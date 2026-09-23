@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "preact/hooks";
-import { api } from "./client";
+import { apiClient } from "./api";
 
 export function GreetingPanel() {
   const [message, setMessage] = useState("Ready for a typed server call.");
@@ -14,7 +14,7 @@ export function GreetingPanel() {
     setFailed(false);
 
     try {
-      const result = await api.greeting.post({
+      const result = await apiClient.greeting.post({
         body: { name: "Preact" },
       });
 

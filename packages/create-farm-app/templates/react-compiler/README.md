@@ -10,7 +10,7 @@ update beside ordinary React reconciliation.
 ## Create this starter
 
 ```bash
-pnpm create @farm.js/app@beta my-compiler-app --template react-compiler --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-compiler-app --template react-compiler
 cd my-compiler-app
 pnpm dev
 ```
@@ -58,5 +58,5 @@ For batching, multiple bindings, safe keyed-list fallback, and the full compiler
 see the maintained
 [React Compiler example](https://github.com/farming-labs/farm.js/tree/main/examples/react-compiler).
 
-Read the [React compiler guide](https://farm.js.dev/docs/renderers/react#experimental-aot-compiler)
+Read the [React compiler guide](https://farmjs.dev/docs/renderers/react#experimental-aot-compiler)
 for the supported component contract and rollout guidance.

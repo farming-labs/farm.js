@@ -1,6 +1,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { setFarmBasePath } from "../base-path";
 import { DEFAULT_NOT_FOUND_STYLES, DefaultNotFoundPage } from "../components/not-found";
 
 describe("DefaultNotFoundPage", () => {
@@ -42,5 +43,16 @@ describe("DefaultNotFoundPage", () => {
     expect(html).toContain(">404</h1>");
     expect(html).toContain("Not found");
     expect(html).toContain("GO HOME");
+  });
+
+  it("applies the configured base path to the home recovery action", () => {
+    setFarmBasePath("/console");
+    try {
+      const html = renderToStaticMarkup(<DefaultNotFoundPage />);
+
+      expect(html).toContain('href="/console/"');
+    } finally {
+      setFarmBasePath("/");
+    }
   });
 });

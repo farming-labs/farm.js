@@ -1,5 +1,11 @@
-export { APIClientError, createAPIClient, createServerAPIClient } from "./api/client";
+export {
+  APIClientError,
+  createApiClients,
+  createAPIClient,
+  createServerAPIClient,
+} from "./api/client";
 export type {
+  ApiClients,
   APIClient,
   APIClientOptions,
   APIClientSystemError,
@@ -10,6 +16,12 @@ export type {
   ServerAPIClientWithoutIntegrationsOptions,
 } from "./api/client";
 export type { FarmAPIStream } from "./api/transport";
+export type { ClientHeaders } from "./client-headers";
+export type {
+  ClientLifecycleHooks,
+  ClientRequestEvent,
+  ClientResponseEvent,
+} from "./client-observers";
 export { useMutation } from "./mutation-client";
 export type {
   AnyMutationTarget,
@@ -18,12 +30,13 @@ export type {
   InferMutationVariables,
   MutationAsync,
   MutationOptimisticContext,
+  MutationNetworkMode,
   MutationStatus,
   MutationTrigger,
   UseMutationOptions,
   UseMutationReturn,
 } from "./mutation-client";
-export { useFetcher } from "./fetcher-client";
+export { useFetcher, FetcherInputError } from "./fetcher-client";
 export type {
   FetcherFormDataContext,
   FetcherFormProps,
@@ -46,6 +59,35 @@ export type {
   UseServerQueryOptions,
   UseServerQueryResult,
 } from "./server-query-client";
+export {
+  enableCrossTabCacheInvalidation,
+  FARM_CACHE_INVALIDATION_CHANNEL,
+} from "./cache-invalidation-broadcast";
+export type { CrossTabCacheInvalidationOptions } from "./cache-invalidation-broadcast";
+export {
+  clearPersistedCache,
+  defineClientCacheAdapter,
+  FARM_CLIENT_CACHE_PERSIST_VERSION,
+  // The generated client entry imports this by name when `cache.client.adapter`
+  // is configured, so it has to be reachable from this entry point.
+  initConfiguredClientCachePersistence,
+  initPersistedClientCache,
+  storageClientCacheAdapter,
+} from "./client-cache-persistence";
+// The shared browser store. Features that keep their own rows (for example
+// `@farm.js/sync`) persist through it rather than opening a second store.
+export { getFarmClientDataCache, normalizeFarmClientCacheKey } from "./client-cache";
+export type {
+  FarmClientCacheEntry,
+  FarmClientCacheKey,
+  FarmClientCacheStatus,
+} from "./client-cache";
+export type {
+  ClientCachePersistenceOptions,
+  FarmClientCacheAdapter,
+  FarmClientCacheStorage,
+  PersistedEntry,
+} from "./client-cache-persistence";
 export {
   api,
   endpoint,
@@ -133,6 +175,7 @@ export type {
   DefaultRoutePattern,
   DefaultRouteHref,
   ExternalHref,
+  LinkExternalUriSchemes,
   RouteHref,
   RouteParamValue,
   RouteOptionalParamValue,

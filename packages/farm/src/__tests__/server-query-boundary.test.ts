@@ -64,6 +64,31 @@ export const q = myCreateServerQuery({});
     expect(findClientServerFnViolation(code, "/app/src/local.ts")).toBeNull();
   });
 
+  it("ignores markdown pages whose fenced examples show server functions", () => {
+    const page = `---
+title: "Server Queries"
+---
+
+# Server Queries
+
+\`\`\`ts
+import { createServerQuery } from "@farm.js/core";
+
+export const scanQuery = createServerQuery({
+  key: () => ["scan"],
+  handler: async () => 1,
+});
+\`\`\`
+`;
+    expect(
+      findClientServerFnViolation(page, "/app/src/app/docs/server-queries/page.md"),
+    ).toBeNull();
+    expect(
+      findClientServerFnViolation(page, "/app/src/app/docs/server-queries/page.md?import"),
+    ).toBeNull();
+    expect(findClientServerFnViolation(page, "/app/src/content/guide.mdx")).toBeNull();
+  });
+
   it("ignores virtual modules and dependencies", () => {
     expect(findClientServerFnViolation(QUERY_MODULE, "\0virtual:farm-entry")).toBeNull();
     expect(findClientServerFnViolation(QUERY_MODULE, "virtual:farm-entry")).toBeNull();

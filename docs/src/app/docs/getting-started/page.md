@@ -8,6 +8,9 @@ section: "Start"
 
 Create a Farm.js app, understand the files that matter, and run the development server.
 
+Farm requires Node.js 22.13 or newer. This is the first Node 22 release that exposes
+the built-in `node:sqlite` module without an experimental command-line flag.
+
 ## Create an app
 
 Farm keeps the first project small: an app directory, a config file, package metadata, and TypeScript. Vite config and platform config are optional escape hatches, not required setup.
@@ -21,10 +24,22 @@ pnpm dev
 ```
 
 This command follows the current `beta` dist-tag and explicitly selects the minimal Basic starter.
+`PNPM_CONFIG_DLX_CACHE_MAX_AGE=0` refreshes pnpm's one-day `create`/`dlx` cache so the current beta
+is resolved on every run. The scoped `PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE` setting allows fresh
+`@farm.js/*` betas without disabling pnpm's release-age protection for third-party packages.
+Generated pnpm projects preserve that scoped exclusion.
 Use `pnpm create`, not `pnpm add`: pnpm resolves the `@farm.js/app` initializer name to the
 published `@farm.js/create-app` package. The scaffolder installs React and all other starter
 dependencies automatically. Use `--skip-install` if you only want it to generate the project
 files.
+
+In PowerShell, set the variables first:
+
+```powershell
+$env:PNPM_CONFIG_DLX_CACHE_MAX_AGE = "0"
+$env:PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE = '["@farm.js/*"]'
+pnpm create @farm.js/app@beta my-app --template basic --typescript
+```
 
 React is the default renderer. The Basic starter can instead use Preact, Solid, Vue, or Svelte:
 
@@ -42,6 +57,9 @@ React because their generated UI and provider packages are React-oriented.
 
 Use `--list-templates` to see the same catalog in the terminal. Provider templates include the
 integration wiring, an app-owned UI feature, `.env.example`, and a minimal dark home page.
+Every starter registers the [DevTools plugin](/docs/plugins/devtools) in `farm.config.ts`, so the
+development workspace is available from the first `farm dev`. Remove `devtools()` from `plugins`
+and drop the `@farm.js/devtools` dev dependency if you do not want it.
 
 | Template         | Included capability                     |
 | ---------------- | --------------------------------------- |
@@ -147,6 +165,21 @@ export const POST = createEndpoint(
   },
 );
 ```
+
+Create the two callers once in a shared module. Farm generates the route types and path manifest;
+the endpoint handler is defined only in the route file above.
+
+**src/lib/api.ts**
+
+```ts
+import { createApiClients } from "@farm.js/core/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
+
+export const { api, apiClient } = createApiClients<APIRouter>({ routes: apiRoutes });
+```
+
+Import `api` during server requests for local calls, or `apiClient` in the browser for HTTP calls.
+See [API Client](/docs/api-client#server-callers) for request context and middleware boundaries.
 
 **src/components/hello-button.tsx**
 

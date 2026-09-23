@@ -8,6 +8,14 @@ section: "Runtime"
 
 Farm exposes one operational view of the application in development. The browser dashboard is useful while working on the app, while `farm doctor` brings the same runtime diagnostics to the terminal and CI.
 
+> **Deprecated: use the DevTools plugin**
+>
+> The built-in browser dashboard described below is deprecated. The official DevTools is now
+> the [`@farm.js/devtools` plugin](/docs/plugins/devtools), which reuses the same runtime
+> snapshot and adds a floating launcher, an expanded workspace UI, and syntax-highlighted
+> browser module inspection. The built-in dashboard, its configuration, its launcher URL, and
+> the shared keyboard shortcut keep working for now, and `farm doctor` is not deprecated.
+
 ## Open DevTools
 
 Start the application:

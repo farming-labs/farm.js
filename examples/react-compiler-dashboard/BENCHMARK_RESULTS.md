@@ -1,6 +1,1118 @@
 # Complex dashboard and 21,000-row peak result
 
-Date: 2026-08-29
+Latest run: 2026-09-12
+
+## Safe local aliases in keyed maps — 2026-09-12
+
+Structured keyed `map()` callbacks may now introduce immutable local `const` aliases when every
+binding is a simple identifier and every initializer passes the compiler's existing safe-expression
+proof. This supports common code such as naming row matches or derived scalar values before the
+return tree. Mutable or destructured declarations, object/array/function literals, unknown calls,
+mutation, and fallthrough keep complete keyed reconciliation. This is a compiler eligibility
+change only; it adds no runtime helper, option, report field, or runtime-size baseline.
+
+The maintained 10,000-row mapped rolling-chain workload now names both branch conditions with local
+aliases between two queued 50-row rolls. It verifies both retained DOM identities, branch-specific
+labels and amounts, the exact incoming suffix, browser errors, and zero compiled owner executions.
+The complete production browser suite passed every correctness, performance, optimization-
+persistence, and scalability gate with unchanged thresholds.
+
+| Mode   | Local-alias mapped chain | Compiled fallback | vs React | vs fallback |
+| ------ | -----------------------: | ----------------: | -------: | ----------: |
+| Static |                  4.40 ms |          15.40 ms |   15.90x |       3.50x |
+| Hybrid |                  5.00 ms |          16.20 ms |   13.99x |       3.24x |
+
+Both modes cleared the unchanged 2x React and 1.25x compiled-control floors. The bracketed React
+median was 69.95 ms. The compiler report retained two mapped rolling-chain steps and 34 keyed map
+hints. The example bundle was 31,682 bytes gzip in static mode and 31,681 bytes gzip in hybrid mode;
+the focused runtime-size suite retained every existing byte baseline.
+
+Compiler coverage includes multiple aliases, safe `Math` and primitive conversion calls, chained
+maps, map-and-sort pipelines, rolling-window lineage, mutable and destructured declarations,
+effectful initializers, fallthrough, and all-row replacement. The full React suite, dedicated stress
+suite, and React 18.3.1/19.2.8 compatibility checks preserve the existing behavior and fallback
+boundaries.
+
+Numbers are browser medians from the complete production-build command with 5 warmups, 10 measured
+samples per compiler action, 20 bracketed React samples, 60 dashboard samples of 10 updates, and 3
+scale cycles, using Chrome 153.0.8010.36 and Node.js 23.11.0 on Apple M1 macOS arm64.
+
+## Structured block-bodied same-key maps — 2026-09-12
+
+Compiler-safe keyed `map()` callbacks may now use structured blocks made only from fully returning
+`if`/`return` paths. The compiler proves every condition and return value before emitting an
+existing same-key hint. A declaration, loop, call, mutation, ambiguous return, or fallthrough keeps
+complete keyed reconciliation. This is a build-time eligibility change; it adds no runtime helper,
+option, or bundle-size baseline.
+
+The maintained 10,000-row mapped rolling-chain workload now uses two early-return branches between
+two queued 50-row rolls. It updates two different retained rows and checks both DOM identities,
+branch-specific labels and amounts, the exact incoming suffix, browser errors, and zero compiled
+owner executions. The control performs the same result with unsupported block-bodied rolling
+setters.
+
+| Mode   | Block-bodied mapped chain | Compiled fallback | vs React | vs fallback |
+| ------ | -------------------------: | ----------------: | -------: | ----------: |
+| Static |                    3.40 ms |          14.90 ms |   19.62x |       4.38x |
+| Hybrid |                    4.10 ms |          16.30 ms |   16.27x |       3.98x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors. The bracketed React
+median was 66.70 ms. A second complete run under heavier concurrent machine load also passed this
+target gate at 12.65x/10.67x versus React and 3.63x/4.04x versus the control. In both runs the broad
+performance, optimization-persistence, and scalability gates passed, the compiler report retained
+two mapped rolling-chain steps and 34 keyed map hints, and the compiler example bundle remained
+31,682 bytes gzip in both compiler modes.
+
+Compiler coverage includes concise nested expressions, early-return chains, single-return block
+wrappers, map-and-sort pipelines, effectful conditions, intermediate statements, fallthrough, and
+atomic runtime fallback. The focused compiler tests, full runtime suite with timeout-only cases
+rerun serially, React 18.3.1/19.2.8 compatibility, and runtime-size checks preserve the existing
+behavior and fallback boundaries.
+
+Numbers are browser medians from the complete production-build command with 5 warmups, 10 measured
+samples per compiler action, 20 bracketed React samples, 60 dashboard samples of 10 updates, and 3
+scale cycles, using Chrome 153.0.8010.36 and Node.js 23.11.0 on Apple M1 macOS arm64.
+
+## Multi-branch same-key maps — 2026-09-11
+
+One compiler-safe `map()` callback may now select several rows with a nested conditional chain.
+Every condition is proven recursively, and every leaf must return the original item or an object
+spread of that item. Effectful or ambiguous branches still use complete keyed reconciliation, and
+changed replacement keys still trigger the atomic runtime fallback.
+
+The maintained 10,000-row workload performs a 50-row roll, updates two different retained rows in
+one nested map, and performs another 50-row roll before React commits. Previously, the nested map
+was not eligible and broke the rolling-window chain. The block-bodied rolling control performs the
+same JavaScript and DOM result without compiler lineage.
+
+| Mode   | Two-branch mapped chain | Compiled fallback | vs React | vs fallback |
+| ------ | ----------------------: | ----------------: | -------: | ----------: |
+| Static |                 3.50 ms |          13.80 ms |   16.46x |       3.94x |
+| Hybrid |                 3.40 ms |          14.20 ms |   16.94x |       4.18x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors. The bracketed React
+median was 57.60 ms. Every sample checked the final 10,000-row count, both retained DOM identities,
+both branch-specific label and amount changes, the final incoming suffix, browser errors, and zero
+compiled owner executions. The compiler report recorded two mapped rolling-chain steps and 34
+safe keyed maps in both compiled modes.
+
+Every existing correctness, performance, optimization-persistence, feature, and scalability gate
+passed. The established 10k/20k persistence speedups remained between 13.95x and 19.73x. The
+compiler runtime-size baselines are unchanged because recursive branch proof is build-time only;
+the complete example bundles were 31,682 bytes gzip in both compiler modes.
+
+Numbers are browser medians from the complete production-build command with 5 warmups, 10 measured
+samples per compiler action, 20 bracketed React samples, 60 dashboard samples of 10 updates, and 3
+scale cycles, using Chrome 153.0.8010.36 and Node.js 23.11.0 on Apple M1 macOS arm64. The aggregate
+command and every individual gate passed.
+
+## Same-key maps through multiple rolling windows — 2026-09-11
+
+One synchronous setter segment can now retain committed-row lineage through more than one
+`slice()`-plus-append rolling step with compiler-safe same-key `map()` updates before, between, or
+after those steps. The maintained 10,000-row workload performs a 50-row roll, updates one retained
+row, and performs a second 50-row roll before React commits. Previously, the intermediate map
+broke rolling-window lineage and the final value used complete keyed reconciliation. The new path
+validates the complete chain before its first DOM write, removes only expired rows, patches only
+changed survivors, creates only the final suffix, and keeps surviving DOM nodes in place.
+
+| Mode   | Roll + map + roll | Compiled fallback | vs React | vs fallback |
+| ------ | ----------------: | ----------------: | -------: | ----------: |
+| Static |           3.10 ms |          14.80 ms |   18.39x |       4.77x |
+| Hybrid |           3.10 ms |          13.90 ms |   18.39x |       4.48x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors. The bracketed React
+median was 57.00 ms. Every sample checked the final 10,000-row count, retained DOM identity, the
+mapped label and amount, the final incoming suffix, browser errors, and zero compiled owner
+executions. The compiler report recorded two `keyedArrayMappedRollingWindowChainHints` in each
+compiled mode. Correctness, the broad 10% no-regression gate, every existing feature gate,
+optimization persistence, and normalized scalability all passed; the established 10k/20k update
+speedups remained between 13.72x and 17.93x.
+
+Compiler and runtime coverage includes maps before, between, and after two rolling setters;
+unsupported callbacks and intervening setters; changed-key and reused-key fallback before DOM
+mutation; exact key, descriptor, and binding work; controlled-input focus and selection; delegated
+event indexes; Strict Mode hydration; unmount-before-flush cancellation; React 18.3.1 and 19.2.8;
+and 2,000 randomized multi-window chains compared with normal React. The mapped-chain runtime is
+isolated in its own tree-shakable feature and measures a 20,115-byte gzip compiler premium. The
+ordinary rolling and structural-append fixtures grew by only 75 and 106 bytes gzip, respectively,
+and remain inside their existing +256-byte budgets.
+
+Numbers are browser medians from the complete production-build command with 5 warmups, 10 measured
+samples per compiler action, 20 bracketed React samples, 60 dashboard samples of 10 updates, and 3
+scale cycles, using Chrome 153.0.8010.36 and Node.js 23.11.0 on Apple M1 macOS arm64. The aggregate
+command and every individual gate passed.
+
+## Mapped updates through a rolling window — 2026-09-11
+
+Immediately adjacent, same-key `map()` setters can now retain committed-row lineage across one
+rolling-window update. The maintained workload updates retained data, expires a 1,000-row prefix,
+appends a 1,000-row suffix, and applies another map before React commits. Previously, the rolling
+step discarded the mapped lineage and the final update used complete keyed reconciliation. The new
+path validates the final array and keys before the first DOM write, patches changed survivors,
+preserves unchanged rows, and creates only the incoming suffix.
+
+| Mode   | Map + roll + map | Compiled fallback | vs React | vs fallback |
+| ------ | ---------------: | ----------------: | -------: | ----------: |
+| Static |         16.50 ms |          27.10 ms |    4.10x |       1.64x |
+| Hybrid |         16.30 ms |          29.10 ms |    4.15x |       1.79x |
+
+Both modes passed the 2x React and 1.25x compiled-control floors. The bracketed React median was
+67.70 ms. Every sample checked the final 10,000-row count, the changed retained value, preserved
+survivor DOM identity, a fresh suffix, browser errors, and zero compiled owner executions. The
+broad 10% no-regression gate and the 10k/20k optimization-persistence gate passed. Two unchanged
+hybrid reorder controls were noisy: structural reorder measured 1.2466x against its 1.25x control
+floor, and queued map-then-reorder measured 1.157x against its 1.20x control floor. Their React
+speedups remained 3.35x and 8.99x, respectively. No threshold was relaxed.
+
+Compiler coverage includes maps before, after, and on both sides of one rolling setter; mixed plain
+and mapped sites; and conservative fallback for multiple rolling setters or an intervening
+statement. Runtime coverage checks changed-key fallback before mutation, exact key, descriptor, and
+binding work, controlled-input focus and selection, delegated indexes, Strict Mode hydration,
+recoverable errors, unmount-before-flush cleanup, React 18.3.1 and 19.2.8, and 2,000 randomized
+transitions matched with normal React. The implementation reuses the existing optional structural
+append/map runtime; the runtime-size suite remains green with an 84.9% core-runtime gzip reduction.
+
+Numbers are browser medians from a complete production-build run with 5 warmups, 10 measured
+samples per compiler action, 20 bracketed React samples, and 3 scale cycles, using Chrome
+153.0.8010.36 and Node.js 23.11.0 on Apple M1 macOS arm64. Correctness and the new performance gate
+passed; the command reported the two isolated unchanged timing misses described above.
+
+## Queued removal followed by prepend — 2026-09-11
+
+An index-independent keyed-row `filter()` or bounded `slice()` can now retain its committed-row
+lineage through one or more immediately following immutable prepends. Previously, the prepend
+result lost the structural survivor proof and the final commit used complete keyed reconciliation.
+The new path validates the entire result before its first DOM write, removes only rejected rows,
+preserves every survivor, shifts delegated event indexes, and creates only the fresh prefix.
+
+| Mode   | Remove + prepend | Compiled fallback | vs React | vs fallback |
+| ------ | ---------------: | ----------------: | -------: | ----------: |
+| Static |          9.00 ms |          24.00 ms |    8.98x |       2.67x |
+| Hybrid |          7.80 ms |          23.30 ms |   10.37x |       2.99x |
+
+Both modes passed the 2x React and 1.25x compiled-control floors. The bracketed React median was
+80.85 ms. Every sample checked the final 10,000-row order, all 9,999 survivor DOM identities, the
+removed row's disconnection, the fresh first row, browser errors, and zero compiled owner
+executions. Correctness, the broad 10% no-regression gate, every established feature gate, and
+optimization persistence passed; the existing 10k/20k update persistence remained between 15.75x
+and 21.75x.
+
+Compiler and runtime coverage includes filter and slice sources, multiple queued prefixes,
+all-rows-rejected mounting, duplicate and mismatched-key fallback before mutation,
+collection-reading fallback, delegated event indexes, controlled-input focus and selection,
+Strict Mode hydration, unmount-before-flush cleanup, React 18.3.1 and 19.2.8, and 2,000 sequential
+randomized transitions matched with normal React. The dedicated structural-prepend fixture adds
+13,387 bytes gzip; the existing direct-prepend and structural-append premiums remain unchanged.
+
+Numbers are browser medians from a complete production-build run with 5 warmups, 10 measured
+samples per compiler action, 20 bracketed React samples, and 3 scale cycles, using Chrome
+153.0.8010.36 and Node.js 23.11.0 on Apple M1 macOS arm64. The aggregate command and every
+individual gate passed.
+
+## Mapped survivors before a later append — 2026-09-10
+
+An index-independent keyed-row `filter()` or bounded `slice()` can now keep its original survivor
+lineage when one or more adjacent same-key `map()` setters run before a later immutable append. A
+safe map may also run before the structural removal. Previously, these call orders reached the
+correct DOM through complete keyed reconciliation. The new path connects mapped survivors back to
+their committed rows, validates the full native result before mutation, removes only rejected rows,
+patches only changed survivors, and creates only the fresh suffix.
+
+| Mode   | Filter + map + append | Compiled fallback | vs React | vs fallback |
+| ------ | ---------------------: | ----------------: | -------: | ----------: |
+| Static |               13.40 ms |          25.40 ms |    5.19x |       1.90x |
+| Hybrid |               13.90 ms |          27.60 ms |    5.00x |       1.99x |
+
+Both modes passed the 2x React and 1.25x compiled-control floors. The bracketed React median was
+69.50 ms. Every sample verified the final 10,000-row order, complete survivor DOM identity, the
+removed row's disconnection, the changed survivor's label and amount, and a fresh appended node.
+Correctness, the broad 10% no-regression gate, optimization persistence, and the new feature gate
+passed; the established 10k/20k update persistence remained between 12.30x and 16.33x. One
+unchanged static queued-window-resize measurement reached 3.87x against its 4x React floor while
+still passing its compiled-control floor at 1.57x. The immediately preceding high-sample
+confirmation passed every aggregate and individual gate, so no threshold was relaxed.
+
+Package coverage includes filter-map-append, slice-map-append, map-filter-append, multiple maps,
+multiple keyed boundaries, changed-key fallback, stale committed-data fallback before key reads,
+controlled-input focus and selection, Strict Mode hydration, unmount before flush, React 18.3.1 and
+19.2.8, and 2,000 randomized transitions matched with normal React. The optional
+structural-append-map fixture is 18,708 bytes gzip, within its existing 18,889-byte ceiling.
+
+Numbers are browser medians from a complete production-build run with 5 warmups, 10 measured
+samples per compiler action, 20 bracketed React samples, and 3 scale cycles, using Chrome
+153.0.8010.36 and Node.js 23.11.0 on Apple M1 macOS arm64. The command reported the isolated
+unchanged timing miss described above rather than a full all-gates pass.
+
+## Queued filter, append, and maps — 2026-09-10
+
+An index-independent keyed-row `filter()` can now retain its original survivor positions through
+one or more adjacent immutable appends and immediately following same-key `map()` setters. The map
+wrapper validates every survivor against the committed item snapshot while native `map()` already
+visits it. The commit then removes only rejected rows, patches only changed survivors, and creates
+the mapped suffix from its final values, with all keys, bindings, and detached rows prepared before
+the first DOM write.
+
+| Mode   | Filter + append + maps | Compiled fallback | vs React | vs fallback |
+| ------ | ---------------------: | ----------------: | -------: | ----------: |
+| Static |               18.00 ms |          32.10 ms |    4.35x |       1.78x |
+| Hybrid |               18.60 ms |          29.20 ms |    4.21x |       1.57x |
+
+Both modes passed the 2x React and 1.25x compiled-control floors. The bracketed React median was
+78.30 ms. Every sample verified the final 10,000-row order, complete survivor DOM identity, the
+middle row's disconnection, the changed survivor's final label and amount, and the fresh mapped
+suffix. The existing bounded-slice comparison remained separate and also passed at 9.79x and 10.38x
+versus React. Correctness, the broad 10% no-regression gate, optimization persistence, and zero
+compiled-owner executions passed.
+
+Package coverage includes mixed filter/slice lineage, multiple following maps, mapped incoming
+rows, changed-key fallback, external mutation, controlled-input focus and selection, multiple keyed
+boundaries, Strict Mode hydration, unmount before flush, React 18.3.1 and 19.2.8, and 2,000
+randomized transitions matched with normal React. The optional structural-append-map runtime is
+18,633 bytes gzip, within its persisted 18,664-byte cap.
+
+Numbers are medians from a reduced complete-dashboard run with 2 warmups and 7 measured samples per
+compiler action, bracketed by 14 React samples, using Chrome 153.0.8010.36 and Node.js 23.11.0 on
+Apple M1 macOS arm64. The aggregate correctness, performance, and optimization-persistence result
+passed.
+
+## Queued slice, append, and maps — 2026-09-10
+
+Adjacent keyed-row setters can now retain one positional proof through a bounded `slice()`, one or
+more immutable appends, and one or more immediately following same-key `map()` updates. Previously,
+the map result lost the append lineage and the final commit used complete keyed reconciliation. The
+new path validates the native arrays and every mapped survivor before its first DOM write, removes
+only sliced-away rows, patches only changed survivors, and creates the mapped suffix from its final
+value.
+
+| Mode   | Slice + append + maps | Compiled fallback | vs React | vs fallback |
+| ------ | --------------------: | ----------------: | -------: | ----------: |
+| Static |              16.40 ms |          29.80 ms |    4.24x |       1.82x |
+| Hybrid |              13.60 ms |          22.60 ms |    5.11x |       1.66x |
+
+Both modes passed the 2x React and 1.25x compiled-control floors. The bracketed React median was
+69.55 ms. Every sample verified the final 10,000-row order, complete survivor DOM identity, the
+sliced row's disconnection, the changed survivor's final label and amount, and the final mapped
+suffix. The broad 10% no-regression gate, optimization-persistence gate, and zero-owner-execution
+checks also passed.
+
+Compiler and runtime coverage includes multiple following maps, a mapped incoming suffix,
+changed-key fallback, controlled-input focus and
+selection, custom and revoked methods, external mutation, Strict Mode, hydration, unmount before
+flush, React 18.3.1 and 19.2.8, and 2,000 randomized transitions matched with normal React. The new
+optional runtime measures 18,408 bytes gzip in its isolated fixture. The older structural-append
+fixture grew by only 23 bytes gzip for the shared instance argument, and the core-only fixture is
+unchanged.
+
+Numbers are medians from a reduced complete-dashboard run with 2 warmups and 7 measured samples per
+compiler action, bracketed by 14 React samples, using Chrome 153.0.8010.36 and Node.js 23.11.0 on
+Apple M1 macOS arm64. Correctness and the new performance gate passed. One unchanged hybrid
+structural-reorder control measured 1.14x against its 1.25x fallback threshold, so the aggregate
+reduced-sample command reported that isolated timing miss rather than a full all-gates pass.
+
+## Queued removal followed by append — 2026-09-10
+
+Adjacent keyed-row setters may now keep one committed-row proof when an index-independent
+`filter()` or bounded `slice()` is followed by one or more immutable appends. Before this change,
+the append result lost the structural survivor lineage and the final commit used complete keyed
+reconciliation. The new path validates the complete chain before its first DOM write, removes only
+rejected rows, preserves every surviving node, and creates only the appended suffix.
+
+| Mode   | Remove + append | Compiled fallback | vs React | vs fallback |
+| ------ | --------------: | ----------------: | -------: | ----------: |
+| Static |        21.00 ms |          32.00 ms |    3.49x |       1.52x |
+| Hybrid |        20.80 ms |          48.00 ms |    3.52x |       2.31x |
+
+Both modes passed the 2x React and 1.25x compiled-control floors. The surrounding React median was
+73.20 ms. Every sample checked all 9,999 survivor positions and identities, the rejected row's
+disconnection, one fresh final row, the final 10,000-row count, browser errors, and zero compiled
+owner executions. The broad 10% no-regression gate and optimization-persistence gate also passed.
+
+Compiler and runtime tests cover filter and slice sources, multiple later appends, duplicate-key
+fallback before mutation, an intervening unhinted update, collection-reading bindings, multiple
+keyed boundaries, controlled-input focus and selection, Strict Mode hydration,
+unmount-before-flush cleanup, and 2,000 randomized row removals/appends matched with normal React.
+The dedicated optional runtime is 17,262 bytes gzip in its isolated fixture; every pre-existing
+fixture remains byte-for-byte equal to the merged parent when rebuilt in the same environment.
+
+Numbers are medians from a reduced complete-dashboard run with 2 warmups and 5 measured samples per
+compiler mode, bracketed by 10 React samples, using Chrome 151.0.7922.34 and Node.js 23.11.0 on
+Apple M1 macOS arm64. Correctness and the new performance gate passed. Several unchanged,
+near-threshold feature gates were noisy at this reduced sample count, so this run is not described
+as a full default all-gates pass.
+
+## Queued structural maps through reorder setters — 2026-09-10
+
+Adjacent keyed-row setters may now keep one committed-row proof across compiler-safe `filter()`,
+same-key `map()`, and native reorder work. The focused 10,000-row workload removes one row, updates
+another, and queues two reverses that restore survivor order. Before this change, the reorder setter
+discarded the shorter structural result and the final value used complete keyed reconciliation.
+The new compiler linking selects the existing structural-reorder runtime, so the final commit
+removes the rejected row and patches the changed survivor without rescanning or moving the other
+9,998 rows.
+
+| Mode   | Parent compiler | This change | Lower median | vs React | vs compiled fallback |
+| ------ | --------------: | ----------: | -----------: | -------: | -------------------: |
+| Static |        21.35 ms |     8.50 ms |        60.2% |   10.41x |                2.40x |
+| Hybrid |        21.40 ms |     8.40 ms |        60.7% |   10.54x |                2.48x |
+
+The parent-compiler medians average matching 10-sample runs immediately before and after the
+candidate (18.10/24.60 ms static and 19.30/23.50 ms hybrid). The candidate run measured 88.50 ms
+for React and 20.40/20.80 ms for equivalent block-bodied compiled fallback controls. Every sample
+checked the final values, complete survivor order, rejected-row disconnection, and every surviving
+DOM identity.
+
+Compiler tests cover filter/map/reverse, maps on both sides of structural work, a map-and-reorder
+pipeline after a structural setter, multiple later reorders, and adjacency, setter, unsupported-map,
+and host-row fallback boundaries. Runtime tests cover zero owner reruns, exact DOM identity, focused
+input behavior inherited from the structural runtime, Strict Mode hydration, unmount-before-flush
+cleanup, and 2,001-row randomized queued transitions matched with normal React.
+
+Numbers are browser medians from focused production builds using 3 warmups and 10 measured samples
+per action in Chrome 153.0.8010.36 and Node.js 23.11.0 on macOS arm64. Timing varies by machine;
+deterministic parity, fallback, DOM-identity, compatibility, runtime-size, and the complete dashboard
+gate remain the primary safety controls.
+
+A reduced complete-dashboard run passed every correctness check and the new action's static and
+hybrid performance gates. Its intentionally small sample count made several unrelated timing gates
+miss narrow thresholds, so it is not recorded as a full default all-gates pass.
+
+## Queued structural setters before maps — 2026-09-09
+
+Adjacent keyed-row setters may now retain one safe lineage when native `filter()` or `slice()`
+work runs before one or more same-key `map()` setters. The maintained workload removes one row and
+then updates another. Farm carries the structural survivor proof into the terminal map, validates
+the complete result before the first DOM write, removes the rejected row, and patches only the
+changed survivor. The block-bodied control performs the same two native operations through
+complete keyed reconciliation.
+
+| Mode   | Queued filter + map | Compiled control | vs React | vs control |
+| ------ | ------------------: | ---------------: | -------: | ---------: |
+| Static |             4.70 ms |         12.90 ms |   14.97x |      2.74x |
+| Hybrid |             4.60 ms |         12.70 ms |   15.29x |      2.76x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors. The complete bracketed
+run passed its correctness oracle, broad 10% regression gate, optimization-persistence gate, every
+existing feature-specific performance gate, and zero compiled owner executions.
+
+Compiler and runtime tests cover multiple filter/slice and terminal-map setters, mixed
+map/structural/map sequences, exact survivor DOM identity, one changed-row binding read,
+controlled-input focus and selection, atomic fallback when adjacency or runtime proof fails,
+Strict Mode hydration, unmount-before-flush cleanup, and 2,000 randomized queued transitions
+matched with normal React. React 18.3.1 and 19.2.8 compatibility passes, and all isolated optional
+runtime gzip fixtures remain within their unchanged budgets.
+
+Numbers are medians from one complete bracketed run: 10 samples per compiler mode and 20 surrounding
+React samples using Chrome 153.0.8010.36, Node.js 23.11.0, and Apple M1 macOS arm64. Timing varies by
+machine; deterministic parity, fallback, DOM-identity, compatibility, and runtime-size checks remain
+the primary safety controls.
+
+## Queued maps before structural setters — 2026-09-09
+
+Adjacent keyed-row setters may now keep one safe lineage across the queued update boundary. The
+maintained workload first updates one row with `map()`, then removes another row with `filter()`.
+Farm preserves the mapped sources until the structural setter finishes, validates the complete
+result before the first DOM write, removes the rejected row, and patches only the changed survivor.
+The block-bodied control performs the same two native operations through complete keyed
+reconciliation.
+
+| Mode   | Queued map + filter | Compiled control | vs React | vs control |
+| ------ | ------------------: | ---------------: | -------: | ---------: |
+| Static |             3.30 ms |         10.50 ms |   16.23x |      3.18x |
+| Hybrid |             3.50 ms |         10.60 ms |   15.30x |      3.03x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors. The complete bracketed
+run passed its correctness oracle, broad 10% regression gate, optimization-persistence gate, every
+existing feature-specific performance gate, and zero compiled owner executions.
+
+Compiler and runtime tests cover multiple queued maps before filter and slice setters, exact
+survivor DOM identity, one changed-row binding read, controlled-input focus and selection, atomic
+fallback when adjacency or runtime proof fails, Strict Mode hydration, unmount-before-flush
+cleanup, and 2,000 randomized queued transitions matched with normal React. React 18.3.1 and 19.2.8
+compatibility passes, and all isolated optional-runtime gzip fixtures remain within their unchanged
+budgets.
+
+Numbers are medians from one complete bracketed run: 10 samples per compiler mode and 20 surrounding
+React samples using Chrome 153.0.8010.36, Node.js 23.11.0, and Apple M1 macOS arm64. Timing varies by
+machine; deterministic parity, fallback, DOM-identity, compatibility, and runtime-size checks remain
+the primary safety controls.
+
+## Maps before terminal structural steps — 2026-09-09
+
+A concise keyed-row setter may now run a safe same-key `map()` before a terminal native `filter()`
+or `slice()` without losing its compiler proof. Farm carries mapped-item sources and structural
+survivor indices to the final array, validates the complete result before the first DOM write,
+removes rejected rows, and patches only changed surviving bindings. Unsupported callbacks, changed
+keys, ambiguous ownership, and failed native-method checks still take complete React reconciliation.
+
+The maintained 10,000-row workload changes one row and then filters out another. Its block-bodied
+compiled control performs the same native JavaScript work through complete keyed reconciliation.
+Every value, surviving position, DOM identity, and removed-row connection is checked after every
+sample.
+
+| Mode   | Map + filter | Compiled control | vs React | vs control |
+| ------ | -----------: | ---------------: | -------: | ---------: |
+| Static |      4.50 ms |         10.50 ms |   12.60x |      2.33x |
+| Hybrid |      6.70 ms |         11.20 ms |    8.46x |      1.67x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors. The complete benchmark
+also passed its correctness oracle, broad 10% regression gate, optimization-persistence gate, every
+existing feature-specific performance gate, and zero compiled owner executions.
+
+Compiler and runtime tests cover map/filter, map/slice, and map/filter/slice pipelines; exact
+survivor DOM identity; one changed-row binding read; controlled-input focus and selection; atomic
+fallback for custom maps and changed keys; Strict Mode hydration; unmount-before-flush cleanup; and
+2,000 randomized mapped terminal-structural transitions matched with normal React. React 18.3.1 and
+19.2.8 compatibility passes, and all isolated optional-runtime gzip fixtures are unchanged.
+
+Numbers are medians from one complete bracketed run: 10 samples per compiler mode and 20 surrounding
+React samples using Chrome 153.0.8010.36, Node.js 23.11.0, and Apple M1 macOS arm64. Timing varies by
+machine; deterministic parity, fallback, DOM-identity, compatibility, and runtime-size checks remain
+the primary safety controls.
+
+## Terminal structural maps — 2026-09-09
+
+A concise keyed-row setter may now finish an index-independent `filter()` or `slice()` pipeline
+with a safe same-key `map()`. Farm keeps the survivor and replacement lineage through the final
+map, validates the complete result before touching the DOM, removes rejected rows, and patches only
+changed surviving bindings. No synthetic reverse or sort is needed, and a failed key, ownership, or
+native-method proof still falls back before any compiler-owned DOM write.
+
+The maintained 10,000-row workload filters one row and updates another. Its block-bodied compiled
+control performs the same native JavaScript work through complete keyed reconciliation. Every
+value, surviving position, DOM identity, and removed-row connection is checked after each sample.
+
+| Mode   | Terminal map | Compiled control | vs React | vs control |
+| ------ | -----------: | ---------------: | -------: | ---------: |
+| Static |      5.00 ms |         10.50 ms |   10.59x |      2.10x |
+| Hybrid |      5.90 ms |         10.50 ms |    8.97x |      1.78x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors in two complete bracketed
+runs. The correctness oracle, broad 10% regression gate, optimization-persistence gate, and zero
+compiled owner executions also passed twice. One unrelated isolated timing gate was noisy in each
+run, but the failing workload changed between runs: queued-window refresh and 20,000-row swap in the
+first, then the older static multi-map reorder in the confirmation run. Each passed in the other
+unchanged run; their code and thresholds were not changed.
+
+Compiler and runtime tests cover terminal filter/map and slice/map pipelines, maps interleaved
+between structural steps, exact survivor identity, one changed-row binding read, custom-map and
+changed-key atomic fallback, controlled-input focus and selection, Strict Mode hydration,
+unmount-before-flush cleanup, and 2,000 randomized terminal structural-map row transitions matched
+with normal React. React 18.3.1 and 19.2.8 compatibility passes. The isolated optional runtime gzip
+sizes are unchanged.
+
+Numbers are conservative medians from the confirmation run: 10 samples per compiler mode and 20
+bracketing React samples using Chrome 153.0.8010.36, Node.js 23.11.0, and Apple M1 macOS arm64.
+Timing varies by machine; deterministic parity, fallback, DOM-identity, compatibility, and runtime-
+size checks are the primary safety controls.
+
+## Maps interleaved with structural steps — 2026-09-09
+
+A concise keyed-row setter may now keep same-key replacement lineage when a safe `map()` follows
+an index-independent `filter()` or `slice()` and precedes the final native reorder. The maintained
+10,000-row workload filters one row, updates another, and executes two reversals that preserve
+survivor order. The block-bodied compiled control performs identical JavaScript work through
+complete keyed reconciliation. Every value, final position, surviving DOM identity, and removed
+row connection is checked after each sample.
+
+| Mode   | Interleaved pipeline | Compiled control | vs React | vs control |
+| ------ | -------------------: | ---------------: | -------: | ---------: |
+| Static |              5.80 ms |         12.80 ms |   11.28x |      2.21x |
+| Hybrid |              5.80 ms |         12.90 ms |   11.28x |      2.22x |
+
+Both modes passed the unchanged 2x React and 1.25x compiled-control floors. The full correctness
+oracle and broad 10% regression gate passed, and compiled owner executions remained zero. Three
+unrelated isolated gates were noisy in this run: static append scaling measured 3.996x against its
+4x floor, the older static structural-control comparison measured 1.239x against 1.25x, and the
+older hybrid multi-map reorder comparison measured 3.19x against 4x. Their workloads and thresholds
+were not changed.
+
+Compiler and runtime tests additionally cover two maps separated by filter/slice steps, exact DOM
+reuse, one changed-row binding read, custom-map and changed-key fallback before DOM writes,
+controlled-input focus and selection, Strict Mode hydration, unmount-before-flush cleanup, and
+2,000 randomized interleaved transitions matched with normal React. Numbers are local medians from
+10 samples per compiler mode and 20 bracketing React samples using Chrome 153.0.8010.36,
+Node.js 23.11.0, and Apple M1 macOS arm64.
+
+## Native reorder followed by same-key maps — 2026-09-08
+
+A concise setter may now call native `toReversed()` or `toSorted()` before one or more safe
+same-key `map()` calls. The compiler keeps that reorder proof through the final mapped array. An
+exact reverse therefore uses the direct `n - 1` DOM-move path and patches only changed bindings;
+an ambiguous sort performs one validated source-item lookup and one LIS pass. Every native method,
+callback, result, and error still occurs in JavaScript source order.
+
+The new 10,000-row production-browser workload reverses the rows and then changes one row through
+two native maps. Its block-bodied compiled control performs the identical application work through
+complete keyed reconciliation. The correctness oracle checks all values and positions plus every
+row's DOM identity and connection after each sample.
+
+| Mode   | Reorder + maps | Compiled control | vs React | vs control |
+| ------ | -------------: | ---------------: | -------: | ---------: |
+| Static | 25.10 ms | 38.20 ms | 10.77x | 1.52x |
+| Hybrid | 22.90 ms | 34.10 ms | 11.80x | 1.49x |
+
+Both modes passed the unchanged 4x React and 1.2x compiled-control floors. The full correctness
+oracle, general performance gate, every existing optimization gate, and zero compiled owner
+executions also passed. Deterministic coverage compares 2,000 reverse-or-sort-then-map updates with
+normal React and covers maps on both sides of a reorder, custom methods, changed-key fallback,
+Strict Mode hydration, unmount-before-flush cleanup, and React 18.3.1 and 19.2.8.
+
+On Node.js 22.13.1, the isolated keyed map/reorder premium is 13,341 B gzip, 58 B below the unchanged
+13,399 B limit and 46 B smaller than the preceding release. The complete dashboard chunks are
+27,123 B gzip in both compiler modes and 6,643 B with the compiler disabled, including the new
+benchmark controls.
+
+Numbers are local medians from 10 table samples per compiler mode with 20 bracketing React samples,
+Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64. Timing varies by machine; the
+deterministic parity, fallback, DOM-move, compatibility, and runtime-size checks are the primary
+safety controls.
+
+## Queued reverse and mapped parity — 2026-09-08
+
+Exact keyed-row order now survives across separate queued setters. The benchmark first queues a
+native `toReversed()`, then queues two safe same-key maps followed by another `toReversed()`. The
+two reversals cancel, so the runtime validates the committed lineage and patches the changed row
+without constructing the generic source-item map, running LIS, or moving a DOM row. Native calls
+and updater order remain unchanged.
+
+The block-bodied control performs the same JavaScript and produces the same DOM-visible result
+through complete keyed reconciliation. Both paths run against the same 10,000 rows. The correctness
+oracle checks every value, position, element identity, and connection after each sample.
+
+| Mode   | Exact identity | Compiled control | vs React | vs control |
+| ------ | -------------: | ---------------: | -------: | ---------: |
+| Static | 3.80 ms | 12.10 ms | 15.05x | 3.18x |
+| Hybrid | 3.60 ms | 11.80 ms | 15.89x | 3.28x |
+
+The new gate passed in a smoke run and two complete bracketing runs without changing its 8x React
+or 1.5x compiled-control floors. The general React-relative performance gate, optimization
+persistence gate, correctness oracle, and zero compiled owner executions passed in both complete
+runs. Separate deterministic coverage compares 2,000 queued updates with normal React and requires
+zero generic source-item map inserts, zero DOM moves, stable row identity, one changed key and
+binding read, React 18.3.1 and 19.2.8 compatibility, and safe ambiguous-order fallback.
+
+On Node.js 22.13.1, the isolated keyed map/reorder premium is 13,387 B gzip, below the unchanged
+13,399 B limit and 11 B smaller than the preceding release.
+
+## Exact reverse parity — 2026-09-08
+
+Compiler-proven reverse chains now retain exact order relative to the last committed keyed rows.
+Each native call still executes in source order. An even number of reversals records exact identity,
+so the runtime validates the final array and patches mapped replacements without constructing the
+generic source-item map, running LIS, or moving a DOM node. An odd number records exact reverse and
+keeps the minimum `n - 1` move path. Sort-derived or otherwise ambiguous order remains on general
+permutation reconciliation.
+
+The new 10,000-row workload changes one row through two native maps and then calls `toReversed()`
+twice. Its block-bodied compiled control performs the same application work through complete keyed
+reconciliation. The correctness oracle checks all 10,000 values, positions, element identities,
+and connections after every sample.
+
+| Mode   | Exact identity | Compiled control | vs React | vs control |
+| ------ | -------------: | ---------------: | -------: | ---------: |
+| Static | 3.40 ms | 11.60 ms | 16.12x | 3.41x |
+| Hybrid | 3.70 ms | 11.10 ms | 14.81x | 3.00x |
+
+Existing double-reverse workloads improved too. Queued reversal medians changed from 6.50 to
+3.80 ms in static mode and 6.30 to 4.10 ms in hybrid mode. Reversals chained inside one setter
+changed from 6.40 to 3.70 ms static and 6.20 to 4.00 ms hybrid. All existing benchmark gates passed;
+compiled owner executions remained zero in both compiler modes.
+
+Deterministic tests require zero generic source-item map inserts and zero DOM moves for even parity,
+and exactly `n - 1` moves for odd parity. Coverage includes parity across queued setters, changed-key
+and subclass fallback, Strict Mode hydration, unmount-before-flush cleanup, React 18.3.1 and 19.2.8,
+and 2,000 mapped updates with one to four reversals compared with normal React.
+
+On the CI-equivalent Node.js 22.13.1 runtime, the isolated keyed map/reorder premium is 13,398 B
+gzip and remains inside its fixed 13,399 B limit. The complete dashboard chunks are 27,009 B gzip
+in static mode, 27,008 B in hybrid mode, and 6,540 B with the compiler disabled, including the
+additional benchmark controls.
+
+Numbers are local medians from 10 table samples per compiler mode with 20 bracketing React samples,
+Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64. Timing varies by machine; the
+deterministic correctness, move-count, fallback, compatibility, and size checks are the primary
+safety controls.
+
+## Direct mapped reverse specialization — 2026-09-08
+
+A compiler-proven chain of safe `map()` calls followed directly by native `toReversed()` now uses
+an exact reverse path. The runtime validates every mirrored row and any changed replacement before
+touching the DOM, then performs the required minimum of 9,999 connected row moves. It does not
+allocate the general source-item lookup map or run LIS, and unchanged rows skip lineage lookups.
+
+The existing 10,000-row benchmark was extended with two native maps that update one row before a
+complete reversal. The block-bodied compiled control performs the same application work but uses
+the general keyed reconciliation path.
+
+| Mode   | General path before | Exact reverse | Compiled control | vs React | vs control |
+| ------ | ------------------: | ------------: | ---------------: | -------: | ---------: |
+| Static | 24.70 ms | 24.60 ms | 35.30 ms | 11.48x | 1.43x |
+| Hybrid | 25.80 ms | 24.60 ms | 37.00 ms | 11.48x | 1.50x |
+
+The end-to-end latency change against the former path is intentionally modest because both paths
+execute the same maps and must move the same 9,999 DOM rows. The larger comparison with the control
+isolates the avoided generic reconciliation work. Both compiler modes passed the 4x React and 1.2x
+compiled-control floors, the complete correctness oracle, and every existing regression gate.
+
+Correctness checks verify the complete final order and values, preserve all 10,000 row nodes and
+their connectivity, and cover changed keys, custom methods, Array subclasses, delegated events,
+controlled-input focus and selection, Strict Mode hydration, unmount cleanup, and 2,000 randomized
+mapped reversals. A separately queued standalone map after a reorder, ambiguous ownership, or
+failed validation remains on the general path or falls back to React before any DOM mutation.
+
+The isolated optional runtime changed from 13,390 B to 13,378 B gzip, remaining below the 13,399 B
+ceiling. The complete dashboard compiler chunk changed from 26,919 B to 26,903 B gzip, while the
+6,480 B compiler-off chunk was unchanged. This adds no public API or observability counter.
+
+Numbers are local medians from 10 table samples per compiler mode with 20 bracketing React samples,
+Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64. Timing varies by machine; the
+deterministic correctness, move-count, descriptor-read, and runtime-size checks are the primary
+safety controls.
+
+## One lineage scan for consecutive maps before reorder — 2026-09-07
+
+The compiler now emits two or more safe same-key `map()` calls before a native reorder as one
+runtime proof boundary. Every native method lookup, callback, result, and error still occurs in
+source order, but the runtime compares property descriptors only between the committed input and
+the final mapped array. A three-row instrumentation test observes six descriptor reads instead of
+the twelve required by two independent lineage scans.
+
+The existing 10,000-row multi-map reorder workload and its thresholds were unchanged. It updates
+one row in two native maps and restores order through native `toSorted()`; the equivalent
+block-bodied control performs the same application work through complete keyed reconciliation.
+
+| Mode   | Before | After | Median change | vs React | vs control |
+| ------ | -----: | ----: | ------------: | -------: | ---------: |
+| Static | 32.10 ms | 29.60 ms | 7.8% lower | 8.15x | 1.43x |
+| Hybrid | 31.60 ms | 31.90 ms | 0.9% higher | 7.56x | 1.33x |
+
+Both modes passed the existing 4x React and 1.2x compiled-control floors, the correctness oracle,
+and the general regression gate. The small hybrid difference is within ordinary run-to-run noise;
+the deterministic descriptor instrumentation proves that the removed intermediate scan does not
+depend on timing. All 10,000 original row nodes kept their identity, final values and order matched
+the oracle, all six expected map hints remained reported, and compiled owner executions stayed at
+zero.
+
+Focused coverage also preserves the older single-map helper form, invalidates the entire grouped
+hint when a later method is custom, falls back for Array subclasses, propagates native errors, and
+checks queued updates, changed keys, delegated events, controlled-input focus and selection,
+Strict Mode hydration, and unmount cleanup. The 2,000-update React differential is now included in
+the serial stress suite, and compatibility passed on React 18.3.1 and 19.2.8.
+
+Compiler-off and unrelated reorder-only bundles are unchanged. The optional map/reorder runtime
+premium is 13,263 B gzip, 105 B above the earlier single-scan implementation, and the complete
+dashboard build changed from 26,852 B to 26,892 B gzip in static mode and from 26,849 B to 26,890 B
+in hybrid mode. The run used 10 table samples per compiler mode, 20 bracketing React samples,
+Chrome 151.0.7922.34, Node.js 23.11.0, and Apple M1 macOS arm64.
+
+## Consecutive same-order keyed maps — 2026-09-07
+
+The 10,000-row table now measures a concise functional setter that updates the label and amount of
+every tenth row in two consecutive native `map()` calls. Farm executes both calls in source order,
+then compares the committed and final item identities once, validates every final changed key and
+position, and patches each changed row once. The equivalent block-bodied setter runs the same
+application work but remains on complete compiled keyed reconciliation.
+
+| Mode   | React median | Two-map update | Compiled control | vs React | vs control |
+| ------ | -----------: | -------------: | ---------------: | -------: | ---------: |
+| Static |     57.80 ms |        4.90 ms |         12.80 ms |   11.80x |      2.61x |
+| Hybrid |     57.80 ms |        5.00 ms |         13.50 ms |   11.56x |      2.70x |
+
+The independent gate requires at least 8x versus bracketed React and 2x versus the compiled control
+in both modes. It passed without changing either threshold. After every measured update, a separate
+oracle verified the final labels and amounts, order, connection, and original DOM identity of all
+10,000 rows. Both compiler reports emitted all six expected keyed-map calls, and compiled owner
+executions stayed at zero.
+
+Compiler coverage rejects an unsupported mapper anywhere in the chain. Runtime coverage preserves
+custom methods and native errors, falls back for sparse or subclassed arrays and changed keys,
+patches different rows or one twice-updated row exactly once, hydrates in Strict Mode, drops queued
+work after unmount, and matches ordinary React through 2,000 deterministic queued two-map updates.
+The complete React suite passed 688 tests plus three stress tests, and compatibility passed on React
+18.3.1 and 19.2.8.
+
+No public API or runtime capability was added. The existing optional keyed map/reorder runtime
+remains 13,158 B gzip, and the compiler-selected core still removes 83.4% of the complete runtime
+premium. The accepted default-count run used 10 samples per compiler mode, 20 bracketing React
+samples, Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64.
+
+## Consecutive same-key maps composed with native reorder — 2026-09-07
+
+The 10,000-row table now measures a concise functional setter that changes one row's label and
+amount in two consecutive native `map()` calls, then restores amount order with native
+`toSorted()`. Each accepted map flattens its replacements back to the committed source rows, so the
+runtime validates the final replacement key, prepares the final binding values once, and runs one
+LIS for the final permutation. The equivalent block-bodied updater remains the
+complete-reconciliation control.
+
+| Mode   | React median | Two maps + reorder | Compiled control | vs React | vs control |
+| ------ | -----------: | -----------------: | ---------------: | -------: | ---------: |
+| Static |    206.45 ms |           32.10 ms |         44.30 ms |    6.43x |      1.38x |
+| Hybrid |    206.45 ms |           32.40 ms |         44.30 ms |    6.37x |      1.37x |
+
+The independent gate requires at least 4x versus bracketed React and 1.2x versus the compiled
+control in both modes. It passed without lowering either threshold. The run also proved that all
+10,000 original row nodes stayed connected in the complete expected amount/id order, the edited
+row retained its DOM identity after moving, the final label and amount were correct, and compiled
+owner executions remained zero. The full permutation oracle runs after each latency sample, so its
+assertion work is not included in the update measurement.
+
+Every existing correctness and performance gate passed in the same run, including the general
+regression gate, the 8x optimization-persistence floor, normalized scalability, and the earlier
+single-map reorder gate. In this latest run, the single-map workload was 6.86x faster than React in
+static mode and 6.31x in hybrid mode, with 1.49x and 1.28x versus its compiled control. The section
+below preserves the measurements from the earlier run that introduced that workload.
+
+Compiler tests accept consecutive safe conditional object-spread maps before native sort/reverse
+suffixes and keep structural calls, maps after reordering, and unsupported callbacks on complete
+reconciliation. Runtime coverage proves same-row and different-row lineage, one final patch per
+changed row, queued composition, changed-key and custom-method fallback, native errors, delegated
+events, controlled-input focus and selection, Strict Mode hydration, unmount-before-flush cleanup,
+and 2,000 deterministic two-map updates against normal React.
+
+No public API or runtime feature is added. The existing optional map-reorder runtime grew by 15 B
+gzip to a 13,158 B compiler premium, while reorder-only modules still omit it and the core-only
+runtime retains its 83.4% reduction versus the complete compatibility runtime. The browser run used
+Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64.
+
+## Same-key map composed with native reorder — 2026-09-07
+
+The 10,000-row table now measures a concise functional setter that replaces one row through
+`map()` and then restores amount order with native `toSorted()`. The compiler carries each mapped
+replacement back to its committed source row, so the runtime validates only the replacement key,
+prepares its changed bindings, and runs one LIS for the final permutation. Every unchanged row
+keeps its DOM node without another key, descriptor, or binding read. The equivalent block-bodied
+updater remains the complete-reconciliation control.
+
+| Mode   | React median | Map + reorder | Compiled control | vs React | vs control |
+| ------ | -----------: | ------------: | ---------------: | -------: | ---------: |
+| Static |    176.60 ms |      33.70 ms |         46.40 ms |    5.24x |      1.38x |
+| Hybrid |    176.60 ms |      32.20 ms |         42.80 ms |    5.48x |      1.33x |
+
+The new gate requires at least 4x versus bracketed React and 1.2x versus the compiled control in
+both modes, and passed without lowering either threshold. The run also proved that all 10,000
+original row nodes survived, and passed every value assertion, zero-owner-execution check, the
+general regression gate, every existing keyed optimization gate, the 8x
+optimization-persistence floor, and normalized scalability checks.
+
+Compiler tests accept one safe conditional object-spread map followed by native sort/reverse
+suffixes and reject referenced or unconditional mappers, structural calls in the same chain, and
+map calls after reordering. Runtime coverage checks queued map/sort/reverse composition, changed-key
+and custom-method fallback before DOM writes, delegated events, controlled-input focus and
+selection, Strict Mode hydration, unmount-before-flush cleanup, and 2,000 deterministic updates
+against normal React. The stress comparison completed in 24.88 seconds after replacement-lineage
+reuse, compared with 48.49 seconds for the earlier all-key-validation implementation on the same
+machine.
+
+The new map-reorder runtime is selected only for modules that emit the composed hint, and the size
+suite verifies that reorder-only applications do not retain it. The recorded browser run used
+Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64.
+
+## Structural prefixes composed with native reorders — 2026-09-06
+
+The 10,000-row table now measures one concise setter that filters one row and then executes two
+native `toReversed()` calls. The final order matches the surviving source order, so the workload
+isolates structural composition from DOM movement. The compiler carries the filter survivor map
+through both immutable reorder results, validates every surviving item and key before writing,
+disconnects only the rejected row, preserves all 9,999 surviving DOM nodes, and skips map and LIS
+work when the final permutation keeps survivor order. The equivalent block-bodied updater remains
+the compiled fallback control.
+
+| Mode   | React median | Composed pipeline | Compiled control | vs React | vs control |
+| ------ | -----------: | ----------------: | ---------------: | -------: | ---------: |
+| Static |     92.85 ms |          23.10 ms |         32.40 ms |    4.02x |      1.40x |
+| Hybrid |     92.85 ms |          24.70 ms |         37.30 ms |    3.76x |      1.51x |
+
+The independent gate requires at least 2x versus bracketed React and 1.25x versus the compiled
+control in both modes. The full production run passed that gate, the general regression and
+scalability gates, every older optimization gate, all DOM identity assertions, and zero-owner-
+execution checks without lowering a threshold. Both compiler reports emitted two filter hints and
+seven reorder hints, including the filter/reorder pipeline.
+
+Compiler coverage accepts compiler-safe `filter()` and bounded `slice()` prefixes followed by
+native `toSorted()` and `toReversed()` suffixes, while rejecting structural calls after a reorder,
+referenced predicates, custom methods, and index-dependent rows. Runtime coverage preserves
+controlled-input focus and selection, proves atomic fallback before DOM writes, exercises queued
+updates, Strict Mode hydration, and unmount-before-flush cleanup, and compares 2,000 randomized
+filter/sort/reverse updates with normal React.
+
+The combined reconciler and structural metadata helpers live only in the every-hints runtime tier.
+The runtime-size guard passes: a reorder-only fixture remains 12,151 B gzip and the compiler-
+selected core removes 82.9% of the complete compatibility-runtime premium. The recorded run used
+Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64.
+
+## Native reorder pipelines in one setter — 2026-09-05
+
+The 10,000-row table now measures two native `toReversed()` calls chained inside one concise
+functional setter. Both calls execute, but their final order equals the committed order. The
+compiler lowers each lookup and call in source order, carries one committed source token through
+both immutable results, validates the final identity permutation once, retains every keyed DOM
+node, and performs no DOM moves. The equivalent block-bodied updater remains the compiled fallback
+control.
+
+| Mode   | React median | Reorder pipeline | Compiled control | vs React | vs control |
+| ------ | -----------: | ---------------: | ---------------: | -------: | ---------: |
+| Static |      50.85 ms |          5.60 ms |         12.80 ms |    9.08x |      2.29x |
+| Hybrid |      50.85 ms |          5.60 ms |         13.00 ms |    9.08x |      2.32x |
+
+The independent gate requires at least 2x versus bracketed React and 1.25x versus the compiled
+control in both modes. The full production run passed that gate, all 10,000-row DOM identity
+assertions, zero-owner-execution checks, the general performance and scalability gates, and every
+older optimization gate without lowering a threshold. Both compiler reports emitted five
+`keyedArrayReorderHints` steps: one direct reverse, two queued setters, and both calls in this
+pipeline.
+
+Compiler tests cover mixed sort/reverse pipelines, default sorting, and rejected unsafe syntax.
+Runtime tests compare 2,000 deterministic two-to-four-step pipelines with normal React, preserve
+DOM identity without row-key reads, and prove fallback for custom or unhinted methods. The complete
+645-test package suite, isolated stress suite, and packaged React 18.3.1 and 19.2.8 compatibility
+runs pass.
+
+No runtime implementation or runtime feature selection changed. Every persisted runtime-size
+fixture remains byte-for-byte unchanged, and the compiler-selected core still removes 82.6% of the
+complete compatibility-runtime premium. The recorded run used Chrome 152.0.7977.82, Node.js
+23.11.0, and Apple M1 macOS arm64.
+
+## Queued native reorder composition — 2026-09-05
+
+The 10,000-row table now has a separate workload that queues two concise native `toReversed()`
+setters before one React commit. Both setters execute, but the final order equals the committed
+order. The compiled runtime carries the committed source token across both immutable results,
+validates one final item-identity permutation, retains every keyed DOM node, and performs no DOM
+moves. The equivalent block-bodied setters remain the compiled fallback control.
+
+| Mode   | React median | Queued reorder | Compiled control | vs React | vs control |
+| ------ | -----------: | -------------: | ---------------: | -------: | ---------: |
+| Static |      54.45 ms |        5.90 ms |         12.30 ms |    9.23x |      2.08x |
+| Hybrid |      54.45 ms |        7.00 ms |         14.70 ms |    7.78x |      2.10x |
+
+The independent gate requires at least 2x versus bracketed React and 1.25x versus the compiled
+control in both modes. The production rerun passed that gate while checking all 10,000 DOM row
+identities after every queued action, plus zero-owner-execution checks, the general performance and
+scalability gates, and every older optimization gate without lowering a threshold. Both compiled
+reports emitted three
+`keyedArrayReorderHints` sites: the existing direct reverse and both setters in this queued
+workload.
+
+Package tests separately prove zero DOM moves for a cancelling double reverse, minimum LIS moves
+for a queued final permutation, native sort and reverse composition in both orders, explicit
+fallback after an unhinted intermediate update, focus and selection preservation, Strict Mode
+hydration, and unmount-before-flush cleanup. Two independent 2,000-commit differential suites,
+each queuing two to four reverses or randomized sorts, match normal React with zero row-key reads.
+For that queued-setter measurement, the then-current complete 637-test package suite, isolated
+stress suite, and packaged React 18.3.1 and 19.2.8 compatibility runs passed.
+
+The optional reverse fixture grows by 42 B gzip to a 12,099 B compiler premium; the sort fixture
+grows by 35 B gzip to 12,130 B. Direct and ordinary keyed fixtures remain byte-for-byte unchanged,
+and the compiler-selected core still removes 82.6% of the complete compatibility-runtime premium.
+The recorded run used Chrome 152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64.
+
+## Queued rolling-window composition — 2026-09-05
+
+The 10,000-row table now has a separate workload that queues two functional rolling-window
+setters before one React commit. Each setter removes 500 rows and appends 500 rows. The compiled
+runtime validates both native updates back to the committed collection, removes the final
+1,000-row prefix once, preserves the 9,000 surviving DOM rows, and mounts only the final
+1,000-row suffix. It does not mount rows from the first setter that have already expired. The
+equivalent block-bodied setters remain the compiled fallback control.
+
+| Mode   | React median | Queued roll | Compiled control | vs React | vs control |
+| ------ | -----------: | ----------: | ---------------: | -------: | ---------: |
+| Static |      77.85 ms |    17.30 ms |         27.30 ms |    4.50x |      1.58x |
+| Hybrid |      77.85 ms |    16.70 ms |         26.60 ms |    4.66x |      1.59x |
+
+The independent gate requires at least 2x versus bracketed React and 1.25x versus the compiled
+control in both modes. The complete production run passed that gate, DOM identity assertions,
+zero-owner-execution checks, the general performance and scalability gates, and every older
+optimization gate without lowering a threshold. Both compiler reports emitted three
+`keyedArrayRollingWindowHints` sites: the existing single setter and both setters in the queued
+workload.
+
+Package tests separately prove work proportional only to the final incoming suffix, disjoint grow
+and shrink chains, committed-key fallback, discarded intermediate keys, mixed-chain fallback,
+controlled-input focus and selection, delegated event indexes, Strict Mode hydration, and
+unmount-before-flush cleanup. Another 1,000 randomized commits, each containing two to four queued
+rolling updates, match normal React exactly. The complete 633-test package suite, isolated stress
+suite, and packaged React 18.3.1 and 19.2.8 compatibility runs pass.
+
+The optional rolling-window fixture grows by 112 B gzip to a 13,069 B compiler premium. Direct and
+ordinary keyed fixtures remain byte-for-byte unchanged, and the compiler-selected core still
+removes 82.6% of the full compatibility-runtime premium. The recorded run used Chrome
+152.0.7977.82, Node.js 23.11.0, and Apple M1 macOS arm64.
+
+## Compiler-safe runtime rolling-window bounds — 2026-09-02
+
+The 10,000-row rolling workload now passes an event-local `trimCount` to
+`[...current.slice(trimCount), ...incoming]` instead of embedding the retained-tail bound as a
+literal. Both compiler builds emit one `keyedArrayRollingWindowHints` site, preserve all 9,000
+retained DOM rows, remove the 1,000-row prefix, mount only the 1,000-row incoming suffix, and finish
+with zero compiled owner executions. The block-bodied setter remains the compiled control and
+performs the same native array and DOM update without the hint.
+
+| Mode   | React median | Runtime bound | Compiled control | vs React | vs control |
+| ------ | -----------: | ------------: | ---------------: | -------: | ---------: |
+| Static |     102.30 ms |      17.50 ms |         26.10 ms |    5.85x |      1.49x |
+| Hybrid |     102.30 ms |      17.30 ms |         25.10 ms |    5.91x |      1.45x |
+
+The unchanged gate requires at least 2x versus React and 1.25x versus the equivalent block-bodied
+compiled control. The complete bracketed production-browser run passed DOM correctness, compiler
+report checks, the general performance gate, every older optimization-persistence gate, and all
+normalized scalability checks.
+
+Compiler tests accept identifiers, property reads, arithmetic, conditionals, and safe `Math` calls
+while rejecting user calls, assignments, updates, and fractional literals. Runtime coverage proves
+complete reconciliation for fractional, `NaN`, and no-op evaluated bounds, retained identity and
+incoming-only work on the fast path, 250 committed fixed-bound updates, and 1,000 randomized
+runtime-bound updates against normal React. The runtime implementation is unchanged. The dynamic
+rolling fixture has a 12,957 B gzip compiler premium, 17 B above the literal-bound fixture; the
+compiler-disabled core premium remains 3,766 B gzip with an 82.5% reduction from the full runtime.
+The recorded run used Chrome 152.0.7977.65, Node.js 23.11.0, and Apple M1 macOS arm64.
+
+## Compiler-safe runtime slice bounds — 2026-09-02
+
+The retained-window workload now passes an event-local `trimCount` to
+`current.slice(trimCount)` instead of embedding the value as a literal. Both compiler builds emit
+one `keyedArraySliceHints` site, preserve every surviving DOM row, remove the exact prefix, and
+finish with zero compiled owner executions. The equivalent block-bodied setter remains the
+compiled control and performs the same native array and DOM work without the hint.
+
+| Mode   | React median | Runtime bound | Compiled control | vs React | vs control | 21k vs React |
+| ------ | -----------: | ------------: | ---------------: | -------: | ---------: | -----------: |
+| Static |      64.00 ms |       5.40 ms |         17.10 ms |   11.85x |      3.17x |       13.65x |
+| Hybrid |      64.00 ms |       7.00 ms |         18.70 ms |    9.14x |      2.67x |       15.53x |
+
+The unchanged gate requires at least 3x versus React at both 10,000 and 21,000 rows and 1.25x
+versus the compiled control. Three complete bracketed production-browser runs all passed the slice
+gate: 5.82x–13.37x versus React at 10,000 rows, 9.00x–15.53x at 21,000 rows, and 2.67x–4.64x versus
+the control. Each run also passed DOM correctness, compiler-report, owner-execution, general
+optimization-persistence, and normalized scalability checks for this path.
+
+Compiler tests accept identifiers, property reads, arithmetic, conditionals, and safe `Math` calls
+while rejecting user calls, assignments, updates, and fractional literals. Runtime coverage proves
+native bound coercion order, complete fallback for fractional, `NaN`, and no-op evaluated bounds,
+2,000 queued slices, and 1,000 randomized runtime-bound slices against normal React. The runtime is
+unchanged: the keyed-slice fixture remains a 12,222 B gzip compiler premium, the optional
+keyed-window fixture remains 14,173 B gzip, and the compiler-disabled core premium remains 3,766 B
+gzip with an 82.5% reduction from the full compatibility runtime. The recorded run used Chrome
+152.0.7977.65, Node.js 23.11.0, and Apple M1 macOS arm64.
+
+## Runtime delete-count exact-window follow-up — 2026-09-02
+
+The full bracketed production-browser run changed the existing 10,000-row exact-window workload
+from a literal delete count to `deleteCount = replacements.length`. The concise setter passes that
+runtime value to `toSpliced(position, deleteCount, ...replacements)`, while the block-bodied
+compiled control performs the same native array and DOM work without the hint. Both compiler builds
+emitted all 15 expected `keyedArrayPositionHints` sites, preserved both surrounding DOM anchors,
+disconnected the complete removed interval, mounted the 64 replacement rows, and produced zero
+owner executions.
+
+| Mode   | React median | Runtime count | Compiled control | vs React | vs control |
+| ------ | -----------: | ------------: | ---------------: | -------: | ---------: |
+| Static |     110.95 ms |       7.60 ms |         19.90 ms |   14.60x |      2.62x |
+| Hybrid |     110.95 ms |       7.80 ms |         18.90 ms |   14.22x |      2.42x |
+
+The unchanged gate requires at least 4x versus React and 1.5x versus the equivalent block-bodied
+compiled control. Every correctness, performance, persistence, and scalability gate passed. The
+stacked queued grow/shrink workload also remained above its existing floors: 7.27x/7.78x versus
+React and 2.03x/2.05x versus its control in static/hybrid modes.
+
+Compiler tests accept identifiers, property reads, arithmetic, conditionals, and safe `Math` calls
+as count expressions while rejecting calls, assignments, and update expressions. Runtime coverage
+proves native count coercion occurs exactly once and that zero or fractional evaluated counts keep
+their native result through complete reconciliation. The full 615-test ordinary suite and all
+three isolated stress controls pass, as do packaged React 18.3.1 and 19.2.8 compatibility. The
+optional keyed-window runtime remains unchanged at a 14,173 B gzip compiler premium, and the
+compiler-disabled core premium remains 3,766 B gzip. The measured environment was Chrome
+145.0.7632.6, Node.js 23.11.0, and Apple M1 macOS arm64.
+
+## Queued disjoint variable-length window follow-up — 2026-09-02
+
+The full bracketed production-browser run added a 10,000-row workload that queues two disjoint
+updates before one compiler flush. The first window grows from 64 to 80 rows while the second
+shrinks from 64 to 48, so the final table remains at 10,000 rows. Both updates reverse and refresh
+locally retained keys, retire old rows, and add globally fresh rows. Static and hybrid builds
+emitted all 15 expected `keyedArrayPositionHints` sites, preserved surrounding anchors and retained
+DOM identities, disconnected retired rows, mounted only fresh rows, and produced zero owner
+executions.
+
+| Mode   | React median | Queued resize | Compiled control | vs React | vs control |
+| ------ | -----------: | ------------: | ---------------: | -------: | ---------: |
+| Static |      72.25 ms |      13.60 ms |         25.40 ms |    5.31x |      1.87x |
+| Hybrid |      72.25 ms |      13.40 ms |         25.40 ms |    5.39x |      1.90x |
+
+The independent gate requires at least 4x versus React and 1.5x versus the equivalent block-bodied
+compiled control in both modes. One initial full run passed correctness and every specialized
+compiler gate but caught a non-reproducing broad hybrid table-creation outlier. An unchanged second
+full run passed every correctness, performance, persistence, and scalability gate; the queued
+resize result remained above both required floors in both runs.
+
+Package coverage separately queues a 32-to-40-row grow and a 32-to-24-row shrink across a
+4,096-row table. It proves 64 key and binding reads, 24 fresh descriptors, exact local LIS moves,
+retained identity, retired-row cleanup, and stable anchors without rerunning the owner. Tests also
+cover high-window-first coordinate normalization, adjacent empty windows, preparation of every
+window before the first DOM write, overlap and cross-window-key fallback, controlled-input focus
+and selection, delegated event indexes, hydration, Strict Mode, unmount-before-flush cleanup, and
+1,000 randomized queued variable-length updates against normal React. Packaged React 18.3.1 and
+19.2.8 compatibility both pass.
+
+The isolated optional window runtime has a 14,173 B gzip compiler premium, 416 B above the previous
+record after reducing the initial implementation by 206 B. The compiler-disabled core runtime
+premium remains unchanged at 3,766 B gzip and still removes 82.5% of the full compatibility
+runtime. The measured environment was Chrome 145.0.7632.6, Node.js 23.11.0, and Apple M1 macOS
+arm64.
+
+## Variable-length local-key window reuse follow-up — 2026-09-02
+
+The full bracketed production-browser run added a separate 10,000-row workload that grows one
+64-row window to 80 rows. The update reverses and refreshes 48 keys retained from that interval,
+retires 16 old keys, adds 32 globally fresh keys, and shifts the untouched suffix without
+recreating either surrounding anchor. Both compiler builds emitted all 13 expected
+`keyedArrayPositionHints` sites, produced zero owner executions, and passed every existing
+correctness, performance, persistence, and scalability gate without lowering a threshold.
+
+| Mode   | React median | Variable local window | Compiled control | vs React | vs control |
+| ------ | -----------: | --------------------: | ---------------: | -------: | ---------: |
+| Static |    114.75 ms |              15.90 ms |         31.90 ms |    7.22x |      2.01x |
+| Hybrid |    114.75 ms |              19.10 ms |         34.80 ms |    6.01x |      1.82x |
+
+The independent gate requires at least 4x versus React and 1.5x versus the equivalent block-bodied
+compiled control in both modes. Package tests separately grow a 4,096-row table from a 64-row
+window to 80 rows and shrink it to 40, requiring exact local LIS moves, retained DOM identity,
+fresh-row-only descriptor work, retired-row cleanup, and preserved surrounding anchors. Another
+1,000 deterministic randomized variable-length updates match normal React. Atomic preparation,
+outside-window and duplicate-key fallback, controlled-input focus and selection, delegated event
+indexes, hydration, Strict Mode, unmount cleanup, and packaged React 18.3.1/19.2.8 compatibility
+also pass. The isolated exact-window runtime grows by 13 B gzip to a 13,757 B compiler premium,
+inside the unchanged 256 B allowance; the compiler-selected core still removes 82.2% of the full
+compatibility runtime. The measured environment was Chrome 145.0.7632.6, Node.js 23.11.0, and
+Apple M1 macOS arm64.
+
+## Mixed local-key exact-window replacement follow-up — 2026-09-01
+
+The full bracketed production-browser run added a separate 10,000-row workload for one fixed
+64-row window. The update reverses and changes 48 keys reused from inside that removed interval,
+retires 16 old keys, and inserts 16 globally new keys. Both compiler builds emitted all 12 expected
+`keyedArrayPositionHints` sites, retained all 48 reused DOM rows, disconnected all 16 retired rows,
+created all 16 fresh rows without borrowing any of the 10,000 pre-update DOM nodes, preserved both
+surrounding anchors, produced zero owner executions, and passed every existing correctness,
+performance, persistence, and scalability gate without lowering a threshold.
+
+| Mode   | React median | Mixed local window | Compiled control | vs React | vs control |
+| ------ | -----------: | -----------------: | ---------------: | -------: | ---------: |
+| Static |     57.70 ms |           10.80 ms |         22.50 ms |    5.34x |      2.08x |
+| Hybrid |     57.70 ms |           10.80 ms |         23.10 ms |    5.34x |      2.14x |
+
+The independent gate requires at least 4x versus React and 1.5x versus the equivalent block-bodied
+compiled control in both modes. Package tests separately prove bounded work across 4,096 rows: 64
+key reads, 64 binding snapshots, 16 fresh descriptors, 47 local LIS moves, and one fragment mount.
+They also cover complete preparation before mutation, duplicate and outside-window key fallback,
+1,000 deterministic differential updates, controlled-input focus and selection, delegated events,
+hydration, Strict Mode, React 18/19 compatibility, and unmount cleanup. The isolated exact-window
+fixture has a 13,744 B gzip compiler premium, 219 B above the previous result and inside the
+unchanged 256 B allowance. Sharing the LIS/focus mover with ordinary keyed reconciliation also
+reduces the other hinted keyed fixtures by up to 49 B gzip. The measured environment was Chrome
+145.0.7632.6, Node.js 23.11.0, and Apple M1 macOS arm64.
 
 ## Mixed local-key exact-window replacement follow-up — 2026-09-01
 

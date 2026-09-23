@@ -22,20 +22,35 @@
  * ```
  */
 
-import { parseAst, type ConfigEnv, type Plugin, type UserConfig } from "vite";
+import {
+  parseAst,
+  version as viteVersion,
+  type ConfigEnv,
+  type Plugin,
+  type UserConfig,
+} from "vite";
 import { init as initModuleLexer, parse as parseModuleImports } from "es-module-lexer";
 import type { FarmRscPluginOptions, EntryContext } from "./types.js";
 import type { FarmServerActionsConfig } from "@farm.js/core/server-action-security";
+import type { FarmAPIConfig } from "@farm.js/core/api";
+import type { FarmServerConfig } from "@farm.js/core/internal/production-runtime";
 import type { FarmLayerEntry, ResolvedFarmLayer } from "@farm.js/core/server";
 import { farmEnvironmentFunctionsPlugin } from "@farm.js/core/environment/vite";
+import type { FarmCacheUserConfig } from "@farm.js/core/cache";
+import {
+  generateClientCachePersistenceCode,
+  resolveFarmClientCacheAdapterEntry,
+} from "@farm.js/core/vite";
 import { generateRscEntry } from "./entries/rsc.js";
 import { generateSsrEntry } from "./entries/ssr.js";
+import { generateErrorFallbackEntry } from "./entries/error-fallback.js";
 import { generateClientEntry, serverFnTransportErrorClientRuntime } from "./entries/client.js";
 import { transformFarmRouteActionClients } from "./route-action-transform.js";
 import { transformFarmServerFns } from "./server-fn-transform.js";
 import { transformAutomaticOptimizedBoundaries } from "./automatic-optimized-boundary.js";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
 import { assertRscPackageCompatibility } from "./compatibility.js";
+import { sendRscDevelopmentResponse } from "./dev-response.js";
 import fs from "fs/promises";
 import path from "path";
 import { devServableFileExists } from "../dev-static.js";
@@ -46,7 +61,11 @@ const require_ = createRequire(import.meta.url);
 const { farmApiPlugin, farmMiddlewarePlugin } = require_(
   "@farm.js/core",
 ) as typeof import("@farm.js/core");
-const { resolveServerActionsConfig } = require_(
+const {
+  resolveServerActionsConfig,
+  validateServerActionRequest,
+  createServerActionRequestErrorResponse,
+} = require_(
   "@farm.js/core/server-action-security",
 ) as typeof import("@farm.js/core/server-action-security");
 const { normalizeFarmDeploymentId } = require_(
@@ -55,9 +74,21 @@ const { normalizeFarmDeploymentId } = require_(
 const { getFarmLayerAliases, getFarmSourceRoots, resolveFarmLayers } = require_(
   "@farm.js/core/server",
 ) as typeof import("@farm.js/core/server");
-const { searchParamsToObject } = require_(
+const {
+  searchParamsToObject,
+  readNodeRequestBody,
+  resolveFarmServerConfig,
+  createFarmRequestBodyErrorResponse,
+} = require_(
   "@farm.js/core/internal/production-runtime",
 ) as typeof import("@farm.js/core/internal/production-runtime");
+const { isFarmAPIPathname } = require_(
+  "@farm.js/core/api/runtime",
+) as typeof import("@farm.js/core/api/runtime");
+const { resolveFarmAPIConfig, resolveFarmAPIServerBasePath } = require_(
+  "@farm.js/core/api",
+) as typeof import("@farm.js/core/api");
+const { getResolvedEnv } = require_("@farm.js/core/env") as typeof import("@farm.js/core/env");
 
 export type { FarmRscPluginOptions, EntryContext };
 export { buildRscNitro, waitForRscManifest, waitForRscOutputs } from "./nitro-build.js";
@@ -73,6 +104,8 @@ export interface FarmRscConfig {
   layers?: readonly ResolvedFarmLayer[];
   outDir?: string;
   basePath?: string;
+  api?: FarmAPIConfig;
+  server?: FarmServerConfig;
   port?: number;
   experimental?: {
     /**
@@ -130,12 +163,14 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
     layers: config.layers,
     outDir: config.outDir ?? "dist",
     basePath: config.basePath ?? "/",
+    api: config.api,
     serverActions: config.serverActions,
     deploymentId: config.deploymentId,
     generateBuildId: config.generateBuildId,
 
     // Vite server configuration
     server: {
+      ...config.server,
       port,
       strictPort: false,
     },
@@ -151,7 +186,11 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
 
     plugins: [
       farmMiddlewarePlugin({ srcDir: config.srcDir ?? "src", debug }),
-      farmApiPlugin({ srcDir: config.srcDir ?? "src", debug }),
+      farmApiPlugin({
+        srcDir: config.srcDir ?? "src",
+        debug,
+        bodySizeLimit: config.server?.bodySizeLimit,
+      }),
       farmRsc({
         debug,
         encryptActions: config.encryptActions,
@@ -491,15 +530,54 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   let rscEnabled = false;
   let actionsEnabled = false;
   let optimizedBoundaryEnabled = false;
+  let bodySizeLimit = resolveFarmServerConfig(undefined).bodySizeLimit;
 
   // Context passed to entry generators
   let entryContext: EntryContext;
-  /** Set in config when RSC enabled; used by build plugin to run Nitro after client writeBundle. */
   let rscBuildRoot: string | undefined;
 
   // Store for debugging
   const debug = options.debug ?? false;
   const automaticDeploymentId = `build-${Date.now()}`;
+  const supportsBuildAppHook = Number(viteVersion.split(".")[0]) >= 7;
+
+  type RscApplicationBuilder = {
+    environments: Record<string, { config?: { build?: { outDir?: string; assetsDir?: string } } }>;
+    config?: { plugins?: readonly { name?: string }[] };
+    build(environment: unknown): Promise<unknown>;
+  };
+
+  const runNitroAfterApplicationBuild = async (builder: RscApplicationBuilder) => {
+    const nitroEnabled = builder.config?.plugins?.some(
+      (plugin) => plugin.name === "vite-plugin-nitro",
+    );
+    if (!nitroEnabled || !rscBuildRoot) return;
+
+    const { runNitroFromBuildApp } = await import("./vite-plugin-nitro.js");
+    if ((globalThis as any).__FARM_NITRO_PATHS) {
+      await runNitroFromBuildApp();
+      return;
+    }
+
+    // Vite creates environment-specific plugin instances by default, so state
+    // captured by a Rollup hook is not guaranteed to be visible here. Resolve
+    // the final environment outputs directly when that state is unavailable.
+    const rscBuild = builder.environments.rsc?.config?.build;
+    const ssrBuild = builder.environments.ssr?.config?.build;
+    const clientBuild = builder.environments.client?.config?.build;
+    if (!rscBuild?.outDir || !ssrBuild?.outDir || !clientBuild?.outDir) return;
+
+    const { buildRscNitro } = await import("./nitro-build.js");
+    const root = path.resolve(rscBuildRoot);
+    await buildRscNitro({
+      root,
+      rendererPath: resolveRscBuildOutputPath(root, rscBuild.outDir, "index.js"),
+      publicDir: resolveRscBuildOutputPath(root, clientBuild.outDir),
+      ssrPath: resolveRscBuildOutputPath(root, ssrBuild.outDir, "index.js"),
+      assetsDir: clientBuild.assetsDir,
+      preset: process.env.NITRO_PRESET || "vercel",
+    });
+  };
 
   const getColors = () => {
     try {
@@ -612,16 +690,20 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           srcDir?: string;
           outDir?: string;
           basePath?: string;
+          api?: FarmAPIConfig;
+          server?: UserConfig["server"] & FarmServerConfig;
           root?: string;
           extends?: readonly FarmLayerEntry[];
           layers?: readonly ResolvedFarmLayer[];
           serverActions?: FarmServerActionsConfig;
           deploymentId?: string;
           generateBuildId?: () => string | Promise<string>;
+          cache?: FarmCacheUserConfig;
         };
         // Check if user enabled RSC in their config
         rscEnabled = c.experimental?.serverComponents === true;
         actionsEnabled = c.experimental?.serverActions === true;
+        bodySizeLimit = resolveFarmServerConfig(c.server).bodySizeLimit;
         optimizedBoundaryEnabled = c.experimental?.optimizedBoundary === true;
 
         logInfo(`RSC enabled: ${rscEnabled}`);
@@ -657,6 +739,11 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         }
 
         // Read user's directory configuration
+        const api = await resolveFarmAPIConfig(c.api, {
+          root,
+          mode: env.command === "build" ? "production" : "development",
+          env: getResolvedEnv(),
+        });
         const srcDir = c.srcDir ?? "src";
         const outDir = c.outDir ?? "dist";
         const deploymentId = normalizeFarmDeploymentId(
@@ -699,6 +786,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           srcDir,
           outDir,
           basePath: c.basePath ?? "/",
+          apiBasePath: resolveFarmAPIServerBasePath(api),
           routesDir: options.routesDir,
           globalCssPath,
           routeRoots,
@@ -711,6 +799,10 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           }),
           deploymentId,
           debug,
+          development: env.command === "serve",
+          clientCachePersistence: generateClientCachePersistenceCode(
+            resolveFarmClientCacheAdapterEntry(root, c.cache),
+          ),
         };
 
         logInfo(`srcDir: ${entryContext.srcDir}, outDir: ${entryContext.outDir}`);
@@ -723,6 +815,10 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         await fs.writeFile(entryRscPath, generateRscEntry(entryContext));
         await fs.writeFile(entrySsrPath, generateSsrEntry(entryContext));
         await fs.writeFile(entryClientPath, generateClientEntry(entryContext));
+        await fs.writeFile(
+          path.join(entriesDir, "error-fallback.tsx"),
+          generateErrorFallbackEntry(),
+        );
         logInfo(`Wrote RSC entries to ${entriesDir}`);
 
         // User must add rsc({ entries: { rsc, ssr, client } }) to config.plugins so the RSC plugin
@@ -754,6 +850,9 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         return {
           appType: "custom" as const,
           builder: { sharedConfigBuild: true } as any,
+          define: {
+            __FARM_API_BASE_URL__: JSON.stringify(api.baseURL),
+          },
           ssr: {
             external: [
               "react",
@@ -949,40 +1048,44 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
       },
     },
 
-    // Nitro: run after all environments (like @hiogawa/vite-plugin-nitro). If the runtime supports
-    // plugin buildApp order "post", this runs automatically; else use build script (see comment below).
     {
-      name: "@farm.js/plugin/rsc:nitro-build",
+      name: "@farm.js/plugin/rsc:nitro-application-build",
+      enforce: "post",
       apply: "build",
+
+      // @vitejs/plugin-rsc owns the Vite 6 builder callback. Wrap its final
+      // callback after config composition so Nitro starts only after the RSC,
+      // client, and SSR outputs have all been written.
+      config(config) {
+        const builderConfig = (
+          config as UserConfig & {
+            builder?: { buildApp?: (builder: RscApplicationBuilder) => Promise<unknown> };
+          }
+        ).builder;
+        const buildApp = builderConfig?.buildApp;
+        if (typeof buildApp !== "function") return;
+
+        return {
+          builder: {
+            ...builderConfig,
+            async buildApp(builder: RscApplicationBuilder) {
+              await buildApp(builder);
+              if (!supportsBuildAppHook) {
+                await runNitroAfterApplicationBuild(builder);
+              }
+            },
+          },
+        } as unknown as UserConfig;
+      },
+
+      // Vite 7+ composes application build hooks directly. Keep the Vite 6
+      // wrapper above for the versions where this hook is not dispatched.
       buildApp: {
         order: "post",
-        handler: async (builder: {
-          environments: Record<
-            string,
-            { config: { build: { outDir: string; assetsDir?: string } } }
-          >;
-        }) => {
-          if (!rscEnabled || !rscBuildRoot || !entryContext) return;
-          if ((globalThis as any).__FARM_NITRO_PLUGIN_RAN) return;
-          const root = path.resolve(rscBuildRoot);
-          if ((globalThis as any).__FARM_NITRO_PATHS) {
-            const { runNitroFromBuildApp } = await import("./vite-plugin-nitro.js");
-            await runNitroFromBuildApp();
-            return;
+        async handler(builder: RscApplicationBuilder) {
+          if (supportsBuildAppHook) {
+            await runNitroAfterApplicationBuild(builder);
           }
-          const rscEnv = builder.environments?.rsc;
-          const ssrEnv = builder.environments?.ssr;
-          const clientEnv = builder.environments?.client;
-          if (!rscEnv || !ssrEnv || !clientEnv) return;
-          const { buildRscNitro } = await import("./nitro-build.js");
-          await buildRscNitro({
-            root,
-            rendererPath: resolveRscBuildOutputPath(root, rscEnv.config.build.outDir, "index.js"),
-            publicDir: resolveRscBuildOutputPath(root, clientEnv.config.build.outDir),
-            ssrPath: resolveRscBuildOutputPath(root, ssrEnv.config.build.outDir, "index.js"),
-            assetsDir: clientEnv.config.build.assetsDir,
-            preset: process.env.NITRO_PRESET || "vercel",
-          });
         },
       },
     } as Plugin,
@@ -1091,6 +1194,12 @@ setServerCallback(async (id, args) => {
   if (!res.ok) throw new Error('Server action failed: ' + res.status);
   const p = await createFromReadableStream(res.body, { temporaryReferences: refs });
   if (p?.returnValue?.ok) return p.returnValue.data;
+  // This entry hydrates a single page and has no client router, so a redirect
+  // from the action becomes a full document navigation.
+  if (p?.returnValue?.redirect?.url) {
+    location.assign(p.returnValue.redirect.url);
+    return;
+  }
   throw createFarmServerFnTransportError(p?.returnValue?.data);
 });
 `
@@ -1214,19 +1323,37 @@ if (document.readyState === 'loading') {
                 `import("/@react-refresh").then(m=>{m.default.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;return import("/@vite/client");}).then(()=>import(${JSON.stringify(clientEntryUrl)}));`;
 
               const base = `http://${req.headers.host || "localhost:3000"}`;
-              let body: Buffer | undefined;
-              if (method === "POST") {
-                const chunks: Buffer[] = [];
-                for await (const chunk of req) chunks.push(chunk as Buffer);
-                body = Buffer.concat(chunks);
-                // Keep as buffer so request.formData() / request.text() in RSC handler work (multipart must not be UTF-8 decoded)
+              const requestUrl = new URL(url, base);
+              const isAction =
+                actionsEnabled &&
+                method === "POST" &&
+                !isFarmAPIPathname(requestUrl.pathname, entryContext.apiBasePath) &&
+                !isFarmAPIPathname(requestUrl.pathname);
+              if (isAction) {
+                validateServerActionRequest(
+                  new Request(requestUrl, {
+                    method,
+                    headers: req.headers as HeadersInit,
+                  }),
+                  entryContext.serverActions,
+                );
               }
-              const request = new Request(new URL(url, base), {
+              let body: Buffer | undefined;
+              if (method !== "GET" && method !== "HEAD") {
+                body = await readNodeRequestBody(
+                  req,
+                  isAction ? entryContext.serverActions.bodySizeLimit : bodySizeLimit,
+                );
+              }
+              const request = new Request(requestUrl, {
                 method,
                 headers: req.headers as HeadersInit,
                 body:
-                  method === "POST" && body && body.length > 0
-                    ? (body as unknown as BodyInit)
+                  body && body.length > 0
+                    ? (body.buffer.slice(
+                        body.byteOffset,
+                        body.byteOffset + body.byteLength,
+                      ) as ArrayBuffer)
                     : undefined,
               });
 
@@ -1268,28 +1395,24 @@ if (document.readyState === 'loading') {
                 throw new Error("[Farm.js] Could not load RSC entry in rsc environment");
               const response = await rscEntry.default.fetch(request);
 
-              res.statusCode = response.status;
-              response.headers.forEach((value: string, key: string) => {
-                if (key.toLowerCase() !== "transfer-encoding") res.setHeader(key, value);
-              });
-              if (response.body) {
-                const reader = response.body.getReader();
-                const pump = async () => {
-                  while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    res.write(Buffer.from(value));
-                  }
-                  res.end();
-                };
-                await pump();
-              } else {
-                res.end();
-              }
+              await sendRscDevelopmentResponse(res, response);
               const duration = Date.now() - startTime;
               logResponse(method, pathname, response.status, duration);
               return;
             } catch (rscError: any) {
+              const rejection =
+                createFarmRequestBodyErrorResponse(rscError) ??
+                createServerActionRequestErrorResponse(rscError);
+              if (rejection && !res.headersSent && !res.writableEnded && !res.destroyed) {
+                await sendRscDevelopmentResponse(res, rejection);
+                return;
+              }
+              if (res.headersSent || res.writableEnded || res.destroyed) {
+                console.error("[Farm.js] RSC dev response error:", rscError);
+                if (!res.destroyed)
+                  res.destroy(rscError instanceof Error ? rscError : new Error(String(rscError)));
+                return;
+              }
               // RSC pipeline failed; fall back to legacy SSR for GET only
               if (method !== "GET") {
                 const duration = Date.now() - startTime;

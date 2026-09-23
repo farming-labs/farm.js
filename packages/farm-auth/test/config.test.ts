@@ -53,4 +53,20 @@ describe("resolveFarmAuthConfig", () => {
       }),
     ).toThrow(/maxPasswordLength/);
   });
+
+  it("rejects base paths that URL parsing could reinterpret", () => {
+    for (const basePath of [
+      "//example.com/auth",
+      "https://example.com/auth",
+      "/api/../auth",
+      "/api/%2e%2e/auth",
+      "/api%2fauth",
+      "/api\\auth",
+      "/api\u0000auth",
+      "/api/auth?tenant=farm",
+      "/api/auth#sign-in",
+    ]) {
+      expect(() => resolveFarmAuthConfig({ basePath })).toThrow();
+    }
+  });
 });

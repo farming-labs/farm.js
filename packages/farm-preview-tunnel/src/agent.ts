@@ -7,19 +7,7 @@ import type {
   TunnelResponseMessage,
 } from "./protocol.js";
 import { isRelayToAgentMessage } from "./protocol.js";
-
-const HOP_BY_HOP_HEADERS = new Set([
-  "connection",
-  "content-length",
-  "host",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-]);
+import { getHopByHopHeaderNames, getRecordHeader } from "./headers.js";
 
 export interface TypeScriptPreviewAgentOptions {
   relayUrl: string;
@@ -29,6 +17,7 @@ export interface TypeScriptPreviewAgentOptions {
   localProbeIntervalMs?: number;
   localProbeTimeoutMs?: number;
   requestTimeoutMs?: number;
+  maxResponseBodyBytes?: number;
 }
 
 export interface TypeScriptPreviewAgent {
@@ -50,11 +39,16 @@ export async function startTypeScriptPreviewAgent(
   try {
     ready = await waitForReady(socket, options);
   } catch (error) {
+    await terminateSocket(socket);
     socket.off("error", onSocketError);
     throw error;
   }
 
   const inFlight = new Map<string, AbortController>();
+  const maxResponseBodyBytes = Math.min(
+    options.maxResponseBodyBytes ?? Number.POSITIVE_INFINITY,
+    ready.maxResponseBodyBytes ?? 5 * 1024 * 1024,
+  );
   const stopWatchingTarget = watchLocalTarget(socket, options);
   const abortInFlight = () => {
     for (const controller of inFlight.values()) controller.abort();
@@ -71,9 +65,14 @@ export async function startTypeScriptPreviewAgent(
       const controller = new AbortController();
       inFlight.get(message.id)?.abort();
       inFlight.set(message.id, controller);
-      void forwardRequest(socket, options, message, controller).finally(() => {
-        if (inFlight.get(message.id) === controller) inFlight.delete(message.id);
-      });
+      void forwardRequest(socket, options, message, controller, maxResponseBodyBytes).finally(
+        () => {
+          if (inFlight.get(message.id) === controller) inFlight.delete(message.id);
+        },
+      );
+    } else if (message.type === "cancel") {
+      inFlight.get(message.id)?.abort();
+      inFlight.delete(message.id);
     }
   });
   socket.once("close", () => {
@@ -185,6 +184,7 @@ async function forwardRequest(
   options: TypeScriptPreviewAgentOptions,
   request: TunnelRequestMessage,
   controller: AbortController,
+  maxResponseBodyBytes: number,
 ) {
   let response: TunnelResponseMessage;
   let timedOut = false;
@@ -195,8 +195,11 @@ async function forwardRequest(
 
   try {
     const headers = new Headers();
+    const requestHopByHopHeaders = getHopByHopHeaderNames(
+      getRecordHeader(request.headers, "connection"),
+    );
     for (const [name, value] of Object.entries(request.headers)) {
-      if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase())) headers.set(name, value);
+      if (!requestHopByHopHeaders.has(name.toLowerCase())) headers.set(name, value);
     }
     const method = request.method.toUpperCase();
     const result = await fetch(resolveTargetUrl(options.targetUrl, request.path), {
@@ -210,26 +213,29 @@ async function forwardRequest(
       signal: controller.signal,
     });
     const responseHeaders: Record<string, string | string[]> = {};
+    const responseHopByHopHeaders = getHopByHopHeaderNames(result.headers.get("connection"));
     for (const [name, value] of result.headers) {
       const normalizedName = name.toLowerCase();
       if (
         normalizedName !== "content-encoding" &&
         normalizedName !== "set-cookie" &&
-        !HOP_BY_HOP_HEADERS.has(normalizedName)
+        !responseHopByHopHeaders.has(normalizedName)
       ) {
         responseHeaders[name] = value;
       }
     }
     const setCookies = getSetCookies(result.headers);
     if (setCookies.length) responseHeaders["set-cookie"] = setCookies;
+    const responseBody = await readResponseBody(result, maxResponseBodyBytes);
     response = {
       type: "response",
       id: request.id,
       status: result.status,
       headers: responseHeaders,
-      body: Buffer.from(await result.arrayBuffer()).toString("base64"),
+      body: responseBody.toString("base64"),
     };
   } catch (error) {
+    if (controller.signal.aborted && !timedOut) return;
     const unsafePath = error instanceof UnsafePreviewPathError;
     response = {
       type: "response",
@@ -243,6 +249,39 @@ async function forwardRequest(
   }
 
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(response));
+}
+
+async function readResponseBody(response: Response, maxBytes: number) {
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  if (
+    !response.headers.has("content-encoding") &&
+    Number.isFinite(contentLength) &&
+    contentLength > maxBytes
+  ) {
+    await response.body?.cancel();
+    throw new PreviewResponseLimitError(maxBytes);
+  }
+  if (!response.body) return Buffer.alloc(0);
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        throw new PreviewResponseLimitError(maxBytes);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  }
+  return Buffer.concat(chunks, size);
 }
 
 function parseRelayMessage(data: WebSocket.RawData): RelayToAgentMessage | undefined {
@@ -259,12 +298,17 @@ function resolveTargetUrl(targetUrl: string, requestPath: string) {
     throw new UnsafePreviewPathError();
   }
 
-  const base = new URL(ensureTrailingSlash(targetUrl));
+  const base = new URL(targetUrl);
   if (base.protocol !== "http:" && base.protocol !== "https:") {
     throw new UnsafePreviewPathError();
   }
-  const resolved = new URL(requestPath, base);
-  if (resolved.origin !== base.origin) throw new UnsafePreviewPathError();
+  base.pathname = ensureTrailingSlash(base.pathname);
+  base.search = "";
+  base.hash = "";
+  const resolved = new URL(requestPath.slice(1), base);
+  if (resolved.origin !== base.origin || !resolved.pathname.startsWith(base.pathname)) {
+    throw new UnsafePreviewPathError();
+  }
   return resolved;
 }
 
@@ -277,11 +321,26 @@ function ensureTrailingSlash(value: string) {
   return value.endsWith("/") ? value : `${value}/`;
 }
 
+class PreviewResponseLimitError extends Error {
+  constructor(maxBytes: number) {
+    super(`The local preview response exceeded the ${maxBytes} byte limit.`);
+    this.name = "PreviewResponseLimitError";
+  }
+}
+
 function closeSocket(socket: WebSocket) {
   if (socket.readyState === socket.CLOSED) return Promise.resolve();
   return new Promise<void>((resolve) => {
     socket.once("close", () => resolve());
     socket.close(1000, "Preview agent stopped");
+  });
+}
+
+function terminateSocket(socket: WebSocket) {
+  if (socket.readyState === socket.CLOSED) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    socket.once("close", () => resolve());
+    socket.terminate();
   });
 }
 

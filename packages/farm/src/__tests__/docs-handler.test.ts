@@ -199,6 +199,75 @@ describe("createFarmDocsHandler", () => {
     expect(response == null || response.status === 404).toBe(true);
   });
 
+  it("does not serve docs files through symlinks outside the content directory", async () => {
+    const { root, docs, docsDir } = await createDocsFixture();
+    const privateDir = path.join(root, "private");
+    await fs.mkdir(privateDir);
+    await fs.writeFile(path.join(privateDir, "page.md"), "# Private\n\nTOP_SECRET_VALUE");
+    await fs.symlink(privateDir, path.join(docsDir, "leak"), "junction");
+
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+    const response = await handler(new Request("http://farm.test/docs/leak"));
+
+    expect(response == null || response.status === 404).toBe(true);
+  });
+
+  it("omits headings inside code fences from the on-this-page TOC", async () => {
+    const { root, docs, docsDir } = await createDocsFixture();
+    await fs.mkdir(path.join(docsDir, "fenced"), { recursive: true });
+    await fs.writeFile(
+      path.join(docsDir, "fenced", "page.md"),
+      [
+        "# Fenced",
+        "",
+        "## Real Section",
+        "",
+        "```md",
+        "## Fake Heading In Code",
+        "```",
+        "",
+        "## Another Real",
+      ].join("\n"),
+    );
+
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+    const response = await handler(
+      new Request("http://farm.test/docs/fenced", { headers: { accept: "text/html" } }),
+    );
+
+    expect(response?.status).toBe(200);
+    const html = (await response?.text()) || "";
+    // Real headings are in the TOC (anchor id + toc link).
+    expect(html).toContain("real-section");
+    expect(html).toContain("another-real");
+    // The heading inside the code fence is not a real heading (marked renders it
+    // as code, no anchor), so its slug must not leak into the TOC.
+    expect(html).not.toContain("fake-heading-in-code");
+  });
+
+  it("keeps on-this-page links in sync when a section repeats the page title", async () => {
+    const { root, docs, docsDir } = await createDocsFixture();
+    await fs.mkdir(path.join(docsDir, "dup"), { recursive: true });
+    await fs.writeFile(
+      path.join(docsDir, "dup", "page.md"),
+      ["# Configuration", "", "Intro.", "", "## Configuration", "", "Details."].join("\n"),
+    );
+
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+    const response = await handler(
+      new Request("http://farm.test/docs/dup", { headers: { accept: "text/html" } }),
+    );
+
+    expect(response?.status).toBe(200);
+    const html = (await response?.text()) || "";
+    // The renderer disambiguates the repeated slug: h1 -> #configuration,
+    // h2 -> #configuration-2. The TOC must link to the h2's real id, not the h1.
+    expect(html).toContain('id="configuration-2"');
+    const tocSection = html.slice(html.indexOf('id="nd-toc"'));
+    expect(tocSection).toContain('href="#configuration-2"');
+    expect(tocSection).not.toContain('href="#configuration"');
+  });
+
   it("serves docs markdown files as HTML", async () => {
     const { root, docs } = await createDocsFixture();
     const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
@@ -361,7 +430,7 @@ describe("createFarmDocsHandler", () => {
 
     const etag = imageResponse?.headers.get("etag");
     const notModified = await handler(
-      new Request(imageUrl!, { headers: { "if-none-match": etag! } }),
+      new Request(imageUrl!, { headers: { "if-none-match": `"other", W/${etag}` } }),
     );
     expect(notModified?.status).toBe(304);
     expect(await notModified?.text()).toBe("");
@@ -732,6 +801,39 @@ describe("createFarmDocsHandler", () => {
     await expect(handler(new Request("http://farm.test/docs"))).resolves.toBeNull();
   });
 
+  it("does not scan docs content for unrelated requests", async () => {
+    const { root, docs } = await createDocsFixture();
+    const contentFile = path.join(root, "not-a-docs-directory");
+    await fs.writeFile(contentFile, "unrelated");
+    const handler = createFarmDocsHandler(
+      { ...docs, contentDir: contentFile },
+      { root, srcDir: "src" },
+    );
+
+    await expect(handler(new Request("http://farm.test/dashboard"))).resolves.toBeNull();
+  });
+
+  it("returns bodyless HEAD responses for docs pages and public artifacts", async () => {
+    const { root, docs } = await createDocsFixture();
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+
+    for (const pathname of ["/docs/guide", "/docs/guide.md", "/llms.txt"]) {
+      const getResponse = await handler(new Request(`http://farm.test${pathname}`));
+      const headResponse = await handler(
+        new Request(`http://farm.test${pathname}`, { method: "HEAD" }),
+      );
+
+      expect(headResponse?.status).toBe(getResponse?.status);
+      expect(headResponse?.headers.get("content-type")).toBe(
+        getResponse?.headers.get("content-type"),
+      );
+      expect(headResponse?.headers.get("cache-control")).toBe(
+        getResponse?.headers.get("cache-control"),
+      );
+      await expect(headResponse?.text()).resolves.toBe("");
+    }
+  });
+
   it("softens a trailing .js in the sidebar brand title", async () => {
     const { root, docs } = await createDocsFixture();
     const handler = createFarmDocsHandler(
@@ -802,6 +904,13 @@ describe("createDocsAPI", () => {
         entry: "docs",
       },
     });
+
+    const headResponse = await handler(
+      new Request("http://farm.test/api/docs?format=config", { method: "HEAD" }),
+    );
+    expect(headResponse?.status).toBe(200);
+    expect(headResponse?.headers.get("content-type")).toBe("application/json");
+    await expect(headResponse?.text()).resolves.toBe("");
   });
 
   it("creates Next-style GET and POST route handlers for Farm API routes", async () => {

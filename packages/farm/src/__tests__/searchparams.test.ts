@@ -186,6 +186,26 @@ describe("searchParamsToObject", () => {
 });
 
 describe("searchParamsToObject hardening", () => {
+  it.each([
+    "toString",
+    "toLocaleString",
+    "valueOf",
+    "hasOwnProperty",
+    "isPrototypeOf",
+    "propertyIsEnumerable",
+    "__defineGetter__",
+    "__defineSetter__",
+    "__lookupGetter__",
+    "__lookupSetter__",
+  ])("treats %s as query data rather than an inherited property", (key) => {
+    const single = searchParamsToObject(new URLSearchParams(`${key}=one`));
+    expect(single[key]).toBe("one");
+    expect(Object.getPrototypeOf(single)).toBe(Object.prototype);
+    const repeated = searchParamsToObject(new URLSearchParams(`${key}=&${key}=two&${key}=three`));
+    expect(repeated[key]).toEqual(["", "two", "three"]);
+    expect(JSON.parse(JSON.stringify(repeated))).toEqual({ [key]: ["", "two", "three"] });
+  });
+
   it("drops prototype-poisoning keys and keeps the prototype intact", () => {
     // Repeated __proto__ keys previously rewrote the returned object's
     // prototype via the read-then-assign flow.
@@ -226,7 +246,7 @@ describe("SearchParams in the production runtime", () => {
     const source = readSource("nitro", "universal-build.ts");
 
     expect(source).toContain(
-      'import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject, setFarmTrailingSlashPreference } from "@farm.js/core/internal/client-runtime";',
+      'import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";',
     );
     expect(source).toContain(
       "const searchParams = searchParamsToObject(new URLSearchParams(window.location.search));",

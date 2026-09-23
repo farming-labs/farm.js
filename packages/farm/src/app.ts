@@ -33,6 +33,7 @@ import type { ResolvedFarmI18nConfig } from "./i18n/types";
 import { configureFarmCache } from "./cache";
 import { resolveFarmAuthConfig, type ResolvedFarmAuthConfig } from "./auth-config";
 import { resolveFarmPerformanceConfig, type ResolvedFarmPerformanceConfig } from "./preload";
+import { normalizeFarmConfigBasePath } from "./base-path";
 import { resolveFarmSecurityConfig, type ResolvedFarmSecurityConfig } from "./security";
 import { resolveFarmThemeConfig } from "./theme/config";
 import { _setDefaultFarmThemeConfig } from "./theme/server";
@@ -145,6 +146,7 @@ export class FarmApp {
 
   private normalizeConfig(config: FarmConfig): NormalizedFarmConfig {
     const root = config.root || process.cwd();
+    const basePath = normalizeFarmConfigBasePath(config.basePath);
 
     return {
       root,
@@ -152,7 +154,7 @@ export class FarmApp {
       extends: config.extends || [],
       layers: [...(config.layers || [])],
       outDir: config.outDir || "dist",
-      basePath: config.basePath || "/",
+      basePath,
       trailingSlash: config.trailingSlash ?? false,
       renderer: resolveFarmRenderer(config.renderer),
       preset: config.preset ?? "node-server",
@@ -174,12 +176,13 @@ export class FarmApp {
       security: resolveFarmSecurityConfig(config.security),
       images: resolveFarmImageConfig(config.images),
       performance: resolveFarmPerformanceConfig(config.performance),
-      theme: resolveFarmThemeConfig(config.theme, config.basePath || "/"),
+      theme: resolveFarmThemeConfig(config.theme, basePath),
       i18n: isResolvedI18nConfig(config.i18n)
         ? config.i18n
         : resolveFarmI18nConfig(config.i18n, {
             root,
             mode: process.env.NODE_ENV === "production" ? "production" : "development",
+            basePath,
           }),
       deploymentId: config.deploymentId || "development",
       notFound: config.notFound || {},
@@ -204,8 +207,10 @@ export class FarmApp {
         serverComponents: config.experimental?.serverComponents ?? false,
         serverActions: config.experimental?.serverActions ?? false,
         isolatedClientHydration: config.experimental?.isolatedClientHydration ?? "off",
+        ppr: config.experimental?.ppr ?? false,
         ...config.experimental,
       },
+      agent: config.agent ?? {},
       vite: config.vite || {},
     };
   }

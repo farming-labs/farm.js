@@ -291,6 +291,48 @@ function normalizeMarkdownRoute(route: string): string {
   return normalized === "" || normalized === "/index" ? "/" : normalized;
 }
 
+/**
+ * Quality value an `Accept` header assigns a media type, or 0 when the client
+ * will not take it.
+ *
+ * `q=0` means "not acceptable" per RFC 9110, so it has to be distinguished from
+ * an absent entry rather than treated as a match. Wildcards are opt-in: a client
+ * sending `*&#47;*` will take anything, which says nothing about whether it would
+ * rather have Markdown than HTML, so callers negotiating between two concrete
+ * types should ask for exact entries only.
+ */
+export function farmAcceptQuality(
+  accept: string | null | undefined,
+  mediaType: string,
+  options: { wildcards?: boolean } = {},
+): number {
+  if (!accept) return 0;
+  const target = mediaType.toLowerCase();
+  const [targetType] = target.split("/");
+  let best = 0;
+
+  for (const entry of accept.split(",")) {
+    const [candidate, ...parameters] = entry
+      .trim()
+      .toLowerCase()
+      .split(";")
+      .map((part) => part.trim());
+    if (!candidate) continue;
+
+    const matches =
+      candidate === target ||
+      (options.wildcards === true && (candidate === "*/*" || candidate === `${targetType}/*`));
+    if (!matches) continue;
+
+    const quality = parameters.find((parameter) => parameter.startsWith("q="));
+    const value = quality === undefined ? 1 : Number(quality.slice(2));
+    if (!Number.isFinite(value) || value <= 0) continue;
+    if (value > best) best = value;
+  }
+
+  return best;
+}
+
 export function requestAcceptsMarkdown(accept: string | null | undefined): boolean {
   if (!accept) {
     return false;
@@ -436,13 +478,26 @@ function stripTags(input: string): string {
 }
 
 function decodeHtml(input: string): string {
-  return input
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(Number.parseInt(code, 16)))
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number.parseInt(code, 10)));
+  return input.replace(/&(?:nbsp|amp|lt|gt|quot|#39|#(?:x|X)[0-9a-fA-F]+|#[0-9]+);/g, (entity) => {
+    switch (entity) {
+      case "&nbsp;":
+        return " ";
+      case "&amp;":
+        return "&";
+      case "&lt;":
+        return "<";
+      case "&gt;":
+        return ">";
+      case "&quot;":
+        return '"';
+      case "&#39;":
+        return "'";
+    }
+
+    const hexadecimal = entity[2] === "x" || entity[2] === "X";
+    const codePoint = Number.parseInt(entity.slice(hexadecimal ? 3 : 2, -1), hexadecimal ? 16 : 10);
+    return codePoint === 0 || codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)
+      ? "\uFFFD"
+      : String.fromCodePoint(codePoint);
+  });
 }

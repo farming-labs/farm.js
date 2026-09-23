@@ -7,9 +7,13 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { notifyHistoryChange, subscribeHistoryChange } from "../client/history-sync";
+import {
+  notifyHistoryChange,
+  subscribeHistoryChange,
+  writeFarmURLSearchHistory,
+} from "../client/history-sync";
 import { _resolveCurrentRequest } from "../server/request-bridge";
-import { emitter } from "./sync";
+import { emitter, type KeyUpdate } from "./sync";
 export { parseRouteParams, loadRouteParams, type RouteParamsInput } from "./params";
 
 import { asString as asStringClient, asInteger as asIntegerClient, type Parser } from "./parsers";
@@ -24,6 +28,7 @@ export {
   asIsoDate,
   asIsoDateTime,
   createParser,
+  type ArrayParserOptions,
   type Parser,
   type inferParserType,
 } from "./parsers";
@@ -39,7 +44,16 @@ export interface Options {
 }
 
 const getCurrentSearchParams = (): URLSearchParams => {
-  if (typeof window !== "undefined") return new URLSearchParams(window.location.search);
+  if (typeof window !== "undefined") {
+    discardDepartedURLUpdates();
+    let params = new URLSearchParams(window.location.search);
+    // Draft values belong to the existing throttle queue, not to a parser's
+    // identity. Inline parsers and newly mounted consumers see the same draft.
+    for (const pending of throttleTimers.values()) {
+      if (pending.href === window.location.href) params = applyChange(params, pending.updates);
+    }
+    return params;
+  }
 
   // Server rendering used to see an empty query string here, so a hook read one
   // value on the server and another in the browser. React reports that as a
@@ -53,7 +67,107 @@ const getCurrentSearchParams = (): URLSearchParams => {
   }
 };
 
-const throttleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const readSearchParam = (searchParams: URLSearchParams, key: string): string => {
+  const values = searchParams.getAll(key);
+  return values.length > 1 ? values.join(",") : (values[0] ?? "");
+};
+
+const throttleTimers = new Map<
+  string,
+  {
+    timer: ReturnType<typeof setTimeout>;
+    updates: Record<string, string | null>;
+    href: string;
+  }
+>();
+
+function discardDepartedURLUpdates(): void {
+  for (const [key, pending] of throttleTimers) {
+    if (pending.href === window.location.href) continue;
+    clearTimeout(pending.timer);
+    throttleTimers.delete(key);
+  }
+}
+
+function getUpdateKey(updates: Record<string, unknown>): string {
+  return JSON.stringify(Object.keys(updates).sort());
+}
+
+function supersedeQueuedKeys(updates: Record<string, string | null>): void {
+  const keys = Object.keys(updates);
+  for (const [queueKey, pending] of throttleTimers) {
+    for (const key of keys) delete pending.updates[key];
+    if (Object.keys(pending.updates).length > 0) continue;
+    clearTimeout(pending.timer);
+    throttleTimers.delete(queueKey);
+  }
+}
+
+const compareStructuredValues = (
+  current: unknown,
+  next: unknown,
+  seen = new WeakMap<object, object>(),
+): boolean | undefined => {
+  if (Object.is(current, next)) return true;
+  if (current === null || next === null || typeof current !== typeof next) return false;
+  if (typeof current !== "object" || typeof next !== "object") return false;
+  if (current instanceof Date || next instanceof Date) {
+    return current instanceof Date && next instanceof Date && current.getTime() === next.getTime();
+  }
+  if (Array.isArray(current) || Array.isArray(next)) {
+    if (!Array.isArray(current) || !Array.isArray(next) || current.length !== next.length) {
+      return false;
+    }
+    const knownNext = seen.get(current);
+    if (knownNext) return knownNext === next;
+    seen.set(current, next);
+    for (let index = 0; index < current.length; index++) {
+      const equal = compareStructuredValues(current[index], next[index], seen);
+      if (equal !== true) return equal;
+    }
+    return true;
+  }
+
+  const currentPrototype = Object.getPrototypeOf(current);
+  const nextPrototype = Object.getPrototypeOf(next);
+  if (currentPrototype !== nextPrototype) return false;
+  if (currentPrototype !== Object.prototype && currentPrototype !== null) return undefined;
+
+  const knownNext = seen.get(current);
+  if (knownNext) return knownNext === next;
+  seen.set(current, next);
+
+  const currentKeys = Object.keys(current);
+  const nextKeys = Object.keys(next);
+  if (
+    currentKeys.length !== nextKeys.length ||
+    currentKeys.some((key) => !Object.prototype.hasOwnProperty.call(next, key))
+  ) {
+    return false;
+  }
+  for (const key of currentKeys) {
+    const equal = compareStructuredValues(
+      (current as Record<string, unknown>)[key],
+      (next as Record<string, unknown>)[key],
+      seen,
+    );
+    if (equal !== true) return equal;
+  }
+  return true;
+};
+
+const areParsedValuesEqual = <T>(parser: Parser<T>, current: T | null, next: T | null) => {
+  if (Object.is(current, next)) return true;
+  const structuredResult = compareStructuredValues(current, next);
+  if (structuredResult === false) return false;
+  if (current === null || next === null) return false;
+
+  try {
+    return parser.serialize(current) === parser.serialize(next);
+  } catch {
+    return structuredResult === true;
+  }
+};
 
 const applyChange = (
   searchParams: URLSearchParams,
@@ -87,24 +201,23 @@ const commitURLUpdate = (
 
   if (newUrl === currentUrl) return;
 
-  // Preserve Farm's history state (page state, interception markers) and
-  // keep its recorded path in sync with the new query string so pops
-  // report the entry's real location.
-  const historyState = window.history.state;
-  const nextHistoryState =
-    historyState && typeof historyState === "object" && "path" in historyState
-      ? { ...historyState, path: newUrl }
-      : historyState;
-
-  if (history === "replaceState") {
-    window.history.replaceState(nextHistoryState, "", newUrl);
-  } else {
-    window.history.pushState(nextHistoryState, "", newUrl);
+  const historyAction = history === "replaceState" ? "replace" : "push";
+  if (!writeFarmURLSearchHistory(historyAction, newUrl)) {
+    const historyState = window.history.state;
+    const nextHistoryState =
+      historyState && typeof historyState === "object" && "path" in historyState
+        ? { ...historyState, path: newUrl }
+        : historyState;
+    window.history[history](nextHistoryState, "", newUrl);
   }
 
   if (emitUpdate) {
-    const actualSearchParams = new URLSearchParams(window.location.search);
-    emitter.emitUpdate(actualSearchParams);
+    // Composing one queued key must not discard drafts for other keys. Only
+    // carry drafts forward across this write, never across unrelated navigation.
+    for (const pending of throttleTimers.values()) {
+      if (pending.href === url.href) pending.href = window.location.href;
+    }
+    emitter.emitUpdate(getCurrentSearchParams());
   }
 
   if (shallow) notifyHistoryChange("url-search");
@@ -118,34 +231,41 @@ const updateURL = (
   updates: Record<string, string | null>,
   options: Options = {},
   emitUpdate = true,
-) => {
+): (() => boolean) | undefined => {
   if (typeof window === "undefined") return;
 
+  discardDepartedURLUpdates();
+
   const { throttleMs } = options;
+  // Latest intent owns each key, including immediate writes and URL no-ops.
+  // Keep unrelated keys in an older batch scheduled with their original owner.
+  supersedeQueuedKeys(updates);
   if (!throttleMs || throttleMs <= 0) {
     commitURLUpdate(updates, options, emitUpdate);
     return;
   }
 
-  const throttleKey = Object.keys(updates).sort().join(",");
-  const existingTimeout = throttleTimers.get(throttleKey);
-  if (existingTimeout) {
-    clearTimeout(existingTimeout);
-    throttleTimers.delete(throttleKey);
-  }
+  const throttleKey = getUpdateKey(updates);
 
   const currentUrl = new URL(window.location.href);
   const nextSearch = applyChange(currentUrl.searchParams, updates).toString();
   if (nextSearch === currentUrl.searchParams.toString()) return;
 
   const timeout = setTimeout(() => {
-    if (throttleTimers.get(throttleKey) === timeout) {
-      throttleTimers.delete(throttleKey);
-    }
+    const pending = throttleTimers.get(throttleKey);
+    if (pending?.timer !== timeout) return;
+    throttleTimers.delete(throttleKey);
+    if (pending.href !== window.location.href) return;
     commitURLUpdate(updates, options, emitUpdate);
   }, throttleMs);
 
-  throttleTimers.set(throttleKey, timeout);
+  throttleTimers.set(throttleKey, { timer: timeout, updates, href: currentUrl.href });
+  return () => {
+    if (throttleTimers.get(throttleKey)?.timer !== timeout) return false;
+    clearTimeout(timeout);
+    throttleTimers.delete(throttleKey);
+    return true;
+  };
 };
 
 export function useQueryState<TParser extends Parser<any>>(
@@ -172,31 +292,26 @@ export function useQueryState<TParser extends Parser<any>>(
   type T = NonNullable<ReturnType<TParser["parse"]>>;
   const [state, setState] = useState<T | null>(() => {
     const searchParams = getCurrentSearchParams();
-    const value = searchParams.get(key);
-    const parsed = parser.parse(value ?? "");
+    const parsed = parser.parse(readSearchParam(searchParams, key));
     return parsed;
   });
 
   const stateRef = useRef(state);
-  const isInternalUpdateRef = useRef(false);
+  const stateKeyRef = useRef(key);
+  const cancelPendingUpdateRef = useRef<(() => boolean) | undefined>(undefined);
   stateRef.current = state;
 
   const setValue = useCallback(
     (value: T | null) => {
-      isInternalUpdateRef.current = true;
-
       setState(value);
       stateRef.current = value;
 
       const serialized = value === null ? null : parser.serialize(value);
 
-      emitter.emitKey(key, { state: value, query: serialized });
+      emitter.emitKey(key, { state: value, query: serialized, source: stateRef });
 
-      updateURL({ [key]: serialized }, options, true);
-
-      setTimeout(() => {
-        isInternalUpdateRef.current = false;
-      }, 10);
+      cancelPendingUpdateRef.current?.();
+      cancelPendingUpdateRef.current = updateURL({ [key]: serialized }, options, true);
     },
     [key, parser, options],
   );
@@ -206,35 +321,35 @@ export function useQueryState<TParser extends Parser<any>>(
 
     const onPopState = () => {
       const searchParams = getCurrentSearchParams();
-      const value = searchParams.get(key);
-      const parsed = parser.parse(value ?? "");
-      if (!Object.is(stateRef.current, parsed)) {
+      const parsed = parser.parse(readSearchParam(searchParams, key));
+      const sourceChanged = stateKeyRef.current !== key;
+      stateKeyRef.current = key;
+      if (sourceChanged || !areParsedValuesEqual(parser, stateRef.current, parsed)) {
         setState(parsed);
         stateRef.current = parsed;
       }
     };
 
     const onEmitterUpdate = (searchParams: URLSearchParams) => {
-      if (isInternalUpdateRef.current) {
-        return;
-      }
-
-      const value = searchParams.get(key);
-      const parsed = parser.parse(value ?? "");
-      if (!Object.is(stateRef.current, parsed)) {
+      const parsed = parser.parse(readSearchParam(searchParams, key));
+      if (!areParsedValuesEqual(parser, stateRef.current, parsed)) {
         setState(parsed);
         stateRef.current = parsed;
       }
     };
 
-    const onKeyUpdate = (payload: { state: any; query: string | null }) => {
-      if (isInternalUpdateRef.current) {
+    const onKeyUpdate = (payload: KeyUpdate) => {
+      // Skip only this hook's synchronous echo, never a peer's newer edit.
+      // The ref identity is stable across renders and is not serialized.
+      if (payload.source === stateRef) {
         return;
       }
 
-      if (!Object.is(stateRef.current, payload.state)) {
-        setState(payload.state);
-        stateRef.current = payload.state;
+      // Consumers may use different parsers for the same URL key.
+      const parsed = parser.parse(payload.query ?? "");
+      if (!areParsedValuesEqual(parser, stateRef.current, parsed)) {
+        setState(parsed);
+        stateRef.current = parsed;
       }
     };
 
@@ -242,6 +357,7 @@ export function useQueryState<TParser extends Parser<any>>(
     // popstate, so listen through the shared history channel (real
     // back/forward events included). Self-updates no-op via the Object.is
     // comparison above.
+    onPopState();
     const unsubscribeHistory = subscribeHistoryChange(onPopState);
     emitter.on("update", onEmitterUpdate);
     emitter.onKey(key, onKeyUpdate);
@@ -252,6 +368,21 @@ export function useQueryState<TParser extends Parser<any>>(
       emitter.offKey(key, onKeyUpdate);
     };
   }, [key, parser]);
+
+  useEffect(
+    () => () => {
+      const canceledPendingWrite = cancelPendingUpdateRef.current?.() ?? false;
+      cancelPendingUpdateRef.current = undefined;
+      // A throttled write is discarded on unmount, but its value was already
+      // broadcast to peers via emitKey. Peers that adopted the optimistic draft
+      // get no other reconciliation signal (unmount fires no history event), so
+      // tell them to re-read the URL, which no longer carries this draft.
+      if (canceledPendingWrite && typeof window !== "undefined") {
+        emitter.emitUpdate(getCurrentSearchParams());
+      }
+    },
+    [key],
+  );
 
   return [state, setValue];
 }
@@ -264,21 +395,21 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   (updates: Partial<{ [K in keyof T]: ReturnType<T[K]["parse"]> | null }>) => void,
 ] {
   const keys = Object.keys(parsers);
-  const watchKeys = keys.join("&");
+  const watchKeys = JSON.stringify(keys);
 
   const [state, setState] = useState<{ [K in keyof T]: ReturnType<T[K]["parse"]> }>(() => {
     const searchParams = getCurrentSearchParams();
     const result = {} as { [K in keyof T]: ReturnType<T[K]["parse"]> };
 
     Object.entries(parsers).forEach(([key, parser]) => {
-      const value = searchParams.get(key);
-      result[key as keyof T] = parser.parse(value ?? "");
+      result[key as keyof T] = parser.parse(readSearchParam(searchParams, key));
     });
 
     return result;
   });
 
   const stateRef = useRef(state);
+  const pendingUpdatesRef = useRef(new Map<string, () => boolean>());
   stateRef.current = state;
 
   const setValues = useCallback(
@@ -291,7 +422,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
         const parser = parsers[key];
         if (parser) {
           const serialized = value === null ? null : parser.serialize(value);
-          emitter.emitKey(key, { state: value, query: serialized });
+          emitter.emitKey(key, { state: value, query: serialized, source: stateRef });
         }
       });
 
@@ -304,7 +435,14 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
         }
       });
 
-      updateURL(urlUpdates, options, true);
+      const updateKey = getUpdateKey(urlUpdates);
+      pendingUpdatesRef.current.get(updateKey)?.();
+      const cancelPendingUpdate = updateURL(urlUpdates, options, true);
+      if (cancelPendingUpdate) {
+        pendingUpdatesRef.current.set(updateKey, cancelPendingUpdate);
+      } else {
+        pendingUpdatesRef.current.delete(updateKey);
+      }
     },
     [parsers, options],
   );
@@ -312,16 +450,18 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const applyChange = (searchParams: URLSearchParams, fromEmitter = false) => {
+    const applyChange = (searchParams: URLSearchParams) => {
       const result = {} as { [K in keyof T]: ReturnType<T[K]["parse"]> };
-      let hasChanged = false;
+      const currentKeys = Object.keys(stateRef.current);
+      let hasChanged =
+        currentKeys.length !== keys.length ||
+        currentKeys.some((key) => !Object.prototype.hasOwnProperty.call(parsers, key));
 
       Object.entries(parsers).forEach(([key, parser]) => {
-        const value = searchParams.get(key);
-        const parsed = parser.parse(value ?? "");
+        const parsed = parser.parse(readSearchParam(searchParams, key));
         const currentValue = stateRef.current[key as keyof T];
 
-        if (!Object.is(currentValue, parsed)) {
+        if (!areParsedValuesEqual(parser, currentValue, parsed)) {
           hasChanged = true;
         }
         result[key as keyof T] = parsed;
@@ -335,21 +475,53 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
 
     const onPopState = () => {
       const searchParams = getCurrentSearchParams();
-      applyChange(searchParams, false);
+      applyChange(searchParams);
     };
 
     const onEmitterUpdate = (searchParams: URLSearchParams) => {
-      applyChange(searchParams, true);
+      applyChange(searchParams);
     };
 
+    applyChange(getCurrentSearchParams());
     const unsubscribeHistory = subscribeHistoryChange(onPopState);
     emitter.on("update", onEmitterUpdate);
+    const unsubscribeKeys = Object.entries(parsers).map(([key, parser]) => {
+      const onKeyUpdate = (payload: KeyUpdate) => {
+        if (payload.source === stateRef) return;
+        const parsed = parser.parse(payload.query ?? "");
+        if (areParsedValuesEqual(parser, stateRef.current[key as keyof T], parsed)) return;
+
+        // Update only this key, preserving local drafts for the other fields.
+        const next = { ...stateRef.current, [key]: parsed };
+        stateRef.current = next;
+        setState(next);
+      };
+      emitter.onKey(key, onKeyUpdate);
+      return () => emitter.offKey(key, onKeyUpdate);
+    });
 
     return () => {
       unsubscribeHistory();
       emitter.off("update", onEmitterUpdate);
+      for (const unsubscribe of unsubscribeKeys) unsubscribe();
     };
   }, [watchKeys, parsers]);
+
+  useEffect(
+    () => () => {
+      let canceledPendingWrite = false;
+      for (const cancelPendingUpdate of pendingUpdatesRef.current.values()) {
+        if (cancelPendingUpdate()) canceledPendingWrite = true;
+      }
+      pendingUpdatesRef.current.clear();
+      // Discarded throttled writes were already broadcast to peers via emitKey;
+      // reconcile any peer that adopted a now-cancelled draft (see useQueryState).
+      if (canceledPendingWrite && typeof window !== "undefined") {
+        emitter.emitUpdate(getCurrentSearchParams());
+      }
+    },
+    [watchKeys],
+  );
 
   return [state, setValues];
 }

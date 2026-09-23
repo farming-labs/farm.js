@@ -1,21 +1,7 @@
 const { execFileSync } = require("node:child_process");
-const fs = require("node:fs");
-const path = require("node:path");
+const { readPublicPackages } = require("./public-packages");
 
-const workspaceRoot = path.resolve(__dirname, "..");
-const packagesRoot = path.join(workspaceRoot, "packages");
 const dryRun = process.argv.includes("--dry-run");
-
-function readPublicPackages() {
-  return fs
-    .readdirSync(packagesRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(packagesRoot, entry.name, "package.json"))
-    .filter((packageJsonPath) => fs.existsSync(packageJsonPath))
-    .map((packageJsonPath) => JSON.parse(fs.readFileSync(packageJsonPath, "utf8")))
-    .filter((packageJson) => packageJson.name && packageJson.version && !packageJson.private)
-    .sort((left, right) => left.name.localeCompare(right.name));
-}
 
 function readDistTags(packageName) {
   return JSON.parse(

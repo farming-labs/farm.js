@@ -1,6 +1,11 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farm.js/core";
 import {
+  describeIntegrationOriginRejection,
+  resolveIntegrationAllowedOrigins,
+  validateIntegrationRequestOrigin,
+} from "@farm.js/core/integrations";
+import {
   clearRequestCookie,
   createPathInferredClientApi,
   createDocumentNavigationMatchers,
@@ -16,6 +21,15 @@ import type { Auth0ProfileResult, Auth0RedirectQuery, Auth0RedirectResult } from
 import { auth0Client } from "./client.js";
 
 const DEV_SECRET = "farmjs-auth0-development-secret-2026";
+
+// The built server re-evaluates farm.config.ts at runtime to instantiate
+// integrations, and Farm does not force NODE_ENV=production into that process.
+// Treating an absent NODE_ENV as "development" would silently sign production
+// sessions with the public DEV_SECRET, so only an explicit dev/test value may
+// use it. `farm dev` runs through Vite, which sets NODE_ENV="development".
+function isExplicitDevelopmentEnv(): boolean {
+  return process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
+}
 
 export interface Auth0Instance {
   middleware(request: Request): Promise<Response | void> | Response | void;
@@ -36,6 +50,12 @@ export interface Auth0IntegrationInput {
   logoutPath?: string;
   profilePath?: string;
   protectedRoutes?: string | string[];
+  /**
+   * Additional origins allowed to drive the sign-out route, using the same
+   * pattern syntax as `serverActions.allowedOrigins`. The app's own origin is
+   * always trusted.
+   */
+  allowedOrigins?: string[];
   audience?: string;
   scopes?: string[];
   tokenEndpointAuthMethod?: "auto" | "client_secret_basic" | "client_secret_post" | "none";
@@ -100,9 +120,7 @@ function resolveEnv(input: Auth0IntegrationInput): ResolvedAuth0Env {
   const clientId = input.clientId ?? process.env.AUTH0_CLIENT_ID ?? "";
   const clientSecret = input.clientSecret ?? process.env.AUTH0_CLIENT_SECRET ?? "";
   const secret =
-    input.secret ??
-    process.env.AUTH0_SECRET ??
-    (process.env.NODE_ENV === "production" ? "" : DEV_SECRET);
+    input.secret ?? process.env.AUTH0_SECRET ?? (isExplicitDevelopmentEnv() ? DEV_SECRET : "");
   const appBaseUrl = input.appBaseUrl ?? process.env.APP_BASE_URL ?? undefined;
 
   if (!domain || !clientId) {
@@ -110,7 +128,11 @@ function resolveEnv(input: Auth0IntegrationInput): ResolvedAuth0Env {
   }
 
   if (!secret) {
-    throw new Error("Auth0 integration requires AUTH0_SECRET in production.");
+    throw new Error(
+      "Auth0 integration requires AUTH0_SECRET. A development-only fallback secret is used " +
+        'only when NODE_ENV is "development" or "test"; set AUTH0_SECRET to a random 32-byte ' +
+        "value in every other environment.",
+    );
   }
 
   return {
@@ -324,6 +346,10 @@ export function auth0(input: Auth0IntegrationInput = {}) {
   const logoutPath = input.logoutPath ?? "/auth/logout";
   const profilePath = input.profilePath ?? "/auth/profile";
   const scopes = input.scopes?.length ? input.scopes : ["openid", "profile", "email"];
+  const allowedOrigins = resolveIntegrationAllowedOrigins(
+    input.allowedOrigins,
+    "auth0.allowedOrigins",
+  );
   const stateCookieName = "farm_auth0_state";
   const sessionCookieName = "farm_auth0_session";
   const callbackSettings = resolveCallbackSettings(
@@ -525,6 +551,27 @@ export function auth0(input: Auth0IntegrationInput = {}) {
       integrationRoute.get<typeof logoutPath, Auth0RedirectResult>(logoutPath, {
         responseFormat: "json",
         handler(request: Request) {
+          // Sign-out is a GET, so it is also reachable as a plain link or a
+          // bookmark with no origin metadata at all. Only a request the browser
+          // labelled cross-site is refused.
+          const originResult = validateIntegrationRequestOrigin(request, {
+            allowedOrigins,
+            requireOriginMetadata: false,
+          });
+
+          if (!originResult.ok) {
+            const message = describeIntegrationOriginRejection(originResult.reason);
+
+            if (request.headers.get("x-farm-integration-client") === "1") {
+              return Response.json({ error: message }, { status: 403 });
+            }
+
+            return new Response(message, {
+              status: 403,
+              headers: { "content-type": "text/plain; charset=utf-8" },
+            });
+          }
+
           const origin = getOrigin(request, appBaseUrl);
           const redirectTo = new URL("/v2/logout", `https://${domain}`);
           redirectTo.searchParams.set("client_id", clientId);
@@ -591,7 +638,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
                   `${requestUrl.pathname}${requestUrl.search}`,
                 );
 
-                return Response.redirect(redirectUrl, 307);
+                return Response.redirect(redirectUrl, 303); // 303 (See Other) mandates a GET on the GET-only login route regardless of the original method (RFC 7231 §6.4.4)
               },
             },
           ]

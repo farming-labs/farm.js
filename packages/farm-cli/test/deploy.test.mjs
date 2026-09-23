@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -29,6 +29,25 @@ test("resolves a deployment plan without building or invoking a platform CLI", a
     assert.equal(plan.build.command, "farm build --preset vercel");
     assert.equal(plan.deploy.command, "vercel deploy --prebuilt --yes --prod");
     assert.match(formatFarmDeployPlan(plan), /FARM \/ DEPLOY PLAN/);
+  } finally {
+    if (root) await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a custom Vercel output that --prebuilt cannot upload", async () => {
+  let root;
+
+  try {
+    root = await mkdtemp(path.join(tmpdir(), "farm-cli-vercel-custom-output-"));
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      "export default { deploy: { target: 'vercel', outputDir: 'custom-output' } };\n",
+    );
+
+    await assert.rejects(
+      () => createFarmDeployPlan({ root }),
+      /Vercel prebuilt deploys require output at .*\.vercel.*output/,
+    );
   } finally {
     if (root) await rm(root, { recursive: true, force: true });
   }
@@ -84,6 +103,35 @@ test("keeps generated deployment configs inside the Farm root", async () => {
   }
 });
 
+test("rejects a Cloudflare Agent config that resolves outside the Farm root", async () => {
+  let temporaryRoot;
+
+  try {
+    temporaryRoot = await mkdtemp(path.join(tmpdir(), "farm-cli-cf-agent-symlink-"));
+    const root = path.join(temporaryRoot, "project");
+    const externalDirectory = path.join(temporaryRoot, "external");
+    await mkdir(path.join(root, ".farm", "cf-agent"), { recursive: true });
+    await mkdir(externalDirectory);
+    await writeFile(path.join(externalDirectory, "wrangler.jsonc"), "{}\n");
+    await symlink(externalDirectory, path.join(root, "cloudflare"), "junction");
+    await writeFile(
+      path.join(root, ".farm", "cf-agent", "deploy.json"),
+      JSON.stringify({
+        version: 1,
+        provider: "cloudflare-agents",
+        config: "cloudflare/wrangler.jsonc",
+      }),
+    );
+
+    assert.throws(
+      () => resolveCloudflareAgentDeployPlan(root),
+      /must stay inside the Farm project root/,
+    );
+  } finally {
+    if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
 test("plans the generated Cloudflare Agent config before the first build", async () => {
   let root;
 
@@ -122,6 +170,45 @@ test("plans the generated Cloudflare Agent config before the first build", async
     assert.match(formatFarmDeployPlan(plan), /generated during build/);
   } finally {
     if (root) await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a configured Cloudflare Agent source config through an outside symlink", async () => {
+  let temporaryRoot;
+
+  try {
+    temporaryRoot = await mkdtemp(path.join(tmpdir(), "farm-cli-cf-agent-source-symlink-"));
+    const root = path.join(temporaryRoot, "project");
+    const externalDirectory = path.join(temporaryRoot, "external");
+    await mkdir(root);
+    await mkdir(externalDirectory);
+    await writeFile(path.join(externalDirectory, "wrangler.jsonc"), "{}\n");
+    await symlink(externalDirectory, path.join(root, "cloudflare"), "junction");
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      [
+        "export default {",
+        "  deploy: { target: 'cloudflare', preset: 'cloudflare-module' },",
+        "  integrations: {",
+        "    agent: {",
+        "      kind: 'farm-integration',",
+        "      category: 'agent',",
+        "      type: 'cloudflare',",
+        "      serverRuntime: false,",
+        "      instance: { config: 'cloudflare/wrangler.jsonc' },",
+        "    },",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    await assert.rejects(
+      () => createFarmDeployPlan({ root }),
+      /Cloudflare Agents source config must stay inside the Farm project root/,
+    );
+  } finally {
+    if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
   }
 });
 

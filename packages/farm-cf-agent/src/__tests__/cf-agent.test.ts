@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -64,6 +64,29 @@ describe("Cloudflare Agents integration", () => {
 });
 
 describe("Cloudflare Agents build output", () => {
+  it("rejects a Wrangler config that resolves outside the project", async () => {
+    const temporaryRoot = await mkdtemp(join(tmpdir(), "farm-cf-agent-symlink-"));
+    const root = join(temporaryRoot, "project");
+    const externalDirectory = join(temporaryRoot, "external");
+    await mkdir(root);
+    await mkdir(externalDirectory);
+    await writeFile(join(externalDirectory, "wrangler.jsonc"), '{"main":"agent.mjs"}\n');
+    await symlink(externalDirectory, join(root, "cloudflare"), "junction");
+
+    await expect(
+      writeCloudflareAgentOutput({
+        root,
+        outputDir: ".output",
+        config: "cloudflare/wrangler.jsonc",
+        routePrefix: "/agents",
+      }),
+    ).rejects.toThrow("including through symlinks");
+
+    await expect(
+      access(join(externalDirectory, ".farm-cf-agent.wrangler.jsonc")),
+    ).rejects.toThrow();
+  });
+
   it("composes agent and Farm handlers without changing the user's config", async () => {
     const root = await mkdtemp(join(tmpdir(), "farm-cf-agent-"));
     const outputDir = join(root, ".output");

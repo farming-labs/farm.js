@@ -1,7 +1,15 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { subscribeFarmCacheInvalidation, subscribeFarmCacheTask } from "./cache-invalidation";
+import {
+  getRequestSourceOrigin,
+  matchesAllowedOrigin,
+  matchesHostHeader,
+  normalizeAllowedOriginPattern,
+} from "./request-origin";
 import { serializeServerFnFailure, type SerializedServerFnFailure } from "./server-fn-error";
 import { parseBodySizeLimit } from "./server-http";
+
+const SERVER_ACTION_ALLOWED_ORIGINS_LABEL = "serverActions.allowedOrigins";
 
 export const DEFAULT_SERVER_ACTION_BODY_SIZE_LIMIT = 1_000_000;
 
@@ -81,7 +89,9 @@ type GlobalWithServerActionStorage = typeof globalThis & {
 export function resolveServerActionsConfig(
   config: FarmServerActionsConfig | undefined,
 ): ResolvedFarmServerActionsConfig {
-  const allowedOrigins = (config?.allowedOrigins ?? []).map(normalizeAllowedOriginPattern);
+  const allowedOrigins = (config?.allowedOrigins ?? []).map((value) =>
+    normalizeAllowedOriginPattern(value, SERVER_ACTION_ALLOWED_ORIGINS_LABEL),
+  );
   const bodySizeLimit = parseBodySizeLimit(
     config?.bodySizeLimit ?? DEFAULT_SERVER_ACTION_BODY_SIZE_LIMIT,
     "serverActions.bodySizeLimit",
@@ -106,7 +116,7 @@ export function validateServerActionRequest(
   }
 
   const requestUrl = new URL(request.url);
-  const sourceOrigin = getRequestSourceOrigin(request);
+  const sourceOrigin = resolveSourceOrigin(request);
   const fetchSite = request.headers.get("sec-fetch-site")?.trim().toLowerCase();
 
   if (!sourceOrigin) {
@@ -261,128 +271,25 @@ function getFallbackAbortController(): AbortController {
   return globalState[FALLBACK_ABORT_CONTROLLER_KEY]!;
 }
 
-function normalizeAllowedOriginPattern(value: string): string {
-  const pattern = value.trim().toLowerCase();
-  if (!pattern) {
-    throw new TypeError("serverActions.allowedOrigins cannot contain empty values");
-  }
+/**
+ * Adapt the shared origin resolution onto the server-action error contract:
+ * an unusable Origin/Referer is a 403 here, while a request that simply
+ * carried neither header returns null for the caller to judge.
+ */
+function resolveSourceOrigin(request: Request): string | null {
+  const result = getRequestSourceOrigin(request);
 
-  if (pattern.includes("*")) {
-    if (!/^(?:https?:\/\/)?\*\.[a-z0-9.-]+(?::\d+)?$/.test(pattern)) {
-      throw new TypeError(`Invalid serverActions.allowedOrigins pattern: ${JSON.stringify(value)}`);
-    }
-    return pattern;
-  }
-
-  if (pattern.includes("://")) {
-    let parsed: URL;
-    try {
-      parsed = new URL(pattern);
-    } catch {
-      throw new TypeError(`Invalid serverActions.allowedOrigins value: ${JSON.stringify(value)}`);
-    }
-
-    if (
-      (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
-      parsed.username ||
-      parsed.password ||
-      parsed.pathname !== "/" ||
-      parsed.search ||
-      parsed.hash
-    ) {
-      throw new TypeError(
-        `serverActions.allowedOrigins must contain origins without paths: ${JSON.stringify(value)}`,
-      );
-    }
-    return parsed.origin;
-  }
-
-  if (/[/@?#]/.test(pattern)) {
-    throw new TypeError(
-      `serverActions.allowedOrigins must contain origins or hosts: ${JSON.stringify(value)}`,
+  if (!result.ok) {
+    throw new ServerActionRequestError(
+      "INVALID_ORIGIN",
+      403,
+      result.reason === "opaque-origin"
+        ? "Opaque origins are not allowed"
+        : "Invalid request origin",
     );
   }
 
-  try {
-    return new URL(`http://${pattern}`).host;
-  } catch {
-    throw new TypeError(`Invalid serverActions.allowedOrigins value: ${JSON.stringify(value)}`);
-  }
-}
-
-function getRequestSourceOrigin(request: Request): string | null {
-  const origin = request.headers.get("origin")?.trim();
-  if (origin) {
-    return parseSourceOrigin(origin);
-  }
-
-  const referer = request.headers.get("referer")?.trim();
-  if (referer) {
-    return parseSourceOrigin(referer);
-  }
-
-  return null;
-}
-
-function parseSourceOrigin(value: string): string {
-  if (value === "null") {
-    throw new ServerActionRequestError("INVALID_ORIGIN", 403, "Opaque origins are not allowed");
-  }
-
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      throw new Error("Unsupported protocol");
-    }
-    return parsed.origin;
-  } catch {
-    throw new ServerActionRequestError("INVALID_ORIGIN", 403, "Invalid request origin");
-  }
-}
-
-function matchesHostHeader(sourceOrigin: string, request: Request): boolean {
-  const host = request.headers.get("host")?.trim().toLowerCase();
-  if (!host) return false;
-
-  try {
-    const source = new URL(sourceOrigin);
-    const target = new URL(request.url);
-    return source.protocol === target.protocol && source.host.toLowerCase() === host;
-  } catch {
-    return false;
-  }
-}
-
-function matchesAllowedOrigin(sourceOrigin: string, pattern: string): boolean {
-  const source = new URL(sourceOrigin);
-  if (!pattern.includes("*")) {
-    return pattern.includes("://") ? source.origin === pattern : source.host === pattern;
-  }
-
-  const schemeEnd = pattern.indexOf("://");
-  const scheme = schemeEnd === -1 ? null : pattern.slice(0, schemeEnd + 1);
-  const hostPattern = pattern.slice(schemeEnd === -1 ? 0 : schemeEnd + 3);
-  const [wildcardHost, port] = splitHostAndPort(hostPattern);
-  const baseHost = wildcardHost.slice(2);
-
-  if (scheme && source.protocol !== scheme) return false;
-  if (port && getEffectivePort(source) !== port) return false;
-  if (!port && source.port) return false;
-
-  return source.hostname.endsWith(`.${baseHost}`) && source.hostname !== baseHost;
-}
-
-function splitHostAndPort(value: string): [string, string | null] {
-  const separator = value.lastIndexOf(":");
-  if (separator === -1) return [value, null];
-  return [value.slice(0, separator), value.slice(separator + 1)];
-}
-
-function getEffectivePort(url: URL): string {
-  if (url.port) return url.port;
-  if (url.protocol === "https:") return "443";
-  if (url.protocol === "http:") return "80";
-  return "";
+  return result.origin;
 }
 
 function validateActionId(actionId?: string | null): asserts actionId is string {
@@ -451,12 +358,15 @@ async function readBodyWithLimit(request: Request, limit: number): Promise<Uint8
 
       total += value.byteLength;
       if (total > limit) {
-        await reader.cancel("Server action body is too large");
-        throw new ServerActionRequestError(
+        const error = new ServerActionRequestError(
           "BODY_TOO_LARGE",
           413,
           "Server action body is too large",
         );
+        // As with API bodies, a cloned stream may wait for its untouched tee
+        // branch. Cleanup must neither delay rejection nor replace its error.
+        void reader.cancel(error).catch(() => {});
+        throw error;
       }
       chunks.push(value);
     }

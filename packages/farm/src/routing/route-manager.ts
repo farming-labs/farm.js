@@ -37,10 +37,13 @@ import {
 import path from "path";
 import type { ViteDevServer } from "vite";
 import {
+  enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
   getClientModuleMetadata,
+  resolveFarmIsolatedClientHydrationMode,
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
+import { getIntegrationProviders } from "../integrations";
 import type { MetadataImageKind } from "../metadata";
 import type { FarmIslandStrategy } from "../island";
 import type { FarmServerRendererRuntime } from "../renderer";
@@ -66,10 +69,17 @@ import {
   stripFarmLocaleFromPathname,
 } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
+import { appendFarmRedirectQuery } from "../redirect-query";
 import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
 import { getFarmRendererComponentExtensions } from "../renderer";
 import type { ApplicationMetadataRouteKind } from "../metadata-route";
-import { compareRouteSpecificity, type RouteSegmentSpecificity } from "./specificity";
+import {
+  AmbiguousRouteError,
+  assertUniqueRouteParameters,
+  compareRouteSpecificity,
+  getRoutePatternShape,
+  type RouteSegmentSpecificity,
+} from "./specificity";
 
 interface RouteEntry {
   route: ParsedRoute;
@@ -187,6 +197,7 @@ function compareRouteEntries(left: RouteEntry, right: RouteEntry): number {
 export class RouteManager {
   private config: Required<FarmConfig>;
   private routes: Map<string, RouteEntry> = new Map();
+  private pageRouteShapes: Map<string, RouteEntry> = new Map();
   private layouts: Map<string, RouteEntry> = new Map();
   private routeSlots: Map<string, RouteSlotEntry> = new Map();
   private loadings: Map<string, RouteEntry> = new Map();
@@ -201,6 +212,7 @@ export class RouteManager {
   private clientManifestCache?: {
     projectRoot: string;
     manifest: FarmClientRouteManifest;
+    isolatedClientBoundaryModules: ReadonlySet<string>;
   };
 
   constructor(config: Required<FarmConfig>, viteServer?: ViteDevServer) {
@@ -218,6 +230,7 @@ export class RouteManager {
   async discoverRoutes(): Promise<void> {
     this.invalidateClientManifest();
     this.routes.clear();
+    this.pageRouteShapes.clear();
     this.layouts.clear();
     this.routeSlots.clear();
     this.loadings.clear();
@@ -234,8 +247,8 @@ export class RouteManager {
     }
 
     for (const slot of this.routeSlots.values()) {
-      if (slot.interception && !this.routes.has(slot.pattern)) {
-        throw new Error(
+      if (slot.interception && !this.pageRouteShapes.has(getRoutePatternShape(slot.pattern))) {
+        throw new AmbiguousRouteError(
           `Intercepting route slot "${slot.name}" targets "${slot.pattern}", but no canonical page exists for that URL`,
         );
       }
@@ -383,7 +396,10 @@ export class RouteManager {
     return Array.from(this.redirects.values()).map((entry) => entry.definition);
   }
 
-  matchRedirect(pathname: string): {
+  matchRedirect(
+    pathname: string,
+    search = "",
+  ): {
     redirect: ProgrammaticRedirectRoute;
     destination: string;
     statusCode: number;
@@ -403,9 +419,12 @@ export class RouteManager {
 
       return {
         redirect: redirectEntry.definition,
-        destination: this.localizeRedirectDestination(
-          interpolateRedirectDestination(redirectEntry.definition.destination, match.params),
-          localeMatch?.locale,
+        destination: appendFarmRedirectQuery(
+          this.localizeRedirectDestination(
+            interpolateRedirectDestination(redirectEntry.definition.destination, match.params),
+            localeMatch?.locale,
+          ),
+          search,
         ),
         statusCode,
         params: match.params,
@@ -582,7 +601,28 @@ export class RouteManager {
       return absolutePath;
     };
 
-    const isolatedMode = this.config.experimental?.isolatedClientHydration ?? "off";
+    const integrationProviders = getIntegrationProviders(this.config.integrations).filter(
+      (provider) => provider.component || provider.type === "clerk",
+    );
+    const unsupportedIntegrationProvider = integrationProviders.find(
+      (provider) => provider.supportsIsolatedHydration !== true,
+    );
+    if (
+      this.config.experimental?.isolatedClientHydration === "enabled" &&
+      this.config.experimental?.serverComponents !== true &&
+      unsupportedIntegrationProvider
+    ) {
+      logger.warn(
+        `[Farm.js] isolated hydration kept route-wide because integration provider "${unsupportedIntegrationProvider.name}" does not declare supportsIsolatedHydration: true.`,
+      );
+    }
+    const isolatedMode = resolveFarmIsolatedClientHydrationMode(
+      this.config.experimental?.isolatedClientHydration,
+      {
+        serverComponents: this.config.experimental?.serverComponents === true,
+        hasUnsupportedIntegrationProvider: Boolean(unsupportedIntegrationProvider),
+      },
+    );
     const layoutEntries = Array.from(this.layouts.values()).map((entry) => ({
       entry,
       metadata: getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode),
@@ -592,45 +632,36 @@ export class RouteManager {
       entry,
       metadata: getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode),
     }));
+
+    enforceFarmIsolatedHydrationRouteBudget(
+      layoutEntries.map(({ entry, metadata }) => ({
+        pattern: entry.pattern,
+        depth: entry.route.segments.length,
+        metadata,
+      })),
+      routeEntries.map(({ entry, metadata }) => ({
+        pattern: entry.pattern,
+        depth: entry.route.segments.length,
+        metadata,
+      })),
+      (layoutPattern, routePattern) =>
+        layoutPattern === "/" ||
+        routePattern === layoutPattern ||
+        routePattern.startsWith(`${layoutPattern.replace(/\/$/, "")}/`),
+    );
+
+    for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
+      if (!metadata.costGuardExceeded) continue;
+      logger.warn(
+        `[Farm.js] isolated hydration kept route-wide for ${entry.modulePath}: ${metadata.fallbackReason}.`,
+      );
+    }
     if (isolatedMode === "analyze") {
       for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
         if (!metadata.isolatedHydrationEligible) continue;
         logger.info(
-          `[Farm.js] isolated hydration analysis: ${entry.modulePath} can keep ${metadata.isolatedBoundaries.length} client boundary${metadata.isolatedBoundaries.length === 1 ? "" : "ies"} while excluding its server owner from the browser graph.`,
+          `[Farm.js] isolated hydration analysis: ${entry.modulePath} can keep ${metadata.isolatedBoundaries.length} client ${metadata.isolatedBoundaries.length === 1 ? "boundary" : "boundaries"} while excluding its server owner from the browser graph.`,
         );
-      }
-    }
-
-    // A route-wide page root needs its complete layout chain in the browser.
-    // Conservatively retain a layout when any child page still uses that path.
-    for (const layoutEntry of layoutEntries) {
-      if (!layoutEntry.metadata.hasIsolatedClientBoundaries) continue;
-      const conflictsWithRouteRoot = routeEntries.some(
-        ({ entry, metadata }) =>
-          metadata.shouldHydrate &&
-          (layoutEntry.entry.pattern === "/" ||
-            entry.pattern === layoutEntry.entry.pattern ||
-            entry.pattern.startsWith(`${layoutEntry.entry.pattern.replace(/\/$/, "")}/`)),
-      );
-      if (conflictsWithRouteRoot) {
-        layoutEntry.metadata.shouldHydrate = layoutEntry.metadata.legacyShouldHydrate;
-        layoutEntry.metadata.islandStrategy = layoutEntry.metadata.legacyIslandStrategy;
-        layoutEntry.metadata.hasIsolatedClientBoundaries = false;
-      }
-    }
-    for (const routeEntry of routeEntries) {
-      if (!routeEntry.metadata.hasIsolatedClientBoundaries) continue;
-      const conflictsWithLayoutRoot = layoutEntries.some(
-        ({ entry, metadata }) =>
-          metadata.shouldHydrate &&
-          (entry.pattern === "/" ||
-            routeEntry.entry.pattern === entry.pattern ||
-            routeEntry.entry.pattern.startsWith(`${entry.pattern.replace(/\/$/, "")}/`)),
-      );
-      if (conflictsWithLayoutRoot) {
-        routeEntry.metadata.shouldHydrate = routeEntry.metadata.legacyShouldHydrate;
-        routeEntry.metadata.islandStrategy = routeEntry.metadata.legacyIslandStrategy;
-        routeEntry.metadata.hasIsolatedClientBoundaries = false;
       }
     }
 
@@ -707,12 +738,28 @@ export class RouteManager {
       };
     });
 
+    const isolatedClientBoundaryModules = new Set<string>();
+    for (const { metadata } of [...layoutEntries, ...routeEntries]) {
+      if (!metadata.hasIsolatedClientBoundaries) continue;
+      for (const boundary of metadata.isolatedBoundaries) {
+        isolatedClientBoundaryModules.add(path.resolve(boundary.modulePath));
+      }
+    }
+
     const manifest = { routes, layouts, slots };
     this.clientManifestCache = {
       projectRoot: normalizedProjectRoot,
       manifest,
+      isolatedClientBoundaryModules,
     };
     return manifest;
+  }
+
+  /** @internal Client modules selected by the compiled hydration ownership plan. */
+  getIsolatedClientBoundaryModules(projectRoot: string = this.config.root): ReadonlySet<string> {
+    const normalizedProjectRoot = path.resolve(projectRoot);
+    this.generateClientManifest(normalizedProjectRoot);
+    return this.clientManifestCache?.isolatedClientBoundaryModules ?? new Set();
   }
 
   /**
@@ -807,6 +854,24 @@ export class RouteManager {
     );
   }
 
+  private registerPageRoute(entry: RouteEntry): void {
+    assertUniqueRouteParameters(entry.pattern);
+    const shape = getRoutePatternShape(entry.pattern);
+    const existing = this.pageRouteShapes.get(shape);
+
+    if (existing && existing.pattern !== entry.pattern) {
+      if (existing.sourceRoot === entry.sourceRoot) {
+        throw new Error(
+          `Ambiguous page routes "${existing.pattern}" and "${entry.pattern}" match the same URLs. Found ${existing.modulePath} and ${entry.modulePath}. Keep only one route for this URL shape.`,
+        );
+      }
+      this.routes.delete(existing.pattern);
+    }
+
+    this.routes.set(entry.pattern, entry);
+    this.pageRouteShapes.set(shape, entry);
+  }
+
   private async discoverFileRoutes(source: FarmSourceRoot): Promise<void> {
     const appDir = resolveAppPath(source.root, source.srcDir, "app");
     const componentExtensions = getFarmRendererComponentExtensions(this.config.renderer).map(
@@ -875,7 +940,7 @@ export class RouteManager {
           `Duplicate page route "${pattern}". Found both ${existing.modulePath} and ${modulePath}.`,
         );
       }
-      this.routes.set(pattern, {
+      this.registerPageRoute({
         route: group.route,
         modulePath,
         ...(markdownFile
@@ -1028,7 +1093,7 @@ export class RouteManager {
 
           const modulePath = createProgrammaticRouteModuleId(filePath, "page", definition.path);
           this.programmaticPages.set(modulePath, definition);
-          this.routes.set(pattern, {
+          this.registerPageRoute({
             route,
             modulePath,
             pattern,

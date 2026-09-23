@@ -37,9 +37,18 @@ export function _hydrateFarmI18n(snapshot: FarmI18nClientSnapshot | undefined): 
   for (const listener of listeners) listener();
 }
 
+// Only own catalog entries count. `snapshot.messages` is a spread object that
+// inherits Object.prototype, so a bare lookup for a key like "toString" or
+// "constructor" would resolve to a native method. The server side guards the
+// same way (readOwnMessage), so without this the client diverges: the server
+// renders the literal key while the client feeds a function to IntlMessageFormat
+// and throws during hydration.
+const readOwnMessage = (messages: Record<string, string>, key: string): string | undefined =>
+  Object.prototype.hasOwnProperty.call(messages, key) ? messages[key] : undefined;
+
 const translate = (key: string, values?: Record<string, unknown>, rich = false): unknown => {
   const snapshot = requireSnapshot();
-  const message = snapshot.messages[key];
+  const message = readOwnMessage(snapshot.messages, key);
   if (message === undefined) return key;
   const cacheKey = `${snapshot.locale}\u0000${key}\u0000${message}`;
   let formatter = compiled.get(cacheKey);
@@ -58,8 +67,8 @@ const translate = (key: string, values?: Record<string, unknown>, rich = false):
 export const t = ((key: string, values?: Record<string, unknown>) =>
   translate(key, values)) as FarmTranslator;
 t.rich = (key: string, values?: Record<string, unknown>) => translate(key, values, true);
-t.raw = (key: string) => requireSnapshot().messages[key] ?? key;
-t.has = (key: string) => key in requireSnapshot().messages;
+t.raw = (key: string) => readOwnMessage(requireSnapshot().messages, key) ?? key;
+t.has = (key: string) => Object.prototype.hasOwnProperty.call(requireSnapshot().messages, key);
 
 export function localizeActiveFarmHref(href: string, locale?: FarmI18nLocale): string {
   const snapshot = getFarmI18nClientState();

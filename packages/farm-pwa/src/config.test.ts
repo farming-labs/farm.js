@@ -4,7 +4,6 @@ import { parsePwaDuration, resolvePwaOptions } from "./config";
 describe("resolvePwaOptions", () => {
   it("uses the automatic cache preset by default", () => {
     const expected = {
-      enabled: true,
       offline: "/offline",
       update: "prompt",
       serviceWorker: false,
@@ -84,6 +83,42 @@ describe("resolvePwaOptions", () => {
     expect(() => resolvePwaOptions({ offline: "/offline?source=pwa" })).toThrow("query string");
     expect(() => resolvePwaOptions({ cache: { images: { strategy: "swr", limit: 0 } } })).toThrow(
       "positive integer",
+    );
+  });
+
+  it("rejects routes that URL parsing could reinterpret", () => {
+    for (const route of [
+      "//example.com/offline",
+      "/safe/../offline",
+      "/safe/%2e%2e/offline",
+      "/safe%2foffline",
+      "/safe\\offline",
+      "/safe\u0000offline",
+    ]) {
+      expect(() => resolvePwaOptions({ offline: route })).toThrow();
+      expect(() => resolvePwaOptions({ cache: { staticRoutes: [route] } })).toThrow();
+    }
+  });
+
+  it("rejects invalid top-level options instead of changing behavior silently", () => {
+    expect(() => resolvePwaOptions(null as never)).toThrow("options must be an object");
+    expect(() => resolvePwaOptions({ enabled: false } as never)).toThrow(
+      "remove pwa() from plugins",
+    );
+    expect(() => resolvePwaOptions({ update: "manual" as never })).toThrow(
+      'update must be "prompt" or "auto"',
+    );
+    expect(() => resolvePwaOptions({ cache: null as never })).toThrow("PWA cache must be");
+    expect(() => resolvePwaOptions({ cache: "unknown" as never })).toThrow("PWA cache must be");
+    expect(() => resolvePwaOptions({ cache: { staticRoutes: "all" as never } })).toThrow(
+      "staticRoutes must be boolean or an array",
+    );
+    expect(() => resolvePwaOptions({ cache: { images: null as never } })).toThrow(
+      'image cache strategy must be "swr"',
+    );
+    expect(() => resolvePwaOptions({ offline: 42 as never })).toThrow("offline must be a route");
+    expect(() => resolvePwaOptions({ serviceWorker: null as never })).toThrow(
+      "serviceWorker must be an options object",
     );
   });
 });

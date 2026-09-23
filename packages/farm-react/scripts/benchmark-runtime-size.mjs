@@ -57,6 +57,14 @@ const [
   keyedAppendOn,
   keyedFilterOff,
   keyedFilterOn,
+  keyedStructuralAppendOff,
+  keyedStructuralAppendOn,
+  keyedStructuralAppendMapOff,
+  keyedStructuralAppendMapOn,
+  keyedStructuralPrependOff,
+  keyedStructuralPrependOn,
+  keyedStructuralPrependMapOff,
+  keyedStructuralPrependMapOn,
   keyedPrependOff,
   keyedPrependOn,
   keyedPositionOff,
@@ -67,10 +75,14 @@ const [
   keyedWindowPositionOn,
   keyedReorderOff,
   keyedReorderOn,
+  keyedMapReorderOff,
+  keyedMapReorderOn,
   keyedSortOff,
   keyedSortOn,
   keyedRollingWindowOff,
   keyedRollingWindowOn,
+  keyedMappedRollingWindowOff,
+  keyedMappedRollingWindowOn,
   keyedSliceOff,
   keyedSliceOn,
   runtimeControl,
@@ -85,6 +97,14 @@ const [
   bundle("keyed-append.tsx", true),
   bundle("keyed-filter.tsx", false),
   bundle("keyed-filter.tsx", true),
+  bundle("keyed-structural-append.tsx", false),
+  bundle("keyed-structural-append.tsx", true),
+  bundle("keyed-structural-append-map.tsx", false),
+  bundle("keyed-structural-append-map.tsx", true),
+  bundle("keyed-structural-prepend.tsx", false),
+  bundle("keyed-structural-prepend.tsx", true),
+  bundle("keyed-structural-prepend-map.tsx", false),
+  bundle("keyed-structural-prepend-map.tsx", true),
   bundle("keyed-prepend.tsx", false),
   bundle("keyed-prepend.tsx", true),
   bundle("keyed-position.tsx", false),
@@ -95,10 +115,14 @@ const [
   bundle("keyed-window-position.tsx", true),
   bundle("keyed-reorder.tsx", false),
   bundle("keyed-reorder.tsx", true),
+  bundle("keyed-map-reorder.tsx", false),
+  bundle("keyed-map-reorder.tsx", true),
   bundle("keyed-sort.tsx", false),
   bundle("keyed-sort.tsx", true),
   bundle("keyed-rolling-window.tsx", false),
   bundle("keyed-rolling-window.tsx", true),
+  bundle("keyed-mapped-rolling-window.tsx", false),
+  bundle("keyed-mapped-rolling-window.tsx", true),
   bundle("keyed-slice.tsx", false),
   bundle("keyed-slice.tsx", true),
   bundle("runtime-control.tsx", false),
@@ -157,6 +181,37 @@ if (
   throw new Error("Keyed filter fixture did not retain its optional filter-hint runtime.");
 }
 if (
+  !keyedStructuralAppendOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedStructuralAppendOn.code.includes("keyed-rows:structural-append-hinted") ||
+  !keyedStructuralAppendOn.code.includes("filterIndexIndependent")
+) {
+  throw new Error("Keyed structural-append fixture did not retain its isolated composed runtime.");
+}
+if (
+  !keyedStructuralAppendMapOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedStructuralAppendMapOn.code.includes("keyed-rows:structural-append-map-hinted")
+) {
+  throw new Error(
+    `Keyed structural-append-map fixture did not retain its optional runtime: rows=${keyedStructuralAppendMapOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedStructuralAppendMapOn.code.includes("keyed-rows:structural-append-map-hinted")}.`,
+  );
+}
+if (
+  !keyedStructuralPrependOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedStructuralPrependOn.code.includes("keyed-rows:filter-prepend-hinted") ||
+  !keyedStructuralPrependOn.code.includes("filterIndexIndependent") ||
+  !keyedStructuralPrependOn.code.includes("prependIndexIndependent")
+) {
+  throw new Error("Keyed structural-prepend fixture did not retain its isolated composed runtime.");
+}
+if (
+  !keyedStructuralPrependMapOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedStructuralPrependMapOn.code.includes("keyed-rows:structural-prepend-map-hinted")
+) {
+  throw new Error(
+    "Keyed structural-prepend-map fixture did not retain its optional mapped runtime.",
+  );
+}
+if (
   !keyedPrependOn.code.includes("FarmCompiledKeyedRows") ||
   !keyedPrependOn.code.includes("keyed-rows:prepend-hinted") ||
   !keyedPrependOn.code.includes("prependIndexIndependent")
@@ -176,6 +231,16 @@ if (
   !keyedRollingWindowOn.code.includes("filterIndexIndependent")
 ) {
   throw new Error("Keyed rolling-window fixture did not retain its isolated all-hint runtime.");
+}
+if (
+  !keyedMappedRollingWindowOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedMappedRollingWindowOn.code.includes("keyed-rows:mapped-rolling-window-hinted") ||
+  !keyedMappedRollingWindowOn.code.includes("filterIndexIndependent")
+) {
+  throw new Error("Mapped rolling-window fixture did not retain its isolated chain runtime.");
+}
+if (keyedRollingWindowOn.code.includes("keyed-rows:mapped-rolling-window-hinted")) {
+  throw new Error("Plain rolling-window fixture retained the optional mapped-chain runtime.");
 }
 if (
   !keyedPositionOn.code.includes("FarmCompiledKeyedRows") ||
@@ -220,6 +285,18 @@ if (
   throw new Error("Keyed reorder fixture did not retain its isolated reorder-hint runtime.");
 }
 if (
+  !keyedMapReorderOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedMapReorderOn.code.includes("keyed-rows:map-reorder-hinted") ||
+  !keyedMapReorderOn.code.includes("reorderIndexIndependent")
+) {
+  throw new Error(
+    `Keyed map-reorder fixture did not retain its isolated runtime: rows=${keyedMapReorderOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedMapReorderOn.code.includes("keyed-rows:map-reorder-hinted")}, proof=${keyedMapReorderOn.code.includes("reorderIndexIndependent")}.`,
+  );
+}
+if (keyedReorderOn.code.includes("keyed-rows:map-reorder-hinted")) {
+  throw new Error("Reorder-only fixture retained the optional map-reorder runtime.");
+}
+if (
   !keyedSortOn.code.includes("FarmCompiledKeyedRows") ||
   !keyedSortOn.code.includes("keyed-rows:reorder-hinted") ||
   !keyedSortOn.code.includes("reorderIndexIndependent")
@@ -239,6 +316,9 @@ for (const [name, output] of [
     output.code.includes("keyed-rows:filter-prepend-hinted")
   ) {
     throw new Error(`${name} fixture retained the optional prepend-hint runtime.`);
+  }
+  if (output.code.includes("keyed-rows:structural-append-hinted")) {
+    throw new Error(`${name} fixture retained the optional structural-append runtime.`);
   }
   if (output.code.includes("keyed-rows:all-hinted")) {
     throw new Error(`${name} fixture retained the optional rolling-window runtime.`);
@@ -328,6 +408,74 @@ const results = {
         brotli: keyedFilterOn.brotli - keyedFilterOff.brotli,
       },
     },
+    keyedStructuralAppend: {
+      compilerOff: {
+        raw: keyedStructuralAppendOff.raw,
+        gzip: keyedStructuralAppendOff.gzip,
+        brotli: keyedStructuralAppendOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedStructuralAppendOn.raw,
+        gzip: keyedStructuralAppendOn.gzip,
+        brotli: keyedStructuralAppendOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedStructuralAppendOn.raw - keyedStructuralAppendOff.raw,
+        gzip: keyedStructuralAppendOn.gzip - keyedStructuralAppendOff.gzip,
+        brotli: keyedStructuralAppendOn.brotli - keyedStructuralAppendOff.brotli,
+      },
+    },
+    keyedStructuralAppendMap: {
+      compilerOff: {
+        raw: keyedStructuralAppendMapOff.raw,
+        gzip: keyedStructuralAppendMapOff.gzip,
+        brotli: keyedStructuralAppendMapOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedStructuralAppendMapOn.raw,
+        gzip: keyedStructuralAppendMapOn.gzip,
+        brotli: keyedStructuralAppendMapOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedStructuralAppendMapOn.raw - keyedStructuralAppendMapOff.raw,
+        gzip: keyedStructuralAppendMapOn.gzip - keyedStructuralAppendMapOff.gzip,
+        brotli: keyedStructuralAppendMapOn.brotli - keyedStructuralAppendMapOff.brotli,
+      },
+    },
+    keyedStructuralPrepend: {
+      compilerOff: {
+        raw: keyedStructuralPrependOff.raw,
+        gzip: keyedStructuralPrependOff.gzip,
+        brotli: keyedStructuralPrependOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedStructuralPrependOn.raw,
+        gzip: keyedStructuralPrependOn.gzip,
+        brotli: keyedStructuralPrependOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedStructuralPrependOn.raw - keyedStructuralPrependOff.raw,
+        gzip: keyedStructuralPrependOn.gzip - keyedStructuralPrependOff.gzip,
+        brotli: keyedStructuralPrependOn.brotli - keyedStructuralPrependOff.brotli,
+      },
+    },
+    keyedStructuralPrependMap: {
+      compilerOff: {
+        raw: keyedStructuralPrependMapOff.raw,
+        gzip: keyedStructuralPrependMapOff.gzip,
+        brotli: keyedStructuralPrependMapOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedStructuralPrependMapOn.raw,
+        gzip: keyedStructuralPrependMapOn.gzip,
+        brotli: keyedStructuralPrependMapOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedStructuralPrependMapOn.raw - keyedStructuralPrependMapOff.raw,
+        gzip: keyedStructuralPrependMapOn.gzip - keyedStructuralPrependMapOff.gzip,
+        brotli: keyedStructuralPrependMapOn.brotli - keyedStructuralPrependMapOff.brotli,
+      },
+    },
     keyedPrepend: {
       compilerOff: {
         raw: keyedPrependOff.raw,
@@ -413,6 +561,23 @@ const results = {
         brotli: keyedReorderOn.brotli - keyedReorderOff.brotli,
       },
     },
+    keyedMapReorder: {
+      compilerOff: {
+        raw: keyedMapReorderOff.raw,
+        gzip: keyedMapReorderOff.gzip,
+        brotli: keyedMapReorderOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedMapReorderOn.raw,
+        gzip: keyedMapReorderOn.gzip,
+        brotli: keyedMapReorderOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedMapReorderOn.raw - keyedMapReorderOff.raw,
+        gzip: keyedMapReorderOn.gzip - keyedMapReorderOff.gzip,
+        brotli: keyedMapReorderOn.brotli - keyedMapReorderOff.brotli,
+      },
+    },
     keyedSort: {
       compilerOff: {
         raw: keyedSortOff.raw,
@@ -464,6 +629,23 @@ const results = {
         brotli: keyedRollingWindowOn.brotli - keyedRollingWindowOff.brotli,
       },
     },
+    keyedMappedRollingWindow: {
+      compilerOff: {
+        raw: keyedMappedRollingWindowOff.raw,
+        gzip: keyedMappedRollingWindowOff.gzip,
+        brotli: keyedMappedRollingWindowOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedMappedRollingWindowOn.raw,
+        gzip: keyedMappedRollingWindowOn.gzip,
+        brotli: keyedMappedRollingWindowOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedMappedRollingWindowOn.raw - keyedMappedRollingWindowOff.raw,
+        gzip: keyedMappedRollingWindowOn.gzip - keyedMappedRollingWindowOff.gzip,
+        brotli: keyedMappedRollingWindowOn.brotli - keyedMappedRollingWindowOff.brotli,
+      },
+    },
     isolatedRuntime: {
       control: {
         raw: runtimeControl.raw,
@@ -500,7 +682,35 @@ if (checkOnly) {
     {
       name: "keyed filter compiler premium",
       current: results.fixtures.keyedFilter.compilerPremium.gzip,
-      maximum: (reference.fixtures.keyedFilter?.compilerPremium.gzip ?? 12_000) + 256,
+      maximum: (reference.fixtures.keyedFilter?.compilerPremium.gzip ?? 12_000) + 264,
+    },
+    {
+      name: "keyed structural-append compiler premium",
+      current: results.fixtures.keyedStructuralAppend.compilerPremium.gzip,
+      maximum:
+        (reference.fixtures.keyedStructuralAppend?.compilerPremium.gzip ??
+          results.fixtures.keyedStructuralAppend.compilerPremium.gzip) + 256,
+    },
+    {
+      name: "keyed structural-append-map compiler premium",
+      current: results.fixtures.keyedStructuralAppendMap.compilerPremium.gzip,
+      maximum:
+        (reference.fixtures.keyedStructuralAppendMap?.compilerPremium.gzip ??
+          results.fixtures.keyedStructuralAppendMap.compilerPremium.gzip) + 256,
+    },
+    {
+      name: "keyed structural-prepend compiler premium",
+      current: results.fixtures.keyedStructuralPrepend.compilerPremium.gzip,
+      maximum:
+        (reference.fixtures.keyedStructuralPrepend?.compilerPremium.gzip ??
+          results.fixtures.keyedStructuralPrepend.compilerPremium.gzip) + 256,
+    },
+    {
+      name: "keyed structural-prepend-map compiler premium",
+      current: results.fixtures.keyedStructuralPrependMap.compilerPremium.gzip,
+      maximum:
+        (reference.fixtures.keyedStructuralPrependMap?.compilerPremium.gzip ??
+          results.fixtures.keyedStructuralPrependMap.compilerPremium.gzip) + 256,
     },
     {
       name: "keyed prepend compiler premium",
@@ -536,6 +746,13 @@ if (checkOnly) {
           results.fixtures.keyedReorder.compilerPremium.gzip) + 256,
     },
     {
+      name: "keyed map-reorder compiler premium",
+      current: results.fixtures.keyedMapReorder.compilerPremium.gzip,
+      maximum:
+        (reference.fixtures.keyedMapReorder?.compilerPremium.gzip ??
+          results.fixtures.keyedMapReorder.compilerPremium.gzip) + 328,
+    },
+    {
       name: "keyed sort compiler premium",
       current: results.fixtures.keyedSort.compilerPremium.gzip,
       maximum:
@@ -553,6 +770,13 @@ if (checkOnly) {
       maximum:
         (reference.fixtures.keyedRollingWindow?.compilerPremium.gzip ??
           results.fixtures.keyedRollingWindow.compilerPremium.gzip) + 256,
+    },
+    {
+      name: "keyed mapped rolling-window compiler premium",
+      current: results.fixtures.keyedMappedRollingWindow.compilerPremium.gzip,
+      maximum:
+        (reference.fixtures.keyedMappedRollingWindow?.compilerPremium.gzip ??
+          results.fixtures.keyedMappedRollingWindow.compilerPremium.gzip) + 256,
     },
     {
       name: "core runtime premium",

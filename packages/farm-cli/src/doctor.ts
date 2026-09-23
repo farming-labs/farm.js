@@ -7,6 +7,7 @@ import {
 } from "@farm.js/core";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { createHttpLocalUrl } from "./local-url";
 import pc from "picocolors";
 
 export type FarmDoctorCheckStatus = "pass" | "warn" | "fail" | "info";
@@ -229,12 +230,21 @@ function createLiveReport(
   baseUrl: string,
   now: FarmDoctorOptions["now"],
 ): FarmDoctorReport {
+  const runtimeHealth = snapshot.health ?? "ready";
+  const runtimeHealthStatus: FarmDoctorCheckStatus =
+    runtimeHealth === "error" ? "fail" : runtimeHealth === "attention" ? "warn" : "pass";
   const checks: FarmDoctorCheck[] = [
     {
       status: "pass",
       code: "LIVE_RUNTIME_READY",
       title: "Connected to the Farm runtime",
       message: `${formatCount(snapshot.counts.pages, "page")}, ${formatCount(snapshot.counts.apiRoutes, "API route")}, and ${formatCount(snapshot.counts.middleware, "middleware layer")} are registered.`,
+    },
+    {
+      status: runtimeHealthStatus,
+      code: "LIVE_RUNTIME_HEALTH",
+      title: "Runtime health is reported",
+      message: `The running Farm application reports ${runtimeHealth} health.`,
     },
     {
       status: "pass",
@@ -362,16 +372,10 @@ function applySafeProjectFixes(
     const rendererExtension = config.renderer.componentExtensions?.[0] || ".tsx";
     const layoutPath = path.join(config.root, config.srcDir, "app", `layout${rendererExtension}`);
     if (!existsSync(layoutPath)) {
+      const source = createRootLayoutSource(config.renderer.name);
+      if (!source) return fixes;
       mkdirSync(path.dirname(layoutPath), { recursive: true });
-      writeFileSync(
-        layoutPath,
-        config.renderer.name === "vue"
-          ? `<script setup lang="ts">\ndefineOptions({ inheritAttrs: false });\n</script>\n\n<template>\n  <slot />\n</template>\n`
-          : config.renderer.name === "solid"
-            ? `import type { ParentProps } from "solid-js";\n\nexport default function RootLayout(props: ParentProps) {\n  return <>{props.children}</>;\n}\n`
-            : `import type { ReactNode } from "react";\n\nexport default function RootLayout({ children }: { children: ReactNode }) {\n  return (\n    <html lang="en">\n      <body>{children}</body>\n    </html>\n  );\n}\n`,
-        { encoding: "utf8", flag: "wx" },
-      );
+      writeFileSync(layoutPath, source, { encoding: "utf8", flag: "wx" });
       fixes.push({
         code: "ROOT_LAYOUT_CREATED",
         title: "Created the missing root layout",
@@ -382,22 +386,40 @@ function applySafeProjectFixes(
   return fixes;
 }
 
+function createRootLayoutSource(renderer: string): string | undefined {
+  if (renderer === "vue") {
+    return `<script setup lang="ts">\ndefineOptions({ inheritAttrs: false });\n</script>\n\n<template>\n  <slot />\n</template>\n`;
+  }
+  if (renderer === "solid") {
+    return `import type { ParentProps } from "solid-js";\n\nexport default function RootLayout(props: ParentProps) {\n  return <>{props.children}</>;\n}\n`;
+  }
+  if (renderer === "preact") {
+    return `import type { ComponentChildren } from "preact";\n\nexport default function RootLayout({ children }: { children?: ComponentChildren }) {\n  return <>{children}</>;\n}\n`;
+  }
+  if (renderer === "svelte") {
+    return `<script lang="ts">\n  import type { Snippet } from "svelte";\n\n  let { children }: { children?: Snippet } = $props();\n</script>\n\n{@render children?.()}\n`;
+  }
+  if (renderer !== "react") return undefined;
+  return `import type { ReactNode } from "react";\n\nexport default function RootLayout({ children }: { children: ReactNode }) {\n  return (\n    <html lang="en">\n      <body>{children}</body>\n    </html>\n  );\n}\n`;
+}
+
 function collectNodeCheck(checks: FarmDoctorCheck[]): void {
-  const major = Number(process.versions.node.split(".")[0]);
+  const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
+  const supported = major > 22 || (major === 22 && minor >= 13);
   checks.push(
-    major >= 18
+    supported
       ? {
           status: "pass",
           code: "NODE_SUPPORTED",
           title: "Node.js is supported",
-          message: `Node ${process.versions.node} satisfies Farm's Node 18+ baseline.`,
+          message: `Node ${process.versions.node} satisfies Farm's Node 22.13+ baseline.`,
         }
       : {
           status: "fail",
           code: "NODE_UNSUPPORTED",
           title: "Node.js is too old",
-          message: `Node ${process.versions.node} does not satisfy Farm's Node 18+ baseline.`,
-          action: "Upgrade Node.js to version 18 or newer.",
+          message: `Node ${process.versions.node} does not satisfy Farm's Node 22.13+ baseline.`,
+          action: "Upgrade Node.js to version 22.13 or newer.",
         },
   );
 }
@@ -453,11 +475,19 @@ function collectPackageCheck(root: string, checks: FarmDoctorCheck[]): void {
 function collectRouterChecks(config: ResolvedFarmConfig, checks: FarmDoctorCheck[]): void {
   const sources = getFarmSourceRoots(config);
   const appDirectories = sources.map((source) => path.join(source.root, source.srcDir, "app"));
-  const hasPages = appDirectories.some((directory) =>
-    containsFile(directory, /^page\.(?:ts|tsx|js|jsx|vue|md|mdx)$/),
-  );
+  const routeExtensions = [
+    ...new Set([
+      ...ROUTE_EXTENSIONS,
+      ...(config.renderer.componentExtensions ?? []).map((extension) =>
+        extension.replace(/^\./, ""),
+      ),
+    ]),
+  ];
+  const pageFilePattern = new RegExp(`^page\\.(?:${routeExtensions.map(escapeRegExp).join("|")})$`);
+  const suggestedRouteExtension = config.renderer.componentExtensions?.[0] || ".tsx";
+  const hasPages = appDirectories.some((directory) => containsFile(directory, pageFilePattern));
   const hasProgrammaticRoutes = sources.some((source) =>
-    ROUTE_EXTENSIONS.some((extension) =>
+    routeExtensions.some((extension) =>
       existsSync(path.join(source.root, source.srcDir, `farm.routes.${extension}`)),
     ),
   );
@@ -474,14 +504,13 @@ function collectRouterChecks(config: ResolvedFarmConfig, checks: FarmDoctorCheck
           code: "NO_PAGE_ROUTES",
           title: "No page routes were found",
           message: `Farm found no page modules under ${config.srcDir}/app.`,
-          action: `Add ${config.srcDir}/app/page.tsx or ${config.srcDir}/farm.routes.tsx.`,
+          action: `Add ${config.srcDir}/app/page${suggestedRouteExtension} or ${config.srcDir}/farm.routes${suggestedRouteExtension}.`,
         },
   );
 
   const hasRootLayout = appDirectories.some((directory) =>
-    ROUTE_EXTENSIONS.some((extension) => existsSync(path.join(directory, `layout.${extension}`))),
+    routeExtensions.some((extension) => existsSync(path.join(directory, `layout.${extension}`))),
   );
-  const suggestedLayoutExtension = config.renderer.componentExtensions?.[0] || ".tsx";
   checks.push(
     hasRootLayout
       ? {
@@ -495,9 +524,13 @@ function collectRouterChecks(config: ResolvedFarmConfig, checks: FarmDoctorCheck
           code: "ROOT_LAYOUT_MISSING",
           title: "Root layout is missing",
           message: "The application has no shared root layout.",
-          action: `Add ${config.srcDir}/app/layout${suggestedLayoutExtension}.`,
+          action: `Add ${config.srcDir}/app/layout${suggestedRouteExtension}.`,
         },
   );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function collectDeploymentChecks(
@@ -570,13 +603,25 @@ function collectCronChecks(
 }
 
 function hasCronRoute(config: ResolvedFarmConfig, job: FarmCronJob): boolean {
-  const relative = job.path.replace(/^\/+/, "").replace(/^api\//, "");
+  const relative = resolveCronSourceRelativePath(config, job.path);
+  if (relative === undefined) return false;
   return getFarmSourceRoots(config).some((source) => {
     const directory = path.join(source.root, source.srcDir, "app", "api", relative);
     return ROUTE_EXTENSIONS.some((extension) =>
       existsSync(path.join(directory, `route.${extension}`)),
     );
   });
+}
+
+function resolveCronSourceRelativePath(
+  config: ResolvedFarmConfig,
+  cronPath: string,
+): string | undefined {
+  const serverBasePath = config.api.baseURL.startsWith("/") ? config.api.basePath : "/api";
+  if (serverBasePath === "/") return cronPath.replace(/^\/+/, "");
+  if (cronPath === serverBasePath) return "";
+  if (!cronPath.startsWith(`${serverBasePath}/`)) return undefined;
+  return cronPath.slice(serverBasePath.length + 1);
 }
 
 function containsFile(directory: string, pattern: RegExp): boolean {
@@ -619,7 +664,7 @@ function findConfigFile(root: string, configPath?: string): string | undefined {
 }
 
 function resolveLiveTarget(options: FarmDoctorOptions): string {
-  const raw = options.url || `http://${options.host || "localhost"}:${options.port || 3000}`;
+  const raw = options.url || createHttpLocalUrl(options.host || "localhost", options.port || 3000);
   return raw.replace(/\/+$/, "");
 }
 
@@ -633,6 +678,10 @@ function isLiveSnapshot(value: unknown): value is LiveSnapshot {
   return Boolean(
     snapshot.project &&
     typeof snapshot.project.name === "string" &&
+    (snapshot.health === undefined ||
+      snapshot.health === "ready" ||
+      snapshot.health === "attention" ||
+      snapshot.health === "error") &&
     snapshot.deployment &&
     typeof snapshot.deployment.target === "string" &&
     snapshot.counts &&

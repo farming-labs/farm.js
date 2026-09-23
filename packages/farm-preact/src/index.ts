@@ -15,6 +15,7 @@ const PREACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
     "@farm.js/preact/client",
   ],
   capabilities: {
+    reconcilesRerenders: true,
     streaming: { node: true, web: true },
   },
 });
@@ -26,6 +27,7 @@ export function preact(): FarmRenderer {
     dedupe: [...(PREACT_RENDERER.dedupe || [])],
     optimizeDeps: [...(PREACT_RENDERER.optimizeDeps || [])],
     capabilities: {
+      reconcilesRerenders: true,
       streaming: { ...PREACT_RENDERER.capabilities?.streaming },
     },
   };

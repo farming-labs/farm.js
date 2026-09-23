@@ -15,7 +15,7 @@ program
     "Rendering library to use (react, preact, solid, vue, or svelte)",
   )
   .option("--list-templates", "List all available starter templates")
-  .option("--typescript", "Use TypeScript template")
+  .option("--typescript", "TypeScript is included by default (deprecated)")
   .option("--skip-install", "Skip installing dependencies")
   .action(async (projectName, options) => {
     try {

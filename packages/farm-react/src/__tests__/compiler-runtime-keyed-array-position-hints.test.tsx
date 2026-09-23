@@ -2,7 +2,7 @@ import React, { StrictMode, useState } from "react";
 import { act } from "react";
 import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCompiledComponent,
   createCompilerKeyedArrayPositionUpdate,
@@ -35,6 +35,7 @@ afterEach(async () => {
     for (const root of roots.splice(0)) root.unmount();
   });
   document.body.replaceChildren();
+  vi.restoreAllMocks();
 });
 
 async function flushCompilerUpdates(): Promise<void> {
@@ -356,6 +357,51 @@ describe("compiled keyed-array position hints", () => {
     });
     expect(container.textContent).toBe("Beta");
     expect(harness.counters.keys).toBe(1);
+  });
+
+  it("keeps the element index across same-key with and toSpliced replacements", async () => {
+    const harness = createPositionHarness([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ]);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Table />));
+    const retained = container.querySelector('[data-key="b"]');
+    let indexWrites = 0;
+    const originalSet = WeakMap.prototype.set;
+    vi.spyOn(WeakMap.prototype, "set").mockImplementation(function (
+      this: WeakMap<object, unknown>,
+      key: object,
+      value: unknown,
+    ) {
+      if (
+        value !== null &&
+        typeof value === "object" &&
+        "element" in value &&
+        value.element === key
+      ) {
+        indexWrites += 1;
+      }
+      return originalSet.call(this, key, value);
+    });
+    for (const [method, label] of [
+      [harness.withReplace, "Beta with"],
+      [harness.replace, "Beta toSpliced"],
+    ] as const) {
+      harness.counters.keys = 0;
+      await act(async () => {
+        method(1, { id: "b", label });
+        await flushCompilerUpdates();
+      });
+      expect(indexWrites).toBe(0);
+      expect(harness.counters.keys).toBe(1);
+      expect(container.querySelector('[data-key="b"]')).toBe(retained);
+      expect(retained?.textContent).toBe(label);
+    }
   });
 
   it("patches a same-key toSpliced replacement and creates one host row for a new key", async () => {

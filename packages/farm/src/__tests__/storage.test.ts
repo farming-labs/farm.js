@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
+import memoryDriver from "unstorage/drivers/memory";
 import { middleware } from "../middleware/chain";
 import { createContext } from "../middleware/context";
 import {
@@ -106,6 +107,32 @@ describe("Storage", () => {
     await storage.dispose();
   });
 
+  it("disposes initialized drivers when a later mount fails", async () => {
+    const rootDriver = memoryDriver();
+    const mountedDriver = memoryDriver();
+    const disposeRoot = vi.fn();
+    const disposeMount = vi.fn();
+    rootDriver.dispose = disposeRoot;
+    mountedDriver.dispose = disposeMount;
+
+    await expect(
+      createFarmStorage({
+        driver: rootDriver,
+        mounts: {
+          ready: { driver: mountedDriver },
+          failed: {
+            driver: async () => {
+              throw new Error("mount failed");
+            },
+          },
+        },
+      }),
+    ).rejects.toThrow("mount failed");
+
+    expect(disposeRoot).toHaveBeenCalledOnce();
+    expect(disposeMount).toHaveBeenCalledOnce();
+  });
+
   it("re-creates the driver after dispose instead of reviving the disposed one", async () => {
     const created: Array<{ isDisposed: () => boolean }> = [];
 
@@ -164,6 +191,37 @@ describe("Storage", () => {
     await expect(client.getItem("farewell")).resolves.toBe("goodbye");
   });
 
+  it("retries initialization after a driver factory failure", async () => {
+    const data = new Map<string, string>();
+    let attempts = 0;
+    const client = defineStorageClient(() => {
+      attempts++;
+      if (attempts === 1) throw new Error("temporary storage failure");
+
+      return {
+        name: "retryable",
+        hasItem: (key: string) => data.has(key),
+        getItem: (key: string) => data.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          data.set(key, value);
+        },
+        removeItem: (key: string) => {
+          data.delete(key);
+        },
+        getKeys: () => [...data.keys()],
+      } as never;
+    });
+
+    const firstAttempts = await Promise.allSettled([client.ready(), client.ready()]);
+    expect(firstAttempts.map((result) => result.status)).toEqual(["rejected", "rejected"]);
+    expect(attempts).toBe(1);
+
+    await client.setItem("status", "ready");
+
+    expect(attempts).toBe(2);
+    await expect(client.getItem("status")).resolves.toBe("ready");
+  });
+
   it("supports mounted local namespaces with shorthand options", async () => {
     const dir = await createTempDir("farm-storage-local-");
     const cacheClient = localStorage({ base: dir });
@@ -205,6 +263,57 @@ describe("Storage", () => {
 
     expect(await cache.getKeys()).toEqual([]);
     expect(await getStorage().getItem("root")).toEqual({ ok: true });
+  });
+
+  it("clears only the requested base within a namespace", async () => {
+    const dir = await createTempDir("farm-storage-scoped-clear-");
+
+    await initStorage({
+      mounts: {
+        cache: localStorage({ base: dir }),
+      },
+    });
+
+    const cache = getStorage("cache");
+    await cache.setItem("sessions:a", { id: "a" });
+    await cache.setItem("profiles:b", { id: "b" });
+
+    await cache.clear("sessions");
+
+    expect(await cache.getItem("sessions:a")).toBeNull();
+    expect(await cache.getItem("profiles:b")).toEqual({ id: "b" });
+  });
+
+  it("does not let a namespaced handle dispose or observe the whole store", async () => {
+    await initStorage({
+      mounts: {
+        nsA: { driver: memoryDriver() },
+        nsB: { driver: memoryDriver() },
+      },
+    });
+
+    await getStorage("nsB").setItem("secret", "vb");
+
+    // watch on nsA must only see nsA's writes, and with the namespace stripped.
+    const nsA = getStorage("nsA");
+    const seen: string[] = [];
+    const unwatch = await nsA.watch((_event, key) => seen.push(key));
+    await getStorage("nsB").setItem("leak", "x");
+    await getStorage("nsA").setItem("own", "y");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await unwatch();
+    expect(seen).toEqual(["own"]);
+
+    // getMounts on nsA must not enumerate other namespaces.
+    expect(
+      getStorage("nsA")
+        .getMounts()
+        .every((mount) => !mount.base.startsWith("nsB")),
+    ).toBe(true);
+
+    // dispose on a namespaced handle must not tear down the global store.
+    await getStorage("nsA").dispose();
+    expect(await getStorage("nsB").getItem("secret")).toBe("vb");
   });
 
   it.skipIf(!supportsNodeSqlite)(
@@ -425,14 +534,18 @@ describe("Storage", () => {
     expect(typeof vercelKV.hasItem).toBe("function");
   });
 
-  const itWithPostgres = process.env.FARM_TEST_POSTGRES_URL ? it : it.skip;
+  const postgresTestUrl = process.env.FARM_TEST_POSTGRES_URL;
+  if (process.env.FARM_REQUIRE_TEST_POSTGRES === "1" && !postgresTestUrl) {
+    throw new Error("FARM_TEST_POSTGRES_URL is required for the Postgres storage test job.");
+  }
+  const itWithPostgres = postgresTestUrl ? it : it.skip;
 
   itWithPostgres(
     "supports postgres storage against a real database",
     async () => {
       const tableName = `farm_pg_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
       const pg = postgresStorage({
-        url: process.env.FARM_TEST_POSTGRES_URL!,
+        url: postgresTestUrl!,
         tableName,
       });
 

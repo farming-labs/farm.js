@@ -35,3 +35,72 @@ export function createFarmVercelImmutableAssetRoute(): FarmVercelImmutableAssetR
 export function isFarmVercelImmutableAssetPath(pathname: string): boolean {
   return new RegExp(createFarmVercelImmutableAssetRoute().src).test(pathname);
 }
+
+export interface FarmVercelRoute {
+  handle?: string;
+  src?: string;
+  dest?: string;
+  status?: number;
+  headers?: Record<string, string>;
+  continue?: boolean;
+  caseSensitive?: boolean;
+}
+
+/**
+ * Rebuild the Vercel Build Output `routes` array around Farm's serverless
+ * function while preserving the preset-generated source routes.
+ *
+ * Nitro's Vercel builder emits, before the `filesystem` handler, the redirect
+ * and header routes declared through `routeRules` (this is how Farm ships its
+ * configured `headers()` and per-prerendered-route cache policy on Vercel), then
+ * a blanket immutable public-asset route. Farm previously discarded the whole
+ * array, which silently dropped those redirect and header routes on Vercel while
+ * they kept working on every other target.
+ *
+ * We keep the redirect/header source routes, replace the preset's blanket
+ * immutable asset route (`continue: true`) with Farm's fingerprint-precise one so
+ * stable filenames and HTML are not over-cached, and re-point Farm's runtime,
+ * API, and catch-all routes at the `__nitro` function this post-processing
+ * creates. Routes after the `filesystem` handler (ISR invocations, observability,
+ * the preset's own `/__fallback` catch-all) are intentionally not carried over:
+ * Farm keeps ISR routes server-handled, and the preset's catch-all targets a
+ * function name Farm does not emit.
+ */
+export function buildFarmVercelRoutes(options: {
+  presetRoutes: FarmVercelRoute[];
+  runtimeRoutes: FarmVercelRoute[];
+  apiBasePath: string;
+}): FarmVercelRoute[] {
+  const { presetRoutes, runtimeRoutes, apiBasePath } = options;
+  const filesystemIndex = presetRoutes.findIndex((route) => route.handle === "filesystem");
+  const sourceRoutes = filesystemIndex >= 0 ? presetRoutes.slice(0, filesystemIndex) : [];
+  // Drop the preset's blanket immutable public-asset routes (the only
+  // pre-filesystem routes marked `continue: true`); Farm supplies its own
+  // precise immutable route below. Everything else here is a redirect or header
+  // route from routeRules and must be preserved.
+  const preservedSourceRoutes = sourceRoutes.filter((route) => route.continue !== true);
+
+  return [
+    ...preservedSourceRoutes,
+    createFarmVercelImmutableAssetRoute(),
+    { handle: "filesystem" },
+    ...runtimeRoutes,
+    ...(apiBasePath === "/"
+      ? []
+      : [
+          {
+            src: `${apiBasePath}/(.*)`,
+            dest: "/__nitro",
+            headers: {
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Methods": "*",
+              "Access-Control-Allow-Headers": "*",
+            },
+          },
+        ]),
+    {
+      src: "/(.*)",
+      dest: "/__nitro",
+    },
+  ];
+}

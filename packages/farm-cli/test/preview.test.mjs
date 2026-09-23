@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import fs from "node:fs/promises";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 const require = createRequire(import.meta.url);
 const {
@@ -17,6 +20,7 @@ const {
   resolvePreviewTarget,
   runNativePreviewTunnel,
   runPreviewGateway,
+  runPreviewTunnel,
 } = require("../dist/index.js");
 const execFileAsync = promisify(execFile);
 const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -55,6 +59,36 @@ test("resolves a running local preview target", async () => {
   } finally {
     await server.close();
   }
+});
+
+test("formats a bare IPv6 preview host as a valid local URL", async () => {
+  const target = await resolvePreviewTarget({ host: "::1", port: 4321, noProbe: true });
+
+  assert.equal(target.localUrl, "http://[::1]:4321");
+  assert.equal(new URL(target.localUrl).hostname, "[::1]");
+});
+
+test("rejects invalid explicit preview targets", async () => {
+  await assert.rejects(resolvePreviewTarget({ url: "ftp://127.0.0.1:21" }), /http or https/);
+  await assert.rejects(resolvePreviewTarget({ url: "file:///tmp/farm" }), /http or https/);
+  await assert.rejects(
+    resolvePreviewTarget({ url: "http://user:secret@127.0.0.1:3000" }),
+    /cannot include credentials/,
+  );
+  await assert.rejects(
+    resolvePreviewTarget({ url: "http://127.0.0.1:3000/app?token=secret" }),
+    /query string or fragment/,
+  );
+  await assert.rejects(resolvePreviewTarget({ port: "3000oops" }), /integer between 1 and 65535/);
+  await assert.rejects(resolvePreviewTarget({ port: 0 }), /integer between 1 and 65535/);
+});
+
+test("normalizes a valid explicit preview URL", async () => {
+  const target = await resolvePreviewTarget({ url: "  http://127.0.0.1:3000/app/  " });
+
+  assert.equal(target.localUrl, "http://127.0.0.1:3000/app");
+  assert.equal(target.host, "127.0.0.1");
+  assert.equal(target.port, 3000);
 });
 
 test("creates a tunnel plan from the preview command template", () => {
@@ -205,6 +239,197 @@ test("forwards a gateway request to the local target", async () => {
   }
 });
 
+test("keeps gateway requests beneath the configured target path", async () => {
+  const requests = [];
+  const server = await createTestServer((req, res) => {
+    requests.push(req.url);
+    res.end(req.url);
+  });
+  const target = {
+    localUrl: `http://localhost:${server.port}/console`,
+    host: "localhost",
+    port: server.port,
+    source: "url",
+  };
+
+  try {
+    const response = await forwardGatewayRequest(target, {
+      id: "req_nested",
+      method: "GET",
+      path: "/dashboard?view=compact",
+    });
+    assert.equal(
+      Buffer.from(response.body, "base64").toString(),
+      "/console/dashboard?view=compact",
+    );
+
+    await assert.rejects(
+      forwardGatewayRequest(target, {
+        id: "req_escape",
+        method: "GET",
+        path: "/%2e%2e/admin",
+      }),
+      /cannot leave the local target path/,
+    );
+    assert.deepEqual(requests, ["/console/dashboard?view=compact"]);
+  } finally {
+    await server.close();
+  }
+});
+
+test("removes headers nominated by Connection in both gateway directions", async () => {
+  const server = await createTestServer((req, res) => {
+    res.setHeader("connection", "x-response-hop");
+    res.setHeader("x-response-hop", "remove-me");
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ requestHop: req.headers["x-request-hop"] }));
+  });
+
+  try {
+    const response = await forwardGatewayRequest(
+      {
+        localUrl: `http://localhost:${server.port}`,
+        host: "localhost",
+        port: server.port,
+        source: "port",
+      },
+      {
+        id: "req_connection_headers",
+        method: "GET",
+        path: "/",
+        headers: {
+          connection: "x-request-hop",
+          "x-request-hop": "remove-me",
+        },
+      },
+    );
+
+    assert.equal(JSON.parse(Buffer.from(response.body, "base64").toString()).requestHop, undefined);
+    assert.equal(response.headers["x-response-hop"], undefined);
+  } finally {
+    await server.close();
+  }
+});
+
+test("forwards local redirects without following them", async () => {
+  const server = await createTestServer((req, res) => {
+    if (req.url === "/redirect") {
+      res.writeHead(302, { location: "/destination" });
+      res.end();
+      return;
+    }
+    res.end("destination");
+  });
+
+  try {
+    const response = await forwardGatewayRequest(
+      {
+        localUrl: `http://localhost:${server.port}`,
+        host: "localhost",
+        port: server.port,
+        source: "port",
+      },
+      {
+        id: "req_redirect",
+        method: "GET",
+        path: "/redirect",
+      },
+    );
+
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.location, "/destination");
+  } finally {
+    await server.close();
+  }
+});
+
+test("removes content encoding after fetch decodes a local response", async () => {
+  const body = gzipSync("compressed response");
+  const server = await createTestServer((_req, res) => {
+    res.writeHead(200, {
+      "content-encoding": "gzip",
+      "content-length": body.byteLength,
+    });
+    res.end(body);
+  });
+
+  try {
+    const response = await forwardGatewayRequest(
+      {
+        localUrl: `http://localhost:${server.port}`,
+        host: "localhost",
+        port: server.port,
+        source: "port",
+      },
+      {
+        id: "req_gzip",
+        method: "GET",
+        path: "/compressed",
+      },
+    );
+
+    assert.equal(response.headers["content-encoding"], undefined);
+    assert.equal(Buffer.from(response.body, "base64").toString(), "compressed response");
+  } finally {
+    await server.close();
+  }
+});
+
+test("stops buffering gateway responses above the configured limit", async () => {
+  const server = await createTestServer((_req, res) => {
+    res.write("12345678");
+    res.end("9");
+  });
+
+  try {
+    await assert.rejects(
+      forwardGatewayRequest(
+        {
+          localUrl: `http://localhost:${server.port}`,
+          host: "localhost",
+          port: server.port,
+          source: "port",
+        },
+        {
+          id: "req_large",
+          method: "GET",
+          path: "/large",
+        },
+        { maxResponseBodyBytes: 8 },
+      ),
+      /exceeded the 8 byte limit/,
+    );
+  } finally {
+    await server.close();
+  }
+});
+
+test("cancels a forwarded local request at its deadline", async () => {
+  const server = await createTestServer(() => undefined);
+
+  try {
+    await assert.rejects(
+      forwardGatewayRequest(
+        {
+          localUrl: `http://localhost:${server.port}`,
+          host: "localhost",
+          port: server.port,
+          source: "port",
+        },
+        {
+          id: "req_timeout",
+          method: "GET",
+          path: "/slow",
+        },
+        { signal: AbortSignal.timeout(20) },
+      ),
+      (error) => error?.name === "TimeoutError",
+    );
+  } finally {
+    await server.close();
+  }
+});
+
 test("closes the gateway session when the local target stops", async () => {
   const app = await createTestServer();
   const gateway = await createPreviewGatewayTestServer();
@@ -240,6 +465,135 @@ test("closes the gateway session when the local target stops", async () => {
 
     assert.equal(gateway.deletedSessions.length, 1);
     assert.equal(gateway.deletedSessions[0], "sess_watch");
+  } finally {
+    await app.close().catch(() => undefined);
+    await gateway.close();
+  }
+});
+
+test("keeps the gateway session alive after one local request fails", async () => {
+  const app = await createTestServer((req, res) => {
+    if (req.url === "/fail") {
+      req.socket.destroy();
+      return;
+    }
+    res.end("ok");
+  });
+  const gateway = await createQueuedPreviewGatewayTestServer([
+    { id: "req_fail", method: "GET", path: "/fail" },
+    { id: "req_ok", method: "GET", path: "/ok" },
+  ]);
+  const plan = createPreviewGatewayPlan(
+    {
+      localUrl: `http://localhost:${app.port}`,
+      host: "localhost",
+      port: app.port,
+      source: "port",
+    },
+    { gatewayUrl: gateway.url, name: "request-isolation" },
+  );
+
+  try {
+    await runPreviewGateway(plan, {
+      maxRequests: 2,
+      pollTimeoutMs: 10,
+      localProbeIntervalMs: 1_000,
+    });
+
+    assert.deepEqual(
+      gateway.responses.map(({ requestId, response }) => [requestId, response.status]),
+      [
+        ["req_fail", 502],
+        ["req_ok", 200],
+      ],
+    );
+  } finally {
+    await app.close();
+    await gateway.close();
+  }
+});
+
+test("aborts local gateway work after a public cancellation", async () => {
+  let markSlowClosed;
+  const slowClosed = new Promise((resolve) => {
+    markSlowClosed = resolve;
+  });
+  const app = await createTestServer((req, res) => {
+    if (req.url === "/slow") {
+      res.once("close", markSlowClosed);
+      return;
+    }
+    res.end("ok");
+  });
+  const gateway = await createQueuedPreviewGatewayTestServer(
+    [
+      { id: "req_cancel", method: "GET", path: "/slow" },
+      { id: "req_cancel", method: "GET", path: "/slow", cancelled: true },
+      { id: "req_ok", method: "GET", path: "/ok" },
+    ],
+    { pollDelayMs: 20 },
+  );
+  const plan = createPreviewGatewayPlan(
+    {
+      localUrl: `http://localhost:${app.port}`,
+      host: "localhost",
+      port: app.port,
+      source: "port",
+    },
+    { gatewayUrl: gateway.url, name: "request-cancellation" },
+  );
+
+  try {
+    await runPreviewGateway(plan, {
+      maxRequests: 1,
+      pollTimeoutMs: 10,
+      localProbeIntervalMs: 1_000,
+    });
+    await Promise.race([
+      slowClosed,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("cancelled local request remained active")), 500),
+      ),
+    ]);
+    assert.deepEqual(
+      gateway.responses.map(({ requestId, response }) => [requestId, response.status]),
+      [["req_ok", 200]],
+    );
+  } finally {
+    await app.close();
+    await gateway.close();
+  }
+});
+
+test("cancels streaming local health probe responses", async () => {
+  const app = await createStreamingTestServer();
+  const gateway = await createPreviewGatewayTestServer();
+  const plan = createPreviewGatewayPlan(
+    {
+      localUrl: `http://localhost:${app.port}`,
+      host: "localhost",
+      port: app.port,
+      source: "port",
+    },
+    { gatewayUrl: gateway.url, name: "probe-cleanup" },
+  );
+
+  try {
+    const preview = runPreviewGateway(plan, {
+      pollTimeoutMs: 25,
+      localProbeIntervalMs: 20,
+      localProbeTimeoutMs: 200,
+    });
+
+    await gateway.waitForSession();
+    await Promise.race([
+      app.waitForCancellation(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("streaming health probe was not cancelled")), 500),
+      ),
+    ]);
+    await app.close();
+    await preview;
   } finally {
     await app.close().catch(() => undefined);
     await gateway.close();
@@ -367,6 +721,34 @@ async function createTestServer(handler) {
   };
 }
 
+async function createStreamingTestServer() {
+  let resolveCancellation;
+  const cancellation = new Promise((resolve) => {
+    resolveCancellation = resolve;
+  });
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.write("streaming");
+    res.once("close", resolveCancellation);
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  return {
+    port: address.port,
+    waitForCancellation: () => cancellation,
+    close: () =>
+      new Promise((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      }),
+  };
+}
+
 async function createPreviewGatewayTestServer() {
   let resolveSession;
   const sessionReady = new Promise((resolve) => {
@@ -429,6 +811,59 @@ async function createPreviewGatewayTestServer() {
   };
 }
 
+async function createQueuedPreviewGatewayTestServer(requests, options = {}) {
+  const queued = [...requests];
+  const responses = [];
+  const server = await createTestServer(async (req, res) => {
+    const url = new URL(req.url || "/", "http://localhost");
+
+    if (req.method === "POST" && url.pathname === "/api/sessions") {
+      await readRequestBody(req);
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          id: "sess_queue",
+          name: "request-isolation",
+          token: "token_queue",
+          publicUrl: "https://request-isolation.preview.farming-labs.dev",
+        }),
+      );
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/sessions/sess_queue/requests") {
+      if (options.pollDelayMs)
+        await new Promise((resolve) => setTimeout(resolve, options.pollDelayMs));
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ requests: queued.length ? [queued.shift()] : [] }));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname.startsWith("/api/sessions/sess_queue/responses/")) {
+      responses.push({
+        requestId: url.pathname.split("/").pop(),
+        response: JSON.parse(await readRequestBody(req)),
+      });
+      res.end("ok");
+      return;
+    }
+
+    if (req.method === "DELETE" && url.pathname === "/api/sessions/sess_queue") {
+      res.end("ok");
+      return;
+    }
+
+    res.statusCode = 404;
+    res.end("not found");
+  });
+
+  return {
+    url: `http://localhost:${server.port}`,
+    responses,
+    close: server.close,
+  };
+}
+
 function readRequestBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -447,3 +882,90 @@ function restoreEnv(key, previous) {
     process.env[key] = previous;
   }
 }
+
+test("terminates the tunnel process when the preview URL times out", async () => {
+  const pidFile = path.join(
+    await fs.mkdtemp(path.join(os.tmpdir(), "farm-preview-timeout-")),
+    "child.pid",
+  );
+  // A tunnel that starts, prints something that is not a URL, and then hangs.
+  const script =
+    "require('node:fs').writeFileSync(process.env.FARM_TEST_PID_FILE, String(process.pid));" +
+    "process.stdout.write('starting tunnel\\n');" +
+    "setInterval(() => {}, 1000);";
+
+  const plan = {
+    command: process.execPath,
+    args: ["-e", script],
+    target: { localUrl: "http://127.0.0.1:3000", host: "127.0.0.1", port: 3000, source: "port" },
+    requestedName: "timeout-preview",
+    requestedHostname: "timeout-preview.preview.farming-labs.dev",
+  };
+
+  const previousPidFile = process.env.FARM_TEST_PID_FILE;
+  process.env.FARM_TEST_PID_FILE = pidFile;
+  try {
+    await assert.rejects(runPreviewTunnel(plan, 300), /Timed out waiting for the preview URL/);
+
+    const pid = Number(await fs.readFile(pidFile, "utf8"));
+    assert.ok(Number.isInteger(pid) && pid > 0, "the tunnel child should have recorded its pid");
+
+    // The child must not outlive the command that spawned it.
+    let alive = true;
+    for (let attempt = 0; attempt < 40 && alive; attempt += 1) {
+      try {
+        process.kill(pid, 0);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      } catch {
+        alive = false;
+      }
+    }
+    assert.equal(alive, false, "the tunnel process should be terminated after the timeout");
+  } finally {
+    if (previousPidFile === undefined) delete process.env.FARM_TEST_PID_FILE;
+    else process.env.FARM_TEST_PID_FILE = previousPidFile;
+  }
+});
+
+test("ignores vendor documentation URLs before a built-in tunnel is ready", async () => {
+  const script =
+    "process.stdout.write('Learn more: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/\\n');" +
+    "setTimeout(() => {" +
+    "  process.stdout.write('tunnel ready at https://actual-preview.trycloudflare.com\\n');" +
+    "}, 50);";
+
+  const plan = {
+    command: process.execPath,
+    args: ["-e", script],
+    provider: "cloudflared",
+    target: { localUrl: "http://127.0.0.1:3000", host: "127.0.0.1", port: 3000, source: "port" },
+    requestedName: "actual-preview",
+    requestedHostname: "actual-preview.preview.farming-labs.dev",
+  };
+
+  const publicUrl = await runPreviewTunnel(plan, 2_000);
+  assert.equal(publicUrl, "https://actual-preview.trycloudflare.com");
+});
+
+test("finds the preview URL after a noisy tunnel prologue", async () => {
+  // The scan buffer is bounded, so a tunnel that prints a lot before announcing
+  // its URL must still be matched - including when the URL lands in a later
+  // chunk than the noise.
+  const script =
+    "for (let i = 0; i < 4000; i += 1) process.stdout.write('warming up the tunnel ' + i + '\\n');" +
+    "setTimeout(() => {" +
+    "  process.stdout.write('tunnel ready at https://noisy-preview.trycloudflare.com\\n');" +
+    "  setInterval(() => {}, 1000).unref();" +
+    "}, 50);";
+
+  const plan = {
+    command: process.execPath,
+    args: ["-e", script],
+    target: { localUrl: "http://127.0.0.1:3000", host: "127.0.0.1", port: 3000, source: "port" },
+    requestedName: "noisy-preview",
+    requestedHostname: "noisy-preview.preview.farming-labs.dev",
+  };
+
+  const publicUrl = await runPreviewTunnel(plan, 10_000);
+  assert.equal(publicUrl, "https://noisy-preview.trycloudflare.com");
+});

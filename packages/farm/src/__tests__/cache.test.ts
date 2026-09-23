@@ -297,6 +297,20 @@ describe("server cache primitives", () => {
     await expect(fromB()).resolves.toEqual({ from: "B" });
   });
 
+  it("separates closures that capture different variables via keyParts", async () => {
+    // Identity is derived from source so it stays stable across processes, which
+    // means closures with identical source but different captured variables share
+    // an identity. Callers disambiguate by listing the captured value in keyParts
+    // (the documented contract); this keeps their entries separate.
+    const makeLoader = (table: string) =>
+      unstable_cache(async (id: number) => ({ table, id }), [table]);
+    const users = makeLoader("users");
+    const posts = makeLoader("posts");
+
+    await expect(users(1)).resolves.toEqual({ table: "users", id: 1 });
+    await expect(posts(1)).resolves.toEqual({ table: "posts", id: 1 });
+  });
+
   it("treats revalidate: 0 as always stale", async () => {
     let calls = 0;
     const getPrices = unstable_cache(
@@ -386,6 +400,116 @@ describe("server cache primitives", () => {
     ]);
     expect(calls).toBe(2);
     expect(cache.get("products")).toEqual({ calls: 2 });
+  });
+
+  it("does not write an in-flight fill into a reconfigured adapter or namespace", async () => {
+    const firstAdapter = new TestSharedCacheAdapter();
+    const secondAdapter = new TestSharedCacheAdapter();
+    const releaseLease = vi.spyOn(firstAdapter, "releaseLease");
+    const cache = new FarmDataCache({ adapter: firstAdapter, namespace: "first" });
+    let finishFill!: () => void;
+    const fillGate = new Promise<void>((resolve) => {
+      finishFill = resolve;
+    });
+    let started = false;
+
+    const pending = cache.getOrSet("products", async () => {
+      started = true;
+      await fillGate;
+      return { source: "first" };
+    });
+
+    await vi.waitFor(() => expect(started).toBe(true));
+    cache.configure({ adapter: secondAdapter, namespace: "second" });
+    finishFill();
+
+    await expect(pending).resolves.toEqual({ source: "first" });
+    await expect(secondAdapter.get("second:entry:products")).resolves.toBeNull();
+    expect(releaseLease).toHaveBeenCalledWith("first:lease:products", "lease-1");
+
+    await cache.getOrSet("products", async () => ({ source: "second" }));
+    await expect(secondAdapter.get("second:entry:products")).resolves.toMatchObject({
+      value: { source: "second" },
+    });
+  });
+
+  it("does not return an entry from an adapter retired during lookup", async () => {
+    const firstAdapter = new TestSharedCacheAdapter();
+    const secondAdapter = new TestSharedCacheAdapter();
+    let releaseLookup!: () => void;
+    let markLookupStarted!: () => void;
+    const lookupGate = new Promise<void>((resolve) => {
+      releaseLookup = resolve;
+    });
+    const lookupStarted = new Promise<void>((resolve) => {
+      markLookupStarted = resolve;
+    });
+    vi.spyOn(firstAdapter, "get").mockImplementation(async () => {
+      markLookupStarted();
+      await lookupGate;
+      return {
+        key: "products",
+        value: { source: "first" },
+        tags: [],
+        createdAt: Date.now(),
+      };
+    });
+    const cache = new FarmDataCache({ adapter: firstAdapter, namespace: "first" });
+    const producer = vi.fn(async () => ({ source: "second" }));
+    const pending = cache.getOrSet("products", producer);
+
+    await lookupStarted;
+    cache.configure({ adapter: secondAdapter, namespace: "second" });
+    releaseLookup();
+
+    await expect(pending).resolves.toEqual({ source: "second" });
+    expect(producer).toHaveBeenCalledOnce();
+    await expect(secondAdapter.get("second:entry:products")).resolves.toMatchObject({
+      value: { source: "second" },
+    });
+  });
+
+  it("stops waiting on a retired adapter without reacquiring its lease", async () => {
+    const firstAdapter = new TestSharedCacheAdapter();
+    const secondAdapter = new TestSharedCacheAdapter();
+    const acquireLease = vi.spyOn(firstAdapter, "acquireLease");
+    await firstAdapter.acquireLease("first:lease:products");
+    let getCalls = 0;
+    let releaseWaitLookup!: () => void;
+    let markWaitLookupStarted!: () => void;
+    const waitLookupGate = new Promise<void>((resolve) => {
+      releaseWaitLookup = resolve;
+    });
+    const waitLookupStarted = new Promise<void>((resolve) => {
+      markWaitLookupStarted = resolve;
+    });
+    vi.spyOn(firstAdapter, "get").mockImplementation(async () => {
+      getCalls++;
+      if (getCalls === 1) return null;
+      markWaitLookupStarted();
+      await waitLookupGate;
+      return {
+        key: "products",
+        value: { source: "first" },
+        tags: [],
+        createdAt: Date.now(),
+      };
+    });
+    const cache = new FarmDataCache({
+      adapter: firstAdapter,
+      namespace: "first",
+      lease: { pollIntervalMs: 1, waitTimeoutMs: 100 },
+    });
+    const producer = vi.fn(async () => ({ source: "second" }));
+    const pending = cache.getOrSet("products", producer);
+
+    await waitLookupStarted;
+    cache.configure({ adapter: secondAdapter, namespace: "second" });
+    releaseWaitLookup();
+
+    await expect(pending).resolves.toEqual({ source: "second" });
+    expect(producer).toHaveBeenCalledOnce();
+    expect(acquireLease).toHaveBeenCalledTimes(2);
   });
 
   it("does not make a local value fresh when its tag is invalidated during generation", async () => {

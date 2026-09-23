@@ -5,6 +5,7 @@ import * as clientRuntime from "../client";
 import * as serverRuntime from "../server";
 
 defineRendererClientConformance({
+  reconcilesRerenders: true,
   name: "preact",
   client: clientRuntime,
   server: serverRuntime,

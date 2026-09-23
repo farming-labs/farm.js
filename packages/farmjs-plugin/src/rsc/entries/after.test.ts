@@ -23,8 +23,9 @@ describe("generated after lifecycle", () => {
     expect(entry).toContain("import { _runWithAfterRequest } from '@farm.js/core/after'");
     expect(entry).toContain("async function handleFarmRequest(request)");
     expect(entry).toContain("async function handler(request, context)");
+    expect(entry).toContain("return _runWithAPIRequestRuntime({");
     expect(entry).toContain(
-      "return _runWithCurrentRequest(request, () =>\n    _runWithAfterRequest(request, () => handleFarmRequest(request), context)",
+      "}, () => _runWithCurrentRequest(request, () =>\n    _runWithAfterRequest(request, () => handleFarmRequest(request), context)",
     );
     expect(entry).toContain("export default { fetch: handler }");
   });

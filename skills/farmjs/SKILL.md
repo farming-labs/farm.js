@@ -48,7 +48,7 @@ Core imports:
 
 ```ts
 import type { PageProps, LayoutProps } from "@farm.js/core";
-import { Link, createIntegrations } from "@farm.js/core/client";
+import { Link, createApiClients } from "@farm.js/core/client";
 ```
 
 Use `"use client"` when a component uses React hooks, browser APIs, or client-only integration calls.
@@ -58,9 +58,9 @@ Use `"use client"` when a component uses React hooks, browser APIs, or client-on
 Follow the current beta channel for beta apps and use `pnpm create`, not `pnpm add`:
 
 ```bash
-pnpm create @farm.js/app@beta my-app --template basic --typescript
-pnpm create @farm.js/app@beta my-app --template basic --renderer vue --typescript
-pnpm create @farm.js/app@beta --list-templates
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic --renderer vue --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta --list-templates
 ```
 
 React is the default renderer. The Basic and Better Auth starters support `react`, `preact`,
@@ -214,26 +214,84 @@ image URLs, and generated `lang`, `dir`, and `hreflang` markup. API routes stay 
 normal `/api/**` paths and can call the same server APIs. Read
 `docs/src/app/docs/internationalization/page.md` and `examples/i18n` before changing this feature.
 
+## Caller header defaults
+
+`createApiClients`, `createAPIClient`, `createIntegrations`, and integration-only factories accept
+`headers` as a string-valued object or a sync/async function returning one. Resolve once per call
+before cache lookup/dispatch; retries reuse the snapshot. Per-call headers stay objects and
+override defaults case-insensitively. Integration operation headers override instance defaults;
+`integrations.headers` and separate integration server header options replace shared defaults.
+Resolvers are not a server-only boundary: keep secrets and provider imports out of shared caller
+modules. See `docs/src/app/docs/api-client/page.md#header-defaults` and the integrations guide.
+
 ## Typed APIs and Server Data
+
+Caller instances support `onRequest`, `onResponse`, and `onError` observers. Shared hooks are
+invoked before per-call hooks; their return values are ignored and failures are reported without
+breaking calls. Attempt hooks skip cache hits and deduplicated transports; final error hooks run
+per logical call, including background failures. Integration/server overrides replace the
+corresponding default hook, not per-call composition. Shared data is unknown; per-call data stays
+typed. Do not use non-awaited observers for required work or import server secrets into them.
+
+Caller `fetch` options replace HTTP only, including integration server fallback. Local route and
+registered integration dispatch remain local. Forward the supplied RequestInit/signal and return
+a Web Response. Custom-transport route caches are instance-private even with shared scope;
+reflect hidden identity changes in header defaults or create a new caller instance.
+
+Caller instances accept `timeoutMs` (0 disables it); individual calls accept `signal` and a
+deadline override. The budget includes header resolution, dispatch, decoding, and retry waits.
+Cancelled app routes return `aborted`/`timeout` errors without retries or optimistic commits;
+cancellable requests do not share in-flight work. Server dispatch combines the incoming and
+per-call signals. Handlers must cooperate: abort cannot undo external side effects. Streams/raw
+responses end the deadline at handoff, while the caller signal still reaches HTTP body reads.
 
 API routes live under `src/app/api/**/route.ts`. Prefer `createEndpoint` from
 `@farm.js/core/api` when input validation and generated caller types matter; plain HTTP method
 exports remain supported. Endpoint input accepts Zod or standard-schema validators for body, query,
 and headers. Farm also supports typed HTTP `QUERY`, multipart uploads, and streamed JSON results.
 
-Use `createAPIClient` from `@farm.js/core/client` for app routes. Calls such as
-`api.products.get(...)` resolve to `{ data, error }` results for HTTP failures and support caching,
+Use one shared `src/lib/api.ts` with `createApiClients<APIRouter>({ routes: apiRoutes })` from
+`@farm.js/core/client`, returning `{ api, apiClient }`. Import the generated schema-free manifest,
+not server endpoint modules. `api` dispatches locally during Farm server requests; `apiClient`
+uses HTTP. Both call the same route definition and return `{ data, error, key }`. Local calls run
+endpoint validation/middleware, not outer HTTP/plugin lifecycle middleware; put shared
+authorization in endpoint middleware. Server caches are request-local and there is no HTTP
+fallback. The older `createAPIClient` and `createServerAPIClient` factories remain supported.
+Calls such as `apiClient.products.get(...)` resolve to `{ data, error, key }` results for HTTP failures and support caching,
 invalidation, retries, callbacks, optimistic updates, `useMutation`, and `useFetcher`.
 
-For integration APIs, use `createIntegrations<AppIntegrations>()` and preserve the configured
-namespace:
+If the app also uses integrations, add the registry type to the same factory instead of creating
+a second pair:
 
 ```ts
-import { createIntegrations } from "@farm.js/core/client";
+import { createApiClients } from "@farm.js/core/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
 import type { AppIntegrations } from "./integrations";
 
-export const { api, apiClient } = createIntegrations<AppIntegrations>();
+export const { api, apiClient } = createApiClients<APIRouter, AppIntegrations>({
+  routes: apiRoutes,
+});
 ```
+
+Integration calls use `api.integrations.billing` / `apiClient.integrations.billing`. They retain
+their existing `{ data, error }` results and server-side HTTP fallback; the app-route cache and
+no-fallback guarantees above do not apply to integrations. Keep the registry value and provider
+SDKs server-only; import only `AppIntegrations` into the shared module. Shared integration
+defaults belong under the factory's `integrations` option and must be browser-safe.
+
+`createIntegrations<AppIntegrations>()` remains supported and is not deprecated. No migration is
+required. Use it for integration-only callers or deliberately separate modules; in the latter
+case, set `integrations: false` on the app-route `createApiClients()` setup. This only disables
+that caller namespace, not the configured integration or its HTTP routes.
+The separate factory exposes `api.billing` / `apiClient.billing` directly. Do not mix
+its call paths with the paired route factory's reserved `.integrations` namespace.
+
+Keep `createIntegrations()` when explicit source maps or separate setup-level server options
+(`request`, `forwardHeaders`, or server defaults) are needed. Shared `baseURL`, `headers`,
+`credentials`, and `data` defaults alone do not require it; the paired factory accepts those
+under `integrations` and supports server integration overrides per call. Keep request-bound
+callers inside server request scope. A separate server-options argument does not make an import
+server-only or protect secrets placed in a browser-reachable module.
 
 Use `createServerFn` for typed mutations/actions and `createServerQuery` for typed reads,
 deduplication, prefetch, stale-while-revalidate, focus/reconnect refresh, and structured invalidation.
@@ -261,7 +319,8 @@ export const appIntegrations = {
 export type AppIntegrations = typeof appIntegrations;
 ```
 
-The object key is the application namespace, so `billing` becomes `api.billing`. An integration
+The object key is the application namespace, so `billing` becomes `api.integrations.billing`
+with `createApiClients`, or `api.billing` with integration-only `createIntegrations`. An integration
 may contribute routes/endpoints, typed callers, middleware, React providers, database schemas,
 validated config, plugins, setup/ready/dispose hooks, and runtime logs. Prefer `integrationRoute.*`
 or `endpoint.*` when the integration owns handlers and should generate caller types. An explicit
@@ -288,7 +347,8 @@ integrations, UI registries, and ORM-backed data.
 
 Provider adapters support two ownership modes: pass credentials so the adapter constructs its
 default SDK, or pass an app-owned vendor client through `instance`. Keep the vendor instance in a
-server-only module. Export the integration registry type so `createIntegrations` can infer callers.
+server-only module. Export the integration registry type so the shared caller factory can infer
+integration operations without importing provider code at runtime.
 
 For ordinary email/password auth, install `@farm.js/auth` and use top-level `auth: true`. Read
 sessions through `auth.session()` or `auth.user()` from `@farm.js/auth/server`, and run
@@ -353,7 +413,7 @@ export const GET = cronRoute(async () => {
 });
 ```
 
-Use `farm cron list`, `farm cron run dailyCleanup`, or the opt-in local scheduler `farm dev --cron`. `cronRoute()` verifies `CRON_SECRET` when configured and fails closed in production when it is missing.
+Use `farm cron list`, `farm cron run dailyCleanup`, or the opt-in local scheduler `farm dev --cron`. `cronRoute()` verifies `CRON_SECRET` when configured and fails closed outside development and test when it is missing.
 
 Builds always emit `.farm/cron-manifest.json`. Vercel compiles entries to Build Output API crons, Cloudflare Workers using `cloudflare-module` get Wrangler triggers, and Node/Bun/Deno targets use Nitro scheduling. Treat delivery as at least once: make handlers idempotent and use uniqueness keys or distributed locks where overlap matters. Use the Jobs integration for durable retries, steps, queues, status, or long-running work. The older `defineCron()` API is compatibility-only; new apps use config plus a route.
 
@@ -430,9 +490,9 @@ run its client generation immediately before type checking or building.
 
 ## Common Pitfalls
 
-- Import `Link`, `createAPIClient`, and `createIntegrations` from current documented client entries.
+- Import `Link`, `createApiClients`, and `createIntegrations` from current documented client entries.
 - Do not put server SDKs or secrets in `"use client"` modules.
-- Keep `AppIntegrations` exported so `createIntegrations<AppIntegrations>()` can infer types.
+- Keep `AppIntegrations` exported so `createApiClients<APIRouter, AppIntegrations>()` can infer integration types.
 - For Supabase/custom route APIs, method calls may be nested, for example `.login.post(...)`, not `.login(...)`.
 - Do not mix renderer component formats, top-level auth with `integrations.auth`, or mismatched Farm package versions.
 - Do not import server query handlers into the browser without the server-function transform.

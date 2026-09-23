@@ -14,6 +14,7 @@ export type {
   DefaultRoutePattern,
   DefaultRouteHref,
   ExternalHref,
+  LinkExternalUriSchemes,
   RouteHref,
   RouteParamValue,
   RouteOptionalParamValue,
@@ -34,8 +35,14 @@ export type {
   FarmRouterRoute,
   FarmRouterRouteInput,
 } from "../router";
-export { APIClientError, createAPIClient, createServerAPIClient } from "../api/client";
+export {
+  APIClientError,
+  createApiClients,
+  createAPIClient,
+  createServerAPIClient,
+} from "../api/client";
 export type {
+  ApiClients,
   APIClient,
   APIClientOptions,
   APIClientSystemError,

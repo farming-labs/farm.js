@@ -134,25 +134,29 @@ export default defineConfig({
 });
 ```
 
-| Option                | Behavior                                                                                                                 |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `provider`            | `auto` uses Sharp on Node, Vercel, and Netlify, and Cloudflare Images on Cloudflare. Use `none` to disable optimization. |
-| `path`                | Public optimizer endpoint used by `Image` and the server runtime.                                                        |
-| `deviceSizes`         | Responsive viewport widths accepted by the endpoint.                                                                     |
-| `imageSizes`          | Smaller fixed image widths accepted by the endpoint.                                                                     |
-| `qualities`           | Quality allowlist. `Image` selects the nearest configured value.                                                         |
-| `formats`             | Preferred modern output formats, negotiated through the request `Accept` header and its quality values.                  |
-| `minimumCacheTTL`     | Browser and in-process transformed-image cache lifetime in seconds.                                                      |
-| `maximumResponseBody` | Maximum source and transformed body size. Accepts bytes or values such as `"10mb"`.                                      |
-| `maximumRedirects`    | Maximum remote redirects; every destination is checked again.                                                            |
-| `localPatterns`       | Allowed same-origin paths. The default is `/**`.                                                                         |
-| `remotePatterns`      | Allowed remote protocols, hostnames, ports, paths, and queries.                                                          |
+| Option                | Behavior                                                                                                                                       |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`            | `auto` uses Sharp on Node, Vercel, and Netlify, and Cloudflare Images on Cloudflare. Use `none` to disable optimization.                       |
+| `path`                | Root-relative optimizer endpoint used by `Image` and the server runtime. URLs, dot segments, backslashes, and encoded separators are rejected. |
+| `deviceSizes`         | Responsive viewport widths accepted by the endpoint.                                                                                           |
+| `imageSizes`          | Smaller fixed image widths accepted by the endpoint.                                                                                           |
+| `qualities`           | Quality allowlist. `Image` selects the nearest configured value.                                                                               |
+| `formats`             | Preferred modern output formats, negotiated through the request `Accept` header and its quality values.                                        |
+| `minimumCacheTTL`     | Browser and in-process transformed-image cache lifetime in seconds.                                                                            |
+| `maximumResponseBody` | Maximum source and transformed body size. Accepts bytes or values such as `"10mb"`.                                                            |
+| `maximumRedirects`    | Maximum remote redirects; every destination is checked again.                                                                                  |
+| `localPatterns`       | Allowed same-origin paths. The default is `/**`.                                                                                               |
+| `remotePatterns`      | Allowed remote protocols, hostnames, ports, paths, and queries.                                                                                |
 
 Pass a `loader` prop when an application already uses an image CDN. The loader receives `src`, `width`, and the configured `quality` and must return the final URL.
 
 ## Security model
 
-The optimizer accepts only configured widths and qualities. It does not forward browser cookies or authorization headers, limits response bodies, checks file signatures instead of trusting `Content-Type`, revalidates redirect destinations, and blocks loopback, link-local, and private network targets.
+The optimizer accepts only configured widths and qualities. It does not forward browser cookies or authorization headers, limits response bodies, checks file signatures instead of trusting `Content-Type`, revalidates redirect destinations, and blocks loopback, link-local, and private network targets. On Node, Farm validates the DNS addresses used by the actual image connection so a hostname cannot switch to a private target between an earlier check and the fetch.
+
+An oversized source returns `413` whether its size is declared in `Content-Length` or discovered
+while reading. Farm cancels the source without waiting for cleanup; a failed cleanup cannot
+replace that response with a `500`.
 Formats explicitly rejected with `q=0` are never emitted. Farm uses the configured format order to
 break equal-quality ties and keeps the source format when the client only sends wildcard ranges.
 

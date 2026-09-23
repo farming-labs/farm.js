@@ -474,6 +474,8 @@ test.describe("Framework feature integration", () => {
           source: "routes",
           message: "server-routes",
           caller: "server",
+          language: "en",
+          transport: null,
         }),
         endpoints: expect.objectContaining({
           source: "endpoints",
@@ -489,12 +491,36 @@ test.describe("Framework feature integration", () => {
     );
 
     await page.goto("/feature-lab/integrations");
+    await page.evaluate(() => {
+      document.documentElement.lang = "fr";
+      const events: string[] = [];
+      (window as any).__integrationEvents = events;
+      for (const name of ["request", "response"]) {
+        window.addEventListener(`integration-lab:${name}`, (event) => {
+          const { method, path, status } = (event as CustomEvent).detail;
+          events.push(`${name}:${method}:${path}:${status ?? ""}`);
+        });
+      }
+    });
 
     await page.getByTestId("call-integration-routes").click();
     await expect(page.getByTestId("integration-client-routes")).toContainText(
       '"message":"browser-routes"',
     );
     await expect(page.getByTestId("integration-client-routes")).toContainText('"caller":"browser"');
+    await expect(page.getByTestId("integration-client-routes")).toContainText('"language":"fr"');
+    expect(await page.evaluate(() => (window as any).__integrationEvents)).toEqual([
+      "request:POST:/api/route-lab/message:",
+      "response:POST:/api/route-lab/message:200",
+    ]);
+    await expect(page.getByTestId("integration-client-routes")).toContainText(
+      '"transport":"custom-fetch"',
+    );
+    await page.evaluate(() => {
+      document.documentElement.lang = "es";
+    });
+    await page.getByTestId("call-integration-routes").click();
+    await expect(page.getByTestId("integration-client-routes")).toContainText('"language":"es"');
 
     await page.getByTestId("call-integration-endpoints").click();
     await expect(page.getByTestId("integration-client-endpoints")).toContainText(

@@ -40,7 +40,7 @@ Typed params, API routes, API callers, KV storage, and database access.
 
 - [Query and Params](/docs/query): Parse search params and route params with typed helpers on the server and synchronized state on the client.
 - [API Routes](/docs/api-routes): Expose HTTP handlers from src/app/api and validate input with schemas before handler code runs.
-- [API Client](/docs/api-client): Call app API routes with api.hello.get style inference, cache policies, invalidation, retries, callbacks, and optimistic updates.
+- [API Client](/docs/api-client): Define one shared `{ api, apiClient }` pair for typed local server calls and HTTP calls, with cache policies, invalidation, retries, callbacks, and optimistic updates.
 - [Server Queries](/docs/server-queries): Define typed server reads once, deduplicate requests, prefetch browser data, use SWR, and share invalidation keys with routes and APIs.
 - [KV Storage](/docs/storage): Use `getStorage()` for caches, settings, counters, idempotency records, and object-backed values.
 
@@ -84,8 +84,17 @@ Docs runtime, markdown mirrors, and OpenAPI.
 Plugin system and lifecycle hooks.
 
 - [Plugin Ecosystem](/docs/plugins): Extend server and browser behavior across config, requests, routing, rendering, hydration, navigation, builds, and HMR.
+- [Hints Plugin](/docs/plugins/hints): Find accessibility, Web Vitals, HTML, and third-party script problems on the route you are developing.
+- [Content Plugin](/docs/plugins/content): Validate local Markdown, MDX, JSON, and YAML as typed server collections without a second config file.
+- [Federation Plugin](/docs/plugins/federation): Publish and load independently deployed browser modules while Farm keeps server code and credentials isolated.
+- [Partytown Plugin](/docs/plugins/partytown): Move explicitly opted-in analytics and tag-manager scripts into a web worker with typed callers.
 - [PWA Plugin](/docs/plugins/pwa): Generate a route-aware service worker with offline navigation, update prompts, and concise SWR image caching.
+- [Search Plugin](/docs/plugins/search): Build a chunked index from static pages and query it through a typed, renderer-neutral browser client.
+- [Scripts Plugin](/docs/plugins/scripts): Load external browser SDKs with typed handles, deliberate timing, consent gates, dependencies, and retries.
 - [Sentry Plugin](/docs/plugins/sentry): Report server errors with route context and trace Farm requests with `@sentry/node`.
+- [StyleX Plugin](/docs/plugins/stylex): Compile StyleX with pre-paint development styles, CSS HMR, and extracted production CSS.
+- [WebAssembly Plugin](/docs/plugins/wasm): Import prebuilt Wasm modules in browser code and module workers.
+- [WebMCP Plugin](/docs/plugins/webmcp): Expose a small, explicit, typed browser tool surface to agents using the experimental WebMCP API.
 - [Create a Plugin](/docs/plugins/create-plugin): Build a plugin with definePlugin when app behavior belongs in reusable framework lifecycle hooks.
 - [Client Plugin API](/docs/plugins/client): Attach typed hydration, navigation, error, performance, and cleanup hooks to a plugin through a browser-safe module.
 

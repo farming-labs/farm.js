@@ -48,6 +48,8 @@ storage, integrations, observability, and deployment output.
 | React Server Components and optimized boundaries | Available experimentally | Not applicable                  | Not applicable       | Not applicable       | Not applicable       |
 | Other integration UI providers and starters      | Available                | Provider-specific compatibility | React-oriented today | React-oriented today | React-oriented today |
 
+In experimental React Server Components, synchronous page and layout components are rendered through React, including supported server hooks such as `useId()`. A string or variable containing `async` does not make a component asynchronous. Stateful hooks and effects still belong in Client Components.
+
 Preact resolves the React-shaped bindings through `preact/compat`. Solid exposes signal-backed
 getters, Vue exposes refs and computed values, and Svelte exposes readable stores. The underlying
 navigation, action, query-cache, theme, and i18n transports live in the renderer-neutral
@@ -96,9 +98,29 @@ export const customRenderer = defineRenderer({
       node: false,
       web: true,
     },
+    reconcilesRerenders: false,
   },
 });
 ```
+
+### Re-render behavior
+
+`reconcilesRerenders` states whether re-rendering an existing root diffs the new tree against the
+live DOM or rebuilds it.
+
+Virtual-DOM renderers (React, Preact, Vue) compare the incoming tree with what is mounted, so a
+client navigation that re-renders a shared layout keeps the matching DOM nodes along with their
+focus and component state.
+
+Compile-time fine-grained renderers (Solid, Svelte) have no virtual DOM to diff against. Their
+updates flow through bindings created when the elements were constructed, so a freshly materialized
+tree replaces the nodes. That is a property of those runtimes rather than a gap in their adapters.
+On those renderers, client state that must survive a navigation belongs in a root the navigation
+does not re-render, not in a shared layout.
+
+Renderers that do not declare the field are treated as rebuilding, so nothing silently depends on
+reconciliation it will not get. The shared renderer conformance suite asserts the behavior each
+renderer declares, so the flag cannot drift away from what the adapter actually does.
 
 FARMJS builds the production client and SSR graphs in parallel by default. If a renderer's compiler
 plugin uses process-global mutable caches, set `buildConcurrency: "serial"` on its descriptor. The
@@ -149,7 +171,7 @@ renderers; rewrite component and client-state code using the selected renderer's
 The Basic and Better Auth templates support every renderer directly:
 
 ```bash
-pnpm create @farm.js/app@beta my-auth-app --template better-auth --renderer vue --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-auth-app --template better-auth --renderer vue --typescript
 ```
 
 Other integration starter templates currently target React. Add their renderer-neutral server

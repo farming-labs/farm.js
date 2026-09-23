@@ -24,13 +24,27 @@
 
 import type { Plugin, ViteDevServer } from "vite";
 import { _withAfterNodeMiddleware } from "@farm.js/core/after";
-import { invokeAPIRouteEndpoint } from "@farm.js/core/api/runtime";
+import {
+  _runWithAPIRequestRuntime,
+  createFarmRequestBodyErrorResponse,
+  readNodeRequestBody,
+  resolveFarmServerConfig,
+} from "@farm.js/core/internal/production-runtime";
+import {
+  getAllowedAPIRouteMethods,
+  invokeAPIRouteEndpoint,
+  matchAPIRouteAtBasePath,
+  resolveAPIRouteEndpoint,
+} from "@farm.js/core/api/runtime";
+import { sendWebResponse } from "@farm.js/core/server";
 
 export interface FarmApiOptions {
   /** Source directory containing the api folder (default: 'src') */
   srcDir?: string;
   /** Enable debug logging */
   debug?: boolean;
+  /** Maximum request body size, for example `"10mb"`. */
+  bodySizeLimit?: number | string;
 }
 
 export interface ApiRoute {
@@ -46,6 +60,9 @@ export interface ApiRoute {
 export default function farmApi(options: FarmApiOptions = {}): Plugin {
   const srcDir = options.srcDir ?? "src";
   const debug = options.debug ?? false;
+  const bodySizeLimit = resolveFarmServerConfig({
+    bodySizeLimit: options.bodySizeLimit,
+  }).bodySizeLimit;
 
   // API routes cache
   let apiRoutesCache: Map<string, ApiRoute> = new Map();
@@ -104,25 +121,32 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
         const method = request.method;
         const pathname = url.pathname;
 
-        // Find matching route
-        const route = apiRoutesCache.get(pathname);
-        if (!route) {
+        // Match through core's matcher, the same one the production entry
+        // uses, so dynamic segments resolve here too. An exact Map lookup
+        // registers `src/api/users/[id]/route.ts` under the literal
+        // "/api/users/[id]" and 404s every real request for it.
+        const match = matchAPIRouteAtBasePath(apiRoutesCache, pathname);
+        if (!match) {
           return new Response(JSON.stringify({ error: "Not Found" }), {
             status: 404,
             headers: { "Content-Type": "application/json" },
           });
         }
 
-        const endpoint = route.endpoints[method];
+        const route = match.route;
+        const endpoint = resolveAPIRouteEndpoint(route, method);
         if (!endpoint) {
           return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
             status: 405,
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              Allow: getAllowedAPIRouteMethods(route).join(", "),
+              "Content-Type": "application/json",
+            },
           });
         }
 
         try {
-          return await invokeAPIRouteEndpoint(endpoint, request);
+          return await invokeAPIRouteEndpoint(endpoint, request, match.params);
         } catch (error: any) {
           return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
             status: 500,
@@ -141,20 +165,23 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
       const url = new URL(request.url);
       const method = request.method;
 
-      // Find matching route
-      const route = apiRoutesCache.get(url.pathname);
-      if (!route) {
+      // Same core matcher as above so dynamic segments resolve here too.
+      const match = matchAPIRouteAtBasePath(apiRoutesCache, url.pathname);
+      if (!match) {
         return new Response(JSON.stringify({ error: "Not Found" }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
         });
       }
 
-      const endpoint = route.endpoints[method];
+      const endpoint = resolveAPIRouteEndpoint(match.route, method);
       if (!endpoint) {
         return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
           status: 405,
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            Allow: getAllowedAPIRouteMethods(match.route).join(", "),
+            "Content-Type": "application/json",
+          },
         });
       }
 
@@ -326,93 +353,98 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
 
       // Add middleware to handle API requests
       return () => {
-        server.middlewares.use(
-          _withAfterNodeMiddleware(async (req, res, next) => {
-            const url = req.url || "/";
-            const pathname = url.split("?")[0];
-            const method = req.method || "GET";
+        const apiMiddleware = _withAfterNodeMiddleware(async (req, res, next) => {
+          const url = req.url || "/";
+          const pathname = url.split("?")[0];
+          const method = req.method || "GET";
 
-            // Only handle /api/ routes
-            if (!pathname.startsWith("/api/")) {
-              return next();
-            }
+          // Only handle /api/ routes
+          if (!pathname.startsWith("/api/")) {
+            return next();
+          }
 
-            // Wait for discovery
-            if (discoveryPromise && !discoveryComplete) {
-              await discoveryPromise;
-            }
+          // Wait for discovery
+          if (discoveryPromise && !discoveryComplete) {
+            await discoveryPromise;
+          }
 
-            if (!apiRouterHandler) {
-              return next();
-            }
+          if (!apiRouterHandler) {
+            return next();
+          }
 
-            const startTime = Date.now();
+          const startTime = Date.now();
 
-            try {
-              // Execute middleware if available
-              const farmMiddleware = (server as any).__farmMiddleware__;
-              if (farmMiddleware) {
-                await farmMiddleware.waitForDiscovery?.();
-                const middlewareData = new Map<string, any>();
-                const handled = await farmMiddleware.execute(req, res, pathname, middlewareData);
-                if (handled) {
-                  const duration = Date.now() - startTime;
-                  logResponse(method, pathname, res.statusCode || 200, duration);
-                  return;
-                }
+          try {
+            // Execute middleware if available
+            const farmMiddleware = (server as any).__farmMiddleware__;
+            if (farmMiddleware) {
+              await farmMiddleware.waitForDiscovery?.();
+              const middlewareData = new Map<string, any>();
+              const handled = await farmMiddleware.execute(req, res, pathname, middlewareData);
+              if (handled) {
+                const duration = Date.now() - startTime;
+                logResponse(method, pathname, res.statusCode || 200, duration);
+                return;
               }
-
-              // Convert Node request to Web Request
-              const fullUrl = `http://${req.headers.host || "localhost:3000"}${url}`;
-              const headers = new Headers();
-              for (const [key, value] of Object.entries(req.headers)) {
-                if (value) {
-                  headers.set(key, Array.isArray(value) ? value.join(", ") : value);
-                }
-              }
-
-              // Get body for non-GET requests
-              let body: string | undefined;
-              if (method !== "GET" && method !== "HEAD") {
-                body = await new Promise<string>((resolve) => {
-                  let data = "";
-                  req.on("data", (chunk: any) => {
-                    data += chunk;
-                  });
-                  req.on("end", () => {
-                    resolve(data);
-                  });
-                });
-              }
-
-              const request = new Request(fullUrl, {
-                method,
-                headers,
-                body: body || undefined,
-              });
-
-              const response = await apiRouterHandler(request);
-
-              const duration = Date.now() - startTime;
-              logResponse(method, pathname, response.status, duration);
-
-              // Send response
-              res.statusCode = response.status;
-              response.headers.forEach((value, key) => {
-                res.setHeader(key, value);
-              });
-
-              const responseBody = await response.text();
-              res.end(responseBody);
-            } catch (error: any) {
-              const duration = Date.now() - startTime;
-              logResponse(method, pathname, 500, duration);
-              console.error("[FARM] API error:", error);
-              res.statusCode = 500;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "Internal server error" }));
             }
-          }),
+
+            // Convert Node request to Web Request
+            const fullUrl = `http://${req.headers.host || "localhost:3000"}${url}`;
+            const headers = new Headers();
+            for (const [key, value] of Object.entries(req.headers)) {
+              if (value) {
+                headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+              }
+            }
+
+            // Get body for non-GET requests
+            let body: Buffer | undefined;
+            if (method !== "GET" && method !== "HEAD") {
+              body = await readNodeRequestBody(req as any, bodySizeLimit);
+            }
+
+            const request = new Request(fullUrl, {
+              method,
+              headers,
+              body: body
+                ? (body.buffer.slice(
+                    body.byteOffset,
+                    body.byteOffset + body.byteLength,
+                  ) as ArrayBuffer)
+                : undefined,
+            });
+
+            const response = await apiRouterHandler(request);
+
+            const duration = Date.now() - startTime;
+            logResponse(method, pathname, response.status, duration);
+
+            await sendWebResponse(res, response);
+          } catch (error: any) {
+            const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
+            if (bodyErrorResponse) {
+              await sendWebResponse(res, bodyErrorResponse);
+              return;
+            }
+            const duration = Date.now() - startTime;
+            logResponse(method, pathname, 500, duration);
+            console.error("[FARM] API error:", error);
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "Internal server error" }));
+          }
+        });
+        server.middlewares.use((req, res, next) =>
+          _runWithAPIRequestRuntime(
+            {
+              basePath: "/api",
+              dispatch: async (request) =>
+                apiRouterHandler
+                  ? apiRouterHandler(request)
+                  : Response.json({ error: "Not Found" }, { status: 404 }),
+            },
+            () => apiMiddleware(req, res, next),
+          ),
         );
       };
     },

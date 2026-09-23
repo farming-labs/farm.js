@@ -1,22 +1,33 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const docsRoot = path.join(repositoryRoot, "docs", "src", "app", "docs");
 const configPath = path.join(repositoryRoot, "docs", "docs.config.ts");
+const packagesRoot = path.join(repositoryRoot, "packages");
 
 const pages = collectDocsPages(docsRoot);
 const navigation = readNavigationSlugs(configPath);
 const visiblePages = new Set(pages.filter((page) => !page.hidden).map((page) => page.slug));
 const hiddenPages = new Set(pages.filter((page) => page.hidden).map((page) => page.slug));
+const officialPluginSlugs = collectOfficialPluginSlugs(packagesRoot);
 
 const missing = [...visiblePages].filter((slug) => !navigation.has(slug)).sort();
 const unknown = [...navigation]
   .filter((slug) => !visiblePages.has(slug) && !hiddenPages.has(slug))
   .sort();
+const missingPluginPages = officialPluginSlugs.filter(
+  (slug) => !visiblePages.has(slug) && !hiddenPages.has(slug),
+);
+const missingPluginNavigation = officialPluginSlugs.filter((slug) => !navigation.has(slug));
 
-if (missing.length || unknown.length) {
+if (
+  missing.length ||
+  unknown.length ||
+  missingPluginPages.length ||
+  missingPluginNavigation.length
+) {
   const messages = ["Farm docs navigation coverage failed."];
   if (missing.length) {
     messages.push(
@@ -32,12 +43,46 @@ if (missing.length || unknown.length) {
       ...unknown.map((slug) => `  - ${slug || "<docs index>"}`),
     );
   }
+  if (missingPluginPages.length) {
+    messages.push(
+      "",
+      "Official plugin packages missing a docs page:",
+      ...missingPluginPages.map((slug) => `  - /docs/${slug}`),
+    );
+  }
+  if (missingPluginNavigation.length) {
+    messages.push(
+      "",
+      "Official plugin docs missing from the sidebar:",
+      ...missingPluginNavigation.map((slug) => `  - /docs/${slug}`),
+    );
+  }
   console.error(messages.join("\n"));
   process.exitCode = 1;
 } else {
   console.log(
-    `Docs navigation covers ${visiblePages.size} visible pages (${hiddenPages.size} explicitly hidden).`,
+    `Docs navigation covers ${visiblePages.size} visible pages and ${officialPluginSlugs.length} official plugins (${hiddenPages.size} explicitly hidden).`,
   );
+}
+
+function collectOfficialPluginSlugs(directory) {
+  const slugs = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    const packageRoot = path.join(directory, entry.name);
+    const manifestPath = path.join(packageRoot, "package.json");
+    const indexPath = path.join(packageRoot, "src", "index.ts");
+    if (!existsSync(manifestPath) || !existsSync(indexPath)) continue;
+
+    const source = readFileSync(indexPath, "utf8");
+    if (!/\bname\s*:\s*["'`]farm:[^"'`]+["'`]/.test(source)) continue;
+
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    if (manifest.private || typeof manifest.name !== "string") continue;
+    if (!manifest.name.startsWith("@farm.js/")) continue;
+    slugs.push(`plugins/${manifest.name.slice("@farm.js/".length)}`);
+  }
+  return slugs.sort();
 }
 
 function collectDocsPages(directory) {

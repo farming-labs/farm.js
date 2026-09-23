@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from "./client";
+  import { apiClient } from "./api";
 
   let message = $state("Ready for a typed server call.");
   let detail = $state("createServerFn is waiting on the server");
@@ -11,7 +11,7 @@
     failed = false;
 
     try {
-      const result = await api.greeting.post({
+      const result = await apiClient.greeting.post({
         body: { name: "Svelte" },
       });
 

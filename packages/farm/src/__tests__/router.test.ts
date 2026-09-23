@@ -34,6 +34,56 @@ describe("createFarmRouter", () => {
       slug: "getting-started",
     });
   });
+
+  it("rejects non-terminal catch-all patterns", () => {
+    expect(() => createFarmRouter(["/docs/[...slug]/edit"])).toThrow(
+      'Catch-all segment "[...slug]" must be the final segment',
+    );
+    expect(() => matchFarmRoute("/docs/*slug/edit", "/docs/guide/edit")).toThrow(
+      'Catch-all segment "*slug" must be the final segment',
+    );
+    expect(() => buildFarmRoutePath("\\docs\\[...slug]\\edit", { slug: "guide" })).toThrow(
+      'Catch-all segment "[...slug]" must be the final segment',
+    );
+    expect(buildFarmRoutePath("/docs/[...slug]/()", { slug: "guide" })).toBe("/docs/guide");
+  });
+
+  it("rejects duplicate parameter names within a route", () => {
+    expect(() => createFarmRouter(["/teams/[id]/members/[id]"])).toThrow(
+      'Duplicate route parameter "id"',
+    );
+    expect(() => matchFarmRoute("/docs/:slug/*slug", "/docs/core/routing")).toThrow(
+      'Duplicate route parameter "slug"',
+    );
+  });
+
+  it("rejects prototype-sensitive names in router patterns", () => {
+    expect(() => createFarmRouter(["/users/:constructor"])).toThrow(
+      'Route parameter "constructor"',
+    );
+    expect(() => matchFarmRoute("/docs/*__proto__", "/docs/core/routing")).toThrow(
+      'Route parameter "__proto__"',
+    );
+  });
+
+  it("rejects routes that differ only by parameter names", () => {
+    expect(() => createFarmRouter(["/users/[id]", "/users/[slug]"])).toThrow(
+      'Ambiguous route patterns "/users/[id]" and "/users/[slug]" match the same URLs.',
+    );
+  });
+
+  it("keeps literal bracket syntax and encoded segment boundaries distinct", () => {
+    const router = createFarmRouter([
+      "/docs/[not.valid]",
+      "/docs/[id]",
+      "/files/a%2Fb",
+      "/files/a/b",
+    ]);
+
+    expect(router.match("/docs/%5Bnot.valid%5D")?.route.path).toBe("/docs/[not.valid]");
+    expect(router.match("/files/a%2Fb")?.route.path).toBe("/files/a%2Fb");
+    expect(router.match("/files/a/b")?.route.path).toBe("/files/a/b");
+  });
 });
 
 describe("route helpers", () => {
@@ -88,5 +138,9 @@ describe("route helpers", () => {
     );
     expect(isFarmRouteActive("/users/[id]", "/users", { exact: false })).toBe(false);
     expect(isFarmRouteActive("/users/[id]", "/projects/42/settings", { exact: false })).toBe(false);
+    expect(isFarmRouteActive("/docs/[[...slug]]", "/docs", { exact: false })).toBe(true);
+    expect(isFarmRouteActive("/docs/[[...slug]]", "/docs/core/routing", { exact: false })).toBe(
+      true,
+    );
   });
 });

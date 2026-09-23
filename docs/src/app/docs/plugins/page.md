@@ -12,11 +12,22 @@ Use an [integration](/docs/integrations) for a product or service such as authen
 
 ## Official plugins
 
-| Plugin                             | Purpose                                                                                        |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------- |
-| [Analyzer](/docs/plugins/analyzer) | Explain page, client, and server build size and enforce readable CI limits.                    |
-| [PWA](/docs/plugins/pwa)           | Generate a route-aware service worker for offline navigation, caching, and safe updates.       |
-| [Sentry](/docs/plugins/sentry)     | Report server errors with Farm event and route context, trace requests, and flush on shutdown. |
+| Plugin                                 | Purpose                                                                                           |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| [Analyzer](/docs/plugins/analyzer)     | Explain page, client, and server build size and enforce readable CI limits.                       |
+| [Content](/docs/plugins/content)       | Validate local Markdown, MDX, JSON, and YAML as typed server collections.                         |
+| [DevTools](/docs/plugins/devtools)     | Inspect routes, runtime configuration, diagnostics, and browser module output during development. |
+| [Federation](/docs/plugins/federation) | Publish and load independently deployed browser modules while server capabilities stay local.     |
+| [Hints](/docs/plugins/hints)           | Find accessibility, performance, HTML, and third-party problems in the live development page.     |
+| [MSW](/docs/plugins/msw)               | Share request handlers across development SSR and the browser without shipping production mocks.  |
+| [Partytown](/docs/plugins/partytown)   | Move explicitly opted-in third-party scripts from the main thread into a web worker.              |
+| [PWA](/docs/plugins/pwa)               | Generate a route-aware service worker for offline navigation, caching, and safe updates.          |
+| [Search](/docs/plugins/search)         | Generate a chunked browser search index from emitted static pages.                                |
+| [Scripts](/docs/plugins/scripts)       | Load external browser SDKs with typed handles, timing, consent, dependencies, and retries.        |
+| [Sentry](/docs/plugins/sentry)         | Report server errors with Farm event and route context, trace requests, and flush on shutdown.    |
+| [StyleX](/docs/plugins/stylex)         | Compile StyleX with pre-paint development styles, CSS HMR, and extracted production CSS.          |
+| [WebAssembly](/docs/plugins/wasm)      | Import prebuilt Wasm modules in browser code and module workers.                                  |
+| [WebMCP](/docs/plugins/webmcp)         | Expose explicit, typed browser tools to agents through the experimental WebMCP API.               |
 
 Each published plugin has its own setup page in this section. Use [Create a Plugin](/docs/plugins/create-plugin) when the behavior is specific to your application or package.
 
@@ -177,6 +188,10 @@ Both hooks receive Farm's plugin context. `setup` additionally receives the reso
 | `runtime.close`   | During graceful shutdown in long-running Node output.        | Nothing.                                                         |
 
 Runtime hooks apply to page, API, server-action, integration, docs, asset, and general requests. Use the event's `kind` and `route` values when behavior should apply only to part of the application.
+
+Direct `api` calls from [`createApiClients()`](/docs/api-client#server-callers) invoke an endpoint
+inside the current request; they do not create another plugin request lifecycle. Endpoint
+`middleware` still runs. Use endpoint middleware for authorization needed by both direct and HTTP callers.
 
 ### Runtime event values
 

@@ -42,6 +42,15 @@ test("resolves a start plan for the node target and maps port/host to Nitro env 
   });
 });
 
+test("rejects invalid start ports before spawning the server", async () => {
+  for (const port of ["3000oops", "1.5", 0, 65536]) {
+    await assert.rejects(
+      createFarmStartPlan({ port }),
+      /--port must be an integer between 1 and 65535/,
+    );
+  }
+});
+
 test("defaults to the node-server preset when no deploy target is configured", async () => {
   await withTempRoot("farm-cli-start-default-", async (root) => {
     await writeFile(path.join(root, "farm.config.mjs"), "export default {};\n");

@@ -1,12 +1,18 @@
 export { _runWithAfterRequest } from "../after";
+export { farmSecretsMatch } from "../secret-compare";
+export type { FarmServerConfig } from "../server-http";
 export {
   bufferFarmRequestBody,
+  createFarmNodeRequestAbortSignal,
   createFarmRequestBodyErrorResponse,
+  matchesFarmIfNoneMatch,
   readFarmRequestBody,
+  readNodeRequestBody,
   resolveFarmServerConfig,
 } from "../server-http";
 export { createFarmProductionLifecycle } from "../production-lifecycle";
 export { _runWithCurrentRequest, getCurrentRequest } from "../server/request";
+export { _runWithAPIRequestRuntime } from "../api/server-context";
 export {
   configureFarmCache,
   createFarmCacheKey,
@@ -55,10 +61,20 @@ export {
   reportFarmPreloadWarnings,
 } from "../preload";
 export { searchParamsToObject } from "../search-params";
+export { parseRoutePath, matchRoute as matchFarmPageRoute } from "../utils";
+export { compareRouteSpecificity, getRoutePatternSpecificity } from "../routing/specificity";
+export { createFarmLegacyRequest } from "./legacy-request";
+export {
+  renderFarmLegacyErrorHtml,
+  renderFarmLegacyHtml,
+  serializeFarmInlineValue,
+} from "./legacy-runtime";
 export {
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
 } from "../trailing-slash";
+export { applyFarmBasePath, setFarmBasePath, stripFarmBasePath } from "../base-path";
+export { appendFarmRedirectQuery } from "../redirect-query";
 
 export function appendFarmLinkHeader(headers: Headers, value: string): void {
   const current = headers.get("Link");

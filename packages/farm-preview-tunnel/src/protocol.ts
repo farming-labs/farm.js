@@ -7,6 +7,7 @@ export interface ReadyMessage {
   type: "ready";
   sessionId: string;
   publicUrl: string;
+  maxResponseBodyBytes?: number;
 }
 
 export interface TunnelRequestMessage {
@@ -16,6 +17,11 @@ export interface TunnelRequestMessage {
   path: string;
   headers: Record<string, string>;
   body?: string;
+}
+
+export interface TunnelCancelMessage {
+  type: "cancel";
+  id: string;
 }
 
 export interface TunnelResponseMessage {
@@ -33,7 +39,11 @@ export interface TunnelErrorMessage {
 }
 
 export type AgentToRelayMessage = RegisterMessage | TunnelResponseMessage;
-export type RelayToAgentMessage = ReadyMessage | TunnelRequestMessage | TunnelErrorMessage;
+export type RelayToAgentMessage =
+  | ReadyMessage
+  | TunnelRequestMessage
+  | TunnelCancelMessage
+  | TunnelErrorMessage;
 
 export function isAgentToRelayMessage(value: unknown): value is AgentToRelayMessage {
   if (!isRecord(value)) return false;
@@ -44,13 +54,21 @@ export function isAgentToRelayMessage(value: unknown): value is AgentToRelayMess
 export function isRelayToAgentMessage(value: unknown): value is RelayToAgentMessage {
   if (!isRecord(value)) return false;
   if (value.type === "ready") {
-    return typeof value.sessionId === "string" && typeof value.publicUrl === "string";
+    return (
+      typeof value.sessionId === "string" &&
+      typeof value.publicUrl === "string" &&
+      (value.maxResponseBodyBytes === undefined ||
+        (typeof value.maxResponseBodyBytes === "number" &&
+          Number.isSafeInteger(value.maxResponseBodyBytes) &&
+          value.maxResponseBodyBytes > 0))
+    );
   }
   if (value.type === "error") {
     return (
       (value.id === undefined || typeof value.id === "string") && typeof value.message === "string"
     );
   }
+  if (value.type === "cancel") return typeof value.id === "string";
   return value.type === "request" && isTunnelRequestMessage(value);
 }
 

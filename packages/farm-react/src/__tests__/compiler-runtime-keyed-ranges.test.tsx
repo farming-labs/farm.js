@@ -243,6 +243,11 @@ function rangeSnapshot(container: Element): string[] {
   );
 }
 
+function LocalFallbackCounter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount((previous) => previous + 1)}>Local: {count}</button>;
+}
+
 describe("compiled keyed DOM ranges", () => {
   it("owns the exact component root and keeps root bindings coherent", async () => {
     const metrics = { executions: 0, rangeRenders: 0 };
@@ -449,6 +454,183 @@ describe("compiled keyed DOM ranges", () => {
     expect(container.querySelector('[data-key="safe"]')?.textContent).toBe("0:Safe");
     expect(metrics.rangeRenders).toBe(3);
   });
+
+  it.each(
+    (["static", "hybrid"] as const).flatMap((reactivity) =>
+      (["nested container", "component root"] as const).flatMap((ownership) =>
+        (["mount", "hydrate"] as const).map((lifecycle) => ({
+          lifecycle,
+          ownership,
+          reactivity,
+          rootOwned: ownership === "component root",
+        })),
+      ),
+    ),
+  )(
+    "preserves React-owned state across safe fallback updates ($reactivity, $ownership, $lifecycle)",
+    async ({ lifecycle, reactivity, rootOwned }) => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      let updateItems: (next: CompilerStateUpdater) => void = () => undefined;
+      const initial = [
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Beta" },
+      ];
+      const FallbackRanges = createCompiledComponent({
+        displayName: "FallbackKeyedRangesState",
+        reactivity,
+        initialize: () => [initial],
+        render(_props: Record<string, never>, state, blocks) {
+          const items = () => state[0].get() as RangeItem[];
+          updateItems = (next) => state[0].set(next);
+          const KeyedRanges = blocks.KeyedRanges;
+          const range: CompilerKeyedRange = {
+            before: 1,
+            items,
+            rowKey: (item) => (item as RangeItem).id,
+            create: (item) => ({
+              kind: "element",
+              tag: "article",
+              attributes: [{ name: "data-key", value: (item as RangeItem).id }],
+              styles: [],
+              children: [(item as RangeItem).label],
+            }),
+            bindings: [
+              {
+                kind: "text",
+                path: [],
+                read: (item) => (item as RangeItem).label,
+              },
+            ],
+          };
+          const ranges = (
+            <KeyedRanges
+              id={0}
+              ranges={[range]}
+              render={() => (
+                <section data-surface="fallback-ranges">
+                  <aside>
+                    <LocalFallbackCounter />
+                    <input aria-label="Text" defaultValue="draft" />
+                    <textarea aria-label="Note" defaultValue="draft" />
+                    <select aria-label="Choice" defaultValue="a">
+                      <option value="a">A</option>
+                      <option value="b">B</option>
+                    </select>
+                  </aside>
+                  {items().map((item) => (
+                    <article data-key={item.id} key={item.id}>
+                      {item.label}
+                    </article>
+                  ))}
+                </section>
+              )}
+              trailing={0}
+            />
+          );
+          return rootOwned ? ranges : <main>{ranges}</main>;
+        },
+        bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+      });
+      const container = document.createElement("div");
+      document.body.append(container);
+      const tree = (
+        <StrictMode>
+          <FallbackRanges />
+        </StrictMode>
+      );
+      if (lifecycle === "hydrate") container.innerHTML = renderToString(tree);
+      const recoverable = vi.fn();
+      const root =
+        lifecycle === "hydrate"
+          ? hydrateRoot(container, tree, { onRecoverableError: recoverable })
+          : createRoot(container);
+      roots.add(root);
+      await act(async () => {
+        if (lifecycle === "mount") root.render(tree);
+        await flushCompilerUpdates();
+      });
+      expect(recoverable).not.toHaveBeenCalled();
+
+      // Duplicate keys force permanent React fallback. Returning to unique keys
+      // receives one final recovery remount before safe reconciliation resumes.
+      await act(async () => {
+        updateItems([
+          { id: "duplicate", label: "One" },
+          { id: "duplicate", label: "Two" },
+        ]);
+        await flushCompilerUpdates();
+      });
+      await act(async () => {
+        updateItems(initial);
+        await flushCompilerUpdates();
+      });
+
+      const surface = container.querySelector<HTMLElement>("[data-surface='fallback-ranges']")!;
+      const input = container.querySelector<HTMLInputElement>("input")!;
+      const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
+      const select = container.querySelector<HTMLSelectElement>("select")!;
+      await act(async () => surface.querySelector("button")!.click());
+      input.value = "typed text";
+      textarea.value = "typed note";
+      select.value = "b";
+      input.focus();
+      input.setSelectionRange(1, 4, "backward");
+
+      await act(async () => {
+        updateItems([
+          { id: "b", label: "Beta renamed" },
+          { id: "a", label: "Alpha renamed" },
+        ]);
+        await flushCompilerUpdates();
+      });
+
+      expect(container.querySelector("[data-surface='fallback-ranges']")).toBe(surface);
+      expect(container.querySelector("input")).toBe(input);
+      expect(container.querySelector("textarea")).toBe(textarea);
+      expect(container.querySelector("select")).toBe(select);
+      expect(input.value).toBe("typed text");
+      expect(textarea.value).toBe("typed note");
+      expect(select.value).toBe("b");
+      expect(surface.querySelector("button")?.textContent).toBe("Local: 1");
+      expect(document.activeElement).toBe(input);
+      expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([
+        1,
+        4,
+        "backward",
+      ]);
+      expect(
+        [...surface.querySelectorAll<HTMLElement>("article")].map((row) => row.textContent),
+      ).toEqual(["Beta renamed", "Alpha renamed"]);
+
+      // A later duplicate render and the first unique render after it must still
+      // use complete recovery resets instead of trusting ambiguous identities.
+      await act(async () => {
+        updateItems([
+          { id: "duplicate", label: "Again one" },
+          { id: "duplicate", label: "Again two" },
+        ]);
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector("input")).not.toBe(input);
+      expect(container.querySelector("button")?.textContent).toBe("Local: 0");
+
+      await act(async () => {
+        updateItems(initial);
+        await flushCompilerUpdates();
+      });
+      const recoveredInput = container.querySelector<HTMLInputElement>("input")!;
+      recoveredInput.value = "recovered";
+      await act(async () => {
+        updateItems([
+          { id: "a", label: "Alpha final" },
+          { id: "b", label: "Beta final" },
+        ]);
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector("input")).toBe(recoveredInput);
+      expect(recoveredInput.value).toBe("recovered");
+    },
+  );
 
   it("routes root-range update errors through the nearest error boundary", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);

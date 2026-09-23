@@ -18,7 +18,12 @@ describe("analyzeBuild", () => {
     expect(report.summary.pages).toBe(2);
     expect(report.pages.map((page) => page.route).sort()).toEqual(["/", "/about"]);
     const home = report.pages.find((page) => page.route === "/");
-    expect(home?.assets).toEqual(["assets/entry.js", "assets/shared.js", "assets/styles.css"]);
+    expect(home?.assets).toEqual([
+      "assets/entry.js",
+      "assets/shared.js",
+      "assets/styles.css",
+      "assets/theme.css",
+    ]);
     expect(home?.assets).not.toContain("assets/lazy.js");
     expect(report.clientAssets.find((asset) => asset.path === "assets/entry.js")?.usedByPages).toBe(
       2,
@@ -45,6 +50,36 @@ describe("analyzeBuild", () => {
     expect(violations.some((violation) => violation.kind === "server")).toBe(true);
     expect(violations.every((violation) => violation.metric === "raw")).toBe(true);
   });
+
+  it("ignores script and link tags inside HTML comments", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "farm-analyzer-"));
+    const publicDirectory = path.join(root, ".farm/.output/public");
+    await mkdir(publicDirectory, { recursive: true });
+    await Promise.all([
+      writeFile(
+        path.join(publicDirectory, "index.html"),
+        '<!-- <script type="module" src="/old.js"></script> -->\n' +
+          '<!-- <link rel="stylesheet" href="/old.css"> -->\n' +
+          '<script type="module" src="/entry.js"></script>\n' +
+          '<link rel="stylesheet" href="/theme.css">',
+      ),
+      writeFile(path.join(publicDirectory, "old.js"), "export const old = 1;"),
+      writeFile(path.join(publicDirectory, "old.css"), "body{color:red}"),
+      writeFile(path.join(publicDirectory, "entry.js"), "export const x = 1;"),
+      writeFile(path.join(publicDirectory, "theme.css"), ":root{color-scheme:dark}"),
+    ]);
+    const report = await analyzeBuild({
+      root,
+      distDir: ".farm",
+      outputDir: path.join(root, ".farm/.output"),
+      preset: "node-server",
+      metric: "raw",
+    });
+    const page = report.pages.find((p) => p.route === "/");
+    expect(page?.assets).toEqual(["entry.js", "theme.css"]);
+    expect(page?.assets).not.toContain("old.js");
+    expect(page?.assets).not.toContain("old.css");
+  });
 });
 
 describe("extractStaticImports", () => {
@@ -54,6 +89,18 @@ describe("extractStaticImports", () => {
         'import "./side-effect.js";import{x}from"./shared.js";export{y}from"./other.js";import("./lazy.js")',
       ),
     ).toEqual(["./side-effect.js", "./shared.js", "./other.js"]);
+  });
+
+  it("ignores import-shaped text in comments and strings", () => {
+    expect(
+      extractStaticImports(`
+        // import "./comment.js";
+        /* export { value } from "./block-comment.js"; */
+        const example = 'import value from "./string.js"';
+        import "./real.js";
+        export { value } from "./shared.js";
+      `),
+    ).toEqual(["./real.js", "./shared.js"]);
   });
 });
 
@@ -67,7 +114,7 @@ async function createBuildFixture(): Promise<string> {
   await Promise.all([
     writeFile(
       path.join(publicDirectory, "index.html"),
-      '<script type="module" src="/assets/entry.js"></script><link rel="stylesheet" href="/assets/styles.css">',
+      '<script data-example="a > b" type="module" src="/assets/entry.js"></script><link rel="stylesheet" href="/assets/styles.css">',
     ),
     writeFile(
       path.join(publicDirectory, "about/index.html"),
@@ -79,7 +126,11 @@ async function createBuildFixture(): Promise<string> {
     ),
     writeFile(path.join(publicDirectory, "assets/shared.js"), "export const x = 1;"),
     writeFile(path.join(publicDirectory, "assets/lazy.js"), "export const lazy = true;"),
-    writeFile(path.join(publicDirectory, "assets/styles.css"), "body{color:#123}"),
+    writeFile(
+      path.join(publicDirectory, "assets/styles.css"),
+      "@import url(./theme.css);body{color:#123}",
+    ),
+    writeFile(path.join(publicDirectory, "assets/theme.css"), ":root{color-scheme:dark}"),
     writeFile(path.join(publicDirectory, "logo.svg"), "<svg></svg>"),
     writeFile(path.join(serverDirectory, "index.mjs"), "export default {}"),
     writeFile(path.join(serverDirectory, "index.mjs.map"), "{}"),

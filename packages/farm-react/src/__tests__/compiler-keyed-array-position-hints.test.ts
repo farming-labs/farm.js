@@ -1,4 +1,7 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
+import { transformWithEsbuild } from "vite";
 import { compileReactModule } from "../compiler";
 import { normalizeReactCompilerOptions } from "../index";
 
@@ -30,6 +33,72 @@ describe("React AOT keyed-array position hints", () => {
     expect(result.code).toContain("createCompilerKeyedArrayPositionUpdate");
     expect(result.code).toContain("keyedRowsPositionHintedRuntimeFeature");
   });
+
+  it.each([
+    {
+      expression: "current.with(0, next)",
+      helper: "createCompilerKeyedArrayPositionUpdate",
+      name: "a native replacement",
+      runtimeFeature: "keyedRowsPositionHintedRuntimeFeature",
+    },
+    {
+      expression: "current.toSpliced(1, 0, next)",
+      helper: "createCompilerKeyedArrayPositionUpdate",
+      name: "a single insertion",
+      runtimeFeature: "keyedRowsPositionHintedRuntimeFeature",
+    },
+    {
+      expression: "current.toSpliced(0, 2)",
+      helper: "createCompilerKeyedArrayPositionUpdate",
+      name: "a range removal",
+      runtimeFeature: "keyedRowsPositionHintedRuntimeFeature",
+    },
+    {
+      expression: "current.toSpliced(0, 0, next, second)",
+      helper: "createCompilerKeyedArrayBatchInsert",
+      name: "a batch insertion",
+      runtimeFeature: "keyedRowsBatchPositionHintedRuntimeFeature",
+    },
+    {
+      expression: "current.toSpliced(0, 2, next, second)",
+      helper: "createCompilerKeyedArrayWindowReplace",
+      name: "an exact-window replacement",
+      runtimeFeature: "keyedRowsWindowPositionHintedRuntimeFeature",
+    },
+  ])(
+    "records $name from an exact updater block",
+    async ({ expression, helper, runtimeFeature }) => {
+      const result = await compile(`
+        import { useState } from "react";
+        export function Table({ next, second }) {
+          const [rows, setRows] = useState([
+            { id: "a", label: "Alpha" },
+            { id: "b", label: "Beta" },
+          ]);
+          return <section>
+            <button onClick={() => setRows((current) => {
+              return ${expression};
+            })}>Change</button>
+            <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+          </section>;
+        }
+      `);
+
+      expect(result.compiled).toEqual(["Table"]);
+      expect(result.diagnostics).toEqual([]);
+      expect(result.optimizations.keyedArrayPositionHints).toBe(1);
+      expect(result.code).toContain(helper);
+      expect(result.code).toContain(runtimeFeature);
+      await expect(
+        transformWithEsbuild(result.code, "/app/KeyedArrayPositionHints.tsx", {
+          loader: "tsx",
+          jsx: "automatic",
+        }),
+      ).resolves.toMatchObject({
+        code: expect.stringContaining(helper),
+      });
+    },
+  );
 
   it("supports safe static negative positions", async () => {
     const result = await compile(`
@@ -139,6 +208,30 @@ describe("React AOT keyed-array position hints", () => {
     expect(result.code).toContain("current.length - 1");
   });
 
+  it("records compiler-safe runtime delete-count expressions", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Table({ next, incoming, offset, deleteCount, counts }) {
+        const [rows, setRows] = useState([
+          { id: "a", label: "Alpha" },
+          { id: "b", label: "Beta" },
+          { id: "c", label: "Gamma" },
+        ]);
+        return <section>
+          <button onClick={() => setRows((current) => current.toSpliced(offset, deleteCount))}>Remove</button>
+          <button onClick={() => setRows((current) => current.toSpliced(offset, counts.window, next))}>Replace</button>
+          <button onClick={() => setRows((current) => current.toSpliced(offset, Math.trunc(deleteCount), ...incoming))}>Replace window</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </section>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Table"]);
+    expect(result.optimizations.keyedArrayPositionHints).toBe(3);
+    expect(result.code.match(/createCompilerKeyedArrayWindowReplace\(/g)).toHaveLength(3);
+    expect(result.code).toContain("keyedRowsWindowPositionHintedRuntimeFeature");
+  });
+
   it.each([
     {
       name: "an index-dependent row",
@@ -146,14 +239,24 @@ describe("React AOT keyed-array position hints", () => {
       update: "current.with(0, next)",
     },
     {
-      name: "a block-bodied updater",
+      name: "an updater block with a local declaration",
       row: "row => <li key={row.id}>{row.label}</li>",
-      update: "{ return current.with(0, next); }",
+      update: "{ const value = current.with(0, next); return value; }",
     },
     {
-      name: "a block-bodied removal updater",
+      name: "an updater block with conditional returns",
       row: "row => <li key={row.id}>{row.label}</li>",
-      update: "{ return current.toSpliced(0, 2); }",
+      update: "{ if (offset > 0) return current.toSpliced(0, 2); return current; }",
+    },
+    {
+      name: "an updater block without a return",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "{ current.toSpliced(0, 2); }",
+    },
+    {
+      name: "an updater block with a directive",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: '{ "use strict"; return current.with(0, next); }',
     },
     {
       name: "an unsafe incoming call",
@@ -176,11 +279,6 @@ describe("React AOT keyed-array position hints", () => {
       update: "current.toSpliced(0, 1.5)",
     },
     {
-      name: "a dynamic removal count",
-      row: "row => <li key={row.id}>{row.label}</li>",
-      update: "current.toSpliced(0, deleteCount)",
-    },
-    {
       name: "a computed removal method",
       row: "row => <li key={row.id}>{row.label}</li>",
       update: 'current["toSpliced"](0, 1)',
@@ -191,9 +289,19 @@ describe("React AOT keyed-array position hints", () => {
       update: "current.slice().toSpliced(0, 1)",
     },
     {
-      name: "a dynamic replacement count",
+      name: "a delete-count call",
       row: "row => <li key={row.id}>{row.label}</li>",
-      update: "current.toSpliced(0, deleteCount, next, next)",
+      update: "current.toSpliced(0, getDeleteCount(), next, next)",
+    },
+    {
+      name: "a delete-count assignment",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "current.toSpliced(0, deleteCount = 2, next, next)",
+    },
+    {
+      name: "a delete-count update expression",
+      row: "row => <li key={row.id}>{row.label}</li>",
+      update: "current.toSpliced(0, deleteCount++, next, next)",
     },
     {
       name: "an unsafe incoming spread call",
@@ -223,7 +331,7 @@ describe("React AOT keyed-array position hints", () => {
   ])("keeps $name off the position fast path", async ({ row, update }) => {
     const result = await compile(`
       import { useState } from "react";
-      export function Table({ next, offset, deleteCount, makeNext, getOffset }) {
+      export function Table({ next, offset, deleteCount, makeNext, getOffset, getDeleteCount }) {
         const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
         return <section>
           <button onClick={() => setRows((current) => ${update})}>Change</button>

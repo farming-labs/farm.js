@@ -138,6 +138,8 @@ if (portal.data?.redirectTo) {
 }
 ```
 
+Checkout and portal return paths must be same-origin, root-relative application paths. Protocol-relative paths such as `//example.com` are rejected.
+
 ## Billing owner
 
 Production billing usually needs an owner resolver. That resolver decides whether the billing account belongs to a user, organization, workspace, or team.

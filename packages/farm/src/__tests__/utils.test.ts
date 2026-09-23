@@ -2,6 +2,7 @@ import path from "path";
 import { describe, it, expect } from "vitest";
 import {
   parseRoutePath,
+  parseSearchParams,
   matchRoute,
   matchRoutePrefix,
   segmentsToPattern,
@@ -80,6 +81,17 @@ describe("toRootRelativeUrlPath", () => {
   });
 });
 
+describe("parseSearchParams", () => {
+  it("drops prototype-poisoning keys without changing the returned prototype", () => {
+    const result = parseSearchParams(
+      new URLSearchParams("__proto__=a&__proto__=b&constructor=c&prototype=d&tag=x&tag=y"),
+    );
+
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+    expect(result).toEqual({ tag: ["x", "y"] });
+  });
+});
+
 describe("parseRoutePath", () => {
   it("should parse static routes", () => {
     const result = parseRoutePath("about/page.tsx");
@@ -111,6 +123,53 @@ describe("parseRoutePath", () => {
       { segment: "docs", isDynamic: false, isOptional: false, isCatchAll: false },
       { segment: "slug", isDynamic: true, isOptional: true, isCatchAll: true },
     ]);
+  });
+
+  it("rejects a catch-all directory before another route segment", () => {
+    expect(() => parseRoutePath("docs/[...slug]/edit/page.tsx")).toThrow(
+      'Catch-all segment "[...slug]" must be the final segment',
+    );
+    expect(() => parseRoutePath("docs/[[...slug]]/edit/page.tsx")).toThrow(
+      'Catch-all segment "[[...slug]]" must be the final segment',
+    );
+  });
+
+  it("rejects duplicate parameter names in one file route", () => {
+    expect(() => parseRoutePath("teams/[id]/members/[id]/page.tsx")).toThrow(
+      'Duplicate route parameter "id"',
+    );
+    expect(() => parseRoutePath("docs/[section]/[...section]/page.tsx")).toThrow(
+      'Duplicate route parameter "section"',
+    );
+    for (const fileName of ["layout.tsx", "loading.tsx", "error.tsx"]) {
+      expect(() => parseRoutePath(`teams/[id]/members/[id]/${fileName}`)).toThrow(
+        'Duplicate route parameter "id"',
+      );
+    }
+  });
+
+  it("rejects prototype-sensitive parameter names in file routes", () => {
+    expect(() => parseRoutePath("users/[__proto__]/page.tsx")).toThrow(
+      'Route parameter "__proto__"',
+    );
+    expect(() => parseRoutePath("docs/[...constructor]/page.tsx")).toThrow(
+      'Route parameter "constructor"',
+    );
+    expect(() => parseRoutePath("docs/[[...prototype]]/page.tsx")).toThrow(
+      'Route parameter "prototype"',
+    );
+  });
+
+  it("rejects file route segments that browsers reinterpret", () => {
+    for (const routePath of [
+      "docs/../admin/page.tsx",
+      "docs/%2e%2e/admin/page.tsx",
+      "docs/%2Fadmin/page.tsx",
+      "docs/%5cadmin/page.tsx",
+      "docs/%00admin/page.tsx",
+    ]) {
+      expect(() => parseRoutePath(routePath)).toThrow(/browser-unstable/);
+    }
   });
 
   it("should parse root page", () => {
@@ -159,6 +218,33 @@ describe("matchRoute", () => {
     const result = matchRoute("/users/123", segments);
     expect(result.matches).toBe(true);
     expect(result.params).toEqual({ id: "123" });
+  });
+
+  it("decodes dynamic, catch-all, and static URL segments", () => {
+    expect(
+      matchRoute("/users/hello%20farm", parseRoutePath("users/[id]/page.tsx").segments),
+    ).toEqual({ matches: true, params: { id: "hello farm" } });
+    expect(
+      matchRoute("/docs/guides/caf%C3%A9", parseRoutePath("docs/[...slug]/page.tsx").segments),
+    ).toEqual({ matches: true, params: { slug: "guides/café" } });
+    expect(matchRoute("/caf%C3%A9", parseRoutePath("café/page.tsx").segments)).toEqual({
+      matches: true,
+      params: {},
+    });
+    expect(matchRoutePrefix("/caf%C3%A9/menu", parseRoutePath("café/layout.tsx").segments)).toBe(
+      true,
+    );
+    expect(matchRoute("/a%2520b", parseRoutePath("a%20b/page.tsx").segments)).toEqual({
+      matches: true,
+      params: {},
+    });
+  });
+
+  it("keeps malformed URL segments literal while matching", () => {
+    expect(matchRoute("/users/%E0%A4%A", parseRoutePath("users/[id]/page.tsx").segments)).toEqual({
+      matches: true,
+      params: { id: "%E0%A4%A" },
+    });
   });
 
   it("should match dynamic segments containing dots", () => {

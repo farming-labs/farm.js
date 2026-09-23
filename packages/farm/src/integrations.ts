@@ -1,3 +1,28 @@
+import { validateConfigRouteSource } from "./plugins/route-pattern";
+import { defineSchema } from "./schema";
+import type {
+  FarmSchema,
+  FarmSchemaConstraint,
+  FarmSchemaField,
+  FarmSchemaFieldType,
+  FarmSchemaModel,
+  FarmSchemaModelExtension,
+  FarmSchemaModelOverride,
+  FarmSchemaReference,
+} from "./schema";
+
+// Origin validation for integration auth routes is part of the integration
+// contract, so it is re-exported here alongside defineIntegration rather than
+// only from the package root.
+export {
+  describeIntegrationOriginRejection,
+  resolveIntegrationAllowedOrigins,
+  validateIntegrationRequestOrigin,
+  type IntegrationOriginPolicy,
+  type IntegrationOriginRejection,
+  type IntegrationOriginResult,
+} from "./integration-request-security";
+
 import type { ComponentType, ReactNode } from "react";
 import { api as integrationApi, defineIntegrationAPIOperation } from "./integration-api";
 import type {
@@ -12,6 +37,12 @@ import type {
 import type { InferFarmIntegrationOrmClient } from "./integration-orm";
 import { setFarmPluginIntegrationContext } from "./plugin-integration-context";
 import { decodeRouteSegment } from "./utils/decode";
+import {
+  assertTerminalCatchAll,
+  assertUniqueRouteParameters,
+  compareRouteSpecificity,
+  getRoutePatternSpecificity,
+} from "./routing/specificity";
 import type {
   FarmPlugin,
   FarmPluginContext,
@@ -26,7 +57,7 @@ import {
   hasRequestContext,
   setRequestContext,
 } from "./request-context";
-import { sendWebResponse } from "./server/response";
+import { applyWebResponseHeaders, sendWebResponse } from "./server/response";
 import type { FarmRequest } from "./types";
 import {
   bufferFarmRequestBody,
@@ -131,6 +162,70 @@ export interface FarmIntegrationRouteInputSchemas<TBody = unknown, TQuery = unkn
 export type FarmIntegrationRequestContextStore = FarmRequestStore;
 
 export const FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY = "farm.integration.internalDispatch";
+
+/**
+ * Request-context key under which an integration middleware can hand
+ * `Set-Cookie` values to the runtime when it returns `void` (i.e. lets the
+ * request continue to the downstream route/page handler). The runtime reads
+ * this key back after a `void` middleware return and forwards the cookies onto
+ * the response it ultimately sends, so a server-side session refresh (or any
+ * other cookie rotation) reaches the browser instead of being dropped.
+ */
+export const FARM_INTEGRATION_SET_COOKIES_KEY = "farm:integration:set-cookies";
+
+/**
+ * Forward `Set-Cookie` values from an integration middleware that returns
+ * `void` (the authenticated/passthrough branch) to the runtime, so they are
+ * merged onto the response the runtime sends for the matched route. This is
+ * the passthrough counterpart to appending `Set-Cookie` to a `Response` the
+ * middleware returns directly (e.g. a failure redirect): both paths can rotate
+ * auth cookies, and both must be able to reach the browser.
+ */
+export function forwardIntegrationSetCookies(
+  context: Pick<FarmIntegrationHandlerContext, "req">,
+  cookies: string[],
+): void {
+  if (cookies.length === 0) return;
+  const existing = context.req.get<string[]>(FARM_INTEGRATION_SET_COOKIES_KEY) ?? [];
+  context.req.set(FARM_INTEGRATION_SET_COOKIES_KEY, [...existing, ...cookies]);
+}
+
+/**
+ * Read and clear the forwarded `Set-Cookie` values an integration middleware
+ * stashed on the request context. Reading-and-clearing guarantees each batch
+ * is applied at most once even when several middleware run for one request.
+ */
+function takeForwardedIntegrationSetCookies(
+  context: Pick<FarmIntegrationHandlerContext, "req">,
+): string[] {
+  const cookies = context.req.get<string[]>(FARM_INTEGRATION_SET_COOKIES_KEY);
+  if (cookies && cookies.length > 0) {
+    context.req.delete(FARM_INTEGRATION_SET_COOKIES_KEY);
+    return cookies;
+  }
+  if (cookies) {
+    context.req.delete(FARM_INTEGRATION_SET_COOKIES_KEY);
+  }
+  return [];
+}
+
+/**
+ * Return a copy of `response` carrying the forwarded `Set-Cookie` values, or
+ * `response` unchanged when there is nothing to forward. Existing `Set-Cookie`
+ * headers on the response are preserved (appended to, not replaced).
+ */
+function appendIntegrationForwardedCookies(response: Response, cookies: string[]): Response {
+  if (cookies.length === 0) return response;
+  const headers = new Headers(response.headers);
+  for (const cookie of cookies) {
+    headers.append("set-cookie", cookie);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 export type FarmIntegrationRouteDb<TSchema extends FarmIntegrationSchema | undefined> =
   InferFarmIntegrationOrmClient<TSchema>;
@@ -328,96 +423,62 @@ export interface FarmIntegrationProviderProps {
   children: ReactNode;
 }
 
+export interface FarmIntegrationProviderComponentReference {
+  /** Client-safe module specifier using `@/`, a path relative to the app root, or a package. */
+  module: string;
+  /** Named export to use. Defaults to the module's default export. */
+  export?: string;
+}
+
 export interface FarmIntegrationProvider {
   name: string;
   type: string;
   props?: Record<string, unknown>;
-  component?: ComponentType<FarmIntegrationProviderProps>;
+  /**
+   * The provider can be instantiated independently around each isolated
+   * client root without relying on context or state owned by the route root.
+   * Providers are treated as route-wide unless they explicitly opt in.
+   */
+  supportsIsolatedHydration?: boolean;
+  component?:
+    | ComponentType<FarmIntegrationProviderProps>
+    | FarmIntegrationProviderComponentReference;
 }
 
 export interface FarmIntegrationDocumentNavigation {
   matcher: string | readonly string[];
 }
 
-export type FarmIntegrationSchemaFieldType =
-  | "id"
-  | "uuid"
-  | "string"
-  | "text"
-  | "boolean"
-  | "integer"
-  | "number"
-  | "datetime"
-  | "json"
-  | "enum";
+// The data schema is renderer- and feature-neutral: it now lives in ./schema
+// so applications can declare one without reaching into the integration API.
+// These aliases keep every shipped `*IntegrationSchema*` name working.
 
-export interface FarmIntegrationSchemaReference {
-  model: string;
-  field: string;
-  relation?: "belongsTo" | "hasOne" | "hasMany";
-  onDelete?: "cascade" | "restrict" | "setNull" | "noAction";
-  enforced?: "db" | "app" | "none";
-}
+/** @deprecated Use `FarmSchemaFieldType`. */
+export type FarmIntegrationSchemaFieldType = FarmSchemaFieldType;
 
-export interface FarmIntegrationSchemaField {
-  type: FarmIntegrationSchemaFieldType;
-  name?: string;
-  description?: string;
-  required?: boolean;
-  nullable?: boolean;
-  primaryKey?: boolean;
-  unique?: boolean;
-  index?: boolean;
-  list?: boolean;
-  default?: unknown;
-  values?: readonly string[];
-  reference?: FarmIntegrationSchemaReference;
-  meta?: Record<string, unknown>;
-}
+/** @deprecated Use `FarmSchemaReference`. */
+export type FarmIntegrationSchemaReference = FarmSchemaReference;
 
-export interface FarmIntegrationSchemaConstraint {
-  type: "unique" | "index";
-  fields: readonly string[];
-  name?: string;
-  meta?: Record<string, unknown>;
-}
+/** @deprecated Use `FarmSchemaField`. */
+export type FarmIntegrationSchemaField = FarmSchemaField;
 
-export interface FarmIntegrationSchemaModel {
-  name?: string;
-  description?: string;
-  fields: Record<string, FarmIntegrationSchemaField>;
-  constraints?: readonly FarmIntegrationSchemaConstraint[];
-  meta?: Record<string, unknown>;
-}
+/** @deprecated Use `FarmSchemaConstraint`. */
+export type FarmIntegrationSchemaConstraint = FarmSchemaConstraint;
 
-export interface FarmIntegrationSchemaModelExtension {
-  name?: string;
-  description?: string;
-  fields?: Record<string, FarmIntegrationSchemaField>;
-  constraints?: readonly FarmIntegrationSchemaConstraint[];
-  meta?: Record<string, unknown>;
-}
+/** @deprecated Use `FarmSchemaModel`. */
+export type FarmIntegrationSchemaModel = FarmSchemaModel;
 
-export interface FarmIntegrationSchemaModelOverride {
-  name?: string;
-  description?: string;
-  fields?: Record<string, Partial<FarmIntegrationSchemaField>>;
-  constraints?: readonly FarmIntegrationSchemaConstraint[];
-  meta?: Record<string, unknown>;
-}
+/** @deprecated Use `FarmSchemaModelExtension`. */
+export type FarmIntegrationSchemaModelExtension = FarmSchemaModelExtension;
 
-export interface FarmIntegrationSchema {
-  models: Record<string, FarmIntegrationSchemaModel>;
-  meta?: Record<string, unknown>;
-  extend?: Record<string, FarmIntegrationSchemaModelExtension>;
-  override?: Record<string, FarmIntegrationSchemaModelOverride>;
-}
+/** @deprecated Use `FarmSchemaModelOverride`. */
+export type FarmIntegrationSchemaModelOverride = FarmSchemaModelOverride;
 
-export function defineIntegrationSchema<TSchema extends FarmIntegrationSchema>(
-  schema: TSchema,
-): TSchema {
-  return schema;
-}
+/** @deprecated Use `FarmSchema`. */
+export type FarmIntegrationSchema = FarmSchema;
+
+/** @deprecated Use `defineSchema`. This is an exact alias, not a wrapper. */
+export const defineIntegrationSchema = defineSchema;
 
 export type FarmIntegrationLogPhase =
   | "registered"
@@ -1099,6 +1160,12 @@ export function defineIntegration<
       ? ([...(routes || []), ...endpointRoutes] as readonly FarmIntegrationRoute[])
       : undefined;
 
+  for (const route of allRoutes || []) {
+    assertUniqueRouteParameters(route.path, "api");
+    validateConfigRouteSource(route.path, `Integration route "${route.path}"`);
+    assertTerminalCatchAll(route.path, "api");
+  }
+
   const derivedApi =
     integration.api ||
     (allRoutes?.length
@@ -1228,12 +1295,12 @@ function withIntegrationPluginOwner(
 
 export function getIntegrationProviders(
   integrations: FarmIntegrationsUserConfig | undefined,
-): Array<Pick<FarmIntegrationProvider, "name" | "type" | "props">> {
+): FarmIntegrationProvider[] {
   if (!integrations) {
     return [];
   }
 
-  const providers: Array<Pick<FarmIntegrationProvider, "name" | "type" | "props">> = [];
+  const providers: FarmIntegrationProvider[] = [];
   for (const integration of Object.values(integrations)) {
     if (!integration || !isFarmIntegration(integration) || !integration.providers?.length) {
       continue;
@@ -1244,11 +1311,25 @@ export function getIntegrationProviders(
         name: provider.name,
         type: provider.type,
         props: provider.props,
+        supportsIsolatedHydration: provider.supportsIsolatedHydration,
+        component: provider.component,
       });
     }
   }
 
   return providers;
+}
+
+export function isFarmIntegrationProviderComponentReference(
+  value: FarmIntegrationProvider["component"],
+): value is FarmIntegrationProviderComponentReference {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    "module" in value &&
+    typeof value.module === "string" &&
+    value.module.length > 0,
+  );
 }
 
 export function getIntegrationDocumentNavigationMatchers(
@@ -1629,6 +1710,18 @@ function createIntegrationLifecycleLogger(
   };
 }
 
+async function emitIntegrationLog(
+  integration: FarmIntegration,
+  event: FarmIntegrationLogEvent,
+): Promise<void> {
+  try {
+    await integration.log?.(event);
+  } catch {
+    // Integration logging is optional observability. A failed sink must not
+    // block lifecycle startup, request handlers, responses, or cleanup.
+  }
+}
+
 const INTEGRATION_DATA_HEADER = "x-farm-integration-data";
 const INTEGRATION_DATA_HEADER_MAX_LENGTH = 16 * 1024;
 const BLOCKED_INTEGRATION_DATA_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -1782,7 +1875,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
       }
 
       for (const route of routes) {
-        await integration.log({
+        await emitIntegrationLog(integration, {
           category: integration.category,
           slot: integration.category,
           type: integration.type,
@@ -1797,7 +1890,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
       }
 
       for (const entry of middleware) {
-        await integration.log({
+        await emitIntegrationLog(integration, {
           category: integration.category,
           slot: integration.category,
           type: integration.type,
@@ -1888,7 +1981,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
           pluginContext: context,
         });
         const startedAt = Date.now();
-        await integration.log?.({
+        await emitIntegrationLog(integration, {
           category: integration.category,
           slot: integration.category,
           type: integration.type,
@@ -1905,9 +1998,26 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
 
         try {
           const response = await entry.handler(request, handlerContext);
+
+          // A middleware that returns `void` lets the request continue to the
+          // downstream route/page handler, so its rotated `Set-Cookie` values
+          // cannot ride on its own response. It hands them to the runtime via
+          // forwardIntegrationSetCookies; merge them onto the Node response now
+          // (appending, so a later short-circuit Response or the page renderer
+          // can add its own Set-Cookie without dropping these). Read-and-clear
+          // so multiple middleware for one request each forward at most once.
+          const forwardedCookies = takeForwardedIntegrationSetCookies(handlerContext);
+          if (forwardedCookies.length > 0) {
+            const setCookieHeaders = new Headers();
+            for (const cookie of forwardedCookies) {
+              setCookieHeaders.append("set-cookie", cookie);
+            }
+            applyWebResponseHeaders(res, setCookieHeaders, { appendSetCookie: true });
+          }
+
           if (response) {
             await sendWebResponse(res, response);
-            await integration.log?.({
+            await emitIntegrationLog(integration, {
               category: integration.category,
               slot: integration.category,
               type: integration.type,
@@ -1926,7 +2036,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
             return;
           }
 
-          await integration.log?.({
+          await emitIntegrationLog(integration, {
             category: integration.category,
             slot: integration.category,
             type: integration.type,
@@ -1942,7 +2052,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
             context: handlerContext.req.snapshot(),
           });
         } catch (error) {
-          await integration.log?.({
+          await emitIntegrationLog(integration, {
             category: integration.category,
             slot: integration.category,
             type: integration.type,
@@ -1987,7 +2097,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
           pluginContext: context,
         });
         const startedAt = Date.now();
-        await integration.log?.({
+        await emitIntegrationLog(integration, {
           category: integration.category,
           slot: integration.category,
           type: integration.type,
@@ -2006,7 +2116,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
           const validation = await validateIntegrationRouteInput(route, request, url);
           if (!validation.success) {
             await sendWebResponse(res, validation.response);
-            await integration.log?.({
+            await emitIntegrationLog(integration, {
               category: integration.category,
               slot: integration.category,
               type: integration.type,
@@ -2030,7 +2140,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
             const middlewareResponse = await middlewareEntry.handler(request, handlerContext);
             if (middlewareResponse) {
               await sendWebResponse(res, middlewareResponse);
-              await integration.log?.({
+              await emitIntegrationLog(integration, {
                 category: integration.category,
                 slot: integration.category,
                 type: integration.type,
@@ -2063,7 +2173,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
               beforeResponse,
             );
             await sendWebResponse(res, response);
-            await integration.log?.({
+            await emitIntegrationLog(integration, {
               category: integration.category,
               slot: integration.category,
               type: integration.type,
@@ -2090,7 +2200,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
             handlerResponse,
           );
           await sendWebResponse(res, response);
-          await integration.log?.({
+          await emitIntegrationLog(integration, {
             category: integration.category,
             slot: integration.category,
             type: integration.type,
@@ -2108,7 +2218,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
           });
           return;
         } catch (error) {
-          await integration.log?.({
+          await emitIntegrationLog(integration, {
             category: integration.category,
             slot: integration.category,
             type: integration.type,
@@ -2189,11 +2299,25 @@ type NormalizedIntegrationRoute = Omit<FarmIntegrationRoute, "method" | "methods
 function normalizeIntegrationRoutes(
   routes: readonly FarmIntegrationRoute[],
 ): NormalizedIntegrationRoute[] {
-  return routes.map((route) => ({
-    ...route,
-    methods: normalizeIntegrationRouteMethods(route),
-    input: normalizeIntegrationRouteInputSchemas(route),
-  }));
+  return routes
+    .map((route, index) => {
+      // Raw FarmIntegration objects and direct dispatch also pass through here.
+      assertUniqueRouteParameters(route.path, "api");
+      return {
+        index,
+        route: {
+          ...route,
+          methods: normalizeIntegrationRouteMethods(route),
+          input: normalizeIntegrationRouteInputSchemas(route),
+        },
+        specificity: getRoutePatternSpecificity(route.path, "api"),
+      };
+    })
+    .sort(
+      (left, right) =>
+        compareRouteSpecificity(left.specificity, right.specificity) || left.index - right.index,
+    )
+    .map(({ route }) => route);
 }
 
 function normalizeIntegrationRouteMethods(route: Pick<FarmIntegrationRoute, "method" | "methods">) {
@@ -2706,6 +2830,14 @@ export async function dispatchIntegrationRequest(
   const routes = normalizeIntegrationRoutes(integration.routes || []);
   const middleware = [...(integration.middleware || [])];
 
+  // Cookies an integration middleware forwards via forwardIntegrationSetCookies
+  // while returning `void` (letting the request continue). They are merged onto
+  // whichever Response this dispatch ultimately returns so a server-side
+  // refresh/rotation reaches the browser instead of being dropped. Top-level
+  // and per-route middleware both contribute here; read-and-clear keeps each
+  // batch applied at most once.
+  const forwardedSetCookies: string[] = [];
+
   for (const entry of middleware) {
     const params = resolveMatcherParams(entry.matcher, pathname);
     if (!params) {
@@ -2729,7 +2861,7 @@ export async function dispatchIntegrationRequest(
     });
     const startedAt = Date.now();
 
-    await integration.log?.({
+    await emitIntegrationLog(integration, {
       category: integration.category,
       slot: integration.category,
       type: integration.type,
@@ -2746,8 +2878,9 @@ export async function dispatchIntegrationRequest(
 
     try {
       const response = await entry.handler(request, handlerContext);
+      forwardedSetCookies.push(...takeForwardedIntegrationSetCookies(handlerContext));
       if (response) {
-        await integration.log?.({
+        await emitIntegrationLog(integration, {
           category: integration.category,
           slot: integration.category,
           type: integration.type,
@@ -2763,10 +2896,10 @@ export async function dispatchIntegrationRequest(
           durationMs: Date.now() - startedAt,
           context: handlerContext.req.snapshot(),
         });
-        return response;
+        return appendIntegrationForwardedCookies(response, forwardedSetCookies);
       }
 
-      await integration.log?.({
+      await emitIntegrationLog(integration, {
         category: integration.category,
         slot: integration.category,
         type: integration.type,
@@ -2782,7 +2915,7 @@ export async function dispatchIntegrationRequest(
         context: handlerContext.req.snapshot(),
       });
     } catch (error) {
-      await integration.log?.({
+      await emitIntegrationLog(integration, {
         category: integration.category,
         slot: integration.category,
         type: integration.type,
@@ -2827,7 +2960,7 @@ export async function dispatchIntegrationRequest(
     });
     const startedAt = Date.now();
 
-    await integration.log?.({
+    await emitIntegrationLog(integration, {
       category: integration.category,
       slot: integration.category,
       type: integration.type,
@@ -2845,7 +2978,7 @@ export async function dispatchIntegrationRequest(
     try {
       const validation = await validateIntegrationRouteInput(route, request, url);
       if (!validation.success) {
-        await integration.log?.({
+        await emitIntegrationLog(integration, {
           category: integration.category,
           slot: integration.category,
           type: integration.type,
@@ -2861,14 +2994,15 @@ export async function dispatchIntegrationRequest(
           durationMs: Date.now() - startedAt,
           context: handlerContext.req.snapshot(),
         });
-        return validation.response;
+        return appendIntegrationForwardedCookies(validation.response, forwardedSetCookies);
       }
       handlerContext.input = validation.input;
 
       for (const middlewareEntry of route.middleware || []) {
         const middlewareResponse = await middlewareEntry.handler(request, handlerContext);
+        forwardedSetCookies.push(...takeForwardedIntegrationSetCookies(handlerContext));
         if (middlewareResponse) {
-          await integration.log?.({
+          await emitIntegrationLog(integration, {
             category: integration.category,
             slot: integration.category,
             type: integration.type,
@@ -2884,7 +3018,7 @@ export async function dispatchIntegrationRequest(
             durationMs: Date.now() - startedAt,
             context: handlerContext.req.snapshot(),
           });
-          return middlewareResponse;
+          return appendIntegrationForwardedCookies(middlewareResponse, forwardedSetCookies);
         }
       }
 
@@ -2896,7 +3030,7 @@ export async function dispatchIntegrationRequest(
           handlerContext,
           beforeResponse,
         );
-        await integration.log?.({
+        await emitIntegrationLog(integration, {
           category: integration.category,
           slot: integration.category,
           type: integration.type,
@@ -2912,7 +3046,7 @@ export async function dispatchIntegrationRequest(
           durationMs: Date.now() - startedAt,
           context: handlerContext.req.snapshot(),
         });
-        return response;
+        return appendIntegrationForwardedCookies(response, forwardedSetCookies);
       }
 
       const handlerResponse = await route.handler(request, handlerContext);
@@ -2922,7 +3056,7 @@ export async function dispatchIntegrationRequest(
         handlerContext,
         handlerResponse,
       );
-      await integration.log?.({
+      await emitIntegrationLog(integration, {
         category: integration.category,
         slot: integration.category,
         type: integration.type,
@@ -2938,9 +3072,9 @@ export async function dispatchIntegrationRequest(
         durationMs: Date.now() - startedAt,
         context: handlerContext.req.snapshot(),
       });
-      return response;
+      return appendIntegrationForwardedCookies(response, forwardedSetCookies);
     } catch (error) {
-      await integration.log?.({
+      await emitIntegrationLog(integration, {
         category: integration.category,
         slot: integration.category,
         type: integration.type,
@@ -3137,7 +3271,11 @@ function matchesMethod(methods: readonly string[], method: string | undefined): 
     return false;
   }
 
-  return methods.some((item) => item.toUpperCase() === method.toUpperCase());
+  const normalizedMethod = method.toUpperCase();
+  return methods.some((item) => {
+    const candidate = item.toUpperCase();
+    return candidate === "ALL" || candidate === normalizedMethod;
+  });
 }
 
 function matchesMatcher(

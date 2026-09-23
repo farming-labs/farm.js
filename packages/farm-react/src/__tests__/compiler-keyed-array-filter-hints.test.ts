@@ -6,6 +6,7 @@ import { compileReactModule } from "../compiler";
 import { normalizeReactCompilerOptions } from "../index";
 
 const infer = normalizeReactCompilerOptions(true);
+const staticInfer = normalizeReactCompilerOptions({ reactivity: "static" });
 
 async function compile(source: string) {
   return compileReactModule(source, "/app/KeyedArrayFilterHints.tsx", infer);
@@ -62,6 +63,76 @@ describe("React AOT keyed-array filter hints", () => {
     expect(result.code).toContain("filterIndexIndependent={true}");
   });
 
+  it("records a filter returned from a single-return updater block", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Inventory({ removedId }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => setRows((current) => {
+            return current.filter((row) => row.id !== removedId);
+          })}>Remove</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Inventory"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArrayFilterHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayFilter");
+    expect(result.code).toContain("filterIndexIndependent={true}");
+    expect(result.code).toContain("keyedRowsFilterHintedRuntimeFeature");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedArrayFilterHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedArrayFilter"),
+    });
+  });
+
+  it.each([
+    ["hybrid", infer],
+    ["static", staticInfer],
+  ] as const)(
+    "records an exact single-return predicate block in %s mode",
+    async (_mode, options) => {
+      const result = await compileReactModule(
+        `
+      import { useState } from "react";
+      export function Inventory({ removedId }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => setRows((current) => current.filter((row) => {
+            return row.id !== removedId;
+          }))}>Remove</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `,
+        "/app/KeyedArrayFilterHints.tsx",
+        options,
+      );
+
+      expect(result.compiled).toEqual(["Inventory"]);
+      expect(result.diagnostics).toEqual([]);
+      expect(result.optimizations.keyedArrayFilterHints).toBe(1);
+      expect(result.code).toContain("createCompilerKeyedArrayFilter");
+      expect(result.code).toContain("filterIndexIndependent={true}");
+      expect(result.code).toContain("keyedRowsFilterHintedRuntimeFeature");
+      await expect(
+        transformWithEsbuild(result.code, "/app/KeyedArrayFilterHints.tsx", {
+          loader: "tsx",
+          jsx: "automatic",
+        }),
+      ).resolves.toMatchObject({
+        code: expect.stringContaining("createCompilerKeyedArrayFilter"),
+      });
+    },
+  );
+
   it.each([
     {
       name: "an index-sensitive row",
@@ -74,15 +145,50 @@ describe("React AOT keyed-array filter hints", () => {
       update: "setRows((current) => current.filter((row) => row.id !== 'a'))",
     },
     {
-      name: "a block-bodied updater",
+      name: "an updater block with a local declaration",
       row: "(row) => <li key={row.id}>{row.label}</li>",
       update:
         "setRows((current) => { const next = current.filter((row) => row.id !== 'a'); return next; })",
     },
     {
-      name: "a block-bodied predicate",
+      name: "an updater block with conditional returns",
       row: "(row) => <li key={row.id}>{row.label}</li>",
-      update: "setRows((current) => current.filter((row) => { return row.id !== 'a'; }))",
+      update:
+        "setRows((current) => { if (current.length > 1) return current.filter((row) => row.id !== 'a'); return current; })",
+    },
+    {
+      name: "an updater block without a return",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update: "setRows((current) => { current.filter((row) => row.id !== 'a'); })",
+    },
+    {
+      name: "an updater block with a directive",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update:
+        "setRows((current) => { \"use strict\"; return current.filter((row) => row.id !== 'a'); })",
+    },
+    {
+      name: "a predicate block with a local declaration",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update:
+        "setRows((current) => current.filter((row) => { const visible = row.id !== 'a'; return visible; }))",
+    },
+    {
+      name: "a predicate block with conditional returns",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update:
+        "setRows((current) => current.filter((row) => { if (row.id === 'a') return false; return true; }))",
+    },
+    {
+      name: "a predicate block without a return",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update: "setRows((current) => current.filter((row) => { row.id !== 'a'; }))",
+    },
+    {
+      name: "a predicate block with a directive",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update:
+        "setRows((current) => current.filter((row) => { 'use strict'; return row.id !== 'a'; }))",
     },
     {
       name: "an index-aware predicate",

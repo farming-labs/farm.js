@@ -1,3 +1,5 @@
+import path from "node:path";
+
 export type AnalyzerMetric = "raw" | "gzip" | "brotli";
 export type AnalyzerLimitAction = "error" | "warn";
 export type AnalyzerSize = number | `${number}${"b" | "kb" | "mb" | "gb"}`;
@@ -14,8 +16,6 @@ export interface AnalyzerLimits {
 }
 
 export interface AnalyzerOptions {
-  /** Set false to keep the plugin configured without analyzing builds. */
-  enabled?: boolean;
   /** HTML report path relative to the project root. Set false to skip it. */
   output?: string | false;
   /** Also write JSON. True uses the HTML report name with a .json extension. */
@@ -38,7 +38,6 @@ export interface ResolvedAnalyzerLimits {
 }
 
 export interface ResolvedAnalyzerOptions {
-  enabled: boolean;
   output: string | false;
   json: string | false;
   open: boolean;
@@ -50,6 +49,11 @@ export interface ResolvedAnalyzerOptions {
 const DEFAULT_OUTPUT = ".farm/analyze.html";
 
 export function resolveAnalyzerOptions(options: AnalyzerOptions = {}): ResolvedAnalyzerOptions {
+  if ("enabled" in options) {
+    throw new TypeError(
+      "Analyzer no longer accepts enabled; remove analyzer() from plugins to disable it",
+    );
+  }
   const output = normalizeOutput(options.output ?? DEFAULT_OUTPUT, "output");
   if (options.open && output === false) {
     throw new TypeError("Analyzer open needs an HTML output path");
@@ -66,7 +70,6 @@ export function resolveAnalyzerOptions(options: AnalyzerOptions = {}): ResolvedA
   }
 
   return {
-    enabled: options.enabled !== false,
     output,
     json: resolveJsonOutput(options.json ?? false, output),
     open: options.open ?? false,
@@ -121,5 +124,15 @@ function normalizeOutput(value: string | false, label: string): string | false {
   if (value === false) return false;
   const normalized = value.trim();
   if (!normalized) throw new TypeError(`Analyzer ${label} must be a non-empty path`);
+  if (
+    path.posix.isAbsolute(normalized) ||
+    path.win32.isAbsolute(normalized) ||
+    /^[a-z]:/i.test(normalized)
+  ) {
+    throw new TypeError(`Analyzer ${label} must be relative to the project root`);
+  }
+  if (normalized.replace(/\\/g, "/").split("/").includes("..")) {
+    throw new TypeError(`Analyzer ${label} cannot contain parent path segments`);
+  }
   return normalized;
 }

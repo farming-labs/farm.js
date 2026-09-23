@@ -6,7 +6,7 @@ interface Row {
   label: string;
 }
 
-export function RollingWindowTable() {
+export function RollingWindowTable({ trimCount = 1 }: { trimCount?: number }) {
   const [rows, setRows] = useState<Row[]>([
     { id: 1, label: "Alpha" },
     { id: 2, label: "Beta" },
@@ -18,7 +18,7 @@ export function RollingWindowTable() {
         onClick={() => {
           const incoming = { id: nextId, label: `Row ${nextId}` };
           setNextId((value) => value + 1);
-          setRows((current) => [...current.slice(1), incoming]);
+          setRows((current) => [...current.slice(trimCount), incoming]);
         }}
       >
         Roll window

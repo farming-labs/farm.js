@@ -196,7 +196,6 @@ describe("farm devtools", () => {
     const html = renderFarmDevtoolsHtml(snapshot);
 
     expect(html).toContain("<title>Farm Devtools - app</title>");
-    expect(html).toContain("/__farm/devtools.json");
     expect(html).toContain('data-inspector="overview"');
     expect(html).toContain('data-view-panel="overview"');
     expect(html).toContain('data-view-panel="runtime"');
@@ -211,6 +210,8 @@ describe("farm devtools", () => {
     expect(html).toContain("<code>/about</code>");
     expect(html).toContain("src/app/about/page.tsx");
     expect(html).toContain("No api routes found");
+
+    expect(html).toContain("Deprecated &middot; use @farm.js/devtools");
 
     expect(html).toContain("const embedded = window.parent !== window");
     expect(html).toContain('type: "farm:devtools:close"');

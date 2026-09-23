@@ -12,7 +12,7 @@ try {
   }, 10_000).unref();
 } catch {}
 
-const { program } = require("commander");
+const { Command, program } = require("commander");
 const { version } = require("../package.json");
 
 const banner = `
@@ -33,6 +33,17 @@ program.addHelpText("beforeAll", `${banner}\n`);
 
 function collectOption(value, previous) {
   return [...(previous || []), value];
+}
+
+function parsePortOption(value) {
+  if (!/^\d+$/.test(value)) {
+    throw new Error("--port must be an integer between 1 and 65535.");
+  }
+  const port = Number(value);
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+    throw new Error("--port must be an integer between 1 and 65535.");
+  }
+  return port;
 }
 
 function telemetryCommandPath(command) {
@@ -81,7 +92,7 @@ program
         {
           root: options.root,
         },
-        options.port === undefined ? undefined : parseInt(options.port, 10),
+        options.port === undefined ? undefined : parsePortOption(options.port),
       );
       if (options.cron) {
         const { startFarmCronScheduler } = require("../dist/index.js");
@@ -573,7 +584,47 @@ telemetryCommand
     }
   });
 
-program.parseAsync().catch((error) => {
-  console.error("Farm CLI failed:", error);
-  process.exitCode = 1;
-});
+// `farm <plugin> migrate` — any plugin that declares tables gets this command,
+// so the name is only knowable once the app's config is loaded. Dispatch before
+// commander parses, which lets every statically registered command win first.
+async function dispatchSchemaMigrate() {
+  const [name, operation, ...rest] = process.argv.slice(2);
+  if (!name || operation !== "migrate" || name.startsWith("-")) return false;
+
+  const registered = new Set(
+    program.commands.flatMap((command) => [command.name(), ...command.aliases()]),
+  );
+  if (registered.has(name)) return false;
+
+  const dynamic = new Command()
+    .name(`farm ${name} migrate`)
+    .description(`Create the database tables the ${name} schema needs`)
+    .option("-r, --root <root>", "Root directory", process.cwd())
+    .option("-c, --config <config>", "Path to farm config file")
+    .option("-w, --write <file>", "Write the statements to a file instead of printing them")
+    .option("--apply", "Execute the statements against the database")
+    .action(async (options) => {
+      const { migrateSchema } = require("../dist/index.js");
+      await migrateSchema(name, {
+        root: options.root,
+        configPath: options.config,
+        write: options.write,
+        apply: options.apply,
+      });
+    });
+
+  try {
+    await dynamic.parseAsync(rest, { from: "user" });
+  } catch (error) {
+    console.error(`Failed to migrate the ${name} schema:`, error?.message ?? error);
+    process.exit(1);
+  }
+  return true;
+}
+
+dispatchSchemaMigrate()
+  .then((handled) => (handled ? undefined : program.parseAsync()))
+  .catch((error) => {
+    console.error("Farm CLI failed:", error);
+    process.exitCode = 1;
+  });

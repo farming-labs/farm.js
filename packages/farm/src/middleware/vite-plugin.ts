@@ -38,8 +38,8 @@ export function farmMiddlewarePlugin(options: FarmMiddlewarePluginOptions = {}):
     enforce: "pre",
 
     configureServer(server) {
-      discoveryPromise = discover(server).catch((error) => {
-        discoveryComplete = true;
+      discoveryPromise = discover(server);
+      void discoveryPromise.catch((error) => {
         console.error("[FARM] Middleware discovery error:", error);
       });
 
@@ -49,7 +49,7 @@ export function farmMiddlewarePlugin(options: FarmMiddlewarePluginOptions = {}):
         _pathname?: string,
         sharedData?: Map<string, any>,
       ): Promise<boolean> => {
-        if (discoveryPromise && !discoveryComplete) {
+        if (discoveryPromise) {
           await discoveryPromise;
         }
 

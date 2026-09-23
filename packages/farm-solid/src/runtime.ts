@@ -89,6 +89,7 @@ const UNITLESS_STYLE_PROPERTIES = new Set([
   "opacity",
   "order",
   "orphans",
+  "scale",
   "stop-opacity",
   "stroke-dasharray",
   "stroke-dashoffset",
@@ -149,6 +150,18 @@ function normalizeProps(element: FarmSolidElement): Record<string, unknown> {
     props.onDblClick = props.onDoubleClick;
     delete props.onDoubleClick;
   }
+  // React reconciliation metadata, never a DOM attribute.
+  delete props.key;
+  // React seeds uncontrolled inputs by rendering defaultValue/defaultChecked as
+  // value/checked; Solid would otherwise emit a dead `defaultvalue` attribute.
+  if ("defaultValue" in props && !("value" in props)) {
+    props.value = props.defaultValue;
+    delete props.defaultValue;
+  }
+  if ("defaultChecked" in props && !("checked" in props)) {
+    props.checked = props.defaultChecked;
+    delete props.defaultChecked;
+  }
   delete props.suppressHydrationWarning;
 
   if (element.children.length > 0) {
@@ -158,6 +171,20 @@ function normalizeProps(element: FarmSolidElement): Record<string, unknown> {
       get() {
         const materialized = element.children.map(materializeSolidElement);
         return materialized.length === 1 ? materialized[0] : materialized;
+      },
+    });
+  } else if ("children" in props) {
+    // Children can also arrive as a prop rather than positionally: core wraps
+    // every layout as `createElement(Layout, { children: element, ... })`, and
+    // route slots pass their element through a prop too. The spread copied the
+    // raw Farm element(s), which Solid would escape to the string "undefined",
+    // so materialize them the same way as positional children.
+    const rawChildren = props.children;
+    Object.defineProperty(props, "children", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        return materializeSolidElement(rawChildren);
       },
     });
   }

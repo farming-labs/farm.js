@@ -1,3 +1,50 @@
+import { assertBrowserStableRoutePath } from "./routing/specificity";
+
+interface FarmNodeAbortRequest {
+  aborted?: boolean;
+  once(event: "aborted", listener: () => void): unknown;
+  off(event: "aborted", listener: () => void): unknown;
+}
+
+interface FarmNodeAbortResponse {
+  writableEnded: boolean;
+  once(event: "close" | "finish", listener: () => void): unknown;
+  off(event: "close" | "finish", listener: () => void): unknown;
+}
+
+/** Share disconnect semantics between development and production Node requests. */
+export function createFarmNodeRequestAbortSignal(
+  req: FarmNodeAbortRequest,
+  res: FarmNodeAbortResponse,
+): AbortSignal {
+  const controller = new AbortController();
+  let disposed = false;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    req.off("aborted", abort);
+    res.off("close", abortOnEarlyClose);
+    res.off("finish", dispose);
+    controller.signal.removeEventListener("abort", dispose);
+  };
+  const abort = () => controller.abort();
+  const abortOnEarlyClose = () => {
+    if (!res.writableEnded) abort();
+    dispose();
+  };
+
+  if (req.aborted) {
+    controller.abort();
+    return controller.signal;
+  }
+
+  req.once("aborted", abort);
+  res.once("close", abortOnEarlyClose);
+  res.once("finish", dispose);
+  controller.signal.addEventListener("abort", dispose, { once: true });
+  return controller.signal;
+}
+
 export const DEFAULT_FARM_SERVER_BODY_SIZE_LIMIT = 10_000_000;
 export const DEFAULT_FARM_SERVER_HEADERS_TIMEOUT = 60_000;
 export const DEFAULT_FARM_SERVER_REQUEST_TIMEOUT = 300_000;
@@ -23,7 +70,7 @@ export interface ResolvedFarmServerHealthConfig {
 export interface FarmServerConfig {
   /** Maximum request body size for API routes, integrations, workflows, and uploads. */
   bodySizeLimit?: number | string;
-  /** Trust proxy-provided client IP headers. Enable only behind a trusted proxy. */
+  /** Trust proxy-provided client address and request authority headers. Enable only behind a trusted proxy. */
   trustProxy?: boolean;
   /** Maximum time for a Node client to send complete request headers. */
   headersTimeout?: FarmServerDuration;
@@ -48,6 +95,73 @@ export interface ResolvedFarmServerConfig {
 }
 
 export type FarmRequestBodyErrorCode = "BODY_TOO_LARGE" | "INVALID_CONTENT_LENGTH";
+
+/** Apply the weak entity-tag comparison required by If-None-Match. */
+export function matchesFarmIfNoneMatch(
+  value: string | readonly string[] | null | undefined,
+  etag: string,
+): boolean {
+  const expected = parseEntityTag(trimOptionalWhitespace(etag));
+  if (!expected) return false;
+
+  const values = Array.isArray(value) ? value : [value];
+  const combined = values
+    .filter((header): header is string => typeof header === "string")
+    .join(",");
+  const fieldValue = trimOptionalWhitespace(combined);
+  if (!fieldValue) return false;
+  if (fieldValue === "*") return true;
+
+  let matched = false;
+  let hasEntityTag = false;
+  for (const candidate of splitEntityTags(fieldValue)) {
+    const token = trimOptionalWhitespace(candidate);
+    if (!token) continue;
+
+    const parsed = parseEntityTag(token);
+    if (!parsed) return false;
+    hasEntityTag = true;
+    if (parsed === expected) matched = true;
+  }
+
+  return hasEntityTag && matched;
+}
+
+function trimOptionalWhitespace(value: string): string {
+  return value.replace(/^[\t ]+|[\t ]+$/g, "");
+}
+
+function parseEntityTag(value: string): string | null {
+  const opaqueTag = value.startsWith("W/") ? value.slice(2) : value;
+  if (opaqueTag.length < 2 || opaqueTag[0] !== '"' || opaqueTag.at(-1) !== '"') return null;
+
+  for (let index = 1; index < opaqueTag.length - 1; index++) {
+    const code = opaqueTag.charCodeAt(index);
+    if (code === 0x21 || (code >= 0x23 && code <= 0x7e) || code >= 0x80) continue;
+    return null;
+  }
+
+  return opaqueTag;
+}
+
+function splitEntityTags(value: string): string[] {
+  const tags: string[] = [];
+  let start = 0;
+  let quoted = false;
+
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index];
+    if (character === '"') {
+      quoted = !quoted;
+    } else if (character === "," && !quoted) {
+      tags.push(value.slice(start, index));
+      start = index + 1;
+    }
+  }
+
+  tags.push(value.slice(start));
+  return tags;
+}
 
 export class FarmRequestBodyError extends Error {
   readonly code: FarmRequestBodyErrorCode;
@@ -162,7 +276,9 @@ function normalizeHealthPath(value: string, optionName: string): string {
   if (!path.startsWith("/") || path.includes("?") || path.includes("#") || path.includes("*")) {
     throw new TypeError(`${optionName} must be an absolute pathname without a query or wildcard`);
   }
-  return path.length > 1 ? path.replace(/\/+$/, "") || "/" : path;
+  const normalized = path.length > 1 ? path.replace(/\/+$/, "") || "/" : path;
+  assertBrowserStableRoutePath(normalized);
+  return normalized;
 }
 
 export function parseBodySizeLimit(value: number | string, optionName = "bodySizeLimit"): number {
@@ -219,7 +335,9 @@ export async function readFarmRequestBody(request: Request, limit: number): Prom
   try {
     validateContentLength(request.headers.get("content-length"), limit);
   } catch (error) {
-    await request.body?.cancel(error).catch(() => {});
+    // A cloned Request is a tee branch: its cancellation may wait for the
+    // untouched branch. Rejection must not wait for producer-owned cleanup.
+    void request.body?.cancel(error).catch(() => {});
     throw error;
   }
   throwIfAborted(request.signal);
@@ -237,13 +355,16 @@ export async function readFarmRequestBody(request: Request, limit: number): Prom
     while (true) {
       throwIfAborted(request.signal);
       const { done, value } = await reader.read();
+      // Cancellation resolves a pending read as EOF, not necessarily an error.
+      throwIfAborted(request.signal);
       if (done) break;
       if (!value) continue;
 
       total += value.byteLength;
       if (total > limit) {
-        await reader.cancel("Request body is too large");
-        throw new FarmRequestBodyError("BODY_TOO_LARGE", 413, "Request body is too large");
+        const error = new FarmRequestBodyError("BODY_TOO_LARGE", 413, "Request body is too large");
+        void reader.cancel(error).catch(() => {});
+        throw error;
       }
       chunks.push(value);
     }

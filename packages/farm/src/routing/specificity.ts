@@ -1,5 +1,40 @@
 export type RouteSegmentSpecificity = "static" | "dynamic" | "catch-all" | "optional-catch-all";
 
+export class AmbiguousRouteError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AmbiguousRouteError";
+  }
+}
+
+export class NonTerminalCatchAllRouteError extends TypeError {
+  constructor(message: string) {
+    super(message);
+    this.name = "NonTerminalCatchAllRouteError";
+  }
+}
+
+export class DuplicateRouteParameterError extends AmbiguousRouteError {
+  constructor(message: string) {
+    super(message);
+    this.name = "DuplicateRouteParameterError";
+  }
+}
+
+export class ReservedRouteParameterError extends AmbiguousRouteError {
+  constructor(message: string) {
+    super(message);
+    this.name = "ReservedRouteParameterError";
+  }
+}
+
+export class BrowserUnstableRouteError extends TypeError {
+  constructor(message: string) {
+    super(message);
+    this.name = "BrowserUnstableRouteError";
+  }
+}
+
 const SEGMENT_RANK: Record<RouteSegmentSpecificity, number> = {
   static: 4,
   dynamic: 3,
@@ -25,4 +60,161 @@ export function compareRouteSpecificity(
   }
 
   return 0;
+}
+
+export type RoutePatternSyntax = "page" | "router" | "api";
+
+const ROUTER_PARAMETER_NAME = "[A-Za-z0-9_$-]+";
+const PAGE_PARAMETER_PATTERN = /^(?:\[\[\.\.\.(.+)\]\]|\[\.\.\.(.+)\]|\[(.+)\])$/;
+const ROUTER_PARAMETER_PATTERN =
+  /^(?:\[\[\.\.\.([A-Za-z0-9_$-]+)\]\]|\[\.\.\.([A-Za-z0-9_$-]+)\]|\[([A-Za-z0-9_$-]+)\]|:([A-Za-z0-9_$-]+)|\*([A-Za-z0-9_$-]+)\??)$/;
+const RESERVED_PARAMETER_NAMES = new Set(["__proto__", "constructor", "prototype"]);
+
+export function assertBrowserStableRoutePath(pattern: string): void {
+  if (pattern.includes("\\") || hasControlCharacter(pattern)) {
+    throw new BrowserUnstableRouteError(
+      `Route path "${pattern}" cannot contain backslashes or control characters.`,
+    );
+  }
+
+  for (const segment of pattern.split("/").filter(Boolean)) {
+    if (
+      (segment.startsWith("(") && segment.endsWith(")")) ||
+      (segment.startsWith("[") && segment.endsWith("]"))
+    ) {
+      continue;
+    }
+
+    let decoded = segment;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      // Malformed escapes stay literal in browser pathnames.
+    }
+    if (
+      decoded === "." ||
+      decoded === ".." ||
+      decoded.includes("/") ||
+      decoded.includes("\\") ||
+      hasControlCharacter(decoded)
+    ) {
+      throw new BrowserUnstableRouteError(
+        `Route path "${pattern}" contains browser-unstable segment "${segment}".`,
+      );
+    }
+  }
+}
+
+function hasControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || (code >= 127 && code <= 159);
+  });
+}
+
+export function assertUniqueRouteParameters(
+  pattern: string,
+  syntax: RoutePatternSyntax = "page",
+): void {
+  const parameterPattern = syntax === "router" ? ROUTER_PARAMETER_PATTERN : PAGE_PARAMETER_PATTERN;
+  const names = new Set<string>();
+
+  for (const segment of splitRoutePattern(pattern, syntax)) {
+    const match = parameterPattern.exec(segment);
+    const name = match?.slice(1).find(Boolean);
+    if (!name) continue;
+    if (RESERVED_PARAMETER_NAMES.has(name)) {
+      throw new ReservedRouteParameterError(
+        `Route parameter "${name}" in route "${pattern}" is reserved. Use a different parameter name.`,
+      );
+    }
+    if (names.has(name)) {
+      throw new DuplicateRouteParameterError(
+        `Duplicate route parameter "${name}" in route "${pattern}". Each dynamic segment must use a unique name.`,
+      );
+    }
+    names.add(name);
+  }
+}
+
+function splitRoutePattern(pattern: string, syntax: RoutePatternSyntax): string[] {
+  return pattern
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean)
+    .filter((segment) =>
+      syntax === "api" ? true : !(segment.startsWith("(") && segment.endsWith(")")),
+    );
+}
+
+export function assertTerminalCatchAll(pattern: string, syntax: RoutePatternSyntax = "page"): void {
+  const segments = splitRoutePattern(pattern, syntax);
+  const parameterName = syntax === "router" ? ROUTER_PARAMETER_NAME : ".+";
+  const catchAllPattern = new RegExp(
+    syntax === "router"
+      ? `^(?:\\[\\[\\.\\.\\.${parameterName}\\]\\]|\\[\\.\\.\\.${parameterName}\\]|\\*${parameterName}\\??)$`
+      : `^(?:\\[\\[\\.\\.\\.${parameterName}\\]\\]|\\[\\.\\.\\.${parameterName}\\])$`,
+  );
+  const catchAllIndex = segments.findIndex((segment) => catchAllPattern.test(segment));
+  if (catchAllIndex >= 0 && catchAllIndex !== segments.length - 1) {
+    throw new NonTerminalCatchAllRouteError(
+      `Catch-all segment "${segments[catchAllIndex]}" must be the final segment in route "${pattern}".`,
+    );
+  }
+}
+
+/** Return the URL-matching shape of a route without its parameter names. */
+export function getRoutePatternShape(pattern: string, syntax: RoutePatternSyntax = "page"): string {
+  assertTerminalCatchAll(pattern, syntax);
+  const segments = splitRoutePattern(pattern, syntax).map((segment) => {
+    const specificity = getPatternSegmentSpecificity(segment, syntax);
+    if (specificity !== "static") return specificity;
+
+    try {
+      return `static:${decodeURIComponent(segment)}`;
+    } catch {
+      return `static:${segment}`;
+    }
+  });
+
+  return segments.length === 0 ? "/" : JSON.stringify(segments);
+}
+
+/** Return the specificity of every URL-consuming segment in a route pattern. */
+export function getRoutePatternSpecificity(
+  pattern: string,
+  syntax: RoutePatternSyntax = "page",
+): RouteSegmentSpecificity[] {
+  assertTerminalCatchAll(pattern, syntax);
+  return splitRoutePattern(pattern, syntax).map((segment) =>
+    getPatternSegmentSpecificity(segment, syntax),
+  );
+}
+
+function getPatternSegmentSpecificity(
+  segment: string,
+  syntax: RoutePatternSyntax,
+): RouteSegmentSpecificity {
+  const parameterName = syntax === "router" ? ROUTER_PARAMETER_NAME : ".+";
+  const supportsColonAndStar = syntax === "router";
+  if (
+    new RegExp(`^\\[\\[\\.\\.\\.${parameterName}\\]\\]$`).test(segment) ||
+    (supportsColonAndStar && new RegExp(`^\\*${parameterName}\\?$`).test(segment))
+  ) {
+    return "optional-catch-all";
+  }
+  if (
+    new RegExp(`^\\[\\.\\.\\.${parameterName}\\]$`).test(segment) ||
+    (supportsColonAndStar && new RegExp(`^\\*${parameterName}$`).test(segment))
+  ) {
+    return "catch-all";
+  }
+  if (
+    new RegExp(`^\\[${parameterName}\\]$`).test(segment) ||
+    (supportsColonAndStar && new RegExp(`^:${parameterName}$`).test(segment))
+  ) {
+    return "dynamic";
+  }
+
+  return "static";
 }

@@ -318,7 +318,6 @@ type InspectorEntry = {
   id: string;
   label: string;
   description: string;
-  icon: IconName;
   value?: string | number;
   searchValue?: string;
   detailMeta?: string;
@@ -423,7 +422,6 @@ function renderOverviewInspector(
       id: "diagnostics",
       label: "Diagnostics",
       description: "Actionable framework checks",
-      icon: "shield",
       value: snapshot.counts.diagnostics,
       detailMeta: healthLabel,
       content: `${renderDetailIntro(
@@ -439,7 +437,6 @@ function renderOverviewInspector(
       id: "project",
       label: snapshot.project.name,
       description: snapshot.project.root,
-      icon: "app",
       value: snapshot.project.srcDir,
       detailMeta: "Active project",
       content: `${renderDetailIntro(
@@ -459,7 +456,6 @@ function renderOverviewInspector(
       id: "routes",
       label: "Route surface",
       description: "Pages, boundaries, and typed endpoints",
-      icon: "route",
       value: snapshot.counts.pages + snapshot.counts.apiRoutes,
       detailMeta: `${snapshot.counts.pages} pages / ${snapshot.counts.apiRoutes} API`,
       content: `${renderDetailIntro(
@@ -479,7 +475,6 @@ function renderOverviewInspector(
       id: "systems",
       label: "Connected systems",
       description: "Integrations, storage, and request layers",
-      icon: "blocks",
       value: snapshot.counts.integrations,
       detailMeta: "Configured surfaces",
       content: `${renderDetailIntro(
@@ -493,7 +488,6 @@ function renderOverviewInspector(
       id: "deployment",
       label: "Runtime",
       description: `${snapshot.deployment.target} / ${snapshot.deployment.preset}`,
-      icon: "runtime",
       value: scheduledCount,
       detailMeta: "Deployment controls",
       content: `${renderDetailIntro(
@@ -522,7 +516,6 @@ function renderRoutesInspector(snapshot: FarmDevtoolsSnapshot): string {
       id: `route-${index}`,
       label: route.pattern,
       description: route.filePath,
-      icon: "route",
       value: route.kind,
       searchValue: `${route.kind} ${route.pattern} ${route.filePath} ${
         route.runtime?.runtime || "inherited"
@@ -552,7 +545,6 @@ function renderApiInspector(snapshot: FarmDevtoolsSnapshot): string {
       id: `api-${index}`,
       label: route.path,
       description: route.filePath,
-      icon: "api",
       value: route.methods.length,
       searchValue: `${route.path} ${route.methods.join(" ")} ${route.filePath} ${
         route.runtime.runtime
@@ -584,7 +576,6 @@ function renderSystemsInspector(snapshot: FarmDevtoolsSnapshot): string {
       id: "integrations",
       label: "Integrations",
       description: "Configured product adapters",
-      icon: "blocks",
       value: snapshot.integrations.length,
       content: renderIntegrations(snapshot),
     },
@@ -592,7 +583,6 @@ function renderSystemsInspector(snapshot: FarmDevtoolsSnapshot): string {
       id: "middleware",
       label: "Middleware",
       description: "Request layers and source modules",
-      icon: "shield",
       value: snapshot.middleware.length,
       content: renderMiddleware(snapshot),
     },
@@ -600,7 +590,6 @@ function renderSystemsInspector(snapshot: FarmDevtoolsSnapshot): string {
       id: "storage",
       label: "Storage mounts",
       description: "Root driver and named namespaces",
-      icon: "database",
       value: snapshot.storage.length,
       content: renderStorage(snapshot),
     },
@@ -608,7 +597,6 @@ function renderSystemsInspector(snapshot: FarmDevtoolsSnapshot): string {
       id: "docs",
       label: "Documentation",
       description: snapshot.docs.entry || "No docs route",
-      icon: "book",
       value: snapshot.docs.enabled ? "on" : "off",
       content: `${renderDetailIntro(
         "Documentation",
@@ -629,7 +617,6 @@ function renderRuntimeInspector(snapshot: FarmDevtoolsSnapshot): string {
       id: "deployment",
       label: "Deployment",
       description: `${snapshot.deployment.target} / ${snapshot.deployment.preset}`,
-      icon: "runtime",
       content: `${renderDetailIntro(
         "Deployment target",
         snapshot.deployment.target,
@@ -648,7 +635,6 @@ function renderRuntimeInspector(snapshot: FarmDevtoolsSnapshot): string {
       id: "cron",
       label: "Cron routes",
       description: "Portable scheduled API routes",
-      icon: "clock",
       value: snapshot.cron.length,
       content: renderCron(snapshot),
     },
@@ -656,7 +642,6 @@ function renderRuntimeInspector(snapshot: FarmDevtoolsSnapshot): string {
       id: "workflows",
       label: "Workflows",
       description: "Discovered workflow modules",
-      icon: "activity",
       value: snapshot.workflows.length,
       content: renderWorkflows(snapshot),
     },
@@ -664,14 +649,12 @@ function renderRuntimeInspector(snapshot: FarmDevtoolsSnapshot): string {
       id: "features",
       label: "Framework features",
       description: "Resolved configuration switches",
-      icon: "blocks",
       content: renderFeatureMatrix(snapshot),
     },
     {
       id: "environment",
       label: "Environment",
       description: "Validated key names only",
-      icon: "shield",
       value: snapshot.environment.server.length + snapshot.environment.public.length,
       content: renderEnvironment(snapshot),
     },
@@ -679,7 +662,6 @@ function renderRuntimeInspector(snapshot: FarmDevtoolsSnapshot): string {
       id: "layers",
       label: "Layers",
       description: "Extended source roots",
-      icon: "layers",
       value: snapshot.layers.length,
       content: renderLayers(snapshot),
     },
@@ -692,14 +674,12 @@ function renderRawInspector(snapshot: FarmDevtoolsSnapshot): string {
       id: "snapshot",
       label: "Snapshot",
       description: "Complete serialized runtime state",
-      icon: "terminal",
       content: renderJson(snapshot),
     },
     {
       id: "routes",
       label: "Routes",
       description: "Pages and route boundaries",
-      icon: "route",
       value: snapshot.routes.length,
       content: renderJson(snapshot.routes),
     },
@@ -707,7 +687,6 @@ function renderRawInspector(snapshot: FarmDevtoolsSnapshot): string {
       id: "api",
       label: "API",
       description: "Typed server endpoints",
-      icon: "api",
       value: snapshot.apiRoutes.length,
       content: renderJson(snapshot.apiRoutes),
     },
@@ -715,7 +694,6 @@ function renderRawInspector(snapshot: FarmDevtoolsSnapshot): string {
       id: "systems",
       label: "Systems",
       description: "Integrations, middleware, and storage",
-      icon: "blocks",
       content: renderJson({
         integrations: snapshot.integrations,
         middleware: snapshot.middleware,
@@ -726,7 +704,6 @@ function renderRawInspector(snapshot: FarmDevtoolsSnapshot): string {
       id: "diagnostics",
       label: "Diagnostics",
       description: "Framework health findings",
-      icon: "shield",
       value: snapshot.diagnostics.length,
       content: renderJson(snapshot.diagnostics),
     },
@@ -799,14 +776,11 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
     .nav-item .icon { width: 13px; height: 13px; }
     .nav-item small { color: #666; font-size: 9px; font-weight: 400; }
     .topbar-meta { display: flex; flex: 0 0 auto; margin-left: auto; border-left: 1px solid var(--line); }
+    .deprecation-tag { display: inline-flex; align-items: center; padding: 0 10px; border-right: 1px solid var(--line); color: #d9a626; font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; white-space: nowrap; }
     .topbar-status { display: flex; min-width: max-content; align-items: center; gap: 7px; padding: 0 11px; color: var(--muted-strong); font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; }
     .status-dot { width: 5px; height: 5px; background: #fff; box-shadow: 0 0 0 3px rgb(255 255 255 / 0.06); }
     .status-dot-attention { background: #909090; animation: status-pulse 1.8s ease-in-out infinite; }
     .status-dot-error { background: transparent; border: 1px solid #fff; }
-    .topbar-actions { display: flex; }
-    .action { display: inline-flex; width: 40px; min-height: 41px; align-items: center; justify-content: center; padding: 0; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--muted-strong); text-decoration: none; transition: background-color 140ms ease-out, color 140ms ease-out; }
-    .action:hover, .action:focus-visible { background: #fff; color: #000; outline: none; }
-    .action[data-copied="true"] { background: #fff; color: #000; }
     .workspace { min-height: 0; flex: 1 1 auto; }
     .eyebrow { display: block; color: var(--muted); font-size: 9px; font-weight: 400; text-transform: uppercase; }
     .content { height: 100%; min-width: 0; }
@@ -828,8 +802,6 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
     .inspector-row:hover, .inspector-row:focus-visible { background: rgb(255 255 255 / 0.035); color: var(--foreground); outline: none; }
     .inspector-row[aria-selected="true"] { background: rgb(255 255 255 / 0.075); color: #fff; }
     .inspector-row[aria-selected="true"]::before { background: #fff; }
-    .inspector-row-icon { display: grid; color: var(--muted-strong); place-items: center; }
-    .inspector-row-icon .icon { width: 14px; height: 14px; }
     .inspector-row-copy { min-width: 0; }
     .inspector-row-copy strong, .inspector-row-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .inspector-row-copy strong { color: inherit; font-size: 11px; font-weight: 520; }
@@ -1308,6 +1280,7 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
           ${renderNavigationItem("raw", "Raw")}
         </nav>
         <div class="topbar-meta">
+          <span class="deprecation-tag" title="The built-in dashboard is deprecated. Install @farm.js/devtools for the maintained workspace.">Deprecated &middot; use @farm.js/devtools</span>
           <span class="project-select">${escapeHtml(snapshot.project.name)} ${icon(
             "chevron",
           )}</span>
@@ -1441,32 +1414,6 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
         }
       });
 
-      document.querySelector("[data-refresh]")?.addEventListener("click", () => location.reload());
-      document.querySelector("[data-copy-snapshot]")?.addEventListener("click", async (event) => {
-        const button = event.currentTarget;
-        const label = button.querySelector("[data-copy-label]");
-        try {
-          const response = await fetch("/__farm/devtools.json", { cache: "no-store" });
-          const value = JSON.stringify(await response.json(), null, 2);
-          if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(value);
-          else {
-            const textarea = document.createElement("textarea");
-            textarea.value = value;
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand("copy");
-            textarea.remove();
-          }
-          button.dataset.copied = "true";
-          if (label) label.textContent = "Copied";
-          setTimeout(() => {
-            button.dataset.copied = "false";
-            if (label) label.textContent = "Copy JSON";
-          }, 1600);
-        } catch {
-          if (label) label.textContent = "Copy failed";
-        }
-      });
     })();
   </script>
 </body>

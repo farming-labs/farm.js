@@ -1,5 +1,5 @@
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PluginManager } from "../plugin";
 import { createCompressionPlugin } from "../plugins/compression";
 
@@ -50,6 +50,58 @@ describe("compression plugin", () => {
     expect(brotliDecompressSync(Buffer.from(await response.arrayBuffer())).toString()).toBe(body);
   });
 
+  it("varies eligible identity responses by Accept-Encoding", async () => {
+    const manager = createManager();
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/", {
+        headers: { "accept-encoding": "br;q=0, gzip;q=0" },
+      }),
+      () =>
+        new Response("identity", {
+          headers: { vary: "Accept-Language" },
+        }),
+    );
+
+    expect(response.headers.get("content-encoding")).toBeNull();
+    expect(response.headers.get("vary")).toBe("Accept-Language, Accept-Encoding");
+    expect(await response.text()).toBe("identity");
+  });
+
+  it("preserves a wildcard Vary value", async () => {
+    const manager = createManager();
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/", {
+        headers: { "accept-encoding": "gzip" },
+      }),
+      () => new Response("wildcard", { headers: { vary: "*" } }),
+    );
+
+    expect(response.headers.get("content-encoding")).toBe("gzip");
+    expect(response.headers.get("vary")).toBe("*");
+    expect(gunzipSync(Buffer.from(await response.arrayBuffer())).toString()).toBe("wildcard");
+  });
+
+  it("varies eligible HEAD responses without compressing them", async () => {
+    const manager = createManager();
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/", {
+        method: "HEAD",
+        headers: { "accept-encoding": "gzip" },
+      }),
+      () =>
+        new Response(null, {
+          headers: {
+            "content-type": "text/plain",
+            vary: "Accept-Language",
+          },
+        }),
+    );
+
+    expect(response.body).toBeNull();
+    expect(response.headers.get("content-encoding")).toBeNull();
+    expect(response.headers.get("vary")).toBe("Accept-Language, Accept-Encoding");
+  });
+
   it("leaves existing encodings and streaming event responses untouched", async () => {
     const manager = createManager();
     const encoded = await manager.runRuntimeRequest(
@@ -66,10 +118,88 @@ describe("compression plugin", () => {
           headers: { "content-type": "text/event-stream" },
         }),
     );
+    const parameterizedEventStream = await manager.runRuntimeRequest(
+      new Request("https://farm.test/events", { headers: { "accept-encoding": "gzip" } }),
+      () =>
+        new Response("data: still-ready\n\n", {
+          headers: { "content-type": "text/event-stream; charset=utf-8" },
+        }),
+    );
 
     expect(encoded.headers.get("content-encoding")).toBe("custom");
     expect(await encoded.text()).toBe("already encoded");
     expect(eventStream.headers.get("content-encoding")).toBeNull();
     expect(await eventStream.text()).toBe("data: ready\n\n");
+    expect(parameterizedEventStream.headers.get("content-encoding")).toBeNull();
+    expect(await parameterizedEventStream.text()).toBe("data: still-ready\n\n");
+  });
+
+  it.each(["br", "gzip"])("streams %s chunks before the source ends", async (encoding) => {
+    const manager = createManager();
+    let closeSource!: () => void;
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("first chunk ".repeat(64)));
+        closeSource = () => controller.close();
+      },
+    });
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/", { headers: { "accept-encoding": encoding } }),
+      () => new Response(source, { headers: { "content-type": "text/plain" } }),
+    );
+    expect(response.headers.get("content-encoding")).toBe(encoding);
+
+    const reader = response.body!.getReader();
+    // The first chunk has to reach the client while the source is still open.
+    // Without a per-chunk flush the compressor buffers it and this read never
+    // settles, which is what stalls streaming responses.
+    const first = await Promise.race([
+      reader.read(),
+      new Promise<"timed out">((resolve) => setTimeout(() => resolve("timed out"), 1_000)),
+    ]);
+
+    expect(first).not.toBe("timed out");
+    expect((first as ReadableStreamReadResult<Uint8Array>).value?.byteLength).toBeGreaterThan(0);
+
+    closeSource();
+    await reader.cancel();
+  });
+
+  it("propagates source stream failures to the compressed response", async () => {
+    const manager = createManager();
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("partial response"));
+        queueMicrotask(() => controller.error(new Error("source stream failed")));
+      },
+    });
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/", { headers: { "accept-encoding": "gzip" } }),
+      () => new Response(source, { headers: { "content-type": "text/plain" } }),
+    );
+
+    await expect(response.arrayBuffer()).rejects.toThrow("source stream failed");
+  });
+
+  it("cancels the source when the compressed response consumer disconnects", async () => {
+    const manager = createManager();
+    const cancel = vi.fn();
+    const chunk = new TextEncoder().encode("streamed response".repeat(256));
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(chunk);
+      },
+      cancel,
+    });
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/", { headers: { "accept-encoding": "gzip" } }),
+      () => new Response(source, { headers: { "content-type": "text/plain" } }),
+    );
+
+    const reader = response.body!.getReader();
+    await reader.read();
+    await reader.cancel("client disconnected");
+
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce());
   });
 });

@@ -11,7 +11,9 @@ import type { ServerQuery } from "../server-query";
 import {
   beginFarmServerQueryAction,
   completeFarmServerQueryAction,
+  fetchServerQuery,
   prefetchServerQuery,
+  shouldApplyFarmServerQueryActionResult,
   useServerQuery,
 } from "../server-query-client";
 import { createFarmServerQueryResult } from "../server-query-protocol";
@@ -32,10 +34,12 @@ type ProductAPI = {
 function createTransportedQuery(
   handler: (input: { id: string }) => Product | Promise<Product>,
   staleTime: number | false = 10_000,
+  onAccepted?: (data: Product) => void,
 ): ServerQuery<{ id: string }, Product> {
   return (async (input: { id: string }) => {
     const invocation = beginFarmServerQueryAction("product-query", [input]);
     const data = await handler(input);
+    if (shouldApplyFarmServerQueryActionResult(invocation)) onAccepted?.(data);
     return completeFarmServerQueryAction(
       invocation,
       createFarmServerQueryResult(data, {
@@ -45,6 +49,14 @@ function createTransportedQuery(
       }),
     );
   }) as ServerQuery<{ id: string }, Product>;
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 describe("server query client", () => {
@@ -100,16 +112,68 @@ describe("server query client", () => {
     expect(calls).toBe(1);
   });
 
+  it("starts forced work and keeps an older result from replacing it", async () => {
+    const firstResult = createDeferred<Product>();
+    const secondResult = createDeferred<Product>();
+    const acceptedVersions: number[] = [];
+    let calls = 0;
+    const product = createTransportedQuery(
+      () => {
+        calls++;
+        return calls === 1 ? firstResult.promise : secondResult.promise;
+      },
+      10_000,
+      (data) => acceptedVersions.push(data.version),
+    );
+
+    const first = fetchServerQuery(product, { id: "123" }, { force: true });
+    await vi.waitFor(() => expect(calls).toBe(1));
+    const second = fetchServerQuery(product, { id: "123" }, { force: true });
+    await vi.waitFor(() => expect(calls).toBe(2));
+
+    secondResult.resolve({ id: "123", version: 2 });
+    await expect(second).resolves.toEqual({ id: "123", version: 2 });
+    firstResult.resolve({ id: "123", version: 1 });
+    await expect(first).resolves.toEqual({ id: "123", version: 1 });
+    expect(acceptedVersions).toEqual([2]);
+
+    await expect(fetchServerQuery(product, { id: "123" })).resolves.toEqual({
+      id: "123",
+      version: 2,
+    });
+    expect(calls).toBe(2);
+  });
+
+  it("clears rejected synchronous queries from the in-flight registry", async () => {
+    let calls = 0;
+    const product = (({ id }: { id: string }) => {
+      calls++;
+      if (calls === 1) throw new Error("synchronous failure");
+      return Promise.resolve({ id, version: calls });
+    }) as ServerQuery<{ id: string }, Product>;
+
+    await expect(fetchServerQuery(product, { id: "123" })).rejects.toThrow("synchronous failure");
+    await expect(fetchServerQuery(product, { id: "123" })).resolves.toEqual({
+      id: "123",
+      version: 2,
+    });
+    expect(calls).toBe(2);
+  });
+
   it("shares structured entries with the API client cache", async () => {
     const product = createTransportedQuery(({ id }) => ({ id, version: 1 }));
     await prefetchServerQuery(product, { id: "123" });
 
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const api = createAPIClient<ProductAPI>({ baseURL: "https://farm.test" });
+    const api = createAPIClient<ProductAPI>({
+      baseURL: "https://farm.test",
+      credentials: "omit",
+    });
     const result = await api.products.get(undefined, {
       cache: {
         key: ["product", "123"],
+        scope: "shared",
         policy: "cache-first",
         staleTime: 10_000,
       },
@@ -175,5 +239,109 @@ describe("server query client", () => {
 
     expect(container.textContent).toBe("2");
     expect(calls).toBe(2);
+  });
+
+  it.each([0, 100])(
+    "refreshes on re-enable without looping with staleTime %i",
+    async (staleTime) => {
+      vi.useFakeTimers();
+      let calls = 0;
+      const product = createTransportedQuery(({ id }) => ({ id, version: ++calls }), staleTime);
+      function View({ enabled }: { enabled: boolean }) {
+        const query = useServerQuery(product, { id: "123" }, { enabled });
+        return createElement("span", null, query.data?.version);
+      }
+      root = createRoot(container);
+      const render = async (enabled: boolean) => {
+        await act(async () => {
+          root?.render(createElement(View, { enabled }));
+        });
+      };
+      await render(true);
+      expect(container.textContent).toBe("1");
+      await render(false);
+      vi.advanceTimersByTime(staleTime + 1);
+      await render(true);
+      expect(container.textContent).toBe("2");
+      await render(true);
+      expect(calls).toBe(2);
+    },
+  );
+
+  it("keeps fresh data when re-enabled and waits to load when initially disabled", async () => {
+    let calls = 0;
+    const product = createTransportedQuery(({ id }) => ({ id, version: ++calls }), false);
+    function View({ enabled }: { enabled: boolean }) {
+      const query = useServerQuery(product, { id: "123" }, { enabled });
+      return createElement("span", null, query.data?.version ?? "idle");
+    }
+    root = createRoot(container);
+    const render = async (enabled: boolean) => {
+      await act(async () => {
+        root?.render(createElement(View, { enabled }));
+      });
+    };
+    await render(false);
+    expect(container.textContent).toBe("idle");
+    expect(calls).toBe(0);
+    await render(true);
+    await render(false);
+    await render(true);
+    expect(container.textContent).toBe("1");
+    expect(calls).toBe(1);
+  });
+
+  it("loads missing data on re-enable after the disabled query's cache was cleared", async () => {
+    let calls = 0;
+    const product = createTransportedQuery(({ id }) => ({ id, version: ++calls }));
+    function View({ enabled }: { enabled: boolean }) {
+      const query = useServerQuery(product, { id: "123" }, { enabled });
+      return createElement("span", null, query.data?.version ?? "idle");
+    }
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(createElement(View, { enabled: true }));
+    });
+    await act(async () => {
+      root?.render(createElement(View, { enabled: false }));
+    });
+    await act(async () => {
+      getFarmClientDataCache().clear();
+    });
+    expect(calls).toBe(1);
+    await act(async () => {
+      root?.render(createElement(View, { enabled: true }));
+    });
+    expect(container.textContent).toBe("2");
+    expect(calls).toBe(2);
+  });
+
+  it("joins existing work when re-enabled while the first request is pending", async () => {
+    let calls = 0;
+    const response = createDeferred<Product>();
+    const product = createTransportedQuery(() => {
+      calls++;
+      return response.promise;
+    });
+    function View({ enabled }: { enabled: boolean }) {
+      const query = useServerQuery(product, { id: "123" }, { enabled });
+      return createElement("span", null, query.data?.version ?? "pending");
+    }
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(createElement(View, { enabled: true }));
+    });
+    await act(async () => {
+      root?.render(createElement(View, { enabled: false }));
+    });
+    await act(async () => {
+      root?.render(createElement(View, { enabled: true }));
+    });
+    expect(calls).toBe(1);
+    await act(async () => {
+      response.resolve({ id: "123", version: 1 });
+    });
+    expect(container.textContent).toBe("1");
+    expect(calls).toBe(1);
   });
 });

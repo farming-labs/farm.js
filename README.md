@@ -57,7 +57,7 @@ No install needed: [open the playground on StackBlitz](https://stackblitz.com/gi
 ### Create a New App
 
 ```bash
-pnpm create @farm.js/app@beta my-app --template basic --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-app --template basic --typescript
 cd my-app
 pnpm dev
 ```
@@ -327,7 +327,7 @@ Visit [farmjs.dev](https://farmjs.dev) for comprehensive documentation, guides, 
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22.13 or newer
 - pnpm 8+
 
 ### Setup

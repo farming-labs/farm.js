@@ -1,4 +1,5 @@
 import type { Metadata } from "./types";
+import { renderFarmAgentJsonLd, type FarmAgentJsonLd } from "./agent-config";
 
 export type MetadataImageKind = "opengraph" | "twitter";
 
@@ -99,7 +100,26 @@ export function addMetadataImageReference(
   };
 }
 
-export function renderMetadataHead(metadata: MetadataRecord | undefined): RenderedMetadataHead {
+export interface RenderMetadataHeadOptions {
+  /**
+   * Current request pathname. Used to emit a default `<link rel="canonical">`
+   * when the route does not set one, so agents and crawlers can resolve the
+   * page's identity. Combined with `metadataBase` into an absolute URL when a
+   * base is configured; otherwise emitted as a self-referential path.
+   */
+  pathname?: string;
+  /**
+   * Agent JSON-LD config. When truthy, a schema.org JSON-LD script is emitted in
+   * the head, built from this config and the page/site metadata. `true` uses the
+   * defaults; `false`/omitted (the default) emits nothing.
+   */
+  jsonLd?: FarmAgentJsonLd | boolean;
+}
+
+export function renderMetadataHead(
+  metadata: MetadataRecord | undefined,
+  options: RenderMetadataHeadOptions = {},
+): RenderedMetadataHead {
   const resolvedMetadata = metadata || {};
   const metadataBase = resolveMetadataBase(resolvedMetadata);
   const explicitTitle = resolveMetadataTitle(resolvedMetadata.title);
@@ -124,15 +144,26 @@ export function renderMetadataHead(metadata: MetadataRecord | undefined): Render
   appendMetaName(tags, "robots", normalizeRobots(resolvedMetadata.robots));
 
   const alternates = (resolvedMetadata as any).alternates;
-  if (isRecord(alternates)) {
-    appendLink(tags, "canonical", resolveMetadataUrl(alternates.canonical, metadataBase));
+  const explicitCanonical = isRecord(alternates) ? alternates.canonical : undefined;
+  // Default the canonical link to the current path when the route does not set
+  // one. This is a self-referential canonical (absolute when `metadataBase` is
+  // configured), which is safe for every page and gives agents/crawlers a
+  // stable identity for the URL.
+  const canonicalHref =
+    explicitCanonical != null
+      ? resolveMetadataUrl(explicitCanonical, metadataBase)
+      : options.pathname
+        ? resolveMetadataUrl(sanitizeSelfCanonicalPathname(options.pathname), metadataBase)
+        : undefined;
+  if (canonicalHref) {
+    appendLink(tags, "canonical", canonicalHref);
+  }
 
-    if (isRecord(alternates.languages)) {
-      for (const [language, href] of Object.entries(alternates.languages)) {
-        appendLink(tags, "alternate", resolveMetadataUrl(href, metadataBase), {
-          hreflang: language,
-        });
-      }
+  if (isRecord(alternates) && isRecord(alternates.languages)) {
+    for (const [language, href] of Object.entries(alternates.languages)) {
+      appendLink(tags, "alternate", resolveMetadataUrl(href, metadataBase), {
+        hreflang: language,
+      });
     }
   }
 
@@ -148,6 +179,19 @@ export function renderMetadataHead(metadata: MetadataRecord | undefined): Render
 
   appendOpenGraph(tags, resolvedMetadata.openGraph, metadataBase);
   appendTwitter(tags, resolvedMetadata.twitter, metadataBase);
+
+  if (options.jsonLd) {
+    const jsonLdConfig = options.jsonLd === true ? {} : options.jsonLd;
+    const jsonLdScript = renderFarmAgentJsonLd(jsonLdConfig, {
+      metadataBase,
+      siteName: isRecord(resolvedMetadata.openGraph)
+        ? normalizeContent(resolvedMetadata.openGraph.siteName)
+        : undefined,
+      title: explicitTitle,
+      description: normalizeContent(resolvedMetadata.description),
+    });
+    if (jsonLdScript) tags.push(jsonLdScript);
+  }
 
   return {
     title: escapeText(title),
@@ -175,7 +219,9 @@ function appendOpenGraph(tags: string[], openGraph: Metadata["openGraph"], metad
   appendMetaProperty(tags, "og:description", openGraph.description);
   appendMetaProperty(tags, "og:url", resolveMetadataUrl(openGraph.url, metadataBase));
   appendMetaProperty(tags, "og:site_name", openGraph.siteName);
-  appendMetaProperty(tags, "og:type", openGraph.type);
+  // Default og:type so a route that sets Open Graph data without a type still
+  // emits a valid entity type for agents and social crawlers.
+  appendMetaProperty(tags, "og:type", openGraph.type ?? "website");
   appendMetaProperty(tags, "og:locale", (openGraph as any).locale);
 
   const images = normalizeMetadataImages(
@@ -316,7 +362,12 @@ function hasMetadataImages(value: unknown): boolean {
   return normalizeMetadataImages(value).length > 0;
 }
 
-function resolveMetadataTitle(title: Metadata["title"]): string | undefined {
+/**
+ * Resolve a metadata title into displayable text. Exported so client-side
+ * navigation resolves the object form the same way SSR does instead of
+ * stringifying it into "[object Object]".
+ */
+export function resolveMetadataTitle(title: Metadata["title"]): string | undefined {
   if (typeof title === "string") return title;
   if (isRecord(title)) {
     return normalizeContent(title.default);
@@ -343,6 +394,21 @@ function resolveMetadataBase(metadata: MetadataRecord): string | undefined {
   const base = metadata.metadataBase;
   if (!base) return undefined;
   return String(base);
+}
+
+/**
+ * Keep the defaulted self-canonical on this origin. The pathname comes straight
+ * from the request URL, and forms like `//evil.com` or `/\evil.com` resolve to a
+ * cross-origin URL through `new URL()` (and browsers treat `\` as `/`), which
+ * would advertise an attacker's domain as the page's canonical identity. Any
+ * request path introducing an authority is collapsed to a single leading slash
+ * so the canonical stays same-origin. Developer-supplied `alternates.canonical`
+ * is trusted and does not pass through here.
+ */
+function sanitizeSelfCanonicalPathname(pathname: string): string {
+  if (typeof pathname !== "string" || pathname.length === 0) return "/";
+  const collapsed = pathname.replace(/^[/\\]+/, "/");
+  return collapsed.startsWith("/") ? collapsed : `/${collapsed}`;
 }
 
 function resolveMetadataUrl(value: unknown, metadataBase?: string): string | undefined {

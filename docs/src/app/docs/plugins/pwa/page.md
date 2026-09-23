@@ -114,6 +114,11 @@ Image requests with an `Authorization` header and responses marked `Cache-Contro
 `no-store`, or `no-cache` are never stored. Only use this option for public images because Cache
 Storage survives sign-out in the same browser profile.
 
+Runtime image caching is best-effort. If browser storage is unavailable or full, a successful
+network response still loads normally. If the network fails, an available cached image remains the
+fallback; without one, the network error is preserved. Install-time precaching still requires all
+selected assets to be cached successfully.
+
 Customize the storage bounds with short names:
 
 ```ts
@@ -191,9 +196,11 @@ worker and reloads once the new worker controls the page.
 
 ## Options
 
+Adding `pwa()` to `plugins` enables service worker generation and registration. Remove it from the
+array when the app should not ship a service worker.
+
 | Option          | Default    | Description                                                         |
 | --------------- | ---------- | ------------------------------------------------------------------- |
-| `enabled`       | `true`     | Generate or copy and then register the worker.                      |
 | `offline`       | `false`    | Static fallback route for the generated worker.                     |
 | `update`        | `"prompt"` | Prompt or automatically activate and reload for a waiting worker.   |
 | `cache`         | `"auto"`   | Generated-worker caching, a custom object, or build assets only.    |
@@ -204,6 +211,15 @@ worker and reloads once the new worker controls the page.
 | `staticRoutes` | `true`               | Every emitted static page, a route list, or `false`. |
 | `images`       | `"swr"`              | SWR options, `true`, `"swr"`, or `false`.            |
 
+`offline` and explicit `staticRoutes` entries must be stable root-relative application paths.
+URLs, query strings, fragments, dot segments, backslashes, control characters, and encoded path
+separators are rejected.
+
+Write these paths without the deployment prefix: with `basePath: "/app"`, `"/"` is served at
+`/app` and `"/help"` at `/app/help`. An application route named `"/app"` is distinct from the home
+page and is cached at `/app/app`. Farm handles localized HTML output automatically; include the
+locale in a localized route such as `offline: "/en/offline"`, but do not add the deployment prefix.
+
 ## Production lifecycle
 
 During `farm build`, generated-worker mode:
@@ -213,6 +229,9 @@ During `farm build`, generated-worker mode:
 3. Writes `sw.js` under Farm's configured `basePath`.
 4. Maps clean static route URLs to emitted HTML files.
 5. Fails if the configured offline page is missing.
+
+Generated cache names are isolated by `basePath`, so multiple Farm applications on one origin do
+not delete or reuse a sibling application's precache or image cache.
 
 Custom-worker mode copies the configured source to the same deployment-aware `sw.js` location and
 leaves its contents untouched.

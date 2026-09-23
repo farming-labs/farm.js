@@ -15,7 +15,11 @@ import { normalizeMiddlewareModule } from "./module";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import type { ResolvedFarmServerConfig } from "../server-http";
-import { parseMiddlewareCookieHeader } from "./cookie-header";
+import {
+  parseMiddlewareCookieHeader,
+  serializeMiddlewareCookie as serializeCookie,
+  serializeMiddlewareCookieDeletion,
+} from "./cookie-header";
 
 export interface ProductionMiddlewareModuleEntry {
   path: string;
@@ -52,6 +56,11 @@ interface WebMiddlewareContextState {
   headers: WebResponseHeaderMap;
   getRequest(): Request;
   getResponse(): Response | null;
+}
+
+interface WebResponseShimState {
+  response: Record<string, any>;
+  getResponse(method: string): Response | null;
 }
 
 const FARM_SET_COOKIE_HEADERS = Symbol("farm.setCookieHeaders");
@@ -104,22 +113,6 @@ class WebResponseHeaderMap extends Map<string, string> {
   }
 }
 
-function serializeCookie(name: string, value: string, options: CookieOptions = {}): string {
-  let cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
-
-  if (options.maxAge != null) cookie += `; Max-Age=${options.maxAge}`;
-  if (options.expires) cookie += `; Expires=${options.expires.toUTCString()}`;
-  cookie += `; Path=${options.path || "/"}`;
-  if (options.domain) cookie += `; Domain=${options.domain}`;
-  if (options.secure) cookie += "; Secure";
-  if (options.httpOnly) cookie += "; HttpOnly";
-  if (options.sameSite) {
-    cookie += `; SameSite=${options.sameSite.charAt(0).toUpperCase()}${options.sameSite.slice(1)}`;
-  }
-
-  return cookie;
-}
-
 class WebCookieJar implements CookieJar {
   private cookies: Record<string, string>;
 
@@ -140,13 +133,11 @@ class WebCookieJar implements CookieJar {
     this.headers.appendSetCookie(cookieString);
   }
 
-  delete(name: string): void {
+  delete(name: string, options: CookieOptions = {}): void {
     delete this.cookies[name];
-    const cookieString = serializeCookie(name, "", {
-      maxAge: 0,
-      expires: new Date(0),
-    });
-    this.headers.appendSetCookie(cookieString);
+    // Path and Domain must match the cookie that was set, or the tombstone
+    // addresses a different cookie and the original survives.
+    this.headers.appendSetCookie(serializeMiddlewareCookieDeletion(name, options));
   }
 
   getAll(): Record<string, string> {
@@ -174,31 +165,141 @@ function isMiddlewareResponse(value: unknown): value is Response {
   return value instanceof Response;
 }
 
-function createResponseShim(headers: WebResponseHeaderMap): Record<string, any> {
-  return {
+function findHeaderName(headers: WebResponseHeaderMap, name: string): string | undefined {
+  const normalizedName = name.toLowerCase();
+  return [...headers.keys()].find((key) => key.toLowerCase() === normalizedName);
+}
+
+function createResponseShim(headers: WebResponseHeaderMap): WebResponseShimState {
+  const bodyChunks: Uint8Array[] = [];
+  const encoder = new TextEncoder();
+
+  const response = {
     headersSent: false,
     writableEnded: false,
-    setHeader(name: string, value: string | string[]) {
+    statusCode: 200,
+    statusMessage: "",
+    setHeader(name: string, value: string | number | readonly string[]) {
+      const existingName = findHeaderName(headers, name);
+      if (existingName) headers.delete(existingName);
       if (name.toLowerCase() === "set-cookie") {
         headers.replaceSetCookies(Array.isArray(value) ? value.map(String) : [String(value)]);
       } else {
         headers.set(name, Array.isArray(value) ? value.join(", ") : String(value));
       }
+      return this;
     },
     getHeader(name: string) {
-      return headers.get(name);
+      if (name.toLowerCase() === "set-cookie") {
+        const cookies = headers.getSetCookies();
+        return cookies.length > 0 ? [...cookies] : undefined;
+      }
+      const existingName = findHeaderName(headers, name);
+      return existingName ? headers.get(existingName) : undefined;
     },
-    writeHead(status: number, responseHeaders?: Record<string, string>) {
+    hasHeader(name: string) {
+      return name.toLowerCase() === "set-cookie"
+        ? headers.getSetCookies().length > 0
+        : findHeaderName(headers, name) !== undefined;
+    },
+    getHeaderNames() {
+      return [...headers.keys()].map((name) => name.toLowerCase());
+    },
+    getHeaders() {
+      return Object.fromEntries(
+        [...headers.keys()].map((name) => [name.toLowerCase(), this.getHeader(name)]),
+      );
+    },
+    removeHeader(name: string) {
+      const existingName = findHeaderName(headers, name);
+      if (existingName) headers.delete(existingName);
+    },
+    appendHeader(name: string, value: string | readonly string[]) {
+      const values = Array.isArray(value) ? value.map(String) : [String(value)];
+      if (name.toLowerCase() === "set-cookie") {
+        for (const item of values) headers.appendSetCookie(item);
+        return this;
+      }
+      const existing = this.getHeader(name);
+      return this.setHeader(name, existing ? `${String(existing)}, ${values.join(", ")}` : values);
+    },
+    writeHead(
+      status: number,
+      statusMessageOrHeaders?: string | Record<string, string | number | readonly string[]>,
+      responseHeaders?: Record<string, string | number | readonly string[]>,
+    ) {
       this.statusCode = status;
-      if (responseHeaders) {
-        for (const [key, value] of Object.entries(responseHeaders)) {
-          headers.set(key, value);
+      const nextHeaders =
+        typeof statusMessageOrHeaders === "string" ? responseHeaders : statusMessageOrHeaders;
+      if (typeof statusMessageOrHeaders === "string") {
+        this.statusMessage = statusMessageOrHeaders;
+      }
+      if (nextHeaders) {
+        for (const [key, value] of Object.entries(nextHeaders)) {
+          this.setHeader(key, value);
         }
       }
       this.headersSent = true;
+      return this;
     },
-    end() {
+    flushHeaders() {
+      this.headersSent = true;
+    },
+    write(
+      chunk: string | Uint8Array,
+      encodingOrCallback?: string | (() => void),
+      callback?: () => void,
+    ) {
+      bodyChunks.push(typeof chunk === "string" ? encoder.encode(chunk) : new Uint8Array(chunk));
+      this.headersSent = true;
+      const done = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
+      done?.();
+      return true;
+    },
+    end(
+      chunk?: string | Uint8Array | (() => void),
+      encodingOrCallback?: string | (() => void),
+      callback?: () => void,
+    ) {
+      if (typeof chunk === "string" || chunk instanceof Uint8Array) {
+        bodyChunks.push(typeof chunk === "string" ? encoder.encode(chunk) : new Uint8Array(chunk));
+      }
+      this.headersSent = true;
       this.writableEnded = true;
+      const done =
+        typeof chunk === "function"
+          ? chunk
+          : typeof encodingOrCallback === "function"
+            ? encodingOrCallback
+            : callback;
+      done?.();
+      return this;
+    },
+  };
+
+  return {
+    response,
+    getResponse(method: string) {
+      if (!response.headersSent && !response.writableEnded) return null;
+
+      const bodyLength = bodyChunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+      const body = new Uint8Array(bodyLength);
+      let offset = 0;
+      for (const chunk of bodyChunks) {
+        body.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+
+      const bodyAllowed =
+        method.toUpperCase() !== "HEAD" &&
+        response.statusCode !== 204 &&
+        response.statusCode !== 205 &&
+        response.statusCode !== 304;
+      return new Response(bodyAllowed && bodyLength > 0 ? body : null, {
+        status: response.statusCode,
+        statusText: response.statusMessage || undefined,
+        headers: mapToHeaders(headers),
+      });
     },
   };
 }
@@ -229,9 +330,12 @@ function createHandledResponse(
   init: ResponseInit,
   headers: WebResponseHeaderMap,
 ): Response {
-  const responseHeaders = new Headers(init.headers);
+  const responseHeaders = new Headers();
   for (const [key, value] of headers) {
     if (key.toLowerCase() === "set-cookie") continue;
+    responseHeaders.set(key, value);
+  }
+  for (const [key, value] of new Headers(init.headers)) {
     responseHeaders.set(key, value);
   }
   for (const cookie of headers.getSetCookies()) {
@@ -260,10 +364,11 @@ function createWebMiddlewareContext(
   }
   const parentCookies = (parent as InternalMiddlewareParent | undefined)?.[FARM_SET_COOKIE_HEADERS];
   if (parentCookies) headers.replaceSetCookies(parentCookies);
+  const responseShim = createResponseShim(headers);
 
   const ctx = {
     request: currentRequest as any,
-    response: createResponseShim(headers) as any,
+    response: responseShim.response as any,
     url,
     pathname: url.pathname,
     searchParams: url.searchParams,
@@ -357,7 +462,7 @@ function createWebMiddlewareContext(
     ctx,
     headers,
     getRequest: () => currentRequest,
-    getResponse: () => handledResponse,
+    getResponse: () => handledResponse || responseShim.getResponse(currentRequest.method),
   };
 }
 
@@ -447,7 +552,12 @@ function matchPattern(
   }
 
   if (pattern.endsWith("(.*)")) {
-    const prefix = pattern.slice(0, -4);
+    // Strip a trailing slash before the wildcard so `/admin/(.*)` matches the
+    // `/admin` subtree like `/admin/**` does. Without this the prefix keeps its
+    // slash and the check becomes startsWith("/admin//"), which no path
+    // satisfies, so the matcher silently matches nothing — an auth gate written
+    // that way would never run.
+    const prefix = pattern.slice(0, -4).replace(/\/$/, "");
     return { matched: pathname === prefix || pathname.startsWith(`${prefix}/`) };
   }
 
@@ -468,7 +578,13 @@ function matchPattern(
   };
 }
 
-function matchesConfig(
+/**
+ * Decide whether a middleware entry's `export const config` applies to a path.
+ *
+ * Exported so the standalone dev plugin matches exactly what the production
+ * runner does instead of maintaining a parallel implementation.
+ */
+export function matchesMiddlewareConfig(
   pathname: string,
   config: MiddlewareConfig,
   ctx: MiddlewareContext,
@@ -663,7 +779,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     let parentData: MiddlewareContext["parent"] | undefined;
 
     if (globalConfig) {
-      const globalMatch = matchesConfig(initialPathname, globalConfig, ctx);
+      const globalMatch = matchesMiddlewareConfig(initialPathname, globalConfig, ctx);
       if (!globalMatch.matched) {
         return emptyResult(request);
       }
@@ -696,7 +812,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     for (const candidate of applicable) {
       const { entry, routeMatch } = candidate;
       const configMatch = entry.config
-        ? matchesConfig(initialPathname, entry.config, ctx)
+        ? matchesMiddlewareConfig(initialPathname, entry.config, ctx)
         : { matched: true };
       if (!configMatch.matched) {
         continue;
@@ -750,7 +866,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
           };
         }
 
-        if (ctx._handled) {
+        if (ctx._handled || ctx.response.headersSent || ctx.response.writableEnded) {
           const response = contextState.getResponse() || new Response(null);
           emitFarmEvent({
             type: "middleware.shortCircuit",
@@ -818,6 +934,10 @@ export function applyProductionMiddlewareHeaders(
       : [];
   for (const [key, value] of middlewareHeaders) {
     if (key.toLowerCase() === "set-cookie") continue;
+    // A returned Response's headers are authoritative and preserved (matching
+    // the dev runtime, where the Response is applied after ctx.headers). ctx
+    // headers only add keys the Response did not already set.
+    if (headers.has(key)) continue;
     headers.set(key, value);
   }
   for (const cookie of setCookies) {

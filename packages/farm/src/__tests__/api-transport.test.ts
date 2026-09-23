@@ -86,4 +86,40 @@ describe("API transports", () => {
 
     expect(released).toBe(true);
   });
+
+  it("cancels and unlocks the response body when NDJSON decoding fails", async () => {
+    let cancelReason: unknown;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"progress":}\n'));
+      },
+      cancel(reason) {
+        cancelReason = reason;
+      },
+    });
+    const response = new Response(body, {
+      headers: { "content-type": "application/x-ndjson" },
+    });
+    const iterator = readJSONStream(response)[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).rejects.toBeInstanceOf(SyntaxError);
+    expect(cancelReason).toBeInstanceOf(SyntaxError);
+    expect(response.body?.locked).toBe(false);
+  });
+
+  it("finalizes the source when a streamed value cannot be serialized", async () => {
+    let finalized = false;
+    async function* events() {
+      try {
+        yield 1n;
+      } finally {
+        finalized = true;
+      }
+    }
+
+    const response = jsonStream(events());
+    await expect(response.text()).rejects.toThrow(/BigInt/);
+
+    expect(finalized).toBe(true);
+  });
 });

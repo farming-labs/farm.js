@@ -16,6 +16,11 @@ import {
   generateFarmClientPluginEntryCode,
   type FarmClientPluginEntryCode,
 } from "../client-plugin-build";
+import {
+  generateClientCachePersistenceCode,
+  resolveFarmClientCacheAdapterEntry,
+  type ClientCachePersistenceEntryCode,
+} from "../client-cache-persistence-build";
 import type { Rollup } from "vite";
 import os from "os";
 import path from "path";
@@ -25,10 +30,14 @@ import { builtinModules, createRequire } from "module";
 import { isDeepStrictEqual } from "node:util";
 import { logger, toPosixPath, toViteModuleId } from "../utils";
 import {
+  enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
   getClientModuleMetadata,
+  resolveFarmIsolatedClientHydrationMode,
+  type ClientModuleHydrationPlan,
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
+import type { FarmIsolatedClientHydrationMode } from "../types";
 import { isFarmMarkdownPageFile } from "../app-markdown";
 import type { ProgrammaticRedirectRoute } from "../routes";
 import type { NitroConfig } from "nitro/config";
@@ -63,12 +72,16 @@ import {
 } from "../route-runtime-manifest";
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
-import { createFarmVercelImmutableAssetRoute } from "./vercel-assets";
+import { buildFarmVercelRoutes } from "./vercel-assets";
 import { createFarmNodeServerEntry } from "./node-server-entry";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import type { FarmI18nCatalogs } from "../i18n/types";
-import { getFarmIntegrationPluginServerRuntime } from "../integrations";
+import { getFarmIntegrationPluginServerRuntime, getIntegrationProviders } from "../integrations";
+import {
+  generateFarmIntegrationProviderClientCode,
+  generateFarmIntegrationProviderServerModules,
+} from "../integration-provider-build";
 import type { TransformOptions } from "esbuild";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
 import { adaptTailwindVitePlugin } from "../build/vite-plugin-compat";
@@ -281,8 +294,7 @@ function snapshotSSRRebundleOptions(config: NitroConfig) {
 
 async function canUseRolldownBuilder(): Promise<boolean> {
   const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
-  const isSupportedNode =
-    (major === 20 && minor >= 19) || major > 22 || (major === 22 && minor >= 12);
+  const isSupportedNode = major > 22 || (major === 22 && minor >= 12);
   if (!isSupportedNode) {
     return false;
   }
@@ -291,7 +303,7 @@ async function canUseRolldownBuilder(): Promise<boolean> {
     await import("rolldown");
     return true;
   } catch {
-    // Rolldown is optional so Node 18 and --no-optional installs retain Rollup.
+    // Rolldown is optional so --no-optional installs retain Rollup.
     return false;
   }
 }
@@ -816,6 +828,9 @@ export async function buildUniversal(
     }
     logger.info(`📋 Found ${pageRoutes.length} page routes and ${layoutRoutes.length} layouts`);
 
+    const isolatedClientBoundaryModules = routeManager.getIsolatedClientBoundaryModules(root);
+    const hydrationPlanCache = new Map<string, ClientModuleHydrationPlan>();
+
     const clientOutputDir = path.join(root, distDir, "client");
     const [productionViteResult] = await productionViteResultPromise;
     if (productionViteResult.status === "rejected") {
@@ -839,6 +854,8 @@ export async function buildUniversal(
         pageRoutes,
         layoutRoutes,
         routeSlots,
+        isolatedClientBoundaryModules,
+        hydrationPlanCache,
       );
     const buildSSRBundle = () =>
       buildSSRInMemory(
@@ -852,6 +869,8 @@ export async function buildUniversal(
         pageRoutes,
         layoutRoutes,
         routeSlots,
+        isolatedClientBoundaryModules,
+        hydrationPlanCache,
       );
 
     // Route metadata and the client/SSR graphs read independent inputs. Drain
@@ -897,6 +916,8 @@ export async function buildUniversal(
         pageRoutes,
         layoutRoutes,
         routeSlots,
+        isolatedClientBoundaryModules,
+        hydrationPlanCache,
       );
     }
 
@@ -1066,6 +1087,21 @@ async function validateClientBuildOutput(
 /**
  * Build client bundle (to disk) with hydration for "use client" components
  */
+function getCachedClientModuleHydrationPlan(
+  modulePath: string,
+  root: string,
+  mode: FarmIsolatedClientHydrationMode,
+  cache: Map<string, ClientModuleHydrationPlan>,
+): ClientModuleHydrationPlan {
+  const key = `${path.resolve(root)}\0${mode}\0${path.resolve(modulePath)}`;
+  let plan = cache.get(key);
+  if (!plan) {
+    plan = getClientModuleHydrationPlan(modulePath, root, mode);
+    cache.set(key, plan);
+  }
+  return { ...plan, isolatedBoundaries: [...plan.isolatedBoundaries] };
+}
+
 async function buildClient(
   productionVite: FarmProductionViteRuntime,
   config: ResolvedFarmConfig,
@@ -1075,6 +1111,8 @@ async function buildClient(
   pageRoutes: UniversalPageRoute[],
   layoutRoutes: Array<{ pattern: string; modulePath: string }> = [],
   routeSlots: UniversalRouteSlot[] = [],
+  isolatedClientBoundaryModules: ReadonlySet<string> = new Set(),
+  hydrationPlanCache: Map<string, ClientModuleHydrationPlan> = new Map(),
 ) {
   const viteBuild = productionVite.build;
   const { farmPlugin } = await import("../vite");
@@ -1099,17 +1137,45 @@ async function buildClient(
     isolatedBoundaries: IsolatedClientBoundaryReference[];
   }> = [];
 
-  const isolatedMode = config.experimental?.isolatedClientHydration ?? "off";
+  const integrationProviders = getIntegrationProviders(config.integrations).filter(
+    (provider) => provider.component || provider.type === "clerk",
+  );
+  const unsupportedIntegrationProvider = integrationProviders.find(
+    (provider) => provider.supportsIsolatedHydration !== true,
+  );
+  if (
+    config.experimental?.isolatedClientHydration === "enabled" &&
+    config.experimental?.serverComponents !== true &&
+    unsupportedIntegrationProvider
+  ) {
+    logger.warn(
+      `[Farm.js] isolated hydration kept route-wide because integration provider "${unsupportedIntegrationProvider.name}" does not declare supportsIsolatedHydration: true.`,
+    );
+  }
+  const isolatedMode = resolveFarmIsolatedClientHydrationMode(
+    config.experimental?.isolatedClientHydration,
+    {
+      serverComponents: config.experimental?.serverComponents === true,
+      hasUnsupportedIntegrationProvider: Boolean(unsupportedIntegrationProvider),
+    },
+  );
 
   const clientLayouts = layoutRoutes.map((layout) => {
     try {
-      const metadata = getClientModuleHydrationPlan(layout.modulePath, root, isolatedMode);
+      const metadata = getCachedClientModuleHydrationPlan(
+        layout.modulePath,
+        root,
+        isolatedMode,
+        hydrationPlanCache,
+      );
       return {
         ...layout,
         shouldHydrate: metadata.shouldHydrate,
         islandStrategy: metadata.islandStrategy,
         legacyShouldHydrate: metadata.legacyShouldHydrate,
         legacyIslandStrategy: metadata.legacyIslandStrategy,
+        mode: metadata.mode,
+        estimatedIsolatedRootCount: metadata.estimatedIsolatedRootCount,
         hasIsolatedClientBoundaries: metadata.hasIsolatedClientBoundaries,
         isolatedHydrationEligible: metadata.isolatedHydrationEligible,
         isolatedBoundaries: metadata.isolatedBoundaries,
@@ -1122,6 +1188,8 @@ async function buildClient(
         islandStrategy: null,
         legacyShouldHydrate: false,
         legacyIslandStrategy: null,
+        mode: isolatedMode,
+        estimatedIsolatedRootCount: 0,
         hasIsolatedClientBoundaries: false,
         isolatedHydrationEligible: false,
         isolatedBoundaries: [],
@@ -1161,12 +1229,33 @@ async function buildClient(
           islandStrategy: null,
           legacyShouldHydrate: false,
           legacyIslandStrategy: null,
+          mode: isolatedMode,
+          estimatedIsolatedRootCount: 0,
           hasIsolatedClientBoundaries: false,
           isolatedBoundaries: [] as IsolatedClientBoundaryReference[],
           suppressedAsyncHydration: undefined,
         }
-      : getClientModuleHydrationPlan(route.modulePath, root, isolatedMode),
+      : getCachedClientModuleHydrationPlan(
+          route.modulePath,
+          root,
+          isolatedMode,
+          hydrationPlanCache,
+        ),
   }));
+
+  enforceFarmIsolatedHydrationRouteBudget(
+    clientLayouts.map((layout) => ({
+      pattern: layout.pattern,
+      depth: layout.pattern.split("/").filter(Boolean).length,
+      metadata: layout,
+    })),
+    routePlans.map(({ route, metadata }) => ({
+      pattern: route.pattern,
+      depth: route.pattern.split("/").filter(Boolean).length,
+      metadata,
+    })),
+    layoutAppliesToRoute,
+  );
 
   if (isolatedMode === "analyze") {
     for (const { entry, metadata } of [
@@ -1177,37 +1266,8 @@ async function buildClient(
         continue;
       }
       logger.info(
-        `📊 Isolated hydration analysis: ${entry.modulePath} can exclude its server owner and hydrate ${metadata.isolatedBoundaries.length} client boundary${metadata.isolatedBoundaries.length === 1 ? "" : "ies"}.`,
+        `📊 Isolated hydration analysis: ${entry.modulePath} can exclude its server owner and hydrate ${metadata.isolatedBoundaries.length} client ${metadata.isolatedBoundaries.length === 1 ? "boundary" : "boundaries"}.`,
       );
-    }
-  }
-
-  for (const { route, metadata } of routePlans) {
-    if (metadata.shouldHydrate) {
-      for (const layout of clientLayouts) {
-        if (
-          layout.hasIsolatedClientBoundaries &&
-          layoutAppliesToRoute(layout.pattern, route.pattern)
-        ) {
-          layout.shouldHydrate = layout.legacyShouldHydrate;
-          layout.islandStrategy = layout.legacyIslandStrategy;
-          layout.hasIsolatedClientBoundaries = false;
-          layout.isolatedBoundaries = [];
-        }
-      }
-    }
-  }
-  for (const { route, metadata } of routePlans) {
-    if (
-      metadata.hasIsolatedClientBoundaries &&
-      clientLayouts.some(
-        (layout) => layout.shouldHydrate && layoutAppliesToRoute(layout.pattern, route.pattern),
-      )
-    ) {
-      metadata.shouldHydrate = metadata.legacyShouldHydrate;
-      metadata.islandStrategy = metadata.legacyIslandStrategy;
-      metadata.hasIsolatedClientBoundaries = false;
-      metadata.isolatedBoundaries = [];
     }
   }
 
@@ -1338,6 +1398,9 @@ async function buildClient(
     config.renderer,
     config.publicRuntimeConfig,
     config.trailingSlash,
+    getIntegrationProviders(config.integrations),
+    config.basePath,
+    generateClientCachePersistenceCode(resolveFarmClientCacheAdapterEntry(root, config.cache)),
   );
 
   // Write the client entry to a temporary file
@@ -1513,7 +1576,7 @@ async function buildClient(
             return null;
           },
         },
-        farmPlugin(config, pluginManager),
+        farmPlugin({ ...config, isolatedClientBoundaryModules }, pluginManager),
         farmEnvironmentFunctionsPlugin(),
       ],
       mode: "production",
@@ -1524,6 +1587,7 @@ async function buildClient(
         : undefined,
       // Ensure React is bundled for client
       resolve: {
+        alias: createFarmSourceAlias(root, config.srcDir),
         dedupe: [...(config.renderer.dedupe || [])],
       },
       // Optimize dependencies - exclude server-side code from client bundle
@@ -1551,9 +1615,10 @@ async function buildClient(
 /**
  * Generate client hydration entry that imports and hydrates client components
  */
-function generateUniversalRouterStateRuntime(): string {
+export function generateUniversalRouterStateRuntime(): string {
   return `
 const FARM_PAGE_STATE_KEY = "__farmPageState";
+const FARM_HISTORY_INDEX_KEY = "__farmHistoryIndex";
 const IDLE_NAVIGATION_STATE = {
   state: "idle",
   pending: false,
@@ -1583,6 +1648,37 @@ function createHistoryState(path, pageState, currentState) {
     path,
     [FARM_PAGE_STATE_KEY]: pageState,
   };
+}
+
+async function fetchFarmNavigationDocument(url, headers, recover = true, signal) {
+  const deploymentId = window.__FARM_DEPLOYMENT_ID__;
+  const response = await fetch(url, {
+    headers: createFarmDeploymentRequestHeaders(deploymentId, headers),
+    signal,
+  });
+  if (isFarmDeploymentMismatchResponse(response, deploymentId)) {
+    const error = createFarmDeploymentMismatchError(response, deploymentId || "unknown");
+    window.dispatchEvent(new CustomEvent("farm:deployment-mismatch", { detail: error }));
+    if (recover) window.location.assign(url);
+    throw error;
+  }
+  return response;
+}
+
+function clearFarmPrefetchCacheOnDeploymentMismatch(router, error) {
+  if (error?.name === "FarmDeploymentMismatchError") {
+    router.prefetchCache.clear();
+  }
+}
+
+function readHistoryIndex(state) {
+  if (!state || typeof state !== "object") return null;
+  const value = state[FARM_HISTORY_INDEX_KEY];
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+function hasAbsoluteNavigationHref(href) {
+  return /^[a-zA-Z][a-zA-Z\\d+.-]*:/.test(href) || href.startsWith("//");
 }
 `.trim();
 }
@@ -1619,49 +1715,135 @@ const farmCatchAllParamSegments = Symbol("farm.catch-all-param-segments");
 function matchRuntimePathPattern(pattern, pathname) {
   const patternSegments = splitRuntimePath(pattern);
   const pathnameSegments = splitRuntimePath(pathname);
-  const params = {};
-  const catchAllParamSegments = {};
-  Object.defineProperty(params, farmCatchAllParamSegments, {
-    value: catchAllParamSegments,
-  });
-  let pathIndex = 0;
+  const failedStates = new Set();
 
-  for (const segment of patternSegments) {
-    const optionalCatchAll = segment.match(/^\\[\\[\\.\\.\\.(.+)\\]\\]$/);
-    const catchAll = segment.match(/^\\[\\.\\.\\.(.+)\\]$/);
-    const dynamic = segment.match(/^\\[(.+)\\]$/);
-    const namedCatchAll = segment.match(/^:([^/]+)\\*$/);
-    const namedDynamic = segment.match(/^:([^/]+)$/);
-    const starCatchAll = segment.match(/^\\*([^?]+)(\\?)?$/);
-    const wildcard = segment === "*";
-
-    if (optionalCatchAll || catchAll || namedCatchAll || starCatchAll || wildcard) {
-      const name = wildcard
-        ? "wildcard"
-        : (optionalCatchAll || catchAll || namedCatchAll || starCatchAll)[1];
-      const remainingSegments = pathnameSegments.slice(pathIndex).map(decodeRouteSegment);
-      const remaining = remainingSegments.join("/");
-      if (!remaining && (catchAll || (starCatchAll && !starCatchAll[2]))) return null;
-      params[name] = remaining;
-      catchAllParamSegments[name] = remainingSegments;
-      pathIndex = pathnameSegments.length;
-      continue;
-    }
-
-    const pathnameSegment = pathnameSegments[pathIndex];
-    if (pathnameSegment === undefined) return null;
-
-    if (dynamic || namedDynamic) {
-      params[(dynamic || namedDynamic)[1]] = decodeRouteSegment(pathnameSegment);
-      pathIndex++;
-      continue;
-    }
-
-    if (segment !== pathnameSegment) return null;
-    pathIndex++;
+  function matchFrom(patternIndex, pathIndex, params, catchAllParamSegments) {
+    const stateKey = patternIndex + ":" + pathIndex;
+    if (failedStates.has(stateKey)) return null;
+    const matched = matchFromUncached(patternIndex, pathIndex, params, catchAllParamSegments);
+    if (!matched) failedStates.add(stateKey);
+    return matched;
   }
 
-  return pathIndex === pathnameSegments.length ? params : null;
+  function matchFromUncached(patternIndex, pathIndex, params, catchAllParamSegments) {
+    while (patternIndex < patternSegments.length) {
+      const segment = patternSegments[patternIndex];
+      const optionalCatchAll = segment.match(/^\\[\\[\\.\\.\\.(.+)\\]\\]$/);
+      const catchAll = segment.match(/^\\[\\.\\.\\.(.+)\\]$/);
+      const dynamic = segment.match(/^\\[(.+)\\]$/);
+      const namedCatchAll = segment.match(/^:([^/]+)\\*$/);
+      const namedDynamic = segment.match(/^:([^/]+)$/);
+      const starCatchAll = segment.match(/^\\*([^?]+)(\\?)?$/);
+      const wildcard = segment === "*";
+
+      if (optionalCatchAll || catchAll || namedCatchAll || starCatchAll || wildcard) {
+        const name = wildcard
+          ? "wildcard"
+          : (optionalCatchAll || catchAll || namedCatchAll || starCatchAll)[1];
+        const required = !!(catchAll || (starCatchAll && !starCatchAll[2]));
+
+        if (patternIndex === patternSegments.length - 1) {
+          const remainingSegments = pathnameSegments.slice(pathIndex).map(decodeRouteSegment);
+          const remaining = remainingSegments.join("/");
+          if (!remaining && required) return null;
+          params[name] = remaining;
+          catchAllParamSegments[name] = remainingSegments;
+          pathIndex = pathnameSegments.length;
+          patternIndex += 1;
+          continue;
+        }
+
+        const maxConsume = pathnameSegments.length - pathIndex;
+        const minConsume = required ? 1 : 0;
+        for (let consume = maxConsume; consume >= minConsume; consume--) {
+          const consumedSegments = pathnameSegments
+            .slice(pathIndex, pathIndex + consume)
+            .map(decodeRouteSegment);
+          const remaining = consumedSegments.join("/");
+          const trialParams = Object.assign({}, params);
+          const trialCatchAll = Object.assign({}, catchAllParamSegments);
+          trialParams[name] = remaining;
+          trialCatchAll[name] = consumedSegments;
+          const matched = matchFrom(
+            patternIndex + 1,
+            pathIndex + consume,
+            trialParams,
+            trialCatchAll,
+          );
+          if (matched) return matched;
+        }
+        return null;
+      }
+
+      const pathnameSegment = pathnameSegments[pathIndex];
+      if (pathnameSegment === undefined) return null;
+
+      if (dynamic || namedDynamic) {
+        params[(dynamic || namedDynamic)[1]] = decodeRouteSegment(pathnameSegment);
+        pathIndex += 1;
+        patternIndex += 1;
+        continue;
+      }
+
+      if (segment !== decodeRouteSegment(pathnameSegment)) return null;
+      pathIndex += 1;
+      patternIndex += 1;
+    }
+
+    if (pathIndex !== pathnameSegments.length) return null;
+    Object.defineProperty(params, farmCatchAllParamSegments, {
+      value: catchAllParamSegments,
+    });
+    return params;
+  }
+
+  return matchFrom(0, 0, {}, {});
+}
+`.trim();
+}
+
+export function generateRedirectInterpolationSource(): string {
+  // Interpolates redirect/rewrite destinations from the params produced by
+  // matchRuntimePathPattern. Must stay in parity with the development path in
+  // packages/farm/src/plugins/route-pattern.ts: named captures (:name, [name],
+  // catch-alls), a positional * for the wildcard param, and numbered captures
+  // ($1-based, in pattern order). Depends on farmCatchAllParamSegments from
+  // generateRuntimePathMatcherSource(), so emit that source alongside this one.
+  return `
+function encodeRuntimePathSegment(value) {
+  return encodeURIComponent(String(value)).replace(
+    /[!'()*]/g,
+    function(character) {
+      return "%" + character.charCodeAt(0).toString(16).toUpperCase();
+    },
+  );
+}
+
+function interpolateRedirectDestination(destination, params) {
+  let result = destination;
+  const catchAllParamSegments = params[farmCatchAllParamSegments] || {};
+  const orderedCaptures = [];
+  for (const [key, value] of Object.entries(params)) {
+    const segments = catchAllParamSegments[key];
+    const encodedValue = Array.isArray(segments)
+      ? segments.map(encodeRuntimePathSegment).join("/")
+      : encodeRuntimePathSegment(value);
+    orderedCaptures.push(encodedValue);
+    result = result.split("[[..." + key + "]]").join(encodedValue);
+    result = result.split("[..." + key + "]").join(encodedValue);
+    result = result.split("[" + key + "]").join(encodedValue);
+    result = result.split(":" + key + "*").join(encodedValue);
+    result = result.split(":" + key).join(encodedValue);
+    if (key === "wildcard") result = result.split("*").join(encodedValue);
+  }
+  // Numbered captures resolve after the named substitutions. Encoded values
+  // never contain "$", so this cannot rewrite an already-injected value. An
+  // out-of-range index resolves to "", matching the development path.
+  result = result.replace(/\\$(\\d+)/g, function(_whole, group) {
+    const captured = orderedCaptures[Number(group) - 1];
+    return captured === undefined ? "" : captured;
+  });
+  return result;
 }
 `.trim();
 }
@@ -1669,11 +1851,39 @@ function matchRuntimePathPattern(pattern, pathname) {
 export function generateUniversalRouterStateProperties(): string {
   return `
   blockers: new Set(),
+  unloadBlockers: new Map(),
   navigationListeners: new Set(),
   navigationState: IDLE_NAVIGATION_STATE,
+  navigationSequence: 0,
+  activeNavigation: null,
   observers: new Map(),
   scrollElements: new Map(),
   currentPath: window.location.pathname + window.location.search,
+  currentHistoryIndex: null,
+  currentHistoryState: null,
+
+  initializeHistory: function() {
+    const existingIndex = readHistoryIndex(window.history.state);
+    if (existingIndex != null) {
+      this.currentHistoryIndex = existingIndex;
+      this.currentHistoryState = window.history.state;
+      return;
+    }
+    try {
+      const initialState = {
+        ...(window.history.state && typeof window.history.state === "object"
+          ? window.history.state
+          : {}),
+        [FARM_HISTORY_INDEX_KEY]: 0,
+      };
+      window.history.replaceState(initialState, "", window.location.href);
+      this.currentHistoryIndex = 0;
+      this.currentHistoryState = initialState;
+    } catch {
+      this.currentHistoryIndex = null;
+      this.currentHistoryState = null;
+    }
+  },
 
   getNavigationState: function() {
     return this.navigationState;
@@ -1685,9 +1895,20 @@ export function generateUniversalRouterStateProperties(): string {
     return () => this.navigationListeners.delete(listener);
   },
 
-  addBlocker: function(blocker) {
+  addBlocker: function(blocker, shouldBlockUnload) {
     this.blockers.add(blocker);
-    return () => this.blockers.delete(blocker);
+    this.unloadBlockers.set(blocker, shouldBlockUnload || (() => {
+      const result = blocker({ from: this.currentPath, to: this.currentPath, action: "replace" });
+      if (result && typeof result.then === "function") {
+        result.catch(() => undefined);
+        return true;
+      }
+      return result === true;
+    }));
+    return () => {
+      this.blockers.delete(blocker);
+      this.unloadBlockers.delete(blocker);
+    };
   },
 
   shouldBlockNavigation: async function(context) {
@@ -1697,7 +1918,49 @@ export function generateUniversalRouterStateProperties(): string {
     return false;
   },
 
+  shouldBlockUnload: function() {
+    for (const blocker of this.blockers) {
+      try {
+        if (this.unloadBlockers.get(blocker)?.()) return true;
+      } catch {
+        return true;
+      }
+    }
+    return false;
+  },
+
+  handlePopState: function(event) {
+    if (document.documentElement.dataset.farmDocsRuntime === "true") return;
+    return this.navigate(window.location.href, {
+      action: "pop",
+      scroll: false,
+      popState: event.state,
+    });
+  },
+
+  revertBlockedPopState: function(from) {
+    try {
+      const previousState = this.currentHistoryState;
+      const pageState = previousState && typeof previousState === "object"
+        ? previousState[FARM_PAGE_STATE_KEY]
+        : undefined;
+      const restoredState = createHistoryState(from, pageState, previousState);
+      if (this.currentHistoryIndex != null) {
+        restoredState[FARM_HISTORY_INDEX_KEY] = this.currentHistoryIndex;
+      }
+      window.history.pushState(restoredState, "", from);
+      this.currentHistoryState = restoredState;
+    } catch {}
+  },
+
   startNavigation: function(from, to, action) {
+    this.activeNavigation?.controller.abort("superseded");
+    const navigation = {
+      id: ++this.navigationSequence,
+      controller: new AbortController(),
+      clientNavigation: null,
+    };
+    this.activeNavigation = navigation;
     this.setNavigationState({
       state: "loading",
       pending: true,
@@ -1706,10 +1969,39 @@ export function generateUniversalRouterStateProperties(): string {
       action,
       startedAt: Date.now(),
     });
+    return navigation;
   },
 
-  finishNavigation: function() {
+  isCurrentNavigation: function(navigation, clientNavigation) {
+    return this.activeNavigation?.id === navigation.id &&
+      !navigation.controller.signal.aborted &&
+      !clientNavigation?.signal.aborted;
+  },
+
+  finishNavigation: function(navigation) {
+    if (this.activeNavigation?.id !== navigation.id) return;
+    this.activeNavigation = null;
     this.setNavigationState(IDLE_NAVIGATION_STATE);
+  },
+
+  cancelActiveNavigation: function() {
+    if (!this.activeNavigation) return;
+    farmClientRuntime.cancelNavigation(
+      this.activeNavigation.clientNavigation || undefined,
+      "superseded",
+    );
+    this.activeNavigation.controller.abort("superseded");
+    this.activeNavigation = null;
+    this.setNavigationState(IDLE_NAVIGATION_STATE);
+  },
+
+  clearPrefetchedPath: function(url) {
+    const interceptionPrefix = url + "\\nintercept:";
+    for (const key of this.prefetchCache.keys()) {
+      if (key === url || key.startsWith(interceptionPrefix)) {
+        this.prefetchCache.delete(key);
+      }
+    }
   },
 
   setNavigationState: function(state) {
@@ -1727,28 +2019,51 @@ export function generateUniversalRouterStateProperties(): string {
 
   writePageState: function(action, state, href) {
     const url = new URL(href || window.location.href, window.location.origin);
-    const nextState = createHistoryState(
-      url.pathname + url.search,
-      state,
-      window.history.state,
+    this.writeHistoryEntry(action, url.pathname + url.search + url.hash, state, url, "page-state");
+  },
+
+  writeURLSearch: function(action, href) {
+    const url = new URL(href || window.location.href, window.location.origin);
+    const currentState = window.history.state;
+    const pageState = currentState && typeof currentState === "object"
+      ? currentState[FARM_PAGE_STATE_KEY]
+      : undefined;
+    this.writeHistoryEntry(
+      action,
+      url.pathname + url.search + url.hash,
+      pageState,
+      url,
+      "url-search",
+      false,
     );
-    if (action === "replace") {
-      window.history.replaceState(nextState, "", url);
-    } else {
-      window.history.pushState(nextState, "", url);
+    this.currentPath = url.pathname + url.search;
+  },
+
+  writeHistoryEntry: function(action, path, pageState, url, changeKind = "url-search", notify = true) {
+    if (action === "pop") return;
+    const nextState = createHistoryState(path, pageState, window.history.state);
+    const nextIndex = this.currentHistoryIndex == null
+      ? null
+      : action === "replace"
+        ? this.currentHistoryIndex
+        : this.currentHistoryIndex + 1;
+    if (nextIndex != null) nextState[FARM_HISTORY_INDEX_KEY] = nextIndex;
+    if (action === "replace") window.history.replaceState(nextState, "", url);
+    else window.history.pushState(nextState, "", url);
+    this.currentHistoryIndex = nextIndex;
+    this.currentHistoryState = nextState;
+    // Announce programmatic history writes without synthesizing popstate,
+    // which the router reserves for real back/forward navigation.
+    if (notify) {
+      window.dispatchEvent(
+        new CustomEvent("farm:historychange", { detail: { kind: changeKind } }),
+      );
     }
-    // Announce on the dedicated history channel; a synthetic popstate would
-    // be treated as back/forward by the popstate listener below and trigger
-    // a full navigation for a shallow page-state write. The bundled client
-    // hooks subscribe to this event via subscribeHistoryChange.
-    window.dispatchEvent(
-      new CustomEvent("farm:historychange", { detail: { kind: "page-state" } }),
-    );
   },
 
   registerScrollElement: function(key, element) {
     this.scrollElements.set(key, element);
-    this.restoreScrollElement(window.location.pathname, key, element);
+    this.restoreScrollElement(window.location.pathname + window.location.search, key, element);
     return () => {
       if (this.scrollElements.get(key) === element) this.scrollElements.delete(key);
     };
@@ -1833,6 +2148,7 @@ function generateClientHydrationEntry(
   docsAdapterReact: string | undefined,
   i18nConfig: ResolvedFarmConfig["i18n"] = {
     enabled: false,
+    basePath: "/",
     locales: ["en"],
     defaultLocale: "en",
     messages: "",
@@ -1853,6 +2169,9 @@ function generateClientHydrationEntry(
   renderer: FarmRenderer = REACT_RENDERER,
   publicRuntimeConfig: Record<string, unknown> | undefined = undefined,
   trailingSlash = false,
+  integrationProviders: ReturnType<typeof getIntegrationProviders> = [],
+  basePath = "/",
+  clientCachePersistence: ClientCachePersistenceEntryCode = { imports: "", init: "" },
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
   const clientPluginEntry: FarmClientPluginEntryCode = generateFarmClientPluginEntryCode(
@@ -1864,11 +2183,16 @@ function generateClientHydrationEntry(
   const rendererClientImports = isReactRenderer(renderer)
     ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";`
     : `import React, { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};`;
+  const providerClientCode = generateFarmIntegrationProviderClientCode(integrationProviders, root);
 
-  // Always import global CSS for Tailwind
+  // Import global CSS (the Tailwind entry) only when the app ships one; an
+  // unconditional import of a missing file fails the client build with
+  // UNRESOLVED_IMPORT. Output validation already treats a missing globals.css
+  // as an intentionally style-free application.
   const globalsCssPath = path.join(root, srcDir, "app", "globals.css");
-  const cssImportPath = toImportPath(globalsCssPath);
-  const cssImport = `import ${JSON.stringify(cssImportPath)};`;
+  const cssImport = existsSync(globalsCssPath)
+    ? `import ${JSON.stringify(toImportPath(globalsCssPath))};`
+    : "";
 
   // Import layouts for wrapping client components
   const layoutImportStatements: string[] = [];
@@ -1901,7 +2225,7 @@ if (window.__FARM_I18N__) {
 }
 
 function getFarmRoutePathname(pathname) {
-  return stripFarmLocaleFromPathname(pathname, farmI18nConfig);
+  return stripFarmLocaleFromPathname(stripFarmBasePath(pathname), farmI18nConfig);
 }
 
 function isFarmLocaleDocumentChange(doc) {
@@ -1912,7 +2236,7 @@ function isFarmLocaleDocumentChange(doc) {
 `
     : `
 function getFarmRoutePathname(pathname) {
-  return pathname;
+  return stripFarmBasePath(pathname);
 }
 
 function isFarmLocaleDocumentChange() {
@@ -1923,7 +2247,8 @@ function isFarmLocaleDocumentChange() {
     ? `
 const farmDocsEntryPath = ${JSON.stringify(docsEntryPath)};
 function isFarmDocsPath(pathname) {
-  const normalizedPath = pathname.length > 1 ? pathname.replace(/\\/+$/, "") : pathname;
+  const routePathname = getFarmRoutePathname(pathname);
+  const normalizedPath = routePathname.length > 1 ? routePathname.replace(/\\/+$/, "") : routePathname;
   return normalizedPath === farmDocsEntryPath || normalizedPath.startsWith(farmDocsEntryPath + "/");
 }
 `
@@ -1955,21 +2280,29 @@ async function hydrateFarmDocsAdapterRuntime() {
 }
 `;
 
-  if (clientPages.length === 0 && clientRouteSlots.length === 0) {
+  if (
+    clientPages.length === 0 &&
+    clientRouteSlots.length === 0 &&
+    !providerClientCode.hasProviders
+  ) {
     // No client pages - just basic runtime with CSS and SPA navigation
     return `
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientPluginManager, installChunkErrorRecovery, setFarmTrailingSlashPreference } from "@farm.js/core/internal/client-runtime";
+import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${clientPluginEntry.imports}
+${clientCachePersistence.imports}
 ${i18nClientRuntime}
 ${docsNavigationRuntime}
 ${docsAdapterRuntime}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 
+setFarmBasePath(${JSON.stringify(basePath)});
 setFarmTrailingSlashPreference(${JSON.stringify(trailingSlash)});
 installChunkErrorRecovery();
+${clientCachePersistence.init}
 mountFarmDocsSearch();
 
 ${generateUniversalRouterStateRuntime()}
@@ -1981,38 +2314,53 @@ ${generateUniversalRouterStateProperties()}
   
   navigate: async function(href, options = {}) {
     const url = new URL(href, window.location.origin);
-    if (url.origin !== window.location.origin) {
-      window.location.href = href;
+    if (isFarmExternalNavigationURL(url, window.location.origin)) {
+      this.cancelActiveNavigation();
+      if (options.replace || options.action === "replace") window.location.replace(href);
+      else window.location.href = href;
       return;
     }
     if (isFarmDocsPath(url.pathname)) {
-      window.location.href = href;
+      this.cancelActiveNavigation();
+      if (options.replace || options.action === "replace") window.location.replace(href);
+      else window.location.href = href;
       return;
     }
 
     const action = options.action || (options.replace ? "replace" : "push");
     const to = url.pathname + url.search;
     if (!options.refresh && action !== "pop" && to === this.currentPath) {
+      this.cancelActiveNavigation();
       if (url.hash === window.location.hash) return;
       const pageState = options.state === undefined
         ? window.history.state?.[FARM_PAGE_STATE_KEY]
         : options.state;
-      const historyState = createHistoryState(to, pageState, window.history.state);
-      if (action === "replace") window.history.replaceState(historyState, "", url);
-      else window.history.pushState(historyState, "", url);
+      this.writeHistoryEntry(action, to, pageState, url);
       if (options.scroll !== false) {
-        if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
+        if (url.hash) getHashTargetElement(url.hash)?.scrollIntoView();
         else window.scrollTo(0, 0);
       }
       return;
     }
-    if (action === "pop" && to === this.currentPath) return;
+    if (action === "pop" && to === this.currentPath) {
+      this.cancelActiveNavigation();
+      this.currentHistoryIndex = readHistoryIndex(options.popState);
+      this.currentHistoryState = options.popState;
+      return;
+    }
 
     const from = this.currentPath;
-    if (await this.shouldBlockNavigation({ from, to, action })) return;
+    if (await this.shouldBlockNavigation({ from, to, action })) {
+      if (action === "pop") this.revertBlockedPopState(from);
+      return;
+    }
+    if (action === "pop") {
+      this.currentHistoryIndex = readHistoryIndex(options.popState);
+      this.currentHistoryState = options.popState;
+    }
 
     this.saveScrollPosition(window.location.pathname + window.location.search);
-    this.startNavigation(from, url, action);
+    const navigation = this.startNavigation(from, url, action);
     let clientNavigation;
     try {
       clientNavigation = await farmClientRuntime.beginNavigation({
@@ -2020,38 +2368,43 @@ ${generateUniversalRouterStateProperties()}
         to: url,
         action,
       });
-      const html = await this.fetchPage(url.pathname + url.search, options.refresh === true);
+      navigation.clientNavigation = clientNavigation;
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+      const html = await this.fetchPage(
+        url.pathname + url.search,
+        options.refresh === true,
+        true,
+        navigation.controller.signal,
+      );
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       await farmClientRuntime.markNavigationLoaded(clientNavigation, html);
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       await this.runViewTransition(options.viewTransition, async () => {
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         if (!this.swapContent(html)) {
           throw new Error("Farm could not swap the target document");
         }
-        const historyState = createHistoryState(
-          url.pathname + url.search,
-          options.state,
-          window.history.state,
-        );
-        if (action === "replace") {
-          window.history.replaceState(historyState, "", url);
-        } else if (action !== "pop") {
-          window.history.pushState(historyState, "", url);
-        }
+        this.writeHistoryEntry(action, url.pathname + url.search, options.state, url);
+        this.currentPath = to;
         if (options.scroll !== false) {
-          if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
+          if (url.hash) getHashTargetElement(url.hash)?.scrollIntoView();
           else window.scrollTo(0, 0);
         } else {
           this.restoreScrollPosition(to);
         }
       });
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       await farmClientRuntime.resolveNavigation(clientNavigation);
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
-      this.currentPath = to;
-      this.finishNavigation();
+      this.finishNavigation(navigation);
     } catch (error) {
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       if (clientNavigation) {
         await farmClientRuntime.failNavigation(clientNavigation, error);
       }
-      this.finishNavigation();
+      this.finishNavigation(navigation);
+      if (error?.name === "FarmDeploymentMismatchError") return;
       console.error("[Farm.js] Navigation error:", error);
       if (action === "pop") window.location.reload();
       else window.location.href = href;
@@ -2068,14 +2421,17 @@ ${generateUniversalRouterStateProperties()}
     });
   },
   
-  fetchPage: async function(url, fresh = false) {
-    if (fresh) this.prefetchCache.delete(url);
+  fetchPage: async function(url, fresh = false, recover = true, signal) {
+    if (fresh) this.clearPrefetchedPath(url);
     const cached = fresh ? undefined : this.prefetchCache.get(url);
     if (cached) return cached;
     
-    const response = await fetch(url, {
-      headers: { "Accept": "text/html" }
-    });
+    const response = await fetchFarmNavigationDocument(
+      url,
+      { "Accept": "text/html" },
+      recover,
+      signal,
+    );
     if (!response.ok) throw new Error("Failed to fetch page");
     return response.text();
   },
@@ -2086,23 +2442,7 @@ ${generateUniversalRouterStateProperties()}
     if (isFarmLocaleDocumentChange(doc)) return false;
     if (doc.getElementById("nd-docs-layout")) return false;
     
-    // Update title
-    const newTitle = doc.querySelector("title");
-    if (newTitle) document.title = newTitle.textContent || "";
-    
-    // Update meta tags
-    const newMetas = doc.querySelectorAll("meta[name]");
-    newMetas.forEach(function(meta) {
-      const name = meta.getAttribute("name");
-      if (name) {
-        const existing = document.querySelector("meta[name=\\"" + name + "\\"]");
-        if (existing) {
-          existing.setAttribute("content", meta.getAttribute("content") || "");
-        } else {
-          document.head.appendChild(meta.cloneNode(true));
-        }
-      }
-    });
+    reconcileFarmDocumentHead(doc);
     
     // Swap root content
     const newRoot = doc.getElementById("root");
@@ -2144,14 +2484,17 @@ ${generateUniversalRouterStateProperties()}
   },
   prefetch: function(href) {
     const url = new URL(href, window.location.origin);
-    if (url.origin !== window.location.origin) return;
+    if (isFarmExternalNavigationURL(url, window.location.origin)) return;
+    if (isFarmDocsPath(url.pathname)) return;
     
     const pathname = url.pathname + url.search;
     if (this.prefetchCache.has(pathname)) return;
     
-    this.fetchPage(pathname)
+    this.fetchPage(pathname, false, false)
       .then(function(html) { spaRouter.prefetchCache.set(pathname, html); })
-      .catch(function() {});
+      .catch(function(error) {
+        clearFarmPrefetchCacheOnDeploymentMismatch(spaRouter, error);
+      });
   },
 
   clearCache: function() {
@@ -2200,12 +2543,13 @@ window.__FARM_CLIENT_RUNTIME__ = farmClientRuntime;
 void farmClientRuntime.start();
 
 // Expose router globally
+spaRouter.initializeHistory();
 window.__FARM_SPA_ROUTER__ = spaRouter;
 
 void hydrateFarmDocsAdapterRuntime();
 
 window.addEventListener("beforeunload", function(event) {
-  if (spaRouter.blockers.size > 0) {
+  if (spaRouter.shouldBlockUnload()) {
     event.preventDefault();
     event.returnValue = "";
   }
@@ -2213,9 +2557,8 @@ window.addEventListener("beforeunload", function(event) {
 });
 
 // Handle popstate (back/forward)
-window.addEventListener("popstate", function() {
-  if (document.documentElement.dataset.farmDocsRuntime === "true") return;
-  void spaRouter.navigate(window.location.href, { action: "pop", scroll: false });
+window.addEventListener("popstate", function(event) {
+  void spaRouter.handlePopState(event);
 });
 
 // Intercept link clicks
@@ -2226,7 +2569,8 @@ document.addEventListener("click", function(e) {
   
   const href = anchor.getAttribute("href");
   if (!href) return;
-  if (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//")) return;
+  if (anchor.hasAttribute("download")) return;
+  if (hasAbsoluteNavigationHref(href)) return;
   if (href.startsWith("#")) return;
   if (anchor.target && anchor.target !== "_self") return;
   if (document.documentElement.dataset.farmDocsRuntime === "true") return;
@@ -2266,6 +2610,9 @@ document.addEventListener("click", function(e) {
   }`);
   });
   const isolatedHydrationEnabled = isolatedBoundaryModules.size > 0;
+  const isolatedHydrationImport = isolatedHydrationEnabled
+    ? `import { createFarmIsolatedHydrationRuntime, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";`
+    : "";
   const isolatedHydrationRuntime = isolatedHydrationEnabled
     ? `const farmIsolatedBoundaryLoaders = {
 ${Array.from(isolatedBoundaryModules.entries())
@@ -2275,58 +2622,31 @@ ${Array.from(isolatedBoundaryModules.entries())
   )
   .join("\n")}
 };
-const farmIsolatedBoundaryRoots = new Map();
+const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
+  ReactRuntime: React,
+  hydrateRoot,
+  load: async function(reference) {
+    const loader = farmIsolatedBoundaryLoaders[reference];
+    if (!loader) throw new Error("isolated client boundary loader was not found: " + reference);
+    return loader();
+  },
+  schedule: scheduleFarmIslandHydration,
+  wrap: wrapWithIntegrationProviders,
+});
 
 function disposeFarmIsolatedClientBoundaries(scope) {
-  for (const [container, root] of farmIsolatedBoundaryRoots) {
-    if (container === scope || scope.contains(container)) {
-      try { root.unmount(); } catch {}
-      farmIsolatedBoundaryRoots.delete(container);
-    }
-  }
+  farmIsolatedHydrationRuntime.dispose(scope);
 }
 
-async function hydrateFarmIsolatedClientBoundaries(scope = document) {
-  const candidates = Array.from(scope.querySelectorAll("farm-client-boundary[data-farm-client-boundary]"));
-  const boundaries = candidates.filter((container) => {
-    if (farmIsolatedBoundaryRoots.has(container)) return false;
-    return !container.parentElement?.closest("farm-client-boundary[data-farm-client-boundary]");
-  });
-  await Promise.all(boundaries.map(async (container) => {
-    const reference = container.getAttribute("data-farm-client-boundary");
-    const exportName = container.getAttribute("data-farm-client-export") || "default";
-    const strategy = container.getAttribute("data-farm-island-strategy") || "load";
-    const loader = reference ? farmIsolatedBoundaryLoaders[reference] : null;
-    if (!reference || !loader) {
-      console.warn("[Farm.js] Missing isolated client boundary loader:", reference);
-      return;
-    }
-    const scheduled = scheduleFarmIslandHydration({
-      container,
-      strategy,
-      hydrate: async function() {
-        try {
-          const module = await loader();
-          const Component = module.__farm_client_boundary_originals__?.[exportName];
-          if (typeof Component !== "function" && typeof Component !== "object") {
-            throw new Error("compiled original export was not found");
-          }
-          const props = JSON.parse(container.getAttribute("data-farm-client-props") || "{}");
-          const root = hydrateRoot(container, React.createElement(Component, props));
-          farmIsolatedBoundaryRoots.set(container, root);
-        } catch (error) {
-          console.warn(
-            "[Farm.js] Could not hydrate isolated client boundary " + reference + "#" + exportName + ". Server HTML was preserved.",
-            error,
-          );
-        }
-      },
-    });
-    if (strategy === "load") await scheduled;
-    else void scheduled.catch((error) => console.warn("[Farm.js] Deferred boundary hydration failed:", error));
-  }));
+async function hydrateFarmIsolatedClientBoundaries(scope = document, signal) {
+  await farmIsolatedHydrationRuntime.hydrate(scope, signal);
 }`
     : "";
+  const routeClientGraphRuntime = isolatedHydrationEnabled
+    ? `function wrapFarmRouteClientGraph(element) {
+  return wrapFarmIsolatedClientGraph(React, element);
+}`
+    : `function wrapFarmRouteClientGraph(element) { return element; }`;
   clientRouteSlots.forEach((slot, index) => {
     const importPath = toImportPath(slot.modulePath);
     imports.push(`import RouteSlot${index} from "${importPath}";`);
@@ -2347,9 +2667,13 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document) {
 ${cssImport}
 ${layoutImports}
 ${rendererClientImports}
-import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration, searchParamsToObject, setFarmTrailingSlashPreference } from "@farm.js/core/internal/client-runtime";
-import { matchFarmRoute } from "@farm.js/core/router";
+${isolatedHydrationImport}
+${providerClientCode.imports}
+import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
+import { isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
+${clientCachePersistence.imports}
 ${i18nClientRuntime}
 ${docsNavigationRuntime}
 ${docsAdapterRuntime}
@@ -2357,8 +2681,12 @@ ${docsAdapterRuntime}
 ${imports.join("\n")}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 
+${providerClientCode.runtime}
+
+setFarmBasePath(${JSON.stringify(basePath)});
 setFarmTrailingSlashPreference(${JSON.stringify(trailingSlash)});
 installChunkErrorRecovery();
+${clientCachePersistence.init}
 
 // Client component routes
 const clientRoutes = [
@@ -2366,6 +2694,7 @@ ${routeEntries.join(",\n")}
 ];
 
 ${isolatedHydrationRuntime}
+${routeClientGraphRuntime}
 
 const clientRouteSlots = [
 ${routeSlotEntries.join(",\n")}
@@ -2382,9 +2711,7 @@ function getApplicableLayouts(pathname) {
   const normalizedPath = getFarmRoutePathname(pathname).replace(/\\/$/, '') || '/';
   
   for (const layout of layoutRoutes) {
-    if (layout.pattern === '/' || 
-        normalizedPath === layout.pattern || 
-        normalizedPath.startsWith(layout.pattern + '/')) {
+    if (layout.pattern === '/' || isFarmRouteActive(layout.pattern, normalizedPath, { exact: false })) {
       applicable.push(layout);
     }
   }
@@ -2491,20 +2818,20 @@ async function createMatchedHydrationElement(matched, pathname, searchParams, se
   }
 
   if (!pageElement) return null;
-  if (!hydrateLayouts) return pageElement;
+  if (!hydrateLayouts) {
+    return wrapFarmRouteClientGraph(wrapWithIntegrationProviders(pageElement));
+  }
   if (matched.route.pageShouldHydrate) {
     pageElement = createLayoutPageBoundary(matched.route, pageElement);
   }
-  return wrapWithLayouts(pageElement, pathname, params);
+  return wrapFarmRouteClientGraph(
+    wrapWithIntegrationProviders(wrapWithLayouts(pageElement, pathname, params)),
+  );
 }
 
 function matchesRoutePrefix(pathname, pattern) {
-  if (pattern === "/") return true;
-  const pathSegments = getFarmRoutePathname(pathname).split("/").filter(Boolean);
-  const patternSegments = pattern.split("/").filter(Boolean);
-  if (patternSegments.length > pathSegments.length) return false;
-  const candidate = "/" + pathSegments.slice(0, patternSegments.length).join("/");
-  return matchFarmRoute(pattern, candidate) !== null;
+  return pattern === "/" ||
+    isFarmRouteActive(pattern, getFarmRoutePathname(pathname), { exact: false });
 }
 
 function matchInterceptedRouteSlot(pathname, from) {
@@ -2558,7 +2885,9 @@ function renderClientRouteSlot(slot, registration, mode) {
   const key = routeSlotKey(slot);
   const existingRoot = routeSlotRoots.get(key);
   const props = slot.props && typeof slot.props === "object" ? slot.props : {};
-  const element = React.createElement(registration.Component, props);
+  const element = wrapFarmRouteClientGraph(
+    wrapWithIntegrationProviders(React.createElement(registration.Component, props)),
+  );
 
   if (mode === "hydrate") {
     if (existingRoot) return true;
@@ -2594,15 +2923,16 @@ function hydrateInitialRouteSlots() {
   }
 }
 
-function renderRouteInterception(slot, registration, from) {
+function renderRouteInterception(slot, registration, from, nextDocument) {
   const container = document.getElementById(slot.containerId);
-  if (!container) return false;
+  if (!container || !registration?.Component) return false;
   const key = routeSlotKey(slot);
   const previousSlot = (window.__FARM_ROUTE_SLOTS__ || []).find(function(candidate) {
     return routeSlotKey(candidate) === key;
   }) || null;
   const previousHtml = container.innerHTML;
 
+  reconcileFarmDocumentHead(nextDocument);
   if (!renderClientRouteSlot(slot, registration, "render")) return false;
   activeRouteInterception = {
     from: from,
@@ -2663,6 +2993,8 @@ function resetReactRoot() {
 
 // Hydrate client components
 async function hydrate() {
+  await farmClientRuntime.start();
+
   if (await hydrateFarmDocsAdapterRuntime()) {
     return;
   }
@@ -2682,7 +3014,9 @@ async function hydrate() {
     !matched.route.pageShouldHydrate &&
     !hasHydratableLayout(pathname)
   ) {
-    await hydrateFarmIsolatedClientBoundaries(document);
+    const hydrationController = new AbortController();
+    pendingPageHydrationController = hydrationController;
+    await hydrateFarmIsolatedClientBoundaries(document, hydrationController.signal);
     return;
   }`
       : ""
@@ -2703,7 +3037,7 @@ async function hydrate() {
   const hydrationController = new AbortController();
   pendingPageHydrationController = hydrationController;
   try {
-    await scheduleFarmIslandHydration({
+    const pageHydration = scheduleFarmIslandHydration({
       container,
       strategy: matched.route.islandStrategy,
       signal: hydrationController.signal,
@@ -2755,6 +3089,16 @@ async function hydrate() {
         }
       },
     });
+    ${
+      isolatedHydrationEnabled
+        ? `const isolatedHydration =
+      !hasHydratableLayout(pathname) &&
+      document.querySelector('farm-client-boundary[data-farm-client-boundary]')
+        ? hydrateFarmIsolatedClientBoundaries(document, hydrationController.signal)
+        : Promise.resolve();
+    await Promise.all([pageHydration, isolatedHydration]);`
+        : "await pageHydration;"
+    }
   } finally {
     if (pendingPageHydrationController === hydrationController) {
       pendingPageHydrationController = null;
@@ -2808,6 +3152,7 @@ function replaceSharedLayoutBoundary(currentRoot, nextRoot) {
     : nextRoot.querySelector("#__farm_page__");
 
   if (!currentTarget || !nextTarget) return false;
+  ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentTarget);" : ""}
   currentTarget.replaceWith(nextTarget);
   activateNavigationScripts(nextTarget);
   if (nextTreeRoot && nextTreeRoot !== nextTarget) nextTreeRoot.remove();
@@ -2821,7 +3166,7 @@ function replaceSharedLayoutBoundary(currentRoot, nextRoot) {
     activateNavigationScripts(support);
     setTimeout(function() { support.remove(); }, 0);
   }
-  return true;
+  return nextTarget;
 }
 
 // SPA Router
@@ -2831,42 +3176,57 @@ ${generateUniversalRouterStateProperties()}
   
   navigate: async function(href, options = {}) {
     const url = new URL(href, window.location.origin);
-    if (url.origin !== window.location.origin) {
-      window.location.href = href;
+    if (isFarmExternalNavigationURL(url, window.location.origin)) {
+      this.cancelActiveNavigation();
+      if (options.replace || options.action === "replace") window.location.replace(href);
+      else window.location.href = href;
       return;
     }
     if (isFarmDocsPath(url.pathname)) {
-      window.location.href = href;
+      this.cancelActiveNavigation();
+      if (options.replace || options.action === "replace") window.location.replace(href);
+      else window.location.href = href;
       return;
     }
 
     const action = options.action || (options.replace ? "replace" : "push");
     const to = url.pathname + url.search;
-    if (action !== "pop" && to === this.currentPath) {
+    if (!options.refresh && action !== "pop" && to === this.currentPath) {
+      this.cancelActiveNavigation();
       if (url.hash === window.location.hash) return;
       const pageState = options.state === undefined
         ? window.history.state?.[FARM_PAGE_STATE_KEY]
         : options.state;
-      const historyState = createHistoryState(to, pageState, window.history.state);
-      if (action === "replace") window.history.replaceState(historyState, "", url);
-      else window.history.pushState(historyState, "", url);
+      this.writeHistoryEntry(action, to, pageState, url);
       if (options.scroll !== false) {
-        if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
+        if (url.hash) getHashTargetElement(url.hash)?.scrollIntoView();
         else window.scrollTo(0, 0);
       }
       return;
     }
-    if (action === "pop" && to === this.currentPath) return;
+    if (action === "pop" && to === this.currentPath) {
+      this.cancelActiveNavigation();
+      this.currentHistoryIndex = readHistoryIndex(options.popState);
+      this.currentHistoryState = options.popState;
+      return;
+    }
     
     const pathname = url.pathname;
     const matched = matchRoute(pathname);
     const from = this.currentPath;
-    if (await this.shouldBlockNavigation({ from, to, action })) return;
+    if (await this.shouldBlockNavigation({ from, to, action })) {
+      if (action === "pop") this.revertBlockedPopState(from);
+      return;
+    }
+    if (action === "pop") {
+      this.currentHistoryIndex = readHistoryIndex(options.popState);
+      this.currentHistoryState = options.popState;
+    }
 
     // A route transition invalidates any trigger waiting on the previous DOM boundary.
     cancelPendingPageHydration();
     this.saveScrollPosition(window.location.pathname + window.location.search);
-    this.startNavigation(from, url, action);
+    const navigation = this.startNavigation(from, url, action);
     let clientNavigation;
 
     try {
@@ -2878,24 +3238,29 @@ ${generateUniversalRouterStateProperties()}
           ? { pattern: matched.route.pattern, params: matched.params }
           : undefined,
       });
+      navigation.clientNavigation = clientNavigation;
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
 
-      if (activeRouteInterception && clearRouteInterception(to)) {
+      if (!options.refresh && activeRouteInterception && clearRouteInterception(to)) {
+        this.currentPath = to;
         await farmClientRuntime.markNavigationLoaded(clientNavigation, {
           routeSlots: "restored",
         });
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         await farmClientRuntime.resolveNavigation(clientNavigation);
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
-        this.currentPath = to;
-        this.finishNavigation();
+        this.finishNavigation(navigation);
         return;
       }
       if (activeRouteInterception) {
         clearRouteInterception(to);
       }
 
-      const intercepted = matchInterceptedRouteSlot(pathname, from);
+      const intercepted = options.refresh ? null : matchInterceptedRouteSlot(pathname, from);
       if (intercepted) {
-        const html = await this.fetchPage(to, from);
+        const html = await this.fetchPage(to, from, false, true, navigation.controller.signal);
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         const doc = new DOMParser().parseFromString(html, "text/html");
         const slotPayload = readRouteSlotPayload(doc);
         const selectedSlot = slotPayload.find(function(slot) {
@@ -2904,36 +3269,29 @@ ${generateUniversalRouterStateProperties()}
             slot.ownerPattern === intercepted.slot.ownerPattern;
         });
 
-        if (
-          selectedSlot &&
-          renderRouteInterception(selectedSlot, intercepted.slot, from)
-        ) {
+        if (selectedSlot) {
           await farmClientRuntime.markNavigationLoaded(clientNavigation, {
             route: intercepted.slot.pattern,
             params: intercepted.params,
           });
-          const historyState = createHistoryState(
-            to,
-            options.state,
-            window.history.state,
-          );
-          if (action === "replace") {
-            window.history.replaceState(historyState, "", url);
-          } else if (action !== "pop") {
-            window.history.pushState(historyState, "", url);
+          if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+          if (renderRouteInterception(selectedSlot, intercepted.slot, from, doc)) {
+            this.writeHistoryEntry(action, to, options.state, url);
+            this.currentPath = to;
+            await farmClientRuntime.resolveNavigation(clientNavigation);
+            if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+            void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
+            this.finishNavigation(navigation);
+            return;
           }
-          await farmClientRuntime.resolveNavigation(clientNavigation);
-          void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
-          this.currentPath = to;
-          this.finishNavigation();
-          return;
         }
       }
 
-      if (matched?.route.navigation === "client-render") {
+      if (!options.refresh && matched?.route.navigation === "client-render") {
         // Navigation itself signals intent, so destination routes load eagerly even
         // when their initial document hydration strategy is deferred.
         const Component = await loadRouteComponent(matched.route);
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         const params = matched.params;
         const searchParams = searchParamsToObject(url.searchParams);
         const props = { params: params, searchParams: Promise.resolve(searchParams) };
@@ -2941,24 +3299,19 @@ ${generateUniversalRouterStateProperties()}
         if (hasHydratableLayout(pathname)) {
           pageElement = createLayoutPageBoundary(matched.route, pageElement);
         }
-        const wrappedElement = wrapWithLayouts(pageElement, pathname, params);
+        const wrappedElement = wrapFarmRouteClientGraph(
+          wrapWithIntegrationProviders(wrapWithLayouts(pageElement, pathname, params)),
+        );
 
         await farmClientRuntime.markNavigationLoaded(clientNavigation, {
           route: matched.route.pattern,
           params,
         });
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
 
         await this.runViewTransition(options.viewTransition, async () => {
-          const historyState = createHistoryState(
-            url.pathname + url.search,
-            options.state,
-            window.history.state,
-          );
-          if (action === "replace") {
-            window.history.replaceState(historyState, "", url);
-          } else if (action !== "pop") {
-            window.history.pushState(historyState, "", url);
-          }
+          if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+          this.writeHistoryEntry(action, url.pathname + url.search, options.state, url);
 
           const container = document.getElementById("root");
           if (container) {
@@ -2970,95 +3323,110 @@ ${generateUniversalRouterStateProperties()}
             reactRoot.render(wrappedElement);
             currentPathname = pathname;
           }
+          this.currentPath = to;
         });
       } else {
-        const html = await this.fetchPage(url.pathname + url.search);
+        const html = await this.fetchPage(
+          url.pathname + url.search,
+          undefined,
+          options.refresh === true,
+          true,
+          navigation.controller.signal,
+        );
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         await farmClientRuntime.markNavigationLoaded(clientNavigation, html);
+        if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         await this.runViewTransition(options.viewTransition, async () => {
-          if (!(await this.swapContent(html, url.pathname + url.search))) {
+          if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+          const swapped = await this.swapContent(
+            html,
+            url.pathname + url.search,
+            navigation,
+            clientNavigation,
+          );
+          if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+          if (!swapped) {
             throw new Error("Farm could not swap the target document");
           }
-          const historyState = createHistoryState(
-            url.pathname + url.search,
-            options.state,
-            window.history.state,
-          );
-          if (action === "replace") {
-            window.history.replaceState(historyState, "", url);
-          } else if (action !== "pop") {
-            window.history.pushState(historyState, "", url);
-          }
+          this.writeHistoryEntry(action, url.pathname + url.search, options.state, url);
           currentPathname = pathname;
+          this.currentPath = to;
         });
       }
 
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       if (options.scroll !== false) {
-        if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
+        if (url.hash) getHashTargetElement(url.hash)?.scrollIntoView();
         else window.scrollTo(0, 0);
       } else {
         this.restoreScrollPosition(to);
       }
       await farmClientRuntime.resolveNavigation(clientNavigation);
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
-      this.currentPath = to;
-      this.finishNavigation();
+      this.finishNavigation(navigation);
     } catch (error) {
+      if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
       if (clientNavigation) {
         await farmClientRuntime.failNavigation(clientNavigation, error);
       }
-      this.finishNavigation();
+      this.finishNavigation(navigation);
+      if (error?.name === "FarmDeploymentMismatchError") return;
       console.error("[Farm.js] Navigation error:", error);
       if (action === "pop") window.location.reload();
       else window.location.href = href;
     }
   },
+
+  refresh: function(options = {}) {
+    return this.navigate(window.location.href, {
+      ...options,
+      action: "replace",
+      replace: true,
+      refresh: true,
+      scroll: options.scroll === undefined ? false : options.scroll,
+    });
+  },
   
-  fetchPage: async function(url, interceptFrom) {
+  fetchPage: async function(url, interceptFrom, fresh = false, recover = true, signal) {
     const cacheKey = interceptFrom ? url + "\\nintercept:" + interceptFrom : url;
-    const cached = this.prefetchCache.get(cacheKey);
+    if (fresh) this.clearPrefetchedPath(url);
+    const cached = fresh ? undefined : this.prefetchCache.get(cacheKey);
     if (cached) return cached;
     
-    const response = await fetch(url, {
-      headers: {
+    const response = await fetchFarmNavigationDocument(
+      url,
+      {
         "Accept": "text/html",
         ...(interceptFrom ? { "X-Farm-Intercept-From": interceptFrom } : {}),
-      }
-    });
+      },
+      recover,
+      signal,
+    );
     if (!response.ok) throw new Error("Failed to fetch page");
     const html = await response.text();
     this.prefetchCache.set(cacheKey, html);
     return html;
   },
   
-  swapContent: async function(html, targetPath) {
+  swapContent: async function(html, targetPath, navigation, clientNavigation) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
     if (isFarmLocaleDocumentChange(doc)) return false;
     if (doc.getElementById("nd-docs-layout")) return false;
     const nextRouteSlots = readRouteSlotPayload(doc);
+    const isNavigationCurrent = () =>
+      this.isCurrentNavigation(navigation, clientNavigation);
     
-    // Update title
-    const newTitle = doc.querySelector("title");
-    if (newTitle) document.title = newTitle.textContent || "";
-    
-    // Update meta tags
-    const newMetas = doc.querySelectorAll("meta[name]");
-    newMetas.forEach(function(meta) {
-      const name = meta.getAttribute("name");
-      if (name) {
-        const existing = document.querySelector("meta[name=\\"" + name + "\\"]");
-        if (existing) {
-          existing.setAttribute("content", meta.getAttribute("content") || "");
-        } else {
-          document.head.appendChild(meta.cloneNode(true));
-        }
-      }
-    });
+    reconcileFarmDocumentHead(doc);
     
     // Swap root content
     const newRoot = doc.getElementById("root");
     const currentRoot = document.getElementById("root");
-    if (!newRoot || !currentRoot) return this.swapDocument(doc);
+    if (!newRoot || !currentRoot) {
+      if (!isNavigationCurrent()) return false;
+      return this.swapDocument(doc);
+    }
     const targetUrl = new URL(targetPath || window.location.href, window.location.origin);
     const newPathname = targetUrl.pathname;
     const matched = matchRoute(newPathname);
@@ -3075,6 +3443,7 @@ ${generateUniversalRouterStateProperties()}
         searchParams,
         nextPage ? nextPage.innerHTML : "",
       );
+      if (!isNavigationCurrent()) return false;
       if (wrappedElement) {
         reactRoot.render(wrappedElement);
         window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
@@ -3084,12 +3453,17 @@ ${generateUniversalRouterStateProperties()}
     }
 
     const rootWasReactOwned = reactRootContainer === currentRoot;
-    ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentRoot);" : ""}
     resetReactRoot();
     resetRouteSlotRoots();
-    if (rootWasReactOwned || !replaceSharedLayoutBoundary(currentRoot, newRoot)) {
+    const replacedSharedBoundary = rootWasReactOwned
+      ? null
+      : replaceSharedLayoutBoundary(currentRoot, newRoot);
+    let isolatedHydrationScope = replacedSharedBoundary || currentRoot;
+    if (!replacedSharedBoundary) {
+      ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentRoot);" : ""}
       currentRoot.innerHTML = newRoot.innerHTML;
       activateNavigationScripts(currentRoot);
+      isolatedHydrationScope = currentRoot;
     }
     window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
     hydrateInitialRouteSlots();
@@ -3104,14 +3478,20 @@ ${generateUniversalRouterStateProperties()}
         newPathname,
         searchParams,
       );
+      if (!isNavigationCurrent()) return false;
       if (wrappedElement) {
         reactRoot = hydrateRoot(pageContainer, wrappedElement);
         reactRootContainer = pageContainer;
         isHydrated = true;
-      }${
+      }
+      ${
         isolatedHydrationEnabled
-          ? ` else if (matched.route.hasIsolatedClientBoundaries) {
-        await hydrateFarmIsolatedClientBoundaries(currentRoot);
+          ? `if (matched.route.hasIsolatedClientBoundaries && !hydrateLayouts) {
+        await hydrateFarmIsolatedClientBoundaries(
+          isolatedHydrationScope,
+          navigation.controller.signal,
+        );
+        if (!isNavigationCurrent()) return false;
       }`
           : ""
       }
@@ -3124,6 +3504,7 @@ ${generateUniversalRouterStateProperties()}
 
     resetReactRoot();
     resetRouteSlotRoots();
+    ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(document);" : ""}
 
     Array.from(document.documentElement.attributes).forEach(function(attr) {
       if (!doc.documentElement.hasAttribute(attr.name)) {
@@ -3154,16 +3535,19 @@ ${generateUniversalRouterStateProperties()}
   },
   prefetch: function(href) {
     const url = new URL(href, window.location.origin);
-    if (url.origin !== window.location.origin) return;
+    if (isFarmExternalNavigationURL(url, window.location.origin)) return;
+    if (isFarmDocsPath(url.pathname)) return;
     
     const pathname = url.pathname + url.search;
     const interceptFrom = this.currentPath;
     const cacheKey = pathname + "\\nintercept:" + interceptFrom;
     if (this.prefetchCache.has(cacheKey)) return;
     
-    this.fetchPage(pathname, interceptFrom)
+    this.fetchPage(pathname, interceptFrom, false, false)
       .then(function(html) { spaRouter.prefetchCache.set(cacheKey, html); })
-      .catch(function() {});
+      .catch(function(error) {
+        clearFarmPrefetchCacheOnDeploymentMismatch(spaRouter, error);
+      });
   },
   
   observeForPrefetch: function(element) {
@@ -3208,10 +3592,11 @@ window.__FARM_CLIENT_RUNTIME__ = farmClientRuntime;
 void farmClientRuntime.start();
 
 // Expose router globally
+spaRouter.initializeHistory();
 window.__FARM_SPA_ROUTER__ = spaRouter;
 
 window.addEventListener("beforeunload", function(event) {
-  if (spaRouter.blockers.size > 0) {
+  if (spaRouter.shouldBlockUnload()) {
     event.preventDefault();
     event.returnValue = "";
   }
@@ -3219,9 +3604,8 @@ window.addEventListener("beforeunload", function(event) {
 });
 
 // Handle popstate (back/forward)
-window.addEventListener("popstate", function() {
-  if (document.documentElement.dataset.farmDocsRuntime === "true") return;
-  void spaRouter.navigate(window.location.href, { action: "pop", scroll: false });
+window.addEventListener("popstate", function(event) {
+  void spaRouter.handlePopState(event);
 });
 
 // Intercept link clicks
@@ -3232,7 +3616,8 @@ document.addEventListener("click", function(e) {
   
   const href = anchor.getAttribute("href");
   if (!href) return;
-  if (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//")) return;
+  if (anchor.hasAttribute("download")) return;
+  if (hasAbsoluteNavigationHref(href)) return;
   if (href.startsWith("#")) return;
   if (anchor.target && anchor.target !== "_self") return;
   if (document.documentElement.dataset.farmDocsRuntime === "true") return;
@@ -3268,6 +3653,8 @@ async function buildSSRInMemory(
   collectedPageRoutes: readonly UniversalPageRoute[],
   collectedLayoutRoutes: ReadonlyArray<{ pattern: string; modulePath: string }>,
   collectedRouteSlots: readonly UniversalRouteSlot[],
+  isolatedClientBoundaryModules: ReadonlySet<string>,
+  hydrationPlanCache: Map<string, ClientModuleHydrationPlan>,
 ): Promise<{
   bundle: OutputBundle;
   entryFile: string;
@@ -3356,12 +3743,14 @@ async function buildSSRInMemory(
     path: string;
     filePath: string;
     methods: string[];
+    pluginMethods?: string[];
   }> = [];
   for (const [routePath, route] of apiRouteManager.getRoutes()) {
     apiRoutes.push({
       path: routePath,
       filePath: route.filePath,
       methods: route.methods,
+      pluginMethods: route.pluginMethods,
     });
   }
   const [configuredRedirects, configuredRewrites, configuredHeaderRoutes] = await Promise.all([
@@ -3390,6 +3779,26 @@ async function buildSSRInMemory(
     : {};
 
   const appDirs = getFarmAppDirectories(config);
+  let openAPIReference: {
+    route: string;
+    html: string;
+    spec: unknown;
+    specRoute: string | null;
+  } | null = null;
+  if (config.openapi.enabled && config.openapi.route) {
+    const { OpenAPIManager, renderOpenAPIReferenceHTML } = await import("../openapi/manager");
+    const openAPIManager = new OpenAPIManager(appDirs, config.openapi);
+    const spec = await openAPIManager.generateSpec();
+    if (!spec) {
+      throw new Error("Failed to generate the OpenAPI specification for the production build.");
+    }
+    openAPIReference = {
+      route: config.openapi.route,
+      html: renderOpenAPIReferenceHTML(spec, config.openapi),
+      spec,
+      specRoute: config.openapi.specRoute || null,
+    };
+  }
   const middlewareRoutes = await discoverMiddlewareRoutes(appDirs);
   const instrumentationPath = resolveFarmInstrumentationFile(root, config.srcDir || "src");
 
@@ -3418,6 +3827,9 @@ async function buildSSRInMemory(
       integration !== null &&
       (!("serverRuntime" in integration) || integration.serverRuntime !== false),
   );
+  const hasIntegrationProviders = getIntegrationProviders(config.integrations).some(
+    (provider) => provider.component || provider.type === "clerk",
+  );
   const hasObservabilityHandler =
     !!config.observability &&
     typeof config.observability === "object" &&
@@ -3432,7 +3844,8 @@ async function buildSSRInMemory(
     hasMdxComponentConfig ||
     hasMiddlewareConfig ||
     hasRouteContextConfig ||
-    hasServerRuntimePlugins
+    hasServerRuntimePlugins ||
+    hasIntegrationProviders
       ? await findFarmConfigPath(root)
       : null;
   const hasRuntimeConfigModule = hasFarmRuntimeConfigModule(config, configModulePath);
@@ -3455,6 +3868,7 @@ async function buildSSRInMemory(
     redirectRoutes,
     configuredRewrites,
     configuredHeaderRoutes,
+    openAPIReference,
     notFoundPath,
     instrumentationPath,
     config,
@@ -3464,6 +3878,8 @@ async function buildSSRInMemory(
     hasConfiguredRuntimePlugins,
     preset,
     i18nCatalogs,
+    isolatedClientBoundaryModules,
+    hydrationPlanCache,
   );
 
   // Find a temporary file path for the virtual entry
@@ -3606,7 +4022,7 @@ async function buildSSRInMemory(
             };
           },
         },
-        farmPlugin(config, pluginManager),
+        farmPlugin({ ...config, isolatedClientBoundaryModules }, pluginManager),
         farmEnvironmentFunctionsPlugin(),
         {
           name: "farm-virtual-ssr-entry",
@@ -3710,8 +4126,83 @@ export function toVirtualEntryImportSpecifier(modulePath: string): string {
   return JSON.stringify(modulePath.replace(/\\/g, "/"));
 }
 
+/**
+ * Runtime source that remounts the native `auth` integration in a built server.
+ *
+ * `resolveConfig` turns a top-level `auth` config into `integrations.auth`, but
+ * the generated production entry never calls `resolveConfig`: it rebuilds its
+ * integration map by re-evaluating the raw user config module, where auth only
+ * exists as `auth: true`. Without this the auth routes are absent from every
+ * production build and each one 404s while dev serves them.
+ *
+ * The import is literal so the bundler traces `@farm.js/auth` into the server
+ * output, and both pieces are empty when auth is disabled so nothing is pulled
+ * in for apps that do not use it.
+ */
+export function generateNativeAuthIntegrationSource(auth: ResolvedFarmConfig["auth"] | undefined): {
+  importSource: string;
+  registerSource: string;
+} {
+  if (auth?.enabled !== true) {
+    return { importSource: "", registerSource: "" };
+  }
+
+  return {
+    importSource: `import { createFarmAuthIntegration as __farmCreateAuthIntegration } from "@farm.js/auth/internal";`,
+    // resolveConfig rejects configuring both `auth` and `integrations.auth`,
+    // so this never overwrites a user-supplied integration.
+    registerSource: `configuredIntegrations.auth = __farmCreateAuthIntegration(${JSON.stringify(auth)}, {
+  root: process.cwd(),
+  mode: "production",
+});`,
+  };
+}
+
+export function generateConfiguredResponseHeadersRuntimeSource(): string {
+  return `
+function getConfiguredSetCookieHeaders(headers) {
+  const getSetCookie = headers.getSetCookie;
+  if (typeof getSetCookie === "function") return getSetCookie.call(headers);
+  const value = headers.get("set-cookie");
+  return value ? [value] : [];
+}
+
+function applyConfiguredResponseHeaders(response, pathname) {
+  let headers;
+  for (const headerRoute of configuredHeaderRoutes) {
+    if (!matchRuntimePathPattern(headerRoute.source, pathname)) continue;
+    for (const header of headerRoute.headers) {
+      const currentHeaders = headers || response.headers;
+      const normalizedKey = header.key.toLowerCase();
+      if (normalizedKey === "set-cookie") {
+        if (getConfiguredSetCookieHeaders(currentHeaders).includes(header.value)) continue;
+        if (!headers) headers = new Headers(response.headers);
+        headers.append("Set-Cookie", header.value);
+      } else {
+        const currentValue = currentHeaders.get(header.key);
+        if (currentValue === header.value) continue;
+        if (!headers) headers = new Headers(response.headers);
+        if (normalizedKey === "link") {
+          appendFarmLinkHeader(headers, header.value);
+        } else {
+          headers.set(header.key, header.value);
+        }
+      }
+    }
+  }
+
+  if (!headers) return response;
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+`.trim();
+}
+
 function generateVirtualEntryCode(
-  apiRoutes: Array<{ path: string; filePath: string; methods: string[] }>,
+  apiRoutes: Array<{ path: string; filePath: string; methods: string[]; pluginMethods?: string[] }>,
   pageRoutes: UniversalPageRoute[],
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
   routeSlots: UniversalRouteSlot[],
@@ -3722,6 +4213,7 @@ function generateVirtualEntryCode(
   redirectRoutes: ProgrammaticRedirectRoute[],
   configuredRewriteRoutes: RewriteConfig[],
   configuredHeaderRoutes: UniversalConfiguredHeaderRoute[],
+  openAPIReference: { route: string; html: string; spec: unknown; specRoute: string | null } | null,
   notFoundPath: string | null,
   instrumentationPath: string | null,
   config: ResolvedFarmConfig,
@@ -3731,6 +4223,8 @@ function generateVirtualEntryCode(
   hasConfiguredRuntimePlugins: boolean,
   preset: string,
   i18nCatalogs: FarmI18nCatalogs,
+  isolatedClientBoundaryModules: ReadonlySet<string>,
+  hydrationPlanCache: Map<string, ClientModuleHydrationPlan>,
 ): string {
   const hasPluginRuntime = hasRuntimeIntegrationConfig || hasConfiguredRuntimePlugins;
   const adapterOwnsDocsRuntime = Boolean(
@@ -3739,9 +4233,20 @@ function generateVirtualEntryCode(
     config.docs.adapter?.server &&
     config.docs.adapter.react,
   );
+  const hasIsolatedClientGraphRuntime =
+    isReactRenderer(config.renderer) && isolatedClientBoundaryModules.size > 0;
   const rendererServerImports = isReactRenderer(config.renderer)
-    ? `import * as React from "react";\nimport * as ReactDOMServer from "react-dom/server";`
+    ? `import * as React from "react";\nimport * as ReactDOMServer from "react-dom/server";${
+        hasIsolatedClientGraphRuntime
+          ? '\nimport { wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";'
+          : ""
+      }`
     : `import React, * as ReactDOMServer from ${JSON.stringify(config.renderer.server)};`;
+  const routeClientGraphServerRuntime = hasIsolatedClientGraphRuntime
+    ? `function wrapFarmRouteClientGraph(element) {
+  return wrapFarmIsolatedClientGraph(React, element);
+}`
+    : `function wrapFarmRouteClientGraph(element) { return element; }`;
   const hasGeneratedMetadataImages = metadataImageRoutes.some(
     (image) => image.sourceType === "module",
   );
@@ -3750,12 +4255,96 @@ function generateVirtualEntryCode(
   const farmDocsFontAssets = config.docs?.enabled
     ? toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(config.root))
     : [];
+  const integrationProviders = getIntegrationProviders(config.integrations);
+  const renderedIntegrationProviders = integrationProviders.filter(
+    (provider) => provider.component || provider.type === "clerk",
+  );
+  if (renderedIntegrationProviders.length > 0 && !isReactRenderer(config.renderer)) {
+    throw new Error("Integration provider components currently require the React renderer.");
+  }
+  const providerServerModules = generateFarmIntegrationProviderServerModules(
+    renderedIntegrationProviders,
+    config.root,
+  );
+  const resolvedIntegrationProviderFallback = Object.fromEntries(
+    Object.entries(config.integrations).flatMap(([name, integration]) => {
+      const configuredProviders = (integration as { providers?: unknown } | null)?.providers;
+      const providers = Array.isArray(configuredProviders) ? configuredProviders : [];
+      if (providers.some((provider) => typeof provider?.component === "function")) {
+        throw new Error(
+          `Integration provider components in production must use an importable component reference, for example component: { module: "@/components/provider" }.`,
+        );
+      }
+      return providers.length > 0 ? [[name, { providers }]] : [];
+    }),
+  );
+  const unsupportedIntegrationProvider = renderedIntegrationProviders.find(
+    (provider) => provider.supportsIsolatedHydration !== true,
+  );
+  const isolatedHydrationMode = resolveFarmIsolatedClientHydrationMode(
+    config.experimental?.isolatedClientHydration,
+    {
+      serverComponents: config.experimental?.serverComponents === true,
+      hasUnsupportedIntegrationProvider: Boolean(unsupportedIntegrationProvider),
+    },
+  );
+  const layoutAppliesToRoute = (layoutPattern: string, routePattern: string) =>
+    layoutPattern === "/" ||
+    routePattern === layoutPattern ||
+    routePattern.startsWith(`${layoutPattern}/`);
+  const layoutHydrationPlans = layoutRoutes.map((layout) => ({
+    ...layout,
+    hydration: getCachedClientModuleHydrationPlan(
+      layout.modulePath,
+      config.root,
+      isolatedHydrationMode,
+      hydrationPlanCache,
+    ),
+  }));
+  const pageHydrationPlans = new Map(
+    pageRoutes
+      .filter((route) => !isFarmMarkdownPageFile(route.modulePath))
+      .map((route) => [
+        route.modulePath,
+        getCachedClientModuleHydrationPlan(
+          route.modulePath,
+          config.root,
+          isolatedHydrationMode,
+          hydrationPlanCache,
+        ),
+      ]),
+  );
+
+  enforceFarmIsolatedHydrationRouteBudget(
+    layoutHydrationPlans.map((layout) => ({
+      pattern: layout.pattern,
+      depth: layout.pattern.split("/").filter(Boolean).length,
+      metadata: layout.hydration,
+    })),
+    pageRoutes
+      .filter((route) => !isFarmMarkdownPageFile(route.modulePath))
+      .map((route) => ({
+        pattern: route.pattern,
+        depth: route.pattern.split("/").filter(Boolean).length,
+        metadata: pageHydrationPlans.get(route.modulePath)!,
+      })),
+    layoutAppliesToRoute,
+  );
+  const providerServerImports = [
+    providerServerModules.hasClerkProvider
+      ? `import { ClerkProvider as FarmClerkProvider } from "@clerk/react";`
+      : "",
+    providerServerModules.imports,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   // Generate imports for all API routes
   const apiImports: string[] = [];
   const apiRegistrations: string[] = [];
 
   apiRoutes.forEach((route, index) => {
+    if (!route.filePath) return;
     const varName = `apiRoute${index}`;
     apiImports.push(
       `import * as ${varName} from ${toVirtualEntryImportSpecifier(route.filePath)};`,
@@ -3763,7 +4352,7 @@ function generateVirtualEntryCode(
     apiRegistrations.push(`
   {
     path: ${JSON.stringify(route.path)},
-    methods: ${JSON.stringify(route.methods)},
+    methods: ${JSON.stringify(route.methods.filter((method) => !route.pluginMethods?.includes(method)))},
     endpoints: ${varName},
   }`);
   });
@@ -3804,7 +4393,7 @@ function generateVirtualEntryCode(
     pageImports.push(
       `import * as ${varName} from ${toVirtualEntryImportSpecifier(route.modulePath)};`,
     );
-    const clientMetadata = getClientModuleMetadata(route.modulePath, config.root);
+    const clientMetadata = pageHydrationPlans.get(route.modulePath)!;
     pageRegistrations.push(`
   {
     pattern: ${JSON.stringify(route.pattern)},
@@ -3826,9 +4415,9 @@ function generateVirtualEntryCode(
   const layoutImports: string[] = [];
   const layoutRegistrations: string[] = [];
 
-  layoutRoutes.forEach((layout, index) => {
+  layoutHydrationPlans.forEach((layout, index) => {
     const varName = `layoutRoute${index}`;
-    const clientMetadata = getClientModuleMetadata(layout.modulePath, config.root);
+    const clientMetadata = layout.hydration;
     layoutImports.push(
       `import * as ${varName} from ${toVirtualEntryImportSpecifier(layout.modulePath)};`,
     );
@@ -3938,15 +4527,18 @@ function generateVirtualEntryCode(
     : "";
   const apiRouteHelpersImport =
     apiRoutes.length > 0
-      ? `import { getAllowedAPIRouteMethods, invokeAPIRouteEndpoint, matchAPIRouteAtBasePath, resolveAPIRouteEndpoint } from "@farm.js/core/api/runtime";`
+      ? `import { mergePluginAPIRoutes, getAllowedAPIRouteMethods, invokeAPIRouteEndpoint, matchAPIRouteAtBasePath, resolveAPIRouteEndpoint } from "@farm.js/core/api/runtime";`
       : "";
   const productionRuntimeImport = `import {
   _runWithAfterRequest,
   _runWithCurrentRequest,
+  _runWithAPIRequestRuntime,
   _runWithMiddlewareContext,
   _runWithMiddlewareData,
   _setDefaultFarmThemeConfig,
   addMetadataImageReference,
+  appendFarmRedirectQuery,
+  applyFarmBasePath,
   applyFarmThemeDocument,
   appendFarmLinkHeader,
   applyProductionMiddlewareHeaders,
@@ -3959,6 +4551,7 @@ function generateVirtualEntryCode(
   createFarmThemeDocumentParts,
   createFarmLocaleCookie,
   createFarmProductionLifecycle,
+  createFarmNodeRequestAbortSignal,
   createProductionMiddlewareRunner,
   getTheme as getFarmTheme,
   emitFarmEvent,
@@ -3973,6 +4566,7 @@ function generateVirtualEntryCode(
   manageFarmDocumentPreloads,
   manageFarmLinkHeaderPreloads,
   mergeMetadata,
+  matchesFarmIfNoneMatch,
   normalizeRevalidatePath,
   reportFarmPreloadWarnings,
   renderMetadataHead,
@@ -3982,7 +4576,9 @@ function generateVirtualEntryCode(
   resolveFarmInstrumentationRuntime,
   runWithFarmRequestSpan,
   searchParamsToObject,
+  setFarmBasePath,
   setFarmTrailingSlashPreference,
+  stripFarmBasePath,
   stripFarmLocaleFromPathname,
   withFarmRouteContext,
 } from "@farm.js/core/internal/production-runtime";`;
@@ -4019,6 +4615,9 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
   const appMarkdownImport = hasMarkdownPages
     ? `import { createFarmMarkdownRouteModule, createFarmMarkdownSourceResponse } from "@farm.js/core/app-markdown";`
     : "const createFarmMarkdownSourceResponse = null;";
+  // Always available: agents can request Markdown on any route, so the
+  // Markdown error body is not gated on the app having Markdown page files.
+  const markdownErrorImport = `import { FARM_MARKDOWN_CONTENT_TYPE, createFarmMarkdownErrorBody, farmRequestWantsMarkdown } from "@farm.js/core/app-markdown";`;
   const mdxComponentsPath =
     typeof config.mdx?.components === "string"
       ? path.isAbsolute(config.mdx.components)
@@ -4058,10 +4657,12 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
   const instrumentationImport = instrumentationPath
     ? `import * as FarmInstrumentationModule from ${toVirtualEntryImportSpecifier(instrumentationPath)};`
     : "";
+  const nativeAuth = generateNativeAuthIntegrationSource(config.auth);
   const integrationImports = `
 ${configModulePath ? `import * as FarmUserConfigModule from ${toVirtualEntryImportSpecifier(configModulePath)};` : ""}
 ${layerConfigImports}
 ${integrationRuntimeImport}
+${nativeAuth.importSource}
 `;
   const imageRuntime = resolveImageRuntime(config, preset);
   const imageRuntimeImport =
@@ -4070,7 +4671,7 @@ ${integrationRuntimeImport}
       : `import { createCloudflareImageTransformer, createFarmImageHandler } from "@farm.js/core/image/server";`;
   const imageNodeRuntimeImport =
     imageRuntime === "node"
-      ? `import { createNodeImageUrlValidator, createSharpImageTransformer } from "@farm.js/core/image/sharp";`
+      ? `import { createNodeImageFetcher, createNodeImageUrlValidator, createSharpImageTransformer } from "@farm.js/core/image/sharp";`
       : "";
   const apiHandlerCode =
     apiRoutes.length > 0
@@ -4193,13 +4794,18 @@ ${docsFontImport}
 ${docsRuntimeImport}
 ${markdownHandlerImport}
 ${appMarkdownImport}
+${markdownErrorImport}
 ${mdxComponentsImport}
 ${integrationImports}
+${providerServerImports}
 ${instrumentationImport}
 ${imageRuntimeImport}
 ${imageNodeRuntimeImport}
 import { farmFontPreloadHeader } from "virtual:farm-font-runtime";
+import { isFarmRouteActive } from "@farm.js/core/router";
 ${rendererServerImports}
+
+${routeClientGraphServerRuntime}
 
 const farmPreloadConfig = ${JSON.stringify(config.performance.preload)};
 const farmProductionSiteTelemetry = ${
@@ -4219,12 +4825,51 @@ const farmUserConfig = ${
   };
 const farmRuntimeConfigs = [${[...layerConfigValues, "farmUserConfig"].join(", ")}].filter(Boolean);
 const farmResolvedRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs);
+setFarmBasePath(${JSON.stringify(config.basePath)});
 setFarmTrailingSlashPreference(${JSON.stringify(config.trailingSlash)});
 const hasConfiguredRouteContext = typeof farmResolvedRuntimeConfig.context === "function";
-const configuredIntegrations = Object.assign(
-  {},
-  ...farmRuntimeConfigs.map((runtimeConfig) => runtimeConfig.integrations || {}),
-);
+const configuredIntegrations = ${JSON.stringify(resolvedIntegrationProviderFallback)};
+for (const runtimeConfig of farmRuntimeConfigs) {
+  for (const [name, integration] of Object.entries(runtimeConfig.integrations || {})) {
+    const fallback = configuredIntegrations[name];
+    configuredIntegrations[name] =
+      fallback?.providers &&
+      integration &&
+      typeof integration === "object" &&
+      integration.providers === undefined
+        ? { ...integration, providers: fallback.providers }
+        : integration;
+  }
+}
+${nativeAuth.registerSource}
+const farmIntegrationProviderModuleComponents = new Map([
+${providerServerModules.entries}
+]);
+
+function wrapWithFarmIntegrationProviders(element) {
+  const providers = Object.values(configuredIntegrations).flatMap(function(integration) {
+    return Array.isArray(integration?.providers) ? integration.providers : [];
+  });
+  let wrapped = element;
+  for (let index = providers.length - 1; index >= 0; index--) {
+    const provider = providers[index];
+    let Component = null;
+    if (typeof provider.component === "function") {
+      Component = provider.component;
+    } else if (provider.component?.module) {
+      const componentKey = provider.component.module + "\\0" + (provider.component.export || "default");
+      Component = farmIntegrationProviderModuleComponents.get(componentKey);
+    } else if (provider.type === "clerk") {
+      Component = ${providerServerModules.hasClerkProvider ? "FarmClerkProvider" : "null"};
+    }
+    if (!Component) {
+      if (!provider.component && provider.type !== "clerk") continue;
+      throw new Error("Integration provider " + provider.name + " did not export its configured component.");
+    }
+    wrapped = React.createElement(Component, provider.props || {}, wrapped);
+  }
+  return wrapped;
+}
 const serverRuntimeIntegrations = Object.fromEntries(
   Object.entries(configuredIntegrations).filter(([, integration]) =>
     integration && typeof integration === "object" && integration.serverRuntime !== false
@@ -4271,6 +4916,7 @@ const farmImageHandler = ${
 })`
         : `createFarmImageHandler(${JSON.stringify(config.images)}, {
   transform: createSharpImageTransformer(),
+  fetchRemote: createNodeImageFetcher(${JSON.stringify(config.images)}),
   validateRemoteUrl: createNodeImageUrlValidator(${JSON.stringify(config.images)}),
   onError(error) { console.error("[Farm Image]", error); },
 })`
@@ -4394,9 +5040,10 @@ const farmDocsAPIHandler = ${
   };
 
 // API routes bundled at build time
-const apiRoutes = [${apiRegistrations.join(",")}
-];
+const apiRoutes = ${apiRoutes.length > 0 ? "mergePluginAPIRoutes(" : ""}[${apiRegistrations.join(",")}
+]${apiRoutes.length > 0 ? `, configuredPlugins, ${JSON.stringify(apiRoutes.map(({ path, methods }) => ({ path, methods })))})` : ""};
 const farmLocalAPIBasePath = ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))};
+const farmOpenAPIReference = ${JSON.stringify(openAPIReference)};
 
 function isFarmLocalAPIPathname(pathname) {
   return farmLocalAPIBasePath !== "/" &&
@@ -4452,8 +5099,8 @@ function getFarmI18nSnapshot() {
 
 function getFarmRoutePathname(pathname) {
   return farmI18nRuntime
-    ? stripFarmLocaleFromPathname(pathname, farmI18nConfig)
-    : pathname;
+    ? stripFarmLocaleFromPathname(stripFarmBasePath(pathname), farmI18nConfig)
+    : stripFarmBasePath(pathname);
 }
 
 function serializeFarmInlineValue(value) {
@@ -4741,11 +5388,40 @@ function createFarmDocumentStream(contentStream, prefix, suffix, onComplete) {
   });
 }
 
+function stripFarmDocumentWrappers(markup) {
+  let output = markup.replace(/^\\s+/, "");
+  const wrapper = /^<div\\b[^>]*style=["']display\\s*:\\s*contents["'][^>]*>/i;
+  let match;
+  while ((match = wrapper.exec(output))) {
+    output = output.slice(match[0].length).replace(/^\\s+/, "");
+  }
+  return output;
+}
+
+function opensFarmFullDocument(markup) {
+  const inner = stripFarmDocumentWrappers(markup);
+  return /^<!doctype/i.test(inner) || /^<html[\\s>]/i.test(inner);
+}
+
+function extractFarmFullDocument(markup) {
+  if (!opensFarmFullDocument(markup)) return null;
+  const start = markup.search(/<!doctype|<html[\\s>]/i);
+  const closeIndex = markup.toLowerCase().lastIndexOf("</html>");
+  if (start < 0 || closeIndex < 0) return null;
+  return markup.slice(start, closeIndex + "</html>".length);
+}
+
+function ensureFarmDocumentHead(markup) {
+  if (/<head[\\s>]/i.test(markup)) return markup;
+  return markup.replace(/<html([^>]*)>/i, function(_match, attributes) {
+    return "<html" + attributes + "><head></head>";
+  });
+}
+
 function createFarmErrorDocument(html, title) {
   const escapedTitle = escapeFarmHtmlAttribute(title || "Application Error");
-  const trimmedHtml = html.trim();
-  const hasFullDocument = trimmedHtml.startsWith("<html") ||
-    trimmedHtml.startsWith("<!DOCTYPE");
+  const fullDocument = extractFarmFullDocument(html);
+  const hasFullDocument = fullDocument !== null;
 
   if (!hasFullDocument) {
     return '<!DOCTYPE html>\\n<html lang="en">\\n<head>\\n' +
@@ -4762,7 +5438,7 @@ function createFarmErrorDocument(html, title) {
       '</body>\\n</html>';
   }
 
-  let fullHtml = html;
+  let fullHtml = ensureFarmDocumentHead(fullDocument);
   if (!/\\sid=["']root["']/.test(fullHtml)) {
     fullHtml = fullHtml
       .replace(/<body([^>]*)>/i, '<body$1><div id="root">')
@@ -4969,10 +5645,11 @@ function createMetadataImageReference(match, locale) {
   const basePath = match.pagePath === "/" ? "" : match.pagePath;
   const version = image.sourceType === "static" ? "?v=" + image.staticInfo.hash : "";
   const href = basePath + "/" + image.fileName + version;
+  const localizedHref = locale ? localizeFarmHref(href, locale, farmI18nConfig) : href;
 
   return {
     kind: image.kind,
-    href: locale ? localizeFarmHref(href, locale, farmI18nConfig) : href,
+    href: applyFarmBasePath(localizedHref),
     width: metadata?.width ?? metadata?.size?.width,
     height: metadata?.height ?? metadata?.size?.height,
     alt: metadata?.alt,
@@ -5013,7 +5690,7 @@ async function handleMetadataImageRequest(request, routePathname) {
       "X-Content-Type-Options": "nosniff",
     });
 
-    if (request.headers.get("if-none-match") === etag) {
+    if (matchesFarmIfNoneMatch(request.headers.get("if-none-match"), etag)) {
       return new Response(null, { status: 304, headers });
     }
 
@@ -5091,7 +5768,8 @@ function getMatchingApplicationMetadataRoute(pathname, kind) {
 function createApplicationMetadataHref(match, locale) {
   const basePath = match.routePath === "/" ? "" : match.routePath;
   const href = basePath + "/" + match.metadata.outputName;
-  return locale ? localizeFarmHref(href, locale, farmI18nConfig) : href;
+  const localizedHref = locale ? localizeFarmHref(href, locale, farmI18nConfig) : href;
+  return applyFarmBasePath(localizedHref);
 }
 
 async function handleApplicationMetadataRouteRequest(request, routePathname) {
@@ -5127,43 +5805,19 @@ async function handleApplicationMetadataRouteRequest(request, routePathname) {
   }
 }
 
-function encodeRuntimePathSegment(value) {
-  return encodeURIComponent(String(value)).replace(
-    /[!'()*]/g,
-    function(character) {
-      return "%" + character.charCodeAt(0).toString(16).toUpperCase();
-    },
-  );
-}
+${generateRedirectInterpolationSource()}
 
-function interpolateRedirectDestination(destination, params) {
-  let result = destination;
-  const catchAllParamSegments = params[farmCatchAllParamSegments] || {};
-  for (const [key, value] of Object.entries(params)) {
-    const segments = catchAllParamSegments[key];
-    const encodedValue = Array.isArray(segments)
-      ? segments.map(encodeRuntimePathSegment).join("/")
-      : encodeRuntimePathSegment(value);
-    result = result.split("[[..." + key + "]]").join(encodedValue);
-    result = result.split("[..." + key + "]").join(encodedValue);
-    result = result.split("[" + key + "]").join(encodedValue);
-    result = result.split(":" + key + "*").join(encodedValue);
-    result = result.split(":" + key).join(encodedValue);
-    if (key === "wildcard") result = result.split("*").join(encodedValue);
-  }
-  return result;
-}
-
-function matchRedirectRoute(pathname, locale) {
+function matchRedirectRoute(pathname, locale, search) {
   for (const redirect of redirectRoutes) {
     const params = matchRuntimePathPattern(redirect.source, pathname);
     if (!params) continue;
     const destination = interpolateRedirectDestination(redirect.destination, params);
+    const localizedDestination =
+      locale && destination.startsWith("/") && !destination.startsWith("//")
+        ? localizeFarmHref(destination, locale, farmI18nConfig)
+        : destination;
     return {
-      destination:
-        locale && destination.startsWith("/") && !destination.startsWith("//")
-          ? localizeFarmHref(destination, locale, farmI18nConfig)
-          : destination,
+      destination: appendFarmRedirectQuery(localizedDestination, search),
       statusCode: redirect.statusCode ?? (redirect.permanent ? 308 : 307),
     };
   }
@@ -5191,29 +5845,7 @@ function createRewrittenRequest(request, destination) {
   return new Request(destinationUrl, request);
 }
 
-function applyConfiguredResponseHeaders(response, pathname) {
-  let headers;
-  for (const headerRoute of configuredHeaderRoutes) {
-    if (!matchRuntimePathPattern(headerRoute.source, pathname)) continue;
-    for (const header of headerRoute.headers) {
-      const currentValue = (headers || response.headers).get(header.key);
-      if (currentValue === header.value) continue;
-      if (!headers) headers = new Headers(response.headers);
-      if (header.key.toLowerCase() === "link") {
-        appendFarmLinkHeader(headers, header.value);
-      } else {
-        headers.set(header.key, header.value);
-      }
-    }
-  }
-
-  if (!headers) return response;
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
-}
+${generateConfiguredResponseHeadersRuntimeSource()}
 
 // App middleware files bundled at build time (sorted by depth, root first)
 const fileMiddlewareModules = [${middlewareRegistrations.join(",")}
@@ -5280,12 +5912,8 @@ function matchPageRoute(pathname) {
 }
 
 function matchesRoutePrefix(pathname, pattern) {
-  if (pattern === "/") return true;
-  const pathSegments = normalizeRuntimePath(pathname).split("/").filter(Boolean);
-  const patternSegments = normalizeRuntimePath(pattern).split("/").filter(Boolean);
-  if (patternSegments.length > pathSegments.length) return false;
-  const candidate = "/" + pathSegments.slice(0, patternSegments.length).join("/");
-  return matchRuntimePathPattern(pattern, candidate) !== null;
+  return pattern === "/" ||
+    isFarmRouteActive(pattern, normalizeRuntimePath(pathname), { exact: false });
 }
 
 function routeSlotSpecificity(slot) {
@@ -5355,6 +5983,12 @@ function matchRouteSlots(pathname, interceptFrom) {
 
 function hasLocalRequestRoute(request, routePathname) {
   const pathname = new URL(request.url).pathname;
+  if (
+    farmOpenAPIReference &&
+    normalizeRuntimePath(pathname) === normalizeRuntimePath(farmOpenAPIReference.route)
+  ) {
+    return true;
+  }
   if (matchLocalAPIRequest(request) || matchLocalIntegrationRequest(request)) {
     return true;
   }
@@ -5389,6 +6023,15 @@ function getFarmPluginRequestOptions(request) {
   const pathname = url.pathname;
   const routePathname = getFarmRoutePathname(pathname);
   const route = { pathname };
+  if (
+    farmOpenAPIReference &&
+    normalizeRuntimePath(pathname) === normalizeRuntimePath(farmOpenAPIReference.route)
+  ) {
+    return {
+      kind: "docs",
+      route: { ...route, pattern: normalizeRuntimePath(farmOpenAPIReference.route) },
+    };
+  }
   const isDocsAPIRequest = ${config.docs?.enabled ? "isFarmDocsAPIRequest(pathname)" : "false"};
   const integrationMatch = ${
     hasServerRuntimeIntegrations
@@ -5483,9 +6126,7 @@ function getApplicableLayouts(pathname) {
   for (const layout of layoutRoutes) {
     // Root layout (/) applies to everything
     // Other layouts apply to their path and sub-paths
-    if (layout.pattern === '/' || 
-        normalizedPath === layout.pattern || 
-        normalizedPath.startsWith(layout.pattern + '/')) {
+    if (layout.pattern === '/' || isFarmRouteActive(layout.pattern, normalizedPath, { exact: false })) {
       applicable.push(layout);
     }
   }
@@ -5553,7 +6194,11 @@ ${
 
   const renderedRoot = await renderFarmElement(
     ReactDOMServer,
-    React.createElement("div", { id: "root" }, wrappedElement),
+    React.createElement(
+      "div",
+      { id: "root" },
+      wrapFarmRouteClientGraph(wrapWithFarmIntegrationProviders(wrappedElement)),
+    ),
   );
   let rootMarkup = renderedRoot.html;
   if (rootMarkup === undefined) {
@@ -5607,9 +6252,10 @@ ${
 }
 
 const pprShellCache = getFarmDataCache();
+const experimentalPPREnabled = ${JSON.stringify(config.experimental?.ppr === true)};
 
 function resolvePPRConfig(routeModule) {
-  if (!routeModule || routeModule.dynamic === "force-dynamic") {
+  if (!experimentalPPREnabled || !routeModule || routeModule.dynamic === "force-dynamic") {
     return { enabled: false };
   }
 
@@ -5753,7 +6399,11 @@ async function handleFarmRequestInContext(
   // targets re-enter this handler so middleware and request-local state observe
   // the rewritten URL; external destinations are proxied transparently.
   if (!configuredRewriteApplied) {
-    const redirectMatch = matchRedirectRoute(routePathname, farmLocaleResolution?.locale);
+    const redirectMatch = matchRedirectRoute(
+      routePathname,
+      farmLocaleResolution?.locale,
+      url.search,
+    );
     if (redirectMatch) {
       return new Response("Redirecting to " + redirectMatch.destination, {
         status: redirectMatch.statusCode,
@@ -5805,69 +6455,6 @@ async function handleFarmRequestInContext(
   }
 
   ${
-    config.docs?.enabled
-      ? `
-  if (farmDocsHandler) {
-    const docsResponse = await farmDocsHandler(request.clone());
-    if (docsResponse) {
-      if (!docsResponse.headers.get("content-type")?.toLowerCase().includes("text/html")) {
-        return docsResponse;
-      }
-      const wrappedDocsResponse = await wrapFarmDocsResponseWithLayouts(
-        request,
-        docsResponse,
-      );
-      const docsHeaders = new Headers(wrappedDocsResponse.headers);
-      docsHeaders.set("x-farm-preload-buffered", "1");
-      return new Response(wrappedDocsResponse.body, {
-        status: wrappedDocsResponse.status,
-        statusText: wrappedDocsResponse.statusText,
-        headers: docsHeaders,
-      });
-    }
-  }
-  `
-      : ""
-  }
-
-  ${
-    hasMarkdownPages
-      ? `
-  const markdownSourceResponse = await createFarmMarkdownSourceResponse?.({
-    request: request.clone(),
-    config: farmMdxConfig,
-    resolveSource: (targetPathname) => {
-      const match = matchPageRoute(getFarmRoutePathname(targetPathname));
-      return match?.route?.markdownSource || null;
-    },
-  });
-  if (markdownSourceResponse) {
-    return markdownSourceResponse;
-  }
-  `
-      : ""
-  }
-
-  ${
-    config.md?.enabled
-      ? `
-  if (farmMarkdownConfig?.enabled) {
-    const markdownResponse = await createMarkdownMirrorResponse({
-      request: request.clone(),
-      config: farmMarkdownConfig,
-      routeExists: (targetPathname) =>
-        Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
-      renderPage: (targetRequest) => handleFarmRequest(targetRequest),
-    });
-    if (markdownResponse) {
-      return markdownResponse;
-    }
-  }
-  `
-      : ""
-  }
-
-  ${
     hasMiddlewareRuntime
       ? `
   const requestBeforeMiddleware = request;
@@ -5896,6 +6483,73 @@ async function handleFarmRequestInContext(
   }
 
   ${
+    config.docs?.enabled
+      ? `
+  // Docs responses are served after app middleware so route guards and
+  // middleware headers apply to the docs engine like any other page content.
+  if (farmDocsHandler) {
+    const docsResponse = await farmDocsHandler(request.clone());
+    if (docsResponse) {
+      if (!docsResponse.headers.get("content-type")?.toLowerCase().includes("text/html")) {
+        return applyProductionMiddlewareHeaders(docsResponse, middlewareHeaders);
+      }
+      const wrappedDocsResponse = await wrapFarmDocsResponseWithLayouts(
+        request,
+        docsResponse,
+      );
+      const docsHeaders = new Headers(wrappedDocsResponse.headers);
+      docsHeaders.set("x-farm-preload-buffered", "1");
+      return applyProductionMiddlewareHeaders(new Response(wrappedDocsResponse.body, {
+        status: wrappedDocsResponse.status,
+        statusText: wrappedDocsResponse.statusText,
+        headers: docsHeaders,
+      }), middlewareHeaders);
+    }
+  }
+  `
+      : ""
+  }
+
+  ${
+    hasMarkdownPages
+      ? `
+  // The raw markdown source of a page route is the page's content in another
+  // representation; middleware guarding the route must run before serving it.
+  const markdownSourceResponse = await createFarmMarkdownSourceResponse?.({
+    request: request.clone(),
+    config: farmMdxConfig,
+    resolveSource: (targetPathname) => {
+      const match = matchPageRoute(getFarmRoutePathname(targetPathname));
+      return match?.route?.markdownSource || null;
+    },
+  });
+  if (markdownSourceResponse) {
+    return applyProductionMiddlewareHeaders(markdownSourceResponse, middlewareHeaders);
+  }
+  `
+      : ""
+  }
+
+  ${
+    config.md?.enabled
+      ? `
+  if (farmMarkdownConfig?.enabled) {
+    const markdownResponse = await createMarkdownMirrorResponse({
+      request: request.clone(),
+      config: farmMarkdownConfig,
+      routeExists: (targetPathname) =>
+        Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
+      renderPage: (targetRequest) => handleFarmRequest(targetRequest),
+    });
+    if (markdownResponse) {
+      return applyProductionMiddlewareHeaders(markdownResponse, middlewareHeaders);
+    }
+  }
+  `
+      : ""
+  }
+
+  ${
     apiRoutes.length > 0
       ? `
   const apiResponse = await handleAPIRequest(request.clone());
@@ -5904,6 +6558,55 @@ async function handleFarmRequestInContext(
   }
   `
       : ""
+  }
+
+  if (
+    farmOpenAPIReference &&
+    farmOpenAPIReference.specRoute &&
+    normalizeRuntimePath(pathname) === normalizeRuntimePath(farmOpenAPIReference.specRoute)
+  ) {
+    const method = request.method.toUpperCase();
+    const specResponse = method === "GET" || method === "HEAD"
+      ? new Response(method === "HEAD" ? null : JSON.stringify(farmOpenAPIReference.spec), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "public, max-age=0, must-revalidate",
+            "X-Content-Type-Options": "nosniff",
+          },
+        })
+      : new Response("Method Not Allowed", {
+          status: 405,
+          headers: {
+            "Allow": "GET, HEAD",
+            "Content-Type": "text/plain; charset=utf-8",
+          },
+        });
+    return applyProductionMiddlewareHeaders(specResponse, middlewareHeaders);
+  }
+
+  if (
+    farmOpenAPIReference &&
+    normalizeRuntimePath(pathname) === normalizeRuntimePath(farmOpenAPIReference.route)
+  ) {
+    const method = request.method.toUpperCase();
+    const response = method === "GET" || method === "HEAD"
+      ? new Response(method === "HEAD" ? null : farmOpenAPIReference.html, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "public, max-age=0, must-revalidate",
+            "X-Content-Type-Options": "nosniff",
+          },
+        })
+      : new Response("Method Not Allowed", {
+          status: 405,
+          headers: {
+            "Allow": "GET, HEAD",
+            "Content-Type": "text/plain; charset=utf-8",
+          },
+        });
+    return applyProductionMiddlewareHeaders(response, middlewareHeaders);
   }
 
   ${
@@ -5978,7 +6681,7 @@ async function handleFarmRequestInContext(
       const pprBypassReason = pprConfig.enabled
         ? getPPRShellBypassReason(request, middlewareData, middlewareContext)
         : undefined;
-      const pprCanCache = pprConfig.enabled && !pprBypassReason;
+      let pprCanCache = pprConfig.enabled && !pprBypassReason;
       const pprCacheKey = pprCanCache
         ? getPPRShellCacheKey(url, farmLocaleResolution?.locale)
         : null;
@@ -6242,6 +6945,10 @@ async function handleFarmRequestInContext(
               pageElement = React.createElement(PageComponent, pageProps);
             }
 
+            if (route.shouldHydrate && !shouldHydrateLayout) {
+              pageElement = wrapFarmRouteClientGraph(pageElement);
+            }
+
             pageElement = React.createElement(
               "div",
               {
@@ -6274,7 +6981,9 @@ async function handleFarmRequestInContext(
                       "data-farm-route-slot": slot.name,
                       "data-farm-slot-owner": slot.ownerPattern,
                     },
-                    React.createElement(slot.module.default, slot.props),
+                    wrapFarmRouteClientGraph(
+                      React.createElement(slot.module.default, slot.props),
+                    ),
                   );
                 }
                 wrappedElement = React.createElement(LayoutComponent, {
@@ -6294,6 +7003,11 @@ async function handleFarmRequestInContext(
               }
             }
 
+          if (shouldHydrateLayout) {
+            wrappedElement = wrapFarmRouteClientGraph(wrappedElement);
+          }
+
+          wrappedElement = wrapWithFarmIntegrationProviders(wrappedElement);
           return renderFarmElement(ReactDOMServer, wrappedElement);
         };
         const renderedPage = ${
@@ -6303,6 +7017,21 @@ async function handleFarmRequestInContext(
         )`
             : "await renderPageElement()"
         };
+
+        // A completed document is not a reusable PPR shell: it already contains
+        // the request's resolved Suspense content. Until the production runtime
+        // can persist and resume the partial shell itself, buffer streamed PPR
+        // responses for late status errors but do not cache their dynamic HTML.
+        const shouldCachePPRShell = Boolean(pprCacheKey && !renderedPage.stream);
+        if (!shouldCachePPRShell && pprCacheKey) {
+          pprCanCache = false;
+          emitFarmEvent({
+            type: "ppr.shell.bypass",
+            route: pathname,
+            reason: "suspense-stream",
+          });
+          emitFarmEvent({ type: "cache.bypass", route: pathname, reason: "suspense-stream" });
+        }
         
         // Collect static and generated metadata from layouts and page.
         // Later entries override earlier entries, matching the development renderer.
@@ -6344,7 +7073,7 @@ async function handleFarmRequestInContext(
           }
         }
 
-        const renderedMetadata = renderMetadataHead(mergedMetadata);
+        const renderedMetadata = renderMetadataHead(mergedMetadata, { pathname, jsonLd: ${JSON.stringify(config.agent?.jsonLd ?? false)} });
         const title = renderedMetadata.title;
         const metaTags = renderedMetadata.tags;
         const hasFavicon = renderedMetadata.hasFavicon;
@@ -6374,8 +7103,8 @@ async function handleFarmRequestInContext(
         let html = renderedPage.html;
         
         // Check if the layout already rendered a full HTML document
-        const trimmedHtml = (html !== undefined ? html : renderedPage.shellHtml || "").trim();
-        const hasFullDocument = trimmedHtml.startsWith('<html') || trimmedHtml.startsWith('<!DOCTYPE');
+        const initialHtml = html !== undefined ? html : renderedPage.shellHtml || "";
+        const hasFullDocument = opensFarmFullDocument(initialHtml);
 
         // Stream a suspended body as soon as React's shell is ready. Full-document
         // layouts, localized documents, and cacheable PPR shells still use the
@@ -6449,27 +7178,36 @@ async function handleFarmRequestInContext(
         }
         
         const rendererHead = renderedPage.head || "";
+        const rendererHasTitle = /<title[\\s>]/i.test(rendererHead);
         // First <title> wins: the fallback framework title yields to a
         // renderer-emitted one; explicit metadata titles still come first.
         const suppressDefaultTitle =
-          !renderedMetadata.hasExplicitTitle && /<title[\\s>]/i.test(rendererHead);
+          !renderedMetadata.hasExplicitTitle && rendererHasTitle;
         let fullHtml;
         if (hasFullDocument) {
           // Layout provides full HTML structure - inject CSS and client script
+          html = ensureFarmDocumentHead(extractFarmFullDocument(html) || html);
           fullHtml = html
             // Inject CSS link after opening head tag or first meta tag
             .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
             .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
-            // Inject title if not present and we have one
+            // Explicit metadata wins over renderer and layout titles. Without
+            // explicit metadata, a renderer title wins over the layout title.
             .replace(/<head([^>]*)>([\\s\\S]*?)<\\/head>/i, (match, attrs, headContent) => {
-              let nextHeadContent = headContent;
-              if (!headContent.includes('<title>') && title !== "Farm.js App") {
+              const hasAuthoritativeTitle = renderedMetadata.hasExplicitTitle || rendererHasTitle;
+              let nextHeadContent = hasAuthoritativeTitle
+                ? headContent.replace(/<title\\b[^>]*>[\\s\\S]*?<\\/title>\\s*/gi, "")
+                : headContent;
+              if (renderedMetadata.hasExplicitTitle) {
                 nextHeadContent += "\\n  <title>" + title + "</title>";
               }
               if (metaTags) nextHeadContent += metaTags;
               // Renderer-emitted head markup (e.g. <svelte:head>). Function
               // replacement below keeps $-sequences literal.
-              if (rendererHead) nextHeadContent += "\\n  " + rendererHead;
+              const effectiveRendererHead = renderedMetadata.hasExplicitTitle
+                ? rendererHead.replace(/<title\\b[^>]*>[\\s\\S]*?<\\/title>\\s*/gi, "")
+                : rendererHead;
+              if (effectiveRendererHead) nextHeadContent += "\\n  " + effectiveRendererHead;
               return nextHeadContent === headContent
                 ? match
                 : "<head" + attrs + ">" + nextHeadContent + "\\n</head>";
@@ -6519,7 +7257,12 @@ async function handleFarmRequestInContext(
           getFarmTheme(request)
         );
 
-        if (pageStatus === 200 && pprCacheKey && request.method.toUpperCase() !== "HEAD") {
+        if (
+          pageStatus === 200 &&
+          shouldCachePPRShell &&
+          pprCacheKey &&
+          request.method.toUpperCase() !== "HEAD"
+        ) {
           await pprShellCache.setAsync(
             pprCacheKey,
             { html: fullHtml },
@@ -6641,6 +7384,8 @@ async function handleFarmRequestInContext(
             }
           }
 
+          errorElement = wrapWithFarmIntegrationProviders(errorElement);
+
           const renderErrorElement = () =>
             renderFarmElementToString(ReactDOMServer, errorElement);
           const errorHtml = ${
@@ -6717,7 +7462,32 @@ async function handleFarmRequestInContext(
 
   // 404 fallback - render proper HTML page
   emitFarmEvent({ type: "route.notFound", pathname });
+
+  // Agents that navigate in Markdown (a \`.md\` URL or \`Accept: text/markdown\`)
+  // get a Markdown error body instead of the HTML not-found shell.
+  if (farmRequestWantsMarkdown(pathname, request.headers.get("accept"))) {
+    emitFarmEvent({
+      type: "render.complete",
+      route: pathname,
+      pathname,
+      status: 404,
+      durationMs: Date.now() - requestStartTime,
+    });
+    return applyProductionMiddlewareHeaders(new Response(
+      createFarmMarkdownErrorBody(404, pathname, applyFarmBasePath("/", farmResolvedRuntimeConfig.basePath)),
+      {
+        status: 404,
+        headers: {
+          "Content-Type": FARM_MARKDOWN_CONTENT_TYPE,
+          "X-Farm-Markdown-Error": "404",
+          "Cache-Control": "no-store",
+        },
+      }
+    ), middlewareHeaders);
+  }
+
   try {
+    const defaultNotFoundHomeHref = applyFarmBasePath("/", farmResolvedRuntimeConfig.basePath);
     // Default 404 page component
     function Default404Page() {
       return React.createElement(React.Fragment, null,
@@ -6738,7 +7508,7 @@ async function handleFarmRequestInContext(
             }, "Not found"),
             React.createElement("a", {
               className: "farm-default-not-found__home",
-              href: "/",
+              href: defaultNotFoundHomeHref,
             }, "GO HOME")
           )
         )
@@ -6760,16 +7530,17 @@ async function handleFarmRequestInContext(
         notFoundElement = React.createElement(LayoutComponent, { children: notFoundElement, params: {} });
       }
     }
+    notFoundElement = wrapWithFarmIntegrationProviders(notFoundElement);
     
     const html = await ReactDOMServer.renderToString(notFoundElement);
     
     // Check if layout provides full HTML document
-    const trimmedHtml = html.trim();
-    const hasFullDocument = trimmedHtml.startsWith('<html') || trimmedHtml.startsWith('<!DOCTYPE');
+    const fullDocument = extractFarmFullDocument(html);
+    const hasFullDocument = fullDocument !== null;
     
     let fullHtml;
     if (hasFullDocument) {
-      fullHtml = html
+      fullHtml = ensureFarmDocumentHead(fullDocument)
         .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
         .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
         .replace(
@@ -6824,7 +7595,7 @@ async function handleFarmRequestInContext(
   } catch (error) {
     console.error("404 render error:", error);
     const fallbackDocument = applyFarmThemeDocument(
-      \`<!DOCTYPE html><html><head><title>404</title></head><body><h1>404 - Page Not Found</h1><p>The page \${pathname} doesn't exist.</p><a href="/">Go Home</a></body></html>\`,
+      \`<!DOCTYPE html><html><head><title>404</title></head><body><h1>404 - Page Not Found</h1><p>The page \${pathname} doesn't exist.</p><a href="\${escapeFarmHtmlAttribute(applyFarmBasePath("/", farmResolvedRuntimeConfig.basePath))}">Go Home</a></body></html>\`,
       farmThemeConfig,
       farmResolvedRuntimeConfig.basePath,
       getFarmTheme(request)
@@ -6947,8 +7718,19 @@ async function applyFarmPreloadBudget(response, pathname) {
 
 // Export as Web Standard fetch API
 export async function fetch(request, context) {
+  return _runWithAPIRequestRuntime({
+    basePath: farmLocalAPIBasePath,
+    dispatch: async (localRequest) =>
+      (await handleAPIRequest(localRequest)) ?? Response.json({ error: "Not Found" }, { status: 404 }),
+  }, () => handleFarmFetch(request, context));
+}
+
+async function handleFarmFetch(request, context) {
   const healthResponse = await farmProductionLifecycle.handleHealthRequest(request);
   if (healthResponse) return healthResponse;
+
+  const productionSiteAttestation = farmProductionSiteTelemetry?.handleAttestation(request);
+  if (productionSiteAttestation) return productionSiteAttestation;
 
   farmProductionSiteTelemetry?.report(
     request.url,
@@ -6979,7 +7761,11 @@ export async function fetch(request, context) {
           _runWithAfterRequest(request, runRequest, context),
         );
         const pathname = new URL(request.url).pathname;
-        return applyFarmPreloadBudget(applyConfiguredResponseHeaders(response, pathname), pathname);
+        const routePathname = getFarmRoutePathname(pathname);
+        return applyFarmPreloadBudget(
+          applyConfiguredResponseHeaders(response, routePathname),
+          routePathname,
+        );
       }),
     {
       onResponseFinished: typeof context?.onResponseFinished === "function"
@@ -6988,6 +7774,7 @@ export async function fetch(request, context) {
     },
   );
 }
+export { createFarmNodeRequestAbortSignal };
 export default { fetch, lifecycle: farmProductionLifecycle };
   `.trim();
 }
@@ -7351,7 +8138,7 @@ async function buildNitroUniversal(
 // This file adapts Farm's Web fetch handler to Nitro's event handler contract.
 
 import { useNitroApp } from 'nitro/runtime'
-import handler, { farmProductionLifecycle } from './${ssrEntryFile}'
+import handler, { farmProductionLifecycle, createFarmNodeRequestAbortSignal } from './${ssrEntryFile}'
 
 export { farmProductionLifecycle }
 
@@ -7397,7 +8184,13 @@ function createResponseFinishedHook(event) {
 
 // Export the event handler for Nitro
 export default async function farmNitroEventHandler(event) {
-  const response = await handler.fetch(event.req, {
+  // Some Node adapters abort their Request on normal IncomingMessage close.
+  // Use the same actual disconnect events as Farm's development server.
+  const node = event.node
+  const request = node?.req && node?.res
+    ? new Request(event.req, { signal: createFarmNodeRequestAbortSignal(node.req, node.res) })
+    : event.req
+  const response = await handler.fetch(request, {
     waitUntil: (promise) => event.waitUntil(promise),
     onResponseFinished: createResponseFinishedHook(event),
   })
@@ -7948,38 +8741,14 @@ async function postProcessVercelOutput(
     fs,
   );
 
-  // Update routes to use the correct function path
-  vercelConfig.routes = [
-    // Apply the header before the filesystem handler. `continue` lets Vercel
-    // serve the matching file while preserving the immutable cache policy.
-    // Hashed client assets ship at the root regardless of basePath, so the
-    // route is deliberately not basePath-scoped.
-    createFarmVercelImmutableAssetRoute(),
-    // Serve static files first
-    {
-      handle: "filesystem",
-    },
-    ...runtimeRoutes,
-    // API routes
-    ...(resolveFarmAPIServerBasePath(config.api) === "/"
-      ? []
-      : [
-          {
-            src: `${resolveFarmAPIServerBasePath(config.api)}/(.*)`,
-            dest: "/__nitro",
-            headers: {
-              "Access-Control-Allow-Origin": "*",
-              "Access-Control-Allow-Methods": "*",
-              "Access-Control-Allow-Headers": "*",
-            },
-          },
-        ]),
-    // All other routes go to the serverless function
-    {
-      src: "/(.*)",
-      dest: "/__nitro",
-    },
-  ];
+  // Rebuild the routes around Farm's `__nitro` function while preserving the
+  // preset's redirect and header routes (previously discarded). See
+  // buildFarmVercelRoutes for the full merge contract.
+  vercelConfig.routes = buildFarmVercelRoutes({
+    presetRoutes: Array.isArray(vercelConfig.routes) ? vercelConfig.routes : [],
+    runtimeRoutes,
+    apiBasePath: resolveFarmAPIServerBasePath(config.api),
+  });
 
   const vercelConfigWithWorkflowCrons = applyFarmWorkflowVercelCrons(
     vercelConfig,

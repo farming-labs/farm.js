@@ -50,6 +50,34 @@ describe("config helpers", () => {
     expect(defineFarmConfig(config)).toBe(config);
   });
 
+  it("canonicalizes the application basePath", async () => {
+    await expect(
+      resolveConfig({ basePath: " docs//guides/ ", theme: {} }, "production"),
+    ).resolves.toMatchObject({
+      basePath: "/docs/guides",
+      theme: { cookiePath: "/docs/guides" },
+    });
+    await expect(resolveConfig({ basePath: "/" }, "production")).resolves.toMatchObject({
+      basePath: "/",
+    });
+  });
+
+  it("rejects application base paths that browsers reinterpret", async () => {
+    for (const basePath of [
+      "/docs/../admin",
+      "/docs/%2e%2e/admin",
+      "/docs/%2e%2e%2fadmin",
+      "/%2F%2Fevil.example/docs",
+      "/docs?preview=1",
+      "/docs#preview",
+      "/docs\\admin",
+      "https://example.com/docs",
+      "//example.com/docs",
+    ]) {
+      await expect(resolveConfig({ basePath }, "production")).rejects.toThrow("Farm basePath");
+    }
+  });
+
   it("preserves a configured cache adapter and namespace", async () => {
     const adapter = {
       name: "test-cache",
@@ -302,6 +330,45 @@ describe("resolveConfig", () => {
     });
   });
 
+  it("keeps experimental PPR disabled by default and preserves explicit opt-in", async () => {
+    const defaults = await resolveConfig({}, "production");
+    const configured = await resolveConfig({ experimental: { ppr: true } }, "production");
+
+    expect(defaults.experimental.ppr).toBe(false);
+    expect(configured.experimental.ppr).toBe(true);
+  });
+
+  it("defaults the OpenAPI spec route to /openapi.json and allows overrides", async () => {
+    const defaults = await resolveConfig({}, "production");
+    expect((defaults.openapi as any).specRoute).toBe("/openapi.json");
+
+    const custom = await resolveConfig(
+      { openapi: { enabled: true, specRoute: "/api/openapi.json" } },
+      "production",
+    );
+    expect((custom.openapi as any).specRoute).toBe("/api/openapi.json");
+
+    const disabled = await resolveConfig(
+      { openapi: { enabled: true, specRoute: false } },
+      "production",
+    );
+    expect((disabled.openapi as any).specRoute).toBe(false);
+  });
+
+  it("resolves the agent config with JSON-LD off by default", async () => {
+    const defaults = await resolveConfig({}, "production");
+    expect(defaults.agent.jsonLd).toBe(false);
+
+    const enabled = await resolveConfig({ agent: { jsonLd: true } }, "production");
+    expect(enabled.agent.jsonLd).toEqual({});
+
+    const customized = await resolveConfig(
+      { agent: { jsonLd: { type: "SoftwareApplication", name: "Farm.js" } } },
+      "production",
+    );
+    expect(customized.agent.jsonLd).toEqual({ type: "SoftwareApplication", name: "Farm.js" });
+  });
+
   it("keeps isolated client hydration off by default and preserves its rollout mode", async () => {
     const defaults = await resolveConfig({}, "production");
     const configured = await resolveConfig(
@@ -547,6 +614,7 @@ describe("resolveConfig", () => {
       route: "/api/internal/workflows",
       secretEnv: "WORKFLOW_SECRET",
       secret: undefined,
+      allowUnsecured: false,
     });
   });
 
@@ -700,7 +768,7 @@ describe("resolveConfig", () => {
       "/blog/**": { swr: 3600 },
       "/admin/**": { prerender: false },
       "/reports/**": {},
-      "/old": { redirect: "/new" },
+      "/old": { redirect: { to: "/new", status: 308 } },
       "/api/**": {
         cors: true,
         headers: {
@@ -710,6 +778,69 @@ describe("resolveConfig", () => {
         },
       },
     });
+  });
+
+  it("rejects config route sources that cannot match a URL pathname", async () => {
+    for (const config of [
+      { redirects: [{ source: "/old?campaign=launch", destination: "/new" }] },
+      { rewrites: [{ source: "/legacy#details", destination: "/current" }] },
+      {
+        headers: [{ source: "docs/:path*", headers: [{ key: "x-docs", value: "enabled" }] }],
+      },
+      { routeRules: { "/api/**?private=1": { cors: true } } },
+      { routeRules: { "": { cors: true } } },
+    ]) {
+      await expect(resolveConfig(config, "production")).rejects.toThrow();
+    }
+  });
+
+  it("rejects OpenAPI routes that browsers reinterpret", async () => {
+    for (const route of [
+      "/docs/../reference",
+      "/docs/%2e%2e/reference",
+      "/docs/%2Freference",
+      "/docs\\reference",
+    ]) {
+      await expect(resolveConfig({ openapi: { route } }, "production")).rejects.toThrow();
+    }
+  });
+
+  it("rejects route-rule keys that normalize to the same pathname", async () => {
+    await expect(
+      resolveConfig(
+        {
+          routeRules: {
+            "docs/**": { headers: { "x-first": "1" } },
+            "/docs/**": { cors: true },
+          },
+        },
+        "production",
+      ),
+    ).rejects.toThrow('Route rules "docs/**" and "/docs/**" both normalize to "/docs/**"');
+  });
+
+  it("preserves route-rule redirect semantics in Nitro", async () => {
+    const config = await resolveConfig(
+      {
+        routeRules: {
+          "/temporary": { redirect: "/next" },
+          "/see-other": { redirect: { to: "/result", statusCode: 303 } },
+          "/permanent": { redirect: { to: "/current", permanent: true } },
+          "/replace-query": { redirect: "/search?view=compact" },
+        },
+      },
+      "production",
+    );
+
+    expect(routeRulesToNitroRouteRules(config.routeRules)).toMatchObject({
+      "/temporary": { redirect: { to: "/next", status: 307 } },
+      "/see-other": { redirect: { to: "/result", status: 303 } },
+      "/permanent": { redirect: { to: "/current", status: 308 } },
+      "/replace-query": {},
+    });
+    expect(routeRulesToNitroRouteRules(config.routeRules)["/replace-query"]).not.toHaveProperty(
+      "redirect",
+    );
   });
 
   it("rejects non-redirect status codes in configured redirects", async () => {
@@ -895,6 +1026,23 @@ describe("resolveDeployConfig", () => {
 
     expect(deploy.preset).toBe("deno-server");
     expect(deploy.outputDir).toBe(".farm/.output");
+  });
+
+  it("lets a CLI target override displace a configured cross-platform preset", () => {
+    // Symmetric to the preset-override case: with deploy.preset vercel in
+    // config, `farm build --target netlify` must not ship Vercel-shaped output
+    // labeled as a Netlify deploy.
+    const deploy = resolveDeployConfig({ deploy: { preset: "vercel" } }, { target: "netlify" });
+
+    expect(deploy.target).toBe("netlify");
+    expect(deploy.preset).toBe("netlify");
+  });
+
+  it("keeps a same-platform configured preset under a CLI target override", () => {
+    const deploy = resolveDeployConfig({ deploy: { preset: "vercel-edge" } }, { target: "vercel" });
+
+    expect(deploy.target).toBe("vercel");
+    expect(deploy.preset).toBe("vercel-edge");
   });
 
   it("respects an explicitly configured output directory under a preset override", () => {

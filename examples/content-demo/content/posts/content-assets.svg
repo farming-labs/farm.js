@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">Farm content assets</title>
+  <desc id="description">A field of typed content cards connected to a Farm route.</desc>
+  <rect width="1200" height="630" fill="#11110f"/>
+  <path d="M80 470h1040" stroke="#d9ff43" stroke-width="2" opacity=".65"/>
+  <path d="M200 470V260m200 210V190m200 280V235m200 235V150m200 320V285" stroke="#f4f4ec" stroke-width="10" stroke-linecap="round" opacity=".84"/>
+  <circle cx="200" cy="238" r="22" fill="#d9ff43"/>
+  <circle cx="400" cy="168" r="22" fill="#d9ff43"/>
+  <circle cx="600" cy="213" r="22" fill="#d9ff43"/>
+  <circle cx="800" cy="128" r="22" fill="#d9ff43"/>
+  <circle cx="1000" cy="263" r="22" fill="#d9ff43"/>
+  <text x="80" y="90" fill="#f4f4ec" font-family="ui-monospace, monospace" font-size="28">@farm.js/content</text>
+  <text x="80" y="555" fill="#f4f4ec" font-family="ui-sans-serif, sans-serif" font-size="54" font-weight="600">Typed assets. Hashed output.</text>
+</svg>

@@ -56,6 +56,105 @@ test("forwards requests over one persistent websocket and closes with the agent"
   }
 });
 
+test("mounts public preview paths beneath the target URL pathname", async () => {
+  const target = createServer((request, response) => response.end(request.url));
+  await listen(target);
+  const targetAddress = target.address();
+  const relay = createPersistentPreviewRelay();
+  const relayAddress = await relay.listen();
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: relayAddress.websocketUrl,
+    name: "base-path",
+    targetUrl: `http://127.0.0.1:${targetAddress.port}/console`,
+  });
+
+  try {
+    const nested = await fetch(`${agent.publicUrl}/dashboard?view=compact`);
+    assert.equal(await nested.text(), "/console/dashboard?view=compact");
+
+    const root = await fetch(agent.publicUrl);
+    assert.equal(await root.text(), "/console/");
+  } finally {
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
+test("replaces client-supplied forwarding headers at the relay boundary", async () => {
+  const target = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(
+      JSON.stringify({
+        forwarded: request.headers.forwarded,
+        forwardedFor: request.headers["x-forwarded-for"],
+        forwardedHost: request.headers["x-forwarded-host"],
+        forwardedProto: request.headers["x-forwarded-proto"],
+      }),
+    );
+  });
+  await listen(target);
+  const targetAddress = target.address();
+  const relay = createPersistentPreviewRelay();
+  const relayAddress = await relay.listen();
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: relayAddress.websocketUrl,
+    name: "forwarded-headers",
+    targetUrl: `http://127.0.0.1:${targetAddress.port}`,
+  });
+
+  try {
+    const response = await fetch(agent.publicUrl, {
+      headers: {
+        forwarded: "for=127.0.0.1;host=evil.example;proto=https",
+        "x-forwarded-for": "127.0.0.1",
+        "x-forwarded-host": "evil.example",
+        "x-forwarded-proto": "https",
+      },
+    });
+
+    assert.deepEqual(await response.json(), {
+      forwardedHost: new URL(agent.publicUrl).host,
+      forwardedProto: "http",
+    });
+  } finally {
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
+test("removes headers nominated by Connection in both proxy directions", async () => {
+  const target = createServer((request, response) => {
+    response.setHeader("connection", "x-response-hop");
+    response.setHeader("x-response-hop", "remove-me");
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ requestHop: request.headers["x-request-hop"] }));
+  });
+  await listen(target);
+  const targetAddress = target.address();
+  const relay = createPersistentPreviewRelay();
+  const relayAddress = await relay.listen();
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: relayAddress.websocketUrl,
+    name: "connection-headers",
+    targetUrl: `http://127.0.0.1:${targetAddress.port}`,
+  });
+
+  try {
+    const response = await requestWithHost(agent.publicUrl, new URL(agent.publicUrl).host, {
+      connection: "x-request-hop",
+      "x-request-hop": "remove-me",
+    });
+    assert.equal(JSON.parse(response.body).requestHop, undefined);
+    assert.equal(response.headers["x-response-hop"], undefined);
+  } finally {
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
 test("preserves repeated cookies and removes encoding after decoding a response", async () => {
   const target = createServer((_request, response) => {
     response.statusCode = 200;
@@ -85,6 +184,32 @@ test("preserves repeated cookies and removes encoding after decoding a response"
       "access=one; Path=/; HttpOnly",
       "refresh=two; Path=/; HttpOnly",
     ]);
+  } finally {
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
+test("stops buffering local responses that exceed the relay limit", async () => {
+  const target = createServer((_request, response) => {
+    response.write("12345678");
+    response.end("9");
+  });
+  await listen(target);
+  const targetAddress = target.address();
+  const relay = createPersistentPreviewRelay({ maxResponseBodyBytes: 8 });
+  const relayAddress = await relay.listen();
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: relayAddress.websocketUrl,
+    name: "bounded-response",
+    targetUrl: `http://127.0.0.1:${targetAddress.port}`,
+  });
+
+  try {
+    const response = await fetch(agent.publicUrl);
+    assert.equal(response.status, 502);
+    assert.match(await response.text(), /exceeded the 8 byte limit/);
   } finally {
     await agent.close();
     await relay.close();
@@ -122,6 +247,44 @@ test("rejects malformed and unauthenticated agent messages without crashing", as
     assert.equal((await health.json()).agents, 0);
   } finally {
     await relay.close();
+  }
+});
+
+test("closes the agent socket when the relay rejects registration", async () => {
+  const relay = new WebSocketServer({ port: 0 });
+  await once(relay, "listening");
+  const address = relay.address();
+  assert.ok(address && typeof address === "object");
+  let resolveAgentClosed;
+  const agentClosed = new Promise((resolve) => {
+    resolveAgentClosed = resolve;
+  });
+  relay.on("connection", (socket) => {
+    socket.once("message", () => {
+      socket.send(JSON.stringify({ type: "error", message: "registration rejected" }));
+    });
+    socket.once("close", resolveAgentClosed);
+  });
+
+  try {
+    await assert.rejects(
+      startTypeScriptPreviewAgent({
+        relayUrl: `ws://127.0.0.1:${address.port}`,
+        name: "rejected-agent",
+        targetUrl: "http://127.0.0.1:3000",
+      }),
+      /registration rejected/,
+    );
+    await Promise.race([
+      agentClosed,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("rejected agent socket remained open")), 500),
+      ),
+    ]);
+    assert.equal(relay.clients.size, 0);
+  } finally {
+    for (const socket of relay.clients) socket.terminate();
+    await new Promise((resolve) => relay.close(resolve));
   }
 });
 
@@ -174,6 +337,51 @@ test("routes wildcard preview hosts and advertises the matching public URL", asy
     assert.equal(response.status, 200);
     assert.equal(response.body, "/nested/path?from=wildcard");
   } finally {
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
+test("aborts the local request when the public visitor disconnects", async () => {
+  let markLocalStarted;
+  const localStarted = new Promise((resolve) => {
+    markLocalStarted = resolve;
+  });
+  let markLocalClosed;
+  const localClosed = new Promise((resolve) => {
+    markLocalClosed = resolve;
+  });
+  const target = createServer((_request, response) => {
+    markLocalStarted();
+    response.once("close", markLocalClosed);
+  });
+  await listen(target);
+  const targetAddress = target.address();
+  const relay = createPersistentPreviewRelay({ requestTimeoutMs: 2_000 });
+  const relayAddress = await relay.listen();
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: relayAddress.websocketUrl,
+    name: "visitor-disconnect",
+    targetUrl: `http://127.0.0.1:${targetAddress.port}`,
+    requestTimeoutMs: 2_000,
+  });
+
+  const publicRequest = createRequest(agent.publicUrl);
+  publicRequest.on("error", () => undefined);
+  publicRequest.end();
+
+  try {
+    await localStarted;
+    publicRequest.destroy();
+    await Promise.race([
+      localClosed,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("local request remained active")), 500),
+      ),
+    ]);
+  } finally {
+    publicRequest.destroy();
     await agent.close();
     await relay.close();
     await close(target);
@@ -431,7 +639,7 @@ function startStalledUpload(value) {
   });
 }
 
-function requestWithHost(value, host) {
+function requestWithHost(value, host, headers = {}) {
   const url = new URL(value);
   return new Promise((resolve, reject) => {
     const request = createRequest(
@@ -439,7 +647,7 @@ function requestWithHost(value, host) {
         host: url.hostname,
         port: url.port,
         path: `${url.pathname}${url.search}`,
-        headers: { host },
+        headers: { ...headers, host },
       },
       (response) => {
         const chunks = [];
@@ -448,6 +656,7 @@ function requestWithHost(value, host) {
           resolve({
             status: response.statusCode,
             body: Buffer.concat(chunks).toString(),
+            headers: response.headers,
           });
         });
       },

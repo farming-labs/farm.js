@@ -5,6 +5,7 @@
  */
 
 declare module "@farm.js/core/api" {
+  export { createApiClients, type ApiClients } from "@farm.js/core/client";
   import type { z } from "zod";
 
   /**

@@ -42,6 +42,36 @@ describe("React AOT keyed-array prepend hints", () => {
     });
   });
 
+  it("records prepends returned from a single-return updater block", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ additions }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => setRows((current) => {
+            return [...additions, ...current];
+          })}>Prepend</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArrayPrependHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayPrepend");
+    expect(result.code).toContain("prependIndexIndependent={true}");
+    expect(result.code).toContain("keyedRowsPrependHintedRuntimeFeature");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedArrayPrependHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedArrayPrepend"),
+    });
+  });
+
   it("supports safe prefix batches and the public List primitive", async () => {
     const result = await compile(`
       import { useState } from "react";
@@ -86,6 +116,202 @@ describe("React AOT keyed-array prepend hints", () => {
 
   it.each([
     {
+      name: "filter",
+      remove: "current.filter((row) => row.id !== expiredId)",
+    },
+    {
+      name: "slice",
+      remove: "current.slice(start, end)",
+    },
+  ])("retains $name survivor lineage through a later prepend", async ({ remove }) => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ expiredId, start, end, incoming }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => {
+            setRows((current) => ${remove});
+            setRows((current) => [incoming, ...current]);
+          }}>
+            Refresh
+          </button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArrayPrependHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralPrepend");
+    expect(result.code).toContain("keyedRowsFilterPrependHintedRuntimeFeature");
+  });
+
+  it("keeps structural prepend available beside other keyed update capabilities", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ expiredId, incoming, trailing }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => {
+            setRows((current) => current.filter((row) => row.id !== expiredId));
+            setRows((current) => [incoming, ...current]);
+          }}>Prepend</button>
+          <button onClick={() => {
+            setRows((current) => current.filter((row) => row.id !== expiredId));
+            setRows((current) => [...current, trailing]);
+          }}>Append</button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralPrepend");
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralAppend");
+    expect(result.code).toContain("keyedRowsStructuralPrependHintedRuntimeFeature");
+  });
+
+  it("retains structural prepend lineage through following safe map setters", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ expiredId, incoming, editedId, nextLabel }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => {
+            setRows((current) => current.filter((row) => row.id !== expiredId));
+            setRows((current) => [incoming, ...current]);
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, label: nextLabel } : row
+            ));
+            setRows((current) => current.map((row) =>
+              row.id === incoming.id ? { ...row, selected: true } : row
+            ));
+          }}>
+            Refresh rows
+          </button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArrayFilterHints).toBe(1);
+    expect(result.optimizations.keyedArrayPrependHints).toBe(1);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(2);
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralPrepend");
+    expect(result.code).toContain("createCompilerKeyedArrayStructuralPrependMapPipeline");
+    expect(result.code.match(/createCompilerKeyedArrayStructuralPrependMapPipeline/g)).toHaveLength(
+      4,
+    );
+    expect(result.code).toContain("keyedRowsStructuralPrependMapHintedRuntimeFeature");
+    await expect(
+      transformWithEsbuild(result.code, "/app/KeyedArrayPrependHints.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompilerKeyedArrayStructuralPrependMapPipeline"),
+    });
+  });
+
+  it("retains structural prepend lineage when safe maps run before the prepend", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ expiredId, incoming, editedId, nextLabel }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => {
+            setRows((current) => current.slice(1));
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, label: nextLabel } : row
+            ));
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, selected: true } : row
+            ));
+            setRows((current) => [incoming, ...current]);
+          }}>
+            Refresh rows
+          </button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArraySliceHints).toBe(1);
+    expect(result.optimizations.keyedArrayPrependHints).toBe(1);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(2);
+    expect(result.code).toContain("createCompilerKeyedArrayMapPipeline");
+    expect(result.code).toContain("createCompilerKeyedArrayMappedStructuralPrepend");
+    expect(result.code.match(/createCompilerKeyedArrayMappedStructuralPrepend/g)).toHaveLength(3);
+    expect(result.code).not.toContain("createCompilerKeyedArrayStructuralPrepend as");
+    expect(result.code).toContain("keyedRowsStructuralPrependMapHintedRuntimeFeature");
+  });
+
+  it("retains a safe map through a following structural removal and prepend", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ expiredId, incoming, editedId, nextLabel }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => {
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, label: nextLabel } : row
+            ));
+            setRows((current) => current.filter((row) => row.id !== expiredId));
+            setRows((current) => [incoming, ...current]);
+          }}>
+            Refresh rows
+          </button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.optimizations.keyedArrayFilterHints).toBe(1);
+    expect(result.optimizations.keyedArrayPrependHints).toBe(1);
+    expect(result.optimizations.keyedMapUpdateHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayQueuedMapPipeline");
+    expect(result.code).toContain("finalizeCompilerKeyedArrayMappedStructuralUpdate");
+    expect(result.code).toContain("createCompilerKeyedArrayMappedStructuralPrepend");
+    expect(result.code.match(/createCompilerKeyedArrayMappedStructuralPrepend/g)).toHaveLength(3);
+    expect(result.code).toContain("keyedRowsStructuralPrependMapHintedRuntimeFeature");
+  });
+
+  it("does not link mapped prepend work across an intervening statement", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function Feed({ expiredId, incoming, editedId, nextLabel }) {
+        const [rows, setRows] = useState([{ id: "a", label: "Alpha" }]);
+        return <main>
+          <button onClick={() => {
+            setRows((current) => current.filter((row) => row.id !== expiredId));
+            setRows((current) => [incoming, ...current]);
+            logRefresh();
+            setRows((current) => current.map((row) =>
+              row.id === editedId ? { ...row, label: nextLabel } : row
+            ));
+          }}>
+            Refresh rows
+          </button>
+          <ul>{rows.map((row) => <li key={row.id}>{row.label}</li>)}</ul>
+        </main>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Feed"]);
+    expect(result.code).not.toContain("createCompilerKeyedArrayStructuralPrependMapPipeline");
+    expect(result.code).not.toContain("keyedRowsStructuralPrependMapHintedRuntimeFeature");
+  });
+
+  it.each([
+    {
       name: "an index-sensitive row",
       row: "(row, index) => <li key={row.id}>{index}: {row.label}</li>",
       update: 'setRows((current) => [{ id: "b", label: "Beta" }, ...current])',
@@ -96,9 +322,27 @@ describe("React AOT keyed-array prepend hints", () => {
       update: 'setRows((current) => [{ id: "b", label: "Beta" }, ...current])',
     },
     {
-      name: "a block-bodied updater",
+      name: "an updater block with a local declaration",
       row: "(row) => <li key={row.id}>{row.label}</li>",
-      update: 'setRows((current) => { return [{ id: "b", label: "Beta" }, ...current]; })',
+      update:
+        'setRows((current) => { const next = [{ id: "b", label: "Beta" }, ...current]; return next; })',
+    },
+    {
+      name: "an updater block with conditional returns",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update:
+        'setRows((current) => { if (current.length > 0) return [{ id: "b", label: "Beta" }, ...current]; return current; })',
+    },
+    {
+      name: "an updater block without a return",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update: 'setRows((current) => { [{ id: "b", label: "Beta" }, ...current]; })',
+    },
+    {
+      name: "an updater block with a directive",
+      row: "(row) => <li key={row.id}>{row.label}</li>",
+      update:
+        'setRows((current) => { "use strict"; return [{ id: "b", label: "Beta" }, ...current]; })',
     },
     {
       name: "an append",

@@ -8,6 +8,7 @@
     "build": "farm build",
     "start": "farm start",
     "type-check": "tsc --noEmit",
+    "prebenchmark": "pnpm --filter @farm.js/react build",
     "benchmark": "node scripts/benchmark.mjs"
   },
   "dependencies": {

@@ -11,6 +11,7 @@ export interface PreviewGatewayOptions {
   pollTimeoutMs?: number;
   pollIntervalMs?: number;
   maxBodyBytes?: number;
+  maxResponseBodyBytes?: number;
 }
 
 export interface PreviewGatewaySession {
@@ -33,6 +34,7 @@ export interface PreviewGatewayRequest {
   body?: string | null;
   encoding?: "base64";
   createdAt: number;
+  cancelled?: true;
 }
 
 export interface PreviewGatewayResponse {
@@ -72,6 +74,7 @@ interface PreviewGatewayRuntimeConfig {
   pollTimeoutMs: number;
   pollIntervalMs: number;
   maxBodyBytes: number;
+  maxResponseBodyBytes: number;
 }
 
 const DEFAULT_DOMAIN = "preview.farming-labs.dev";
@@ -81,10 +84,10 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 25000;
 const DEFAULT_POLL_TIMEOUT_MS = 15000;
 const DEFAULT_POLL_INTERVAL_MS = 100;
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024 * 5;
+const DEFAULT_MAX_RESPONSE_BODY_BYTES = 1024 * 1024 * 5;
 const DEFAULT_POLL_REQUEST_LIMIT = 50;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
-  "content-encoding",
   "content-length",
   "keep-alive",
   "proxy-authenticate",
@@ -94,6 +97,22 @@ const HOP_BY_HOP_HEADERS = new Set([
   "transfer-encoding",
   "upgrade",
 ]);
+
+function getHopByHopHeaderNames(headers: Headers | Record<string, string | string[]>): Set<string> {
+  const names = new Set(HOP_BY_HOP_HEADERS);
+  const connection =
+    headers instanceof Headers
+      ? headers.get("connection")
+      : Object.entries(headers).find(([name]) => name.toLowerCase() === "connection")?.[1];
+  const values = Array.isArray(connection) ? connection : connection ? [connection] : [];
+  for (const value of values) {
+    for (const name of value.split(",")) {
+      const normalized = name.trim().toLowerCase();
+      if (normalized) names.add(normalized);
+    }
+  }
+  return names;
+}
 
 export function createPreviewGatewayHandler(options: PreviewGatewayOptions = {}) {
   const store = options.store || createPreviewGatewayStoreFromEnv();
@@ -107,6 +126,7 @@ export function createPreviewGatewayHandler(options: PreviewGatewayOptions = {})
     pollTimeoutMs: options.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS,
     pollIntervalMs: options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
     maxBodyBytes: options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
+    maxResponseBodyBytes: options.maxResponseBodyBytes ?? DEFAULT_MAX_RESPONSE_BODY_BYTES,
   };
 
   return async function handlePreviewGatewayRequest(request: Request): Promise<Response> {
@@ -160,20 +180,36 @@ export function createNodePreviewGatewayHandler(options: PreviewGatewayOptions =
   const handler = createPreviewGatewayHandler(options);
 
   return async function nodePreviewGatewayHandler(req: IncomingMessage, res: ServerResponse) {
-    const response = await handler(nodeRequestToWebRequest(req));
-    res.statusCode = response.status;
-    // Headers.forEach folds repeated headers into one comma-joined value, which
-    // corrupts multiple Set-Cookie. Emit those separately as an array so each
-    // cookie becomes its own header line.
-    const setCookies = response.headers.getSetCookie?.() ?? [];
-    response.headers.forEach((value, key) => {
-      if (key.toLowerCase() === "set-cookie") return;
-      res.setHeader(key, value);
-    });
-    if (setCookies.length > 0) {
-      res.setHeader("set-cookie", setCookies);
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    const abortOnClose = () => {
+      if (!res.writableEnded) abort();
+    };
+    req.once("aborted", abort);
+    res.once("close", abortOnClose);
+    try {
+      const response = await handler(nodeRequestToWebRequest(req, controller.signal));
+      if (controller.signal.aborted || res.destroyed) {
+        await response.body?.cancel();
+        return;
+      }
+      res.statusCode = response.status;
+      // Headers.forEach folds repeated headers into one comma-joined value, which
+      // corrupts multiple Set-Cookie. Emit those separately as an array so each
+      // cookie becomes its own header line.
+      const setCookies = response.headers.getSetCookie?.() ?? [];
+      response.headers.forEach((value, key) => {
+        if (key.toLowerCase() === "set-cookie") return;
+        res.setHeader(key, value);
+      });
+      if (setCookies.length > 0) {
+        res.setHeader("set-cookie", setCookies);
+      }
+      res.end(Buffer.from(await response.arrayBuffer()));
+    } finally {
+      req.off("aborted", abort);
+      res.off("close", abortOnClose);
     }
-    res.end(Buffer.from(await response.arrayBuffer()));
   };
 }
 
@@ -488,7 +524,20 @@ async function handleSessionRoute(
   }
 
   if (request.method === "POST" && route.action === "responses" && route.requestId) {
-    const response = (await request.json()) as PreviewGatewayResponse;
+    let response: PreviewGatewayResponse;
+    try {
+      response = await parsePreviewResponse(request, config.maxResponseBodyBytes);
+    } catch (error) {
+      if (error instanceof GatewayHttpError && error.status === 413) {
+        await store.saveResponse(
+          session.id,
+          route.requestId,
+          createOversizedPreviewResponse(config.maxResponseBodyBytes),
+          config.sessionTtlMs,
+        );
+      }
+      throw error;
+    }
     await store.saveResponse(session.id, route.requestId, response, config.sessionTtlMs);
     await markSessionOnline(store, config, session);
     return json({ ok: true });
@@ -505,6 +554,48 @@ async function handleSessionRoute(
   }
 
   return text("Preview gateway route not found.", 404);
+}
+
+async function parsePreviewResponse(request: Request, maxBodyBytes: number) {
+  const maxEncodedBytes = Math.ceil(maxBodyBytes / 3) * 4 + 64 * 1024;
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  if (Number.isFinite(contentLength) && contentLength > maxEncodedBytes) {
+    await request.body?.cancel();
+    throw new GatewayHttpError(413, "Preview response body is too large.");
+  }
+
+  const bytes = await readBodyWithLimit(
+    request,
+    maxEncodedBytes,
+    "Preview response body is too large.",
+  );
+  let response: PreviewGatewayResponse;
+  try {
+    response = JSON.parse(bytes.toString("utf8")) as PreviewGatewayResponse;
+  } catch {
+    throw new GatewayHttpError(400, "Preview response body must be valid JSON.");
+  }
+
+  if (getPreviewResponseBodySize(response) > maxBodyBytes) {
+    throw new GatewayHttpError(413, "Preview response body is too large.");
+  }
+  return response;
+}
+
+function getPreviewResponseBodySize(response: PreviewGatewayResponse) {
+  if (!response.body) return 0;
+  return Buffer.byteLength(response.body, response.encoding === "base64" ? "base64" : "utf8");
+}
+
+function createOversizedPreviewResponse(maxBodyBytes: number): PreviewGatewayResponse {
+  return {
+    status: 502,
+    headers: { "content-type": "text/plain; charset=utf-8" },
+    body: Buffer.from(
+      `The local preview response exceeded the ${maxBodyBytes} byte limit.`,
+    ).toString("base64"),
+    encoding: "base64",
+  };
 }
 
 async function pollSessionRequests(
@@ -556,7 +647,27 @@ async function proxyPublicRequest(
   await store.enqueueRequest(session.id, previewRequest, config.sessionTtlMs);
   await store.touchSession(session, config.sessionTtlMs);
 
-  const response = await waitForPreviewResponse(store, config, session, previewRequest.id);
+  const response = await waitForPreviewResponse(
+    store,
+    config,
+    session,
+    previewRequest.id,
+    request.signal,
+  );
+  if (response === "cancelled") {
+    await store.enqueueRequest(
+      session.id,
+      {
+        ...previewRequest,
+        body: undefined,
+        encoding: undefined,
+        cancelled: true,
+        createdAt: Date.now(),
+      },
+      config.sessionTtlMs,
+    );
+    return new Response(null, { status: 499 });
+  }
   if (response === "stale") {
     return text(`No active Farm preview is running for "${route.name}".`, 404);
   }
@@ -565,9 +676,10 @@ async function proxyPublicRequest(
   }
 
   const headers = new Headers();
+  const responseHopByHopHeaders = getHopByHopHeaderNames(response.headers || {});
   for (const [key, value] of Object.entries(response.headers || {})) {
     const normalized = key.toLowerCase();
-    if (HOP_BY_HOP_HEADERS.has(normalized)) {
+    if (responseHopByHopHeaders.has(normalized) || normalized === "content-encoding") {
       continue;
     }
     // Append multi-valued headers (Set-Cookie) so every value reaches the
@@ -595,11 +707,13 @@ async function waitForPreviewResponse(
   config: PreviewGatewayRuntimeConfig,
   session: PreviewGatewaySession,
   requestId: string,
+  signal: AbortSignal,
 ) {
   const deadline = Date.now() + config.requestTimeoutMs;
   let nextLivenessCheckAt = 0;
 
   while (Date.now() < deadline) {
+    if (signal.aborted) return "cancelled";
     if (Date.now() >= nextLivenessCheckAt) {
       const latestSession = await store.getSessionById(session.id);
       if (!latestSession || !isPreviewClientOnline(latestSession, config)) {
@@ -614,7 +728,12 @@ async function waitForPreviewResponse(
       await store.deleteResponse(session.id, requestId);
       return response;
     }
-    await delay(config.pollIntervalMs);
+    try {
+      await delay(config.pollIntervalMs, undefined, { signal });
+    } catch {
+      if (signal.aborted) return "cancelled";
+      throw new Error("Preview response polling was interrupted.");
+    }
   }
 
   return undefined;
@@ -645,9 +764,14 @@ async function serializePreviewRequest(
 ): Promise<PreviewGatewayRequest> {
   const method = request.method.toUpperCase();
   const headers: Record<string, string> = {};
+  const requestHopByHopHeaders = getHopByHopHeaderNames(request.headers);
   request.headers.forEach((value, key) => {
     const normalized = key.toLowerCase();
-    if (!HOP_BY_HOP_HEADERS.has(normalized)) {
+    if (
+      !requestHopByHopHeaders.has(normalized) &&
+      normalized !== "forwarded" &&
+      !normalized.startsWith("x-forwarded-")
+    ) {
       headers[key] = value;
     }
   });
@@ -662,10 +786,11 @@ async function serializePreviewRequest(
       throw new GatewayHttpError(413, "Preview request body is too large.");
     }
 
-    const buffer = Buffer.from(await request.arrayBuffer());
-    if (buffer.byteLength > maxBodyBytes) {
-      throw new GatewayHttpError(413, "Preview request body is too large.");
-    }
+    const buffer = await readBodyWithLimit(
+      request,
+      maxBodyBytes,
+      "Preview request body is too large.",
+    );
     body = buffer.toString("base64");
   }
 
@@ -678,6 +803,29 @@ async function serializePreviewRequest(
     encoding: body ? "base64" : undefined,
     createdAt: Date.now(),
   };
+}
+
+async function readBodyWithLimit(request: Request, maxBytes: number, message: string) {
+  if (!request.body) return Buffer.alloc(0);
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        throw new GatewayHttpError(413, message);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  }
+  return Buffer.concat(chunks, size);
 }
 
 async function requireSession(store: PreviewGatewayStore, sessionId: string, token: string | null) {
@@ -720,17 +868,18 @@ function matchSessionRoute(pathname: string) {
   };
 }
 
-function nodeRequestToWebRequest(req: IncomingMessage) {
+function nodeRequestToWebRequest(req: IncomingMessage, signal?: AbortSignal) {
   const host = headerValue(req.headers, "host") || "localhost";
-  const protocol =
-    headerValue(req.headers, "x-forwarded-proto") ||
-    (isLocalHost(host.split(":")[0]) ? "http" : "https");
+  // This adapter is the public trust boundary. A visitor-controlled forwarded
+  // protocol must not influence the authority serialized to the local app.
+  const protocol = isLocalHost(host.split(":")[0]) ? "http" : "https";
   const url = `${protocol}://${host}${req.url || "/"}`;
   const headers = nodeHeadersToWebHeaders(req.headers);
   const method = req.method || "GET";
   const init: RequestInit & { duplex?: "half" } = {
     method,
     headers,
+    signal,
   };
 
   if (method !== "GET" && method !== "HEAD") {

@@ -10,6 +10,12 @@ Parse search params and route params with typed helpers on the server and synchr
 
 ## Server parsing
 
+Page `search` / `searchParams` values are strings for single keys and ordered arrays for repeated
+keys, including empty values. Names such as `toString` and `hasOwnProperty` are ordinary query
+data, not inherited JavaScript methods. Farm omits `__proto__`, `constructor`, and `prototype`
+when converting request search parameters to objects. This representation is shared by
+development rendering, production SSR, page-data navigation, and hydration.
+
 **src/app/search/page.tsx**
 
 ```tsx
@@ -45,10 +51,42 @@ export function SearchControls() {
 
 `throttleMs` coalesces rapid writes to the same query key. Updates to different keys are
 composed against the latest URL, and returning a value to the current URL cancels its queued write.
+The latest edit to each key wins across hook instances and overlapping multi-key updates, even
+with different throttle durations or an immediate writer. Superseding one key keeps unrelated keys
+in an older batch queued. Cancelling the newer edit does not restore an older superseded value.
+Hook values update immediately while the URL write is queued. Inline parsers, inline parser maps,
+parent rerenders, and other consumers of the same keys preserve those pending values; memoizing
+parsers is not required. Each queued key keeps its draft when another key commits.
+Consumers sharing a key parse incoming edits with their own parser, including while a URL write
+is queued. Different parser types therefore retain their own output types and defaults; removing
+a key is parsed like an absent URL value.
+Multiple `useQueryState` writers receive each other's edits immediately, even when both write
+in the same event before a throttled URL commit. A writer ignores only its own draft notification;
+there is no time window during which peer edits are dropped.
+If a component changes the key or parser it passes to the hook, the returned value is immediately
+re-parsed from the current URL plus active queued values for that URL. A queued write is cancelled
+when its owning hook changes keys or unmounts. Navigation to a different URL also discards its
+pending edits, including in a persistent layout; returning to the old URL does not restore discarded
+drafts. Writes to different query keys still compose across Farm's own query updates.
+
+Repeated keys have the same meaning during server rendering and in client hooks. For example,
+`?tag=react&tag=vite` is read as both values by `asArrayOf(asString)`.
+
+When Farm's SPA router is installed, shallow query pushes participate in its normal history index.
+Back/forward blockers therefore receive the rendered query location and can restore a blocked
+traversal without inserting a duplicate entry.
 
 ## Multiple query values
 
 Use `useQueryStates` when several controls should update together. This keeps the browser URL as the source of shareable state for filters, pagination, and tabs.
+Changing the parser map replaces the returned object with exactly the newly declared keys.
+
+`useQueryStates` receives drafts from both `useQueryState` and other `useQueryStates` instances
+immediately, before a throttled URL write. Each changed key is parsed with the receiving map's
+parser; unrelated local drafts are preserved, and the writer does not parse its own draft echo.
+Changing the parser map replaces its keyed subscriptions, and unmounting removes them. Receiving
+a peer's draft does not take ownership of its URL timer, so unmounting a reader does not cancel
+the writer's queued update.
 
 **src/components/product-filters.tsx**
 
@@ -124,6 +162,31 @@ unsafe `page` values fall back to page 1. `totalItems` must be a non-negative sa
 | `asJson`            | Structured JSON encoded in the URL.                       |
 | `asIsoDate`         | Calendar-valid `YYYY-MM-DD` values.                       |
 | `asIsoDateTime`     | Calendar-valid ISO date-times with `Z` or numeric offset. |
+
+`asArrayOf` keeps its existing comma-separated format by default. When items can contain commas,
+opt in to the structured format so generated URLs round-trip those values:
+
+```ts
+const locations = asArrayOf(asString, { format: "structured" });
+```
+
+The item parser still decides how each value is normalized. `asString` trims surrounding whitespace
+and treats an empty string as missing. Use an exact string parser when those values are significant:
+
+```ts
+import { asArrayOf, createParser } from "@farm.js/core/query";
+
+const exactString = createParser<string>({
+  parse: (value) => value,
+  serialize: (value) => value,
+});
+const labels = asArrayOf(exactString, { format: "structured" });
+```
+
+The structured parser still accepts ordinary comma URLs during migration and emits a versioned
+`~farm-array:v1:` representation only when the comma format would lose information. Because the
+default parser never reserves that namespace, existing literal values such as
+`~farm-array:v1:["legacy"]` retain their comma-format meaning.
 
 ## Production notes
 

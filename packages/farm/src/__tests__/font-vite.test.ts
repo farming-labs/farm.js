@@ -496,9 +496,8 @@ console.log(demo);`,
     expect(source).toContain("manageFarmLinkHeaderPreloads(");
     expect(source).toContain("isStreaming || !isBuffered || response.body === null");
     expect(source).toContain("appendFarmLinkHeader(headers, header.value);");
-    expect(source).toContain(
-      "applyFarmPreloadBudget(applyConfiguredResponseHeaders(response, pathname), pathname)",
-    );
+    expect(source).toContain("const routePathname = getFarmRoutePathname(pathname);");
+    expect(source).toContain("applyConfiguredResponseHeaders(response, routePathname)");
     expect(source).toContain("await copyFarmDocsFontAssetsToClient(root, clientOutputDir);");
     expect(source).toContain("resolveFarmDocsFontAssets(root).map");
     expect(source).toContain("fontAssets: ${JSON.stringify(farmDocsFontAssets)},");

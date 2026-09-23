@@ -48,6 +48,13 @@ const embeddedWoff2 = (...segments: string[]) =>
   `data:font/woff2;base64,${readFileSync(path.join(geistFontsDirectory, ...segments)).toString("base64")}`;
 
 const icons = {
+  // Lucide paths, serialized like the other sidebar icons below.
+  lightbulb:
+    '<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"></path><path d="M9 18h6"></path><path d="M10 22h4"></path>',
+  network:
+    '<rect x="16" y="16" width="6" height="6" rx="1"></rect><rect x="2" y="16" width="6" height="6" rx="1"></rect><rect x="9" y="2" width="6" height="6" rx="1"></rect><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"></path><path d="M12 12V8"></path>',
+  smartphone:
+    '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"></rect><path d="M12 18h.01"></path>',
   activity: '<path d="M22 12h-4l-3 7L9 5l-3 7H2"></path>',
   "brand-auth0": brandPath(
     "M21.98 7.448L19.62 0H4.347L2.02 7.448c-1.352 4.312.03 9.206 3.815 12.015L12.007 24l6.157-4.552c3.755-2.81 5.182-7.688 3.815-12.015l-6.16 4.58 2.343 7.45-6.157-4.597-6.158 4.58 2.358-7.433-6.188-4.55 7.63-.045L12.008 0l2.356 7.404 7.615.044z",
@@ -200,6 +207,7 @@ const sidebar = [
       { label: "API Routes", slug: "api-routes", icon: "server" },
       { label: "API Client", slug: "api-client", icon: "terminal" },
       { label: "Server Queries", slug: "server-queries", icon: "database" },
+      { label: "Local-First Patterns", slug: "local-first", icon: "zap" },
       { label: "KV Storage", slug: "storage", icon: "database" },
     ],
   },
@@ -329,8 +337,20 @@ const sidebar = [
         icon: "plug",
         children: [
           { label: "Analyzer", slug: "plugins/analyzer", icon: "gauge" },
-          { label: "PWA", slug: "plugins/pwa", icon: "monitor" },
+          { label: "Content", slug: "plugins/content", icon: "file" },
+          { label: "DevTools", slug: "plugins/devtools", icon: "monitor" },
+          { label: "Federation", slug: "plugins/federation", icon: "network" },
+          { label: "Hints", slug: "plugins/hints", icon: "lightbulb" },
+          { label: "MSW", slug: "plugins/msw", icon: "shield" },
+          { label: "Partytown", slug: "plugins/partytown", icon: "zap" },
+          { label: "PWA", slug: "plugins/pwa", icon: "smartphone" },
+          { label: "Search", slug: "plugins/search", icon: "search" },
+          { label: "Scripts", slug: "plugins/scripts", icon: "code" },
           { label: "Sentry", slug: "plugins/sentry", icon: "brand-sentry" },
+          { label: "Sync", slug: "plugins/sync", icon: "network" },
+          { label: "StyleX", slug: "plugins/stylex", icon: "braces" },
+          { label: "WebAssembly", slug: "plugins/wasm", icon: "box" },
+          { label: "WebMCP", slug: "plugins/webmcp", icon: "sparkles" },
         ],
       },
       {
@@ -339,6 +359,7 @@ const sidebar = [
         children: [
           { label: "Create a Plugin", slug: "plugins/create-plugin", icon: "wrench" },
           { label: "Client Plugin API", slug: "plugins/client", icon: "monitor" },
+          { label: "Plugin Tables", slug: "plugins/schema-tables", icon: "database" },
         ],
       },
     ],

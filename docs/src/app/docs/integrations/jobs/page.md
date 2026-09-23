@@ -111,6 +111,19 @@ const queued = await api.jobs.sendWelcomeEmail.trigger({
 const handleId = queued.data!.handleId;
 ```
 
+When a task takes a scalar input rather than an object, wrap it in `$value` so it stays distinguishable from inline payload fields:
+
+```ts
+const queued = await api.jobs.countTokens.trigger({
+  body: {
+    $value: 42,
+    $options: { tags: ["billing"] },
+  },
+});
+```
+
+Reserved keys are `$`-prefixed (`$value`, `$options`, `$schedule`), so an object input is free to use ordinary field names such as `value` or `input` without colliding with the envelope.
+
 The older `{ input, options }` body is still accepted, but the inline shape above is the canonical API.
 
 ## Batch trigger

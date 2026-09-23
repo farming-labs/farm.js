@@ -42,12 +42,25 @@ export async function createMiddlewareProductionFixture(): Promise<string> {
     `
 export default {
   srcDir: "src",
+  experimental: {
+    ppr: true,
+  },
+  agent: {
+    jsonLd: {
+      type: "SoftwareApplication",
+      name: "Farm production fixture",
+      url: "https://example.test",
+    },
+  },
   deploy: {
     target: "vercel",
   },
   images: {
     path: "/media/image",
     qualities: [60],
+  },
+  redirects() {
+    return [{ source: "/legacy", destination: "/dashboard", permanent: true }];
   },
   context({ request, path }) {
     return {
@@ -389,8 +402,33 @@ export async function middleware(
       },
     });
   }
+  if (pathname.startsWith("/dashboard/private-notes")) {
+    return new Response("private notes require sign-in", {
+      status: 401,
+      headers: {
+        "x-file-response": "markdown-guard",
+      },
+    });
+  }
 }
 `.trim(),
+  );
+  await fs.mkdir(path.join(root, "src", "app", "dashboard", "notes"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "src", "app", "dashboard", "notes", "page.md"),
+    `# Dashboard notes\n\ndashboard-notes-source\n`,
+  );
+  await fs.mkdir(path.join(root, "src", "app", "dashboard", "private-notes"), {
+    recursive: true,
+  });
+  await fs.writeFile(
+    path.join(root, "src", "app", "dashboard", "private-notes", "page.md"),
+    `# Private notes\n\ndashboard-private-notes-source\n`,
+  );
+  await fs.mkdir(path.join(root, "src", "app", "public-notes"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "src", "app", "public-notes", "page.md"),
+    `# Public notes\n\npublic-notes-source\n`,
   );
   await fs.writeFile(
     path.join(root, "src", "app", "users", "[id]", "middleware.ts"),

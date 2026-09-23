@@ -1,6 +1,36 @@
-import { OpenAPIGenerator } from "./generator";
+import { OpenAPIGenerator, type OpenAPISpec } from "./generator";
 import { APITypeGenerator } from "../type-generator";
 import type { OpenAPIConfig } from "../config";
+
+function escapeHTML(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+export function renderOpenAPIReferenceHTML(spec: OpenAPISpec, config: OpenAPIConfig): string {
+  return `
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>${escapeHTML(config.title || "API Documentation")}</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <script
+      id="api-reference"
+      data-url="data:application/json;base64,${Buffer.from(JSON.stringify(spec)).toString("base64")}"
+    ></script>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+  </body>
+</html>
+    `;
+}
 
 export class OpenAPIManager {
   private generator: OpenAPIGenerator;
@@ -78,6 +108,15 @@ export class OpenAPIManager {
   getDocsRouteHandler() {
     return async (req: any, res: any) => {
       try {
+        const method = String(req.method || "GET").toUpperCase();
+        if (method !== "GET" && method !== "HEAD") {
+          res.statusCode = 405;
+          res.setHeader("Allow", "GET, HEAD");
+          res.setHeader("Content-Type", "text/plain; charset=utf-8");
+          res.end("Method Not Allowed");
+          return;
+        }
+
         const spec = await this.getSpec();
 
         if (!spec) {
@@ -96,11 +135,12 @@ export class OpenAPIManager {
 
         // Set headers for HTML response
         res.statusCode = 200;
-        res.setHeader("Content-Type", "text/html");
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
+        res.setHeader("X-Content-Type-Options", "nosniff");
 
         // Generate HTML with Scalar
-        const html = this.generateDocsHTML(spec);
-        res.end(html);
+        res.end(method === "HEAD" ? undefined : renderOpenAPIReferenceHTML(spec, this.config));
       } catch (error) {
         console.error("Error serving docs route:", error);
         res.statusCode = 500;
@@ -115,29 +155,5 @@ export class OpenAPIManager {
         `);
       }
     };
-  }
-
-  /**
-   * Generate HTML for docs route
-   */
-  private generateDocsHTML(spec: any): string {
-    return `
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>${this.config.title || "API Documentation"}</title>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" href="data:," />
-  </head>
-  <body>
-    <script
-      id="api-reference"
-      data-url="data:application/json;base64,${Buffer.from(JSON.stringify(spec)).toString("base64")}"
-    ></script>
-    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
-  </body>
-</html>
-    `;
   }
 }

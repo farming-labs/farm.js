@@ -1,4 +1,11 @@
-import { compareRouteSpecificity, type RouteSegmentSpecificity } from "./routing/specificity";
+import {
+  AmbiguousRouteError,
+  assertTerminalCatchAll,
+  assertUniqueRouteParameters,
+  compareRouteSpecificity,
+  getRoutePatternShape,
+  type RouteSegmentSpecificity,
+} from "./routing/specificity";
 
 export type FarmRouterPrimitiveParam = string | number | boolean;
 export type FarmRouterPathParam =
@@ -68,7 +75,19 @@ interface NormalizedRouterRoute<TMeta> {
 export function createFarmRouter<TMeta = unknown>(
   routes: FarmRouterRouteInput<TMeta>[],
 ): FarmRouter<TMeta> {
-  const normalizedRoutes = routes.map(normalizeRouteInput).sort(compareRoutes);
+  const normalizedRoutes = routes.map(normalizeRouteInput);
+  const patternsByShape = new Map<string, string>();
+  for (const entry of normalizedRoutes) {
+    const shape = getRoutePatternShape(entry.route.path, "router");
+    const existingPattern = patternsByShape.get(shape);
+    if (existingPattern) {
+      throw new AmbiguousRouteError(
+        `Ambiguous route patterns "${existingPattern}" and "${entry.route.path}" match the same URLs. Keep only one route for this URL shape.`,
+      );
+    }
+    patternsByShape.set(shape, entry.route.path);
+  }
+  normalizedRoutes.sort(compareRoutes);
 
   return {
     routes: normalizedRoutes.map((entry) => entry.route),
@@ -162,7 +181,7 @@ function normalizeRouteInput<TMeta>(
   index: number,
 ): NormalizedRouterRoute<TMeta> {
   const route = typeof input === "string" ? { path: input } : input;
-  const path = normalizePathname(route.path);
+  const path = normalizeRoutePattern(route.path);
   const segments = parseRoutePattern(path);
 
   return {
@@ -177,7 +196,9 @@ function normalizeRouteInput<TMeta>(
 }
 
 function parseRoutePattern(pattern: string): RouterSegment[] {
-  return splitPathname(pattern)
+  assertTerminalCatchAll(pattern, "router");
+  assertUniqueRouteParameters(pattern, "router");
+  return splitRoutePattern(pattern)
     .filter((part) => !isRouteGroup(part))
     .map((part) => {
       const optionalCatchAll = part.match(/^\[\[\.\.\.([A-Za-z0-9_$-]+)\]\]$/);
@@ -298,6 +319,17 @@ function normalizePathname(value: string) {
 
 function splitPathname(pathname: string) {
   return normalizePathname(pathname).split("/").filter(Boolean);
+}
+
+function normalizeRoutePattern(value: string) {
+  let pathname = (value || "/").replace(/\\/g, "/").replace(/\/+/g, "/");
+  if (!pathname.startsWith("/")) pathname = `/${pathname}`;
+  if (pathname.length > 1) pathname = pathname.replace(/\/+$/, "");
+  return pathname || "/";
+}
+
+function splitRoutePattern(pattern: string) {
+  return normalizeRoutePattern(pattern).split("/").filter(Boolean);
 }
 
 function isRouteGroup(part: string) {

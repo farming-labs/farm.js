@@ -9,6 +9,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
+import { loadConfigFromFile } from "vite";
 import { buildRscNitro } from "@farm.js/plugin/rsc";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -20,10 +21,22 @@ const legacyDist = path.join(root, "dist");
 const useNitroPipeline = existsSync(path.join(nitroDist, "rsc", "index.js"));
 const baseDir = useNitroPipeline ? nitroDist : legacyDist;
 
+let clientAssetsDir = "assets";
+try {
+  const loaded = await loadConfigFromFile({ command: "build", mode: "production" });
+  const cfg = (loaded && loaded.config) || {};
+  const fromEnv = cfg.environments?.client?.build?.assetsDir;
+  const fromTop = cfg.build?.assetsDir;
+  clientAssetsDir = fromEnv ?? fromTop ?? "assets";
+} catch {
+  clientAssetsDir = "assets";
+}
+
 await buildRscNitro({
   root,
   rendererPath: path.join(baseDir, "rsc", "index.js"),
   publicDir: path.join(baseDir, "client"),
   ssrPath: path.join(baseDir, "ssr", "index.js"),
+  assetsDir: clientAssetsDir,
   preset: process.env.NITRO_PRESET || "vercel",
 });

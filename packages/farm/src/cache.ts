@@ -133,11 +133,26 @@ export interface FarmCacheAdapter {
   releaseLease?(key: string, token: string): Promise<void>;
 }
 
+export interface FarmClientCacheUserConfig {
+  /**
+   * Module path, relative to the project root, whose default export is a
+   * client cache adapter (`defineClientCacheAdapter`). The module is bundled
+   * into the browser entry; the server never imports it.
+   */
+  adapter?: string;
+  /** Extra version salt, typically a build or deploy id; entries persisted under another salt are dropped. */
+  version?: string;
+  /** Debounce for persisted write-behind flushes, in milliseconds. */
+  flushDelayMs?: number;
+}
+
 export interface FarmCacheUserConfig {
   /** Shared cache implementation, for example a Redis-backed adapter. */
   adapter?: FarmCacheAdapter;
   /** Prefix isolating applications and deployments sharing one adapter. */
   namespace?: string;
+  /** Browser cache persistence; see the client cache adapter documentation. */
+  client?: FarmClientCacheUserConfig;
   /**
    * Coordinate cache fills across processes when the adapter implements
    * acquireLease/releaseLease. Set false to disable.
@@ -249,6 +264,11 @@ export class FarmDataCache {
   }
 
   configure(config: FarmCacheUserConfig = {}): void {
+    this.generation++;
+    this.entries.clear();
+    this.inflight.clear();
+    this.invalidatedTagVersions.clear();
+    this.version = 0;
     this.adapter = config.adapter;
     this.namespace = normalizeCacheNamespace(config.namespace || "farm");
     this.local = !config.adapter;
@@ -269,12 +289,6 @@ export class FarmDataCache {
               "cache.lease.pollIntervalMs",
             ),
           };
-    if (!this.local) {
-      this.entries.clear();
-      this.inflight.clear();
-      this.invalidatedTagVersions.clear();
-      this.version = 0;
-    }
   }
 
   get adapterName(): string {
@@ -342,14 +356,19 @@ export class FarmDataCache {
       return this.local ? undefined : this.getEntry<T>(key, options);
     }
 
-    const entry = await this.adapter.get<T>(this.createAdapterKey(key));
+    const generation = this.generation;
+    const adapter = this.adapter;
+    const namespace = this.namespace;
+    const entry = await adapter.get<T>(`${namespace}:entry:${key}`);
+    if (generation !== this.generation) return undefined;
     if (!entry) {
       emitFarmEvent({ type: "cache.miss", key });
       return undefined;
     }
 
     assertFarmCacheEntry(entry, key);
-    const stale = await this.isAdapterEntryStale(entry, options.now);
+    const stale = await this.isAdapterEntryStale(entry, options.now, adapter, namespace);
+    if (generation !== this.generation) return undefined;
     if (stale) {
       emitFarmEvent({
         type: "cache.stale",
@@ -619,42 +638,85 @@ export class FarmDataCache {
     tags: readonly string[],
     generation: number,
   ): Promise<T> {
-    const leaseKey = `${this.namespace}:lease:${key}`;
+    const adapter = this.adapter;
+    const namespace = this.namespace;
+    const lease = { ...this.lease };
+    const leaseKey = `${namespace}:lease:${key}`;
     let leaseToken: string | null | undefined;
 
-    if (this.adapter?.acquireLease && this.adapter.releaseLease && this.lease.enabled) {
-      leaseToken = await this.adapter.acquireLease(leaseKey, this.lease.ttlMs);
+    if (adapter?.acquireLease && adapter.releaseLease && lease.enabled) {
+      leaseToken = await adapter.acquireLease(leaseKey, lease.ttlMs);
       if (!leaseToken) {
-        const shared = await this.waitForAdapterEntry<T>(key);
+        const shared = await this.waitForAdapterEntry<T>(
+          key,
+          adapter,
+          namespace,
+          lease,
+          generation,
+        );
         if (shared) {
           emitFarmEvent({ type: "cache.dedupe", key });
           return shared.value;
         }
-        leaseToken = await this.adapter.acquireLease(leaseKey, this.lease.ttlMs);
+        if (generation === this.generation) {
+          leaseToken = await adapter.acquireLease(leaseKey, lease.ttlMs);
+        }
       }
     }
 
     try {
       const initialCreatedVersion = this.version;
-      const initialTagVersions = await this.getAdapterTagVersions(tags);
+      const initialTagVersions = await this.getAdapterTagVersions(tags, adapter, namespace);
       const value = await producer();
       if (generation === this.generation) {
         await this.writeAsync(key, value, options, initialTagVersions, initialCreatedVersion);
       }
       return value;
     } finally {
-      if (leaseToken && this.adapter?.releaseLease) {
-        await this.adapter.releaseLease(leaseKey, leaseToken);
+      if (leaseToken && adapter?.releaseLease) {
+        await adapter.releaseLease(leaseKey, leaseToken);
       }
     }
   }
 
-  private async waitForAdapterEntry<T>(key: string): Promise<FarmCacheEntry<T> | undefined> {
-    const deadline = Date.now() + this.lease.waitTimeoutMs;
+  private async waitForAdapterEntry<T>(
+    key: string,
+    adapter: FarmCacheAdapter,
+    namespace: string,
+    lease: typeof this.lease,
+    generation: number,
+  ): Promise<FarmCacheEntry<T> | undefined> {
+    const deadline = Date.now() + lease.waitTimeoutMs;
     while (Date.now() < deadline) {
-      await delay(this.lease.pollIntervalMs);
-      const entry = await this.getEntryAsync<T>(key);
-      if (entry) return entry;
+      await delay(lease.pollIntervalMs);
+      if (generation !== this.generation) return undefined;
+      const entry = await adapter.get<T>(`${namespace}:entry:${key}`);
+      if (generation !== this.generation) return undefined;
+      if (!entry) {
+        emitFarmEvent({ type: "cache.miss", key });
+        continue;
+      }
+      assertFarmCacheEntry(entry, key);
+      const stale = await this.isAdapterEntryStale(entry, Date.now(), adapter, namespace);
+      if (generation !== this.generation) return undefined;
+      if (stale) {
+        emitFarmEvent({
+          type: "cache.stale",
+          key,
+          tags: [...entry.tags],
+          revalidate: entry.revalidate,
+        });
+        emitFarmEvent({ type: "cache.miss", key, reason: "stale" });
+      } else {
+        emitFarmEvent({
+          type: "cache.hit",
+          key,
+          tags: [...entry.tags],
+          revalidate: entry.revalidate,
+          stale: false,
+        });
+        return { ...entry, key };
+      }
     }
     return undefined;
   }
@@ -718,12 +780,14 @@ export class FarmDataCache {
 
   private async getAdapterTagVersions(
     tags: readonly string[],
+    adapter = this.adapter,
+    namespace = this.namespace,
   ): Promise<Readonly<Record<string, number>>> {
-    if (!this.adapter?.getTagVersions || tags.length === 0) return {};
+    if (!adapter?.getTagVersions || tags.length === 0) return {};
 
     const normalized = tags.map(normalizeCacheTag);
-    const physicalTags = normalized.map((tag) => this.createAdapterTag(tag));
-    const versions = await this.adapter.getTagVersions(physicalTags);
+    const physicalTags = normalized.map((tag) => `${namespace}:tag:${tag}`);
+    const versions = await adapter.getTagVersions(physicalTags);
     return Object.fromEntries(
       normalized.map((tag, index) => [
         tag,
@@ -732,7 +796,12 @@ export class FarmDataCache {
     );
   }
 
-  private async isAdapterEntryStale(entry: FarmCacheEntry, now = Date.now()): Promise<boolean> {
+  private async isAdapterEntryStale(
+    entry: FarmCacheEntry,
+    now = Date.now(),
+    adapter = this.adapter,
+    namespace = this.namespace,
+  ): Promise<boolean> {
     if (
       typeof entry.revalidate === "number" &&
       entry.revalidate >= 0 &&
@@ -741,7 +810,7 @@ export class FarmDataCache {
       return true;
     }
 
-    const currentVersions = await this.getAdapterTagVersions(entry.tags);
+    const currentVersions = await this.getAdapterTagVersions(entry.tags, adapter, namespace);
     for (const tag of entry.tags) {
       if (
         normalizeAdapterVersion(currentVersions[tag]) >
@@ -768,6 +837,40 @@ export function configureFarmCache(config: FarmCacheUserConfig | undefined): voi
   sharedFarmDataCache.configure(config);
 }
 
+/**
+ * Wrap an async function so its results are cached and shared across requests,
+ * processes, and restarts.
+ *
+ * The cache key is built from the wrapped function's identity (its name and a
+ * hash of its source), the active locale, `keyParts`, and the call arguments.
+ * Deriving identity from the source — rather than the closure instance — is
+ * deliberate: it keeps the key stable across processes and restarts so a
+ * distributed cache adapter can share entries between server instances.
+ *
+ * The consequence is that two closures with **identical source text but
+ * different captured variables** produce the same identity. Pass those captured
+ * values in `keyParts` so they take part in the key; otherwise the closures
+ * share a cache entry and return each other's data:
+ *
+ * ```ts
+ * // Collides: both closures have identical source, and `table` is captured,
+ * // not an argument, so it never reaches the key.
+ * const makeLoader = (table: string) =>
+ *   unstable_cache(async (id: number) => db.get(table, id));
+ *
+ * // Correct: the captured value disambiguates the two closures.
+ * const makeLoader = (table: string) =>
+ *   unstable_cache(async (id: number) => db.get(table, id), [table]);
+ * ```
+ *
+ * Values passed as call arguments already participate in the key and do not
+ * need to be repeated in `keyParts`.
+ *
+ * @param fn The async function to memoize.
+ * @param keyParts Extra values that identify this call site. Include every
+ *   variable the function closes over that is not one of its arguments.
+ * @param options Tags, paths, and revalidation settings for the cached entry.
+ */
 export function unstable_cache<Args extends unknown[], Result>(
   fn: (...args: Args) => Result | Promise<Result>,
   keyParts: readonly unknown[] = [],
@@ -786,6 +889,15 @@ export function unstable_cache<Args extends unknown[], Result>(
   };
 }
 
+/**
+ * Invalidate every cache entry carrying `tag`.
+ *
+ * Observability note: the `count` on the emitted `cache.revalidateTag` event is
+ * derived from Farm's process-local entry tracking. With a shared `cache.adapter`
+ * configured, entries live in the adapter rather than in local memory, so the
+ * count can read as `0` even though the invalidation is still propagated to the
+ * adapter and applied. Treat it as a best-effort signal, not a distributed count.
+ */
 export function revalidateTag(_tag: string, _profile?: RevalidateTagProfile): void | Promise<void> {
   const cache = getFarmDataCache();
   if (cache.hasAdapter) {
@@ -814,6 +926,16 @@ export function updateTag(tag: string): void | Promise<void> {
   cache.revalidateTag(tag, { source: "updateTag" });
 }
 
+/**
+ * Invalidate cached data for a route path (and its PPR shell, if any).
+ *
+ * Observability note: the `count` on the emitted `cache.revalidatePath` event and
+ * the `ppr.shell.invalidated` event are derived from process-local entry tracking.
+ * With a shared `cache.adapter`, PPR shells live in the adapter rather than in
+ * local memory, so the count can read as `0` and `ppr.shell.invalidated` may not
+ * be emitted even though the invalidation is still propagated to the adapter and
+ * applied.
+ */
 export function revalidatePath(routePath: string): void | Promise<void> {
   const cache = getFarmDataCache();
   if (cache.hasAdapter) {
@@ -1031,6 +1153,27 @@ function serializeBinaryBytes(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function serializeCanonicalStringEntries(
+  entries: Iterable<readonly [string, string]>,
+  seen: WeakSet<object>,
+): string {
+  const valuesByKey = new Map<string, string[]>();
+  for (const [key, item] of entries) {
+    const values = valuesByKey.get(key);
+    if (values) values.push(item);
+    else valuesByKey.set(key, [item]);
+  }
+
+  return Array.from(valuesByKey.keys())
+    .sort(compareCodepoint)
+    .flatMap((key) =>
+      valuesByKey
+        .get(key)!
+        .map((item) => `[${stableSerialize(key, seen)},${stableSerialize(item, seen)}]`),
+    )
+    .join(",");
+}
+
 function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
   if (value === null) return "null";
   if (value === undefined) return "undefined";
@@ -1105,6 +1248,21 @@ function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
       ).sort(compareCodepoint);
       seen.delete(value);
       return `map:[${items.join(",")}]`;
+    }
+    // URLSearchParams and Headers keep their contents internally, so
+    // Object.entries is empty for both (same rationale as Set/Map above).
+    // Canonicalize key order while preserving the order of repeated values for
+    // each key. URLSearchParams treats `a=1&a=2` and `a=2&a=1` as observably
+    // different inputs, while `b=2&a=1` and `a=1&b=2` should still share a key.
+    if (value instanceof URLSearchParams) {
+      const serialized = serializeCanonicalStringEntries(value, seen);
+      seen.delete(value);
+      return `urlsearchparams:[${serialized}]`;
+    }
+    if (value instanceof Headers) {
+      const serialized = serializeCanonicalStringEntries(value, seen);
+      seen.delete(value);
+      return `headers:[${serialized}]`;
     }
 
     // Codepoint comparison, not localeCompare: the host locale must not

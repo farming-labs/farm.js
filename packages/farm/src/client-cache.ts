@@ -1,3 +1,4 @@
+/// <reference lib="es2021.weakref" />
 import { createRouteDataCacheKey, type RouteDataCacheKey } from "./cache";
 import { subscribeFarmCacheInvalidation } from "./cache-invalidation";
 
@@ -14,9 +15,66 @@ export type FarmClientCacheEntry<TData = unknown> = {
   status?: FarmClientCacheStatus;
   error?: Error | null;
   fetching?: boolean;
+  /** Marks an entry the persistence layer may write to its adapter. */
+  persist?: boolean;
 };
 
-type FarmClientCacheListener = () => void;
+/** @internal Observation seam for the client cache persistence engine. */
+export type FarmClientCachePersistenceSink = {
+  onSet(key: string, entry: FarmClientCacheEntry): void;
+  onDelete(key: string): void;
+  onClear(): void;
+};
+
+type FarmClientCacheListener = (event?: "invalidate") => void;
+
+const invalidationTrackers = new WeakMap<FarmClientDataCache, Set<Set<string>>>();
+
+/** Internal request-lifetime tracking, including keys learned only from a response. */
+export function trackFarmClientCacheInvalidations(cache: FarmClientDataCache) {
+  let trackers = invalidationTrackers.get(cache);
+  if (!trackers) {
+    trackers = new Set();
+    invalidationTrackers.set(cache, trackers);
+  }
+  const keys = new Set<string>();
+  trackers.add(keys);
+  return {
+    has(key: string) {
+      const resolved = cache.resolveKey(key);
+      for (const invalidated of keys) {
+        if (cache.resolveKey(invalidated) === resolved) return true;
+      }
+      return false;
+    },
+    dispose() {
+      if (!trackers.delete(keys)) return;
+      keys.clear();
+      if (trackers.size === 0) invalidationTrackers.delete(cache);
+    },
+  };
+}
+
+const cacheFinalizer =
+  typeof FinalizationRegistry === "function"
+    ? new FinalizationRegistry<() => void>((unsubscribe) => unsubscribe())
+    : undefined;
+
+// This closure must only capture a weak reference, never the cache itself.
+function subscribeWeakCache(reference: WeakRef<FarmClientDataCache>): () => void {
+  const unsubscribe = subscribeFarmCacheInvalidation((key) => {
+    const cache = reference.deref();
+    if (cache) cache.invalidate(key);
+    else dispose();
+  });
+  function dispose() {
+    unsubscribe();
+    cacheFinalizer?.unregister(reference);
+  }
+  return dispose;
+}
+
+const DEFAULT_GC_SWEEP_INTERVAL_MS = 30_000;
 
 export class FarmClientDataCache {
   private entries = new Map<string, FarmClientCacheEntry>();
@@ -24,13 +82,37 @@ export class FarmClientDataCache {
   private invalidatedAt = new Map<string, number>();
   private listeners = new Map<string, Set<FarmClientCacheListener>>();
   private inflight = new Map<string, Promise<unknown>>();
+  private unsubscribeInvalidation: (() => void) | undefined;
+  private gcTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly gcSweepIntervalMs: number | false;
+  private persistence: FarmClientCachePersistenceSink | undefined;
 
-  constructor() {
-    subscribeFarmCacheInvalidation((key) => this.invalidate(key));
+  constructor(
+    options: { subscribeToInvalidation?: boolean; gcSweepIntervalMs?: number | false } = {},
+  ) {
+    this.gcSweepIntervalMs = options.gcSweepIntervalMs ?? DEFAULT_GC_SWEEP_INTERVAL_MS;
+    if (options.subscribeToInvalidation !== false) {
+      if (typeof WeakRef === "function") {
+        const reference = new WeakRef(this);
+        const unsubscribe = subscribeWeakCache(reference);
+        cacheFinalizer?.register(this, unsubscribe, reference);
+        this.unsubscribeInvalidation = unsubscribe;
+      } else {
+        // Keep invalidation working on older runtimes without weak references.
+        this.unsubscribeInvalidation = subscribeFarmCacheInvalidation((key) =>
+          this.invalidate(key),
+        );
+      }
+    }
   }
 
   get size(): number {
     return this.entries.size;
+  }
+
+  /** @internal Attach or detach the persistence engine's observation sink. */
+  attachPersistence(sink: FarmClientCachePersistenceSink | undefined): void {
+    this.persistence = sink;
   }
 
   resolveKey(key: string): string {
@@ -52,6 +134,7 @@ export class FarmClientDataCache {
 
     if (entry.gcAt !== undefined && now >= entry.gcAt) {
       this.entries.delete(resolved);
+      this.persistence?.onDelete(resolved);
       this.emit(resolved);
       return undefined;
     }
@@ -72,6 +155,8 @@ export class FarmClientDataCache {
     }
 
     this.entries.set(resolved, nextEntry);
+    if (nextEntry.gcAt !== undefined) this.scheduleGcSweep();
+    this.persistence?.onSet(resolved, nextEntry);
     this.emit(resolved);
     return this;
   }
@@ -80,6 +165,7 @@ export class FarmClientDataCache {
     const resolved = this.resolveKey(key);
     const deleted = this.entries.delete(resolved);
     this.inflight.delete(resolved);
+    if (deleted) this.persistence?.onDelete(resolved);
     this.emit(resolved);
     return deleted;
   }
@@ -90,7 +176,18 @@ export class FarmClientDataCache {
     this.aliases.clear();
     this.invalidatedAt.clear();
     this.inflight.clear();
+    this.persistence?.onClear();
     for (const key of keys) this.emit(key);
+  }
+
+  dispose(): void {
+    this.unsubscribeInvalidation?.();
+    this.unsubscribeInvalidation = undefined;
+    if (this.gcTimer !== undefined) {
+      clearTimeout(this.gcTimer);
+      this.gcTimer = undefined;
+    }
+    this.clear();
   }
 
   isStale(key: string, now = Date.now()): boolean {
@@ -100,6 +197,7 @@ export class FarmClientDataCache {
 
   invalidate(key: string, now = Date.now()): void {
     const resolved = this.resolveKey(key);
+    for (const keys of invalidationTrackers.get(this) ?? []) keys.add(resolved);
     this.invalidatedAt.set(resolved, now);
 
     const entry = this.entries.get(resolved);
@@ -111,7 +209,7 @@ export class FarmClientDataCache {
       });
     }
 
-    this.emit(resolved);
+    this.emit(resolved, "invalidate");
   }
 
   alias(alias: string, key: string): void {
@@ -119,11 +217,40 @@ export class FarmClientDataCache {
     if (alias === resolved) return;
 
     const aliasEntry = this.entries.get(alias);
+    const aliasInvalidatedAt = this.invalidatedAt.get(alias) ?? aliasEntry?.invalidatedAt;
+    const resolvedInvalidatedAt = this.invalidatedAt.get(resolved);
     if (aliasEntry && !this.entries.has(resolved)) {
       this.entries.set(resolved, aliasEntry);
+      this.persistence?.onSet(resolved, aliasEntry);
     }
 
-    this.entries.delete(alias);
+    if (this.entries.delete(alias)) this.persistence?.onDelete(alias);
+    this.invalidatedAt.delete(alias);
+    const invalidatedAt = [aliasInvalidatedAt, resolvedInvalidatedAt].reduce<number | undefined>(
+      (latest, value) =>
+        value === undefined ? latest : latest === undefined ? value : Math.max(latest, value),
+      undefined,
+    );
+    const resolvedEntry = this.entries.get(resolved);
+    if (
+      invalidatedAt !== undefined &&
+      (!resolvedEntry || invalidatedAt > resolvedEntry.updatedAt)
+    ) {
+      this.invalidatedAt.set(resolved, invalidatedAt);
+      if (resolvedEntry) {
+        this.entries.set(resolved, {
+          ...resolvedEntry,
+          staleAt: 0,
+          invalidatedAt,
+        });
+      }
+    } else if (invalidatedAt !== undefined) {
+      this.invalidatedAt.delete(resolved);
+      if (resolvedEntry?.invalidatedAt !== undefined) {
+        this.entries.set(resolved, { ...resolvedEntry, invalidatedAt: undefined });
+      }
+    }
+
     const aliasInflight = this.inflight.get(alias);
     if (aliasInflight && !this.inflight.has(resolved)) {
       this.inflight.set(resolved, aliasInflight);
@@ -131,7 +258,7 @@ export class FarmClientDataCache {
     this.inflight.delete(alias);
     this.aliases.set(alias, resolved);
     this.emit(alias);
-    this.emit(resolved);
+    this.emit(resolved, this.invalidatedAt.has(resolved) ? "invalidate" : undefined);
   }
 
   subscribe(key: string, listener: FarmClientCacheListener): () => void {
@@ -144,7 +271,12 @@ export class FarmClientDataCache {
     listeners.add(listener);
     return () => {
       listeners!.delete(listener);
-      if (listeners!.size === 0) this.listeners.delete(key);
+      // Only drop the map entry if it still holds this exact set. A repeated or
+      // stale unsubscribe (called after the key was drained and resubscribed)
+      // must not evict a newer subscriber's live listener set.
+      if (listeners!.size === 0 && this.listeners.get(key) === listeners) {
+        this.listeners.delete(key);
+      }
     };
   }
 
@@ -160,18 +292,81 @@ export class FarmClientDataCache {
     this.inflight.delete(this.resolveKey(key));
   }
 
-  private emit(key: string): void {
-    this.notifyListeners(key);
+  private scheduleGcSweep(): void {
+    if (this.gcSweepIntervalMs === false || this.gcTimer !== undefined) return;
+    const timer = setTimeout(() => {
+      this.gcTimer = undefined;
+      this.sweepExpiredEntries();
+    }, this.gcSweepIntervalMs);
+    // Cache cleanup must never keep a Node.js process (SSR, tests) alive.
+    (timer as unknown as { unref?: () => void }).unref?.();
+    this.gcTimer = timer;
+  }
+
+  private sweepExpiredEntries(now = Date.now()): void {
+    const watched = new Set<string>();
+    for (const key of this.listeners.keys()) watched.add(this.resolveKey(key));
+
+    let remaining = false;
+    const swept = new Set<string>();
+    for (const [key, entry] of this.entries) {
+      if (entry.gcAt === undefined) continue;
+      if (now < entry.gcAt || entry.fetching || this.inflight.has(key) || watched.has(key)) {
+        remaining = true;
+        continue;
+      }
+      // Only unwatched entries are swept, so eviction is unobservable: a read
+      // of this key would already evict it lazily before returning data.
+      this.entries.delete(key);
+      this.persistence?.onDelete(key);
+      swept.add(key);
+    }
+
+    if (swept.size > 0) this.sweepEntryMetadata(swept);
+    if (remaining) this.scheduleGcSweep();
+  }
+
+  /**
+   * Entry eviction alone leaves the per-key metadata behind. `invalidatedAt`
+   * marks and provisional aliases are created per query invocation, so with
+   * dynamic keys they accumulate for the lifetime of the page even though the
+   * entries they describe are long gone.
+   */
+  private sweepEntryMetadata(swept: Set<string>): void {
+    for (const key of swept) this.invalidatedAt.delete(key);
+
+    for (const [alias, target] of this.aliases) {
+      // Keep any alias that is still addressable: one that has its own entry,
+      // that something is subscribed to, or whose target is still live.
+      if (this.entries.has(alias) || this.listeners.has(alias)) continue;
+      const resolved = this.resolveKey(target);
+      if (!swept.has(resolved)) continue;
+      if (this.entries.has(resolved) || this.listeners.has(resolved)) continue;
+      this.aliases.delete(alias);
+      this.invalidatedAt.delete(alias);
+    }
+  }
+
+  private emit(key: string, event?: "invalidate"): void {
+    this.notifyListeners(key, event);
     for (const [alias, target] of this.aliases) {
       if (this.resolveKey(target) === key) {
-        this.notifyListeners(alias);
+        this.notifyListeners(alias, event);
       }
     }
   }
 
-  private notifyListeners(key: string): void {
+  private notifyListeners(key: string, event?: "invalidate"): void {
     for (const listener of this.listeners.get(key) ?? []) {
-      listener();
+      // One subscriber must not be able to break the others, or to make an
+      // ordinary cache write or invalidation throw in its caller. This matches
+      // the isolation the global invalidation bus already provides.
+      try {
+        listener(event);
+      } catch (error) {
+        const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+        console.warn(`[farm:client-cache] cache listener failed: ${detail}`);
+      }
     }
   }
 }

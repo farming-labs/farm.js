@@ -6,6 +6,7 @@ import {
   extractFarmFullDocument,
   isFarmFullDocument,
   opensFarmFullDocument,
+  removeFarmDocumentTitles,
 } from "../server/full-document";
 
 // How a full-document root layout renders through the dev pipeline: the layout's
@@ -42,6 +43,14 @@ describe("full-document detection", () => {
     expect(extractFarmFullDocument(prefix)).toBeNull(); // no closing tag yet
     expect(opensFarmFullDocument(fragmentMarkup)).toBe(false);
   });
+
+  it("removes attributed and multiline title elements", () => {
+    expect(
+      removeFarmDocumentTitles(
+        '<html><head><title data-source="layout">Layout\nTitle</title><meta name="x"></head></html>',
+      ),
+    ).toBe('<html><head><meta name="x"></head></html>');
+  });
 });
 
 describe("full-document composition", () => {
@@ -74,5 +83,22 @@ describe("full-document composition", () => {
     // The $-sequences in the document survive untouched (no expansion).
     expect(html).toContain("$&amp; $` $' $$");
     expect(html).toContain("<script>1</script>");
+  });
+
+  it("replaces Farm-managed document attributes without duplicating them", () => {
+    const html = composeFarmFullDocument(
+      '<html lang="en" dir="ltr" data-theme="light" class="app"><head></head><body></body></html>',
+      {
+        htmlAttributes: ' lang="ar" dir="rtl" data-theme="dark"',
+        replaceHtmlAttributes: ["lang", "dir", "data-theme"],
+        headAssets: "",
+        bodyFooter: "",
+      },
+    );
+
+    expect(html).toContain('<html class="app" lang="ar" dir="rtl" data-theme="dark">');
+    expect(html.match(/\slang=/gi)).toHaveLength(1);
+    expect(html.match(/\sdir=/gi)).toHaveLength(1);
+    expect(html.match(/\sdata-theme=/gi)).toHaveLength(1);
   });
 });

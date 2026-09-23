@@ -66,6 +66,8 @@ The preview lifecycle is tied to the local app. When `farm dev` stops or the con
 
 The public URL is invalidated as soon as the session closes, so later requests return `404`. You do not need to run a separate command to stop or clean up the tunnel.
 
+Cancellation also applies to individual requests. If a visitor closes the connection while a slow or streaming local response is still running, the gateway tells the preview agent to abort that localhost request.
+
 ## Commands
 
 ```bash
@@ -78,6 +80,10 @@ farm preview --dry-run
 ```
 
 When no target is passed, Farm tries to detect a running app from the current project config and common development ports. Pass `--port` or `--url` when the app is running somewhere specific.
+
+The pathname in `--url` is a mount point. For example, `--url
+http://localhost:4319/console` forwards the public preview root to `/console/` and a public
+`/settings` request to `/console/settings` without allowing the public path to escape that mount.
 
 ## Options
 
@@ -142,13 +148,13 @@ After hydration, normal client-side handlers run in the browser and API calls go
 ```tsx
 "use client";
 
-import { api } from "../lib/api-client";
+import { apiClient } from "../lib/api";
 
 export default function Demo() {
   return (
     <button
       onClick={async () => {
-        const result = await api.hello.get({
+        const result = await apiClient.hello.get({
           query: { name: "preview" },
         });
         console.log(result.data);
@@ -218,6 +224,8 @@ The local CLI owns:
 - Forwarding requests to `localhost`.
 - Request and response logging.
 - Closing the preview when the local app exits.
+
+Preview transports currently buffer bodies while carrying them through the relay. Public request and local response bodies are limited to 5 MiB by default; an oversized request receives `413`, while an oversized local response receives `502`. Self-hosted gateway and relay operators can configure those limits.
 
 ## Self-Hosting a Gateway
 

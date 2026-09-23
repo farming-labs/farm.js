@@ -63,8 +63,30 @@ describe("production middleware runtime", () => {
       const vercelOutputConfig = JSON.parse(
         await fs.readFile(path.join(root, ".vercel", "output", "config.json"), "utf8"),
       );
-      expect(vercelOutputConfig.routes[0]).toEqual(createFarmVercelImmutableAssetRoute());
-      expect(vercelOutputConfig.routes[1]).toEqual({ handle: "filesystem" });
+      // Farm's immutable asset route is the last source route before the
+      // filesystem handler. The preset's redirect/header routes — including the
+      // per-prerendered-route cache headers this fixture injects (PPR + ISR
+      // pages) — are now preserved ahead of it instead of being discarded, so
+      // the immutable route is no longer necessarily at index 0.
+      const filesystemIndex = vercelOutputConfig.routes.findIndex(
+        (route: { handle?: string }) => route.handle === "filesystem",
+      );
+      expect(filesystemIndex).toBeGreaterThan(0);
+      expect(vercelOutputConfig.routes[filesystemIndex - 1]).toEqual(
+        createFarmVercelImmutableAssetRoute(),
+      );
+      expect(vercelOutputConfig.routes[filesystemIndex]).toEqual({ handle: "filesystem" });
+      // At least one preset source route (a redirect or header route) is
+      // preserved ahead of the immutable route; the old wholesale rebuild
+      // dropped every one of them on Vercel.
+      const preservedSourceRoutes = vercelOutputConfig.routes.slice(0, filesystemIndex - 1);
+      expect(preservedSourceRoutes.length).toBeGreaterThan(0);
+      expect(
+        preservedSourceRoutes.every(
+          (route: { handle?: string; continue?: boolean }) =>
+            route.handle === undefined && route.continue !== true,
+        ),
+      ).toBe(true);
 
       const staticAssetsDir = path.join(root, ".vercel", "output", "static", "assets");
       // The client build emits this image under more than one hashed name, and readdir
@@ -132,6 +154,12 @@ describe("production middleware runtime", () => {
         "index.mjs",
       );
       const serverModule = await import(`${pathToFileURL(entryPath).href}?t=${Date.now()}`);
+      const redirectResponse = await serverModule.default.fetch(
+        new Request("https://example.test/legacy?campaign=launch"),
+      );
+      expect(redirectResponse.status).toBe(308);
+      expect(redirectResponse.headers.get("location")).toBe("/dashboard?campaign=launch");
+
       (globalThis as any).__farmMiddlewareEvents = [];
       const response = await serverModule.default.fetch(
         new Request("https://example.test/dashboard/settings"),
@@ -141,6 +169,15 @@ describe("production middleware runtime", () => {
       expect(response.status).toBe(200);
       expect(response.headers.get("x-farm-middleware")).toBe("yes");
       expect(response.headers.get("cache-control")).toBe("private, no-store");
+      // Agent JSON-LD from the resolved agent config is baked into the document head.
+      expect(html).toContain('<script type="application/ld+json">');
+      const jsonLd = html.match(/application\/ld\+json">(.*?)<\/script>/s)?.[1] ?? "";
+      expect(JSON.parse(jsonLd)).toMatchObject({
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        name: "Farm production fixture",
+        url: "https://example.test",
+      });
       expect(html).toContain(
         "production middleware: dashboard / settings / dashboard-file / /dashboard/settings",
       );
@@ -256,6 +293,34 @@ describe("production middleware runtime", () => {
       await expect(robotsResponse.text()).resolves.toContain(
         "Sitemap: https://example.test/sitemap.xml",
       );
+
+      // Agents that request Markdown for a missing page get a Markdown 404 body.
+      const markdownExtension404 = await serverModule.default.fetch(
+        new Request("https://example.test/does-not-exist.md"),
+      );
+      expect(markdownExtension404.status).toBe(404);
+      expect(markdownExtension404.headers.get("content-type")).toContain("text/markdown");
+      const markdown404Body = await markdownExtension404.text();
+      expect(markdown404Body).toContain("# Page not found");
+      expect(markdown404Body.length).toBeGreaterThan(20);
+      expect(markdown404Body).not.toContain("<html");
+
+      const markdownAccept404 = await serverModule.default.fetch(
+        new Request("https://example.test/also-missing", {
+          headers: { accept: "text/markdown" },
+        }),
+      );
+      expect(markdownAccept404.status).toBe(404);
+      expect(markdownAccept404.headers.get("content-type")).toContain("text/markdown");
+
+      // A normal browser 404 stays HTML.
+      const html404 = await serverModule.default.fetch(
+        new Request("https://example.test/also-missing", {
+          headers: { accept: "text/html,*/*;q=0.8" },
+        }),
+      );
+      expect(html404.status).toBe(404);
+      expect(html404.headers.get("content-type")).toContain("text/html");
 
       const manifestResponse = await serverModule.default.fetch(
         new Request("https://example.test/manifest.webmanifest"),
@@ -395,6 +460,33 @@ describe("production middleware runtime", () => {
         expect(pprResponse.headers.get("x-farm-ppr")).toBe("bypass");
         await expect(pprResponse.text()).resolves.toContain("configured context PPR route");
       }
+
+      // Raw markdown-source routes serve page content, so app middleware must
+      // run first: a guard on the route blocks the .md representation too.
+      const guardedMarkdownResponse = await serverModule.default.fetch(
+        new Request("https://example.test/dashboard/private-notes.md"),
+      );
+      expect(guardedMarkdownResponse.status).toBe(401);
+      expect(guardedMarkdownResponse.headers.get("x-file-response")).toBe("markdown-guard");
+      const guardedMarkdownBody = await guardedMarkdownResponse.text();
+      expect(guardedMarkdownBody).not.toContain("dashboard-private-notes-source");
+
+      // A pass-through middleware match still serves the source and carries
+      // the middleware's response headers.
+      const allowedMarkdownResponse = await serverModule.default.fetch(
+        new Request("https://example.test/dashboard/notes.md"),
+      );
+      expect(allowedMarkdownResponse.status).toBe(200);
+      expect(allowedMarkdownResponse.headers.get("content-type")).toContain("text/markdown");
+      expect(allowedMarkdownResponse.headers.get("x-farm-middleware")).toBe("yes");
+      await expect(allowedMarkdownResponse.text()).resolves.toContain("dashboard-notes-source");
+
+      // Routes outside every matcher keep serving their markdown source.
+      const publicMarkdownResponse = await serverModule.default.fetch(
+        new Request("https://example.test/public-notes.md"),
+      );
+      expect(publicMarkdownResponse.status).toBe(200);
+      await expect(publicMarkdownResponse.text()).resolves.toContain("public-notes-source");
 
       const generatedMetadataResponse = await serverModule.default.fetch(
         new Request("https://example.test/metadata/42?variant=featured"),

@@ -255,9 +255,20 @@ function createRscRequest(event) {
   return new Request(event.req, { signal: controller.signal });
 }
 
-export default defineEventHandler((event) => handler(createRscRequest(event), {
-  waitUntil: (promise) => event.waitUntil(promise),
-}));
+export default defineEventHandler(async (event) => {
+  const response = await handler(createRscRequest(event), {
+    waitUntil: (promise) => event.waitUntil(promise),
+  });
+  // H3's prepared headers override Response headers. Keep both the runtime's
+  // fields (e.g. Accept-Encoding from static middleware) and the app's fields.
+  const vary = [event.res.headers.get('vary'), response.headers.get('vary')]
+    .filter(Boolean).join(',').split(',').map(value => value.trim()).filter(Boolean);
+  if (vary.length) {
+    const fields = new Map(vary.map(value => [value.toLowerCase(), value]));
+    event.res.headers.set('vary', fields.has('*') ? '*' : [...fields.values()].join(', '));
+  }
+  return response;
+});
 `.trim();
   const entryPath = path.join(buildDir, "rsc-entry.mjs");
   mkdirSync(buildDir, { recursive: true });
@@ -449,12 +460,13 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
     }
   }
   if (existsSync(ssrIndexPath)) {
-    const assetsDir = path.join(publicDir, "assets");
+    const assetsDirName = assetsDir ?? "assets";
+    const assetsRoot = path.join(publicDir, assetsDirName);
     let clientCssHref = "";
-    if (existsSync(assetsDir)) {
-      const files = readdirSync(assetsDir);
+    if (existsSync(assetsRoot)) {
+      const files = readdirSync(assetsRoot);
       const cssFile = files.find((f) => f.endsWith(".css"));
-      if (cssFile) clientCssHref = "/assets/" + cssFile;
+      if (cssFile) clientCssHref = `/${assetsDirName}/${cssFile}`;
     }
     try {
       let ssrCode = readFileSync(ssrIndexPath, "utf-8");

@@ -1,6 +1,6 @@
 import type { FarmPlugin, FarmPluginContext } from "../plugin";
 import type { FarmRequest, FarmResponse } from "../types";
-import { Readable } from "node:stream";
+import { pipeline, Readable } from "node:stream";
 import { constants, createBrotliCompress, createGzip } from "node:zlib";
 
 type SupportedEncoding = "br" | "gzip";
@@ -42,10 +42,9 @@ function selectEncoding(header: string): SupportedEncoding | undefined {
   return brotli >= gzip ? "br" : "gzip";
 }
 
-function canCompress(request: Request, response: Response): boolean {
+function isCompressionEligible(request: Request, response: Response): boolean {
   if (
-    request.method === "HEAD" ||
-    !response.body ||
+    (request.method !== "HEAD" && !response.body) ||
     response.status === 204 ||
     response.status === 205 ||
     response.status === 304 ||
@@ -56,8 +55,8 @@ function canCompress(request: Request, response: Response): boolean {
     return false;
   }
 
-  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-  return contentType !== "text/event-stream";
+  const mediaType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  return mediaType !== "text/event-stream";
 }
 
 function appendVary(headers: Headers, value: string): void {
@@ -68,6 +67,7 @@ function appendVary(headers: Headers, value: string): void {
         .map((item) => item.trim())
         .filter(Boolean)
     : [];
+  if (values.includes("*")) return;
   if (!values.some((item) => item.toLowerCase() === value.toLowerCase())) {
     values.push(value);
   }
@@ -75,10 +75,21 @@ function appendVary(headers: Headers, value: string): void {
 }
 
 function compressResponse(response: Response, encoding: SupportedEncoding): Response {
+  // Both compressors must flush per chunk. Without an explicit flush mode brotli
+  // buffers until its 4 MB window fills or the source ends, so a streaming SSR,
+  // RSC, or NDJSON response delivers nothing to the client until it completes -
+  // and `selectEncoding` prefers brotli on every tie, so that is the default
+  // path for an ordinary browser.
   const compressor =
-    encoding === "br" ? createBrotliCompress() : createGzip({ flush: constants.Z_SYNC_FLUSH });
+    encoding === "br"
+      ? createBrotliCompress({ flush: constants.BROTLI_OPERATION_FLUSH })
+      : createGzip({ flush: constants.Z_SYNC_FLUSH });
   const input = Readable.fromWeb(response.body as any);
-  const output = input.pipe(compressor);
+  const output = pipeline(input, compressor, () => {
+    // pipeline forwards source failures to the compressed body and destroys
+    // the source when the response consumer cancels it. The web stream owns
+    // observing the resulting destination error.
+  });
   const headers = new Headers(response.headers);
 
   headers.set("content-encoding", encoding);
@@ -91,6 +102,17 @@ function compressResponse(response: Response, encoding: SupportedEncoding): Resp
   }
 
   return new Response(Readable.toWeb(output) as ReadableStream<Uint8Array>, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function varyIdentityResponse(response: Response): Response {
+  const headers = new Headers(response.headers);
+  appendVary(headers, "Accept-Encoding");
+
+  return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
     headers,
@@ -118,10 +140,12 @@ export function createCompressionPlugin({
 
     runtime: {
       after({ request, response, isProd }) {
-        if (!isProd || !canCompress(request, response)) return;
+        if (!isProd || !isCompressionEligible(request, response)) return;
+
+        if (request.method === "HEAD") return varyIdentityResponse(response);
 
         const encoding = selectEncoding(request.headers.get("accept-encoding") ?? "");
-        if (!encoding) return;
+        if (!encoding) return varyIdentityResponse(response);
         return compressResponse(response, encoding);
       },
     },

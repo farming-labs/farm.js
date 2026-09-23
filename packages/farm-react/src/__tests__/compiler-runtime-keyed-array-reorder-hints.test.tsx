@@ -5,6 +5,9 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCompiledComponent,
+  createCompilerKeyedArrayFilter,
+  createCompilerKeyedArrayMapReorder,
+  createCompilerKeyedArrayQueuedMapPipeline,
   createCompilerKeyedArrayReorder,
   type CompilerKeyedRowElement,
 } from "../compiler-runtime";
@@ -21,6 +24,7 @@ interface Item {
 type ReversibleArray = Item[] & { toReversed(): Item[] };
 
 const roots: Root[] = [];
+const stressIt = process.env.FARM_REACT_STRESS === "1" ? it : it.skip;
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -54,7 +58,13 @@ function rowDescriptor(item: Item): CompilerKeyedRowElement {
   };
 }
 
-function createReorderHarness(initialItems: Item[], readsCollection = false) {
+function createReorderHarness(
+  initialItems: Item[],
+  readsCollection = false,
+  reactivity?: "static" | "hybrid",
+  delegateEvents = false,
+) {
+  const calls: string[] = [];
   const counters = {
     executions: 0,
     renders: 0,
@@ -63,17 +73,56 @@ function createReorderHarness(initialItems: Item[], readsCollection = false) {
     bindings: 0,
   };
   let reverse: () => void = () => undefined;
+  let editAndReverse: () => void = () => undefined;
+  let removeAndReverse: () => void = () => undefined;
   let queueTwo: () => void = () => undefined;
+  let queueThree: () => void = () => undefined;
+  let plainThenReverse: () => void = () => undefined;
   let customReverse: () => void = () => undefined;
   const Table = createCompiledComponent({
     displayName: "ReorderTable",
+    reactivity,
     initialize: () => [initialItems],
     render(_props: Record<string, never>, state, blocks) {
       counters.executions += 1;
       const items = () => state[0].get() as Item[];
       reverse = () => state[0].set((previous) => hintedReverse(previous as Item[]));
+      editAndReverse = () => {
+        state[0].set((previous) => {
+          const source = previous as Item[];
+          return createCompilerKeyedArrayQueuedMapPipeline(source, (current, applyMap) =>
+            applyMap(current, source.map, (item: Item) =>
+              item.id === "row-0" ? { ...item, label: `${item.label}!` } : item,
+            ),
+          );
+        });
+        state[0].set((previous) => {
+          const source = previous as ReversibleArray;
+          return createCompilerKeyedArrayMapReorder(source, source.toReversed);
+        });
+      };
+      removeAndReverse = () => {
+        state[0].set((previous) => {
+          const source = previous as Item[];
+          return createCompilerKeyedArrayFilter(
+            source,
+            source.filter,
+            (_item: Item, index: number) => index % 2 === 0,
+          );
+        });
+        state[0].set((previous) => hintedReverse(previous as Item[]));
+      };
       queueTwo = () => {
         state[0].set((previous) => hintedReverse(previous as Item[]));
+        state[0].set((previous) => hintedReverse(previous as Item[]));
+      };
+      queueThree = () => {
+        state[0].set((previous) => hintedReverse(previous as Item[]));
+        state[0].set((previous) => hintedReverse(previous as Item[]));
+        state[0].set((previous) => hintedReverse(previous as Item[]));
+      };
+      plainThenReverse = () => {
+        state[0].set((previous) => [...(previous as Item[])]);
         state[0].set((previous) => hintedReverse(previous as Item[]));
       };
       customReverse = () =>
@@ -90,7 +139,20 @@ function createReorderHarness(initialItems: Item[], readsCollection = false) {
         <section>
           <blocks.KeyedRows
             collectionDependency={0}
+            delegateEvents={delegateEvents}
             dependencies={[0]}
+            events={
+              delegateEvents
+                ? [
+                    {
+                      name: "onClick",
+                      path: [],
+                      invoke: (item, index) => calls.push(`${(item as Item).label}:${index}`),
+                    },
+                  ]
+                : undefined
+            }
+            filterIndexIndependent
             id={0}
             items={items}
             reorderIndexIndependent
@@ -134,10 +196,15 @@ function createReorderHarness(initialItems: Item[], readsCollection = false) {
   });
   return {
     Table,
+    calls,
     counters,
     customReverse: () => customReverse(),
+    plainThenReverse: () => plainThenReverse(),
+    queueThree: () => queueThree(),
     queueTwo: () => queueTwo(),
     reverse: () => reverse(),
+    editAndReverse: () => editAndReverse(),
+    removeAndReverse: () => removeAndReverse(),
   };
 }
 
@@ -145,42 +212,233 @@ function itemLabels(container: Element): string[] {
   return [...container.querySelectorAll("li")].map((node) => node.textContent || "");
 }
 
+function trackRowIndexWrites() {
+  const writes = { count: 0 };
+  const originalSet = WeakMap.prototype.set;
+  vi.spyOn(WeakMap.prototype, "set").mockImplementation(function (
+    this: WeakMap<object, unknown>,
+    key: object,
+    value: unknown,
+  ) {
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      "element" in value &&
+      value.element === key
+    ) {
+      writes.count += 1;
+    }
+    return originalSet.call(this, key, value);
+  });
+  return writes;
+}
+
 describe("compiled keyed-array reorder hints", () => {
-  it("reverses 4,096 rows with minimum DOM moves and no key, descriptor, or binding reads", async () => {
-    const initialItems = Array.from(
-      { length: 4_096 },
-      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+  for (const reactivity of ["static", "hybrid"] as const) {
+    it.each(["reverse", "queueTwo", "queueThree", "editAndReverse"] as const)(
+      `retains owned row maps and element indexes after %s in ${reactivity}`,
+      async (action) => {
+        const initialItems = Array.from(
+          { length: 256 },
+          (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+        );
+        const harness = createReorderHarness(initialItems, false, reactivity, true);
+        const container = document.createElement("div");
+        document.body.append(container);
+        const root = createRoot(container);
+        roots.push(root);
+        await act(async () => root.render(<harness.Table />));
+        const initialRows = [...container.querySelectorAll("li")];
+        const list = container.querySelector("ul")!;
+        const insertBefore = vi.spyOn(list, "insertBefore");
+        const indexWrites = trackRowIndexWrites();
+        let rowMapCopies = 0;
+        const originalIterator = Map.prototype[Symbol.iterator];
+        vi.spyOn(Map.prototype, Symbol.iterator).mockImplementation(
+          function (this: Map<string, { element?: Element }>) {
+            if (
+              this.size === initialItems.length &&
+              this.get("row-0")?.element === initialRows[0]
+            ) {
+              rowMapCopies += 1;
+            }
+            return originalIterator.call(this);
+          },
+        );
+
+        let expectedRows = initialRows;
+        let expectedItems = initialItems;
+        for (let commit = 0; commit < 3; commit += 1) {
+          rowMapCopies = 0;
+          indexWrites.count = 0;
+          harness.counters.keys = 0;
+          harness.counters.descriptors = 0;
+          harness.counters.bindings = 0;
+          insertBefore.mockClear();
+          await act(async () => {
+            harness[action]();
+            await flushCompilerUpdates();
+          });
+          if (action === "editAndReverse") {
+            expectedItems = expectedItems.map((item) =>
+              item.id === "row-0" ? { ...item, label: `${item.label}!` } : item,
+            );
+          }
+          if (action !== "queueTwo") {
+            expectedRows = [...expectedRows].reverse();
+            expectedItems = [...expectedItems].reverse();
+          }
+          expect([...container.querySelectorAll("li")]).toEqual(expectedRows);
+          expect(itemLabels(container)).toEqual(expectedItems.map((item) => item.label));
+          expect(insertBefore).toHaveBeenCalledTimes(action === "queueTwo" ? 0 : 255);
+          expect(harness.counters).toEqual({
+            executions: 1,
+            renders: 1,
+            keys: action === "editAndReverse" ? 1 : 0,
+            descriptors: 0,
+            bindings: action === "editAndReverse" ? 1 : 0,
+          });
+          expect(rowMapCopies).toBe(0);
+          expect(indexWrites.count).toBe(0);
+          harness.calls.length = 0;
+          await act(async () => {
+            for (const index of [0, 127, 255]) expectedRows[index].click();
+          });
+          expect(harness.calls).toEqual(
+            [0, 127, 255].map((index) => `${expectedItems[index].label}:${index}`),
+          );
+        }
+      },
     );
+
+    it(`rebuilds the element index after structural removals in ${reactivity}`, async () => {
+      const initialItems = Array.from(
+        { length: 16 },
+        (_, index): Item => ({
+          id: `row-${index}`,
+          label: `Row ${index}`,
+        }),
+      );
+      const harness = createReorderHarness(initialItems, false, reactivity, true);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      roots.push(root);
+      await act(async () => root.render(<harness.Table />));
+      let expectedRows = [...container.querySelectorAll("li")];
+      let expectedItems = initialItems;
+      const writes = trackRowIndexWrites();
+      for (let commit = 0; commit < 3; commit += 1) {
+        const removedRows = expectedRows.filter((_, index) => index % 2 !== 0);
+        expectedRows = expectedRows.filter((_, index) => index % 2 === 0).reverse();
+        expectedItems = expectedItems.filter((_, index) => index % 2 === 0).reverse();
+        writes.count = 0;
+        await act(async () => {
+          harness.removeAndReverse();
+          await flushCompilerUpdates();
+        });
+        expect(writes.count).toBe(expectedRows.length);
+        expect([...container.querySelectorAll("li")]).toEqual(expectedRows);
+        expect(itemLabels(container)).toEqual(expectedItems.map((item) => item.label));
+        harness.calls.length = 0;
+        await act(async () => {
+          for (const row of removedRows) {
+            expect(row.isConnected).toBe(false);
+            row.click();
+          }
+          for (const row of expectedRows) row.click();
+        });
+        expect(harness.calls).toEqual(expectedItems.map((item, index) => `${item.label}:${index}`));
+        expect(harness.counters.executions).toBe(1);
+      }
+    });
+  }
+
+  stressIt(
+    "reverses 4,096 rows with minimum DOM moves and no key, descriptor, or binding reads",
+    async () => {
+      const initialItems = Array.from(
+        { length: 4_096 },
+        (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+      );
+      const harness = createReorderHarness(initialItems);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      roots.push(root);
+      await act(async () => root.render(<harness.Table />));
+      const first = container.querySelector('[data-key="row-0"]');
+      const last = container.querySelector('[data-key="row-4095"]');
+      const list = container.querySelector("ul")!;
+      const insertBefore = vi.spyOn(list, "insertBefore");
+      harness.counters.keys = 0;
+      harness.counters.descriptors = 0;
+      harness.counters.bindings = 0;
+
+      await act(async () => {
+        harness.reverse();
+        await flushCompilerUpdates();
+      });
+
+      expect(container.querySelector("li:first-child")).toBe(last);
+      expect(container.querySelector("li:last-child")).toBe(first);
+      expect(insertBefore).toHaveBeenCalledTimes(4_095);
+      expect(harness.counters.executions).toBe(1);
+      expect(harness.counters.renders).toBe(1);
+      expect(harness.counters.keys).toBe(0);
+      expect(harness.counters.descriptors).toBe(0);
+      expect(harness.counters.bindings).toBe(0);
+    },
+  );
+
+  it("tracks queued reverse parity as exact identity and reverse orders", async () => {
+    const initialItems: Item[] = [
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ];
     const harness = createReorderHarness(initialItems);
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
     roots.push(root);
     await act(async () => root.render(<harness.Table />));
-    const first = container.querySelector('[data-key="row-0"]');
-    const last = container.querySelector('[data-key="row-4095"]');
+    const rows = [...container.querySelectorAll("li")];
     const list = container.querySelector("ul")!;
     const insertBefore = vi.spyOn(list, "insertBefore");
+    const mapSet = vi.spyOn(Map.prototype, "set");
     harness.counters.keys = 0;
     harness.counters.descriptors = 0;
     harness.counters.bindings = 0;
 
     await act(async () => {
-      harness.reverse();
+      harness.queueTwo();
       await flushCompilerUpdates();
     });
 
-    expect(container.querySelector("li:first-child")).toBe(last);
-    expect(container.querySelector("li:last-child")).toBe(first);
-    expect(insertBefore).toHaveBeenCalledTimes(4_095);
+    expect(itemLabels(container)).toEqual(["Alpha", "Beta", "Gamma"]);
+    expect([...container.querySelectorAll("li")]).toEqual(rows);
+    expect(insertBefore).not.toHaveBeenCalled();
     expect(harness.counters.executions).toBe(1);
     expect(harness.counters.renders).toBe(1);
     expect(harness.counters.keys).toBe(0);
     expect(harness.counters.descriptors).toBe(0);
     expect(harness.counters.bindings).toBe(0);
+    expect(mapSet.mock.calls.filter(([key]) => initialItems.includes(key as Item))).toHaveLength(0);
+
+    insertBefore.mockClear();
+    mapSet.mockClear();
+    await act(async () => {
+      harness.queueThree();
+      await flushCompilerUpdates();
+    });
+
+    expect(itemLabels(container)).toEqual(["Gamma", "Beta", "Alpha"]);
+    expect(insertBefore).toHaveBeenCalledTimes(2);
+    expect(mapSet.mock.calls.filter(([key]) => initialItems.includes(key as Item))).toHaveLength(0);
   });
 
-  it("falls back safely for custom methods, queued hints, and collection-reading bindings", async () => {
+  it("falls back safely for custom methods, unhinted chains, and collection-reading bindings", async () => {
     const initialItems: Item[] = [
       { id: "a", label: "Alpha" },
       { id: "b", label: "Beta" },
@@ -200,19 +458,19 @@ describe("compiled keyed-array reorder hints", () => {
     expect(itemLabels(customContainer)).toEqual(["Gamma", "Beta", "Alpha"]);
     expect(custom.counters.keys).toBeGreaterThan(0);
 
-    const queued = createReorderHarness(initialItems);
-    const queuedContainer = document.createElement("div");
-    document.body.append(queuedContainer);
-    const queuedRoot = createRoot(queuedContainer);
-    roots.push(queuedRoot);
-    await act(async () => queuedRoot.render(<queued.Table />));
-    queued.counters.keys = 0;
+    const unhinted = createReorderHarness(initialItems);
+    const unhintedContainer = document.createElement("div");
+    document.body.append(unhintedContainer);
+    const unhintedRoot = createRoot(unhintedContainer);
+    roots.push(unhintedRoot);
+    await act(async () => unhintedRoot.render(<unhinted.Table />));
+    unhinted.counters.keys = 0;
     await act(async () => {
-      queued.queueTwo();
+      unhinted.plainThenReverse();
       await flushCompilerUpdates();
     });
-    expect(itemLabels(queuedContainer)).toEqual(["Alpha", "Beta", "Gamma"]);
-    expect(queued.counters.keys).toBeGreaterThan(0);
+    expect(itemLabels(unhintedContainer)).toEqual(["Gamma", "Beta", "Alpha"]);
+    expect(unhinted.counters.keys).toBeGreaterThan(0);
 
     const dependent = createReorderHarness(initialItems, true);
     const dependentContainer = document.createElement("div");
@@ -314,7 +572,7 @@ describe("compiled keyed-array reorder hints", () => {
     expect([input.selectionStart, input.selectionEnd]).toEqual([1, 3]);
   });
 
-  it("matches normal React through 2,000 randomized reversals", async () => {
+  it("matches normal React through 2,000 randomized queued reversal batches", async () => {
     const initialItems = Array.from(
       { length: 64 },
       (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
@@ -344,11 +602,12 @@ describe("compiled keyed-array reorder hints", () => {
       compiledRoot.render(<compiled.Table />);
       reactRoot.render(<NormalTable />);
     });
+    compiled.counters.keys = 0;
 
     let seed = 0x9e3779b9;
     for (let update = 0; update < 2_000; update += 1) {
       seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
-      const repetitions = (seed & 3) + 1;
+      const repetitions = 2 + (seed % 3);
       await act(async () => {
         for (let count = 0; count < repetitions; count += 1) {
           compiled.reverse();
@@ -362,6 +621,7 @@ describe("compiled keyed-array reorder hints", () => {
     }
     expect(itemLabels(compiledContainer)).toEqual(itemLabels(reactContainer));
     expect(compiled.counters.executions).toBe(1);
+    expect(compiled.counters.keys).toBe(0);
   }, 15_000);
 
   it("supports StrictMode hydration and ignores a flush after unmount", async () => {
@@ -395,7 +655,7 @@ describe("compiled keyed-array reorder hints", () => {
     document.body.append(unmountContainer);
     const unmountRoot = createRoot(unmountContainer);
     await act(async () => unmountRoot.render(<unmounted.Table />));
-    unmounted.reverse();
+    unmounted.queueTwo();
     await act(async () => unmountRoot.unmount());
     await flushCompilerUpdates();
     expect(unmountContainer.childElementCount).toBe(0);

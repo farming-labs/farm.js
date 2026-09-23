@@ -1,5 +1,5 @@
 import { execFileSync } from "child_process";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, realpathSync } from "fs";
 import path from "path";
 import {
   getDeployTargetForPreset,
@@ -178,6 +178,16 @@ async function resolveFarmDeployContext(options: DeployFarmOptions) {
   });
   const preset = deployConfig.preset || getPresetForDeployTarget(platform) || "node-server";
   const nitroOutput = resolveDeployOutputPath(root, deployConfig.outputDir);
+  if (
+    platform === "vercel" &&
+    path.resolve(nitroOutput) !== path.resolve(root, ".vercel", "output")
+  ) {
+    throw new FarmDeployError(
+      "INVALID_BUILD_OUTPUT",
+      "vercel",
+      `Vercel prebuilt deploys require output at ${path.resolve(root, ".vercel", "output")}. Remove the custom deploy outputDir or deploy that output with your own upload workflow.`,
+    );
+  }
   const cloudflareAgent =
     platform === "cloudflare"
       ? resolveCloudflareAgentDeployPlan(root) ||
@@ -590,6 +600,7 @@ export function resolveCloudflareAgentDeployPlan(
   if (!existsSync(configPath)) {
     throw new Error(`Cloudflare Agents deployment config was not found at ${configPath}.`);
   }
+  assertRealPathInsideProject(projectRoot, configPath, "Cloudflare Agents deployment config");
 
   const environment = metadata.environment;
   if (environment !== undefined && (typeof environment !== "string" || !environment.trim())) {
@@ -621,6 +632,9 @@ function resolveConfiguredCloudflareAgentDeployPlan(
   const projectRoot = path.resolve(root);
   const sourceConfigPath = path.resolve(projectRoot, configuredPath);
   assertPathInsideProject(projectRoot, sourceConfigPath, "Cloudflare Agents source config");
+  if (existsSync(sourceConfigPath)) {
+    assertRealPathInsideProject(projectRoot, sourceConfigPath, "Cloudflare Agents source config");
+  }
   const configPath = path.join(path.dirname(sourceConfigPath), ".farm-cf-agent.wrangler.jsonc");
   const environment = integration.instance.environment;
 
@@ -642,6 +656,12 @@ function assertPathInsideProject(projectRoot: string, candidate: string, label: 
   ) {
     throw new Error(`${label} must stay inside the Farm project root.`);
   }
+}
+
+function assertRealPathInsideProject(projectRoot: string, candidate: string, label: string): void {
+  const realProjectRoot = realpathSync(projectRoot);
+  const realCandidate = realpathSync(candidate);
+  assertPathInsideProject(realProjectRoot, realCandidate, label);
 }
 
 function assertWranglerInstalled(root: string): void {

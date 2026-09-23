@@ -14,6 +14,7 @@ import type {
 import { getClientModuleMetadata } from "../utils/client-component";
 import { toRootRelativeUrlPath } from "../utils";
 import { createFarmRouteRenderPlan } from "../navigation/render-plan";
+import { assertTerminalCatchAll, assertUniqueRouteParameters } from "../routing/specificity";
 
 function layoutAppliesToRoute(layoutPattern: string, routePattern: string): boolean {
   if (layoutPattern === "/") return true;
@@ -97,6 +98,8 @@ function parseRoutePath(filePath: string): {
       })
       .join("/");
 
+  assertTerminalCatchAll(pattern || "/");
+  assertUniqueRouteParameters(pattern || "/");
   return { segments, pattern: pattern || "/" };
 }
 

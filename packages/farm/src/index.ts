@@ -1,4 +1,5 @@
 export * from "./types";
+export type { FarmAgentUserConfig, FarmAgentJsonLd } from "./agent-config";
 export { defineRenderer, REACT_RENDERER } from "./renderer";
 export type {
   FarmRenderer,
@@ -8,6 +9,10 @@ export type {
 } from "./renderer";
 export * from "./utils";
 export * from "./storage";
+export * from "./schema";
+export * from "./schema-sql";
+export * from "./schema-migrate";
+export * from "./schema-tables";
 export * from "./integrations";
 export * from "./integration-orm";
 export * from "./integration-api";
@@ -127,6 +132,7 @@ export * from "./markdown";
 export * from "./app-markdown";
 export * from "./observability";
 export * from "./devtools-config";
+export type { FarmDevtoolsSnapshot, FarmDevtoolsDiagnostic, FarmDevtoolsRuntime } from "./devtools";
 export * from "./dev-indicators";
 export * from "./workflows";
 export * from "./cron";

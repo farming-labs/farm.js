@@ -2,6 +2,7 @@ import {
   farmRouteRuleMatches,
   getFarmSourceRoots,
   getFarmPresetRuntime,
+  isProgrammaticRoutesFileName,
   loadConfig,
   mergeFarmRouteRuntimeConfigs,
   resolveConfig,
@@ -133,7 +134,7 @@ export async function explainFarmRoute(
   const matchingRules = Object.entries(config.routeRules)
     .filter(([pattern]) => farmRouteRuleMatches(pattern, normalizedPathname))
     .sort(([left], [right]) => routeSpecificity(left) - routeSpecificity(right));
-  const rendering = resolveRendering(pageSource, matchingRules);
+  const rendering = resolveRendering(pageSource, matchingRules, config.experimental?.ppr === true);
   const cache = resolveCaching(pageSource, matchingRules);
   const metadataSources = [...layoutSources, { filePath: page.filePath, source: pageSource }];
   const openGraphImage = findNearestSocialImage(config, normalizedPathname, "opengraph-image");
@@ -256,8 +257,14 @@ function discoverMatchingPages(
 
     const sourceDirectory = path.join(source.root, source.srcDir);
     if (!existsSync(sourceDirectory)) continue;
-    for (const filePath of walkFiles(sourceDirectory)) {
-      if (!/\.(?:tsx?|jsx?)$/.test(filePath) || filePath.endsWith(".d.ts")) continue;
+    for (const entry of readdirSync(sourceDirectory, { withFileTypes: true })) {
+      if (
+        (!entry.isFile() && !entry.isSymbolicLink()) ||
+        !isProgrammaticRoutesFileName(entry.name)
+      ) {
+        continue;
+      }
+      const filePath = path.join(sourceDirectory, entry.name);
       const moduleSource = readFileSync(filePath, "utf8");
       for (const pattern of scanProgrammaticPagePaths(moduleSource)) {
         const match = matchRoutePattern(pattern, pathname);
@@ -471,25 +478,28 @@ function readRuntimeExports(source: string): FarmRouteRuntimeConfig {
 function resolveRendering(
   pageSource: string,
   matchingRules: Array<[string, FarmRouteRule]>,
+  experimentalPPR: boolean,
 ): FarmRouteExplanation["rendering"] {
-  const pageRendering = resolveRouteRenderingConfig(
-    {
-      ...(readBooleanExport(pageSource, "ssg") !== undefined
-        ? { ssg: readBooleanExport(pageSource, "ssg") }
-        : {}),
-      ...(readBooleanExport(pageSource, "ppr") !== undefined
-        ? { ppr: readBooleanExport(pageSource, "ppr") }
-        : {}),
-      ...(readBooleanExport(pageSource, "experimental_ppr") !== undefined
-        ? { experimental_ppr: readBooleanExport(pageSource, "experimental_ppr") }
-        : {}),
-      ...(readNumberOrFalseExport(pageSource, "revalidate") !== undefined
-        ? { revalidate: readNumberOrFalseExport(pageSource, "revalidate") }
-        : {}),
-      ...(readDynamicExport(pageSource) ? { dynamic: readDynamicExport(pageSource) } : {}),
-    },
-    pageSource,
-  );
+  const pageModule = {
+    ...(readBooleanExport(pageSource, "ssg") !== undefined
+      ? { ssg: readBooleanExport(pageSource, "ssg") }
+      : {}),
+    ...(readBooleanExport(pageSource, "ppr") !== undefined
+      ? { ppr: readBooleanExport(pageSource, "ppr") }
+      : {}),
+    ...(readBooleanExport(pageSource, "experimental_ppr") !== undefined
+      ? { experimental_ppr: readBooleanExport(pageSource, "experimental_ppr") }
+      : {}),
+    ...(readNumberOrFalseExport(pageSource, "revalidate") !== undefined
+      ? { revalidate: readNumberOrFalseExport(pageSource, "revalidate") }
+      : {}),
+    ...(readDynamicExport(pageSource) ? { dynamic: readDynamicExport(pageSource) } : {}),
+  };
+  const pageRendering = resolveRouteRenderingConfig(pageModule, pageSource, { experimentalPPR });
+  const requestsDisabledPPR =
+    !experimentalPPR &&
+    !pageRendering.ppr &&
+    resolveRouteRenderingConfig(pageModule, pageSource, { experimentalPPR: true }).ppr;
   let mode: FarmRouteExplanation["rendering"]["mode"] = pageRendering.ssg
     ? "static"
     : pageRendering.ppr
@@ -501,7 +511,9 @@ function resolveRendering(
       ? "page static rendering declaration"
       : pageRendering.ppr
         ? "page PPR declaration"
-        : "default server rendering";
+        : requestsDisabledPPR
+          ? "page PPR declaration ignored (experimental.ppr disabled)"
+          : "default server rendering";
   let ppr = pageRendering.ppr;
 
   for (const [pattern, rule] of matchingRules) {
@@ -612,7 +624,15 @@ function normalizePathname(value: string, basePath: string): string {
 }
 
 function splitPath(value: string) {
-  return value.split("/").filter(Boolean).map(decodeURIComponent);
+  return value.split("/").filter(Boolean).map(decodeExplainPathSegment);
+}
+
+function decodeExplainPathSegment(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function toProjectPath(root: string, filePath: string) {

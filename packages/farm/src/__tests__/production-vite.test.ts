@@ -64,7 +64,7 @@ describe.sequential("production Vite selection", () => {
   it.each([
     ["18.20.8", false],
     ["20.18.3", false],
-    ["20.19.0", true],
+    ["20.19.0", false],
     ["21.7.3", false],
     ["22.11.0", false],
     ["22.12.0", true],
@@ -110,7 +110,7 @@ describe.sequential("production Vite selection", () => {
     process.env.FARM_VITE_BUILDER = "rolldown";
 
     await expect(loadFarmProductionVite()).rejects.toThrow(
-      "FARM_VITE_BUILDER=rolldown requires Node 20.19+, Node 22.12+, or a newer release",
+      "FARM_VITE_BUILDER=rolldown requires Node 22.12 or newer",
     );
   });
 

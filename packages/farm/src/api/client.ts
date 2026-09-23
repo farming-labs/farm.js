@@ -7,11 +7,11 @@ import {
   type IntegrationServerClientRoot,
 } from "../integration-client";
 import {
+  FarmClientDataCache,
   getFarmClientDataCache,
   normalizeFarmClientCacheKey,
   type FarmClientCacheEntry,
   type FarmClientCacheKey,
-  type FarmClientDataCache,
 } from "../client-cache";
 import {
   applyFarmCacheInvalidations,
@@ -20,6 +20,14 @@ import {
 } from "../cache-invalidation";
 import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "../cache";
 import { getFarmAPIBaseURL, resolveFarmAPIRequestURL } from "./config";
+import { ClientRouteManifest, type APIRouteManifest, type BoundRouteParams } from "./client-routes";
+import type { RoutePathParams } from "./route";
+import { _resolveCurrentRequest } from "../server/request-bridge";
+import { resolveClientHeaders, type ClientHeaders } from "../client-headers";
+import { createClientCancellation } from "../client-cancellation";
+import { notifyClientObserver, type ClientLifecycleHooks } from "../client-observers";
+import { resolveAPIRequestRuntime, type APIRequestRuntime } from "./server-client-bridge";
+export type { APIRouteManifest } from "./client-routes";
 import {
   isFarmAPIStream,
   isJSONStreamResponse,
@@ -37,10 +45,16 @@ export type APIRouteRefMetadata = {
   sameOrigin: boolean;
 };
 
-export type APIClientOptions = {
+export type APIClientOptions = ClientLifecycleHooks & {
+  /** Generated path/method metadata required for dynamic shorthand and $params scopes. */
+  routes?: APIRouteManifest;
   baseURL?: string;
-  headers?: Record<string, string>;
+  headers?: ClientHeaders;
   credentials?: RequestCredentials;
+  /** Whole-call deadline in milliseconds. 0 (default) disables it. */
+  timeoutMs?: number;
+  /** HTTP transport only; local server dispatch does not use it. */
+  fetch?: typeof globalThis.fetch;
   cacheDefaults?: CacheOptions;
   integrations?: IntegrationClientOptions;
 };
@@ -114,6 +128,7 @@ export class APIClientError<
 
 export type APIClientSystemError =
   | APIClientError<"http_error", unknown, number>
+  | APIClientError<"aborted" | "timeout", unknown, 0>
   | APIClientError<"network_error", unknown, 0>;
 
 export type RequestEvent = {
@@ -142,19 +157,62 @@ export type ResponseEvent<TData = unknown, TError = Error> = {
 };
 
 export type CachePolicy = "cache-first" | "network-only" | "stale-while-revalidate";
+export type CacheScope = "client" | "shared";
 
 export type CacheOptions = {
   key?: FarmClientCacheKey;
   policy?: CachePolicy;
+  /** Select client-local or public shared storage. Identity-carrying requests always stay local. */
+  scope?: CacheScope;
   staleTime?: number;
   gcTime?: number;
   dedupeMs?: number;
+  /** Allow the configured client cache persistence adapter to store this read. */
+  persist?: boolean;
+};
+
+export type RetryAttemptContext = {
+  /** Zero-based index of the attempt that just failed. */
+  attempt: number;
+  /** Upper-case HTTP method of the request. */
+  method: string;
+  /** Response status, or undefined when the request never produced a response. */
+  status?: number;
+  error: Error;
 };
 
 export type RetryOptions = {
   count?: number;
   delay?: number | ((attempt: number) => number);
+  /**
+   * Decide whether a failed attempt should be retried.
+   *
+   * Defaults to transient failures of idempotent requests only: replaying a
+   * POST or PATCH whose response was lost duplicates the write it performed.
+   * Supply this to opt a specific call in or out.
+   */
+  shouldRetry?: (context: RetryAttemptContext) => boolean;
 };
+
+/**
+ * Methods whose replay has the same effect as a single call, so a retry cannot
+ * duplicate work: the idempotent set from RFC 9110, plus QUERY, which Farm
+ * supports as a read that carries a body.
+ */
+const FARM_IDEMPOTENT_METHODS = new Set(["GET", "HEAD", "OPTIONS", "PUT", "DELETE", "QUERY"]);
+
+/** Statuses that represent a transient condition worth another attempt. */
+const FARM_RETRYABLE_STATUSES = new Set([408, 425, 429]);
+
+function isFarmRetryableFailure(context: RetryAttemptContext): boolean {
+  // A non-idempotent request may already have been applied by the server even
+  // when the client never saw the response, so it is never retried by default.
+  if (!FARM_IDEMPOTENT_METHODS.has(context.method)) return false;
+  // No response at all: a transport failure, which is the transient case retries
+  // exist for.
+  if (context.status === undefined) return true;
+  return context.status >= 500 || FARM_RETRYABLE_STATUSES.has(context.status);
+}
 
 export type InvalidateTarget =
   | FarmClientCacheKey
@@ -190,6 +248,9 @@ export type ClientOptions<
   TUpdates extends readonly unknown[] = readonly OptimisticUpdate[],
 > = {
   key?: CacheKey<TData> | FarmClientCacheKey;
+  signal?: AbortSignal;
+  /** Override the instance deadline; 0 disables it for this call. */
+  timeoutMs?: number;
   cache?: CacheOptions;
   retry?: RetryOptions;
   invalidate?: InvalidateOptions;
@@ -309,8 +370,27 @@ type InferEndpointInput<T> = T extends {
     query: infer TQuery;
   };
 }
-  ? Simplify<BodyInputProp<InferEndpointBody<T>> & QueryInputProp<TQuery>>
-  : {};
+  ? Simplify<
+      BodyInputProp<InferEndpointBody<T>> &
+        QueryInputProp<T extends { __types: { inputQuery: infer I } } ? I : TQuery> &
+        (T extends { __routeParams: infer P }
+          ? keyof P extends never
+            ? { params?: never }
+            : { params: P }
+          : {}) &
+        (T extends { __types: { inputHeaders: infer H } }
+          ? IsNever<H> extends true
+            ? {}
+            : RequiredKeys<H> extends never
+              ? { headers?: H }
+              : { headers: H }
+          : {})
+    >
+  : T extends { __routeParams: infer P }
+    ? keyof P extends never
+      ? { params?: never }
+      : { params: P }
+    : {};
 
 type InferEndpointOutput<T> = T extends {
   __types: {
@@ -342,7 +422,7 @@ type InferEndpointError<T> = T extends {
   : Error;
 
 // Type for a single endpoint method
-type EndpointMethod<T = any> = (<TUpdates extends readonly unknown[] = readonly OptimisticUpdate[]>(
+type EndpointCall<T = any> = <TUpdates extends readonly unknown[] = readonly OptimisticUpdate[]>(
   ...args: HasRequiredKeys<InferEndpointInput<T>> extends true
     ? [
         options: InferEndpointInput<T>,
@@ -352,17 +432,58 @@ type EndpointMethod<T = any> = (<TUpdates extends readonly unknown[] = readonly 
         options?: InferEndpointInput<T>,
         clientOptions?: ClientOptions<InferEndpointOutput<T>, InferEndpointError<T>, TUpdates>,
       ]
-) => Promise<APIResult<InferEndpointOutput<T>, InferEndpointError<T>>>) &
+) => Promise<APIResult<InferEndpointOutput<T>, InferEndpointError<T>>>;
+type EndpointMethod<T = any> = EndpointCall<T> &
   RouteRef<InferEndpointOutput<T>, InferEndpointInput<T>>;
 
-// Type for converting router structure to client structure
-type RouterToClient<T> = {
-  [K in keyof T]: T[K] extends TypedEndpointLike
-    ? EndpointMethod<T[K]>
+type DynamicKeys<T> = Extract<keyof T, `[${string}]`>;
+type MethodKeys = "get" | "head" | "query" | "post" | "put" | "patch" | "delete" | "options";
+type OwnMethodKeys<T> = {
+  [K in Extract<keyof T, MethodKeys>]: T[K] extends TypedEndpointLike | ((...args: any[]) => any)
+    ? K
+    : never;
+}[Extract<keyof T, MethodKeys>];
+type WithRouteParams<T, P> = T & { __routeParams: P };
+type UnionToIntersection<U> = (U extends unknown ? (v: U) => void : never) extends (
+  v: infer I,
+) => void
+  ? I
+  : never;
+type ChildMethods<T> = { [K in DynamicKeys<T>]: OwnMethodKeys<T[K]> }[DynamicKeys<T>];
+type MethodEndpoints<T, M extends PropertyKey, P> =
+  | (M extends OwnMethodKeys<T> ? WithRouteParams<T[M], P> : never)
+  | {
+      [K in DynamicKeys<T>]: M extends keyof T[K]
+        ? WithRouteParams<T[K][M], P & RoutePathParams<K>>
+        : never;
+    }[DynamicKeys<T>];
+type DistributedCall<T> = T extends unknown ? EndpointCall<T> : never;
+type ScopedMethod<T> = UnionToIntersection<DistributedCall<T>> &
+  EndpointCall<T> &
+  RouteRef<InferEndpointOutput<T>, InferEndpointInput<T>>;
+
+// Keep bracket access for compatibility; explicit binding preserves intermediate segments.
+type RouterToClient<T, P = {}> = {
+  [K in Exclude<keyof T, OwnMethodKeys<T>>]: T[K] extends TypedEndpointLike
+    ? EndpointMethod<WithRouteParams<T[K], P>>
     : T[K] extends Record<string, any>
-      ? RouterToClient<T[K]> // Recurssive handling of the multi level api routes
-      : EndpointMethod<T[K]>;
-};
+      ? RouterToClient<T[K], P & (K extends string ? RoutePathParams<K> : {})>
+      : EndpointMethod<WithRouteParams<T[K], P>>;
+} & {
+  [M in OwnMethodKeys<T> | ChildMethods<T>]: M extends ChildMethods<T>
+    ? ScopedMethod<MethodEndpoints<T, M, P>>
+    : M extends keyof T
+      ? EndpointMethod<WithRouteParams<T[M], P>>
+      : never;
+} & ([DynamicKeys<T>] extends [never]
+    ? {}
+    : {
+        $params: UnionToIntersection<
+          {
+            [K in DynamicKeys<T>]: (params: RoutePathParams<K>) => RouterToClient<T[K], P>;
+          }[DynamicKeys<T>]
+        >;
+      });
 
 export type RouteAPIClient<TRouter extends Record<string, any>> = RouterToClient<TRouter>;
 
@@ -375,6 +496,118 @@ export type ServerAPIClient<
   TEndpoints extends Record<string, any>,
   TIntegrations extends Record<string, any> = {},
 > = TEndpoints & IntegrationServerClientRoot<TIntegrations>;
+
+export type ApiClients<
+  TRouter extends Record<string, any>,
+  TIntegrations extends Record<string, any> = {},
+> = {
+  api: RouteAPIClient<TRouter> & IntegrationServerClientRoot<TIntegrations>;
+  apiClient: APIClient<TRouter, TIntegrations>;
+};
+
+/**
+ * Define one shared pair of typed callers. Import only generated route metadata
+ * here, not endpoint modules. `api` dispatches locally during a Farm request;
+ * `apiClient` uses HTTP. Both return the same app-route APIResult shape.
+ */
+export function createApiClients<TRouter extends Record<string, any>>(
+  options: APIClientWithoutIntegrationsOptions,
+): { api: RouteAPIClient<TRouter>; apiClient: RouteAPIClient<TRouter> };
+export function createApiClients<
+  TRouter extends Record<string, any>,
+  TIntegrations extends Record<string, any> = {},
+>(options?: APIClientOptions): ApiClients<TRouter, TIntegrations>;
+export function createApiClients<
+  TRouter extends Record<string, any>,
+  TIntegrations extends Record<string, any> = {},
+>(
+  options: APIClientOptions | APIClientWithoutIntegrationsOptions = {},
+): ApiClients<TRouter, TIntegrations> {
+  // A module-level pair is safe across requests. No cache, credentials, or
+  // dispatcher from one request is retained by another request's caller.
+  const localScopes = new WeakMap<APIRequestRuntime, WeakMap<Request, { request: APICall }>>();
+  const routeMeta = new WeakMap<AnyRouteRef, RouteMeta>();
+  const api = createNestedProxy(
+    [],
+    async (path: string, method: string, input: any, clientOptions?: ClientOptions<any, any>) => {
+      if (typeof window !== "undefined") {
+        throw new Error(
+          "api is server-only. Use apiClient from createApiClients() in the browser.",
+        );
+      }
+      const currentRequest = _resolveCurrentRequest();
+      const runtime = resolveAPIRequestRuntime();
+      if (!currentRequest || !runtime) {
+        throw new Error(
+          "api requires an active Farm server request. Call it from a server page, query, action, or API handler; use apiClient with an absolute baseURL for standalone HTTP calls.",
+        );
+      }
+      let localClients = localScopes.get(runtime);
+      if (!localClients) {
+        localClients = new WeakMap();
+        localScopes.set(runtime, localClients);
+      }
+      let local = localClients.get(currentRequest);
+      if (!local) {
+        const origin = new URL(currentRequest.url).origin;
+        const headers = new Headers();
+        // Only identity/content negotiation headers are inherited. In
+        // particular, never copy the outer request's body or hop-by-hop fields.
+        for (const name of ["cookie", "authorization", "accept-language"]) {
+          const value = currentRequest.headers.get(name);
+          if (value !== null) headers.set(name, value);
+        }
+        local = createAPIClientRuntime(
+          {
+            ...options,
+            integrations: false,
+            baseURL: new URL(runtime.basePath, origin).toString(),
+          },
+          {
+            headers,
+            signal: currentRequest.signal,
+            cache: new FarmClientDataCache({ subscribeToInvalidation: false }),
+            routeMeta,
+            fetch: (url, init) => {
+              if (new URL(url).origin !== origin) {
+                throw new Error(
+                  "api can only dispatch to this Farm app. Use apiClient for HTTP calls.",
+                );
+              }
+              currentRequest.signal.throwIfAborted();
+              return runtime.dispatch(new Request(url, init));
+            },
+          },
+        );
+        localClients.set(currentRequest, local);
+      }
+      return local.request(path, method, input, clientOptions);
+    },
+    routeMeta,
+    "/api",
+    true,
+    options.integrations === false
+      ? undefined
+      : {
+          integrations: integrationsServer<TIntegrations>({
+            baseURL: options.baseURL,
+            headers: options.headers,
+            credentials: options.credentials,
+            timeoutMs: options.timeoutMs,
+            fetch: options.fetch,
+            onRequest: options.onRequest,
+            onResponse: options.onResponse,
+            onError: options.onError,
+            ...options.integrations,
+          }),
+        },
+    options.routes ? new ClientRouteManifest(options.routes) : undefined,
+  );
+  return {
+    api: api as ApiClients<TRouter, TIntegrations>["api"],
+    apiClient: createAPIClient<TRouter, TIntegrations>(options as APIClientOptions),
+  };
+}
 
 /**
  * Create a typed RPC client for Farm.js API routes
@@ -422,8 +655,32 @@ export function createAPIClient<
 >(
   options: APIClientOptions | APIClientWithoutIntegrationsOptions = {},
 ): RouteAPIClient<TRouter> | APIClient<TRouter, TIntegrations> {
+  return createAPIClientRuntime<TRouter, TIntegrations>(options).client;
+}
+
+type APICall = (
+  path: string,
+  method: string,
+  input?: any,
+  options?: ClientOptions<any, any>,
+) => Promise<APIResult<any, Error>>;
+
+function createAPIClientRuntime<
+  TRouter extends Record<string, any>,
+  TIntegrations extends Record<string, any> = {},
+>(
+  options: APIClientOptions | APIClientWithoutIntegrationsOptions = {},
+  transport?: {
+    headers?: HeadersInit;
+    signal?: AbortSignal;
+    fetch(url: string, init: RequestInit): Promise<Response>;
+    cache: FarmClientDataCache;
+    routeMeta: WeakMap<AnyRouteRef, RouteMeta>;
+  },
+): { client: APIClient<TRouter, TIntegrations>; request: APICall } {
   options ??= {};
   const baseURL = options.baseURL || getFarmAPIBaseURL();
+  const httpFetch = options.fetch;
   const integrationOptions =
     options.integrations === false
       ? false
@@ -431,6 +688,11 @@ export function createAPIClient<
           baseURL: options.baseURL,
           headers: options.headers,
           credentials: options.credentials,
+          timeoutMs: options.timeoutMs,
+          fetch: httpFetch,
+          onRequest: options.onRequest,
+          onResponse: options.onResponse,
+          onError: options.onError,
           ...(typeof options.integrations === "object" ? options.integrations : {}),
         };
   const rootAliases =
@@ -440,13 +702,20 @@ export function createAPIClient<
           integrations: integrationsClient<TIntegrations>(integrationOptions),
         };
 
-  const cacheState = getFarmClientDataCache();
-  const inflightState = new Map<string, InflightEntry>();
-  const routeMeta = new WeakMap<AnyRouteRef, RouteMeta>();
+  const sharedCacheState = transport?.cache ?? getFarmClientDataCache();
+  const localCaches = transport ? new Set([sharedCacheState]) : undefined;
+  const sharedInflightState = new Map<string, InflightEntry>();
+  let scopedRequestState: ScopedRequestState | undefined;
+  const routeMeta = transport?.routeMeta ?? new WeakMap<AnyRouteRef, RouteMeta>();
   let requestCounter = 0;
 
   // Create a simple fetch-based client (browser compatible)
-  const fetchClient = async (path: string, requestOptions: any = {}) => {
+  const fetchClient = async (
+    path: string,
+    requestOptions: any,
+    defaultHeaders: Headers,
+    cancellation: ReturnType<typeof createClientCancellation>,
+  ) => {
     const url = resolveFarmAPIRequestURL(path, baseURL);
     const method = String(requestOptions.method || "GET").toUpperCase();
 
@@ -463,34 +732,50 @@ export function createAPIClient<
     }
 
     // Prepare fetch options
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...options.headers,
-      ...requestOptions.headers,
-    };
+    const headers = new Headers(defaultHeaders);
+    new Headers(requestOptions.headers).forEach((value, key) => headers.set(key, value));
     const fetchOptions: RequestInit = {
       method,
       headers,
       credentials: options.credentials,
+      signal: cancellation.signal,
     };
+    if (method === "QUERY" && !headers.has("content-type")) {
+      headers.set("content-type", "application/json");
+    }
 
     // Handle body
     if (requestOptions.body !== undefined) {
       if (isFormData(requestOptions.body)) {
-        deleteHeader(headers, "content-type");
+        headers.delete("content-type");
         fetchOptions.body = requestOptions.body;
       } else {
+        if (!headers.has("content-type")) headers.set("content-type", "application/json");
         fetchOptions.body = JSON.stringify(requestOptions.body);
       }
     }
 
-    const response = await fetch(url.toString(), fetchOptions);
-    applyFarmCacheInvalidations(
-      decodeFarmCacheInvalidations(response.headers?.get?.(FARM_CACHE_INVALIDATION_HEADER)),
+    cancellation.check();
+    const response = await (transport?.fetch ?? httpFetch ?? fetch)(url.toString(), fetchOptions);
+    cancellation.check();
+    const invalidations = decodeFarmCacheInvalidations(
+      response.headers?.get?.(FARM_CACHE_INVALIDATION_HEADER),
     );
-    let data: any = undefined;
-    if (method !== "HEAD" && response.status !== 204 && response.status !== 205) {
-      data = isJSONStreamResponse(response) ? readJSONStream(response) : await response.json();
+    if (transport) {
+      for (const cache of localCaches!) {
+        for (const key of invalidations) cache.invalidate(key);
+      }
+    } else {
+      applyFarmCacheInvalidations(invalidations);
+    }
+    let data: unknown;
+    try {
+      data = await readAPIResponseData(response, method);
+      cancellation.check();
+    } catch (decodeError) {
+      if (!(decodeError instanceof APIResponseDecodeError)) throw decodeError;
+      if (response.ok) throw decodeError.cause;
+      return { response, data: undefined, decodeError: decodeError.cause };
     }
 
     return { response, data };
@@ -502,316 +787,648 @@ export function createAPIClient<
     input: any = {},
     clientOptions?: ClientOptions<any, any>,
   ): Promise<APIResult<any, Error>> => {
-    const methodUpper = method.toUpperCase() as StatusEvent["method"];
-    const requestId = `${Date.now()}-${++requestCounter}`;
-    const cacheOptions = clientOptions?.cache
-      ? {
-          ...options.cacheDefaults,
-          ...clientOptions.cache,
-        }
-      : undefined;
-    const configuredCacheKey = clientOptions?.key ?? cacheOptions?.key;
-    const cacheKey = normalizeFarmClientCacheKey(
-      configuredCacheKey ?? buildCacheKey(methodUpper, path, input, baseURL, options.headers),
-    ) as CacheKey<any>;
-    const now = Date.now();
-
-    const emitStatus = (phase: StatusPhase, payload?: Partial<StatusEvent>) => {
-      clientOptions?.onStatus?.({
-        phase,
-        requestId,
-        method: methodUpper,
-        key: cacheKey,
-        input,
-        timestamp: Date.now(),
-        ...payload,
-      });
+    const cancellation = createClientCancellation(
+      clientOptions?.signal,
+      clientOptions?.timeoutMs ?? options.timeoutMs,
+      transport?.signal,
+    );
+    const normalizeCallError = (error: unknown): Error => {
+      if (!cancellation.signal?.aborted) return normalizeError(error);
+      const normalized = new APIClientError(
+        cancellation.timedOut ? "timeout" : "aborted",
+        undefined,
+        {
+          status: 0,
+          message: cancellation.timedOut ? "Client request timed out" : "Client request aborted",
+        },
+      );
+      (normalized as Error & { cause?: unknown }).cause = cancellation.signal.reason;
+      return normalized;
     };
+    try {
+      const methodUpper = method.toUpperCase() as StatusEvent["method"];
+      const requestId = `${Date.now()}-${++requestCounter}`;
+      const defaultHeaders = new Headers(transport?.headers);
+      let requestContextError: Error | undefined;
+      try {
+        cancellation.check();
+        const resolved = resolveClientHeaders(options.headers);
+        const headers =
+          resolved instanceof Headers ? resolved : await cancellation.run(() => resolved);
+        cancellation.check();
+        headers.forEach((value, name) => defaultHeaders.set(name, value));
+      } catch (error) {
+        requestContextError = normalizeCallError(error);
+      }
+      const cacheOptions = clientOptions?.cache
+        ? {
+            ...options.cacheDefaults,
+            ...clientOptions.cache,
+          }
+        : undefined;
+      const configuredCacheKey = clientOptions?.key ?? cacheOptions?.key;
+      const cacheKey = normalizeFarmClientCacheKey(
+        configuredCacheKey ?? buildCacheKey(methodUpper, path, input, baseURL, defaultHeaders),
+      ) as CacheKey<any>;
+      const now = Date.now();
 
-    const entry = getValidCacheEntry(cacheState, cacheKey, now);
-    const policy = cacheOptions?.policy ?? (cacheOptions ? "cache-first" : "network-only");
-    const staleTime = cacheOptions?.staleTime ?? 0;
-    const hasReliableDefaultCacheKey =
-      methodUpper !== "QUERY" || !isFormData(input?.body) || configuredCacheKey !== undefined;
-    const isCacheEnabled =
-      Boolean(cacheOptions) &&
-      (methodUpper === "GET" || methodUpper === "QUERY") &&
-      hasReliableDefaultCacheKey;
-    const isStale = entry ? isEntryStale(entry, now) : true;
-
-    const applyOptimisticUpdates = () => {
-      if (!clientOptions?.optimistic?.update?.length) return [] as OptimisticSnapshot[];
-
-      const snapshots: OptimisticSnapshot[] = [];
-      for (const update of clientOptions.optimistic.update) {
-        const [target, targetInput, updater] =
-          update.length === 2
-            ? [update[0], undefined, update[1]]
-            : [update[0], update[1], update[2]];
-        const targetKey = resolveTargetKey(
-          routeMeta,
-          target,
-          targetInput,
-          baseURL,
-          options.headers,
-        );
-        if (!targetKey) continue;
-
-        const targetEntry = getValidCacheEntry(cacheState, targetKey, now);
-        const previousEntry = targetEntry ? { ...targetEntry } : undefined;
-        const previousData = targetEntry?.data;
-        const nextData = updater(previousData);
-        cacheState.set(targetKey, {
-          data: nextData,
-          updatedAt: now,
-          staleAt:
-            targetEntry?.staleAt ??
-            now + (cacheOptions?.staleTime ?? options.cacheDefaults?.staleTime ?? 0),
-          gcAt:
-            targetEntry?.gcAt ??
-            getGcAt(now, cacheOptions?.gcTime ?? options.cacheDefaults?.gcTime),
-          invalidatedAt: targetEntry?.invalidatedAt,
+      const emitStatus = (phase: StatusPhase, payload?: Partial<StatusEvent>) => {
+        clientOptions?.onStatus?.({
+          phase,
+          requestId,
+          method: methodUpper,
+          key: cacheKey,
+          input,
+          timestamp: Date.now(),
+          ...payload,
         });
+      };
 
-        snapshots.push({ key: targetKey, entry: previousEntry });
-      }
-
-      return snapshots;
-    };
-
-    const rollbackOptimisticUpdates = (snapshots: OptimisticSnapshot[]) => {
-      if (!clientOptions?.optimistic?.rollbackOnError) return;
-
-      for (const snapshot of snapshots) {
-        if (!snapshot.entry) {
-          cacheState.delete(snapshot.key);
-          continue;
-        }
-
-        cacheState.set(snapshot.key, { ...snapshot.entry });
-      }
-    };
-
-    const executeNetwork = async (opts?: { isBackground?: boolean; callCallbacks?: boolean }) => {
-      const dedupeMs = cacheOptions?.dedupeMs ?? 0;
-      const inflight = inflightState.get(cacheKey);
-      const allowDedupe = isCacheEnabled && dedupeMs > 0;
-
-      if (allowDedupe && inflight && now - inflight.startedAt < dedupeMs) {
-        emitStatus("pending", { isBackground: opts?.isBackground, data: entry?.data });
-        const result = await inflight.promise;
-
-        if (result.error) {
-          emitStatus("error", { error: result.error, isBackground: opts?.isBackground });
-          if (opts?.callCallbacks !== false) {
-            clientOptions?.onError?.(result.error);
-          }
-        } else {
-          emitStatus("success", { data: result.data, isBackground: opts?.isBackground });
-          if (opts?.callCallbacks !== false) {
-            clientOptions?.onSuccess?.(result.data as any);
-          }
-        }
-
-        return result;
-      }
-
-      emitStatus(opts?.isBackground ? "revalidating" : "pending", {
-        isBackground: opts?.isBackground,
-      });
-
-      const promise = (async () => {
-        const maxRetries = Math.max(0, clientOptions?.retry?.count ?? 0);
-        let attempt = 0;
-
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-          clientOptions?.onRequest?.({
-            requestId,
-            method: methodUpper,
-            key: cacheKey,
-            path,
+      const policy = cacheOptions?.policy ?? (cacheOptions ? "cache-first" : "network-only");
+      const staleTime = cacheOptions?.staleTime ?? 0;
+      const hasReliableDefaultCacheKey =
+        methodUpper !== "QUERY" || !isFormData(input?.body) || configuredCacheKey !== undefined;
+      const isCacheEnabled =
+        Boolean(cacheOptions) &&
+        (methodUpper === "GET" || methodUpper === "QUERY") &&
+        hasReliableDefaultCacheKey;
+      const needsCacheState =
+        isCacheEnabled ||
+        Boolean(clientOptions?.optimistic?.update?.length) ||
+        Boolean(clientOptions?.invalidate);
+      let requestCacheContext: string | undefined = undefined;
+      if (needsCacheState && !requestContextError) {
+        try {
+          requestCacheContext = getRequestCacheContext(
+            { headers: defaultHeaders, credentials: options.credentials },
             input,
-            attempt,
-            timestamp: Date.now(),
+            // Custom transports can inject an identity outside visible headers.
+            // Never share their cached data with other client instances.
+            httpFetch ? "client" : cacheOptions?.scope,
+          );
+        } catch (error) {
+          requestContextError = normalizeError(error);
+        }
+      }
+
+      let cacheState = sharedCacheState;
+      let inflightState = sharedInflightState;
+      let requestScopedState: ScopedRequestState | undefined;
+      if (requestCacheContext !== undefined) {
+        if (scopedRequestState && scopedRequestState.context !== requestCacheContext) {
+          scopedRequestState.retired = true;
+          if (scopedRequestState.inflight.size === 0) scopedRequestState.cache.dispose();
+          scopedRequestState = undefined;
+        }
+        scopedRequestState ??= {
+          context: requestCacheContext,
+          cache: new FarmClientDataCache({ subscribeToInvalidation: !transport }),
+          inflight: new Map(),
+          retired: false,
+        };
+        requestScopedState = scopedRequestState;
+        cacheState = requestScopedState.cache;
+        localCaches?.add(cacheState);
+        inflightState = requestScopedState.inflight;
+      }
+      const optimisticState = getOptimisticState(cacheState);
+
+      const entry = getValidCacheEntry(cacheState, cacheKey, now);
+      const isStale = entry ? isEntryStale(entry, now) : true;
+
+      const applyOptimisticUpdates = () => {
+        if (!clientOptions?.optimistic?.update?.length) return [] as OptimisticSnapshot[];
+
+        const snapshots = new Map<string, OptimisticSnapshot>();
+        for (const update of clientOptions.optimistic.update) {
+          const [target, targetInput, updater] =
+            update.length === 2
+              ? [update[0], undefined, update[1]]
+              : [update[0], update[1], update[2]];
+          const targetKey = resolveTargetKey(
+            routeMeta,
+            target,
+            targetInput,
+            baseURL,
+            defaultHeaders,
+            transport ? baseURL : undefined,
+          );
+          if (!targetKey) continue;
+
+          const targetEntry = getValidCacheEntry(cacheState, targetKey, now);
+          const currentEntry = cacheState.get(targetKey);
+          let stack = optimisticState.get(targetKey);
+          if (stack && !reconcileOptimisticInvalidation(cacheState, targetKey, stack)) {
+            stack = undefined;
+          }
+          if (!stack) {
+            stack = {
+              entry: targetEntry ? { ...targetEntry } : undefined,
+              layers: [],
+              renderedEntry: currentEntry,
+            };
+            optimisticState.set(targetKey, stack);
+          }
+
+          let snapshot = snapshots.get(targetKey);
+          if (!snapshot) {
+            const previousEntry = stack.layers.length === 0 ? stack.entry : stack.renderedEntry;
+            const layer: OptimisticLayer = {
+              updaters: [],
+              updatedAt: now,
+              staleAt:
+                targetEntry?.staleAt ??
+                now + (cacheOptions?.staleTime ?? options.cacheDefaults?.staleTime ?? 0),
+              gcAt:
+                targetEntry?.gcAt ??
+                getGcAt(now, cacheOptions?.gcTime ?? options.cacheDefaults?.gcTime),
+            };
+            stack.layers.push(layer);
+            snapshot = {
+              key: targetKey,
+              stack,
+              layer,
+            };
+            snapshots.set(targetKey, snapshot);
+            snapshot.layer.updaters.push(updater);
+            const nextEntry = applyOptimisticLayer(previousEntry, {
+              ...snapshot.layer,
+              updaters: [updater],
+            });
+            storeOptimisticEntry(cacheState, targetKey, stack, nextEntry);
+            continue;
+          }
+          snapshot.layer.updaters.push(updater);
+          const nextEntry = applyOptimisticLayer(stack.renderedEntry, {
+            ...snapshot.layer,
+            updaters: [updater],
           });
+          storeOptimisticEntry(cacheState, targetKey, stack, nextEntry);
+        }
+
+        return Array.from(snapshots.values());
+      };
+
+      const rollbackOptimisticUpdates = (snapshots: OptimisticSnapshot[]) => {
+        if (!clientOptions?.optimistic?.rollbackOnError) return;
+        settleOptimisticUpdates(cacheState, optimisticState, snapshots, "rollback");
+      };
+
+      const invalidateUncommittedOptimisticUpdates = (snapshots: OptimisticSnapshot[]) => {
+        if (clientOptions?.optimistic?.rollbackOnError) return;
+        for (const key of settleOptimisticUpdates(
+          cacheState,
+          optimisticState,
+          snapshots,
+          "invalidate",
+        )) {
+          emitStatus("invalidated", { key });
+        }
+      };
+
+      const executeNetwork = async (opts?: { isBackground?: boolean; callCallbacks?: boolean }) => {
+        const release = cancellation.hold();
+        let unsubscribeInvalidation: (() => void) | undefined;
+        let readOwners: Map<string, object> | undefined;
+        let readOwner: object | undefined;
+        const resolvedCacheKey = cacheState.resolveKey(cacheKey);
+        try {
+          const dedupeMs = cacheOptions?.dedupeMs ?? 0;
+          const inflight = inflightState.get(cacheKey);
+          const allowDedupe =
+            isCacheEnabled && dedupeMs > 0 && !cancellation.signal && !requestContextError;
+
+          if (
+            allowDedupe &&
+            inflight &&
+            !inflight.cancellable &&
+            now - inflight.startedAt < dedupeMs
+          ) {
+            emitStatus("pending", { isBackground: opts?.isBackground, data: entry?.data });
+            const result = await inflight.promise;
+
+            if (result.error) {
+              emitStatus("error", { error: result.error, isBackground: opts?.isBackground });
+              notifyClientObserver(options.onError, [result.error]);
+              if (opts?.callCallbacks !== false) {
+                clientOptions?.onError?.(result.error);
+              }
+            } else {
+              emitStatus("success", { data: result.data, isBackground: opts?.isBackground });
+              if (opts?.callCallbacks !== false) {
+                clientOptions?.onSuccess?.(result.data as any);
+              }
+            }
+
+            return result;
+          }
+
+          // Observe ordering, not wall-clock timestamps: invalidation can happen in the
+          // same millisecond, or be cleared by another client's newer cache write.
+          let invalidatedDuringRequest = false;
+          if (isCacheEnabled) {
+            // Transport deduplication is caller-local, but cache ownership must
+            // span every caller writing to the same cache instance.
+            readOwners = getCacheReadOwners(cacheState);
+            readOwner = {};
+            readOwners.set(resolvedCacheKey, readOwner);
+            unsubscribeInvalidation = cacheState.subscribe(cacheKey, (event) => {
+              if (event === "invalidate") invalidatedDuringRequest = true;
+            });
+          }
+          emitStatus(opts?.isBackground ? "revalidating" : "pending", {
+            isBackground: opts?.isBackground,
+          });
+
+          const promise = (async () => {
+            const maxRetries = Math.max(0, clientOptions?.retry?.count ?? 0);
+            const shouldRetryFailure = clientOptions?.retry?.shouldRetry ?? isFarmRetryableFailure;
+            let attempt = 0;
+
+            // eslint-disable-next-line no-constant-condition
+            while (true) {
+              if (options.onRequest || clientOptions?.onRequest) {
+                const requestEvent: RequestEvent = {
+                  requestId,
+                  method: methodUpper,
+                  key: cacheKey,
+                  path,
+                  input,
+                  attempt,
+                  timestamp: Date.now(),
+                };
+                notifyClientObserver(options.onRequest, [requestEvent]);
+                clientOptions?.onRequest?.(requestEvent);
+              }
+
+              try {
+                if (requestContextError) throw requestContextError;
+                const { response, data, decodeError } = await cancellation.run(() =>
+                  fetchClient(
+                    path,
+                    {
+                      ...input,
+                      method: methodUpper,
+                    },
+                    defaultHeaders,
+                    cancellation,
+                  ),
+                );
+
+                const error = response.ok ? null : createResponseError(response, data, decodeError);
+
+                const responseEvent: ResponseEvent<any, Error> = {
+                  requestId,
+                  method: methodUpper,
+                  key: cacheKey,
+                  path,
+                  input,
+                  attempt,
+                  timestamp: Date.now(),
+                  response,
+                  data: response.ok ? data : undefined,
+                  error: error ?? undefined,
+                  ok: response.ok,
+                  status: response.status,
+                };
+
+                notifyClientObserver(options.onResponse, [
+                  response.ok ? data : undefined,
+                  error,
+                  responseEvent,
+                ]);
+                notifyResponseObserver(
+                  clientOptions?.onResponse,
+                  response.ok ? data : undefined,
+                  error,
+                  responseEvent,
+                );
+
+                if (!error) {
+                  return { data, error: null, key: cacheKey } as APIResult<any, Error>;
+                }
+
+                if (
+                  attempt >= maxRetries ||
+                  !shouldRetryFailure({
+                    attempt,
+                    method: methodUpper,
+                    status: response.status,
+                    error,
+                  })
+                ) {
+                  return { data: undefined, error, key: cacheKey } as APIResult<any, Error>;
+                }
+              } catch (err: any) {
+                const error = normalizeCallError(err);
+                const responseEvent: ResponseEvent<any, Error> = {
+                  requestId,
+                  method: methodUpper,
+                  key: cacheKey,
+                  path,
+                  input,
+                  attempt,
+                  timestamp: Date.now(),
+                  error,
+                  ok: false,
+                };
+
+                notifyClientObserver(options.onResponse, [undefined, error, responseEvent]);
+                notifyResponseObserver(clientOptions?.onResponse, undefined, error, responseEvent);
+
+                if (
+                  attempt >= maxRetries ||
+                  requestContextError ||
+                  cancellation.signal?.aborted ||
+                  !shouldRetryFailure({ attempt, method: methodUpper, error })
+                ) {
+                  return { data: undefined, error, key: cacheKey } as APIResult<any, Error>;
+                }
+              }
+
+              attempt += 1;
+              const delay =
+                typeof clientOptions?.retry?.delay === "function"
+                  ? clientOptions.retry.delay(attempt)
+                  : (clientOptions?.retry?.delay ?? 0);
+
+              if (delay > 0) {
+                try {
+                  await cancellation.delay(delay);
+                } catch (error) {
+                  return { data: undefined, error: normalizeCallError(error), key: cacheKey };
+                }
+              }
+            }
+          })();
+
+          const inflightEntry = {
+            promise,
+            startedAt: now,
+            cancellable: !!cancellation.signal || !!requestContextError,
+          };
+          inflightState.set(cacheKey, inflightEntry);
 
           try {
-            const { response, data } = await fetchClient(path, {
-              ...input,
-              method: methodUpper,
-            });
+            const result = await promise;
 
-            const error = response.ok ? null : createResponseError(response, data);
+            if (
+              inflightState.get(cacheKey) === inflightEntry &&
+              readOwners?.get(resolvedCacheKey) === readOwner &&
+              !invalidatedDuringRequest &&
+              !result.error &&
+              isCacheEnabled &&
+              !isFarmAPIStream(result.data)
+            ) {
+              const updatedAt = Date.now();
+              const cached: CacheEntry = {
+                data: result.data,
+                updatedAt,
+                staleAt: updatedAt + staleTime,
+                gcAt: getGcAt(updatedAt, cacheOptions?.gcTime),
+                invalidatedAt: undefined,
+                persist: cacheOptions?.persist === true ? true : undefined,
+                [API_CACHE_REFETCH]: createCacheRefetch(
+                  request,
+                  path,
+                  method,
+                  input,
+                  cacheKey,
+                  cacheOptions!,
+                  clientOptions,
+                  options.onError,
+                ),
+              };
+              cacheState.set(cacheKey, cached);
+            }
 
-            const responseEvent: ResponseEvent<any, Error> = {
-              requestId,
-              method: methodUpper,
-              key: cacheKey,
-              path,
-              input,
-              attempt,
-              timestamp: Date.now(),
-              response,
-              data: response.ok ? data : undefined,
-              error: error ?? undefined,
-              ok: response.ok,
-              status: response.status,
+            if (result.error) {
+              emitStatus("error", { error: result.error, isBackground: opts?.isBackground });
+              notifyClientObserver(options.onError, [result.error]);
+              if (opts?.callCallbacks !== false) {
+                clientOptions?.onError?.(result.error);
+              }
+            } else {
+              emitStatus("success", { data: result.data, isBackground: opts?.isBackground });
+              if (opts?.callCallbacks !== false) {
+                clientOptions?.onSuccess?.(result.data as any);
+              }
+            }
+
+            return result;
+          } finally {
+            if (inflightState.get(cacheKey) === inflightEntry) {
+              inflightState.delete(cacheKey);
+            }
+            if (requestContextError && requestScopedState) {
+              requestScopedState.retired = true;
+              if (scopedRequestState === requestScopedState) scopedRequestState = undefined;
+            }
+            if (requestScopedState?.retired && requestScopedState.inflight.size === 0) {
+              requestScopedState.cache.dispose();
+            }
+          }
+        } finally {
+          if (readOwner && readOwners?.get(resolvedCacheKey) === readOwner) {
+            readOwners.delete(resolvedCacheKey);
+          }
+          unsubscribeInvalidation?.();
+          release();
+        }
+      };
+
+      const invalidateTargets = async () => {
+        if (!clientOptions?.invalidate) return;
+
+        const invalidateOptions = Array.isArray(clientOptions.invalidate)
+          ? { targets: clientOptions.invalidate, refetch: false }
+          : {
+              targets: clientOptions.invalidate.targets,
+              refetch: clientOptions.invalidate.refetch ?? false,
             };
 
-            clientOptions?.onResponse?.(response.ok ? data : undefined, error, responseEvent);
+        const refetches = new Set<() => void>();
+        for (const target of invalidateOptions.targets) {
+          const targetKey = resolveTargetKey(
+            routeMeta,
+            target,
+            undefined,
+            baseURL,
+            defaultHeaders,
+            transport ? baseURL : undefined,
+          );
+          if (!targetKey) continue;
 
-            if (!error) {
-              return { data, error: null, key: cacheKey } as APIResult<any, Error>;
-            }
-
-            if (attempt >= maxRetries) {
-              return { data: undefined, error, key: cacheKey } as APIResult<any, Error>;
-            }
-          } catch (err: any) {
-            const error = normalizeError(err);
-            const responseEvent: ResponseEvent<any, Error> = {
-              requestId,
-              method: methodUpper,
-              key: cacheKey,
-              path,
-              input,
-              attempt,
-              timestamp: Date.now(),
-              error,
-              ok: false,
-            };
-
-            clientOptions?.onResponse?.(undefined, error, responseEvent);
-
-            if (attempt >= maxRetries) {
-              return { data: undefined, error, key: cacheKey } as APIResult<any, Error>;
+          const existing = cacheState.get(targetKey);
+          const invalidatedAt = Date.now();
+          // The first read may still be in flight with no stored entry yet.
+          // Notify its invalidation listener before it can cache an old result.
+          cacheState.invalidate(targetKey, invalidatedAt);
+          if (existing) {
+            const stack = optimisticState.get(targetKey);
+            if (stack?.renderedEntry === existing) {
+              stack.invalidatedAt = invalidatedAt;
+              stack.renderedEntry = cacheState.get(targetKey);
             }
           }
 
-          attempt += 1;
-          const delay =
-            typeof clientOptions?.retry?.delay === "function"
-              ? clientOptions.retry.delay(attempt)
-              : (clientOptions?.retry?.delay ?? 0);
+          emitStatus("invalidated", { key: targetKey });
 
-          if (delay > 0) {
-            await new Promise((resolve) => setTimeout(resolve, delay));
+          const refetch = (existing as CacheEntry | undefined)?.[API_CACHE_REFETCH];
+          if (invalidateOptions.refetch && refetch) {
+            refetches.add(refetch);
           }
         }
-      })();
+        // Invalidate every alias before starting work; never replay this mutation.
+        for (const refetch of refetches) refetch();
+      };
 
-      const inflightEntry = { promise, startedAt: now };
-      inflightState.set(cacheKey, inflightEntry);
+      const optimisticSnapshots = requestContextError ? [] : applyOptimisticUpdates();
 
-      try {
-        const result = await promise;
-
-        if (
-          inflightState.get(cacheKey) === inflightEntry &&
-          !result.error &&
-          isCacheEnabled &&
-          !isFarmAPIStream(result.data)
-        ) {
-          const updatedAt = Date.now();
-          cacheState.set(cacheKey, {
-            data: result.data,
-            updatedAt,
-            staleAt: updatedAt + staleTime,
-            gcAt: getGcAt(updatedAt, cacheOptions?.gcTime),
-            invalidatedAt: undefined,
-          });
+      if (isCacheEnabled && !requestContextError && !cancellation.signal?.aborted) {
+        if (entry && !isStale && policy !== "network-only") {
+          emitStatus("success", { data: entry.data });
+          clientOptions?.onSuccess?.(entry.data);
+          clientOptions?.onSettled?.(entry.data, null);
+          return { data: entry.data, error: null, key: cacheKey };
         }
 
-        if (result.error) {
-          emitStatus("error", { error: result.error, isBackground: opts?.isBackground });
-          if (opts?.callCallbacks !== false) {
-            clientOptions?.onError?.(result.error);
-          }
-        } else {
-          emitStatus("success", { data: result.data, isBackground: opts?.isBackground });
-          if (opts?.callCallbacks !== false) {
-            clientOptions?.onSuccess?.(result.data as any);
-          }
-        }
+        if (entry && isStale && policy === "stale-while-revalidate") {
+          emitStatus("success", { data: entry.data });
+          clientOptions?.onSuccess?.(entry.data);
+          clientOptions?.onSettled?.(entry.data, null);
 
-        return result;
-      } finally {
-        if (inflightState.get(cacheKey) === inflightEntry) {
-          inflightState.delete(cacheKey);
-        }
-      }
-    };
-
-    const invalidateTargets = async () => {
-      if (!clientOptions?.invalidate) return;
-
-      const invalidateOptions = Array.isArray(clientOptions.invalidate)
-        ? { targets: clientOptions.invalidate, refetch: false }
-        : {
-            targets: clientOptions.invalidate.targets,
-            refetch: clientOptions.invalidate.refetch ?? false,
-          };
-
-      for (const target of invalidateOptions.targets) {
-        const targetKey = resolveTargetKey(routeMeta, target, undefined, baseURL, options.headers);
-        if (!targetKey) continue;
-
-        const existing = cacheState.get(targetKey);
-        if (existing) {
-          cacheState.set(targetKey, {
-            ...existing,
-            staleAt: 0,
-            invalidatedAt: Date.now(),
-          });
-        }
-
-        emitStatus("invalidated", { key: targetKey });
-
-        if (invalidateOptions.refetch && existing && targetKey === cacheKey) {
           void executeNetwork({ isBackground: true, callCallbacks: false });
+          return { data: entry.data, error: null, key: cacheKey };
         }
       }
-    };
 
-    const optimisticSnapshots = applyOptimisticUpdates();
-
-    if (isCacheEnabled) {
-      if (entry && !isStale && policy !== "network-only") {
-        emitStatus("success", { data: entry.data });
-        clientOptions?.onSuccess?.(entry.data);
-        clientOptions?.onSettled?.(entry.data, null);
-        return { data: entry.data, error: null, key: cacheKey };
+      const result = await executeNetwork();
+      if (result.error) {
+        if (cancellation.signal?.aborted) {
+          settleOptimisticUpdates(cacheState, optimisticState, optimisticSnapshots, "rollback");
+        } else {
+          rollbackOptimisticUpdates(optimisticSnapshots);
+          invalidateUncommittedOptimisticUpdates(optimisticSnapshots);
+        }
+      } else {
+        settleOptimisticUpdates(cacheState, optimisticState, optimisticSnapshots, "commit");
+        await invalidateTargets();
       }
-
-      if (entry && isStale && policy === "stale-while-revalidate") {
-        emitStatus("success", { data: entry.data });
-        clientOptions?.onSuccess?.(entry.data);
-        clientOptions?.onSettled?.(entry.data, null);
-
-        void executeNetwork({ isBackground: true, callCallbacks: false });
-        return { data: entry.data, error: null, key: cacheKey };
-      }
+      clientOptions?.onSettled?.(result.data, result.error);
+      return result;
+    } finally {
+      cancellation.dispose();
     }
-
-    const result = await executeNetwork();
-    if (result.error) {
-      rollbackOptimisticUpdates(optimisticSnapshots);
-    }
-    await invalidateTargets();
-    clientOptions?.onSettled?.(result.data, result.error);
-    return result;
   };
 
   // Return nested proxy (starts with empty path, user adds to it)
-  return createNestedProxy(
+  const client = createNestedProxy(
     [],
     request,
     routeMeta,
     baseURL,
     isSameOriginAPIBaseURL(baseURL),
     rootAliases,
+    options.routes ? new ClientRouteManifest(options.routes) : undefined,
   ) as APIClient<TRouter, TIntegrations>;
+  return { client, request };
+}
+
+async function readAPIResponseData(response: Response, method: string): Promise<unknown> {
+  if (
+    method === "HEAD" ||
+    response.status === 204 ||
+    response.status === 205 ||
+    response.status === 304
+  ) {
+    return undefined;
+  }
+
+  // Keep lightweight fetch-compatible adapters working when they expose the
+  // traditional json() contract without a complete Web Response implementation.
+  if (!response.headers?.get && typeof response.json === "function") {
+    return readResponseJSON(response);
+  }
+
+  if (response.body === null) return undefined;
+
+  if (isJSONStreamResponse(response)) {
+    return readJSONStream(response);
+  }
+
+  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (typeof response.arrayBuffer === "function") {
+    const data = await response.arrayBuffer();
+    if (data.byteLength === 0) return undefined;
+
+    if (!contentType || contentType === "application/json" || contentType.endsWith("+json")) {
+      return parseResponseJSON(new TextDecoder().decode(data));
+    }
+
+    if (
+      contentType.startsWith("text/") ||
+      contentType === "application/xml" ||
+      contentType === "application/xhtml+xml" ||
+      contentType === "application/graphql"
+    ) {
+      return new TextDecoder().decode(data);
+    }
+
+    return data;
+  }
+
+  if (
+    (!contentType || contentType === "application/json" || contentType.endsWith("+json")) &&
+    typeof response.json === "function"
+  ) {
+    return readResponseJSON(response);
+  }
+
+  if (
+    (contentType?.startsWith("text/") ||
+      contentType === "application/xml" ||
+      contentType === "application/xhtml+xml" ||
+      contentType === "application/graphql") &&
+    typeof response.text === "function"
+  ) {
+    return response.text();
+  }
+
+  // Some fetch-compatible adapters expose headers but still only implement
+  // the traditional json() reader.
+  if (typeof response.json === "function") {
+    return readResponseJSON(response);
+  }
+
+  return undefined;
+}
+
+class APIResponseDecodeError extends Error {
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : "Failed to decode JSON response");
+    this.name = "APIResponseDecodeError";
+    this.cause = cause;
+  }
+}
+
+function parseResponseJSON(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    throw new APIResponseDecodeError(error);
+  }
+}
+
+async function readResponseJSON(response: Pick<Response, "json">): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new APIResponseDecodeError(error);
+    throw error;
+  }
 }
 
 /**
@@ -835,16 +1452,42 @@ function createNestedProxy(
   baseURL: string,
   sameOrigin: boolean,
   rootAliases?: Record<string, unknown>,
+  manifest?: ClientRouteManifest,
+  bound: BoundRouteParams = {},
 ): any {
   const target = () => {};
   const proxy = new Proxy(target, {
     // When accessing a property (api.hello)
     get(_target, prop: string | symbol) {
+      if (prop === "$params") {
+        return (params: unknown) => {
+          if (!manifest)
+            throw new TypeError(
+              "$params requires createAPIClient({ routes: apiRoutes }) from the generated API manifest.",
+            );
+          const scope = manifest.bind(buildProxyRoutePath(path), params);
+          return createNestedProxy(
+            [...path, scope.segment],
+            client,
+            routeMeta,
+            baseURL,
+            sameOrigin,
+            rootAliases,
+            manifest,
+            Object.freeze({ ...bound, ...scope.params }),
+          );
+        };
+      }
       if (prop === FARM_API_ROUTE_REF_SYMBOL) {
         return path.length > 0;
       }
       if (prop === FARM_API_ROUTE_META_SYMBOL) {
-        const metadata = resolveRouteMeta({ path, baseURL });
+        let metadata;
+        try {
+          metadata = resolveRouteMeta({ path, baseURL, manifest, bound });
+        } catch {
+          return null;
+        } // An unbound/overloaded route has no single URL yet.
         const requestURL = resolveFarmAPIRequestURL(metadata.routePath, baseURL);
         return Object.freeze({
           path: `${requestURL.pathname}${requestURL.search}${requestURL.hash}`,
@@ -870,6 +1513,8 @@ function createNestedProxy(
         baseURL,
         sameOrigin,
         rootAliases,
+        manifest,
+        bound,
       );
     },
 
@@ -882,30 +1527,39 @@ function createNestedProxy(
       if (httpMethods.includes(lastPart)) {
         // Method is explicitly called: api.users.get() or api['auth/login'].post()
         // Remove the method from path and use it as the HTTP method
-        const routePath = "/api/" + path.slice(0, -1).join("/");
+        const routePath = buildProxyRoutePath(path.slice(0, -1));
         const method = lastPart.toUpperCase();
 
         // Extract options from arguments
         const [options, clientOptions] = args;
 
         // Call fetch client with explicit method
-        return client(routePath, method, options, clientOptions);
+        const resolved = manifest ? manifest.resolve(routePath, method, bound, options) : routePath;
+        if (!manifest && options?.params)
+          throw new TypeError("Dynamic params require the generated routes manifest.");
+        return client(resolved, method, options, clientOptions);
       } else {
         // Direct call without method: api.hello()
         // Use the full path and let the server determine the method (usually GET)
-        const routePath = "/api/" + path.join("/");
+        const routePath = buildProxyRoutePath(path);
 
         // Extract options from arguments
         const [options, clientOptions] = args;
 
         // Call fetch client (default method will be GET)
-        return client(routePath, options?.method || "GET", options, clientOptions);
+        const method = options?.method || "GET";
+        const resolved = manifest ? manifest.resolve(routePath, method, bound, options) : routePath;
+        return client(resolved, method, options, clientOptions);
       }
     },
   });
 
-  routeMeta.set(proxy, { path: [...path], baseURL });
+  routeMeta.set(proxy, { path: [...path], baseURL, manifest, bound });
   return proxy;
+}
+
+function buildProxyRoutePath(path: string[]): string {
+  return "/api/" + path.join("/").replace(/^\/+/, "");
 }
 
 export function isAPIRouteRef(value: unknown): value is CallableRouteRef {
@@ -996,29 +1650,314 @@ export function createServerAPIClient<
   return endpoints as ServerAPIClient<TEndpoints, TIntegrations>;
 }
 
-type CacheEntry = FarmClientCacheEntry<any>;
+const API_CACHE_REFETCH = Symbol.for("farm.api.cache-refetch");
+type CacheEntry = FarmClientCacheEntry<any> & {
+  [API_CACHE_REFETCH]?: () => void;
+};
+
+// Keep the read recipe on its cache entry, so deletion/GC also releases it.
+// This separate closure must not retain the original request's entry or signal.
+function createCacheRefetch(
+  request: APICall,
+  path: string,
+  method: string,
+  input: unknown,
+  key: string,
+  cache: CacheOptions,
+  options: ClientOptions<any, any> | undefined,
+  onError: APIClientOptions["onError"],
+): () => void {
+  const readOptions: ClientOptions<any, any> = {
+    cache: { ...cache, key, policy: "network-only", dedupeMs: 0 },
+    retry: options?.retry,
+    timeoutMs: options?.timeoutMs,
+  };
+  return () => {
+    // A new call resolves current defaults and owns a fresh deadline. Do not
+    // retain prior signals, mutation options, or per-call completion callbacks.
+    void request(path, method, input, readOptions).catch((error) => {
+      notifyClientObserver(onError, [normalizeError(error)]);
+    });
+  };
+}
 
 type InflightEntry = {
+  cancellable?: boolean;
   promise: Promise<APIResult<any, Error>>;
   startedAt: number;
+};
+
+type ScopedRequestState = {
+  context: string;
+  cache: FarmClientDataCache;
+  inflight: Map<string, InflightEntry>;
+  retired: boolean;
 };
 
 type RouteMeta = {
   path: string[];
   baseURL: string;
+  manifest?: ClientRouteManifest;
+  bound?: BoundRouteParams;
 };
 
 type OptimisticSnapshot = {
   key: string;
-  entry?: CacheEntry;
+  stack: OptimisticStack;
+  layer: OptimisticLayer;
 };
+
+type OptimisticStack = {
+  entry?: CacheEntry;
+  layers: OptimisticLayer[];
+  renderedEntry?: CacheEntry;
+  invalidatedAt?: number;
+};
+
+type OptimisticLayer = {
+  updaters: Array<(prev: any) => any>;
+  updatedAt: number;
+  staleAt: number;
+  gcAt?: number;
+  committed?: boolean;
+};
+
+const optimisticStates = new WeakMap<FarmClientDataCache, Map<string, OptimisticStack>>();
+const cacheReadOwners = new WeakMap<FarmClientDataCache, Map<string, object>>();
+
+function getCacheReadOwners(cache: FarmClientDataCache): Map<string, object> {
+  let owners = cacheReadOwners.get(cache);
+  if (!owners) {
+    owners = new Map();
+    cacheReadOwners.set(cache, owners);
+  }
+  return owners;
+}
+
+function getOptimisticState(cache: FarmClientDataCache): Map<string, OptimisticStack> {
+  let state = optimisticStates.get(cache);
+  if (!state) {
+    state = new Map();
+    optimisticStates.set(cache, state);
+  }
+  return state;
+}
+
+function applyOptimisticLayer(entry: CacheEntry | undefined, layer: OptimisticLayer): CacheEntry {
+  let data = entry?.data;
+  for (const updater of layer.updaters) data = updater(data);
+
+  return {
+    data,
+    updatedAt: layer.updatedAt,
+    staleAt: entry?.staleAt ?? layer.staleAt,
+    gcAt: entry?.gcAt ?? layer.gcAt,
+    invalidatedAt: entry?.invalidatedAt,
+    [API_CACHE_REFETCH]: entry?.[API_CACHE_REFETCH],
+  };
+}
+
+function storeOptimisticEntry(
+  cacheState: FarmClientDataCache,
+  key: string,
+  stack: OptimisticStack,
+  entry: CacheEntry | undefined,
+): void {
+  if (!entry) {
+    cacheState.delete(key);
+    stack.renderedEntry = undefined;
+    return;
+  }
+
+  cacheState.set(key, entry);
+  if (stack.invalidatedAt !== undefined) {
+    cacheState.invalidate(key, stack.invalidatedAt);
+  }
+  stack.renderedEntry = cacheState.get(key);
+}
+
+function reconcileOptimisticInvalidation(
+  cacheState: FarmClientDataCache,
+  key: string,
+  stack: OptimisticStack,
+): boolean {
+  const current = cacheState.get(key);
+  const rendered = stack.renderedEntry;
+  if (current === rendered) return true;
+  if (
+    !current ||
+    !rendered ||
+    current.data !== rendered.data ||
+    current.updatedAt !== rendered.updatedAt ||
+    current.gcAt !== rendered.gcAt ||
+    current.status !== rendered.status ||
+    current.error !== rendered.error ||
+    current.fetching !== rendered.fetching ||
+    current.staleAt !== 0 ||
+    current.invalidatedAt === undefined
+  ) {
+    return false;
+  }
+
+  stack.invalidatedAt = current.invalidatedAt;
+  stack.renderedEntry = current;
+  return true;
+}
+
+function renderOptimisticStack(
+  cacheState: FarmClientDataCache,
+  key: string,
+  stack: OptimisticStack,
+): void {
+  let entry = stack.entry ? { ...stack.entry } : undefined;
+  for (const layer of stack.layers) entry = applyOptimisticLayer(entry, layer);
+  storeOptimisticEntry(cacheState, key, stack, entry);
+}
+
+function settleOptimisticUpdates(
+  cacheState: FarmClientDataCache,
+  optimisticState: Map<string, OptimisticStack>,
+  snapshots: OptimisticSnapshot[],
+  outcome: "commit" | "rollback" | "invalidate",
+): string[] {
+  const settledKeys: string[] = [];
+  for (const snapshot of snapshots) {
+    const stack = optimisticState.get(snapshot.key);
+    if (stack !== snapshot.stack) continue;
+    if (!reconcileOptimisticInvalidation(cacheState, snapshot.key, stack)) {
+      optimisticState.delete(snapshot.key);
+      continue;
+    }
+
+    if (outcome === "rollback") {
+      stack.layers = stack.layers.filter((layer) => layer !== snapshot.layer);
+    } else {
+      snapshot.layer.committed = true;
+      if (outcome === "invalidate") stack.invalidatedAt = Date.now();
+    }
+
+    while (stack.layers[0]?.committed) {
+      stack.entry = applyOptimisticLayer(stack.entry, stack.layers.shift()!);
+    }
+
+    renderOptimisticStack(cacheState, snapshot.key, stack);
+    if (stack.layers.length === 0) optimisticState.delete(snapshot.key);
+    settledKeys.push(snapshot.key);
+  }
+  return settledKeys;
+}
+
+/**
+ * @internal Apply key-targeted optimistic updates to the shared client cache
+ * for a server-function mutation. Route-reference update tuples need an API
+ * caller's route metadata and are skipped here; use structured cache keys.
+ */
+export function applyServerFnOptimisticUpdates(
+  updates: readonly OptimisticUpdate[],
+  now = Date.now(),
+): OptimisticSnapshot[] {
+  const cacheState = getFarmClientDataCache();
+  const optimisticState = getOptimisticState(cacheState);
+  const snapshots = new Map<string, OptimisticSnapshot>();
+
+  for (const update of updates) {
+    if (update.length !== 2) continue;
+    const [target, updater] = update;
+    if (typeof updater !== "function") continue;
+    const targetKey =
+      typeof target === "string" || Array.isArray(target)
+        ? normalizeFarmClientCacheKey(target as FarmClientCacheKey)
+        : null;
+    if (!targetKey) continue;
+
+    const targetEntry = getValidCacheEntry(cacheState, targetKey, now);
+    const currentEntry = cacheState.get(targetKey);
+    let stack = optimisticState.get(targetKey);
+    if (stack && !reconcileOptimisticInvalidation(cacheState, targetKey, stack)) {
+      stack = undefined;
+    }
+    if (!stack) {
+      stack = {
+        entry: targetEntry ? { ...targetEntry } : undefined,
+        layers: [],
+        renderedEntry: currentEntry,
+      };
+      optimisticState.set(targetKey, stack);
+    }
+
+    let snapshot = snapshots.get(targetKey);
+    if (!snapshot) {
+      const previousEntry = stack.layers.length === 0 ? stack.entry : stack.renderedEntry;
+      const layer: OptimisticLayer = {
+        updaters: [],
+        updatedAt: now,
+        // A server function has no cache policy of its own; preserve the
+        // target read's freshness metadata when it exists.
+        staleAt: targetEntry?.staleAt ?? now,
+        gcAt: targetEntry?.gcAt,
+      };
+      stack.layers.push(layer);
+      snapshot = { key: targetKey, stack, layer };
+      snapshots.set(targetKey, snapshot);
+      snapshot.layer.updaters.push(updater);
+      const nextEntry = applyOptimisticLayer(previousEntry, {
+        ...snapshot.layer,
+        updaters: [updater],
+      });
+      storeOptimisticEntry(cacheState, targetKey, stack, nextEntry);
+      continue;
+    }
+    snapshot.layer.updaters.push(updater);
+    const nextEntry = applyOptimisticLayer(stack.renderedEntry, {
+      ...snapshot.layer,
+      updaters: [updater],
+    });
+    storeOptimisticEntry(cacheState, targetKey, stack, nextEntry);
+  }
+
+  return Array.from(snapshots.values());
+}
+
+/**
+ * @internal Settle a server-function mutation's optimistic snapshots with the
+ * API client's semantics: commit on success, rollback on failure with
+ * `rollbackOnError`, and mark-stale on failure without it.
+ */
+export function settleServerFnOptimisticUpdates(
+  snapshots: OptimisticSnapshot[],
+  outcome: "commit" | "rollback" | "invalidate",
+): void {
+  if (snapshots.length === 0) return;
+  const cacheState = getFarmClientDataCache();
+  settleOptimisticUpdates(cacheState, getOptimisticState(cacheState), snapshots, outcome);
+}
+
+/**
+ * @internal Resolve a server-function mutation's invalidate targets to cache
+ * keys. Route-reference and path targets need an API caller's identity and are
+ * skipped; use structured cache keys. Keys are applied through the shared
+ * invalidation bus, matching server-declared `invalidates`.
+ */
+export function resolveServerFnInvalidateTargets(invalidate: InvalidateOptions): string[] {
+  const targets = Array.isArray(invalidate) ? invalidate : invalidate.targets;
+  const keys: string[] = [];
+  for (const target of targets) {
+    if (typeof target === "string" || Array.isArray(target)) {
+      if (Array.isArray(target) && typeof target[0] === "function") continue;
+      keys.push(normalizeFarmClientCacheKey(target as FarmClientCacheKey));
+    } else if (target && typeof target === "object" && "key" in target) {
+      keys.push(normalizeFarmClientCacheKey(target.key));
+    }
+  }
+  return keys;
+}
 
 function buildCacheKey(
   method: string,
   path: string,
   input: any,
   baseURL: string,
-  defaultHeaders?: Record<string, string>,
+  defaultHeaders?: HeadersInit,
 ): string {
   const keyInput =
     input && typeof input === "object"
@@ -1071,6 +2010,29 @@ function getHeader(headers: unknown, name: string): string | undefined {
   return entry?.[1] === undefined ? undefined : String(entry[1]);
 }
 
+function getRequestCacheContext(
+  options: { headers?: HeadersInit; credentials?: RequestCredentials },
+  input: unknown,
+  scope: CacheScope | undefined,
+): string | undefined {
+  const credentials = options.credentials ?? "same-origin";
+  const headers = new Headers(options.headers);
+  const requestHeaders =
+    input && typeof input === "object" && "headers" in input ? input.headers : undefined;
+
+  if (requestHeaders) {
+    new Headers(requestHeaders as HeadersInit).forEach((value, key) => headers.set(key, value));
+  }
+
+  const carriesBrowserIdentity = credentials !== "omit" || [...headers].length > 0;
+  if (scope !== "client" && !carriesBrowserIdentity) return undefined;
+
+  return stableStringify({
+    credentials,
+    headers: [...headers].sort(([left], [right]) => left.localeCompare(right)),
+  });
+}
+
 function getGcAt(now: number, gcTime?: number): number | undefined {
   if (gcTime === undefined) return undefined;
   if (!Number.isFinite(gcTime) || gcTime <= 0) return now;
@@ -1103,7 +2065,8 @@ function resolveTargetKey(
   target: InvalidateTarget | AnyRouteRef,
   input?: unknown,
   baseURL = "http://localhost:3000",
-  defaultHeaders?: Record<string, string>,
+  defaultHeaders?: HeadersInit,
+  localBaseURL?: string,
 ): string | null {
   if (!target) return null;
 
@@ -1113,14 +2076,20 @@ function resolveTargetKey(
     const meta = routeMeta.get(target);
     if (!meta) return null;
 
-    const { method, routePath } = resolveRouteMeta(meta);
-    return buildCacheKey(method, routePath, input ?? {}, meta.baseURL, defaultHeaders);
+    const { method, routePath } = resolveRouteMeta(meta, input);
+    return buildCacheKey(
+      method,
+      routePath,
+      input ?? {},
+      localBaseURL ?? meta.baseURL,
+      defaultHeaders,
+    );
   }
 
   if (Array.isArray(target)) {
     const [route, routeInput] = target;
     if (typeof route === "function") {
-      return resolveTargetKey(routeMeta, route, routeInput, baseURL, defaultHeaders);
+      return resolveTargetKey(routeMeta, route, routeInput, baseURL, defaultHeaders, localBaseURL);
     }
     return normalizeFarmClientCacheKey(target);
   }
@@ -1135,18 +2104,27 @@ function resolveTargetKey(
   return null;
 }
 
-function resolveRouteMeta(meta: RouteMeta): { routePath: string; method: string } {
+function resolveRouteMeta(meta: RouteMeta, input?: any): { routePath: string; method: string } {
   const httpMethods = ["get", "head", "query", "post", "put", "delete", "patch", "options"];
   const lastPart = meta.path[meta.path.length - 1];
   if (lastPart && httpMethods.includes(lastPart)) {
     return {
-      routePath: "/api/" + meta.path.slice(0, -1).join("/"),
+      routePath: meta.manifest
+        ? meta.manifest.resolve(
+            buildProxyRoutePath(meta.path.slice(0, -1)),
+            lastPart.toUpperCase(),
+            meta.bound ?? {},
+            input,
+          )
+        : buildProxyRoutePath(meta.path.slice(0, -1)),
       method: lastPart.toUpperCase(),
     };
   }
 
   return {
-    routePath: "/api/" + meta.path.join("/"),
+    routePath: meta.manifest
+      ? meta.manifest.resolve(buildProxyRoutePath(meta.path), "GET", meta.bound ?? {}, input)
+      : buildProxyRoutePath(meta.path),
     method: "GET",
   };
 }
@@ -1167,6 +2145,15 @@ function normalizeError(error: unknown): Error {
   return normalized;
 }
 
+function notifyResponseObserver(
+  observer: ClientOptions<any, any>["onResponse"],
+  data: unknown,
+  error: unknown,
+  event: ResponseEvent<any, any>,
+): void {
+  notifyClientObserver(observer, [data, error, event], "API client onResponse");
+}
+
 function isFormData(value: unknown): value is FormData {
   return (
     typeof value === "object" &&
@@ -1177,14 +2164,7 @@ function isFormData(value: unknown): value is FormData {
   );
 }
 
-function deleteHeader(headers: Record<string, string>, name: string): void {
-  const normalized = name.toLowerCase();
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === normalized) delete headers[key];
-  }
-}
-
-function createResponseError(response: Response, data: any): Error {
+function createResponseError(response: Response, data: any, cause?: unknown): Error {
   const expected = readEndpointErrorEnvelope(data);
   if (expected) {
     return new APIClientError(expected.code, expected.data, {
@@ -1194,11 +2174,13 @@ function createResponseError(response: Response, data: any): Error {
     });
   }
 
-  return new APIClientError("http_error", data, {
+  const error = new APIClientError("http_error", data, {
     status: response.status,
     message: `HTTP ${response.status}: ${response.statusText}`,
     response,
   });
+  if (cause !== undefined) (error as Error & { cause?: unknown }).cause = cause;
+  return error;
 }
 
 function readEndpointErrorEnvelope(data: unknown): {

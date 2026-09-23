@@ -328,7 +328,7 @@ function encodeDeferredValue(
   assertNotCircular(value, ancestors);
   const output: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    output[key] = encodeDeferredValue(item, context, ancestors);
+    defineDataProperty(output, key, encodeDeferredValue(item, context, ancestors));
   }
   ancestors.delete(value);
   // User data that happens to have the marker shape must not be revived as a
@@ -381,9 +381,31 @@ function reviveDeferredValue(
   if (prototype !== Object.prototype && prototype !== null) return value;
   const output: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    output[key] = reviveDeferredValue(item, controllers, settlements, applyingSettlements);
+    defineDataProperty(
+      output,
+      key,
+      reviveDeferredValue(item, controllers, settlements, applyingSettlements),
+    );
   }
   return output;
+}
+
+// Assign an own key preserving its data. A plain `output[key] = value` runs the
+// `Object.prototype.__proto__` setter when `key` is the string "__proto__" (the
+// shape JSON.parse of external input produces), which silently drops the entry
+// and mutates the object's prototype instead of storing the value. Defining the
+// property sidesteps the accessor for that one key; other keys keep the fast path.
+function defineDataProperty(output: Record<string, unknown>, key: string, value: unknown): void {
+  if (key === "__proto__") {
+    Object.defineProperty(output, key, {
+      value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  } else {
+    output[key] = value;
+  }
 }
 
 function getControlledDeferred(

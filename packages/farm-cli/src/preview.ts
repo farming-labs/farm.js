@@ -10,6 +10,7 @@ import {
   type PreviewGatewaySession,
 } from "./preview-gateway";
 import { runNativePreviewTunnel } from "./preview-native";
+import { createHttpLocalUrl } from "./local-url";
 
 export interface PreviewFarmOptions {
   root?: string;
@@ -36,6 +37,7 @@ export interface PreviewTunnelPlan {
   command: string;
   args: string[];
   shell?: boolean;
+  provider?: "custom" | "cloudflared" | "localtunnel";
   target: PreviewTarget;
   requestedName: string;
   requestedHostname: string;
@@ -48,6 +50,7 @@ export interface PreviewFarmResult {
   session?: PreviewAgentSession | PreviewGatewaySession;
 }
 
+const MAX_TUNNEL_SCAN_CHARS = 64 * 1024;
 const DEFAULT_PREVIEW_PORTS = [3000, 4319, 5173, 4173, 8080];
 const PREVIEW_URL_PATTERN = /https:\/\/[^\s"')\]}]+/g;
 
@@ -113,13 +116,30 @@ export async function resolvePreviewTarget(
   options: PreviewFarmOptions = {},
 ): Promise<PreviewTarget> {
   if (options.url) {
-    const parsed = new URL(options.url);
+    let parsed: URL;
+    try {
+      parsed = new URL(options.url);
+    } catch {
+      throw new Error(`Preview URL ${JSON.stringify(options.url)} is not a valid URL.`);
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("Preview URL must use http or https.");
+    }
+    if (!parsed.hostname) {
+      throw new Error("Preview URL must include a hostname.");
+    }
+    if (parsed.username || parsed.password) {
+      throw new Error("Preview URL cannot include credentials.");
+    }
+    if (parsed.search || parsed.hash) {
+      throw new Error("Preview URL cannot include a query string or fragment.");
+    }
     const port = Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80));
-    if (!Number.isFinite(port)) {
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
       throw new Error(`Could not resolve a port from ${options.url}.`);
     }
     return {
-      localUrl: normalizeLocalUrl(options.url),
+      localUrl: normalizeLocalUrl(parsed.toString()),
       host: parsed.hostname,
       port,
       source: "url",
@@ -128,7 +148,11 @@ export async function resolvePreviewTarget(
 
   const root = options.root || process.cwd();
   const host = options.host || process.env.FARM_PREVIEW_HOST || "localhost";
-  const explicitPort = normalizePort(options.port || process.env.FARM_PREVIEW_PORT);
+  const configuredPort = options.port ?? process.env.FARM_PREVIEW_PORT;
+  const explicitPort = normalizePort(configuredPort);
+  if (configuredPort !== undefined && configuredPort !== "" && explicitPort === undefined) {
+    throw new Error("Preview port must be an integer between 1 and 65535.");
+  }
   const configPort = explicitPort ? undefined : await readConfigPort(root, options.configPath);
   const candidates = uniqueNumbers([
     explicitPort,
@@ -189,6 +213,7 @@ export function createPreviewTunnelPlan(
       command: expandTunnelTemplate(template, target, requestedName, requestedHostname),
       args: [],
       shell: true,
+      provider: "custom",
       target,
       requestedName,
       requestedHostname,
@@ -199,6 +224,7 @@ export function createPreviewTunnelPlan(
     return {
       command: "cloudflared",
       args: ["tunnel", "--url", target.localUrl],
+      provider: "cloudflared",
       target,
       requestedName,
       requestedHostname,
@@ -218,6 +244,7 @@ export function createPreviewTunnelPlan(
         "--subdomain",
         requestedName,
       ],
+      provider: "localtunnel",
       target,
       requestedName,
       requestedHostname,
@@ -232,6 +259,7 @@ export function createPreviewTunnelPlan(
 export function parsePreviewPublicUrl(
   output: string,
   preferredHostname?: string,
+  options: { allowUnknownHost?: boolean } = {},
 ): string | undefined {
   const matches = output.match(PREVIEW_URL_PATTERN) || [];
   const urls = matches.filter((value) => {
@@ -248,24 +276,26 @@ export function parsePreviewPublicUrl(
     if (preferred) return preferred;
   }
 
-  return (
-    urls.find((value) => {
-      const host = new URL(value).hostname;
-      return (
-        host.endsWith(".trycloudflare.com") ||
-        host.endsWith(".loca.lt") ||
-        host.endsWith(".localtunnel.me") ||
-        host.endsWith(".ngrok.app") ||
-        host.endsWith(".ngrok-free.app") ||
-        host.endsWith(".ngrok.dev") ||
-        host.endsWith(".ngrok.io") ||
-        host.endsWith(".preview.farming-labs.dev")
-      );
-    }) || urls[0]
-  );
+  const knownUrl = urls.find((value) => {
+    const host = new URL(value).hostname;
+    return (
+      host.endsWith(".trycloudflare.com") ||
+      host.endsWith(".loca.lt") ||
+      host.endsWith(".localtunnel.me") ||
+      host.endsWith(".ngrok.app") ||
+      host.endsWith(".ngrok-free.app") ||
+      host.endsWith(".ngrok.dev") ||
+      host.endsWith(".ngrok.io") ||
+      host.endsWith(".preview.farming-labs.dev")
+    );
+  });
+  return knownUrl || (options.allowUnknownHost === false ? undefined : urls[0]);
 }
 
-async function runPreviewTunnel(plan: PreviewTunnelPlan, timeoutMs: number): Promise<string> {
+export async function runPreviewTunnel(
+  plan: PreviewTunnelPlan,
+  timeoutMs: number,
+): Promise<string> {
   const child = spawn(plan.command, plan.args, {
     env: {
       ...process.env,
@@ -290,14 +320,27 @@ async function runPreviewTunnel(plan: PreviewTunnelPlan, timeoutMs: number): Pro
   try {
     publicUrl = await new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
         reject(new Error("Timed out waiting for the preview URL."));
       }, timeoutMs);
 
       const handleChunk = (chunk: Buffer) => {
         const text = chunk.toString();
-        output += text;
         process.stdout.write(text);
-        const nextUrl = parsePreviewPublicUrl(output, plan.requestedHostname);
+        // The buffer exists only to find the public URL. Once that is known it
+        // has no further use, and until then only a bounded trailing window is
+        // needed - a long-lived or noisy tunnel would otherwise grow one string
+        // for the whole session. The window is far larger than any URL line, so
+        // a URL split across chunks is still matched.
+        if (settled) return;
+        output =
+          output.length + text.length > MAX_TUNNEL_SCAN_CHARS
+            ? (output + text).slice(-MAX_TUNNEL_SCAN_CHARS)
+            : output + text;
+        const nextUrl = parsePreviewPublicUrl(output, plan.requestedHostname, {
+          allowUnknownHost: plan.provider === undefined || plan.provider === "custom",
+        });
         if (nextUrl && !settled) {
           settled = true;
           clearTimeout(timer);
@@ -332,6 +375,13 @@ async function runPreviewTunnel(plan: PreviewTunnelPlan, timeoutMs: number): Pro
 
     await waitForTunnelExit(child);
     return publicUrl;
+  } catch (error) {
+    // The timeout (and any spawn or early-exit failure) rejects while the child
+    // may still be running. Nothing else terminates it: the SIGINT/SIGTERM
+    // handlers are removed below, so without this the tunnel process outlives
+    // the command that started it.
+    cleanup();
+    throw error;
   } finally {
     process.removeListener("SIGINT", cleanup);
     process.removeListener("SIGTERM", cleanup);
@@ -418,7 +468,7 @@ function normalizeLocalUrl(value: string) {
 }
 
 function createLocalUrl(host: string, port: number) {
-  return `http://${host}:${port}`;
+  return createHttpLocalUrl(host, port);
 }
 
 function normalizePort(value: unknown): number | undefined {

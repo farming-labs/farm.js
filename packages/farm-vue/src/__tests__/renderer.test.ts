@@ -79,7 +79,91 @@ describe("Vue renderer", () => {
     expect(html).toContain('<section class="layout"><p>Nested route</p></section>');
   });
 
+  it("reports a render error as a shell error", async () => {
+    const Boom = defineComponent({
+      setup: () => () => {
+        throw new Error("vue shell boom");
+      },
+    });
+
+    const outcome = await new Promise<string>((resolve) => {
+      const stream = renderToPipeableStream(createElement(Boom, null), {
+        onShellReady() {
+          resolve("shell-ready");
+        },
+        onShellError() {
+          resolve("shell-error");
+        },
+        onError() {
+          resolve("error");
+        },
+      });
+      void stream;
+    });
+
+    expect(outcome).toBe("shell-error");
+  });
+
+  it("settles the piped destination when the render errors instead of hanging", async () => {
+    const Boom = defineComponent({
+      setup: () => () => {
+        throw new Error("vue stream boom");
+      },
+    });
+
+    // Mirror core's buffered pipeable consumer: pipe on shell-ready, and let the
+    // Writable's finish/error be the only way the promise settles. A regression
+    // (error not forwarded to the destination) would hang until the test times out.
+    const outcome = await new Promise<string>((resolve, reject) => {
+      const destination = new Writable({
+        write(_chunk, _encoding, callback) {
+          callback();
+        },
+      });
+      let started = false;
+      destination.once("finish", () => resolve("finish"));
+      destination.once("error", () => resolve("destination-error"));
+
+      const stream = renderToPipeableStream(createElement(Boom, null), {
+        onShellReady() {
+          started = true;
+          stream.pipe(destination);
+        },
+        onShellError(error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+        },
+        onError() {
+          if (!started) reject(new Error("errored before shell"));
+        },
+      });
+    }).catch((error: Error) => `shell-error:${error.message}`);
+
+    // Either classification is acceptable; the point is that it settles.
+    expect(outcome).toMatch(/^(destination-error|shell-error:)/);
+  }, 5000);
+
   it("does not require a renderer-specific hydration bootstrap", () => {
     expect(generateHydrationScript()).toBe("");
+  });
+
+  it("emits numeric scale without a px unit, matching React's unitless set", async () => {
+    const html = await renderToString(
+      createElement("div", { style: { scale: 1.5, opacity: 0.5, width: 100, zIndex: 3 } }),
+    );
+
+    expect(html).toMatch(/scale:\s*1\.5(?!px)/);
+    expect(html).not.toMatch(/scale:\s*1\.5px/);
+    expect(html).toMatch(/opacity:\s*0?\.5(?!px)/);
+    expect(html).toMatch(/z-index:\s*3(?!px)/);
+    expect(html).toMatch(/width:\s*100px/);
+  });
+
+  it("keeps translate and rotate unit-bearing, matching React's unitless set", async () => {
+    const html = await renderToString(
+      createElement("div", { style: { translate: 10, rotate: 45 } }),
+    );
+
+    expect(html).toMatch(/translate:\s*10px/);
+    expect(html).toMatch(/rotate:\s*45px/);
   });
 });

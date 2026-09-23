@@ -252,6 +252,10 @@ export default defineConfig({
 
 When `target` is `vercel`, Farm uses the Vercel Nitro preset and writes Build Output API output to `.vercel/output`. Other targets default to `.farm/.output` unless you override `output` or `outputDir`. When `preset` is set directly, Farm passes that value through to Nitro.
 
+`farm deploy --vercel` requires `.vercel/output` because the Vercel CLI reads that fixed directory
+for `--prebuilt` uploads. Keep the default output for Farm-managed Vercel deploys. A custom Vercel
+output directory is only suitable when another deployment workflow uploads the build itself.
+
 ## Override output
 
 Use `output` for the compact form or `outputDir` when you want the explicit option name.

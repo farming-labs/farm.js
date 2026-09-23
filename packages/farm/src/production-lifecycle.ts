@@ -19,6 +19,7 @@ export interface FarmProductionLifecycle {
   beginDrain(reason?: string): void;
   waitForIdle(timeoutMs?: number): Promise<boolean>;
   close(reason?: string): Promise<void>;
+  forceClose(reason?: string): Promise<void>;
   handleHealthRequest(request: Request): Promise<Response | null>;
   runRequest(
     handler: () => Response | Promise<Response>,
@@ -33,6 +34,11 @@ export function createFarmProductionLifecycle(
   let activeRequests = 0;
   let startPromise: Promise<void> | undefined;
   let closePromise: Promise<void> | undefined;
+  let resourceClosePromise: Promise<void> | undefined;
+  let resolveForcedCloseWait!: () => void;
+  const forcedCloseWait = new Promise<void>((resolve) => {
+    resolveForcedCloseWait = resolve;
+  });
   const idleWaiters = new Set<() => void>();
 
   const notifyIdle = () => {
@@ -58,7 +64,7 @@ export function createFarmProductionLifecycle(
           if (state === "starting") state = "ready";
         },
         (error) => {
-          state = "failed";
+          if (state !== "closed") state = "failed";
           throw error;
         },
       );
@@ -91,10 +97,9 @@ export function createFarmProductionLifecycle(
     });
   };
 
-  const close = async (reason = "production-server-closed") => {
-    if (closePromise) return closePromise;
-    beginDrain(reason);
-    closePromise = Promise.resolve()
+  const closeResources = async (reason: string) => {
+    if (resourceClosePromise) return resourceClosePromise;
+    resourceClosePromise = Promise.resolve()
       .then(() => options.close?.(reason))
       .then(
         () => {
@@ -105,7 +110,30 @@ export function createFarmProductionLifecycle(
           throw error;
         },
       );
+    return resourceClosePromise;
+  };
+
+  const close = async (reason = "production-server-closed") => {
+    if (resourceClosePromise) return resourceClosePromise;
+    if (closePromise) return closePromise;
+    beginDrain(reason);
+    closePromise = Promise.race([
+      Promise.resolve(startPromise).catch(() => {
+        // Startup may have partially initialized resources. The close hook
+        // still owns their cleanup, while the original start caller keeps the
+        // startup failure.
+      }),
+      forcedCloseWait,
+    ]).then(() => closeResources(reason));
     return closePromise;
+  };
+
+  const forceClose = async (reason = "production-server-closed") => {
+    beginDrain(reason);
+    resolveForcedCloseWait();
+    const forcedClose = closeResources(reason);
+    closePromise ??= forcedClose;
+    return forcedClose;
   };
 
   const handleHealthRequest = async (request: Request): Promise<Response | null> => {
@@ -145,6 +173,7 @@ export function createFarmProductionLifecycle(
     handler: () => Response | Promise<Response>,
     context: FarmResponseCompletionContext = {},
   ): Promise<Response> => {
+    if (state === "failed") return createFailedResponse();
     if (state === "draining" || state === "closed") return createDrainingResponse();
     await start();
     if (state !== "ready") return createDrainingResponse();
@@ -178,6 +207,7 @@ export function createFarmProductionLifecycle(
     beginDrain,
     waitForIdle,
     close,
+    forceClose,
     handleHealthRequest,
     runRequest,
   };
@@ -207,6 +237,18 @@ function createDrainingResponse(): Response {
   });
 }
 
+function createFailedResponse(): Response {
+  return new Response("Service Unavailable", {
+    status: 503,
+    headers: {
+      "cache-control": "no-store",
+      connection: "close",
+      "content-type": "text/plain; charset=utf-8",
+      "x-content-type-options": "nosniff",
+    },
+  });
+}
+
 function trackResponseCompletion(
   response: Response,
   finish: () => void,
@@ -227,25 +269,35 @@ function trackResponseCompletion(
   }
 
   const reader = response.body.getReader();
+  let released = false;
+  const releaseReader = () => {
+    if (released) return;
+    released = true;
+    reader.releaseLock();
+  };
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         const result = await reader.read();
         if (result.done) {
+          releaseReader();
           finish();
           controller.close();
           return;
         }
         controller.enqueue(result.value);
       } catch (error) {
+        releaseReader();
         finish();
         controller.error(error);
       }
     },
-    async cancel(reason) {
+    cancel(reason) {
       try {
-        await reader.cancel(reason);
+        // Cancellation closes the response now; producer cleanup may finish later.
+        return reader.cancel(reason);
       } finally {
+        releaseReader();
         finish();
       }
     },

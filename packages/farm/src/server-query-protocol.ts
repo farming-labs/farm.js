@@ -6,6 +6,8 @@ export type FarmServerQueryResult<TData> = {
     key: string;
     staleTime: number | false;
     updatedAt: number;
+    /** Declared by the query; allows the client persistence adapter to store the entry. */
+    persist?: boolean;
   };
   data: TData;
 };

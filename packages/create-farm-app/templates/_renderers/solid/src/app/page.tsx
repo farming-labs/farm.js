@@ -2,7 +2,7 @@
 
 import { createSignal } from "solid-js";
 import { ResourceLinks } from "../components/resource-links";
-import { api } from "../lib/api-client";
+import { apiClient } from "../lib/api";
 
 export default function HomePage() {
   const [message, setMessage] = createSignal("Call a typed server function");
@@ -11,7 +11,7 @@ export default function HomePage() {
   const callServer = async () => {
     setPending(true);
     try {
-      const result = await api.greeting.post({
+      const result = await apiClient.greeting.post({
         body: { name: "Solid" },
       });
       if (result.error) throw result.error;

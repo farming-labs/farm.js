@@ -14,6 +14,7 @@ A compact map of the main package exports and where to learn more.
 | ----------------------------- | ------------------------------------------------------------------------------------ |
 | @farm.js/core                 | Config, app types, plugins, integrations, routing, OpenAPI, docs, cache.             |
 | @farm.js/core/client          | Link, router helpers, callable route actions, API client, integration client.        |
+| @farm.js/core/api/client      | Renderer-neutral typed API clients.                                                  |
 | @farm.js/core/plugin/client   | Advanced browser lifecycle manager and client plugin event types.                    |
 | @farm.js/core/navigation      | Next-compatible redirect, notFound, and client navigation hooks.                     |
 | @farm.js/core/headers         | Next-compatible request headers and cookies helpers.                                 |
@@ -46,7 +47,7 @@ A compact map of the main package exports and where to learn more.
 
 | Package                                                                       | Exports                                                                                                    |
 | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `@farm.js/core`                                                               | `defineIntegration`, `integrationRoute`, `defineIntegrationSchema`, `definePlugin`, `defineConfig`.        |
+| `@farm.js/core`                                                               | `defineIntegration`, `integrationRoute`, `defineSchema`, `definePlugin`, `defineConfig`.                   |
 | `@farm.js/core/theme/client`                                                  | `useTheme`, `getTheme`, `setTheme`, and `toggleTheme` for browser color-mode state.                        |
 | `@farm.js/core/theme/server`                                                  | `getTheme` and `getThemeSnapshot` for cookie-backed server rendering.                                      |
 | `@farm.js/core/cron`                                                          | `cronRoute`, cron config types, schedule manifests, and deployment adapter helpers.                        |
@@ -59,6 +60,9 @@ A compact map of the main package exports and where to learn more.
 | `@farm.js/core/router`                                                        | `createFarmRouter`, `matchFarmRoute`, `buildFarmRoutePath`, `isFarmRouteActive`.                           |
 | `@farm.js/core/storage`                                                       | `sqliteStorage`, `postgresStorage`, `redisStorage`, `createStorageClient`, `defineStorageClient`.          |
 | `@farm.js/cache-redis`                                                        | `redisCache` distributed cache adapter.                                                                    |
+| `@farm.js/federation`                                                         | `federation` build plugin for browser Module Federation producers and hosts.                               |
+| `@farm.js/federation/client`                                                  | Typed `loadRemote` and `preloadRemote` browser helpers.                                                    |
+| `@farm.js/search`                                                             | `search` build plugin and the headless `createSearch` browser client.                                      |
 | `@farm.js/core/after`                                                         | `after` for short work that starts after the current response finishes.                                    |
 | `@farm.js/stripe`, `@farm.js/polar`, `@farm.js/autumn`                        | Dedicated billing integration packages.                                                                    |
 | `@farm.js/auth0`, `@farm.js/authjs`, `@farm.js/better-auth`, `@farm.js/clerk` | Dedicated auth integration packages.                                                                       |

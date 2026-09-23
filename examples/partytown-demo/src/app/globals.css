@@ -1,0 +1,147 @@
+:root {
+  color: #f2f8f4;
+  background: #070b09;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+code {
+  font: inherit;
+}
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 18% 12%, rgb(72 207 139 / 16%), transparent 34%),
+    radial-gradient(circle at 82% 88%, rgb(89 118 255 / 12%), transparent 32%),
+    #070b09;
+}
+
+.card {
+  width: min(720px, 100%);
+  padding: clamp(30px, 7vw, 72px);
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 28px;
+  background: rgb(15 22 18 / 86%);
+  box-shadow: 0 32px 100px rgb(0 0 0 / 44%);
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #70e0a7;
+  font: 650 0.76rem/1.2 ui-monospace, SFMono-Regular, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.eyebrow span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 18px currentColor;
+}
+
+h1 {
+  max-width: 10ch;
+  margin: 20px 0;
+  font-size: clamp(2.6rem, 8vw, 5.8rem);
+  line-height: 0.92;
+  letter-spacing: -0.065em;
+}
+
+.lede {
+  max-width: 58ch;
+  margin: 0 0 32px;
+  color: #aebdb4;
+  font-size: 1.03rem;
+  line-height: 1.7;
+}
+
+button {
+  min-height: 46px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 10px;
+  color: #07120c;
+  background: #70e0a7;
+  font-weight: 720;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #8deab9;
+}
+
+button:focus-visible {
+  outline: 3px solid rgb(112 224 167 / 35%);
+  outline-offset: 3px;
+}
+
+.result {
+  min-height: 118px;
+  margin-top: 28px;
+  padding: 18px;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 14px;
+  background: rgb(0 0 0 / 18%);
+}
+
+.status {
+  display: block;
+  margin-bottom: 16px;
+  color: #819188;
+  font-size: 0.82rem;
+}
+
+code {
+  color: #70e0a7;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.86rem;
+}
+
+dl,
+dl div {
+  display: grid;
+}
+
+dl {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 0;
+}
+
+dl div {
+  gap: 6px;
+}
+
+dt {
+  color: #819188;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+dd {
+  margin: 0;
+  color: #e7f4eb;
+  font: 600 0.88rem/1.4 ui-monospace, SFMono-Regular, monospace;
+}
+
+@media (max-width: 560px) {
+  dl {
+    grid-template-columns: 1fr;
+  }
+}

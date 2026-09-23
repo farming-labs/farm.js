@@ -1,5 +1,7 @@
 import type { ImageResponseOptions } from "@vercel/og";
 import type { ReactElement } from "react";
+import { omitFarmResponseBody } from "./response-body";
+import { matchesFarmIfNoneMatch } from "./server-http";
 
 const REACT_ELEMENT_TYPE = Symbol.for("react.element");
 const REACT_TRANSITIONAL_ELEMENT_TYPE = Symbol.for("react.transitional.element");
@@ -93,7 +95,18 @@ async function prepareMetadataImageNode(node: unknown): Promise<unknown> {
     }
     if (type.$$typeof === REACT_LAZY_TYPE) {
       const { createElement } = await import("react");
-      return prepareMetadataImageNode(createElement(type._init(type._payload), props));
+      let resolvedType: unknown;
+      try {
+        resolvedType = type._init(type._payload);
+      } catch (suspension) {
+        if (suspension && typeof (suspension as Promise<unknown>).then === "function") {
+          await suspension;
+          resolvedType = type._init(type._payload);
+        } else {
+          throw suspension;
+        }
+      }
+      return prepareMetadataImageNode(createElement(resolvedType as any, props));
     }
   }
 
@@ -164,12 +177,7 @@ async function finalizeMetadataImageResponse(
   responseHeaders.set("Content-Length", String(body.byteLength));
   responseHeaders.set("X-Content-Type-Options", "nosniff");
 
-  const matchesEntityTag =
-    options.ifNoneMatch?.trim() === "*" ||
-    options.ifNoneMatch
-      ?.split(",")
-      .some((candidate) => candidate.trim().replace(/^W\//, "") === etag);
-  if (matchesEntityTag) {
+  if (matchesFarmIfNoneMatch(options.ifNoneMatch, etag)) {
     return new Response(null, { status: 304, headers: responseHeaders });
   }
 
@@ -191,9 +199,7 @@ export async function createFarmMetadataImageResponse(
   }
 
   if (isResponse(value)) {
-    return method === "HEAD"
-      ? new Response(null, { status: value.status, headers: value.headers })
-      : value;
+    return method === "HEAD" ? omitFarmResponseBody(value) : value;
   }
 
   const cacheControl = resolveCacheControl(imageModule.revalidate);

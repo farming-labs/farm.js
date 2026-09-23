@@ -1,5 +1,6 @@
 import type { FarmRenderer } from "./renderer";
 import type { IncomingMessage, ServerResponse } from "http";
+import type { FarmAgentUserConfig } from "./agent-config";
 import type { FarmStorageUserConfig } from "./storage/types";
 import type { FarmIntegrationsUserConfig } from "./integrations";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
@@ -202,6 +203,8 @@ export interface FarmConfig {
   serverActions?: FarmServerActionsConfig;
   /** App-wide HTTP security policy. */
   security?: FarmSecurityConfig | ResolvedFarmSecurityConfig;
+  /** Opt-in agent-readiness primitives (JSON-LD and related). Off by default. */
+  agent?: FarmAgentUserConfig;
   images?: FarmImageConfig;
   /** Browser resource scheduling and preload budgets. */
   performance?: FarmPerformanceConfig;
@@ -224,7 +227,13 @@ export interface FarmConfig {
   observability?: FarmObservabilityUserConfig;
   /** Farm product telemetry for deployed server runtimes. Set to false to disable. */
   telemetry?: boolean;
-  /** Development-only runtime inspector. Enabled by default during `farm dev`. */
+  /**
+   * Development-only runtime inspector. Enabled by default during `farm dev`.
+   *
+   * @deprecated The built-in dashboard is deprecated. Install `@farm.js/devtools` and add
+   * `devtools()` to `plugins` instead; it reuses this runtime and owns the maintained UI.
+   * `devtools: false` and `shortcut` remain supported for the transition.
+   */
   devtools?: FarmDevtoolsUserConfig;
   /** Development-only browser feedback for build and HMR activity. */
   devIndicators?: FarmDevIndicatorsConfig;
@@ -236,6 +245,17 @@ export interface FarmConfig {
   experimental?: {
     serverComponents?: boolean;
     serverActions?: boolean;
+    /**
+     * Enables Partial Prerendering (static-shell caching). Routes still opt in
+     * individually with `export const ppr = true`, the Next-compatible
+     * `export const experimental_ppr = true`, or a `"use ppr"` directive;
+     * without this flag those declarations are inert and the route renders
+     * fully dynamically.
+     *
+     * @experimental
+     * @default false
+     */
+    ppr?: boolean;
     /**
      * Controls non-RSC hydration ownership for server modules that import
      * leaf `"use client"` components.
@@ -494,6 +514,7 @@ export interface RouteModule<TRoute extends FarmRoutePropsTarget = FarmRouteProp
   /**
    * Opt into Partial Prerendering/static-shell caching for this route.
    * Compatible with Farm's `ppr` export and Next.js `experimental_ppr`.
+   * Requires `experimental.ppr` in `farm.config.ts`; inert without it.
    */
   ppr?: boolean;
   experimental_ppr?: boolean;

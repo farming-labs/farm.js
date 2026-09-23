@@ -42,7 +42,7 @@ definitions, while generated code uses the tree-shakable feature entry.
 
 The persisted production-size fixtures and regression gate live in
 [`RUNTIME_SIZE_RESULTS.md`](./RUNTIME_SIZE_RESULTS.md). The recorded direct-only runtime premium is
-73.6% smaller than the complete compatibility runtime premium; the feature-heavy keyed benchmark
+82.6% smaller than the complete compatibility runtime premium; the feature-heavy keyed benchmark
 application removes 6,185 gzip bytes from its previous compiler-on build.
 
 For selective adoption, use annotation mode:
@@ -220,17 +220,33 @@ updates such as:
 
 ```tsx
 setItems((current) =>
-  current.map((item) => (item.id === targetId ? { ...item, selected: !item.selected } : item)),
+  current
+    .map((item) => (item.id === targetId ? { ...item, label: nextLabel } : item))
+    .map((item) => (item.id === targetId ? { ...item, selected: !item.selected } : item)),
 );
 ```
 
-The generated native `map()` records which indexes returned new item identities. Farm then
-validates that length, keys, and positions are unchanged and patches only those row instances. The
-user's `map()` remains O(n); this removes the keyed runtime's second full key-and-binding scan.
-Queued hints compose. Key changes, structural edits, relevant mixed dependencies, and failed runtime
-checks use the existing complete reconciliation and LIS path. Non-functional setters, derived
-collections, block-bodied or mutating mappers, and other unproven forms are simply not hinted. No
-new option is required. A compiler report exposes the emitted-site count as
+Farm executes every generated native `map()` and then compares the committed and final item
+identities once. It validates final length, keys, and positions and patches each final changed row
+once; intermediate arrays never receive DOM work. Every user `map()` remains O(n); this removes the
+keyed runtime's second full key-and-binding scan. Queued hints compose. The source method lookup,
+native result, callback order, and thrown errors are preserved.
+
+The setter may be concise or use a block containing exactly one value-returning `return`. Extra
+updater statements, conditional returns, and missing returns keep complete keyed reconciliation.
+Each stage requires an inline synchronous conditional mapper that returns the original item on at
+least one path and an object-spread replacement on another. The callback may be a concise expression
+or a structured block containing fully returning `if` or `switch` branches and proven local `const`
+aliases. Each alias needs a simple identifier and compiler-safe initializer. A `switch` needs one
+`default`, a complete return from every case, safe discriminant and case expressions, and no trailing
+statements. Consecutive empty labels may share the next fully returning body; partially executed
+fallthrough and dangling labels are rejected. An unsupported mapper anywhere in the chain disables
+the complete setter hint. Custom methods still execute but record no metadata. Key changes, structural
+edits, sparse or subclassed arrays, relevant mixed dependencies, and failed runtime checks use the
+existing complete reconciliation and LIS path. Non-functional setters, derived collections,
+referenced callbacks, mutable or destructured declarations, effectful initializers, other
+intermediate statements, partial or dangling fallthrough, mutating mappers, and other unproven forms
+are simply not hinted. No new option is required. A compiler report counts prepared map calls as
 `keyedMapUpdateHints`. The separate hint runtime capability is imported only when that count is
 nonzero, so direct-only and ordinary keyed builds do not retain it.
 
@@ -239,63 +255,207 @@ The same optional runtime recognizes conservative immutable appends on a direct 
 ```tsx
 setItems((current) => [...current, nextItem]);
 setItems((current) => [...current, ...nextItems]);
+setItems((current) => {
+  return [...current, ...nextItems];
+});
 ```
 
 Because every existing item keeps its key and index, Farm validates the committed source and the
 queued append chain, reads keys and descriptors only for the appended suffix, and mounts that
-suffix in one fragment. Existing row DOM is left untouched. The concise functional updater and
-native arrays are required; middle insertion, removal, direct replacement, duplicate
-keys, rows that read the collection itself, and failed runtime checks use complete keyed
-reconciliation. A key that reads the collection prevents hint emission entirely. The compiler
-report exposes the emitted-site count as
+suffix in one fragment. Existing row DOM is left untouched. The setter may be concise or use a
+block containing exactly one direct value-returning `return`. Extra statements, conditional
+returns, and missing returns keep complete keyed reconciliation. Native arrays are required;
+middle insertion, removal, direct replacement, duplicate keys, rows that read the collection
+itself, and failed runtime checks use complete keyed reconciliation. A key that reads the
+collection prevents hint emission entirely. The compiler report exposes the emitted-site count as
 `keyedArrayAppendHints`.
+
+Adjacent removal and append setters can share the same committed-row proof:
+
+```tsx
+setItems((current) => current.filter((item) => item.id !== expiredId));
+setItems((current) => [...current, incoming]);
+
+setItems((current) => current.slice(start, end));
+setItems((current) => [...current, ...incoming]);
+
+setItems((current) => current.slice(start, end));
+setItems((current) => [...current, incoming]);
+setItems((current) =>
+  current.map((item) => (item.id === targetId ? { ...item, label: nextLabel } : item)),
+);
+
+setItems((current) => current.filter((item) => item.id !== expiredId));
+setItems((current) =>
+  current.map((item) => (item.id === targetId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) => [...current, incoming]);
+```
+
+The setters still execute in order and still create their normal native arrays. Before changing the
+DOM, Farm validates the original committed token, every filter or slice survivor, the complete final
+length, and every incoming key. It prepares all incoming keys, descriptors, bindings, and detached
+host rows first; only then does it remove rejected rows, update survivor indexes, and append the new
+suffix in one fragment. Existing survivors are neither rebound nor recreated, and additional
+adjacent append setters are collapsed into the same final suffix. This keeps the unavoidable native
+filter or slice work while removing the keyed runtime's second full scan.
+
+One or more immediately adjacent safe same-key `map()` setters may run between the filter or slice
+and the append, after the append, or in both positions. A safe map may also precede the structural
+removal. Farm carries the original survivor indices or retained interval through those native maps
+and records each replacement against its committed row. Before touching the DOM it validates the
+complete dense result, every survivor identity, every changed key and binding, and every incoming
+row. It then removes only rejected rows, patches only changed survivors, and creates the suffix from
+its final values. The owner stays mounted, survivor DOM identity is preserved, and the suffix is
+appended once.
+
+Only concise updater results and blocks with one direct value-returning `return` that form one
+direct chain for the same state array are linked. The row and key must be compiler-owned and
+index-independent. A reorder in the structural-append chain, an
+unsupported or non-adjacent map, an unhinted update to that state, another dirty row dependency,
+collection-reading binding, custom, sparse, or subclassed array, nested or React-owned row,
+duplicate final key, or reuse of any committed key in the appended suffix keeps complete React
+reconciliation before a DOM write. A mapped survivor whose key changes also falls back before
+mutation. No API or configuration is added. Compiler reports use the existing
+`keyedArrayFilterHints`, `keyedArraySliceHints`, and `keyedArrayAppendHints` counts, and modules
+without both accepted operations omit the composed runtime.
 
 The mirror-image prepend form is supported when the keyed row and key do not read the row index:
 
 ```tsx
 setItems((current) => [nextItem, ...current]);
 setItems((current) => [...nextItems, ...current]);
+setItems((current) => {
+  return [...nextItems, ...current];
+});
+
+setItems((current) => current.filter((item) => item.id !== expiredId));
+setItems((current) => [nextItem, ...current]);
+
+setItems((current) => current.slice(start, end));
+setItems((current) => [...nextItems, ...current]);
+
+setItems((current) => current.filter((item) => item.id !== expiredId));
+setItems((current) => [nextItem, ...current]);
+setItems((current) =>
+  current.map((item) => (item.id === targetId ? { ...item, label: nextLabel } : item)),
+);
+
+setItems((current) => current.slice(start, end));
+setItems((current) =>
+  current.map((item) => (item.id === targetId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) => [nextItem, ...current]);
 ```
 
 Farm validates the committed source and queued prepend chain, creates only the new prefix, inserts
 it before the first existing row, and shifts the stored indexes used by delegated row events.
-Existing row DOM and bindings stay in place. Index-aware rows, collection-reading bindings or
-keys, React-owned row structures, middle insertion, direct replacement, duplicate keys, custom or
-sparse arrays, and failed validation use complete keyed reconciliation. The compiler report
-exposes the emitted-site count as `keyedArrayPrependHints`.
+When an adjacent filter or bounded slice runs first, the compiler also carries the exact survivor
+positions into the prepend. The runtime removes only rejected rows, preserves every surviving DOM
+node, and creates only the final prefix instead of rescanning and rebinding the whole result.
+Multiple adjacent prepends share the same proof.
 
-Literal native slices can carry their exact retained interval into the same removal runtime:
+The setter may be concise or use a block containing exactly one direct value-returning `return`.
+Extra statements, conditional returns, and missing returns keep complete keyed reconciliation.
+
+One or more immediately adjacent safe same-key `map()` setters may run after the prepend or between
+the removal and prepend. A safe map may also run immediately before the removal. Farm carries every
+survivor back to its committed row, validates the complete dense result and every final key, then
+patches only changed survivors and creates the prefix from its final mapped values. A surviving DOM
+node keeps its identity even when its item object changes.
+
+Index-aware rows, collection-reading bindings or keys, React-owned or nested row structures,
+middle insertion, direct replacement, a reordered structural chain, an unsupported or non-adjacent
+map, duplicate final keys, reuse of any committed key in the new prefix, custom or sparse arrays,
+and failed validation use complete keyed reconciliation before any DOM mutation. A mapped survivor
+whose key changes also falls back before mutation. The compiler report exposes the emitted-site
+count as `keyedArrayPrependHints`; no option or component API is added, and modules without the
+accepted removal, prepend, and map chain omit its mapped runtime.
+
+Native slices with compiler-safe bounds can carry their exact retained interval into the same
+removal runtime:
 
 ```tsx
 setItems((current) => current.slice(1_000));
 setItems((current) => current.slice(0, -1_000));
 setItems((current) => current.slice(2, 8));
+setItems((current) => current.slice(trimCount));
+setItems((current) => current.slice(visible.start, visible.end));
+setItems((current) => {
+  return current.slice(visible.start, visible.end);
+});
 ```
 
 For compiler-owned host rows whose render and key do not read the row index, Farm validates the
 committed source and queued slice chain, preserves every surviving DOM row, and removes only rows
 outside the retained interval. A slice-only chain does not reread surviving keys, descriptors, or
-bindings. One or two build-time safe-integer bounds are required. Runtime bounds, block-bodied or
-chained updates, custom slice methods, sparse or subclassed arrays, index-aware or
-collection-reading rows, React-owned structures, and failed validation keep complete keyed
-reconciliation. No option or component is added. The compiler report exposes the emitted-site
-count as `keyedArraySliceHints`.
+bindings. One or two safe-integer literals or compiler-safe runtime expressions are required.
+Identifiers, property reads, side-effect-free arithmetic and conditionals, and safe `Math` calls
+are supported. The setter may be concise or use a block containing exactly one direct
+value-returning `return`. Farm preserves native method lookup, argument evaluation, coercion,
+results, and errors, then records metadata only when the evaluated bounds are already safe integers.
+Calls, assignments, updates, unsafe evaluated bounds, updater blocks with extra statements,
+directives, conditional returns, or no value-returning `return`, chained updates, custom slice
+methods, sparse or subclassed arrays, index-aware or collection-reading rows, React-owned structures,
+and failed validation keep complete keyed reconciliation. No option or component is added. The
+compiler report exposes the emitted-site count as `keyedArraySliceHints`.
 
 A fixed-size feed can combine that retained tail with a new keyed suffix:
 
 ```tsx
 setItems((current) => [...current.slice(1), nextItem]);
 setItems((current) => [...current.slice(1_000), ...nextItems]);
+
+const trimCount = pageSize * pagesToExpire;
+setItems((current) => [...current.slice(trimCount), ...nextItems]);
+setItems((current) => {
+  return [...current.slice(trimCount), ...nextItems];
+});
 ```
 
-Farm executes the ordinary native slice and array construction, then validates the committed
-source, retained item identities, and incoming keys. It removes only the expired prefix, leaves
-the retained DOM rows in place, and creates only the incoming suffix. This first form supports one
-build-time safe-integer slice bound and compiler-owned, index-independent host rows. Reused keys,
-block-bodied updaters, custom slice behavior, collection-reading or index-aware rows, nested or
-React-owned rows, queued uncommitted windows, and failed checks use complete keyed reconciliation.
-The optional all-hint runtime is selected only for modules that emit this optimization. Reports
-expose the site count as `keyedArrayRollingWindowHints`.
+Farm executes the ordinary native slice and array construction, then validates the complete hint
+chain back to the committed source, retained item identities, and final incoming keys. Multiple
+rolling setters queued before one compiler flush collapse into one cumulative prefix removal; rows
+introduced by an earlier setter are created only if they remain in the final suffix. Farm removes
+only the expired committed prefix, leaves the retained DOM rows in place, and creates only that
+final incoming suffix. The setter may be concise or use a block containing exactly one direct
+value-returning `return`. This form supports one safe-integer literal or compiler-safe runtime slice
+bound and compiler-owned, index-independent host rows. Identifiers, property reads,
+side-effect-free arithmetic and conditionals, and safe `Math` calls are supported while preserving
+native lookup, evaluation, results, and errors.
+
+Immediately adjacent safe same-key maps may run before, after, or between one or more rolling
+setters in the same synchronous setter segment:
+
+```tsx
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) => [...current.slice(trimCount), ...nextItems]);
+setItems((current) =>
+  current.map((item) => (item.id === selectedId ? { ...item, selected: true } : item)),
+);
+setItems((current) => [...current.slice(secondTrimCount), ...laterItems]);
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, status: "ready" } : item)),
+);
+```
+
+Each map may use a compiler-safe nested conditional to update several retained rows.
+The compiler carries mapped survivor identity through the retained tail, creates incoming rows
+from their final mapped values, and patches only changed committed survivors. A single rolling
+setter uses the optional structural append/map runtime. Multiple rolling setters keep their
+cumulative retained-window metadata and mapped provenance through an optional runtime dedicated to
+mapped rolling chains. No new public helper, option, or always-loaded browser code is added.
+
+Effectful expressions, reused keys, updater blocks with extra statements, directives, conditional
+returns, or no value-returning `return`, custom slice behavior, collection-reading or index-aware
+rows, nested or React-owned rows, mixed or unhinted queued chains, a statement or unsupported setter
+inside the segment, changed mapped keys, unsafe or no-op evaluated bounds, and failed checks use
+complete keyed reconciliation. Unmapped rolling modules retain the smaller optional all-hint
+runtime. Reports expose each emitted rolling site as `keyedArrayRollingWindowHints`, each rolling
+step retained across a multi-window mapped chain as `keyedArrayMappedRollingWindowChainHints`, and
+each safe map as `keyedMapUpdateHints`.
 
 Native known-position updates can avoid a complete keyed scan too:
 
@@ -308,18 +468,24 @@ setItems((current) => current.toSpliced(selectedIndex, 25));
 setItems((current) => current.toSpliced(selectedIndex, 1, replacement));
 setItems((current) => current.toSpliced(selectedIndex, 25, ...replacements));
 setItems((current) => current.with(selectedIndex, replacement));
+setItems((current) => {
+  return current.toSpliced(selectedIndex, 0, nextItem);
+});
+setItems((current) => {
+  return current.with(selectedIndex, replacement);
+});
 
 // Two same-key windows may be queued before one compiler flush.
 setItems((current) => current.toSpliced(firstIndex, 25, ...firstRefresh));
 setItems((current) => current.toSpliced(secondIndex, 25, ...secondRefresh));
 ```
 
-The compiler recognizes only a concise functional setter and either a safe-integer literal or a
-compiler-safe runtime position expression, such as an identifier, property read, arithmetic,
-conditional, or safe `Math` call. The update must insert one or more compiler-safe items with zero
-removals, remove one item or a fixed positive safe-integer literal range, replace one item through
-either `toSpliced()` or `with()`, or replace a fixed positive safe-integer literal window with
-compiler-safe explicit items or a safe spread. Farm preserves method lookup,
+The compiler recognizes a concise functional setter or a setter block containing exactly one direct
+`return`. Its position must be either a safe-integer literal or a compiler-safe runtime expression,
+such as an identifier, property read, arithmetic, conditional, or safe `Math` call. The update must insert
+one or more compiler-safe items with zero removals, remove one item or a fixed positive safe-integer
+literal range, replace one item through either `toSpliced()` or `with()`, or replace a fixed positive
+safe-integer literal window with compiler-safe explicit items or a safe spread. Farm preserves method lookup,
 evaluates the position and remaining arguments once in their original order, executes the ordinary
 native call, and records metadata only after validating the committed native source, result, and
 actual safe-integer position and clamped removal count. A batch requires at least two evaluated
@@ -330,12 +496,17 @@ through one document fragment. It then removes only the replaced window. When th
 has the same length and the same keys in the same order, Farm prepares every binding read and
 changed DOM target across the complete window first, patches the existing rows in place, and
 updates the stored row objects used by later events. That path creates no descriptors or DOM rows,
-and preserves row identity, focus, and selection. A fixed-length window may instead reorder keys
-from inside its own removed interval and mix them with globally fresh keys. Farm prepares all
-reused binding updates, new descriptors, binding snapshots, and detached rows before the first DOM
-write. It removes only retired rows, preserves each reused row, batches adjacent new rows in a
-fragment, and applies LIS only to the reused part of that interval so it moves the fewest connected
-rows needed by the local permutation. Rows outside the interval are not rerendered or rebound.
+and preserves row identity, focus, and selection. Validated same-key row and window refreshes also
+keep the existing row map and element lookup, and skip redundant cache cleanup instead of
+rebuilding whole-list bookkeeping. Source and key validation still run, and each flush commits the
+new collection token for subsequent updates. Structural changes retain index rebuilding and cache
+cleanup. A window may instead grow or shrink while it
+reorders keys from inside its own removed interval and mixes them with globally fresh keys. Farm
+prepares all reused binding updates, new descriptors, binding snapshots, and detached rows before
+the first DOM write. It removes only retired rows, preserves each reused row, batches adjacent new
+rows in a fragment, updates shifted suffix indexes, and applies LIS only to the reused part of that
+interval so it moves the fewest connected rows needed by the local permutation. Rows outside the
+interval are not rerendered or rebound.
 Multiple length-preserving same-key windows
 queued before one compiler flush compose into one atomic refresh. Fixed-length queued windows may
 mix same-key refreshes with globally new final keys, and both disjoint and overlapping windows are
@@ -348,11 +519,11 @@ removes only the known row or range, or patches/replaces one row at that positio
 every existing key, descriptor, and binding. Surviving rows keep their DOM identity. Index-aware or
 collection-reading rows, custom methods, position expressions with user calls or mutations,
 runtime positions that are not safe integers, dynamic, zero, negative, or fractional removal
-counts, other `toSpliced()` forms, block-bodied updaters, unsafe incoming expressions, queued
-chains containing a structural window or unhinted intermediate update, existing keys moved from
-outside the removed interval, length-changing partially reused windows, duplicate final keys,
-nested or React-owned rows, and failed checks use complete keyed reconciliation before the fast
-path mutates the DOM.
+counts, other `toSpliced()` forms, updater blocks with extra statements, directives, conditional
+returns, or no value-returning `return`, unsafe incoming expressions, queued chains containing a
+structural window or unhinted intermediate update, existing keys moved from outside the removed
+interval, duplicate final keys, nested or React-owned rows, and failed checks use complete keyed
+reconciliation before the fast path mutates the DOM.
 Reports expose the site count as `keyedArrayPositionHints`. Batch insertion and exact-window
 replacement use progressively separate optional runtime capabilities, so existing single-position
 and batch-only bundles do not retain window validation or replacement code.
@@ -361,53 +532,306 @@ A direct native reverse can carry its complete permutation to a separate optiona
 
 ```tsx
 setItems((current) => current.toReversed());
+setItems((current) => {
+  return current.toReversed();
+});
 ```
 
-Farm preserves the method lookup, call result, and errors, then records metadata only for the native
-method on a committed ordinary array. The runtime verifies equal lengths and every reversed item
-identity before moving the existing keyed elements with the minimum `n - 1` connected DOM moves.
-It does not reread row keys, descriptors, or bindings and does not run the generic LIS calculation.
-Index-aware or collection-reading rows, arguments, computed or chained calls, block-bodied
-updaters, custom methods, sparse or subclassed behavior, queued uncommitted reversals, nested or
-React-owned rows, and failed checks keep complete keyed reconciliation. Reports expose the site
-count as `keyedArrayReorderHints`, and modules without one omit the reorder runtime. Farm does not
-polyfill `Array.prototype.toReversed`.
+Farm recognizes the concise form and a block containing exactly one direct `return`. It preserves
+the method lookup, call result, and errors, then records metadata only for the native method on an
+ordinary array whose chain starts at the committed collection. One direct reverse
+verifies equal lengths and every reversed item identity before moving the existing keyed elements
+with the minimum `n - 1` connected DOM moves. It does not reread row keys, descriptors, or bindings
+and does not run the generic LIS calculation. Consecutive concise native `toReversed()` and
+`toSorted()` setters queued before one flush compose into one final validated permutation. The
+runtime skips intermediate DOM states. When the proven chain contains only reversals, Farm tracks
+their parity relative to the committed rows: an even count validates exact identity and performs
+no DOM moves, source-item map construction, or LIS; an odd count validates exact reverse and uses
+the same minimum `n - 1` moves as one reverse. A chain containing a sort keeps the general final
+permutation and uses LIS once. A concise updater or a block containing exactly one direct
+value-returning `return` may also chain two or more native reorder operations:
+
+```tsx
+setItems((current) => current.toSorted((left, right) => left.rank - right.rank).toReversed());
+setItems((current) => {
+  return current.toSorted((left, right) => left.rank - right.rank).toReversed();
+});
+```
+
+Farm evaluates every lookup and call in JavaScript order, carries the same committed token through
+the pipeline, and reconciles only its final result. Index-aware or collection-reading rows,
+arguments to `toReversed()`, referenced comparators, computed methods, updater blocks with extra
+statements, directives, conditional returns, or no returned value, custom methods, sparse or
+subclassed behavior, structural calls after reordering, an unhinted intermediate update, nested or
+React-owned rows, and failed checks keep complete keyed reconciliation.
+
+A compiler-safe `filter()` or bounded `slice()` prefix may precede the native reorder suffix in a
+concise updater or exact one-return block. A filter predicate may be concise or contain exactly one
+direct value-returning `return`:
+
+```tsx
+setItems((current) =>
+  current
+    .filter((item) => {
+      return item.visible;
+    })
+    .toSorted((left, right) => left.rank - right.rank)
+    .toReversed(),
+);
+```
+
+Farm validates the complete survivor set and final order before the first DOM write, removes only
+rejected rows, and applies LIS once to the survivors. Concise or exact one-return filter/slice and
+reorder setters also compose when queued in that order before one flush. Unsupported calls or a
+structural call after a reorder fall back. Reports count each compiled step in the existing filter,
+slice, sort, or reverse counter, and modules without those operations omit their optional runtimes.
+Farm does not polyfill `Array.prototype.toReversed`.
+
+A compiler-safe same-key map may also appear before or after native reorder steps:
+
+```tsx
+setItems((current) =>
+  current
+    .map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item))
+    .map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item))
+    .toSorted((left, right) => left.rank - right.rank),
+);
+```
+
+One callback may select several rows through nested expressions, structured early returns, or a
+fully returning `switch`:
+
+```tsx
+setItems((current) =>
+  current.map((item) => {
+    const matchesReviewed = item.id === reviewedId;
+    if (matchesReviewed) return { ...item, status: "reviewed" };
+    const matchesEscalated = item.id === escalatedId;
+    if (matchesEscalated) {
+      return { ...item, status: "escalated", priority: 1 };
+    }
+    return item;
+  }),
+);
+```
+
+Every condition must be compiler-safe, and every leaf must return the original item or a safe
+object spread of it, with at least one unchanged and one replacement path. Concise expressions and
+blocks made from fully returning `if` or `switch` branches plus local `const` aliases are accepted.
+Each alias must have a simple identifier and compiler-safe initializer. A switch requires one
+`default` and complete returning cases. Consecutive empty labels may share the next body, while
+partial or dangling fallthrough is rejected. Mutable or destructured declarations, effectful
+initializers, other intermediate statements, and ambiguous leaves use complete keyed
+reconciliation. A runtime key change also falls back before any DOM write.
+
+The functional setter may be concise or a block containing exactly one direct value-returning
+`return`. Farm executes every native map and reorder call normally. For consecutive accepted maps,
+it checks each native call but compares only the input and final result of that map segment, avoiding
+a full lineage scan for every intermediate array. It verifies the committed token, dense-array
+shape, a one-to-one source-item match, and every final replacement key before touching the DOM, then runs one
+LIS and patches each changed row once. Unchanged rows need no second key or binding read. Queued
+supported map-and-reorder setters compose against the same committed rows. Every accepted map
+requires an inline synchronous conditional mapper whose leaves return either the original item or
+an object-spread replacement, plus index-independent compiler-owned host rows. Concise expressions
+and structured blocks with proven local `const` aliases plus fully returning `if` or `switch`
+branches are supported.
+Changed keys, referenced callbacks, mutable, destructured, or effectful declarations, other
+intermediate statements or partial/dangling fallthrough, unconditional replacements, `thisArg`,
+structural calls in the same chain, computed or custom methods, sparse or subclassed arrays,
+collection-reading bindings, nested or React-owned rows, and failed checks use complete keyed
+reconciliation. Reports use the existing map, sort, and reorder hint counters, and unrelated modules
+do not retain this optional runtime.
+
+The maps may also finish the concise pipeline:
+
+```tsx
+setItems((current) =>
+  current
+    .toReversed()
+    .map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item))
+    .map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item)),
+);
+```
+
+Farm retains the preceding reorder instead of treating the mapped result as an unhinted snapshot.
+An exact reverse uses the minimum-move reverse path without a general source-item lookup or LIS. A
+sort remains an ambiguous permutation, so Farm performs one validated source lookup and LIS pass.
+Safe maps on both sides of a reorder flatten their replacements back to the same committed rows.
+
+Safe maps may also run before, between, or after index-independent `filter` or `slice` steps in one
+concise functional setter or one block with a single direct `return`. A final native reorder is optional:
+
+```tsx
+setItems((current) =>
+  current
+    .filter((item) => item.visible)
+    .map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item))
+    .slice(0, limit)
+    .toSorted((left, right) => left.rank - right.rank),
+);
+
+setItems((current) =>
+  current
+    .map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item))
+    .filter((item) => item.visible)
+    .slice(0, limit),
+);
+```
+
+The structural helpers retain both the committed survivor indices and mapped-item sources across
+each accepted step. The final commit removes rejected rows, performs LIS moves only when a reorder
+needs them, and patches bindings only for changed survivors. Every native callback and method still
+runs in JavaScript order.
+
+The structural and map steps may also be split across immediately adjacent setter calls in either
+order:
+
+```tsx
+// Map, then structural work.
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) => current.filter((item) => item.visible));
+setItems((current) => current.slice(0, limit));
+
+// Structural work, then maps.
+setItems((current) => current.filter((item) => item.visible));
+setItems((current) => current.slice(0, limit));
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item)),
+);
+```
+
+Farm links only consecutive calls to the same setter. A leading map retains its first committed
+source through later structural work; a terminal map consumes the saved survivor lineage from the
+preceding filter or slice. Multiple safe steps in either segment may share the proof, and mixed
+map/structural/map sequences compose. Every result and key is validated before the queued commit
+touches the DOM. An intervening statement, another setter, an unsafe callback, a changed key, or
+failed runtime validation keeps complete keyed reconciliation.
+
+The survivor proof may continue through adjacent native reorder setters:
+
+```tsx
+setItems((current) => current.filter((item) => item.visible));
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item)),
+);
+setItems((current) => current.toSorted((left, right) => left.rank - right.rank));
+setItems((current) => current.toReversed());
+```
+
+Farm retains the committed survivor positions and same-key replacements until the final queued
+value. The commit removes rejected rows, patches changed survivors, and applies the final order in
+one validated DOM transaction. Exact reverses use the minimum-move reverse path; an arbitrary sort
+uses one source lookup and LIS. Non-adjacent calls, another setter, unsupported syntax, or a failed
+shape/key check keep complete reconciliation.
+
+The reorder and safe maps may also be adjacent setter calls in the same synchronous block:
+
+```tsx
+setItems((current) => current.toReversed());
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)),
+);
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, rank: nextRank } : item)),
+);
+```
+
+The compiler links only consecutive calls to the same setter. It keeps the reorder token through
+each accepted native map, then validates row keys before applying the same exact-reverse or
+sort-permutation path at commit. Adjacent compiler-safe filter or slice work switches to the
+structural proof above. An intervening statement, another setter, an unsupported map, or a changed
+key keeps the ordinary complete fallback. Standalone map-only components do not retain the
+map-and-reorder runtime.
+
+The mirror order is supported as well: two or more adjacent concise same-key map setters may be
+followed by a concise native reverse or sort setter. Farm records their replacement lineage from
+the committed collection and carries it into the final reorder. Only adjacent calls to the same
+setter are linked; intervening work and unsupported updates retain complete reconciliation.
+
+Mapped lineage also continues through multiple adjacent native reorder setters. For example,
+`map -> reverse -> sort -> reverse` keeps the same committed-row proof until the final value, then
+performs one validated keyed reconciliation. A concise `map().toReversed()` pipeline may start the
+same chain. Adjacent compiler-safe filter or slice work changes it into a structural chain while
+retaining the committed source. Every updater and native method still executes in order; another
+setter, intervening work, or an unsupported method ends the chain and preserves the complete
+fallback.
+
+A reverse before the safe map pipeline may be queued in a separate setter:
+
+```tsx
+setItems((current) => current.toReversed());
+setItems((current) =>
+  current.map((item) => (item.id === editedId ? { ...item, label: nextLabel } : item)).toReversed(),
+);
+```
+
+A direct `toReversed()` suffix is more specific than an arbitrary permutation. When all preceding
+maps retain committed row order, Farm validates the mirrored source-to-result relation and every
+changed binding before touching the DOM, then performs the minimum-move reverse without building a
+second item lookup map or running LIS. Additional exact reversals toggle that proof between reverse
+and identity. Therefore two reversals after safe maps patch changed rows in committed order without
+moving DOM nodes or creating the generic source map; three use the exact reverse path. Exact reverse
+metadata also composes across queued setters: a queued reverse followed by safe maps and another
+reverse retains exact identity, so only changed row bindings are patched. A preceding sort or any
+ambiguous order keeps the general permutation path.
 
 A direct native immutable sort can use the same optional reorder runtime:
 
 ```tsx
 setItems((current) => current.toSorted((left, right) => left.rank - right.rank));
 setLabels((current) => current.toSorted());
+setItems((current) => {
+  return current.toSorted((left, right) => left.rank - right.rank);
+});
 ```
 
-Farm recognizes a concise functional setter with no comparator or an inline synchronous comparator
-from the compiler-safe expression subset. It preserves the original method lookup, comparator,
-stable native result, and errors. After the native sort runs, the runtime validates a committed
-ordinary dense array, equal lengths, and a unique one-to-one item-identity permutation. It then
+Farm recognizes a concise functional setter or a block containing exactly one direct `return`,
+with no comparator or an inline synchronous comparator from the compiler-safe expression subset.
+It preserves the original method lookup, comparator, stable native result, and errors. After the
+native sort runs, the runtime validates an ordinary dense array whose reorder chain starts at the
+committed collection, equal lengths, and a unique one-to-one item-identity permutation. It then
 uses LIS to move only `n - LIS` keyed DOM nodes without rereading row keys, descriptors, or
-bindings. The native sorting work itself is unchanged.
+bindings. Multiple concise native sorts and reverses queued in one flush, or chained in one concise
+updater, share the original committed token and reconcile only their final permutation. The native
+sorting work itself is unchanged.
 
-Index-aware or collection-reading rows, referenced comparators, block-bodied updaters, computed or
-chained calls, custom methods, sparse or subclassed arrays, duplicate item identities, queued
-uncommitted sorts, nested or React-owned rows, and failed checks keep complete keyed
-reconciliation. Reports expose the site count as `keyedArraySortHints`; sort shares the optional
-reorder runtime, and Farm does not polyfill `Array.prototype.toSorted`.
+Index-aware or collection-reading rows, referenced comparators, updater blocks with extra
+statements, directives, conditional returns, or no returned value, computed or unsupported chained
+calls, custom methods, sparse or subclassed arrays, duplicate item identities, unhinted intermediate
+updates, structural calls after reordering, nested or React-owned rows, and failed checks keep
+complete keyed reconciliation. A compiler-safe filter/slice prefix is supported. Reports count each
+compiled sort step as a `keyedArraySortHints` entry; sort shares the optional reorder runtime, and
+Farm does not polyfill `Array.prototype.toSorted`.
 
-Concise immutable filters on a direct keyed array can carry removal positions into the same
-optional runtime:
+Concise or single-return block-bodied immutable filters on a direct keyed array can carry removal
+positions into the same optional runtime:
 
 ```tsx
 setItems((current) => current.filter((item) => item.id !== removedId));
+setItems((current) => {
+  return current.filter((item) => item.id !== removedId);
+});
+setItems((current) =>
+  current.filter((item) => {
+    return item.id !== removedId;
+  }),
+);
 ```
 
 For compiler-owned host rows whose render and key do not observe the row index, Farm validates the
 native filter chain, every surviving item identity, and every surviving key before removing only
 the rejected DOM rows. It does not recreate descriptors or reread bindings for unchanged rows,
-and queued filters compose before one compiler flush. Index-aware rows or predicates,
-block-bodied updates, custom filter methods, sparse or subclassed arrays, collection-reading
-bindings or keys, React-owned row structures, mixed dirty dependencies, and failed validation use
-complete keyed reconciliation. No option or new component is required. The compiler report exposes
-the emitted-site count as `keyedArrayFilterHints`.
+and queued filters compose before one compiler flush. Index-aware rows or predicates, updater blocks
+with extra statements, directives, conditional returns, or no value-returning `return`, predicate
+blocks with those unsupported shapes, custom filter methods, sparse or subclassed arrays,
+collection-reading bindings or keys, React-owned row structures, mixed dirty dependencies, and
+failed validation use complete keyed reconciliation. No option or new component is required. The
+compiler report exposes the emitted-site count as `keyedArrayFilterHints`.
 
 An otherwise eligible host row may also contain an inline synchronous React event:
 
@@ -690,19 +1114,23 @@ reasons aggregated by count. Its summary and per-module `optimizations` also rep
 `keyedMapLookupTargets`, the number of native-Map keyed lookup bindings;
 `keyedMembershipTargets`, the number of native-Set membership bindings;
 `keyedCollectionUpdateHints`, the number of compiler-proven native Set/Map mutation sites; and
-`keyedMapUpdateHints`, the number of compiler-proven direct keyed `map()` update sites; and
+`keyedMapUpdateHints`, the number of compiler-proven keyed `map()` update calls; and
 `keyedArrayAppendHints`, the number of compiler-proven direct keyed-array append sites; and
-`keyedArrayFilterHints`, the number of compiler-proven direct keyed-array filter sites; and
+`keyedArrayFilterHints`, the number of compiler-proven keyed-array filter sites, including supported
+structural reorder pipelines; and
 `keyedArrayPrependHints`, the number of compiler-proven direct keyed-array prepend sites; and
 `keyedArrayPositionHints`, the number of compiler-proven native exact-position insertion, single or
 contiguous-range removal, single-row replacement, or exact-window replacement sites, including
 guarded compiler-safe runtime positions;
 and
-`keyedArrayReorderHints`, the number of compiler-proven direct native keyed-array reverse sites; and
-`keyedArraySortHints`, the number of compiler-proven direct native keyed-array sort sites; and
+`keyedArrayReorderHints`, the number of compiler-proven native keyed-array reverse steps; and
+`keyedArraySortHints`, the number of compiler-proven native keyed-array sort steps; and
+`keyedArrayMappedRollingWindowChainHints`, the number of compiler-proven rolling steps retained
+across multi-window same-key map chains; and
 `keyedArrayRollingWindowHints`, the number of compiler-proven retained-tail plus incoming-suffix
 sites; and
-`keyedArraySliceHints`, the number of compiler-proven direct keyed-array slice sites. A custom
+`keyedArraySliceHints`, the number of compiler-proven keyed-array slice sites with literal or guarded
+compiler-safe runtime bounds, including supported structural reorder pipelines. A custom
 project-relative `reportFile` also enables reporting.
 
 The runtime test compares the same counter interaction on both paths: ordinary React performs a
@@ -711,9 +1139,9 @@ commit and updates its two bindings directly. This is a deterministic structural
 assertion; it is not presented as a cross-machine timing benchmark.
 
 Application and prototype calls, dynamic style objects, handlers outside JSX events, nested,
-computed, and rest props patterns, async handlers, unkeyed or index-keyed lists, chained maps,
-unsupported conditional roots, effects, and more advanced hook support intentionally stay on React
-in this release. Compiler-owned keyed rows support either one dedicated host-only map/`List` or
+computed, and rest props patterns, async handlers, unkeyed or index-keyed lists, unsupported map
+chains, unsupported conditional roots, effects, and more advanced hook support intentionally stay
+on React in this release. Compiler-owned keyed rows support either one dedicated host-only map/`List` or
 one or more non-interactive ranges in a nested or component-root host container. A dedicated
 non-interactive row may also contain multiple recursive logical or ternary host branches beside
 stateful static host siblings, plus recursively nested non-interactive keyed ranges scoped by every

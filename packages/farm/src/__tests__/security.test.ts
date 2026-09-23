@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  farmCspBlocksFrameworkInlineScripts,
   getFarmSecurityHeader,
   resolveFarmSecurityConfig,
   serializeFarmCspDirectives,
@@ -94,5 +95,42 @@ describe("security.csp", () => {
         csp: { policy: "default-src 'self'", reportOnly: "yes" },
       } as never),
     ).toThrow(/reportOnly must be a boolean/);
+  });
+});
+
+describe("farmCspBlocksFrameworkInlineScripts", () => {
+  const blocks = (csp: string) =>
+    farmCspBlocksFrameworkInlineScripts(resolveFarmSecurityConfig({ csp }));
+
+  it("flags a script-src allowlist with no inline mechanism", () => {
+    expect(blocks("script-src 'self' https://cdn.example.com")).toBe(true);
+  });
+
+  it("flags default-src when script-src is absent", () => {
+    expect(blocks("default-src 'self'")).toBe(true);
+  });
+
+  it("does not flag 'unsafe-inline'", () => {
+    expect(blocks("script-src 'self' 'unsafe-inline'")).toBe(false);
+  });
+
+  it("does not flag a nonce or hash source", () => {
+    expect(blocks("script-src 'self' 'nonce-abc123'")).toBe(false);
+    expect(blocks("script-src 'self' 'sha256-abcd'")).toBe(false);
+  });
+
+  it("prefers script-src over default-src", () => {
+    // default-src would block, but the explicit script-src allows inline.
+    expect(blocks("default-src 'self'; script-src 'self' 'unsafe-inline'")).toBe(false);
+    // and the reverse: permissive default, restrictive script-src.
+    expect(blocks("default-src 'unsafe-inline'; script-src 'self'")).toBe(true);
+  });
+
+  it("does not flag a policy that governs no scripts", () => {
+    expect(blocks("img-src 'self'; style-src 'self'")).toBe(false);
+  });
+
+  it("does not flag when CSP is disabled", () => {
+    expect(farmCspBlocksFrameworkInlineScripts(resolveFarmSecurityConfig(undefined))).toBe(false);
   });
 });

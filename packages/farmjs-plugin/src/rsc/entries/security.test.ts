@@ -1,5 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { registerAPIRouteShape } from "@farm.js/core/api/runtime";
+import { describe, expect, it, vi } from "vitest";
+import { createApiClients } from "@farm.js/core/client";
+import {
+  _runWithAPIRequestRuntime,
+  _runWithCurrentRequest,
+  _runWithAfterRequest,
+} from "@farm.js/core/internal/production-runtime";
 import { transformWithEsbuild } from "vite";
+import {
+  getAllowedAPIRouteMethods,
+  invokeAPIRouteEndpoint,
+  matchAPIRouteAtBasePath,
+} from "@farm.js/core/api/runtime";
 import type { EntryContext } from "../types.js";
 import { generateClientEntry } from "./client.js";
 import { generateRscEntry } from "./rsc.js";
@@ -75,6 +87,10 @@ describe("generated server action security", () => {
     expect(entry).toContain("Symbol.for('farm.server-fn.failure')");
     expect(entry).toContain("throw createFarmServerFnTransportError(p.returnValue?.data)");
     expect(entry).not.toContain("throw p.returnValue?.data");
+    expect(entry).toContain("shouldApplyFarmServerQueryActionResult(serverQueryInvocation)");
+    expect(entry.indexOf("if (shouldApplyFarmServerQueryActionResult")).toBeLessThan(
+      entry.indexOf("setPayloadRef.current?.(p)"),
+    );
   });
 
   it("emits the resolved global stylesheet URL for every routes directory shape", () => {
@@ -108,6 +124,42 @@ describe("generated server action security", () => {
     expect(entry).toContain("middlewareHeaders.set('cache-control', 'private, no-store')");
   });
 
+  it("binds paired local callers to the RSC request's route runtime", async () => {
+    const entry = generateRscEntry(context);
+    const start = entry.indexOf("async function handler(request, context)");
+    const end = entry.indexOf("export default", start);
+    const { api } = createApiClients<{
+      hello: {
+        get: { __types: { body: never; query: never; response: { cookie: string | null } } };
+      };
+    }>();
+    const dispatch = vi.fn(async (request: Request) => {
+      expect(new URL(request.url).pathname).toBe("/backend/hello");
+      return Response.json({ cookie: request.headers.get("cookie") });
+    });
+    const handle = new Function(
+      "_runWithAPIRequestRuntime",
+      "_runWithCurrentRequest",
+      "_runWithAfterRequest",
+      "handleAPIRequest",
+      "handleFarmRequest",
+      "farmApiBasePath",
+      `${entry.slice(start, end)}; return handler;`,
+    )(
+      _runWithAPIRequestRuntime,
+      _runWithCurrentRequest,
+      _runWithAfterRequest,
+      dispatch,
+      async () => Response.json(await api.hello.get()),
+      "/backend",
+    );
+    const response = await handle(
+      new Request("https://farm.test/page", { headers: { cookie: "session=rsc" } }),
+    );
+    expect((await response.json()).data).toEqual({ cookie: "session=rsc" });
+    expect(dispatch).toHaveBeenCalledOnce();
+  });
+
   it("bundles production API routes and dispatches them outside the server-action pipeline", () => {
     const entry = generateRscEntry(context);
 
@@ -116,13 +168,16 @@ describe("generated server action security", () => {
     );
     expect(entry).toContain("getProgrammaticApiRoutes(routeModule)");
     expect(entry).toContain("from '@farm.js/core/api/runtime'");
+    expect(entry).toContain("'GET', 'HEAD', 'QUERY', 'POST'");
+    expect(entry).toContain("method === 'HEAD' ? match.route.handlers.GET : undefined");
+    expect(entry).toContain("getAllowedAPIRouteMethods(match.route).join(', ')");
     expect(entry).toContain("invokeAPIRouteEndpoint(endpoint, request, match.params)");
     expect(entry).toContain("error: 'Internal Server Error'");
     expect(entry).not.toContain("error?.message || 'Internal Server Error'");
     expect(entry).toContain("if (request.method === 'POST' && !isInitialApiRequest)");
     expect(entry).toContain("applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders)");
 
-    const apiClassification = entry.indexOf("const initialApiMatch = matchAPIRoute(");
+    const apiClassification = entry.indexOf("const initialApiMatch = matchAPIRouteAtBasePath(");
     const actionValidation = entry.indexOf("validateServerActionRequest(request");
     const middleware = entry.indexOf("const middlewareResult = await executeMiddleware(request");
     const apiDispatch = entry.indexOf(
@@ -134,6 +189,102 @@ describe("generated server action security", () => {
     expect(actionValidation).toBeLessThan(middleware);
     expect(middleware).toBeLessThan(apiDispatch);
     expect(apiDispatch).toBeLessThan(actionDecode);
+  });
+
+  it("keeps QUERY and implicit HEAD behavior in the generated API runtime", async () => {
+    const entry = generateRscEntry(context);
+    const registryStart = entry.indexOf("const apiRouteMethods =");
+    const registryEnd = entry.indexOf("\n\nregisterApiRouteSources(apiRouteModules", registryStart);
+    const { apiRouteMap, registerApiRouteSources } = new Function(
+      "registerAPIRouteShape",
+      `${entry.slice(registryStart, registryEnd)}; return { apiRouteMap, registerApiRouteSources };`,
+    )(registerAPIRouteShape) as {
+      apiRouteMap: Map<
+        string,
+        { path: string; methods: string[]; handlers: Record<string, Function> }
+      >;
+      registerApiRouteSources: (
+        fileModules: Array<{
+          sourceIndex: number;
+          filePath: string;
+          relativePath: string;
+          module: Record<string, Function>;
+        }>,
+        definitionModules: unknown[],
+        sourceCount: number,
+      ) => void;
+    };
+    const get = () => new Response("get", { headers: { "x-handler": "get" } });
+    const query = async (request: Request) => Response.json({ query: await request.json() });
+    registerApiRouteSources(
+      [
+        {
+          sourceIndex: 0,
+          filePath: "/src/app/api/items/route.ts",
+          relativePath: "/api/items/route.ts",
+          module: { GET: get, QUERY: query },
+        },
+        {
+          sourceIndex: 0,
+          filePath: "/src/app/api/explicit/route.ts",
+          relativePath: "/api/explicit/route.ts",
+          module: {
+            GET: get,
+            HEAD: () => new Response("head", { headers: { "x-handler": "head" } }),
+          },
+        },
+      ],
+      [],
+      1,
+    );
+
+    expect(apiRouteMap.get("/api/items")?.handlers.QUERY).toBe(query);
+
+    const handlerStart = entry.indexOf("async function handleAPIRequest(request)");
+    const handlerEnd = entry.indexOf("\nconst farmMiddlewareRunner", handlerStart);
+    const createHandler = new Function(
+      "apiRouteMap",
+      "matchAPIRouteAtBasePath",
+      "getAllowedAPIRouteMethods",
+      "invokeAPIRouteEndpoint",
+      "farmApiBasePath",
+      `${entry.slice(handlerStart, handlerEnd)}; return handleAPIRequest;`,
+    );
+    const handleAPIRequest = createHandler(
+      apiRouteMap,
+      matchAPIRouteAtBasePath,
+      getAllowedAPIRouteMethods,
+      invokeAPIRouteEndpoint,
+      "/api",
+    ) as (request: Request) => Promise<Response | null>;
+
+    const headResponse = await handleAPIRequest(
+      new Request("https://farm.test/api/items", { method: "HEAD" }),
+    );
+    expect(headResponse?.status).toBe(200);
+    expect(headResponse?.headers.get("x-handler")).toBe("get");
+    expect(await headResponse?.text()).toBe("");
+
+    const explicitHead = await handleAPIRequest(
+      new Request("https://farm.test/api/explicit", { method: "HEAD" }),
+    );
+    expect(explicitHead?.headers.get("x-handler")).toBe("head");
+    expect(await explicitHead?.text()).toBe("");
+    const queryResponse = await handleAPIRequest(
+      new Request("https://farm.test/api/items", {
+        method: "QUERY",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ term: "farm" }),
+      }),
+    );
+    expect(queryResponse?.status).toBe(200);
+    expect(await queryResponse?.json()).toEqual({ query: { term: "farm" } });
+
+    const rejected = await handleAPIRequest(
+      new Request("https://farm.test/api/items", { method: "POST" }),
+    );
+    expect(rejected?.status).toBe(405);
+    expect(rejected?.headers.get("allow")).toBe("GET, HEAD, QUERY");
   });
 
   it("merges layout/page metadata and clears stale document metadata during navigation", () => {
@@ -152,7 +303,7 @@ describe("generated server action security", () => {
     expect(layoutMetadata).toBeLessThan(pageMetadata);
 
     const mergeStart = serverEntry.indexOf("function mergeDocumentMetadata(...sources)");
-    const mergeEnd = serverEntry.indexOf("\n}\n\n/**\n * Find every applicable", mergeStart) + 2;
+    const mergeEnd = serverEntry.indexOf("\n}\n\n/**\n * Find modules", mergeStart) + 2;
     const mergeDocumentMetadata = new Function(
       `${serverEntry.slice(mergeStart, mergeEnd)}; return mergeDocumentMetadata;`,
     )() as (...sources: Array<{ title?: string; description?: string } | undefined>) => {
@@ -168,7 +319,7 @@ describe("generated server action security", () => {
     ).toEqual({ title: "Nested", description: "Page description" });
     expect(mergeDocumentMetadata(undefined, {})).toEqual({});
 
-    const layoutsStart = serverEntry.indexOf("function getLayoutModules(pageFilePath)");
+    const layoutsStart = serverEntry.indexOf("function getRouteModules(");
     const layoutsEnd = serverEntry.indexOf("\n}\n\n/**\n * Main request handler", layoutsStart) + 2;
     const applicableLayouts = new Function(`
       const root = { default() {}, metadata: { title: 'Root' } };
@@ -336,8 +487,9 @@ describe("generated server action security", () => {
     const registryStart = entry.indexOf("const apiRouteMethods =");
     const registryEnd = entry.indexOf("\n\nregisterApiRouteSources(apiRouteModules", registryStart);
     const { apiRouteMap, registerApiRouteSources } = new Function(
+      "registerAPIRouteShape",
       `${entry.slice(registryStart, registryEnd)}; return { apiRouteMap, registerApiRouteSources };`,
-    )() as {
+    )(registerAPIRouteShape) as {
       apiRouteMap: Map<string, { handlers: Record<string, Function> }>;
       registerApiRouteSources: (
         fileModules: unknown[],
@@ -352,6 +504,47 @@ describe("generated server action security", () => {
     expect(apiRouteMap.get("/api/project-only")?.handlers.GET).toBe(projectOnly);
     expect(apiRouteMap.get("/api/shared")?.handlers.GET).toBe(projectShared);
     expect(apiRouteMap.get("/api/shared")?.handlers.POST).toBe(projectSharedPost);
+  });
+
+  it("rejects duplicate API methods within one route source", () => {
+    const entry = generateRscEntry(context);
+    const registryStart = entry.indexOf("const apiRouteMethods =");
+    const registryEnd = entry.indexOf("\n\nregisterApiRouteSources(apiRouteModules", registryStart);
+    const { registerApiRouteSources } = new Function(
+      "registerAPIRouteShape",
+      `${entry.slice(registryStart, registryEnd)}; return { registerApiRouteSources };`,
+    )(registerAPIRouteShape) as {
+      registerApiRouteSources: (
+        fileModules: unknown[],
+        definitionModules: Array<{
+          sourceIndex: number;
+          filePath: string;
+          module: Record<string, Function>;
+        }>,
+        sourceCount: number,
+      ) => void;
+    };
+    const first = Object.assign(() => "first", {
+      __path: "/api/shared",
+      __method: "GET",
+    });
+    const second = Object.assign(() => "second", {
+      __path: "/api/shared",
+      __method: "GET",
+    });
+
+    expect(() =>
+      registerApiRouteSources(
+        [],
+        [
+          { sourceIndex: 0, filePath: "/src/routes-a.ts", module: { first } },
+          { sourceIndex: 0, filePath: "/src/routes-b.ts", module: { second } },
+        ],
+        1,
+      ),
+    ).toThrow(
+      "Duplicate API route for GET /api/shared: /src/routes-a.ts conflicts with /src/routes-b.ts",
+    );
   });
 
   it("keeps project precedence when layer and project APIs use different discovery styles", () => {
@@ -374,8 +567,9 @@ describe("generated server action security", () => {
     const registryStart = entry.indexOf("const apiRouteMethods =");
     const registryEnd = entry.indexOf("\n\nregisterApiRouteSources(apiRouteModules", registryStart);
     const { apiRouteMap, registerApiRouteSources } = new Function(
+      "registerAPIRouteShape",
       `${entry.slice(registryStart, registryEnd)}; return { apiRouteMap, registerApiRouteSources };`,
-    )() as {
+    )(registerAPIRouteShape) as {
       apiRouteMap: Map<string, { handlers: Record<string, Function> }>;
       registerApiRouteSources: (
         fileModules: Array<{
@@ -451,5 +645,93 @@ describe("generated server action security", () => {
         loader: "tsx",
       }),
     ).resolves.toMatchObject({ code: expect.any(String) });
+  });
+});
+
+describe("RSC client link interceptor respects modified and non-primary clicks", () => {
+  function extractHandleClickFactory(entry: string) {
+    const start = entry.indexOf("const handleClick = (e) => {");
+    const end = entry.indexOf("document.addEventListener('click', handleClick, true);", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const slice = entry.slice(start, end);
+    return new Function("location", "history", "nav", `${slice} return handleClick;`) as (
+      location: any,
+      history: any,
+      nav: any,
+    ) => (e: any) => void;
+  }
+
+  const origin = "https://farm.test";
+
+  function makeLink(overrides: Record<string, any> = {}) {
+    return {
+      href: `${origin}/page`,
+      origin,
+      download: false,
+      target: "",
+      hasAttribute: () => false,
+      ...overrides,
+    };
+  }
+
+  function makeEvent(link: any, overrides: Record<string, any> = {}) {
+    return {
+      target: { closest: () => link },
+      preventDefault: vi.fn(),
+      metaKey: false,
+      altKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      button: 0,
+      ...overrides,
+    };
+  }
+
+  function harness() {
+    const history = { pushState: vi.fn() };
+    const nav = vi.fn();
+    const location = { origin };
+    const handleClick = extractHandleClickFactory(generateClientEntry(context))(
+      location,
+      history,
+      nav,
+    );
+    return { history, nav, location, handleClick };
+  }
+
+  it("performs SPA navigation for a plain left-click on a same-origin link", () => {
+    const { handleClick, history, nav } = harness();
+    const e = makeEvent(makeLink());
+    handleClick(e);
+    expect(e.preventDefault).toHaveBeenCalledOnce();
+    expect(history.pushState).toHaveBeenCalledWith(null, "", `${origin}/page`);
+    expect(nav).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["metaKey", { metaKey: true }],
+    ["ctrlKey", { ctrlKey: true }],
+    ["shiftKey", { shiftKey: true }],
+    ["altKey", { altKey: true }],
+  ])("skips SPA navigation on %s-click so the browser opens a new tab", (_label, mods) => {
+    const { handleClick, history, nav } = harness();
+    const e = makeEvent(makeLink(), mods);
+    handleClick(e);
+    expect(e.preventDefault).not.toHaveBeenCalled();
+    expect(history.pushState).not.toHaveBeenCalled();
+    expect(nav).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["middle-click", { button: 1 }],
+    ["right-click", { button: 2 }],
+  ])("skips SPA navigation on %s", (_label, mods) => {
+    const { handleClick, history, nav } = harness();
+    const e = makeEvent(makeLink(), mods);
+    handleClick(e);
+    expect(e.preventDefault).not.toHaveBeenCalled();
+    expect(history.pushState).not.toHaveBeenCalled();
+    expect(nav).not.toHaveBeenCalled();
   });
 });

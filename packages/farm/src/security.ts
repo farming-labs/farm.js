@@ -140,6 +140,50 @@ export function getFarmSecurityHeader(
   };
 }
 
+/**
+ * Whether a resolved CSP would block the inline scripts the framework injects
+ * into SSR documents (theme bootstrap, hydration bootstraps).
+ *
+ * The scripts carry no nonce or hash yet (see the CSP-nonce RFC), so they run
+ * only when the governing directive — `script-src`, falling back to
+ * `default-src` — permits inline script either via `'unsafe-inline'` or by
+ * listing a nonce/hash source. A policy with no script-governing directive at
+ * all does not restrict inline scripts, so it is not flagged. When a nonce or
+ * hash is already present the app is assumed to be managing inline sources
+ * deliberately and is left alone, to avoid nagging a correct-by-construction
+ * setup.
+ */
+export function farmCspBlocksFrameworkInlineScripts(security: ResolvedFarmSecurityConfig): boolean {
+  if (!security.csp) return false;
+
+  const directives = parseCspDirectives(security.csp.value);
+  const governing = directives.get("script-src") ?? directives.get("default-src");
+  if (!governing) return false;
+
+  const allowsInline = governing.some((source) => {
+    const value = source.toLowerCase();
+    return (
+      value === "'unsafe-inline'" ||
+      value.startsWith("'nonce-") ||
+      value.startsWith("'sha256-") ||
+      value.startsWith("'sha384-") ||
+      value.startsWith("'sha512-")
+    );
+  });
+  return !allowsInline;
+}
+
+function parseCspDirectives(value: string): Map<string, string[]> {
+  const directives = new Map<string, string[]>();
+  for (const segment of value.split(";")) {
+    const parts = segment.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) continue;
+    const name = parts[0]!.toLowerCase();
+    if (!directives.has(name)) directives.set(name, parts.slice(1));
+  }
+  return directives;
+}
+
 function normalizeDirectiveName(value: string): string {
   const name = value
     .trim()

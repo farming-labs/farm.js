@@ -40,6 +40,236 @@ describe("APIRouteManager", () => {
     expect(manager.getRoutes().get("/api/jsx")?.methods).toEqual(["GET"]);
   });
 
+  it("rejects dynamic API routes that match the same URL shape", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+    const firstDir = path.join(root, "api", "users", "[id]");
+    const secondDir = path.join(root, "api", "users", "[slug]");
+    fs.mkdirSync(firstDir, { recursive: true });
+    fs.mkdirSync(secondDir, { recursive: true });
+    fs.writeFileSync(path.join(firstDir, "route.ts"), "export const GET = () => new Response();\n");
+    fs.writeFileSync(
+      path.join(secondDir, "route.ts"),
+      "export const GET = () => new Response();\n",
+    );
+
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async () => ({ GET: async () => new Response() }),
+    } as any);
+
+    const error = await manager.discoverRoutes().catch((cause) => cause);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain("Ambiguous API routes");
+    expect(error.message).toContain("/api/users/[id]");
+    expect(error.message).toContain("/api/users/[slug]");
+  });
+
+  it("fails discovery for a non-terminal API catch-all", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+    const routeDir = path.join(root, "api", "docs", "[...slug]", "edit");
+    fs.mkdirSync(routeDir, { recursive: true });
+    fs.writeFileSync(path.join(routeDir, "route.ts"), "export const GET = () => new Response();\n");
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async () => ({ GET: async () => new Response() }),
+    } as any);
+
+    await expect(manager.discoverRoutes()).rejects.toThrow(
+      'Catch-all segment "[...slug]" must be the final segment',
+    );
+  });
+
+  it("fails discovery for duplicate API parameter names", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+    const routeDir = path.join(root, "api", "teams", "[id]", "members", "[id]");
+    fs.mkdirSync(routeDir, { recursive: true });
+    fs.writeFileSync(path.join(routeDir, "route.ts"), "export const GET = () => new Response();\n");
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async () => ({ GET: async () => new Response() }),
+    } as any);
+
+    await expect(manager.discoverRoutes()).rejects.toThrow('Duplicate route parameter "id"');
+  });
+
+  it("fails discovery for prototype-sensitive API parameter names", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+    const routeDir = path.join(root, "api", "users", "[__proto__]");
+    fs.mkdirSync(routeDir, { recursive: true });
+    fs.writeFileSync(path.join(routeDir, "route.ts"), "export const GET = () => new Response();\n");
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async () => ({ GET: async () => new Response() }),
+    } as any);
+
+    await expect(manager.discoverRoutes()).rejects.toThrow('Route parameter "__proto__"');
+  });
+
+  it("ignores empty programmatic routes and preserves API-literal syntax", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+    const srcDir = path.join(root, "src");
+    const appDir = path.join(srcDir, "app");
+    const routesFile = path.join(srcDir, "farm.routes.js");
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(routesFile, "export {};\n");
+
+    const handler = async () => new Response("ok");
+    const manager = new APIRouteManager(appDir, {
+      ssrLoadModule: async () => ({
+        default: defineRoutes(({ api }) => [
+          api("/api/items/[id]", {}),
+          api("/api/items/[slug]", { GET: handler }),
+          api("/api/literal/:id", { GET: handler }),
+          api("/api/literal/[id]", { GET: handler }),
+          api("/api/(group)/items", { GET: handler }),
+          api("/api/items", { GET: handler }),
+        ]),
+      }),
+    } as any);
+
+    await manager.discoverRoutes();
+
+    expect(manager.getRoutes().has("/api/items/[id]")).toBe(false);
+    expect(manager.getRoutes().has("/api/items/[slug]")).toBe(true);
+    expect(manager.getRoutes().has("/api/literal/:id")).toBe(true);
+    expect(manager.getRoutes().has("/api/literal/[id]")).toBe(true);
+    expect(manager.getRoutes().has("/api/(group)/items")).toBe(true);
+    expect(manager.getRoutes().has("/api/items")).toBe(true);
+  });
+
+  it("does not let an invalid route config reserve a dynamic URL shape", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+    const idDir = path.join(root, "api", "users", "[id]");
+    const slugDir = path.join(root, "api", "users", "[slug]");
+    const idFile = path.join(idDir, "route.ts");
+    const slugFile = path.join(slugDir, "route.ts");
+    fs.mkdirSync(idDir, { recursive: true });
+    fs.mkdirSync(slugDir, { recursive: true });
+    fs.writeFileSync(idFile, "export {};\n");
+    fs.writeFileSync(slugFile, "export {};\n");
+
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async (filePath: string) => ({
+        GET: async () => new Response("ok"),
+        ...(filePath === idFile ? { runtime: "invalid" } : {}),
+      }),
+    } as any);
+
+    await manager.discoverRoutes();
+
+    expect(manager.getRoutes().has("/api/users/[id]")).toBe(false);
+    expect(manager.getRoutes().has("/api/users/[slug]")).toBe(true);
+  });
+
+  it("rejects duplicate methods for the same API path in one app source", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+
+    const routeDir = path.join(root, "api", "health");
+    const routeFile = path.join(routeDir, "route.ts");
+    const routesFile = path.join(root, "routes.ts");
+    fs.mkdirSync(routeDir, { recursive: true });
+    fs.writeFileSync(routeFile, "export const GET = () => new Response('file');\n");
+    fs.writeFileSync(routesFile, "export {};\n");
+
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async (filePath: string) => {
+        if (filePath === routeFile) return { GET: async () => new Response("file") };
+        return {
+          health: createEndpoint("/api/health", { method: "GET" }, async () => ({ ok: true })),
+        };
+      },
+    } as any);
+
+    await expect(manager.discoverRoutes()).rejects.toThrow(
+      `Duplicate API route for GET /api/health: ${routeFile} conflicts with ${routesFile}`,
+    );
+  });
+
+  it("combines different methods for the same API path", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+
+    const routeDir = path.join(root, "api", "health");
+    const routeFile = path.join(routeDir, "route.ts");
+    const routesFile = path.join(root, "routes.ts");
+    fs.mkdirSync(routeDir, { recursive: true });
+    fs.writeFileSync(routeFile, "export const GET = () => new Response('file');\n");
+    fs.writeFileSync(routesFile, "export {};\n");
+
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async (filePath: string) => {
+        if (filePath === routeFile) return { GET: async () => new Response("file") };
+        return {
+          update: createEndpoint("/api/health", { method: "POST" }, async () => ({ ok: true })),
+        };
+      },
+    } as any);
+
+    await manager.discoverRoutes();
+
+    expect(manager.getRoutes().get("/api/health")?.methods).toEqual(["GET", "POST"]);
+  });
+
+  it("keeps the last complete route registry when refresh finds a conflict", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+
+    const routeDir = path.join(root, "api", "health");
+    const routeFile = path.join(routeDir, "route.ts");
+    const routesFile = path.join(root, "routes.ts");
+    fs.mkdirSync(routeDir, { recursive: true });
+    fs.writeFileSync(routeFile, "export const GET = () => new Response('file');\n");
+    fs.writeFileSync(routesFile, "export {};\n");
+
+    let rootMethod = "POST";
+    const rootEndpoint = createEndpoint("/api/health", { method: rootMethod }, async () => ({
+      ok: true,
+    }));
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async (filePath: string) => {
+        if (filePath === routeFile) return { GET: async () => new Response("file") };
+        rootEndpoint.__method = rootMethod;
+        return { health: rootEndpoint };
+      },
+    } as any);
+
+    await manager.discoverRoutes();
+    expect(manager.getRoutes().get("/api/health")?.methods.sort()).toEqual(["GET", "POST"]);
+
+    rootMethod = "GET";
+    await expect(manager.discoverRoutes()).rejects.toThrow(
+      `Duplicate API route for GET /api/health: ${routeFile} conflicts with ${routesFile}`,
+    );
+    expect(manager.getRoutes().get("/api/health")?.methods.sort()).toEqual(["GET", "POST"]);
+    expect(manager.getRoutes().get("/api/health")?.endpoints.POST).toBe(rootEndpoint);
+  });
+
+  it("combines disjoint methods from supported route files in one directory", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+
+    const routeDir = path.join(root, "api", "health");
+    const tsRouteFile = path.join(routeDir, "route.ts");
+    const jsRouteFile = path.join(routeDir, "route.js");
+    fs.mkdirSync(routeDir, { recursive: true });
+    fs.writeFileSync(tsRouteFile, "export const GET = () => new Response('get');\n");
+    fs.writeFileSync(jsRouteFile, "export const POST = () => new Response('post');\n");
+
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async (filePath: string) =>
+        filePath === tsRouteFile
+          ? { GET: async () => new Response("get") }
+          : { POST: async () => new Response("post") },
+    } as any);
+
+    await manager.discoverRoutes();
+
+    expect(manager.getRoutes().get("/api/health")?.methods.sort()).toEqual(["GET", "POST"]);
+  });
+
   it("serves canonical routes through a custom same-origin API path", async () => {
     const manager = new APIRouteManager("/tmp/farm-api-base-path-test", undefined, {
       basePath: "/v2/api",
@@ -106,11 +336,20 @@ describe("APIRouteManager", () => {
 
   it("uses GET for HEAD requests and strips the response body", async () => {
     const manager = new APIRouteManager("/tmp/farm-api-head-test");
+    let cancelled = false;
     const getHandler = async () =>
-      new Response("payload", {
-        status: 201,
-        headers: { "x-handler": "get" },
-      });
+      new Response(
+        new ReadableStream({
+          pull() {},
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        {
+          status: 201,
+          headers: { "x-handler": "get" },
+        },
+      );
     manager.getRoutes().set("/api/status", {
       path: "/api/status",
       filePath: "/tmp/farm-api-head-test/status/route.ts",
@@ -125,6 +364,7 @@ describe("APIRouteManager", () => {
     expect(response.status).toBe(201);
     expect(response.headers.get("x-handler")).toBe("get");
     expect(await response.text()).toBe("");
+    expect(cancelled).toBe(true);
   });
 
   it("strips bodies returned by explicit HEAD handlers", async () => {

@@ -11,13 +11,13 @@ Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and
 ## Create an app
 
 ```bash
-pnpm create @farm.js/app@beta my-app --template basic --typescript
-pnpm create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
-pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
-pnpm create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
-pnpm create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
-pnpm create @farm.js/app@beta stripe-app --template stripe --typescript
-pnpm create @farm.js/app@beta --list-templates
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-app --template basic --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta stripe-app --template stripe --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta --list-templates
 ```
 
 The create-app CLI includes Basic, Farm.js Auth, Better Auth, and one ready-to-configure starter
@@ -73,7 +73,7 @@ the newest prerelease published under the `beta` tag. Exactly one release channe
 
 Farm reads the app's dependencies and upgrades every published `@farm.js/*` package together. It
 detects npm, pnpm, Yarn, or Bun from `packageManager` and lockfiles, preserves whether each package
-is a regular, development, optional, or peer dependency, and skips local `workspace:`, `file:`,
+is a regular, development, optional, or peer dependency (including packages repeated across sections), and skips local `workspace:`, `file:`,
 `link:`, `portal:`, and `catalog:` references. Use `--dry-run` to inspect the commands without
 changing the project.
 
@@ -223,6 +223,9 @@ farm explain /products/42 --json
 - route-rule and module runtime controls, rendering mode, PPR, and cache settings;
 - static or generated metadata and the nearest Open Graph and Twitter images;
 - the deployment target, preset, runtime compatibility, and actionable warnings.
+
+Request paths are not required to contain valid percent escapes. `farm explain` keeps a malformed
+segment raw, matching the runtime router, instead of aborting the diagnostic with a URI error.
 
 Use the text output while debugging and `--json` for tooling. The command is read-only and fails when no page route matches the supplied URL.
 

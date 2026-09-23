@@ -3,6 +3,7 @@ import { createLoggerPlugin, createEnvPlugin } from '@farm.js/core/plugin/server
 import { z } from 'zod';
 import { storageDemoClients, STORAGE_DEMO_MOUNTS } from './src/lib/storage-demo.ts';
 import { integrationLab } from './src/lib/integration-lab.ts';
+import { projectRoutes } from './src/lib/plugin-routes.ts';
 
 declare global {
   interface Window {
@@ -149,6 +150,8 @@ export default defineConfig({
     // Route-level loading.tsx/error.tsx in this example rely on streamed server rendering.
     serverComponents: true,
     serverActions: true,
+    // Required for the /ppr-demo static-shell route; per-route ppr exports are inert without it.
+    ppr: true,
   },
 
   integrations: integrationLab,
@@ -312,6 +315,7 @@ export default defineConfig({
 
   // Plugins
   plugins: [
+    projectRoutes,
     runtimeLifecyclePlugin,
     createLoggerPlugin({}),
     createEnvPlugin({

@@ -12,6 +12,10 @@ Run request behavior before routes, pass request-scoped data to pages, and short
 
 Farm runs middleware in development and production builds. For every request, Farm finds matching `farm.config.ts` middleware entries first, then matching `src/app/**/middleware.ts` files from the root segment down to the route segment.
 
+In development, a middleware edit is activated only after the complete middleware tree loads
+successfully. A syntax or import error is reported through Vite while the last valid tree remains
+active, so a broken hot update cannot silently remove authentication or other request guards.
+
 The chain stops when a middleware handler returns a Web `Response` or uses a short-circuit helper such as `ctx.redirect()`. Default Farm handlers call `await next()` to continue. A named request-first handler continues automatically when it returns `undefined`.
 
 Data and headers written during middleware are request-scoped:
@@ -26,7 +30,8 @@ Data and headers written during middleware are request-scoped:
 | `return new Response(...)`                                           | Stops the chain and sends that response immediately.                                          |
 
 Cookies set by multiple matching middleware handlers are accumulated into separate `Set-Cookie`
-headers; a later handler does not replace cookies already written by an earlier handler.
+headers. They are also preserved when the short-circuiting `Response` supplies its own cookies, so
+a returned response does not replace cookies already written through `ctx.cookies`.
 
 ## Route middleware
 

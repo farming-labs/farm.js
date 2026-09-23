@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { getFarmClientDataCache, type FarmClientCacheStatus } from "./client-cache";
+import { attachRevalidationListeners } from "./client-revalidation";
 import type { ServerQuery } from "./server-query";
 import {
   createServerQueryCallKey,
@@ -14,6 +15,7 @@ export {
   completeFarmServerQueryAction,
   fetchServerQuery,
   prefetchServerQuery,
+  shouldApplyFarmServerQueryActionResult,
 } from "./server-query-runtime";
 export type {
   FarmServerQueryActionInvocation,
@@ -46,53 +48,66 @@ export function useServerQuery<TInput, TData>(
   const inputRef = useRef(input);
   const optionsRef = useRef(options);
   const mountedKeyRef = useRef<string | undefined>(undefined);
+  const pendingInvalidationRef = useRef(false);
   inputRef.current = input;
   optionsRef.current = options;
 
   const subscribe = useCallback(
-    (listener: () => void) => cache.subscribe(key, listener),
+    (listener: () => void) =>
+      cache.subscribe(key, (event) => {
+        if (event === "invalidate") pendingInvalidationRef.current = true;
+        else if (cache.get(key)?.fetching) {
+          // A shared read consumes this invalidation for every subscriber, even
+          // when React batches its pending and error snapshots into one render.
+          pendingInvalidationRef.current = false;
+        }
+        listener();
+      }),
     [cache, key],
   );
   const getSnapshot = useCallback(() => cache.get<TData>(key), [cache, key]);
   const entry = useSyncExternalStore(subscribe, getSnapshot, () => undefined);
 
   const run = useCallback(
-    (force = false) =>
-      fetchServerQuery(query, inputRef.current, {
+    (force = false) => {
+      pendingInvalidationRef.current = false;
+      return fetchServerQuery(query, inputRef.current, {
         ...optionsRef.current,
         force,
-      }),
+      });
+    },
     [query],
   );
 
   useEffect(() => {
-    if (options.enabled === false) return;
+    if (options.enabled === false) {
+      // Re-enabling is a new read, even when the query/input key is unchanged.
+      mountedKeyRef.current = undefined;
+      return;
+    }
 
     const firstReadForKey = mountedKeyRef.current !== key;
     if (firstReadForKey) mountedKeyRef.current = key;
     if (
       (firstReadForKey && (!entry || cache.isStale(key))) ||
-      (entry?.invalidatedAt !== undefined && !entry.fetching)
+      (pendingInvalidationRef.current && entry?.invalidatedAt !== undefined && !entry.fetching)
     ) {
       void run().catch(() => undefined);
     }
   }, [cache, entry, key, options.enabled, run]);
 
   useEffect(() => {
-    if (options.enabled === false || typeof window === "undefined") return;
+    if (options.enabled === false) return;
 
-    const refreshIfStale = () => {
-      if (cache.isStale(key)) void run().catch(() => undefined);
-    };
-    const onFocus = options.refetchOnWindowFocus === false ? undefined : refreshIfStale;
-    const onOnline = options.refetchOnReconnect === false ? undefined : refreshIfStale;
-
-    if (onFocus) window.addEventListener("focus", onFocus);
-    if (onOnline) window.addEventListener("online", onOnline);
-    return () => {
-      if (onFocus) window.removeEventListener("focus", onFocus);
-      if (onOnline) window.removeEventListener("online", onOnline);
-    };
+    return attachRevalidationListeners(
+      () => {
+        if (cache.isStale(key)) void run().catch(() => undefined);
+      },
+      {
+        refetchOnWindowFocus: options.refetchOnWindowFocus,
+        refetchOnReconnect: options.refetchOnReconnect,
+      },
+    );
   }, [cache, key, options.enabled, options.refetchOnReconnect, options.refetchOnWindowFocus, run]);
 
   const status = entry?.status ?? (entry ? "success" : "idle");

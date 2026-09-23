@@ -2,6 +2,7 @@ import type { FarmPlugin, FarmPluginContext } from "../plugin";
 import type { RewriteConfig } from "../config";
 import type { FarmRequest, FarmResponse } from "../types";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
+import { resolveFarmRequestURL } from "../server/request";
 import {
   compileConfigRoutePattern,
   interpolateConfigRouteDestination,
@@ -44,7 +45,7 @@ export function createRewritesPlugin(
       if (overrideBeforeRequest) {
         await overrideBeforeRequest(req, res, context);
       }
-      const url = new URL(req.url || "/", `http://${req.headers.host}`);
+      const url = resolveFarmRequestURL(req);
       const routePath = resolveConfigRoutePathname(url.pathname, i18n);
       const pathname = routePath.pathname;
 

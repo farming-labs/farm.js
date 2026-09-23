@@ -1,9 +1,10 @@
 // @vitest-environment node
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createFarmProductionSiteReporter,
   detectFarmProductionSiteOrigin,
+  FARM_PRODUCTION_SITE_ATTESTATION_PATH,
   normalizeFarmProductionSiteOrigin,
 } from "../product-telemetry";
 import { FARM_VERSION } from "../version";
@@ -12,7 +13,16 @@ const originalEnvironment = {
   DO_NOT_TRACK: process.env.DO_NOT_TRACK,
   FARM_TELEMETRY: process.env.FARM_TELEMETRY,
   FARM_TELEMETRY_DISABLED: process.env.FARM_TELEMETRY_DISABLED,
+  VERCEL_ENV: process.env.VERCEL_ENV,
+  VERCEL_TARGET_ENV: process.env.VERCEL_TARGET_ENV,
+  NETLIFY: process.env.NETLIFY,
+  CONTEXT: process.env.CONTEXT,
+  IS_PULL_REQUEST: process.env.IS_PULL_REQUEST,
 };
+
+beforeEach(() => {
+  for (const key of Object.keys(originalEnvironment)) delete process.env[key];
+});
 
 afterEach(() => {
   for (const [key, value] of Object.entries(originalEnvironment)) {
@@ -55,6 +65,85 @@ describe("production-site origin detection", () => {
 });
 
 describe("production-site telemetry reporting", () => {
+  it("serves origin-owned metadata from a framework well-known endpoint", async () => {
+    const send = vi.fn<typeof fetch>();
+    const reporter = createFarmProductionSiteReporter({
+      renderer: "react",
+      deployTarget: "vercel",
+      fetch: send,
+    });
+
+    const response = reporter.handleAttestation(
+      new Request(`https://example.com${FARM_PRODUCTION_SITE_ATTESTATION_PATH}`),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("cache-control")).toBe("no-store");
+    await expect(response?.json()).resolves.toEqual({
+      schemaVersion: 1,
+      eventType: "production_site_attestation",
+      packageName: "@farm.js/core",
+      packageVersion: FARM_VERSION,
+      renderer: "react",
+      deployTarget: "vercel",
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("does not expose an attestation after runtime telemetry opt-out", () => {
+    process.env.FARM_TELEMETRY = "0";
+    const reporter = createFarmProductionSiteReporter({ renderer: "react" });
+
+    expect(
+      reporter.handleAttestation(
+        new Request(`https://example.com${FARM_PRODUCTION_SITE_ATTESTATION_PATH}`),
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects writes to the attestation endpoint", () => {
+    const reporter = createFarmProductionSiteReporter({ renderer: "react" });
+
+    const response = reporter.handleAttestation(
+      new Request(`https://example.com${FARM_PRODUCTION_SITE_ATTESTATION_PATH}`, {
+        method: "POST",
+      }),
+    );
+
+    expect(response?.status).toBe(405);
+    expect(response?.headers.get("allow")).toBe("GET, HEAD");
+  });
+
+  it("does not redirect an invalid custom endpoint to the Farm-owned service", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const deliveries: Promise<unknown>[] = [];
+    const reporter = createFarmProductionSiteReporter({
+      renderer: "react",
+      endpoint: "http://telemetry.example.com/sites",
+      fetch: send,
+    });
+
+    reporter.report("https://example.com", (promise) => deliveries.push(promise));
+    await Promise.all(deliveries);
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("accepts an HTTP IPv6 loopback endpoint for local development", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const deliveries: Promise<unknown>[] = [];
+    const reporter = createFarmProductionSiteReporter({
+      renderer: "react",
+      endpoint: "http://[::1]:4318/sites",
+      fetch: send,
+    });
+
+    reporter.report("https://example.com", (promise) => deliveries.push(promise));
+    await Promise.all(deliveries);
+
+    expect(send).toHaveBeenCalledWith("http://[::1]:4318/sites", expect.any(Object));
+  });
+
   it("hands delivery to waitUntil without waiting for the network", async () => {
     let finishRequest: ((response: Response) => void) | undefined;
     const response = new Promise<Response>((resolve) => {
@@ -159,6 +248,115 @@ describe("production-site telemetry reporting", () => {
     reporter.report("https://preview.localhost/products");
 
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["preview", undefined],
+    ["development", undefined],
+    [undefined, "preview"],
+    ["production", "staging"],
+  ])(
+    "does not report a Vercel non-production deployment (%s, %s)",
+    (environment, targetEnvironment) => {
+      if (environment === undefined) delete process.env.VERCEL_ENV;
+      else process.env.VERCEL_ENV = environment;
+      if (targetEnvironment === undefined) delete process.env.VERCEL_TARGET_ENV;
+      else process.env.VERCEL_TARGET_ENV = targetEnvironment;
+      const send = vi.fn<typeof fetch>();
+      const reporter = createFarmProductionSiteReporter({
+        renderer: "react",
+        deployTarget: "vercel",
+        fetch: send,
+      });
+
+      reporter.report("https://docs-git-feature-owner.vercel.app/private");
+
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([["deploy-preview"], ["branch-deploy"], ["dev"]])(
+    "does not report a Netlify %s deployment",
+    (context) => {
+      process.env.NETLIFY = "true";
+      process.env.CONTEXT = context;
+      const send = vi.fn<typeof fetch>();
+      const reporter = createFarmProductionSiteReporter({
+        renderer: "react",
+        deployTarget: "netlify",
+        fetch: send,
+      });
+
+      reporter.report("https://deploy-preview-42--example.netlify.app/private");
+
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reports a Netlify production deployment", () => {
+    process.env.NETLIFY = "true";
+    process.env.CONTEXT = "production";
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const reporter = createFarmProductionSiteReporter({
+      renderer: "react",
+      deployTarget: "netlify",
+      fetch: send,
+    });
+
+    reporter.report("https://example.netlify.app/private");
+
+    expect(send).toHaveBeenCalled();
+  });
+
+  it("ignores a CONTEXT value that does not come from Netlify", () => {
+    delete process.env.NETLIFY;
+    // Unrelated tooling also uses CONTEXT; it must not suppress reporting.
+    process.env.CONTEXT = "deploy-preview";
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const reporter = createFarmProductionSiteReporter({
+      renderer: "react",
+      deployTarget: "node-server",
+      fetch: send,
+    });
+
+    reporter.report("https://example.com/private");
+
+    expect(send).toHaveBeenCalled();
+  });
+
+  it("does not report a Render pull-request preview", () => {
+    process.env.IS_PULL_REQUEST = "true";
+    const send = vi.fn<typeof fetch>();
+    const reporter = createFarmProductionSiteReporter({
+      renderer: "react",
+      deployTarget: "node-server",
+      fetch: send,
+    });
+
+    reporter.report("https://example-pr-7.onrender.com/private");
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("continues to report a production site on a vercel.app domain", () => {
+    process.env.VERCEL_ENV = "production";
+    process.env.VERCEL_TARGET_ENV = "production";
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const reporter = createFarmProductionSiteReporter({
+      renderer: "react",
+      deployTarget: "vercel",
+      fetch: send,
+    });
+
+    reporter.report("https://farm-git-tools.vercel.app/products");
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        body: expect.stringContaining('"siteUrl":"https://farm-git-tools.vercel.app"'),
+      }),
+    );
   });
 
   it("bounds automatically detected origins per running instance", async () => {

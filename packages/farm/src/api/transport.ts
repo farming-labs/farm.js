@@ -89,6 +89,9 @@ export function jsonStream<TItem>(
   const iterator = toAsyncIterator(source);
   const encoder = new TextEncoder();
   let finished = false;
+  let cleanup: Promise<unknown> | undefined;
+  const closeSource = (reason?: unknown) =>
+    (cleanup ??= Promise.resolve().then(() => iterator.return?.(reason)));
 
   const body = new ReadableStream<Uint8Array>(
     {
@@ -97,6 +100,7 @@ export function jsonStream<TItem>(
 
         try {
           const next = await iterator.next();
+          if (finished) return;
           if (next.done) {
             finished = true;
             controller.close();
@@ -104,13 +108,19 @@ export function jsonStream<TItem>(
           }
           controller.enqueue(encoder.encode(`${JSON.stringify(next.value)}\n`));
         } catch (error) {
+          if (finished) return;
           finished = true;
+          try {
+            await closeSource(error);
+          } catch {
+            // Preserve the serialization/source error that failed the response stream.
+          }
           controller.error(error);
         }
       },
       async cancel(reason) {
         finished = true;
-        await iterator.return?.(reason);
+        await closeSource(reason);
       },
     },
     {
@@ -149,35 +159,88 @@ export function readJSONStream<TItem>(response: Response): FarmAPIStream<TItem> 
   const decoder = new TextDecoder();
   let buffer = "";
   let completed = false;
+  let cancelled = false;
   let claimed = false;
+  let released = false;
 
-  const iterator: AsyncIterator<TItem> = {
-    async next() {
-      while (true) {
-        const lineEnd = buffer.indexOf("\n");
-        if (lineEnd >= 0) {
-          const line = buffer.slice(0, lineEnd).trim();
-          buffer = buffer.slice(lineEnd + 1);
-          if (!line) continue;
-          return { done: false, value: JSON.parse(line) as TItem };
-        }
-
-        if (completed) {
-          const line = buffer.trim();
-          buffer = "";
-          if (!line) return { done: true, value: undefined };
-          return { done: false, value: JSON.parse(line) as TItem };
-        }
-
-        const chunk = await reader.read();
-        completed = chunk.done;
-        buffer += decoder.decode(chunk.value, { stream: !chunk.done });
-      }
-    },
-    async return() {
+  const releaseReader = () => {
+    if (released) return;
+    released = true;
+    reader.releaseLock();
+  };
+  const parseLine = async (line: string) => {
+    try {
+      return JSON.parse(line) as TItem;
+    } catch (error) {
       completed = true;
       buffer = "";
-      await reader.cancel();
+      // A tee branch can wait for an unread sibling during cancellation. The
+      // parse failure is already known and must not wait for producer cleanup.
+      void reader.cancel(error).catch(() => {});
+      releaseReader();
+      throw error;
+    }
+  };
+
+  const readNext = async (): Promise<IteratorResult<TItem>> => {
+    while (true) {
+      if (cancelled) return { done: true, value: undefined };
+      const lineEnd = buffer.indexOf("\n");
+      if (lineEnd >= 0) {
+        const line = buffer.slice(0, lineEnd).trim();
+        buffer = buffer.slice(lineEnd + 1);
+        if (!line) continue;
+        return { done: false, value: await parseLine(line) };
+      }
+
+      if (completed) {
+        const line = buffer.trim();
+        buffer = "";
+        if (!line) {
+          releaseReader();
+          return { done: true, value: undefined };
+        }
+        return { done: false, value: await parseLine(line) };
+      }
+
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch (error) {
+        if (cancelled) return { done: true, value: undefined };
+        completed = true;
+        buffer = "";
+        releaseReader();
+        throw error;
+      }
+      if (cancelled) return { done: true, value: undefined };
+      completed = chunk.done;
+      buffer += decoder.decode(chunk.value, { stream: !chunk.done });
+    }
+  };
+
+  let readQueue = Promise.resolve();
+  const iterator: AsyncIterator<TItem> = {
+    next() {
+      const result = readQueue.then(readNext);
+      // A failed read must not poison subsequent operations on this iterator.
+      readQueue = result.then(
+        () => {},
+        () => {},
+      );
+      return result;
+    },
+    async return() {
+      cancelled = true;
+      completed = true;
+      buffer = "";
+      if (!released) {
+        try {
+          await reader.cancel();
+        } finally {
+          releaseReader();
+        }
+      }
       return { done: true, value: undefined };
     },
   };
@@ -185,9 +248,17 @@ export function readJSONStream<TItem>(response: Response): FarmAPIStream<TItem> 
   return {
     response,
     async cancel(reason) {
+      // Cancellation must interrupt the active reader, not wait in its queue.
+      cancelled = true;
       completed = true;
       buffer = "";
-      await reader.cancel(reason);
+      if (!released) {
+        try {
+          await reader.cancel(reason);
+        } finally {
+          releaseReader();
+        }
+      }
     },
     [Symbol.asyncIterator]() {
       if (claimed) {

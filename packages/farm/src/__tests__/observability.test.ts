@@ -185,6 +185,29 @@ describe("observability", () => {
     expect(requestSpan?.events.map((event) => event.name)).toContain("render.error");
   });
 
+  it("does not fail the request trace for a recovered render error", async () => {
+    configureFarmObservability({ tracing: true });
+
+    await runWithFarmRequestSpan(new Request("https://farm.test/recovered"), async () => {
+      emitFarmEvent({
+        type: "render.error",
+        route: "/recovered",
+        error: new Error("an error boundary recovered this"),
+      });
+      return new Response("ok", { status: 200 });
+    });
+
+    await processor.forceFlush();
+    const span = exporter.getFinishedSpans().find((s) => s.name === "GET /recovered");
+    expect(span).toBeDefined();
+    // A 200 response must not be reported as a failed trace just because a
+    // render error was caught and recovered by an error boundary mid-stream.
+    expect(span?.status.code).not.toBe(SpanStatusCode.ERROR);
+    // The error is still recorded on the span for visibility.
+    expect(span?.events.map((event) => event.name)).toContain("render.error");
+    expect(span?.events.map((event) => event.name)).toContain("exception");
+  });
+
   it("creates completed lifecycle spans outside a request context", async () => {
     configureFarmObservability({ tracing: { spans: ["build"] } });
 
@@ -199,5 +222,31 @@ describe("observability", () => {
     expect(buildSpan).toBeDefined();
     expect(event.traceId).toBe(buildSpan?.spanContext().traceId);
     expect(event.spanId).toBe(buildSpan?.spanContext().spanId);
+  });
+
+  it("redacts cache keys from exported span events", async () => {
+    configureFarmObservability({ tracing: true });
+    await runWithFarmRequestSpan(new Request("https://farm.test/u"), async () => {
+      emitFarmEvent({
+        type: "cache.hit",
+        key: 'unstable_cache:["getUser",["alice@example.com"]]',
+        tags: [],
+        revalidate: false,
+        stale: false,
+      });
+      return new Response("ok");
+    });
+    await processor.forceFlush();
+
+    const cacheEvent = exporter
+      .getFinishedSpans()
+      .flatMap((span) => span.events)
+      .find((event) => event.name === "cache.hit");
+    expect(cacheEvent).toBeDefined();
+    // The raw key (which contains the email argument) must never be exported.
+    expect(cacheEvent?.attributes).not.toHaveProperty("farm.key");
+    expect(JSON.stringify(cacheEvent?.attributes ?? {})).not.toContain("alice@example.com");
+    // A stable digest is exported instead so traces stay correlatable.
+    expect(typeof cacheEvent?.attributes?.["farm.key_hash"]).toBe("string");
   });
 });

@@ -47,6 +47,90 @@ describe("production middleware HTTP behavior", () => {
     ]);
   });
 
+  it("preserves a returned Response's headers over ctx.headers, adding only new keys", () => {
+    const middlewareHeaders = new Headers({
+      "cache-control": "private",
+      "x-mw": "1",
+    });
+    const response = applyProductionMiddlewareHeaders(
+      new Response("ok", { headers: { "cache-control": "public, max-age=60" } }),
+      middlewareHeaders,
+    );
+    // The returned Response's header is authoritative (matches the dev runtime,
+    // where the Response is applied after ctx.headers); ctx.headers only add
+    // keys the Response did not already set.
+    expect(response.headers.get("cache-control")).toBe("public, max-age=60");
+    expect(response.headers.get("x-mw")).toBe("1");
+  });
+
+  it("short-circuits when middleware writes to the raw response", async () => {
+    const runner = createProductionMiddlewareRunner({
+      config: {
+        handler(ctx) {
+          const response = ctx.response
+            .setHeader("X-Middleware", "raw")
+            .writeHead(201, "Created", {
+              "Set-Cookie": ["session=abc; Path=/", "theme=dark; Path=/"],
+            })
+            .end("created");
+
+          expect(response).toBe(ctx.response);
+        },
+      },
+    });
+
+    const result = await runner(new Request("https://example.com/"));
+
+    expect(result.handled).toBe(true);
+    expect(result.response?.status).toBe(201);
+    expect(result.response?.statusText).toBe("Created");
+    expect(result.response?.headers.get("x-middleware")).toBe("raw");
+    expect(result.response?.headers.getSetCookie()).toEqual([
+      "session=abc; Path=/",
+      "theme=dark; Path=/",
+    ]);
+    await expect(result.response?.text()).resolves.toBe("created");
+  });
+
+  it("keeps redirect helper headers authoritative over ctx.headers", async () => {
+    const runner = createProductionMiddlewareRunner({
+      config: {
+        handler(ctx) {
+          ctx.headers.set("location", "/wrong");
+          ctx.headers.set("content-type", "application/json");
+          ctx.headers.set("x-middleware", "kept");
+          ctx.redirect("/right", 308);
+        },
+      },
+    });
+
+    const result = await runner(new Request("https://example.com/"));
+    expect(result.response?.status).toBe(308);
+    expect(result.response?.headers.get("location")).toBe("/right");
+    expect(result.response?.headers.get("content-type")).toBe("text/plain");
+    expect(result.response?.headers.get("x-middleware")).toBe("kept");
+  });
+
+  it.each([
+    ["json", "application/json"],
+    ["text", "text/plain"],
+    ["html", "text/html"],
+  ] as const)("keeps %s helper content type authoritative", async (helper, contentType) => {
+    const runner = createProductionMiddlewareRunner({
+      config: {
+        handler(ctx) {
+          ctx.headers.set("content-type", "application/octet-stream");
+          if (helper === "json") ctx.json({ ok: true });
+          if (helper === "text") ctx.text("ok");
+          if (helper === "html") ctx.html("<p>ok</p>");
+        },
+      },
+    });
+
+    const result = await runner(new Request("https://example.com/"));
+    expect(result.response?.headers.get("content-type")).toBe(contentType);
+  });
+
   it("serves requests with malformed percent-encoded paths instead of throwing", async () => {
     const seen: Array<Record<string, string>> = [];
     const runner = createProductionMiddlewareRunner({

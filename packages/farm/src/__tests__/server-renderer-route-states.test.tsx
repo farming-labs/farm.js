@@ -4,11 +4,16 @@ import React from "react";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { imageSize } from "image-size";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ServerRenderer } from "../server/renderer";
 import type { FarmConfig, FarmRequest, FarmResponse, LoadingProps, ErrorProps } from "../types";
 import { logger } from "../utils";
 import { defer } from "../deferred";
+import { defineIntegration } from "../integrations";
+import { REACT_RENDERER } from "../renderer";
+import { Link } from "../client/link";
+import { setFarmBasePath } from "../base-path";
 
 type MockResponse = FarmResponse & {
   body: string;
@@ -72,27 +77,46 @@ describe("file route loading.tsx and error.tsx", () => {
   it("renders the nearest error.tsx for file route render failures", async () => {
     vi.spyOn(logger, "error").mockImplementation(() => {});
     const response = createMockResponse();
-    const renderer = createRenderer({
-      [routeModulePath]: {
-        default: function DashboardPage() {
-          throw new Error("dashboard exploded");
+    const acme = defineIntegration({
+      category: "custom",
+      type: "acme",
+      instance: {},
+      providers: [
+        {
+          name: "acme",
+          type: "client",
+          component: function AcmeProvider({ children }) {
+            return React.createElement("div", { "data-acme-provider": "" }, children);
+          },
         },
-      },
-      [errorModulePath]: {
-        default: function DashboardError(props: ErrorProps) {
-          const message = props.error instanceof Error ? props.error.message : String(props.error);
-          return React.createElement(
-            "section",
-            null,
-            `Dashboard error ${message} ${props.path} ${props.search?.tab}`,
-          );
-        },
-      },
+      ],
     });
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          default: function DashboardPage() {
+            throw new Error("dashboard exploded");
+          },
+        },
+        [errorModulePath]: {
+          default: function DashboardError(props: ErrorProps) {
+            const message =
+              props.error instanceof Error ? props.error.message : String(props.error);
+            return React.createElement(
+              "section",
+              null,
+              `Dashboard error ${message} ${props.path} ${props.search?.tab}`,
+            );
+          },
+        },
+      },
+      { integrations: { acme } },
+    );
 
     await renderer.renderPage(createMockRequest("/dashboard?tab=stats"), response);
 
     expect(response.statusCode).toBe(500);
+    expect(response.body).toContain("data-acme-provider");
     expect(response.body).toContain("Dashboard error dashboard exploded /dashboard stats");
     expect(response.body).not.toContain("Internal Server Error");
   });
@@ -204,6 +228,40 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain("OG /dashboard");
   });
 
+  it("serves a React.lazy opengraph-image.tsx as a PNG on the dev ServerRenderer cold start", async () => {
+    const LazyDiv = React.lazy(async () => ({
+      default: function LazyInner() {
+        return React.createElement(
+          "div",
+          { className: "flex h-full w-full bg-black text-white" },
+          "Lazy",
+        );
+      },
+    }));
+    const renderer = createRenderer(
+      {
+        [ogImageModulePath]: {
+          size: { width: 120, height: 63 },
+          default: () => React.createElement(LazyDiv),
+        },
+      },
+      { opengraphImage: true },
+    );
+
+    const response = createBinaryResponse();
+    await renderer.renderPage(createMockRequest("/dashboard/opengraph-image"), response);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+
+    const body = Buffer.concat(response.chunks);
+    expect(body.subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+    expect(imageSize(body)).toMatchObject({ width: 120, height: 63, type: "png" });
+  });
+
   it("serves sitemap.ts with params, search params, and cache headers", async () => {
     const response = createMockResponse();
     const renderer = createRenderer(
@@ -256,12 +314,15 @@ describe("file route loading.tsx and error.tsx", () => {
           modulePath: manifestModulePath,
           outputName: "manifest.webmanifest",
         },
+        basePath: "/console",
       },
     );
 
     await renderer.renderPage(createMockRequest("/dashboard"), response);
 
-    expect(response.body).toContain('<link rel="manifest" href="/dashboard/manifest.webmanifest">');
+    expect(response.body).toContain(
+      '<link rel="manifest" href="/console/dashboard/manifest.webmanifest">',
+    );
   });
 
   it("renders and serves a fingerprinted static metadata image", async () => {
@@ -294,13 +355,14 @@ describe("file route loading.tsx and error.tsx", () => {
       {
         opengraphImage: true,
         staticImage: { modulePath: imagePath, staticInfo },
+        basePath: "/console",
       },
     );
 
     const pageResponse = createMockResponse();
     await renderer.renderPage(createMockRequest("/dashboard"), pageResponse);
     expect(pageResponse.body).toContain(
-      '<meta property="og:image" content="/dashboard/opengraph-image?v=0123456789abcdef">',
+      '<meta property="og:image" content="/console/dashboard/opengraph-image?v=0123456789abcdef">',
     );
     expect(pageResponse.body).toContain('<meta property="og:image:width" content="2">');
     expect(pageResponse.body).toContain(
@@ -318,6 +380,13 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(imageResponse.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     expect(imageResponse.headers.get("etag")).toBe('"0123456789abcdef"');
     expect(imageResponse.body.length).toBeGreaterThan(0);
+
+    const conditionalRequest = createMockRequest("/dashboard/opengraph-image");
+    conditionalRequest.headers["if-none-match"] = '"other", W/"0123456789abcdef"';
+    const notModifiedResponse = createMockResponse();
+    await renderer.renderPage(conditionalRequest, notModifiedResponse);
+    expect(notModifiedResponse.statusCode).toBe(304);
+    expect(notModifiedResponse.body).toBe("");
   });
 
   it("streams deferred route data and serializes it for hydration", async () => {
@@ -501,6 +570,44 @@ describe("file route loading.tsx and error.tsx", () => {
     );
   });
 
+  it("uses Vite filesystem module IDs for routes supplied by an external layer", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          default: function DashboardPage() {
+            return React.createElement("main", null, "Layer dashboard");
+          },
+        },
+        [layoutModulePath]: {
+          default: function RootLayout({ children }: { children: React.ReactNode }) {
+            return React.createElement("section", null, children);
+          },
+        },
+        [loadingModulePath]: {
+          default: function DashboardLoading() {
+            return React.createElement("p", null, "Loading layer dashboard");
+          },
+        },
+      },
+      {
+        root: "/workspace/app",
+        clientMetadata: { isClientComponent: true, shouldHydrate: true },
+        layoutMetadata: { shouldHydrate: true },
+      },
+    );
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    expect(response.body).toContain(
+      'window.__FARM_PAGE_MODULE__ = "/@fs/test/src/app/dashboard/page.tsx"',
+    );
+    expect(response.body).toContain('"modulePath":"/@fs/test/src/app/layout.tsx"');
+    expect(response.body).toContain(
+      'window.__FARM_LOADING_MODULE__ = "/@fs/test/src/app/dashboard/loading.tsx"',
+    );
+  });
+
   it("renders navigation fragments with stable page and nested layout boundaries", async () => {
     const renderer = createRenderer({});
     const html = await renderer.renderNavigationFragment({
@@ -538,9 +645,108 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(html).toContain('data-farm-client="false"');
     expect(html).toContain("Settings fragment");
   });
+
+  it("applies the app base path while rendering navigation fragments", async () => {
+    const renderer = createRenderer({}, { basePath: "/console" });
+    const html = await renderer.renderNavigationFragment({
+      PageComponent: function SettingsPage() {
+        return React.createElement(Link, { href: "/settings" }, "Settings");
+      },
+      pageProps: {},
+      params: {},
+      layouts: [],
+      pageShouldHydrate: false,
+      layoutShouldHydrate: false,
+      islandStrategy: null,
+    });
+
+    expect(html).toContain('href="/console/settings"');
+  });
 });
 
 describe("custom not-found rendering", () => {
+  it("applies the app base path to the default home recovery action", async () => {
+    const response = createMockResponse();
+    const renderer = new ServerRenderer(
+      { ...createConfig(), basePath: "/console" } as Required<FarmConfig>,
+      {
+        matchMetadataRoute: () => null,
+        matchMetadataImage: () => null,
+        matchRoute: () => ({ route: null, params: {}, layouts: [], slots: [] }),
+      } as any,
+    );
+
+    try {
+      await renderer.renderPage(createMockRequest("/console/missing"), response);
+
+      expect(response.statusCode).toBe(404);
+      expect(response.body).toContain('href="/console/"');
+    } finally {
+      setFarmBasePath("/");
+    }
+  });
+
+  it("renders a custom not-found page inside integration providers", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "farm-not-found-provider-"));
+    temporaryDirectories.push(directory);
+    const appDirectory = path.join(directory, "src", "app");
+    const notFoundPath = path.join(appDirectory, "not-found.tsx");
+    const rootLayoutPath = path.join(appDirectory, "layout.tsx");
+    await mkdir(appDirectory, { recursive: true });
+    await Promise.all([writeFile(notFoundPath, ""), writeFile(rootLayoutPath, "")]);
+
+    const acme = defineIntegration({
+      category: "custom",
+      type: "acme",
+      instance: {},
+      providers: [
+        {
+          name: "acme",
+          type: "client",
+          component: function AcmeProvider({ children }) {
+            return React.createElement("div", { "data-acme-provider": "" }, children);
+          },
+        },
+      ],
+    });
+    const response = createMockResponse();
+    const routeManager = {
+      matchMetadataRoute: () => null,
+      matchMetadataImage: () => null,
+      matchRoute: () => ({ route: null, params: {}, layouts: [], slots: [] }),
+      async loadRouteModule(modulePath: string) {
+        expect(modulePath).toBe(notFoundPath);
+        return {
+          default: function CustomNotFound() {
+            return React.createElement("main", null, "Custom not found");
+          },
+        };
+      },
+      async loadLayoutModule(modulePath: string) {
+        expect(modulePath).toBe(rootLayoutPath);
+        return {
+          default: function RootLayout({ children }: { children: React.ReactNode }) {
+            return React.createElement("html", null, React.createElement("body", null, children));
+          },
+        };
+      },
+    };
+    const renderer = new ServerRenderer(
+      {
+        ...createConfig(),
+        root: directory,
+        integrations: { acme },
+      } as Required<FarmConfig>,
+      routeManager as any,
+    );
+
+    await renderer.renderPage(createMockRequest("/missing"), response);
+
+    expect(response.statusCode).toBe(404);
+    expect(response.body).toContain("data-acme-provider");
+    expect(response.body).toContain("Custom not found");
+  });
+
   it("surfaces a root layout import failure through the error response", async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "farm-not-found-layout-"));
     temporaryDirectories.push(directory);
@@ -613,6 +819,9 @@ function createRenderer(
       islandStrategy?: string;
     };
     onGenerateClientManifest?: () => void;
+    integrations?: FarmConfig["integrations"];
+    basePath?: string;
+    root?: string;
   } = {},
 ) {
   const metadataImageEntry = {
@@ -785,12 +994,19 @@ function createRenderer(
     },
   };
 
-  return new ServerRenderer(createConfig(), routeManager as any);
+  return new ServerRenderer(
+    {
+      ...createConfig(options.root),
+      integrations: options.integrations ?? {},
+      basePath: options.basePath ?? "/",
+    },
+    routeManager as any,
+  );
 }
 
-function createConfig(): Required<FarmConfig> {
+function createConfig(root = "/test"): Required<FarmConfig> {
   return {
-    root: "/test",
+    root,
     srcDir: "src",
     outDir: "dist",
     basePath: "/",
@@ -798,6 +1014,7 @@ function createConfig(): Required<FarmConfig> {
     deploy: {},
     storage: {},
     integrations: {},
+    renderer: REACT_RENDERER,
     migrations: { commands: [] },
     workflows: {
       enabled: false,
@@ -885,6 +1102,42 @@ function createMockResponse(): MockResponse {
   };
 
   return response as unknown as MockResponse;
+}
+
+type BinaryMockResponse = MockResponse & {
+  chunks: Buffer[];
+};
+
+function createBinaryResponse(): BinaryMockResponse {
+  const response = {
+    statusCode: 200,
+    chunks: [] as Buffer[],
+    headers: new Map<string, string | number | readonly string[]>(),
+    headersSent: false,
+    writableEnded: false,
+    setHeader(key: string, value: string | number | readonly string[]) {
+      this.headers.set(key.toLowerCase(), value);
+      return this;
+    },
+    getHeader(key: string) {
+      return this.headers.get(key.toLowerCase());
+    },
+    write(chunk: unknown) {
+      this.headersSent = true;
+      this.chunks.push(Buffer.from(chunk as Uint8Array));
+      return true;
+    },
+    end(chunk?: unknown) {
+      if (chunk !== undefined) {
+        this.write(chunk);
+      }
+      this.writableEnded = true;
+      return this;
+    },
+    flush() {},
+  };
+
+  return response as unknown as BinaryMockResponse;
 }
 
 function createDeferred<T>() {

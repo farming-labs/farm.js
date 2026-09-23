@@ -72,23 +72,82 @@ async function waitForWritable(res: ServerResponse): Promise<boolean> {
   }
 }
 
-export async function sendWebResponse(res: ServerResponse, response: Response): Promise<void> {
-  res.statusCode = response.status;
+/**
+ * Older Fetch implementations expose repeated Set-Cookie fields as one
+ * comma-joined value. Split only at a comma followed by another cookie-pair;
+ * commas inside Expires dates remain part of the current cookie. RFC cookie
+ * values exclude commas, so a comma followed by a cookie-pair is unambiguous
+ * for valid Set-Cookie syntax once the original field boundaries are lost.
+ */
+function splitSetCookieHeader(value: string): string[] {
+  const cookies: string[] = [];
+  let start = 0;
 
-  const responseHeaders = response.headers as Headers & {
-    getSetCookie?: () => string[];
-  };
-  const setCookies = responseHeaders.getSetCookie?.() || [];
-  if (setCookies.length > 0) {
-    res.setHeader("Set-Cookie", setCookies);
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== ",") continue;
+
+    let next = index + 1;
+    while (value[next] === " " || value[next] === "\t") next += 1;
+
+    const equals = value.indexOf("=", next);
+    if (equals === -1) continue;
+
+    const separator = value.slice(next, equals);
+    if (separator.length === 0 || /[;,\s]/.test(separator)) continue;
+
+    cookies.push(value.slice(start, index).trim());
+    start = next;
+    index = next - 1;
   }
 
-  response.headers.forEach((value, key) => {
-    if (key.toLowerCase() === "set-cookie" && setCookies.length > 0) {
+  cookies.push(value.slice(start).trim());
+  return cookies.filter(Boolean);
+}
+
+export function applyWebResponseHeaders(
+  res: Pick<ServerResponse, "setHeader"> & Partial<Pick<ServerResponse, "getHeader">>,
+  headers: Headers,
+  options: { appendSetCookie?: boolean } = {},
+): void {
+  const responseHeaders = headers as Headers & {
+    getSetCookie?: () => string[];
+    raw?: () => Record<string, string[]>;
+  };
+  const rawSetCookies = responseHeaders.raw?.()["set-cookie"];
+  const setCookies = responseHeaders.getSetCookie?.() || rawSetCookies || [];
+  const existing =
+    options.appendSetCookie && typeof res.getHeader === "function"
+      ? res.getHeader("Set-Cookie")
+      : undefined;
+  const existingCookies = Array.isArray(existing)
+    ? existing.map(String)
+    : existing === undefined
+      ? []
+      : [String(existing)];
+
+  let fallbackSetCookie = "";
+  headers.forEach((value, key) => {
+    if (key.toLowerCase() === "set-cookie") {
+      fallbackSetCookie = value;
       return;
     }
     res.setHeader(key, value);
   });
+
+  const cookies =
+    setCookies.length > 0
+      ? setCookies
+      : fallbackSetCookie
+        ? splitSetCookieHeader(fallbackSetCookie)
+        : [];
+  if (cookies.length > 0) {
+    res.setHeader("Set-Cookie", [...existingCookies, ...cookies]);
+  }
+}
+
+export async function sendWebResponse(res: ServerResponse, response: Response): Promise<void> {
+  res.statusCode = response.status;
+  applyWebResponseHeaders(res, response.headers, { appendSetCookie: true });
 
   if (!response.body) {
     res.end();
@@ -112,7 +171,7 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
       if (res.destroyed) {
         // The client disconnected mid-response; drop the rest of the body so
         // the handler can return.
-        await reader.cancel().catch(() => {});
+        void reader.cancel().catch(() => {});
         return;
       }
 
@@ -139,7 +198,7 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
 
       if (!res.write(value)) {
         if (!(await waitForWritable(res))) {
-          await reader.cancel().catch(() => {});
+          void reader.cancel().catch(() => {});
           return;
         }
       }
@@ -147,6 +206,10 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
 
     res.end();
   } catch (error) {
+    // Releasing the lock does not stop the producer. Cancel it when the
+    // downstream write fails, without waiting on app-owned cleanup or letting
+    // a cancellation failure replace the original error.
+    void reader.cancel(error).catch(() => {});
     if (!res.writableEnded) {
       const responseError = error instanceof Error ? error : new Error(String(error));
       if (typeof res.destroy === "function") {

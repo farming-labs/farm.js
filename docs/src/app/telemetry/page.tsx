@@ -1,4 +1,3 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Metadata } from "@farm.js/core";
 import { cookies } from "@farm.js/core/headers";
 import {
@@ -12,6 +11,8 @@ import {
   Terminal,
 } from "lucide-react";
 import { getPrisma } from "../../lib/prisma";
+import { farmProductionSiteWhere } from "../../lib/telemetry-sites";
+import { DASHBOARD_SESSION_COOKIE, isValidDashboardSession } from "../../lib/dashboard-session";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -93,28 +94,15 @@ function first(value: string | string[] | undefined): string | undefined {
   return candidate?.trim() || undefined;
 }
 
-function safeTokenEqual(received: string | undefined, expected: string): boolean {
-  if (!received) return false;
-  const receivedBytes = Buffer.from(received);
-  const expectedBytes = Buffer.from(expected);
-  return (
-    receivedBytes.length === expectedBytes.length && timingSafeEqual(receivedBytes, expectedBytes)
-  );
-}
-
-function dashboardSessionValue(token: string): string {
-  return createHmac("sha256", token).update("farm.telemetry.dashboard.v1").digest("hex");
-}
-
 function hasDashboardAccess(): boolean {
   const expected = process.env.FARM_TELEMETRY_DASHBOARD_TOKEN?.trim();
-  if (!expected) {
-    return process.env.NODE_ENV !== "production";
-  }
-  return safeTokenEqual(
-    cookies().get("farm_telemetry_dashboard")?.value,
-    dashboardSessionValue(expected),
-  );
+  // Fail closed. Returning access for a missing token meant a typo, a rename, or
+  // an unset variable published the dashboard to anonymous visitors on any
+  // runtime where NODE_ENV was not exactly "production" - and the login route
+  // already fails closed on the same variable, so the two halves of one auth
+  // system disagreed.
+  if (!expected) return false;
+  return isValidDashboardSession(cookies().get(DASHBOARD_SESSION_COOKIE)?.value, expected);
 }
 
 function readLimit(value: string | string[] | undefined): number {
@@ -177,8 +165,9 @@ async function loadTelemetryData(limit: number): Promise<TelemetryData> {
         select: { identityHash: true },
       }),
       prisma.farmTelemetryEvent.count({ where: { eventType: "project_created" } }),
-      prisma.farmProductionSite.count(),
+      prisma.farmProductionSite.count({ where: farmProductionSiteWhere }),
       prisma.farmProductionSite.findMany({
+        where: farmProductionSiteWhere,
         orderBy: { lastSeenAt: "desc" },
         take: 250,
         select: {
@@ -329,10 +318,12 @@ function StatCard({
   label,
   value,
   icon: Icon,
+  note,
 }: {
   label: string;
   value: string;
   icon: typeof Activity;
+  note?: string;
 }) {
   return (
     <article className="border border-white/10 bg-white/[0.025] p-4">
@@ -341,6 +332,11 @@ function StatCard({
         <Icon className="size-4 text-white/45" strokeWidth={1.7} aria-hidden="true" />
       </div>
       <p className="mt-4 text-3xl font-medium tracking-[-0.04em] text-white">{value}</p>
+      {note ? (
+        <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.16em] text-white/30">
+          {note}
+        </p>
+      ) : null}
     </article>
   );
 }
@@ -401,9 +397,14 @@ function ProductionSitesTable({ sites }: { sites: ProductionSite[] }) {
           <h2 className="text-sm font-medium">Production websites</h2>
         </div>
         <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/35">
-          automatic detection
+          origin attestation enabled
         </span>
       </header>
+      <p className="border-b border-white/10 px-4 py-2.5 text-xs text-white/45">
+        Current check-ins are stored only after Farm retrieves framework metadata from the claimed
+        website itself. Legacy rows created before origin attestation remain unverified until a
+        current deployment attests them or the retention window removes them.
+      </p>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[900px] text-left">
           <thead className="bg-white/[0.025] font-mono text-[10px] uppercase tracking-[0.14em] text-white/35">
@@ -599,6 +600,7 @@ export default async function TelemetryPage({ searchParams }: TelemetryPageProps
             label="Production websites"
             value={formatNumber(data.productionSiteCount)}
             icon={Globe2}
+            note="self-reported"
           />
         </section>
 

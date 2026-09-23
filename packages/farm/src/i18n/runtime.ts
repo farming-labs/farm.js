@@ -59,10 +59,7 @@ export class FarmI18nRuntime {
   }
 
   hasMessage(locale: string, key: string): boolean {
-    return (
-      (this.catalogs[locale]?.[key] ?? this.catalogs[this.config.fallbackLocale]?.[key]) !==
-      undefined
-    );
+    return this.readOwnMessage(locale, key) !== undefined;
   }
 
   getClientSnapshot(resolution: FarmLocaleResolution): FarmI18nClientSnapshot {
@@ -72,6 +69,7 @@ export class FarmI18nRuntime {
       locales: this.config.locales,
       defaultLocale: this.config.defaultLocale,
       routing: this.config.routing,
+      basePath: this.config.basePath,
       cookie: this.config.cookie,
       direction: getFarmLocaleDirection(resolution.locale, this.config.direction),
       messages: {
@@ -92,9 +90,20 @@ export class FarmI18nRuntime {
     return formatter.format(values as any);
   }
 
+  // Look up a message by own-property only. A key named after an
+  // Object.prototype member (toString, valueOf, constructor, ...) must resolve
+  // to a real catalog entry or undefined, never the inherited prototype value
+  // (mirrors the own-property handling added to catalog.ts in #454).
+  private readOwnMessage(locale: string, key: string): string | undefined {
+    const direct = this.catalogs[locale];
+    if (direct && Object.prototype.hasOwnProperty.call(direct, key)) return direct[key];
+    const fallback = this.catalogs[this.config.fallbackLocale];
+    if (fallback && Object.prototype.hasOwnProperty.call(fallback, key)) return fallback[key];
+    return undefined;
+  }
+
   private resolveMessage(locale: string, key: string): string {
-    const message =
-      this.catalogs[locale]?.[key] ?? this.catalogs[this.config.fallbackLocale]?.[key];
+    const message = this.readOwnMessage(locale, key);
     if (message !== undefined) return message;
     if (this.config.strict) {
       throw new Error(`Missing Farm i18n message "${key}" for locale "${locale}".`);

@@ -31,6 +31,25 @@ export const product = query({ key: () => ["product"], handler: async () => true
     expect(result?.code).toContain("$$farm_server_query_product");
   });
 
+  it("transforms exports that pass explicit type arguments to the factory", () => {
+    const result = transformFarmServerFns(
+      `import { createServerFn, createServerQuery } from "@farm.js/core";
+export const save = createServerFn<{ name: string }>({ handler: async () => true });
+export const product = createServerQuery<Params<Id>>({ key: () => ["product"], handler: async () => true });`,
+      "/app/src/actions.ts",
+    );
+
+    expect(result?.exports).toEqual(["save", "product"]);
+    expect(result?.code).toContain('"use server"');
+    expect(result?.code).toContain(
+      "const $$farm_server_fn_save = createServerFn<{ name: string }>(",
+    );
+    expect(result?.code).toContain(
+      "const $$farm_server_query_product = createServerQuery<Params<Id>>(",
+    );
+    expect(result?.code).toContain("export async function save(input)");
+  });
+
   it("does not let adjacent core imports consume server function imports", () => {
     const result = transformFarmServerFns(
       `import { invalidate } from "@farm.js/core/cache";
@@ -43,6 +62,24 @@ export const update = createServerFn({ handler: async () => { invalidate(["produ
 
     expect(result?.exports).toEqual(["product", "update"]);
     expect(result?.code).toContain("export async function update(input)");
+  });
+
+  it("transforms a default-exported server function so it gets a server boundary", () => {
+    // Without this the module gets no "use server" directive and the handler
+    // (and its server-only imports) ships to the client.
+    const result = transformFarmServerFns(
+      `import { createServerFn } from "@farm.js/core";
+export default createServerFn({ handler: async () => true });`,
+      "/app/src/actions.ts",
+    );
+
+    expect(result).not.toBeNull();
+    expect(result?.exports).toEqual(["default"]);
+    expect(result?.code).toContain('"use server"');
+    expect(result?.code).toContain("const $$farm_server_fn_default = createServerFn(");
+    expect(result?.code).toContain("export default async function (input)");
+    // The raw factory call must no longer be the default export.
+    expect(result?.code).not.toContain("export default createServerFn(");
   });
 
   it("rejects query declarations in client modules", () => {

@@ -1,7 +1,22 @@
 import { readFileSync, existsSync, readdirSync, mkdirSync } from "fs";
 import { join, relative, dirname } from "path";
+import { initSync, parse } from "es-module-lexer";
 import { writeFileIfChanged } from "./write-file-if-changed";
+import { registerAPIRouteShape } from "./api/route-shape";
 import { isFarmAPIRouteFileName } from "./api/route-files";
+
+let moduleLexerInitialized = false;
+
+const API_CLIENT_METHOD_SEGMENTS = new Set([
+  "get",
+  "head",
+  "query",
+  "post",
+  "put",
+  "delete",
+  "patch",
+  "options",
+]);
 
 export interface APIRouteInfo {
   path: string;
@@ -21,7 +36,7 @@ export class APITypeGenerator {
    * Scan all API route files and extract route information
    */
   scanAPIRoutes(): APIRouteInfo[] {
-    const routes = new Map<string, APIRouteInfo>();
+    const methodSources = new Map<string, Map<string, APIRouteInfo>>();
 
     for (const appDir of this.appDirs) {
       const apiDir = join(appDir, "api");
@@ -30,11 +45,36 @@ export class APITypeGenerator {
       const discovered: APIRouteInfo[] = [];
       this.scanDirectory(apiDir, appDir, discovered);
       for (const route of discovered) {
-        routes.set(route.path, route);
+        const routeMethods = methodSources.get(route.path) ?? new Map<string, APIRouteInfo>();
+        for (const method of route.methods) {
+          routeMethods.set(method, route);
+        }
+        methodSources.set(route.path, routeMethods);
       }
     }
 
-    return Array.from(routes.values()).sort((left, right) => left.path.localeCompare(right.path));
+    const routes: APIRouteInfo[] = [];
+    for (const [routePath, methods] of methodSources) {
+      const routesByFile = new Map<string, APIRouteInfo>();
+      for (const [method, route] of methods) {
+        const existing = routesByFile.get(route.filePath);
+        if (existing) {
+          existing.methods.push(method);
+        } else {
+          routesByFile.set(route.filePath, {
+            ...route,
+            path: routePath,
+            methods: [method],
+          });
+        }
+      }
+      routes.push(...routesByFile.values());
+    }
+
+    return routes.sort(
+      (left, right) =>
+        left.path.localeCompare(right.path) || left.filePath.localeCompare(right.filePath),
+    );
   }
 
   private scanDirectory(dir: string, appDir: string, routes: APIRouteInfo[], basePath = "") {
@@ -84,41 +124,70 @@ export class APITypeGenerator {
   }
 
   private extractExportedMethods(content: string): string[] {
-    const methods: string[] = [];
+    if (!moduleLexerInitialized) {
+      initSync();
+      moduleLexerInitialized = true;
+    }
     const httpMethods = ["GET", "HEAD", "QUERY", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
-    const namedExports = new Set<string>();
+    const [, exports] = parse(content);
+    const valueExports = new Set(
+      exports
+        .filter((specifier) => !this.isTypeOnlyExportSpecifier(content, specifier.s))
+        .map((specifier) => specifier.n),
+    );
+    return httpMethods.filter((method) => valueExports.has(method));
+  }
 
-    for (const match of content.matchAll(/export\s*\{([\s\S]*?)\}/g)) {
-      for (const specifier of match[1].split(",")) {
-        const normalized = specifier.trim().replace(/^type\s+/, "");
-        if (!normalized) continue;
+  private isTypeOnlyExportSpecifier(content: string, exportNameStart: number): boolean {
+    let cursor = exportNameStart - 1;
 
-        const alias = normalized.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
-        const exportedName = alias?.[2] ?? normalized.match(/^([A-Za-z_$][\w$]*)$/)?.[1];
-        if (exportedName) namedExports.add(exportedName);
+    while (cursor >= 0) {
+      while (cursor >= 0 && /\s/.test(content[cursor])) cursor--;
+
+      if (content.slice(cursor - 1, cursor + 1) === "*/") {
+        const commentStart = content.lastIndexOf("/*", cursor - 1);
+        if (commentStart >= 0) {
+          cursor = commentStart - 1;
+          continue;
+        }
       }
+
+      const lineStart = content.lastIndexOf("\n", cursor) + 1;
+      const lineCommentStart = content.indexOf("//", lineStart);
+      if (lineCommentStart >= 0 && lineCommentStart <= cursor) {
+        cursor = lineCommentStart - 1;
+        continue;
+      }
+
+      break;
     }
 
-    for (const method of httpMethods) {
-      // Look for a direct declaration or the name exposed by an export list.
-      const patterns = [
-        new RegExp(`export\\s+const\\s+${method}\\s*=`, "g"),
-        new RegExp(`export\\s+(?:async\\s+)?function\\s+${method}\\s*\\(`, "g"),
-      ];
-
-      if (namedExports.has(method) || patterns.some((pattern) => pattern.test(content))) {
-        methods.push(method);
-      }
-    }
-
-    return methods;
+    const tokenEnd = cursor + 1;
+    while (cursor >= 0 && /[A-Za-z0-9_$]/.test(content[cursor])) cursor--;
+    return content.slice(cursor + 1, tokenEnd) === "type";
   }
 
   /**
    * Generate TypeScript code for the API router
    */
-  generateAPIRouter(routes: APIRouteInfo[], options: { outFile?: string } = {}): string {
+  generateAPIRouter(
+    routes: APIRouteInfo[],
+    options: {
+      outFile?: string;
+      pluginConfigs?: readonly string[];
+      pluginRoutes?: readonly { path: string; method: string }[];
+    } = {},
+  ): string {
     const imports: string[] = [];
+    const pluginTypes: string[] = [];
+    if (options.pluginConfigs?.length) {
+      imports.push('import type { PluginAPIRouter } from "@farm.js/core/api";');
+      options.pluginConfigs.forEach((filePath, index) => {
+        const importPath = this.getRouteImportPath({ filePath } as APIRouteInfo, options.outFile);
+        imports.push(`import type FarmPluginConfig${index} from ${JSON.stringify(importPath)};`);
+        pluginTypes.push(`PluginAPIRouter<typeof FarmPluginConfig${index}>`);
+      });
+    }
 
     // Group routes by path to handle multiple methods
     const routeGroups = new Map<string, APIRouteInfo[]>();
@@ -131,22 +200,40 @@ export class APITypeGenerator {
       routeGroups.get(key)!.push(route);
     }
 
+    const routeMethodsByPath = new Map<string, Set<string>>();
+    for (const [routePath, routeList] of routeGroups) {
+      const cleanPath = routePath === "/api" ? "" : routePath.replace(/^\/api\//, "");
+      routeMethodsByPath.set(
+        cleanPath,
+        new Set(routeList.flatMap((route) => route.methods.map((method) => method.toLowerCase()))),
+      );
+    }
+    for (const route of options.pluginRoutes ?? []) {
+      const cleanPath = route.path === "/api" ? "" : route.path.replace(/^\/api\//, "");
+      const methods = routeMethodsByPath.get(cleanPath) ?? new Set<string>();
+      methods.add(route.method.toLowerCase());
+      routeMethodsByPath.set(cleanPath, methods);
+    }
+
     // Build nested structure
     const nestedStructure: any = {};
     const usedRouteNames = new Map<string, number>();
 
     for (const [path, routeList] of routeGroups) {
-      const route = routeList[0];
-      const importPath = this.getRouteImportPath(route, options.outFile);
-      const routeName = this.uniqueRouteName(route.path, usedRouteNames);
+      const routeName = this.uniqueRouteName(path, usedRouteNames);
       const cleanPath = path === "/api" ? "" : path.replace(/^\/api\//, "");
       const parts = cleanPath ? cleanPath.split("/") : [];
 
-      // Collect all methods for this route
-      const allMethods = routeList.flatMap((r) => r.methods);
+      // Keep the final source for each method, matching runtime layer precedence.
+      const methodSources = new Map<string, APIRouteInfo>();
+      for (const route of routeList) {
+        for (const method of route.methods) methodSources.set(method, route);
+      }
+      const allMethods = [...methodSources.keys()];
 
       // Generate imports
       for (const method of allMethods) {
+        const importPath = this.getRouteImportPath(methodSources.get(method)!, options.outFile);
         const importName = `${method}_${routeName}`;
         imports.push(
           `import type { ${method} as ${importName} } from ${JSON.stringify(importPath)};`,
@@ -160,11 +247,18 @@ export class APITypeGenerator {
           nestedStructure[methodName] = `typeof ${importName}`;
         }
       } else {
+        const hasMethodCollision = parts.some((part, index) => {
+          if (part === "$params" || (index === 0 && part === "integrations")) return true;
+          if (!API_CLIENT_METHOD_SEGMENTS.has(part)) return false;
+          const parentPath = parts.slice(0, index).join("/");
+          return routeMethodsByPath.get(parentPath)?.has(part) === true;
+        });
+        const typePath = hasMethodCollision ? [`/${cleanPath}`] : parts;
         // Build nested object
         let current = nestedStructure;
-        for (let i = 0; i < parts.length; i++) {
-          const part = parts[i];
-          if (i === parts.length - 1) {
+        for (let i = 0; i < typePath.length; i++) {
+          const part = typePath[i];
+          if (i === typePath.length - 1) {
             // Last part - add methods
             current[part] = {};
             for (const method of allMethods) {
@@ -185,21 +279,50 @@ export class APITypeGenerator {
 
     // Convert nested structure to TypeScript code
     const typeExports = this.structureToTypeString(nestedStructure, 1);
+    const manifest = new Map<string, Set<string>>();
+    const shapes = new Map();
+    for (const route of routes) {
+      registerAPIRouteShape(shapes, route.path, route.filePath, "app");
+      const methods = manifest.get(route.path) ?? new Set<string>();
+      for (const method of route.methods) methods.add(method);
+      manifest.set(route.path, methods);
+    }
+    for (const route of options.pluginRoutes ?? []) {
+      registerAPIRouteShape(shapes, route.path, `plugin:${route.path}`, "app");
+      const methods = manifest.get(route.path) ?? new Set<string>();
+      if (methods.has(route.method))
+        throw new Error(`Duplicate API route for ${route.method} ${route.path}`);
+      methods.add(route.method);
+      manifest.set(route.path, methods);
+    }
+    const routeManifest = [...manifest]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([path, methods]) => ({ path, methods: [...methods].sort() }));
+    const manifestSource = routeManifest.length
+      ? `[\n${routeManifest
+          .map(
+            ({ path, methods }) =>
+              `  {\n    path: ${JSON.stringify(path)},\n    methods: [${methods.map((method) => JSON.stringify(method)).join(", ")}],\n  },`,
+          )
+          .join("\n")}\n]`
+      : "[]";
 
     return `/**
  * Auto-generated API router types
  * This file is automatically generated - do not edit manually
  *
- * This file contains only TypeScript types for the API client.
- * Runtime imports are used only at the type level.
+ * Server modules are imported only as types. Runtime data contains paths and methods only.
  */
 
 ${imports.join("\n")}
 
 // Type-only representation of your API routes
-export type APIRouter = {
+export type APIRouter = ${pluginTypes.length ? `${pluginTypes.join(" & ")} & ` : ""}{
 ${typeExports}
 };
+
+// Pass this schema-free manifest to createApiClients({ routes: apiRoutes }).
+export const apiRoutes = ${manifestSource} as const;
 `;
   }
 
@@ -291,7 +414,7 @@ ${typeExports}
    */
   generateAPIIndex(outputPath: string): void {
     const routes = this.scanAPIRoutes();
-    const content = this.generateAPIRouter(routes);
+    const content = this.generateAPIRouter(routes, { outFile: outputPath });
 
     mkdirSync(dirname(outputPath), { recursive: true });
     writeFileIfChanged(outputPath, content);

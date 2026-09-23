@@ -12,6 +12,12 @@ Expose HTTP handlers from src/app/api and validate input with schemas before han
 
 API route modules export HTTP methods. Farm discovers them, runs the route pipeline, and can generate typed client callers from the route shape.
 
+Routes in one app source must have distinct URL shapes. For example, `/api/users/[id]` and
+`/api/users/[slug]` conflict even though their parameter names differ. Parameters must have unique,
+non-reserved names, and catch-alls must be the final segment. These checks also run in RSC builds.
+If a project overrides a layer's equivalent dynamic shape, the project route replaces it completely,
+so handlers do not receive parameters named by the lower-priority route.
+
 **src/app/api/hello/route.ts**
 
 ```ts
@@ -31,9 +37,17 @@ export const POST = createEndpoint(
 );
 ```
 
+Use [`createApiClients()`](/docs/api-client) in one shared `src/lib/api.ts` to return `{ api, apiClient }`
+from the generated router. Both callers reuse this route definition: `api` dispatches locally on
+the server and `apiClient` sends HTTP requests. Endpoint middleware runs for both; outer HTTP
+middleware is not replayed by direct calls. Never import endpoint modules into the shared caller file.
+
 ## Next-style exports
 
 You can also manually export GET, POST, PATCH, and other handlers from the route file. Farm keeps this familiar while layering typed helpers around it.
+
+Generated API client types follow runtime value exports. Comments, string examples, and type-only
+exports named after HTTP methods do not create callable endpoints.
 
 **src/app/api/status/route.ts**
 
@@ -63,6 +77,10 @@ src/app/api/files/[...path]/route.ts -> /api/files/*
 Static route directory names may contain Unicode. Browsers percent-encode those path segments;
 Farm decodes both the discovered route and request segment before matching them.
 
+Defining the same method and path twice within one app source is an error, including in
+production RSC builds. The error names both files. Project routes may still override matching
+methods from a layer; other methods on the layer route remain available.
+
 Use `createEndpoint` when you want input validation and typed client generation. Use plain `GET`, `POST`, `PATCH`, and friends when you want to handle the raw `Request`.
 Plain handlers always receive that `Request`; parameter names such as `request`, `context`, or `ctx`
 do not change the calling convention. Use `createEndpoint` for the parsed `{ body, query, headers }`
@@ -70,6 +88,9 @@ context.
 
 `HEAD` follows normal HTTP semantics. A route can export a dedicated `HEAD` handler, otherwise Farm
 uses its `GET` handler and returns the same status and headers without a response body.
+
+This also applies to production RSC builds. They support `QUERY` exports, prefer an explicit
+`HEAD` handler, and return `405` with an `Allow` header for unsupported methods.
 
 ## Body and query input
 
@@ -92,8 +113,21 @@ export const GET = createEndpoint(
 ```
 
 Farm parses and validates `body`, `query`, and `headers` before middleware or handler code runs. Header schema keys use the lower-case names exposed by the Fetch `Headers` API. Invalid input returns a `400` response with structured validation issues.
+
+Generated callers use the schema's **input** type for body and query values; middleware and
+handlers receive its parsed **output** type. For example, a field declared as
+`z.string().transform(Number)` is sent as a string and received by the handler as a number.
+Defaulted fields may be omitted by the caller. The same distinction applies to multipart
+`toFormData(...)` inputs, Standard Schema input/output types, and both `api` and `apiClient`
+from `createApiClients()`. Validation still runs on the server; this does not send schemas or
+transforms to the browser. Existing endpoints without transforms retain their input types.
+
 Malformed `application/json` and `application/*+json` bodies also return `400` before endpoint
 middleware or handler code executes, including when the endpoint does not declare a body schema.
+If an upload is aborted while Farm is buffering its body, Farm rejects it before invoking the
+endpoint. This does not roll back work in a handler that has already started.
+On Node, finishing an upload is not an abort: only an interrupted upload or an early response
+disconnect cancels the request signal.
 
 ## HTTP QUERY
 
@@ -176,6 +210,16 @@ export const POST = createEndpoint(
 soon as the source yields it, respects response backpressure, cancels the source when the reader
 disconnects, and defaults to `Cache-Control: no-store`. Use ordinary `Response` objects for binary
 downloads or protocols that are not JSON event streams.
+
+The client decoder rejects malformed NDJSON with its original `SyntaxError` and cancels the
+source without waiting for cleanup or an unread response clone. Explicit stream cancellation
+and early iterator return still await the producer's cleanup.
+
+When Farm bridges a streamed `Response` to Node, a failed response write also cancels the
+upstream body. Put producer cleanup in the stream's `cancel()` callback. Farm preserves the
+original write error and does not wait indefinitely for that cleanup to finish.
+Disconnects follow the same rule, including when the connection closes under backpressure:
+Farm releases its reader and response listeners without waiting for app-owned cancellation work.
 
 ## Endpoint middleware
 

@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import {
   buildDocsAgentDiscoverySpec,
@@ -22,7 +22,10 @@ import {
 } from "@farming-labs/docs";
 import { marked, Renderer } from "marked";
 import { highlight } from "sugar-high";
+import { FARM_NAVIGATION_HEAD_SELECTOR } from "../client/document-head";
+import { farmAcceptQuality } from "../markdown";
 import type { FarmLayoutFonts } from "../font";
+import { matchesFarmIfNoneMatch } from "../server-http";
 import {
   resolveFarmDocsFontAssets,
   toFarmDocsPublicFontAssets,
@@ -172,6 +175,20 @@ function resolveInside(root: string, target: string): string | null {
   return null;
 }
 
+function resolveExistingFileInside(root: string, target: string): string | null {
+  const safePath = resolveInside(root, target);
+  if (!safePath) return null;
+
+  try {
+    const realRoot = realpathSync(root);
+    const realTarget = realpathSync(safePath);
+    const containedTarget = resolveInside(realRoot, realTarget);
+    return containedTarget && statSync(containedTarget).isFile() ? containedTarget : null;
+  } catch {
+    return null;
+  }
+}
+
 export function isFarmDocsRequest(docs: FarmDocsResolvedConfig | undefined, request: Request) {
   if (!docs?.enabled) return false;
   if (request.method !== "GET" && request.method !== "HEAD") return false;
@@ -243,8 +260,8 @@ function findDocsPageFile(contentDir: string, slug: string): string | null {
         ];
 
   for (const candidate of candidates) {
-    const safePath = resolveInside(contentDir, candidate);
-    if (safePath && existsSync(safePath) && statSync(safePath).isFile()) {
+    const safePath = resolveExistingFileInside(contentDir, candidate);
+    if (safePath) {
       return safePath;
     }
   }
@@ -608,8 +625,8 @@ function renderBelowTitleMeta(page: LoadedFarmDocsPage, docs: FarmDocsResolvedCo
 function renderMarkdownHtmlWithTitleMeta(
   page: LoadedFarmDocsPage,
   docs: FarmDocsResolvedConfig,
+  html: string,
 ): string {
-  const html = renderMarkdownHtml(page.body);
   const meta = renderBelowTitleMeta(page, docs);
   if (!meta) return html;
 
@@ -679,10 +696,11 @@ function createFarmDocsPublicResponse(
   request: Request,
 ): Response | null {
   const url = new URL(request.url);
-  const loadedPages = getLoadedDocsPages(contentDir, docs);
+  let loadedPages: LoadedFarmDocsPage[] | undefined;
+  const getPages = () => (loadedPages ??= getLoadedDocsPages(contentDir, docs));
   const sitemapManifest = () =>
     buildDocsSitemapManifest({
-      pages: loadedPages.map(toDocsSitemapPage),
+      pages: getPages().map(toDocsSitemapPage),
       entry: docs.entry,
       siteTitle: getDocsTitle(docs),
       baseUrl: url.origin,
@@ -695,7 +713,7 @@ function createFarmDocsPublicResponse(
   const llmsFormat = resolveDocsLlmsTxtFormat(url);
   if (llmsFormat) {
     const generated = renderDocsLlmsTxt(
-      loadedPages.map(toDocsLlmsPage),
+      getPages().map(toDocsLlmsPage),
       getDocsLlmsOptions(docs, request),
     );
     return new Response(llmsFormat === "llms-full" ? generated.llmsFullTxt : generated.llmsTxt, {
@@ -788,6 +806,15 @@ function createFarmDocsPublicResponse(
   return null;
 }
 
+function omitFarmDocsHeadBody(request: Request, response: Response): Response {
+  if (request.method !== "HEAD") return response;
+  return new Response(null, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -798,11 +825,21 @@ function escapeHtml(value: string): string {
 
 function shouldReturnMarkdown(request: Request): boolean {
   const url = new URL(request.url);
-  return (
-    url.pathname.endsWith(".md") ||
-    request.headers.get("accept")?.includes("text/markdown") === true ||
-    request.headers.get("accept")?.includes("text/plain") === true
+  if (url.pathname.endsWith(".md")) return true;
+
+  const accept = request.headers.get("accept");
+  // Substring matching cannot see `q=0`, so `text/markdown;q=0` (an explicit
+  // refusal) used to be served Markdown anyway. Only an exact entry counts:
+  // `*/*` means "anything", not "Markdown over HTML".
+  const markdown = Math.max(
+    farmAcceptQuality(accept, "text/markdown"),
+    farmAcceptQuality(accept, "text/plain"),
   );
+  if (markdown <= 0) return false;
+
+  // A client listing text/plain as a low-quality fallback behind text/html
+  // wants the HTML page; serve Markdown only when it is at least as welcome.
+  return markdown >= farmAcceptQuality(accept, "text/html", { wildcards: true });
 }
 
 function escapeAttribute(value: string): string {
@@ -1029,12 +1066,21 @@ function renderCodeCopyButton(className = "code-copy"): string {
   return `<button class="${className}" type="button" data-copied="false" aria-label="Copy code" title="Copy code" onclick="navigator.clipboard?.writeText(this.closest('figure').querySelector('code').innerText); this.dataset.copied='true'; this.setAttribute('aria-label','Copied'); this.title='Copied'; clearTimeout(this._copyTimer); this._copyTimer=setTimeout(() => { this.dataset.copied='false'; this.setAttribute('aria-label','Copy code'); this.title='Copy code'; }, 4500);"><svg class="code-copy-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><svg class="code-copy-check" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"></path></svg></button>`;
 }
 
-function renderMarkdownHtml(body: string): string {
+function renderMarkdownDocument(
+  body: string,
+  depth: number,
+): { html: string; tocItems: TocItem[] } {
   const slug = createSlugger();
   const renderer = new Renderer();
+  const maxLevel = Math.max(2, Math.min(depth, 6));
+  const tocItems: TocItem[] = [];
 
   renderer.heading = (text, level, raw) => {
-    const id = slug(raw || stripHtml(text));
+    const title = raw || stripHtml(text);
+    const id = slug(title);
+    if (level >= 2 && level <= maxLevel) {
+      tocItems.push({ id, title, level });
+    }
     return `<h${level} id="${escapeAttribute(id)}"><a class="heading-anchor" href="#${escapeAttribute(id)}">${text}</a></h${level}>\n`;
   };
 
@@ -1080,29 +1126,13 @@ function renderMarkdownHtml(body: string): string {
     renderer,
   }) as string;
 
-  return html.trim();
+  return { html: html.trim(), tocItems };
 }
 
 interface TocItem {
   id: string;
   title: string;
   level: number;
-}
-
-function extractTocItems(body: string, depth: number): TocItem[] {
-  const slug = createSlugger();
-  const maxLevel = Math.max(2, Math.min(depth, 6));
-
-  return body
-    .split(/\r?\n/)
-    .map((line) => line.match(/^(#{2,6})\s+(.+)$/))
-    .filter((match): match is RegExpMatchArray => Boolean(match))
-    .map((match) => ({
-      id: slug(match[2].trim()),
-      title: match[2].trim(),
-      level: match[1].length,
-    }))
-    .filter((item) => item.level <= maxLevel);
 }
 
 function getThemeUI(docs: FarmDocsResolvedConfig): Record<string, any> {
@@ -1595,7 +1625,8 @@ ${items
 
 function renderDocsRuntimeScript(docs: FarmDocsResolvedConfig): string {
   const docsEntry = JSON.stringify(normalizeEntry(docs.entry));
-  return `<script>(()=>{if(window.__farmDocsRuntime)return;window.__farmDocsRuntime=true;document.documentElement.dataset.farmDocsRuntime="true";document.documentElement.dataset.farmDocsRuntimeId=Math.random().toString(36).slice(2);const docsEntry=${docsEntry};let cleanupToc=()=>{};let closeMobileSidebar=()=>{};const normalizePath=(path)=>path.length>1?path.replace(/\\/+$/,""):path;const isDocsPath=(path)=>{const next=normalizePath(path);const entry=normalizePath(docsEntry);if(next.endsWith(".md"))return false;if(entry==="/")return true;return next===entry||next.startsWith(entry+"/")};const initToc=()=>{cleanupToc();const toc=document.getElementById("nd-toc");if(!toc){cleanupToc=()=>{};return}const links=Array.from(toc.querySelectorAll("[data-toc-item]"));const thumb=toc.querySelector("[data-toc-thumb]");const pairs=links.map((link)=>{let id=link.hash.slice(1);try{id=decodeURIComponent(id)}catch{}return{link,heading:document.getElementById(id)}}).filter((item)=>item.heading);const setActive=(active)=>{for(const {link} of pairs){const selected=link===active.link;link.dataset.active=selected?"true":"false";link.classList.toggle("fd-toc-link-active",selected)}if(!thumb)return;const styles=getComputedStyle(active.link);const top=active.link.offsetTop+parseFloat(styles.paddingTop||"0");const bottom=active.link.offsetTop+active.link.clientHeight-parseFloat(styles.paddingBottom||"0");thumb.style.clipPath="polygon(0 "+top+"px,100% "+top+"px,100% "+bottom+"px,0 "+bottom+"px)"};const update=()=>{if(pairs.length===0)return;const offset=Math.min(window.innerHeight*0.3,160);let active=pairs[0];for(const pair of pairs){if(pair.heading.getBoundingClientRect().top<=offset)active=pair;else break}setActive(active)};let frame=0;const schedule=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;update()})};const onHashChange=()=>setTimeout(schedule,0);window.addEventListener("scroll",schedule,{passive:true});window.addEventListener("resize",schedule);window.addEventListener("hashchange",onHashChange);cleanupToc=()=>{window.removeEventListener("scroll",schedule);window.removeEventListener("resize",schedule);window.removeEventListener("hashchange",onHashChange);if(frame)cancelAnimationFrame(frame);frame=0};update()};const getSidebar=()=>document.getElementById("nd-sidebar");const ensureActiveVisible=()=>{const sidebar=getSidebar();if(!sidebar)return;const active=sidebar.querySelector('a[data-active="true"]');if(!(active instanceof HTMLElement))return;const activeRect=active.getBoundingClientRect();const sidebarRect=sidebar.getBoundingClientRect();if(activeRect.top<sidebarRect.top||activeRect.bottom>sidebarRect.bottom)sidebar.scrollTop+=activeRect.top-sidebarRect.top-(sidebar.clientHeight-activeRect.height)/2};const setSidebarActive=(path)=>{const sidebar=getSidebar();if(!sidebar)return;const current=normalizePath(path);for(const link of Array.from(sidebar.querySelectorAll("a[href]"))){try{link.dataset.active=normalizePath(new URL(link.href,location.href).pathname)===current?"true":"false"}catch{}}ensureActiveVisible()};const initMobileSidebar=()=>{const layout=document.getElementById("nd-docs-layout");const sidebar=getSidebar();const toggle=document.querySelector("[data-sidebar-toggle]");const backdrop=document.querySelector("[data-sidebar-backdrop]");if(!layout||!sidebar||!(toggle instanceof HTMLButtonElement))return;const setOpen=(open)=>{layout.dataset.sidebarOpen=open?"true":"false";sidebar.classList.toggle("fd-sidebar-open",open);document.documentElement.dataset.farmDocsSidebar=open?"open":"closed";toggle.setAttribute("aria-expanded",open?"true":"false");toggle.setAttribute("aria-label",open?"Close menu":"Open menu")};const toggleOpen=()=>setOpen(layout.dataset.sidebarOpen!=="true");closeMobileSidebar=()=>setOpen(false);toggle.addEventListener("click",(event)=>{event.preventDefault();toggleOpen()});backdrop?.addEventListener("click",()=>closeMobileSidebar());document.addEventListener("keydown",(event)=>{if(event.key==="Escape")closeMobileSidebar()});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(target)closeMobileSidebar()});closeMobileSidebar()};const initSidebarScroll=()=>{const sidebar=getSidebar();if(!sidebar)return;const key="farmdocs:sidebar-scroll:"+location.origin;const getStorage=()=>{try{return window.sessionStorage}catch{return null}};const readSaved=()=>{try{const raw=getStorage()?.getItem(key);if(!raw)return null;const parsed=JSON.parse(raw);return parsed&&typeof parsed==="object"?parsed:null}catch{return null}};const save=(path=location.pathname)=>{try{getStorage()?.setItem(key,JSON.stringify({path,scrollTop:sidebar.scrollTop}))}catch{}};const saved=readSaved();if(saved?.path===location.pathname&&Number.isFinite(Number(saved.scrollTop)))sidebar.scrollTop=Number(saved.scrollTop);ensureActiveVisible();save();sidebar.addEventListener("scroll",()=>save(),{passive:true});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target)return;try{save(new URL(target.href,location.href).pathname)}catch{save()}});window.addEventListener("beforeunload",()=>save())};let navigateController=null;const getPageKey=(root)=>{const article=root.getElementById("nd-page");if(!article)return"";return article.querySelector("h1")?.textContent?.trim()||article.textContent?.replace(/\\s+/g," ").trim().slice(0,160)||""};const swapDocsPage=(html,url)=>{const nextDoc=new DOMParser().parseFromString(html,"text/html");const nextArticle=nextDoc.getElementById("nd-page");const currentArticle=document.getElementById("nd-page");if(!nextArticle||!currentArticle)return false;const nextKey=getPageKey(nextDoc);const importedArticle=document.importNode(nextArticle,true);currentArticle.replaceWith(importedArticle);const renderedArticle=document.getElementById("nd-page");if(!renderedArticle||renderedArticle===currentArticle||(nextKey&&getPageKey(document)!==nextKey))return false;const nextToc=nextDoc.getElementById("nd-toc");const currentToc=document.getElementById("nd-toc");if(nextToc&&currentToc)currentToc.replaceWith(document.importNode(nextToc,true));if(nextDoc.title)document.title=nextDoc.title;const nextDescription=nextDoc.querySelector('meta[name="description"]');const currentDescription=document.querySelector('meta[name="description"]');if(nextDescription&&currentDescription)currentDescription.setAttribute("content",nextDescription.getAttribute("content")||"");setSidebarActive(url.pathname);initToc();closeMobileSidebar();return true};const navigateDocs=async(url,{replace=false,scroll=true}={})=>{if(!isDocsPath(url.pathname))return false;if(navigateController)navigateController.abort();const controller=new AbortController();navigateController=controller;document.documentElement.dataset.farmDocsNavigating="true";try{const response=await fetch(url.href,{cache:"no-store",headers:{accept:"text/html","x-farm-docs-navigate":"1"},signal:controller.signal});if(!response.ok||!((response.headers.get("content-type")||"").includes("text/html")))return false;const html=await response.text();if(!swapDocsPage(html,url))return false;if(replace)history.replaceState({farmDocs:true},"",url.href);else history.pushState({farmDocs:true},"",url.href);if(scroll){if(url.hash){let id=url.hash.slice(1);try{id=decodeURIComponent(id)}catch{}document.getElementById(id)?.scrollIntoView({block:"start"})}else window.scrollTo({top:0,left:0})}return true}catch(error){if(error?.name==="AbortError")return true;return false}finally{if(navigateController===controller){delete document.documentElement.dataset.farmDocsNavigating;navigateController=null}}};const initClientNavigation=()=>{document.addEventListener("click",(event)=>{if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target||target.target||target.hasAttribute("download"))return;let url;try{url=new URL(target.href,location.href)}catch{return}if(url.origin!==location.origin||!isDocsPath(url.pathname))return;if(normalizePath(url.pathname)===normalizePath(location.pathname)&&url.hash)return;event.preventDefault();navigateDocs(url).then((handled)=>{if(!handled)location.href=url.href})});window.addEventListener("popstate",()=>{navigateDocs(new URL(location.href),{replace:true,scroll:false}).then((handled)=>{if(!handled)location.reload()})})};const init=()=>{initToc();initMobileSidebar();initSidebarScroll();initClientNavigation()};if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init()})();</script>`;
+  const reconcileHeadRuntime = `const farmNavigationHeadSelector=${JSON.stringify(FARM_NAVIGATION_HEAD_SELECTOR)};const reconcileDocsHead=(nextDoc)=>{const nextTitle=nextDoc.querySelector("title");document.title=nextTitle?.textContent||"";document.head.querySelectorAll(farmNavigationHeadSelector).forEach((node)=>node.remove());nextDoc.head.querySelectorAll(farmNavigationHeadSelector).forEach((node)=>document.head.appendChild(document.importNode(node,true)))}`;
+  return `<script>(()=>{if(window.__farmDocsRuntime)return;window.__farmDocsRuntime=true;document.documentElement.dataset.farmDocsRuntime="true";document.documentElement.dataset.farmDocsRuntimeId=Math.random().toString(36).slice(2);${reconcileHeadRuntime};const docsEntry=${docsEntry};let cleanupToc=()=>{};let closeMobileSidebar=()=>{};const normalizePath=(path)=>path.length>1?path.replace(/\\/+$/,""):path;const isDocsPath=(path)=>{const next=normalizePath(path);const entry=normalizePath(docsEntry);if(next.endsWith(".md"))return false;if(entry==="/")return true;return next===entry||next.startsWith(entry+"/")};const initToc=()=>{cleanupToc();const toc=document.getElementById("nd-toc");if(!toc){cleanupToc=()=>{};return}const links=Array.from(toc.querySelectorAll("[data-toc-item]"));const thumb=toc.querySelector("[data-toc-thumb]");const pairs=links.map((link)=>{let id=link.hash.slice(1);try{id=decodeURIComponent(id)}catch{}return{link,heading:document.getElementById(id)}}).filter((item)=>item.heading);const setActive=(active)=>{for(const {link} of pairs){const selected=link===active.link;link.dataset.active=selected?"true":"false";link.classList.toggle("fd-toc-link-active",selected)}if(!thumb)return;const styles=getComputedStyle(active.link);const top=active.link.offsetTop+parseFloat(styles.paddingTop||"0");const bottom=active.link.offsetTop+active.link.clientHeight-parseFloat(styles.paddingBottom||"0");thumb.style.clipPath="polygon(0 "+top+"px,100% "+top+"px,100% "+bottom+"px,0 "+bottom+"px)"};const update=()=>{if(pairs.length===0)return;const offset=Math.min(window.innerHeight*0.3,160);let active=pairs[0];for(const pair of pairs){if(pair.heading.getBoundingClientRect().top<=offset)active=pair;else break}setActive(active)};let frame=0;const schedule=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;update()})};const onHashChange=()=>setTimeout(schedule,0);window.addEventListener("scroll",schedule,{passive:true});window.addEventListener("resize",schedule);window.addEventListener("hashchange",onHashChange);cleanupToc=()=>{window.removeEventListener("scroll",schedule);window.removeEventListener("resize",schedule);window.removeEventListener("hashchange",onHashChange);if(frame)cancelAnimationFrame(frame);frame=0};update()};const getSidebar=()=>document.getElementById("nd-sidebar");const ensureActiveVisible=()=>{const sidebar=getSidebar();if(!sidebar)return;const active=sidebar.querySelector('a[data-active="true"]');if(!(active instanceof HTMLElement))return;const activeRect=active.getBoundingClientRect();const sidebarRect=sidebar.getBoundingClientRect();if(activeRect.top<sidebarRect.top||activeRect.bottom>sidebarRect.bottom)sidebar.scrollTop+=activeRect.top-sidebarRect.top-(sidebar.clientHeight-activeRect.height)/2};const setSidebarActive=(path)=>{const sidebar=getSidebar();if(!sidebar)return;const current=normalizePath(path);for(const link of Array.from(sidebar.querySelectorAll("a[href]"))){try{link.dataset.active=normalizePath(new URL(link.href,location.href).pathname)===current?"true":"false"}catch{}}ensureActiveVisible()};const initMobileSidebar=()=>{const layout=document.getElementById("nd-docs-layout");const sidebar=getSidebar();const toggle=document.querySelector("[data-sidebar-toggle]");const backdrop=document.querySelector("[data-sidebar-backdrop]");if(!layout||!sidebar||!(toggle instanceof HTMLButtonElement))return;const setOpen=(open)=>{layout.dataset.sidebarOpen=open?"true":"false";sidebar.classList.toggle("fd-sidebar-open",open);document.documentElement.dataset.farmDocsSidebar=open?"open":"closed";toggle.setAttribute("aria-expanded",open?"true":"false");toggle.setAttribute("aria-label",open?"Close menu":"Open menu")};const toggleOpen=()=>setOpen(layout.dataset.sidebarOpen!=="true");closeMobileSidebar=()=>setOpen(false);toggle.addEventListener("click",(event)=>{event.preventDefault();toggleOpen()});backdrop?.addEventListener("click",()=>closeMobileSidebar());document.addEventListener("keydown",(event)=>{if(event.key==="Escape")closeMobileSidebar()});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(target)closeMobileSidebar()});closeMobileSidebar()};const initSidebarScroll=()=>{const sidebar=getSidebar();if(!sidebar)return;const key="farmdocs:sidebar-scroll:"+location.origin;const getStorage=()=>{try{return window.sessionStorage}catch{return null}};const readSaved=()=>{try{const raw=getStorage()?.getItem(key);if(!raw)return null;const parsed=JSON.parse(raw);return parsed&&typeof parsed==="object"?parsed:null}catch{return null}};const save=(path=location.pathname)=>{try{getStorage()?.setItem(key,JSON.stringify({path,scrollTop:sidebar.scrollTop}))}catch{}};const saved=readSaved();if(saved?.path===location.pathname&&Number.isFinite(Number(saved.scrollTop)))sidebar.scrollTop=Number(saved.scrollTop);ensureActiveVisible();save();sidebar.addEventListener("scroll",()=>save(),{passive:true});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target)return;try{save(new URL(target.href,location.href).pathname)}catch{save()}});window.addEventListener("beforeunload",()=>save())};let navigateController=null;const getPageKey=(root)=>{const article=root.getElementById("nd-page");if(!article)return"";return article.querySelector("h1")?.textContent?.trim()||article.textContent?.replace(/\\s+/g," ").trim().slice(0,160)||""};const swapDocsPage=(html,url)=>{const nextDoc=new DOMParser().parseFromString(html,"text/html");const nextArticle=nextDoc.getElementById("nd-page");const currentArticle=document.getElementById("nd-page");if(!nextArticle||!currentArticle)return false;const nextKey=getPageKey(nextDoc);const importedArticle=document.importNode(nextArticle,true);currentArticle.replaceWith(importedArticle);const renderedArticle=document.getElementById("nd-page");if(!renderedArticle||renderedArticle===currentArticle||(nextKey&&getPageKey(document)!==nextKey))return false;const nextToc=nextDoc.getElementById("nd-toc");const currentToc=document.getElementById("nd-toc");if(nextToc&&currentToc)currentToc.replaceWith(document.importNode(nextToc,true));reconcileDocsHead(nextDoc);setSidebarActive(url.pathname);initToc();closeMobileSidebar();return true};const navigateDocs=async(url,{replace=false,scroll=true}={})=>{if(!isDocsPath(url.pathname))return false;if(navigateController)navigateController.abort();const controller=new AbortController();navigateController=controller;document.documentElement.dataset.farmDocsNavigating="true";try{const response=await fetch(url.href,{cache:"no-store",headers:{accept:"text/html","x-farm-docs-navigate":"1"},signal:controller.signal});if(!response.ok||!((response.headers.get("content-type")||"").includes("text/html")))return false;const html=await response.text();if(!swapDocsPage(html,url))return false;if(replace)history.replaceState({farmDocs:true},"",url.href);else history.pushState({farmDocs:true},"",url.href);if(scroll){if(url.hash){let id=url.hash.slice(1);try{id=decodeURIComponent(id)}catch{}document.getElementById(id)?.scrollIntoView({block:"start"})}else window.scrollTo({top:0,left:0})}return true}catch(error){if(error?.name==="AbortError")return true;return false}finally{if(navigateController===controller){delete document.documentElement.dataset.farmDocsNavigating;navigateController=null}}};const initClientNavigation=()=>{document.addEventListener("click",(event)=>{if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target||target.target||target.hasAttribute("download"))return;let url;try{url=new URL(target.href,location.href)}catch{return}if(url.origin!==location.origin||!isDocsPath(url.pathname))return;if(normalizePath(url.pathname)===normalizePath(location.pathname)&&url.hash)return;event.preventDefault();navigateDocs(url).then((handled)=>{if(!handled)location.href=url.href})});window.addEventListener("popstate",()=>{navigateDocs(new URL(location.href),{replace:true,scroll:false}).then((handled)=>{if(!handled)location.reload()})})};const init=()=>{initToc();initMobileSidebar();initSidebarScroll();initClientNavigation()};if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init()})();</script>`;
 }
 
 function renderDocsPageActionsRuntimeScript(): string {
@@ -1660,7 +1691,12 @@ function renderPixelDocsHtml(
       ? String((docs.config.nav as { title?: unknown }).title || "Docs")
       : "Docs";
   const description = page.description || docs.config.metadata?.description || "";
-  const tocItems = extractTocItems(page.body, getThemeTocDepth(docs));
+  // Rendering and TOC extraction share the same preprocessed Marked pass. This
+  // guarantees MDX lines removed before rendering, Setext/CommonMark edge
+  // cases, and duplicate-slug counters cannot diverge between the article and
+  // its navigation.
+  const renderedMarkdown = renderMarkdownDocument(page.body, getThemeTocDepth(docs));
+  const tocItems = renderedMarkdown.tocItems;
   const themeName = getThemeName(docs);
   const searchEnabled = isFarmDocsSearchEnabled(docs);
   const socialMetadata = isFarmDocsSocialImageEnabled(page, docs)
@@ -1710,7 +1746,7 @@ function renderPixelDocsHtml(
       <div class="fd-page">
       <article id="nd-page" class="prose fd-page-article fd-page-body fd-docs-content">
         ${renderPixelBreadcrumb(page, docs)}
-${renderMarkdownHtmlWithTitleMeta(page, docs)}
+${renderMarkdownHtmlWithTitleMeta(page, docs, renderedMarkdown.html)}
         ${renderPixelPageFooter(page, docs)}
         ${renderPixelPageNav(pages, page.href, docs)}
       </article>
@@ -1769,7 +1805,7 @@ export function createFarmDocsHandler(
         ETag: etag,
         "X-Content-Type-Options": "nosniff",
       });
-      if (request.headers.get("if-none-match") === etag) {
+      if (matchesFarmIfNoneMatch(request.headers.get("if-none-match"), etag)) {
         return new Response(null, { status: 304, headers });
       }
       if (request.method === "HEAD") return new Response(null, { status: 200, headers });
@@ -1778,7 +1814,7 @@ export function createFarmDocsHandler(
     }
 
     const publicResponse = createFarmDocsPublicResponse(contentDir, docs, request);
-    if (publicResponse) return publicResponse;
+    if (publicResponse) return omitFarmDocsHeadBody(request, publicResponse);
 
     if (!isFarmDocsRequest(docs, request)) return null;
 
@@ -1787,19 +1823,22 @@ export function createFarmDocsHandler(
 
     if (shouldReturnMarkdown(request)) {
       const origin = new URL(request.url).origin;
-      return new Response(
-        renderDocsMarkdownDocument(toFarmDocsMarkdownPage(page), {
-          origin,
-          llms: docs.config.llmsTxt ?? true,
-          sitemap: docs.config.sitemap,
-        }),
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "text/markdown; charset=utf-8",
-            "Cache-Control": "public, max-age=60",
+      return omitFarmDocsHeadBody(
+        request,
+        new Response(
+          renderDocsMarkdownDocument(toFarmDocsMarkdownPage(page), {
+            origin,
+            llms: docs.config.llmsTxt ?? true,
+            sitemap: docs.config.sitemap,
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "text/markdown; charset=utf-8",
+              "Cache-Control": "public, max-age=60",
+            },
           },
-        },
+        ),
       );
     }
 
@@ -1811,26 +1850,29 @@ export function createFarmDocsHandler(
       ? renderFarmLayoutFontPreloadHeader(layoutFonts)
       : fallbackFontPreloadHeader;
 
-    return new Response(
-      renderPixelDocsHtml(
-        page,
-        discoverFarmDocsPages(contentDir, docs),
-        docs,
-        options.clientEntry || "/farm-client.js",
-        faviconHref,
-        requestUrl,
-        activeFontAssets,
-        usesLayoutFonts ? options.fontStylesheetHref : undefined,
-        options.globalStylesheetHref,
-      ),
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "text/html; charset=utf-8",
-          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
-          ...(fontPreloadHeader ? { Link: fontPreloadHeader } : {}),
+    return omitFarmDocsHeadBody(
+      request,
+      new Response(
+        renderPixelDocsHtml(
+          page,
+          discoverFarmDocsPages(contentDir, docs),
+          docs,
+          options.clientEntry || "/farm-client.js",
+          faviconHref,
+          requestUrl,
+          activeFontAssets,
+          usesLayoutFonts ? options.fontStylesheetHref : undefined,
+          options.globalStylesheetHref,
+        ),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+            ...(fontPreloadHeader ? { Link: fontPreloadHeader } : {}),
+          },
         },
-      },
+      ),
     );
   };
 }

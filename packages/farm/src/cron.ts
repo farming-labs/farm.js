@@ -1,4 +1,9 @@
+import { farmSecretsMatch } from "./secret-compare";
 import { toPosixPath } from "./utils";
+import {
+  getFarmRuntimeBindings,
+  readFarmEnvironmentValue as readEnvironmentValue,
+} from "./utils/runtime-env";
 
 export type FarmCronSchedule = string | string[];
 
@@ -121,9 +126,10 @@ export async function prepareFarmCronForNitro(config: {
   await fs.mkdir(generatedDir, { recursive: true });
 
   const tasks: PreparedFarmCron["tasks"] = {};
+  const wrapperNames = resolveCronWrapperFileNames(cron.jobs.map((job) => job.name));
   for (const job of cron.jobs) {
     const taskName = getFarmCronTaskName(job.name);
-    const wrapperPath = toPosixPath(path.join(generatedDir, `${safeFileName(job.name)}.mjs`));
+    const wrapperPath = toPosixPath(path.join(generatedDir, `${wrapperNames.get(job.name)}.mjs`));
     await fs.writeFile(wrapperPath, createNitroCronTaskWrapper(job, cron.secretEnv), "utf8");
     tasks[taskName] = {
       handler: wrapperPath,
@@ -226,6 +232,20 @@ export function mergeScheduledTasks(
   );
 }
 
+/**
+ * Whether the process explicitly declares a development or test environment.
+ *
+ * An absent NODE_ENV is not a development signal. Plenty of container images and
+ * serverless runtimes leave it unset, so treating "not production" as
+ * development leaves an unsecured cron route open wherever the variable simply
+ * was never set. Matches the fail-closed gate the auth0 and workos integrations
+ * use for their development secrets.
+ */
+function isExplicitDevelopmentEnv(): boolean {
+  const nodeEnv = readEnvironmentValue("NODE_ENV");
+  return nodeEnv === "development" || nodeEnv === "test";
+}
+
 export function isCronRequestAuthorized(
   request: Request,
   options: FarmCronRouteOptions = {},
@@ -234,14 +254,16 @@ export function isCronRequestAuthorized(
   const secret = options.secret || readEnvironmentValue(secretEnv);
   if (!secret) {
     return (
-      options.allowUnsecured === true ||
-      (!getFarmRuntimeBindings() && readEnvironmentValue("NODE_ENV") !== "production")
+      options.allowUnsecured === true || (!getFarmRuntimeBindings() && isExplicitDevelopmentEnv())
     );
   }
 
   const authorization = request.headers.get("authorization") || "";
-  const bearer = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
-  return bearer === secret || request.headers.get("x-farm-cron-secret") === secret;
+  const bearer = /^Bearer (.*)$/i.exec(authorization)?.[1] || "";
+  const headerSecret = request.headers.get("x-farm-cron-secret") || "";
+  // Both are checked so a caller may use either header; neither short-circuits
+  // on the first differing character.
+  return farmSecretsMatch(bearer, secret) || farmSecretsMatch(headerSecret, secret);
 }
 
 export function cronRoute<TArgs extends unknown[], TResult>(
@@ -288,11 +310,46 @@ function normalizeCronPath(name: string, value: unknown): string {
     throw new TypeError(`Farm cron ${JSON.stringify(name)} path must start with "/".`);
   }
 
+  const hasUnstableCharacters = (candidate: string) =>
+    candidate.includes("\\") ||
+    Array.from(candidate).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 31 || (code >= 127 && code <= 159);
+    });
+  if (hasUnstableCharacters(value)) {
+    throw new TypeError(
+      `Farm cron ${JSON.stringify(name)} path cannot contain backslashes or control characters.`,
+    );
+  }
+
   const path = value.trim();
   if (path.startsWith("//") || path.includes("?") || path.includes("#")) {
     throw new TypeError(
       `Farm cron ${JSON.stringify(name)} path must be an application pathname without a host, query, or hash.`,
     );
+  }
+  for (const segment of path.split("/")) {
+    let decoded = segment;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      // Malformed escapes remain literal and cannot conceal a separator or dot segment.
+    }
+    if (hasUnstableCharacters(decoded)) {
+      throw new TypeError(
+        `Farm cron ${JSON.stringify(name)} path cannot contain backslashes or control characters.`,
+      );
+    }
+    if (decoded.includes("/")) {
+      throw new TypeError(
+        `Farm cron ${JSON.stringify(name)} path cannot contain percent-encoded path separators.`,
+      );
+    }
+    if (decoded === "." || decoded === "..") {
+      throw new TypeError(
+        `Farm cron ${JSON.stringify(name)} path cannot contain "." or ".." path segments.`,
+      );
+    }
   }
   return path.length > 1 ? path.replace(/\/+$/, "") : path;
 }
@@ -443,19 +500,53 @@ export default defineTask({
 `.trim();
 }
 
-function readEnvironmentValue(name: string): string | undefined {
-  const runtimeValue = getFarmRuntimeBindings()?.[name];
-  if (typeof runtimeValue === "string") return runtimeValue;
-  return typeof process !== "undefined" ? process.env?.[name] : undefined;
+/**
+ * Wrapper file names for a set of cron job names.
+ *
+ * Cron names are case-sensitive and `Daily` and `daily` are both valid, distinct
+ * jobs — but macOS and Windows use case-insensitive filesystems by default, so
+ * their wrappers would overwrite one another and both jobs would run whichever
+ * file was written last. Names are only disambiguated when they actually
+ * collide case-insensitively, so ordinary names such as `dailyCleanup` keep a
+ * readable wrapper; every name in a colliding group gets a digest of the exact
+ * job name appended, which keeps the result independent of configuration order.
+ */
+function resolveCronWrapperFileNames(names: readonly string[]): Map<string, string> {
+  const groups = new Map<string, number>();
+  for (const name of names) {
+    const key = safeFileName(name).toLowerCase();
+    groups.set(key, (groups.get(key) ?? 0) + 1);
+  }
+
+  const resolved = new Map<string, string>();
+  const claimed = new Map<string, string>();
+  for (const name of names) {
+    const base = safeFileName(name);
+    const key = base.toLowerCase();
+    const fileName = (groups.get(key) ?? 0) > 1 ? `${key}-${cronNameFingerprint(name)}` : base;
+    const claimedBy = claimed.get(fileName.toLowerCase());
+    if (claimedBy !== undefined) {
+      throw new Error(
+        `Farm cron jobs ${JSON.stringify(claimedBy)} and ${JSON.stringify(name)} generate the same wrapper file ${JSON.stringify(`${fileName}.mjs`)}. Rename one of them.`,
+      );
+    }
+    claimed.set(fileName.toLowerCase(), name);
+    resolved.set(name, fileName);
+  }
+  return resolved;
 }
 
-function getFarmRuntimeBindings(): Record<string, unknown> | undefined {
-  const runtimeBindings = (
-    globalThis as typeof globalThis & {
-      __env__?: Record<string, unknown>;
-    }
-  ).__env__;
-  return runtimeBindings && typeof runtimeBindings === "object" ? runtimeBindings : undefined;
+/**
+ * FNV-1a. This module is bundled into server runtimes without node:crypto, and
+ * the digest only needs to separate file names.
+ */
+function cronNameFingerprint(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 function safeFileName(value: string): string {

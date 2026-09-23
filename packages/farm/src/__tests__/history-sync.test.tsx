@@ -10,7 +10,7 @@ import {
   subscribeHistoryChange,
   type FarmHistoryChangeDetail,
 } from "../client/history-sync";
-import { usePageState } from "../client/router";
+import { usePageState, useRouter } from "../client/router";
 import { readPageState, SPARouter } from "../client/spa-router";
 import { asString, useQueryState } from "../query/client";
 
@@ -250,5 +250,34 @@ describe("page state writes do not navigate", () => {
 
     expect(h.fetched().length).toBeGreaterThan(0);
     expect(h.navigationStates).toContain("loading");
+  });
+});
+
+describe("route navigation history updates", () => {
+  it("keeps useRouter state in sync after a completed SPA navigation", async () => {
+    const h = mountRouter();
+    delete (window as unknown as { __FARM_SPA_ROUTER__?: SPARouter }).__FARM_SPA_ROUTER__;
+    const popstate = vi.fn();
+    listen("popstate", popstate);
+    let pathname = "";
+
+    function Probe() {
+      pathname = useRouter().pathname;
+      return null;
+    }
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root?.render(createElement(Probe)));
+
+    await act(async () => {
+      await h.router.navigate("/next", { scroll: false });
+      await settle();
+    });
+
+    expect(pathname).toBe("/next");
+    expect(popstate).not.toHaveBeenCalled();
+    expect(h.fetched()).toHaveLength(1);
   });
 });

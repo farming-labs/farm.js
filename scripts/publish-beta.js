@@ -14,11 +14,10 @@
  *                  stragglers, and promote. Useful to resume after a failure.
  */
 const { execFileSync } = require("node:child_process");
-const fs = require("node:fs");
 const path = require("node:path");
+const { readPublicPackages } = require("./public-packages");
 
 const workspaceRoot = path.resolve(__dirname, "..");
-const packagesRoot = path.join(workspaceRoot, "packages");
 
 const VERIFY_ATTEMPTS = 30;
 const VERIFY_DELAY_MS = 30_000;
@@ -50,23 +49,6 @@ function parsePublishBetaArgs(args) {
  */
 function isRetryableStagedPublishError(output) {
   return /previously staged version|previously published versions|E409|409 Conflict/i.test(output);
-}
-
-function readPublicPackages() {
-  return fs
-    .readdirSync(packagesRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => ({
-      dir: path.join(packagesRoot, entry.name),
-      packageJsonPath: path.join(packagesRoot, entry.name, "package.json"),
-    }))
-    .filter(({ packageJsonPath }) => fs.existsSync(packageJsonPath))
-    .map(({ dir, packageJsonPath }) => ({
-      dir,
-      ...JSON.parse(fs.readFileSync(packageJsonPath, "utf8")),
-    }))
-    .filter((packageJson) => packageJson.name && packageJson.version && !packageJson.private)
-    .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function run(command, commandArgs, options = {}) {

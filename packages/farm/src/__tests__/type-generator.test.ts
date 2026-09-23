@@ -2,9 +2,31 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { format } from "oxfmt";
 import { APITypeGenerator } from "../type-generator";
 
 describe("APITypeGenerator", () => {
+  it("emits a route manifest that survives formatting unchanged", async () => {
+    const generator = new APITypeGenerator("/tmp/app");
+    for (const routes of [
+      [],
+      [
+        {
+          path: "/api/uploads/[id]",
+          methods: ["GET", "HEAD", "QUERY", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+          filePath: "/tmp/app/api/uploads/[id]/route.ts",
+          relativePath: "api/uploads/[id]/route.ts",
+        },
+      ],
+    ]) {
+      const source = generator.generateAPIRouter(routes);
+      const manifest = source.slice(source.indexOf("export const apiRoutes"));
+      const formatted = await format("api.generated.ts", manifest);
+      expect(formatted.errors).toEqual([]);
+      expect(formatted.code).toBe(manifest);
+    }
+  });
+
   it("quotes invalid TypeScript property keys in generated router types", () => {
     const generator = new APITypeGenerator("/tmp/app");
 
@@ -60,6 +82,45 @@ describe("APITypeGenerator", () => {
     expect(new Set(aliases).size).toBe(4);
   });
 
+  it("emits literal aliases only when HTTP method path segments collide", () => {
+    const generator = new APITypeGenerator("/tmp/app");
+
+    const content = generator.generateAPIRouter([
+      {
+        path: "/api/users",
+        methods: ["GET"],
+        filePath: "/tmp/app/api/users/route.ts",
+        relativePath: "api/users/route.ts",
+      },
+      {
+        path: "/api/users/get/profile",
+        methods: ["GET", "POST"],
+        filePath: "/tmp/app/api/users/get/profile/route.ts",
+        relativePath: "api/users/get/profile/route.ts",
+      },
+      {
+        path: "/api/get",
+        methods: ["GET"],
+        filePath: "/tmp/app/api/get/route.ts",
+        relativePath: "api/get/route.ts",
+      },
+      {
+        path: "/api/users/post",
+        methods: ["GET"],
+        filePath: "/tmp/app/api/users/post/route.ts",
+        relativePath: "api/users/post/route.ts",
+      },
+    ]);
+
+    expect(content).toContain("users: {");
+    expect(content).toContain("get: typeof GET_users;");
+    expect(content).toContain('"/users/get/profile": {');
+    expect(content).not.toContain('"/get": {');
+    expect(content).not.toContain('"/users/post": {');
+    expect(content).toContain("post: {");
+    expect(content).not.toMatch(/get: \{\n\s+profile:/);
+  });
+
   it("creates the output directory before writing generated API types", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "farm-api-types-"));
     const appDir = path.join(root, "src", "app");
@@ -105,6 +166,59 @@ describe("APITypeGenerator", () => {
     expect(content).toContain("query: typeof QUERY_profile;");
   });
 
+  it("detects typed variable handlers", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-api-types-"));
+    const appDir = path.join(root, "src", "app");
+    const routeDir = path.join(appDir, "api", "typed");
+    const similarlyNamedRouteDir = path.join(appDir, "api", "similarly-named");
+    mkdirSync(routeDir, { recursive: true });
+    mkdirSync(similarlyNamedRouteDir, { recursive: true });
+
+    writeFileSync(
+      path.join(routeDir, "route.ts"),
+      [
+        "type Handler = () => Response;",
+        "export const GET: Handler = () => Response.json({ ok: true });",
+        "export let POST: Handler = () => Response.json({ ok: true });",
+      ].join("\n"),
+    );
+    writeFileSync(
+      path.join(similarlyNamedRouteDir, "route.ts"),
+      "export const GET$ = () => Response.json({ ok: true });\n",
+    );
+
+    const generator = new APITypeGenerator(appDir);
+    const routes = generator.scanAPIRoutes();
+
+    expect(routes).toHaveLength(1);
+    expect(routes[0]?.methods).toEqual(["GET", "POST"]);
+  });
+
+  it("ignores commented, string, and type-only HTTP exports", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-api-types-comments-"));
+    const appDir = path.join(root, "src", "app");
+    const routeDir = path.join(appDir, "api", "comments");
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(
+      path.join(routeDir, "route.ts"),
+      [
+        "// export const GET = () => new Response('commented');",
+        "/* export async function DELETE() { return new Response('commented'); } */",
+        'const example = "export const PATCH = () => null";',
+        "type OPTIONS = () => Response;",
+        "export type { OPTIONS };",
+        "type HEAD = () => Response;",
+        "export { type /* remains type-only */ HEAD };",
+        "export const POST = () => new Response(example);",
+      ].join("\n"),
+    );
+
+    const routes = new APITypeGenerator(appDir).scanAPIRoutes();
+
+    expect(routes).toHaveLength(1);
+    expect(routes[0]?.methods).toEqual(["POST"]);
+  });
+
   it("detects the HTTP names exposed by export lists", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "farm-api-types-"));
     const appDir = path.join(root, "src", "app");
@@ -134,5 +248,53 @@ describe("APITypeGenerator", () => {
     expect(routes.find((route) => route.path === "/api/aliased")?.methods).toEqual(["GET"]);
     expect(routes.find((route) => route.path === "/api/listed")?.methods).toEqual(["GET", "POST"]);
     expect(routes.some((route) => route.path === "/api/renamed")).toBe(false);
+  });
+
+  it("keeps non-overridden layer methods and imports each winning source", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-api-types-layers-"));
+    const layerAppDir = path.join(root, "layer", "src", "app");
+    const projectAppDir = path.join(root, "project", "src", "app");
+    const layerRoute = path.join(layerAppDir, "api", "users", "route.ts");
+    const projectRoute = path.join(projectAppDir, "api", "users", "route.ts");
+    mkdirSync(path.dirname(layerRoute), { recursive: true });
+    mkdirSync(path.dirname(projectRoute), { recursive: true });
+    writeFileSync(
+      layerRoute,
+      "export const GET = async () => new Response('layer');\nexport const PATCH = GET;\n",
+    );
+    writeFileSync(
+      projectRoute,
+      "export const GET = async () => new Response('project');\nexport const POST = GET;\n",
+    );
+    const outputPath = path.join(projectAppDir, "..", "lib", "api.generated.ts");
+
+    const generator = new APITypeGenerator([layerAppDir, projectAppDir]);
+    const routes = generator.scanAPIRoutes();
+    const content = generator.generateAPIRouter(routes, { outFile: outputPath });
+    const layerImport = path
+      .relative(path.dirname(outputPath), layerRoute)
+      .replace(/\\/g, "/")
+      .replace(/\.ts$/, "");
+    const projectImport = path
+      .relative(path.dirname(outputPath), projectRoute)
+      .replace(/\\/g, "/")
+      .replace(/\.ts$/, "");
+
+    expect(routes).toEqual([
+      expect.objectContaining({ filePath: layerRoute, methods: ["PATCH"] }),
+      expect.objectContaining({ filePath: projectRoute, methods: ["GET", "POST"] }),
+    ]);
+    expect(content).toContain(
+      `import type { PATCH as PATCH_users } from ${JSON.stringify(layerImport)};`,
+    );
+    expect(content).toContain(
+      `import type { GET as GET_users } from ${JSON.stringify(projectImport)};`,
+    );
+    expect(content).toContain(
+      `import type { POST as POST_users } from ${JSON.stringify(projectImport)};`,
+    );
+    expect(content).toContain("get: typeof GET_users;");
+    expect(content).toContain("post: typeof POST_users;");
+    expect(content).toContain("patch: typeof PATCH_users;");
   });
 });

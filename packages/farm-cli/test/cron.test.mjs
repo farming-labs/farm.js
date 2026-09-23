@@ -69,6 +69,27 @@ test("runs a configured route with cron metadata and bearer auth", async () => {
   }
 });
 
+test("formats a bare IPv6 cron host as a valid request URL", async () => {
+  const root = await createTempProject();
+  let requestedUrl;
+
+  try {
+    await runFarmCronJob("dailyCleanup", {
+      root,
+      host: "::1",
+      port: 4319,
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return Response.json({ ok: true });
+      },
+    });
+
+    assert.equal(requestedUrl, "http://[::1]:4319/api/maintenance/cleanup");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("starts UTC development schedules and stops them cleanly", async () => {
   const root = await createTempProject();
 
@@ -84,6 +105,82 @@ test("starts UTC development schedules and stops them cleanly", async () => {
     assert.ok(scheduler.entries[0].timer.nextRun() instanceof Date);
     scheduler.stop();
     assert.equal(scheduler.entries[0].timer.isStopped(), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("stopping the development scheduler aborts an active invocation", async () => {
+  const root = await createTempProject();
+  let requestSignal;
+  let markStarted;
+  const started = new Promise((resolve) => {
+    markStarted = resolve;
+  });
+
+  try {
+    const scheduler = await startFarmCronScheduler({
+      root,
+      url: "http://localhost:4319",
+      fetch: async (_input, init) => {
+        requestSignal = init.signal;
+        markStarted();
+        await new Promise((_resolve, reject) => {
+          requestSignal.addEventListener(
+            "abort",
+            () => reject(new DOMException("The operation was aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      },
+    });
+
+    const activeRun = scheduler.entries[0].timer.trigger();
+    await started;
+    scheduler.stop();
+
+    await assert.doesNotReject(activeRun);
+    assert.equal(requestSignal.aborted, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("prevents one cron job's schedules from overlapping", async () => {
+  const root = await createTempProject({ schedule: ["0 2 * * *", "0 14 * * *"] });
+  let finishFirstRun;
+  let firstRunStarted;
+  const started = new Promise((resolve) => {
+    firstRunStarted = resolve;
+  });
+  let calls = 0;
+
+  try {
+    const scheduler = await startFarmCronScheduler({
+      root,
+      url: "http://localhost:4319",
+      fetch: async () => {
+        calls += 1;
+        if (calls === 1) {
+          firstRunStarted();
+          await new Promise((resolve) => {
+            finishFirstRun = resolve;
+          });
+        }
+        return Response.json({ ok: true });
+      },
+    });
+
+    const firstRun = scheduler.entries[0].timer.trigger();
+    await started;
+    await scheduler.entries[1].timer.trigger();
+    assert.equal(calls, 1);
+
+    finishFirstRun();
+    await firstRun;
+    await scheduler.entries[1].timer.trigger();
+    assert.equal(calls, 2);
+    scheduler.stop();
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -118,15 +215,16 @@ test("runs cron list and cron run through the CLI", async () => {
   }
 });
 
-async function createTempProject() {
+async function createTempProject(options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-cron-"));
+  const schedule = JSON.stringify(options.schedule || "0 2 * * *");
   await writeFile(
     path.join(root, "farm.config.mjs"),
     [
       "export default {",
       "  cron: {",
       "    dailyCleanup: {",
-      "      schedule: '0 2 * * *',",
+      `      schedule: ${schedule},`,
       "      path: '/api/maintenance/cleanup',",
       "      description: 'Delete expired sessions.',",
       "    },",

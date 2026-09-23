@@ -21,7 +21,7 @@ generated server references; it does not install or wrap TanStack Query.
 > rendering: importing a query module from `"use client"` code would bundle the server handler into
 > the browser, and Farm fails the build with a boundary error instead. In apps without the
 > transform, call queries from server components, or expose an API route and use
-> [`createAPIClient`](/docs/api-client) from client components.
+> [`apiClient` from `createApiClients()`](/docs/api-client) from client components.
 
 ## Declare a query
 
@@ -114,7 +114,27 @@ export function ProductPrice({ id }: { id: string }) {
 
 The hook returns `data`, `error`, `status`, `pending`, `fetching`, `stale`, and `refetch`. Stale data remains visible while Farm refreshes it in the background. Stale queries also refresh on window focus and reconnect unless those options are disabled.
 
+Set `enabled: false` to pause automatic reads, invalidation refetches, and focus/reconnect refresh.
+An already-running read is not cancelled. Switching back to `enabled: true` checks the cache again:
+missing or stale data refreshes, fresh data is reused, and pending work is deduplicated. This does
+not add polling or continuously refetch when `staleTime` is zero. Explicit `refetch()` remains
+available while automatic reads are disabled.
+
+`refetch()` always starts fresh work. If an older request finishes afterward, its result is returned
+to its original caller but cannot replace the newer cached value.
+
+Invalidating a query while its read is pending keeps that response stale, even if the response
+timestamp is newer than the invalidation or its canonical key is learned only on arrival.
+The original caller still receives its result. Enabled mounted consumers refresh after the old
+work settles; an imperative read with `swr: false` waits for fresh data on the next call.
+Unrelated invalidations and invalidations before a read starts do not invalidate that read.
+
 Use `fetchServerQuery(productQuery, input)` for an imperative browser read that should participate in deduplication and SWR. Calling the generated `productQuery(input)` reference directly still returns plain typed data, but the fetch helper supplies the browser cache lifecycle.
+
+With SWR enabled (the default), every imperative reader receives the existing stale value
+immediately while one shared refresh runs, including readers arriving after that refresh starts.
+An initial read without cached data still waits. Set `swr: false` to wait for the in-flight
+result, or `force: true` to start and await a new request instead of joining it.
 
 ## Invalidate after a mutation
 
@@ -142,6 +162,13 @@ export const updateProduct = createServerFn({
 ```
 
 During a browser server-action call, Farm carries structured invalidations back with the action response. Mounted stale queries refetch automatically, and concurrent consumers still produce one request.
+If invalidation arrives while a query is still resolving its canonical server key, the invalidation
+follows that key and the older response cannot make the entry fresh again.
+
+If an automatic refresh fails, `useServerQuery` keeps the previous data stale and exposes the
+error without repeatedly retrying the same invalidation. Call `refetch()` to retry, or let a new
+invalidation, focus/reconnect event, or re-enabled query trigger another read. Concurrent mounted
+consumers continue to share that read.
 
 ## Share keys with routes and APIs
 
@@ -197,6 +224,12 @@ const result = await api.products.get(
 
 The route, API caller, and server query now read and invalidate the same canonical key. Default API keys remain isolated by request origin; only an explicit structured key opts into cross-feature sharing.
 
+When overlapping server-query requests use different function references but resolve to the same
+canonical key, a late older response cannot replace a newer request's cached result. Each caller
+still receives its own result. Once both references' keys are known, newer pending and error states
+are protected too. A key cannot be associated with a previously unknown reference until a Farm
+transport returns its cache metadata; plain-data transports remain scoped to the function and input.
+
 ### Share optimistic updates
 
 API mutations can optimistically update data watched by `useServerQuery` when both features use the
@@ -238,6 +271,10 @@ This works through the shared Farm client cache; `useServerQuery` does not expos
 optimistic option. Keep the API response and server-query result contracts identical whenever they
 share a key.
 
+Server-function mutations reach the same shared cache through `useMutation`: pass
+key-targeted `request.optimistic` updates and `request.invalidate` targets, as described in
+[Track mutations in React](/docs/api-client#track-mutations-in-react).
+
 ## Cache lifetime
 
 | `staleTime`                         | Server behavior                                                     | Browser behavior                                                   |
@@ -247,6 +284,11 @@ share a key.
 | `false`                             | Store until explicit invalidation                                   | Keep fresh until explicit invalidation                             |
 
 Numbers are milliseconds. Duration strings support `ms`, `s`, `m`, and `h`. Failed handlers and invalid output are never cached.
+
+When the app configures a [client cache adapter](/docs/api-client#persist-the-client-cache),
+declare `persist: true` on a query to allow its results to be stored on the device and rendered
+stale-but-visible on the next cold start. Nothing persists without the flag; treat it as part of
+the query's security review, since persisted results outlive the session.
 
 ## Middleware and cancellation
 

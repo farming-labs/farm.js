@@ -51,6 +51,7 @@ import {
 import path from "path";
 import { logger } from "./utils";
 import { normalizeFarmDeploymentId } from "./deployment";
+import { normalizeFarmConfigBasePath } from "./base-path";
 import { resolveFarmDevtoolsConfig, type ResolvedFarmDevtoolsConfig } from "./devtools-config";
 import {
   resolveFarmDevIndicatorsConfig,
@@ -72,7 +73,9 @@ import {
   type ResolvedFarmAuthConfig,
 } from "./auth-config";
 import { resolveFarmPerformanceConfig, type ResolvedFarmPerformanceConfig } from "./preload";
+import { validateConfigRouteSource } from "./plugins/route-pattern";
 import {
+  farmCspBlocksFrameworkInlineScripts,
   getFarmSecurityHeader,
   resolveFarmSecurityConfig,
   type FarmCspConfig,
@@ -85,6 +88,7 @@ import {
 } from "./security";
 import { isFarmRedirectStatus } from "./navigation-errors";
 import { resolveFarmThemeConfig } from "./theme/config";
+import { resolveFarmAgentConfig, type ResolvedFarmAgentConfig } from "./agent-config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
 import { isReactRenderer, resolveFarmRenderer } from "./renderer";
 import type { FarmRenderer } from "./renderer";
@@ -230,6 +234,13 @@ export type I18nConfig = FarmI18nUserConfig;
 export interface OpenAPIConfig {
   enabled?: boolean;
   route?: string;
+  /**
+   * Path where the raw OpenAPI spec is served as JSON, so agents and API tools
+   * can fetch it at a predictable URL. Set to `false` to disable.
+   *
+   * @default "/openapi.json"
+   */
+  specRoute?: string | false;
   title?: string;
   description?: string;
   version?: string;
@@ -381,8 +392,10 @@ export interface ResolvedFarmConfig extends Required<
     | "security"
     | "theme"
     | "renderer"
+    | "agent"
   >
 > {
+  agent: ResolvedFarmAgentConfig;
   /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
   [FARM_RESOLVED_CUSTOM_CONTEXT]?: boolean;
   root: string;
@@ -546,10 +559,19 @@ export function resolveDeployConfig(
       }
     }
   }
+  // A CLI --target override governs the preset too: keep a configured preset
+  // only when it targets the same platform, otherwise derive the preset from
+  // the override target. Mirrors how a --preset override recomputes the target
+  // above, so `farm build --target netlify` never ships Vercel-shaped output.
+  const configuredPreset = deploy.preset || config.preset;
+  const overrideTargetPreset =
+    overrideTarget && getDeployTargetForPreset(configuredPreset) !== overrideTarget
+      ? getPresetForDeployTarget(overrideTarget)
+      : undefined;
   const preset =
     overrides.preset ||
-    deploy.preset ||
-    config.preset ||
+    overrideTargetPreset ||
+    configuredPreset ||
     getPresetForDeployTarget(target) ||
     "node-server";
   const resolvedTarget = target || getDeployTargetForPreset(preset);
@@ -854,6 +876,7 @@ export async function resolveDocsConfig(
 
 function validateRedirectConfigs(redirects: RedirectConfig[], field: string): RedirectConfig[] {
   for (const [index, redirect] of redirects.entries()) {
+    validateConfigRouteSource(redirect.source, `${field}[${index}].source`);
     if (redirect.statusCode !== undefined && !isFarmRedirectStatus(redirect.statusCode)) {
       throw new RangeError(
         `${field}[${index}].statusCode must be one of 301, 302, 303, 307, or 308.`,
@@ -861,6 +884,13 @@ function validateRedirectConfigs(redirects: RedirectConfig[], field: string): Re
     }
   }
   return redirects;
+}
+
+function validateConfigRouteSources<T extends { source: string }>(routes: T[], field: string): T[] {
+  for (const [index, route] of routes.entries()) {
+    validateConfigRouteSource(route.source, `${field}[${index}].source`);
+  }
+  return routes;
 }
 
 export async function resolveConfig(
@@ -905,16 +935,26 @@ export async function resolveConfig(
     typeof userConfig.rewrites === "function"
       ? await userConfig.rewrites()
       : userConfig.rewrites || [];
+  validateConfigRouteSources(rewrites, "rewrites");
 
   const headers =
     typeof userConfig.headers === "function"
       ? await userConfig.headers()
       : userConfig.headers || [];
+  validateConfigRouteSources(headers, "headers");
   const routeRules = normalizeRouteRules(userConfig.routeRules);
   const routeRuleRedirects = routeRulesToRedirects(routeRules);
   const routeRuleHeaders = routeRulesToHeaders(routeRules);
   const security = resolveFarmSecurityConfig(userConfig.security);
   const securityHeader = getFarmSecurityHeader(security);
+  if (farmCspBlocksFrameworkInlineScripts(security)) {
+    logger.warn(
+      "security.csp restricts inline scripts (no 'unsafe-inline', nonce, or hash in " +
+        "script-src/default-src), which blocks the inline scripts Farm injects for theming " +
+        "and hydration. Add 'unsafe-inline' or the scripts' hashes until nonce support lands " +
+        "(https://github.com/farming-labs/farm.js/issues/1275).",
+    );
+  }
 
   const deploy = resolveDeployConfig(userConfig);
   const root = userConfig.root || process.cwd();
@@ -946,6 +986,19 @@ export async function resolveConfig(
       process.env.CF_PAGES_COMMIT_SHA ||
       (mode === "production" ? await generateBuildId() : "development"),
   );
+  const basePath = normalizeFarmConfigBasePath(userConfig.basePath);
+  const openapi = {
+    enabled: false,
+    route: "/docs/reference",
+    specRoute: "/openapi.json" as string | false,
+    title: "API Documentation",
+    description: "Auto-generated API documentation",
+    version: "1.0.0",
+    servers: [{ url: "http://localhost:3000", description: "Development server" }],
+    ...userConfig.openapi,
+  };
+  if (openapi.route !== undefined) validateConfigRouteSource(openapi.route, "openapi.route");
+  if (openapi.specRoute) validateConfigRouteSource(openapi.specRoute, "openapi.specRoute");
 
   const resolved: ResolvedFarmConfig = {
     [FARM_RESOLVED_CUSTOM_CONTEXT]: typeof userConfig.context === "function",
@@ -954,7 +1007,7 @@ export async function resolveConfig(
     extends: userConfig.extends || [],
     layers: layerResolution.layers,
     outDir: userConfig.outDir || "dist",
-    basePath: userConfig.basePath || "/",
+    basePath,
     renderer: resolveFarmRenderer(userConfig.renderer),
     preset: deploy.preset || "node-server",
     deploy,
@@ -976,8 +1029,10 @@ export async function resolveConfig(
       serverComponents: false,
       serverActions: false,
       isolatedClientHydration: "off",
+      ppr: false,
       ...userConfig.experimental,
     },
+    agent: resolveFarmAgentConfig(userConfig.agent),
     plugins: [...resolveIntegrationPlugins(integrations), ...(userConfig.plugins || [])],
     integrations,
     trailingSlash: userConfig.trailingSlash ?? false,
@@ -991,18 +1046,10 @@ export async function resolveConfig(
     routeRules,
     images: resolveFarmImageConfig(userConfig.images),
     performance: resolveFarmPerformanceConfig(userConfig.performance),
-    theme: resolveFarmThemeConfig(userConfig.theme, userConfig.basePath || "/"),
+    theme: resolveFarmThemeConfig(userConfig.theme, basePath),
     publicDir: userConfig.publicDir || "public",
-    i18n: resolveFarmI18nConfig(userConfig.i18n, { root, mode }),
-    openapi: {
-      enabled: false,
-      route: "/docs/reference",
-      title: "API Documentation",
-      description: "Auto-generated API documentation",
-      version: "1.0.0",
-      servers: [{ url: "http://localhost:3000", description: "Development server" }],
-      ...userConfig.openapi,
-    },
+    i18n: resolveFarmI18nConfig(userConfig.i18n, { root, mode, basePath }),
+    openapi,
     middleware: userConfig.middleware || {},
     notFound: userConfig.notFound || {},
     context: userConfig.context || (() => undefined),

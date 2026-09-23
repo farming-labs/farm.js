@@ -54,7 +54,7 @@ export function ResourceLinks(props: ResourceLinksProps) {
       ) : null}
       <span class="resource-link-item">
         {props.primary ? <ResourceSeparator /> : null}
-        <a href="https://farm.js.dev">
+        <a href="https://farmjs.dev">
           <DocsIcon />
           <span>Docs</span>
         </a>

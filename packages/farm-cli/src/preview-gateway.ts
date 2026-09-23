@@ -27,6 +27,7 @@ export interface PreviewGatewayRequest {
   headers?: Record<string, string>;
   body?: string | null;
   encoding?: "base64";
+  cancelled?: true;
 }
 
 export interface PreviewGatewayResponse {
@@ -43,6 +44,13 @@ export interface RunPreviewGatewayOptions {
   localProbeTimeoutMs?: number;
   maxRequests?: number;
   maxConcurrentRequests?: number;
+  requestTimeoutMs?: number;
+  maxResponseBodyBytes?: number;
+}
+
+export interface ForwardGatewayRequestOptions {
+  signal?: AbortSignal;
+  maxResponseBodyBytes?: number;
 }
 
 const DEFAULT_GATEWAY_URL = "https://preview.farming-labs.dev";
@@ -51,6 +59,8 @@ const DEFAULT_POLL_TIMEOUT_MS = 15000;
 const DEFAULT_LOCAL_PROBE_INTERVAL_MS = 2000;
 const DEFAULT_LOCAL_PROBE_TIMEOUT_MS = 1000;
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 25;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_RESPONSE_BODY_BYTES = 5 * 1024 * 1024;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "content-length",
@@ -62,6 +72,24 @@ const HOP_BY_HOP_HEADERS = new Set([
   "transfer-encoding",
   "upgrade",
 ]);
+
+function getHopByHopHeaderNames(headers: Record<string, string | string[]> | Headers): Set<string> {
+  const names = new Set(HOP_BY_HOP_HEADERS);
+  let connection: string | string[] | null | undefined;
+  if (headers instanceof Headers) {
+    connection = headers.get("connection");
+  } else {
+    connection = Object.entries(headers).find(([name]) => name.toLowerCase() === "connection")?.[1];
+  }
+  const values = Array.isArray(connection) ? connection : connection ? [connection] : [];
+  for (const value of values) {
+    for (const name of value.split(",")) {
+      const normalized = name.trim().toLowerCase();
+      if (normalized) names.add(normalized);
+    }
+  }
+  return names;
+}
 
 export function createPreviewGatewayPlan(
   target: PreviewTarget,
@@ -95,6 +123,7 @@ export async function runPreviewGateway(
   const controller = new AbortController();
   let handledRequests = 0;
   const inFlightRequests = new Set<Promise<void>>();
+  const requestControllers = new Map<string, AbortController>();
   const maxConcurrentRequests = Math.max(
     1,
     options.maxConcurrentRequests ?? DEFAULT_MAX_CONCURRENT_REQUESTS,
@@ -118,11 +147,28 @@ export async function runPreviewGateway(
     }
   };
 
-  const handleRequest = async (request: PreviewGatewayRequest) => {
+  const handleRequest = async (
+    request: PreviewGatewayRequest,
+    requestController: AbortController,
+  ) => {
     const startedAt = Date.now();
+    let response: PreviewGatewayResponse;
 
     try {
-      const response = await forwardGatewayRequest(plan.target, request);
+      response = await forwardGatewayRequest(plan.target, request, {
+        signal: AbortSignal.any([
+          controller.signal,
+          requestController.signal,
+          AbortSignal.timeout(options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS),
+        ]),
+        maxResponseBodyBytes: options.maxResponseBodyBytes ?? DEFAULT_MAX_RESPONSE_BODY_BYTES,
+      });
+    } catch (error) {
+      if (controller.signal.aborted || requestController.signal.aborted) return;
+      response = createGatewayErrorResponse(error);
+    }
+
+    try {
       await sendGatewayResponse(plan, session, request.id, response, controller.signal);
       handledRequests += 1;
       logger.info(
@@ -131,9 +177,8 @@ export async function runPreviewGateway(
     } catch (error) {
       if (controller.signal.aborted) return;
       logger.warn(
-        `Local preview target ${plan.target.localUrl} is no longer reachable. Closing preview session.`,
+        `Could not return preview response for ${request.method.toUpperCase()} ${formatRequestPath(request.path)}: ${error instanceof Error ? error.message : String(error)}`,
       );
-      controller.abort(error);
     }
   };
 
@@ -148,12 +193,24 @@ export async function runPreviewGateway(
       });
 
       for (const request of requests) {
+        if (request.cancelled) {
+          requestControllers.get(request.id)?.abort();
+          continue;
+        }
         await waitForAvailableRequestSlot();
         if (controller.signal.aborted) break;
 
-        const promise = handleRequest(request);
+        const requestController = new AbortController();
+        requestControllers.get(request.id)?.abort();
+        requestControllers.set(request.id, requestController);
+        const promise = handleRequest(request, requestController);
         inFlightRequests.add(promise);
-        promise.finally(() => inFlightRequests.delete(promise));
+        promise.finally(() => {
+          inFlightRequests.delete(promise);
+          if (requestControllers.get(request.id) === requestController) {
+            requestControllers.delete(request.id);
+          }
+        });
       }
 
       if (options.maxRequests && handledRequests >= options.maxRequests) {
@@ -164,6 +221,8 @@ export async function runPreviewGateway(
     process.removeListener("SIGINT", cleanup);
     process.removeListener("SIGTERM", cleanup);
     controller.abort();
+    for (const requestController of requestControllers.values()) requestController.abort();
+    requestControllers.clear();
     await Promise.allSettled(inFlightRequests);
     await localTargetWatch.catch(() => undefined);
     await closeGatewaySession(plan, session).catch(() => undefined);
@@ -201,10 +260,11 @@ async function isLocalPreviewTargetReachable(url: string, timeoutMs: number) {
   const signal = AbortSignal.timeout(timeoutMs);
 
   try {
-    await fetch(url, {
+    const response = await fetch(url, {
       method: "GET",
       signal,
     });
+    await response.body?.cancel();
     return true;
   } catch {
     return false;
@@ -250,11 +310,14 @@ function getSetCookies(headers: Headers): string[] {
 export async function forwardGatewayRequest(
   target: PreviewTarget,
   request: PreviewGatewayRequest,
+  options: ForwardGatewayRequestOptions = {},
 ): Promise<PreviewGatewayResponse> {
   const headers = new Headers();
-  for (const [key, value] of Object.entries(request.headers || {})) {
+  const requestHeaders = request.headers || {};
+  const requestHopByHopHeaders = getHopByHopHeaderNames(requestHeaders);
+  for (const [key, value] of Object.entries(requestHeaders)) {
     const normalized = key.toLowerCase();
-    if (HOP_BY_HOP_HEADERS.has(normalized) || normalized.startsWith("sec-websocket-")) {
+    if (requestHopByHopHeaders.has(normalized) || normalized.startsWith("sec-websocket-")) {
       continue;
     }
     headers.set(key, value);
@@ -264,20 +327,27 @@ export async function forwardGatewayRequest(
 
   const method = request.method.toUpperCase();
   const hasBody = method !== "GET" && method !== "HEAD" && Boolean(request.body);
-  const response = await fetch(`${target.localUrl}${request.path}`, {
+  const response = await fetch(resolveGatewayTargetUrl(target.localUrl, request.path), {
     method,
     headers,
     body: hasBody
       ? Buffer.from(request.body || "", request.encoding === "base64" ? "base64" : "utf8")
       : undefined,
+    redirect: "manual",
+    signal: options.signal,
   });
 
   const responseHeaders: Record<string, string | string[]> = {};
+  const responseHopByHopHeaders = getHopByHopHeaderNames(response.headers);
   response.headers.forEach((value, key) => {
     const normalized = key.toLowerCase();
     // Set-Cookie is collected separately: Headers.forEach folds repeated
     // headers into one comma-joined value, which corrupts multiple cookies.
-    if (!HOP_BY_HOP_HEADERS.has(normalized) && normalized !== "set-cookie") {
+    if (
+      !responseHopByHopHeaders.has(normalized) &&
+      normalized !== "content-encoding" &&
+      normalized !== "set-cookie"
+    ) {
       responseHeaders[key] = value;
     }
   });
@@ -286,12 +356,65 @@ export async function forwardGatewayRequest(
     responseHeaders["set-cookie"] = setCookies;
   }
 
+  const responseBody = await readResponseBody(
+    response,
+    options.maxResponseBodyBytes ?? DEFAULT_MAX_RESPONSE_BODY_BYTES,
+  );
   return {
     status: response.status,
     headers: responseHeaders,
-    body: Buffer.from(await response.arrayBuffer()).toString("base64"),
+    body: responseBody.toString("base64"),
     encoding: "base64",
   };
+}
+
+function resolveGatewayTargetUrl(targetUrl: string, requestPath: string): URL {
+  if (!requestPath.startsWith("/") || /^[/\\]{2}/.test(requestPath)) {
+    throw new Error("Preview request path cannot change the local target authority.");
+  }
+
+  const base = new URL(targetUrl);
+  base.pathname = base.pathname.endsWith("/") ? base.pathname : `${base.pathname}/`;
+  base.search = "";
+  base.hash = "";
+  const resolved = new URL(requestPath.slice(1), base);
+  if (resolved.origin !== base.origin || !resolved.pathname.startsWith(base.pathname)) {
+    throw new Error("Preview request path cannot leave the local target path.");
+  }
+  return resolved;
+}
+
+async function readResponseBody(response: Response, maxBytes: number) {
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  if (
+    !response.headers.has("content-encoding") &&
+    Number.isFinite(contentLength) &&
+    contentLength > maxBytes
+  ) {
+    await response.body?.cancel();
+    throw new Error(`The local preview response exceeded the ${maxBytes} byte limit.`);
+  }
+  if (!response.body) return Buffer.alloc(0);
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        throw new Error(`The local preview response exceeded the ${maxBytes} byte limit.`);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  }
+  return Buffer.concat(chunks, size);
 }
 
 async function pollGatewayRequests(
@@ -379,6 +502,16 @@ function formatRequestPath(path: string) {
   }
 
   return `${path.slice(0, 93)}...`;
+}
+
+function createGatewayErrorResponse(error: unknown): PreviewGatewayResponse {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    status: 502,
+    headers: { "content-type": "text/plain; charset=utf-8" },
+    body: Buffer.from(message).toString("base64"),
+    encoding: "base64",
+  };
 }
 
 function normalizeGatewayUrl(value: string) {

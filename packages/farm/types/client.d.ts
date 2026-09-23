@@ -18,6 +18,17 @@ import type {
 } from "react";
 import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "@farm.js/core/cache";
 import type { ServerFn } from "@farm.js/core/server-fn";
+import type {
+  createAPIClient as coreCreateAPIClient,
+  RouteAPIClient as CoreRouteAPIClient,
+  APIClientOptions as CoreAPIClientOptions,
+  ClientHeaders as CoreClientHeaders,
+  ClientLifecycleHooks as CoreClientLifecycleHooks,
+  ClientRequestEvent as CoreClientRequestEvent,
+  ClientResponseEvent as CoreClientResponseEvent,
+  ApiClients as CoreApiClients,
+  APIClientWithoutIntegrationsOptions as CoreAPIClientWithoutIntegrationsOptions,
+} from "../dist/client";
 
 declare global {
   namespace FarmJS {
@@ -215,12 +226,105 @@ declare module "@farm.js/core/client" {
 
   export type PrefetchBehavior = false | "intent" | "viewport" | "render" | "none";
 
+  /** URI schemes recognized as typed external Link targets. Apps may augment this interface. */
+  export interface LinkExternalUriSchemes {
+    about: true;
+    blob: true;
+    data: true;
+    file: true;
+    ftp: true;
+    ftps: true;
+    geo: true;
+    git: true;
+    http: true;
+    https: true;
+    im: true;
+    intent: true;
+    irc: true;
+    ircs: true;
+    magnet: true;
+    mailto: true;
+    market: true;
+    sms: true;
+    ssh: true;
+    tel: true;
+    urn: true;
+    vscode: true;
+    webcal: true;
+    ws: true;
+    wss: true;
+  }
+
+  type ExternalUriScheme = Extract<keyof LinkExternalUriSchemes, string>;
+
+  type UriSchemeLetter =
+    | "a"
+    | "b"
+    | "c"
+    | "d"
+    | "e"
+    | "f"
+    | "g"
+    | "h"
+    | "i"
+    | "j"
+    | "k"
+    | "l"
+    | "m"
+    | "n"
+    | "o"
+    | "p"
+    | "q"
+    | "r"
+    | "s"
+    | "t"
+    | "u"
+    | "v"
+    | "w"
+    | "x"
+    | "y"
+    | "z";
+  type UriSchemeStart = UriSchemeLetter | Uppercase<UriSchemeLetter>;
+  type UriSchemeCharacter =
+    | UriSchemeStart
+    | "0"
+    | "1"
+    | "2"
+    | "3"
+    | "4"
+    | "5"
+    | "6"
+    | "7"
+    | "8"
+    | "9"
+    | "+"
+    | "-"
+    | ".";
+  type IsUriSchemeTail<TValue extends string> = TValue extends ""
+    ? true
+    : TValue extends `${infer First}${infer Rest}`
+      ? First extends UriSchemeCharacter
+        ? IsUriSchemeTail<Rest>
+        : false
+      : false;
+  type IsUriScheme<TValue extends string> = TValue extends `${infer First}${infer Rest}`
+    ? First extends UriSchemeStart
+      ? IsUriSchemeTail<Rest>
+      : false
+    : false;
+
+  type KnownExternalHref = `//${string}` | `${ExternalUriScheme}:${string}`;
+
   /** External URLs are never type-checked as routes; use for http/https/mailto etc. */
-  export type ExternalHref =
-    | `http://${string}`
-    | `https://${string}`
-    | `//${string}`
-    | `mailto:${string}`;
+  export type ExternalHref<THref extends string = string> = string extends THref
+    ? KnownExternalHref
+    : THref extends `//${string}`
+      ? THref
+      : THref extends `${infer Scheme}:${string}`
+        ? IsUriScheme<Scheme> extends true
+          ? THref
+          : never
+        : never;
 
   export interface LinkDefaultRoute {}
 
@@ -316,16 +420,16 @@ declare module "@farm.js/core/client" {
         } & LinkRouteParamsProps<TRoute>
       : never;
 
-  export type LinkExternalTargetProps = {
-    href: ExternalHref;
+  export type LinkExternalTargetProps<THref extends string = string> = {
+    href: ExternalHref<THref>;
     params?: never;
   };
 
-  export type LinkProps<TRoute extends string = DefaultRouteHref> = Omit<
-    AnchorHTMLAttributes<HTMLAnchorElement>,
-    "href"
-  > &
-    (LinkExternalTargetProps | LinkRouteTargetProps<TRoute>) & {
+  export type LinkProps<
+    TRoute extends string = DefaultRouteHref,
+    THref extends string = string,
+  > = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> &
+    (LinkExternalTargetProps<THref> | LinkRouteTargetProps<TRoute>) & {
       /** Internal route path (typed when route types are generated) or external URL (never raises route-type errors). */
       prefetch?: PrefetchBehavior | boolean | "hover" | "viewport" | "none";
       query?: URLSearchParams | Record<string, RouteQueryValue>;
@@ -337,8 +441,11 @@ declare module "@farm.js/core/client" {
       viewTransition?: FarmViewTransitionMode;
     };
 
-  export type LinkComponent = <TRoute extends string = DefaultRouteHref>(
-    props: LinkProps<TRoute> & RefAttributes<HTMLAnchorElement>,
+  export type LinkComponent = <
+    TRoute extends string = DefaultRouteHref,
+    THref extends string = string,
+  >(
+    props: LinkProps<TRoute, THref> & RefAttributes<HTMLAnchorElement>,
   ) => ReactElement;
 
   export const Link: LinkComponent;
@@ -458,9 +565,14 @@ declare module "@farm.js/core/client" {
   export function isChunkLoadError(errorLike: unknown): boolean;
   export function installChunkErrorRecovery(options?: FarmChunkRecoveryOptions): () => void;
 
-  export interface APIClientOptions {
+  export type ClientHeaders = CoreClientHeaders;
+  export type ClientLifecycleHooks<TData = unknown> = CoreClientLifecycleHooks<TData>;
+  export type ClientRequestEvent = CoreClientRequestEvent;
+  export type ClientResponseEvent<TData = unknown> = CoreClientResponseEvent<TData>;
+
+  export interface APIClientOptions extends CoreAPIClientOptions {
     baseURL?: string;
-    headers?: Record<string, string>;
+    headers?: ClientHeaders;
     cacheDefaults?: CacheOptions;
   }
 
@@ -522,6 +634,7 @@ declare module "@farm.js/core/client" {
 
   export type APIClientSystemError =
     | APIClientError<"http_error", unknown, number>
+    | APIClientError<"aborted" | "timeout", unknown, 0>
     | APIClientError<"network_error", unknown, 0>;
 
   export type RequestEvent = {
@@ -557,6 +670,8 @@ declare module "@farm.js/core/client" {
     staleTime?: number;
     gcTime?: number;
     dedupeMs?: number;
+    /** Allow the configured client cache persistence adapter to store this read. */
+    persist?: boolean;
   };
 
   export type RetryOptions = {
@@ -583,6 +698,73 @@ declare module "@farm.js/core/client" {
         refetch?: boolean;
       };
 
+  export const FARM_CACHE_INVALIDATION_CHANNEL: "farm:cache-invalidation";
+
+  export type CrossTabCacheInvalidationOptions = {
+    /** Override the BroadcastChannel name, e.g. to isolate multiple apps on one origin. */
+    channelName?: string;
+  };
+
+  export function enableCrossTabCacheInvalidation(
+    options?: CrossTabCacheInvalidationOptions,
+  ): () => void;
+
+  export const FARM_CLIENT_CACHE_PERSIST_VERSION: string;
+
+  export type PersistedEntry = {
+    data: unknown;
+    updatedAt: number;
+    staleAt: number;
+    gcAt?: number;
+    version: string;
+  };
+
+  export type FarmClientCacheAdapter = {
+    keys(): Promise<string[]>;
+    get(key: string): Promise<PersistedEntry | null>;
+    set(key: string, entry: PersistedEntry): Promise<void>;
+    delete(key: string): Promise<void>;
+    clear(): Promise<void>;
+    getMany?(keys: string[]): Promise<Array<PersistedEntry | null>>;
+    setMany?(entries: Array<[string, PersistedEntry]>): Promise<void>;
+  };
+
+  export type FarmClientCacheStorage = {
+    getItem<T = unknown>(key: string): Promise<T | null>;
+    setItem<T = unknown>(key: string, value: T): Promise<unknown>;
+    removeItem(key: string): Promise<unknown>;
+    getKeys?(base?: string): Promise<string[]>;
+    keys?(base?: string): Promise<string[]>;
+    clear?(base?: string): Promise<unknown>;
+  };
+
+  export type ClientCachePersistenceOptions = {
+    version?: string;
+    persistKey?: (key: string) => boolean;
+    flushDelayMs?: number;
+  };
+
+  export function defineClientCacheAdapter(adapter: FarmClientCacheAdapter): FarmClientCacheAdapter;
+
+  export function storageClientCacheAdapter(
+    storage: FarmClientCacheStorage,
+    options?: { base?: string },
+  ): FarmClientCacheAdapter;
+
+  export function clearPersistedCache(): Promise<void>;
+
+  /** @internal Wired by the generated client entry from `cache.client.adapter`. */
+  export function initPersistedClientCache(
+    adapter: FarmClientCacheAdapter,
+    options?: ClientCachePersistenceOptions,
+  ): () => void;
+
+  /** @internal Entry point used by generated client entries. */
+  export function initConfiguredClientCachePersistence(
+    adapterModule: unknown,
+    options?: ClientCachePersistenceOptions,
+  ): void;
+
   export type OptimisticUpdate =
     | [CallableRouteRef<any>, unknown, (prev: any) => any]
     | [CacheKey<any> | DefinedCacheKey<any> | string, (prev: any) => any];
@@ -599,6 +781,8 @@ declare module "@farm.js/core/client" {
     TUpdates extends readonly unknown[] = readonly OptimisticUpdate[],
   > = {
     key?: CacheKey<TData> | RouteDataCacheKey;
+    signal?: AbortSignal;
+    timeoutMs?: number;
     cache?: CacheOptions;
     retry?: RetryOptions;
     invalidate?: InvalidateOptions;
@@ -723,7 +907,10 @@ declare module "@farm.js/core/client" {
       query: infer TQuery;
     };
   }
-    ? SimplifyEndpointInput<BodyInputProp<InferEndpointBody<T>> & QueryInputProp<TQuery>>
+    ? SimplifyEndpointInput<
+        BodyInputProp<InferEndpointBody<T>> &
+          QueryInputProp<T extends { __types: { inputQuery: infer I } } ? I : TQuery>
+      >
     : {};
 
   type InferEndpointOutput<T> = T extends {
@@ -792,6 +979,8 @@ declare module "@farm.js/core/client" {
       context: ServerFnOptimisticContext<TInput, TResult>,
     ) => TResult | null | undefined;
     rollbackOnError?: boolean;
+    /** Retry failed submissions with the API client's retry shape. Defaults to no retries. */
+    retry?: RetryOptions;
     onSuccess?: (result: TResult) => void;
     onError?: (error: TError) => void;
     onSettled?: (result: TResult | null, error: TError | null) => void;
@@ -838,11 +1027,13 @@ declare module "@farm.js/core/client" {
     ? TData
     : Awaited<ReturnType<TTarget>>;
 
-  export type InferMutationError<TTarget extends AnyMutationTarget> = TTarget extends (
-    ...args: any[]
-  ) => Promise<APIResult<any, infer TError>>
+  export type InferMutationError<TTarget extends AnyMutationTarget> = TTarget extends {
+    readonly __farmServerFnError: infer TError;
+  }
     ? TError
-    : Error;
+    : TTarget extends (...args: any[]) => Promise<APIResult<any, infer TError>>
+      ? TError
+      : Error;
 
   export type MutationOptimisticContext<TVariables, TData> = {
     variables: TVariables | undefined;
@@ -852,6 +1043,12 @@ declare module "@farm.js/core/client" {
   export type UseMutationOptions<TVariables, TData, TError = Error> = {
     initialData?: TData | null;
     resetOnMutate?: boolean;
+    /**
+     * `"always"` (default) dispatches regardless of connectivity. `"online"`
+     * pauses a submission while the browser is offline and resumes it on the
+     * `online` event instead of failing it.
+     */
+    networkMode?: MutationNetworkMode;
     optimistic?: (
       context: MutationOptimisticContext<TVariables, TData>,
     ) => TData | null | undefined;
@@ -876,12 +1073,16 @@ declare module "@farm.js/core/client" {
       ? (variables?: InferMutationVariables<TTarget>) => void
       : (variables: InferMutationVariables<TTarget>) => void;
 
+  export type MutationNetworkMode = "always" | "online";
+
   export type UseMutationReturn<
     TTarget extends AnyMutationTarget,
     TData = InferMutationData<TTarget>,
     TError = InferMutationError<TTarget>,
   > = {
     pending: boolean;
+    /** True while a submission is waiting for the browser to come back online. */
+    paused: boolean;
     status: MutationStatus;
     data: TData | null;
     error: TError | null;
@@ -902,16 +1103,33 @@ declare module "@farm.js/core/client" {
 
   export type FetcherState = "idle" | "submitting";
 
+  export class FetcherInputError extends Error {
+    readonly name: "FetcherInputError";
+    readonly code: "input_error";
+    readonly status: 0;
+    readonly data: undefined;
+    readonly cause: unknown;
+    constructor(cause: unknown);
+  }
+
   export type FetcherFormDataContext = {
     form: HTMLFormElement | null;
     submitter: HTMLElement | null;
   };
 
-  export type UseFetcherOptions<TTarget extends AnyMutationTarget> = UseMutationOptions<
-    InferMutationVariables<TTarget>,
-    InferMutationData<TTarget>,
-    InferMutationError<TTarget>
+  export type UseFetcherOptions<TTarget extends AnyMutationTarget> = Omit<
+    UseMutationOptions<
+      InferMutationVariables<TTarget>,
+      InferMutationData<TTarget>,
+      InferMutationError<TTarget> | FetcherInputError
+    >,
+    "request"
   > & {
+    request?: UseMutationOptions<
+      InferMutationVariables<TTarget>,
+      InferMutationData<TTarget>,
+      InferMutationError<TTarget>
+    >["request"];
     mapFormData?: (
       formData: FormData,
       context: FetcherFormDataContext,
@@ -942,8 +1160,10 @@ declare module "@farm.js/core/client" {
     state: FetcherState;
     status: MutationStatus;
     pending: boolean;
+    /** True while a submission is waiting for the browser to come back online. */
+    paused: boolean;
     data: InferMutationData<TTarget> | null;
-    error: InferMutationError<TTarget> | null;
+    error: InferMutationError<TTarget> | FetcherInputError | null;
     variables: InferMutationVariables<TTarget> | undefined;
     formData: FormData | null;
     submit: FetcherSubmit<TTarget>;
@@ -965,9 +1185,20 @@ declare module "@farm.js/core/client" {
         : EndpointMethod<T[K]>;
   };
 
-  export function createAPIClient<TRouter extends Record<string, any>>(
-    options?: APIClientOptions,
-  ): RouterToClient<TRouter>;
+  // Keep all overloads and integration inference tied to the implementation.
+  export const createAPIClient: typeof coreCreateAPIClient;
+
+  export type ApiClients<
+    TRouter extends Record<string, any>,
+    TIntegrations extends Record<string, any> = {},
+  > = CoreApiClients<TRouter, TIntegrations>;
+  export function createApiClients<TRouter extends Record<string, any>>(
+    options: CoreAPIClientWithoutIntegrationsOptions,
+  ): { api: CoreRouteAPIClient<TRouter>; apiClient: CoreRouteAPIClient<TRouter> };
+  export function createApiClients<
+    TRouter extends Record<string, any>,
+    TIntegrations extends Record<string, any> = {},
+  >(options?: APIClientOptions): ApiClients<TRouter, TIntegrations>;
 
   export function createServerAPIClient<TEndpoints extends Record<string, unknown>>(
     endpoints: TEndpoints,
@@ -1220,22 +1451,27 @@ declare module "@farm.js/core/client" {
    */
   export type IntegrationClientData = Record<string, unknown>;
 
-  export interface IntegrationClientOptions {
+  export interface IntegrationClientOptions extends ClientLifecycleHooks {
+    fetch?: typeof globalThis.fetch;
+    timeoutMs?: number;
     baseURL?: string;
-    headers?: Record<string, string>;
+    headers?: ClientHeaders;
     credentials?: RequestCredentials;
     data?: IntegrationClientData;
     isServer?: false | undefined;
   }
 
-  interface IntegrationRequestOptionsBase {
+  interface IntegrationRequestOptionsBase<TData = unknown> extends ClientLifecycleHooks<TData> {
+    timeoutMs?: number;
     headers?: Record<string, string>;
     signal?: AbortSignal;
     credentials?: RequestCredentials;
     data?: IntegrationClientData;
   }
 
-  export interface IntegrationClientRequestOptions extends IntegrationRequestOptionsBase {}
+  export interface IntegrationClientRequestOptions<
+    TData = unknown,
+  > extends IntegrationRequestOptionsBase<TData> {}
 
   export type IntegrationServerRequestLike =
     | Request
@@ -1253,7 +1489,9 @@ declare module "@farm.js/core/client" {
     forwardHeaders?: boolean | readonly string[];
   }
 
-  export interface IntegrationServerClientRequestOptions extends IntegrationRequestOptionsBase {
+  export interface IntegrationServerClientRequestOptions<
+    TData = unknown,
+  > extends IntegrationRequestOptionsBase<TData> {
     baseURL?: string;
     request?: IntegrationServerRequestLike;
     forwardHeaders?: boolean | readonly string[];
@@ -1311,7 +1549,7 @@ declare module "@farm.js/core/client" {
 
   type IntegrationOperationMethod<T> = (
     options?: IntegrationOperationInput<T>,
-    requestOptions?: IntegrationClientRequestOptions,
+    requestOptions?: IntegrationClientRequestOptions<ExtractIntegrationOperationResponse<T>>,
   ) => Promise<IntegrationOperationResult<ExtractIntegrationOperationResponse<T>>>;
 
   type IsUnion<T, U = T> = T extends any ? ([U] extends [T] ? false : true) : never;
@@ -1384,7 +1622,7 @@ declare module "@farm.js/core/client" {
 
   type IntegrationServerOperationMethod<T> = (
     options?: IntegrationOperationInput<T>,
-    requestOptions?: IntegrationServerClientRequestOptions,
+    requestOptions?: IntegrationServerClientRequestOptions<ExtractIntegrationOperationResponse<T>>,
   ) => Promise<IntegrationOperationResult<ExtractIntegrationOperationResponse<T>>>;
 
   type ServerOperationKeys<TAPI> = {

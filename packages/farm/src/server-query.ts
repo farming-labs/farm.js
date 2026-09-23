@@ -43,6 +43,8 @@ export type ServerQueryOptions<
   >;
   /** Milliseconds, a duration string such as "30s", or false for no expiry. */
   staleTime?: ServerQueryStaleTime;
+  /** Allow the configured client cache persistence adapter to store results on the device. */
+  persist?: boolean;
   handler: ServerFnHandler<
     TSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TSchema> : unknown,
     TResult,
@@ -64,6 +66,8 @@ export type ServerQueryOutputOptions<
   >;
   /** Milliseconds, a duration string such as "30s", or false for no expiry. */
   staleTime?: ServerQueryStaleTime;
+  /** Allow the configured client cache persistence adapter to store results on the device. */
+  persist?: boolean;
   handler: ServerFnHandler<
     TInputSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TInputSchema> : unknown,
     unknown,
@@ -87,6 +91,7 @@ type AnyServerQueryOptions = {
   middleware?: readonly AnyServerFnMiddleware[];
   key: ServerQueryKey<any, any>;
   staleTime?: ServerQueryStaleTime;
+  persist?: boolean;
   handler: ServerFnHandler<any, any, any>;
 };
 
@@ -167,6 +172,7 @@ export function createServerQuery(options: AnyServerQueryOptions): ServerQuery<u
         key: clientKey,
         staleTime,
         updatedAt,
+        ...(options.persist === true ? { persist: true } : {}),
       });
     },
   });

@@ -131,7 +131,10 @@ Security-sensitive arrays such as `serverActions.allowedOrigins` are replaced ra
 
 Farm generates route, API, environment, and static image types from the final resolved application graph. Layer routes appear in typed `Link` values, layer APIs appear in the generated API client, layer environment schemas participate in `getEnv` autocomplete, and raster imports carry image dimensions.
 
-When a project overrides a layer API route, generated API types import the project implementation. Layer-owned routes that remain active keep type-only imports to their real package or directory files.
+API route methods compose across layers. If a base layer exports `GET` and the project exports only
+`POST` at the same path, both methods remain available and generated types import each method from
+its real source. When a later layer or the project exports the same method, that method's generated
+type points to the higher-priority implementation.
 
 ## Nested layers
 

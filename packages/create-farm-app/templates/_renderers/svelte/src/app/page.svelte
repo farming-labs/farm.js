@@ -4,7 +4,7 @@
 
 <script lang="ts">
   import ResourceLinks from "../components/resource-links.svelte";
-  import { api } from "../lib/api-client";
+  import { apiClient } from "../lib/api";
 
   let message = $state("Call a typed server function");
   let pending = $state(false);
@@ -14,7 +14,7 @@
     pending = true;
     failed = false;
     try {
-      const result = await api.greeting.post({
+      const result = await apiClient.greeting.post({
         body: { name: "Svelte" },
       });
       if (result.error) throw result.error;

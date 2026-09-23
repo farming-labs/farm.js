@@ -1,3 +1,5 @@
+import { omitFarmResponseBody } from "./response-body";
+
 export type ApplicationMetadataRouteKind = "sitemap" | "robots" | "manifest";
 
 export namespace MetadataRoute {
@@ -218,13 +220,7 @@ export function createFarmMetadataRouteResponse(
   }
 
   if (isResponse(value)) {
-    return method === "HEAD"
-      ? new Response(null, {
-          status: value.status,
-          statusText: value.statusText,
-          headers: value.headers,
-        })
-      : value;
+    return method === "HEAD" ? omitFarmResponseBody(value) : value;
   }
 
   const body =

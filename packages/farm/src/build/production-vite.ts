@@ -19,7 +19,7 @@ export function canUseRolldownForRouteDiscovery(viteConfig: object | undefined):
 
 export function supportsRolldownVite(nodeVersion = process.versions.node): boolean {
   const [major = 0, minor = 0] = nodeVersion.split(".").map(Number);
-  return (major === 20 && minor >= 19) || major > 22 || (major === 22 && minor >= 12);
+  return major > 22 || (major === 22 && minor >= 12);
 }
 
 function requestedProductionViteBuilder(): FarmProductionViteBuilder | undefined {
@@ -41,16 +41,14 @@ async function loadRollupVite(): Promise<FarmProductionViteRuntime> {
 
 /**
  * Prefer Vite's Rolldown-powered production builder on supported Node releases.
- * Vite 5 remains the compatibility path for Node 18, --no-optional installs,
+ * Vite 5 remains the compatibility path for unsupported runtimes, --no-optional installs,
  * and projects that explicitly request Rollup.
  */
 export async function loadFarmProductionVite(): Promise<FarmProductionViteRuntime> {
   const requested = requestedProductionViteBuilder();
   if (requested === "rollup" || !supportsRolldownVite()) {
     if (requested === "rolldown") {
-      throw new Error(
-        "FARM_VITE_BUILDER=rolldown requires Node 20.19+, Node 22.12+, or a newer release",
-      );
+      throw new Error("FARM_VITE_BUILDER=rolldown requires Node 22.12 or newer");
     }
     return loadRollupVite();
   }

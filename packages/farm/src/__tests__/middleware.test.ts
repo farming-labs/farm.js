@@ -1612,10 +1612,12 @@ describe("URL Rewriting", () => {
     const ctx = createContext(req, res);
 
     expect(ctx.pathname).toBe("/old-path");
+    expect(ctx.route).toBe("/old-path");
 
     ctx.rewrite("/new-path");
 
     expect(ctx.pathname).toBe("/new-path");
+    expect(ctx.route).toBe("/new-path");
     expect(ctx._rewriteUrl).toBe("/new-path");
     expect(req.url).toBe("/new-path");
   });
@@ -1735,6 +1737,84 @@ describe("Named request middleware", () => {
         ]),
       );
     } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the last valid middleware when an HMR reload fails", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-middleware-reload-"));
+    const appDir = path.join(root, "src", "app");
+    const middlewareFile = path.join(appDir, "middleware.ts");
+    await fs.mkdir(appDir, { recursive: true });
+    await fs.writeFile(middlewareFile, "export {};\n");
+    const handler = vi.fn();
+    const viteServer = {
+      ssrLoadModule: vi
+        .fn()
+        .mockResolvedValueOnce({ default: handler })
+        .mockRejectedValueOnce(new SyntaxError("Unexpected token")),
+    };
+
+    try {
+      const manager = new MiddlewareManager(appDir, viteServer as never);
+      await manager.discover();
+      expect(manager.getMiddlewares()).toHaveLength(1);
+
+      await expect(manager.reload()).rejects.toThrow(`Failed to load middleware ${middlewareFile}`);
+      expect(manager.getMiddlewares()).toHaveLength(1);
+      expect(manager.getMiddlewares()[0]?.handlers).toEqual([handler]);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails initial discovery when a middleware module cannot load", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-middleware-invalid-"));
+    const appDir = path.join(root, "src", "app");
+    const middlewareFile = path.join(appDir, "middleware.ts");
+    await fs.mkdir(appDir, { recursive: true });
+    await fs.writeFile(middlewareFile, "export {};\n");
+    const viteServer = {
+      ssrLoadModule: vi.fn().mockRejectedValue(new SyntaxError("Unexpected token")),
+    };
+
+    try {
+      const manager = new MiddlewareManager(appDir, viteServer as never);
+      await expect(manager.discover()).rejects.toThrow(
+        `Failed to load middleware ${middlewareFile}`,
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("propagates initial discovery failures through the standalone Vite plugin", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-middleware-plugin-invalid-"));
+    const middlewareFile = path.join(root, "src", "app", "middleware.ts");
+    await fs.mkdir(path.dirname(middlewareFile), { recursive: true });
+    await fs.writeFile(middlewareFile, "export {};\n");
+    const loadError = new SyntaxError("Unexpected token");
+    const server = {
+      config: { root },
+      ssrLoadModule: vi.fn().mockRejectedValue(loadError),
+      moduleGraph: { invalidateModule: vi.fn() },
+      ws: { send: vi.fn() },
+    };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const plugin = farmMiddlewarePlugin();
+      (plugin.configureServer as (server: any) => void)(server);
+
+      await expect((server as any).__farmMiddleware__.waitForDiscovery()).rejects.toThrow(
+        `Failed to load middleware ${middlewareFile}`,
+      );
+      expect((server as any).__farmMiddleware__.isReady()).toBe(false);
+      await expect(
+        (server as any).__farmMiddleware__.execute(createMockRequest("/"), createMockResponse()),
+      ).rejects.toThrow(`Failed to load middleware ${middlewareFile}`);
+    } finally {
+      errorSpy.mockRestore();
       await fs.rm(root, { recursive: true, force: true });
     }
   });
@@ -2045,6 +2125,37 @@ describe("Middleware Manager Data Flow", () => {
     expect(handled).toBe(true);
     expect(res.statusCode).toBe(204);
     expect(res.setHeader).toHaveBeenCalledWith("x-middleware", "/dashboard/settings");
+  });
+
+  it("keeps context cookies when middleware returns a Response with cookies", async () => {
+    const manager = new MiddlewareManager("/tmp", undefined, [
+      {
+        matcher: "/dashboard/:path*",
+        handler(ctx) {
+          ctx.cookies.set("session", "abc", { httpOnly: true });
+          return new Response(null, {
+            status: 204,
+            headers: { "Set-Cookie": "theme=dark; Path=/" },
+          });
+        },
+      },
+    ]);
+    const req = createMockRequest("/dashboard/settings");
+    const res = createMockResponse();
+    let setCookieHeader: string | string[] | undefined;
+    vi.mocked(res.setHeader).mockImplementation((name, value) => {
+      if (String(name).toLowerCase() === "set-cookie") {
+        setCookieHeader = value as string | string[];
+      }
+      return res;
+    });
+    vi.spyOn(res, "getHeader").mockImplementation((name) =>
+      String(name).toLowerCase() === "set-cookie" ? setCookieHeader : undefined,
+    );
+
+    await expect(manager.execute(req, res)).resolves.toBe(true);
+
+    expect(setCookieHeader).toEqual(["session=abc; Path=/; HttpOnly", "theme=dark; Path=/"]);
   });
 
   it("emits middleware observability events", async () => {

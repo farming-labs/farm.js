@@ -145,7 +145,9 @@ export function StandardTableBenchmark() {
             const nextSeed = seed + 1;
             const additions = buildRows(1_000, nextSeed);
             setSeed(nextSeed);
-            setRows((current) => [...current, ...additions]);
+            setRows((current) => {
+              return [...current, ...additions];
+            });
             setOperation("append 1,000");
             setRevision((value) => value + 1);
           }}
@@ -175,7 +177,9 @@ export function StandardTableBenchmark() {
             const nextSeed = seed + 1;
             const additions = buildRows(1_000, nextSeed);
             setSeed(nextSeed);
-            setRows((current) => [...additions, ...current]);
+            setRows((current) => {
+              return [...additions, ...current];
+            });
             setOperation("prepend 1,000");
             setRevision((value) => value + 1);
           }}
@@ -202,25 +206,30 @@ export function StandardTableBenchmark() {
           data-action="table-drop-prefix"
           type="button"
           onClick={() => {
-            setRows((current) => current.slice(1_000));
-            setOperation("drop benchmark prefix");
+            const trimCount = 1_000;
+            setRows((current) => {
+              return current.slice(trimCount);
+            });
+            setOperation("drop runtime-count prefix");
             setRevision((value) => value + 1);
           }}
         >
-          Drop benchmark prefix
+          Drop runtime-count prefix
         </button>
         <button
           data-action="table-drop-prefix-snapshot"
           type="button"
           onClick={() => {
+            const trimCount = 1_000;
             setRows((current) => {
-              return current.slice(1_000);
+              const next = current.slice(trimCount);
+              return next;
             });
-            setOperation("drop benchmark prefix (snapshot control)");
+            setOperation("drop runtime-count prefix (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Drop benchmark prefix (snapshot control)
+          Drop runtime-count prefix (snapshot control)
         </button>
         <button
           data-action="table-roll-window"
@@ -228,13 +237,16 @@ export function StandardTableBenchmark() {
           onClick={() => {
             const nextSeed = seed + 1;
             const additions = buildRows(1_000, nextSeed);
+            const trimCount = 1_000;
             setSeed(nextSeed);
-            setRows((current) => [...current.slice(1_000), ...additions]);
-            setOperation("roll benchmark window");
+            setRows((current) => {
+              return [...current.slice(trimCount), ...additions];
+            });
+            setOperation("roll runtime-count window");
             setRevision((value) => value + 1);
           }}
         >
-          Roll benchmark window
+          Roll runtime-count window
         </button>
         <button
           data-action="table-roll-window-snapshot"
@@ -242,15 +254,199 @@ export function StandardTableBenchmark() {
           onClick={() => {
             const nextSeed = seed + 1;
             const additions = buildRows(1_000, nextSeed);
+            const trimCount = 1_000;
             setSeed(nextSeed);
             setRows((current) => {
-              return [...current.slice(1_000), ...additions];
+              const nextRows = [...current.slice(trimCount), ...additions];
+              return nextRows;
             });
-            setOperation("roll benchmark window (snapshot control)");
+            setOperation("roll runtime-count window (snapshot control)");
             setRevision((value) => value + 1);
           }}
         >
-          Roll benchmark window (snapshot control)
+          Roll runtime-count window (snapshot control)
+        </button>
+        <button
+          data-action="table-roll-window-map"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const additions = buildRows(1_000, nextSeed);
+            const trimCount = 1_000;
+            setSeed(nextSeed);
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 1_000 === 1
+                  ? { ...row, label: `${row.label} reviewed` }
+                  : row,
+              ),
+            );
+            setRows((current) => {
+              return [...current.slice(trimCount), ...additions];
+            });
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 1_000 === 1 ? { ...row, amount: row.amount + 1 } : row,
+              ),
+            );
+            setOperation("map, roll, and map runtime-count window");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Map + roll window + map
+        </button>
+        <button
+          data-action="table-roll-window-map-snapshot"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const additions = buildRows(1_000, nextSeed);
+            const trimCount = 1_000;
+            setSeed(nextSeed);
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 1_000 === 1
+                  ? { ...row, label: `${row.label} reviewed` }
+                  : row,
+              ),
+            );
+            setRows((current) => {
+              const nextRows = [...current.slice(trimCount), ...additions];
+              return nextRows;
+            });
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 1_000 === 1 ? { ...row, amount: row.amount + 1 } : row,
+              ),
+            );
+            setOperation("map, roll, and map window (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Map + roll window + map (snapshot control)
+        </button>
+        <button
+          data-action="table-roll-window-map-chain"
+          type="button"
+          onClick={() => {
+            const firstSeed = seed + 1;
+            const secondSeed = seed + 2;
+            const firstAdditions = buildRows(50, firstSeed);
+            const secondAdditions = buildRows(50, secondSeed);
+            const reviewedId = rows[100].id;
+            const escalatedId = rows[101].id;
+            const secondaryReviewedId = rows[102].id;
+            const trimCount = 50;
+            setSeed(secondSeed);
+            setRows((current) => {
+              return [...current.slice(trimCount), ...firstAdditions];
+            });
+            setRows((current) => {
+              return current.map((row) => {
+                const target = row.id;
+                switch (target) {
+                  case reviewedId:
+                  case secondaryReviewedId:
+                    return { ...row, amount: row.amount + 1, label: `${row.label} reviewed` };
+                  case escalatedId: {
+                    const nextAmount = row.amount + 2;
+                    return { ...row, amount: nextAmount, label: `${row.label} escalated` };
+                  }
+                  default:
+                    return row;
+                }
+              });
+            });
+            setRows((current) => {
+              return [...current.slice(trimCount), ...secondAdditions];
+            });
+            setOperation("map through two queued rolling windows");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Map through two rolling windows
+        </button>
+        <button
+          data-action="table-roll-window-map-chain-snapshot"
+          type="button"
+          onClick={() => {
+            const firstSeed = seed + 1;
+            const secondSeed = seed + 2;
+            const firstAdditions = buildRows(50, firstSeed);
+            const secondAdditions = buildRows(50, secondSeed);
+            const reviewedId = rows[100].id;
+            const escalatedId = rows[101].id;
+            const secondaryReviewedId = rows[102].id;
+            const trimCount = 50;
+            setSeed(secondSeed);
+            setRows((current) => {
+              const nextRows = [...current.slice(trimCount), ...firstAdditions];
+              return nextRows;
+            });
+            setRows((current) =>
+              current.map((row) =>
+                row.id === reviewedId || row.id === secondaryReviewedId
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row.id === escalatedId
+                    ? { ...row, amount: row.amount + 2, label: `${row.label} escalated` }
+                  : row,
+              ),
+            );
+            setRows((current) => {
+              const nextRows = [...current.slice(trimCount), ...secondAdditions];
+              return nextRows;
+            });
+            setOperation("map through two rolling windows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Map through two rolling windows (snapshot control)
+        </button>
+        <button
+          data-action="table-roll-window-queued"
+          type="button"
+          onClick={() => {
+            const firstSeed = seed + 1;
+            const secondSeed = seed + 2;
+            const firstAdditions = buildRows(500, firstSeed);
+            const secondAdditions = buildRows(500, secondSeed);
+            const trimCount = 500;
+            setSeed(secondSeed);
+            setRows((current) => {
+              return [...current.slice(trimCount), ...firstAdditions];
+            });
+            setRows((current) => {
+              return [...current.slice(trimCount), ...secondAdditions];
+            });
+            setOperation("roll two queued runtime-count windows");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Roll two queued runtime-count windows
+        </button>
+        <button
+          data-action="table-roll-window-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const firstSeed = seed + 1;
+            const secondSeed = seed + 2;
+            const firstAdditions = buildRows(500, firstSeed);
+            const secondAdditions = buildRows(500, secondSeed);
+            const trimCount = 500;
+            setSeed(secondSeed);
+            setRows((current) => {
+              const nextRows = [...current.slice(trimCount), ...firstAdditions];
+              return nextRows;
+            });
+            setRows((current) => {
+              const nextRows = [...current.slice(trimCount), ...secondAdditions];
+              return nextRows;
+            });
+            setOperation("roll two queued runtime-count windows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Roll two queued runtime-count windows (snapshot control)
         </button>
         <button
           data-action="table-position-insert"
@@ -260,7 +456,9 @@ export function StandardTableBenchmark() {
             const addition = buildRows(1, nextSeed)[0];
             const position = 9_000;
             setSeed(nextSeed);
-            setRows((current) => current.toSpliced(position, 0, addition));
+            setRows((current) => {
+              return current.toSpliced(position, 0, addition);
+            });
             setOperation("insert at runtime position");
             setRevision((value) => value + 1);
           }}
@@ -276,7 +474,8 @@ export function StandardTableBenchmark() {
             const position = 9_000;
             setSeed(nextSeed);
             setRows((current) => {
-              return current.toSpliced(position, 0, addition);
+              const nextRows = current.toSpliced(position, 0, addition);
+              return nextRows;
             });
             setOperation("insert at runtime position (snapshot control)");
             setRevision((value) => value + 1);
@@ -292,7 +491,9 @@ export function StandardTableBenchmark() {
             const additions = buildRows(64, nextSeed);
             const position = 5_000;
             setSeed(nextSeed);
-            setRows((current) => current.toSpliced(position, 0, ...additions));
+            setRows((current) => {
+              return current.toSpliced(position, 0, ...additions);
+            });
             setOperation("insert batch at runtime position");
             setRevision((value) => value + 1);
           }}
@@ -308,7 +509,8 @@ export function StandardTableBenchmark() {
             const position = 5_000;
             setSeed(nextSeed);
             setRows((current) => {
-              return current.toSpliced(position, 0, ...additions);
+              const nextRows = current.toSpliced(position, 0, ...additions);
+              return nextRows;
             });
             setOperation("insert batch at runtime position (snapshot control)");
             setRevision((value) => value + 1);
@@ -323,13 +525,16 @@ export function StandardTableBenchmark() {
             const nextSeed = seed + 1;
             const replacements = buildRows(64, nextSeed);
             const position = 5_000;
+            const deleteCount = replacements.length;
             setSeed(nextSeed);
-            setRows((current) => current.toSpliced(position, 64, ...replacements));
-            setOperation("replace 64-row runtime window");
+            setRows((current) => {
+              return current.toSpliced(position, deleteCount, ...replacements);
+            });
+            setOperation("replace dynamic-count runtime window");
             setRevision((value) => value + 1);
           }}
         >
-          Replace 64-row runtime window
+          Replace dynamic-count runtime window
         </button>
         <button
           data-action="table-position-window-replace-snapshot"
@@ -338,15 +543,173 @@ export function StandardTableBenchmark() {
             const nextSeed = seed + 1;
             const replacements = buildRows(64, nextSeed);
             const position = 5_000;
+            const deleteCount = replacements.length;
+            setSeed(nextSeed);
+            setRows((current) => {
+              const nextRows = current.toSpliced(position, deleteCount, ...replacements);
+              return nextRows;
+            });
+            setOperation("replace dynamic-count runtime window (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Replace dynamic-count runtime window (snapshot control)
+        </button>
+        <button
+          data-action="table-position-window-reuse"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const position = 2_500;
+            const retained = rows
+              .slice(position, position + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} retained` }));
+            const additions = buildRows(16, nextSeed);
+            const replacements = [...retained, ...additions];
             setSeed(nextSeed);
             setRows((current) => {
               return current.toSpliced(position, 64, ...replacements);
             });
-            setOperation("replace 64-row runtime window (snapshot control)");
+            setOperation("reuse and reorder a 64-row runtime window");
             setRevision((value) => value + 1);
           }}
         >
-          Replace 64-row runtime window (snapshot control)
+          Reuse and reorder a 64-row runtime window
+        </button>
+        <button
+          data-action="table-position-window-reuse-snapshot"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const position = 2_500;
+            const retained = rows
+              .slice(position, position + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} retained` }));
+            const additions = buildRows(16, nextSeed);
+            const replacements = [...retained, ...additions];
+            setSeed(nextSeed);
+            setRows((current) => {
+              const nextRows = current.toSpliced(position, 64, ...replacements);
+              return nextRows;
+            });
+            setOperation("reuse and reorder a 64-row runtime window (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reuse and reorder a 64-row runtime window (snapshot control)
+        </button>
+        <button
+          data-action="table-position-window-resize-reuse"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const position = 2_500;
+            const retained = rows
+              .slice(position, position + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} resized` }));
+            const additions = buildRows(32, nextSeed);
+            const replacements = [...retained, ...additions];
+            setSeed(nextSeed);
+            setRows((current) => {
+              return current.toSpliced(position, 64, ...replacements);
+            });
+            setOperation("grow and reuse a runtime window");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Grow and reuse a runtime window
+        </button>
+        <button
+          data-action="table-position-window-resize-reuse-snapshot"
+          type="button"
+          onClick={() => {
+            const nextSeed = seed + 1;
+            const position = 2_500;
+            const retained = rows
+              .slice(position, position + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} resized` }));
+            const additions = buildRows(32, nextSeed);
+            const replacements = [...retained, ...additions];
+            setSeed(nextSeed);
+            setRows((current) => {
+              const nextRows = current.toSpliced(position, 64, ...replacements);
+              return nextRows;
+            });
+            setOperation("grow and reuse a runtime window (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Grow and reuse a runtime window (snapshot control)
+        </button>
+        <button
+          data-action="table-position-window-resize-queued"
+          type="button"
+          onClick={() => {
+            const firstSeed = seed + 1;
+            const secondSeed = seed + 2;
+            const firstPosition = 2_500;
+            const firstRetained = rows
+              .slice(firstPosition, firstPosition + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} queued grow` }));
+            const firstReplacements = [...firstRetained, ...buildRows(32, firstSeed)];
+            const secondSourcePosition = 7_500;
+            const secondPosition = secondSourcePosition + 16;
+            const secondRetained = rows
+              .slice(secondSourcePosition, secondSourcePosition + 32)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} queued shrink` }));
+            const secondReplacements = [...secondRetained, ...buildRows(16, secondSeed)];
+            setSeed(secondSeed);
+            setRows((current) => {
+              return current.toSpliced(firstPosition, 64, ...firstReplacements);
+            });
+            setRows((current) => {
+              return current.toSpliced(secondPosition, 64, ...secondReplacements);
+            });
+            setOperation("queue disjoint grow and shrink windows");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue disjoint grow and shrink windows
+        </button>
+        <button
+          data-action="table-position-window-resize-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const firstSeed = seed + 1;
+            const secondSeed = seed + 2;
+            const firstPosition = 2_500;
+            const firstRetained = rows
+              .slice(firstPosition, firstPosition + 48)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} queued grow` }));
+            const firstReplacements = [...firstRetained, ...buildRows(32, firstSeed)];
+            const secondSourcePosition = 7_500;
+            const secondPosition = secondSourcePosition + 16;
+            const secondRetained = rows
+              .slice(secondSourcePosition, secondSourcePosition + 32)
+              .toReversed()
+              .map((row) => ({ ...row, label: `${row.label} queued shrink` }));
+            const secondReplacements = [...secondRetained, ...buildRows(16, secondSeed)];
+            setSeed(secondSeed);
+            setRows((current) => {
+              const nextRows = current.toSpliced(firstPosition, 64, ...firstReplacements);
+              return nextRows;
+            });
+            setRows((current) => {
+              const nextRows = current.toSpliced(secondPosition, 64, ...secondReplacements);
+              return nextRows;
+            });
+            setOperation("queue disjoint grow and shrink windows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue disjoint grow and shrink windows (snapshot control)
         </button>
         <button
           data-action="table-position-window-reuse"
@@ -400,7 +763,9 @@ export function StandardTableBenchmark() {
                 ? { ...row, amount: row.amount + 1, label: `${row.label} refreshed` }
                 : { ...row },
             );
-            setRows((current) => current.toSpliced(position, 64, ...replacements));
+            setRows((current) => {
+              return current.toSpliced(position, 64, ...replacements);
+            });
             setOperation("refresh 64-row same-key window");
             setRevision((value) => value + 1);
           }}
@@ -418,7 +783,8 @@ export function StandardTableBenchmark() {
                 : { ...row },
             );
             setRows((current) => {
-              return current.toSpliced(position, 64, ...replacements);
+              const nextRows = current.toSpliced(position, 64, ...replacements);
+              return nextRows;
             });
             setOperation("refresh 64-row same-key window (snapshot control)");
             setRevision((value) => value + 1);
@@ -442,8 +808,12 @@ export function StandardTableBenchmark() {
                 ? { ...row, amount: row.amount + 1, label: `${row.label} queued` }
                 : { ...row },
             );
-            setRows((current) => current.toSpliced(firstPosition, 32, ...first));
-            setRows((current) => current.toSpliced(secondPosition, 32, ...second));
+            setRows((current) => {
+              return current.toSpliced(firstPosition, 32, ...first);
+            });
+            setRows((current) => {
+              return current.toSpliced(secondPosition, 32, ...second);
+            });
             setOperation("refresh two queued same-key windows");
             setRevision((value) => value + 1);
           }}
@@ -467,10 +837,12 @@ export function StandardTableBenchmark() {
                 : { ...row },
             );
             setRows((current) => {
-              return current.toSpliced(firstPosition, 32, ...first);
+              const nextRows = current.toSpliced(firstPosition, 32, ...first);
+              return nextRows;
             });
             setRows((current) => {
-              return current.toSpliced(secondPosition, 32, ...second);
+              const nextRows = current.toSpliced(secondPosition, 32, ...second);
+              return nextRows;
             });
             setOperation("refresh two queued same-key windows (snapshot control)");
             setRevision((value) => value + 1);
@@ -493,8 +865,12 @@ export function StandardTableBenchmark() {
               offset === 16 ? { ...row, label: `${row.label} queued replacement` } : row,
             );
             setSeed(secondSeed);
-            setRows((current) => current.toSpliced(firstPosition, 32, ...first));
-            setRows((current) => current.toSpliced(secondPosition, 32, ...second));
+            setRows((current) => {
+              return current.toSpliced(firstPosition, 32, ...first);
+            });
+            setRows((current) => {
+              return current.toSpliced(secondPosition, 32, ...second);
+            });
             setOperation("replace two overlapping queued fresh-key windows");
             setRevision((value) => value + 1);
           }}
@@ -517,10 +893,12 @@ export function StandardTableBenchmark() {
             );
             setSeed(secondSeed);
             setRows((current) => {
-              return current.toSpliced(firstPosition, 32, ...first);
+              const nextRows = current.toSpliced(firstPosition, 32, ...first);
+              return nextRows;
             });
             setRows((current) => {
-              return current.toSpliced(secondPosition, 32, ...second);
+              const nextRows = current.toSpliced(secondPosition, 32, ...second);
+              return nextRows;
             });
             setOperation("replace two overlapping queued fresh-key windows (snapshot control)");
             setRevision((value) => value + 1);
@@ -533,7 +911,9 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             const position = 9_000;
-            setRows((current) => current.toSpliced(position, 1));
+            setRows((current) => {
+              return current.toSpliced(position, 1);
+            });
             setOperation("remove at runtime position");
             setRevision((value) => value + 1);
           }}
@@ -546,7 +926,8 @@ export function StandardTableBenchmark() {
           onClick={() => {
             const position = 9_000;
             setRows((current) => {
-              return current.toSpliced(position, 1);
+              const nextRows = current.toSpliced(position, 1);
+              return nextRows;
             });
             setOperation("remove at runtime position (snapshot control)");
             setRevision((value) => value + 1);
@@ -559,7 +940,9 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             const position = 8_000;
-            setRows((current) => current.toSpliced(position, 64));
+            setRows((current) => {
+              return current.toSpliced(position, 64);
+            });
             setOperation("remove range at runtime position");
             setRevision((value) => value + 1);
           }}
@@ -572,7 +955,8 @@ export function StandardTableBenchmark() {
           onClick={() => {
             const position = 8_000;
             setRows((current) => {
-              return current.toSpliced(position, 64);
+              const nextRows = current.toSpliced(position, 64);
+              return nextRows;
             });
             setOperation("remove range at runtime position (snapshot control)");
             setRevision((value) => value + 1);
@@ -587,7 +971,9 @@ export function StandardTableBenchmark() {
             const position = 100;
             const current = rows[position];
             const replacement = { ...current, label: `${current.label} @` };
-            setRows((items) => items.toSpliced(position, 1, replacement));
+            setRows((items) => {
+              return items.toSpliced(position, 1, replacement);
+            });
             setOperation("replace at runtime position");
             setRevision((value) => value + 1);
           }}
@@ -602,7 +988,8 @@ export function StandardTableBenchmark() {
             const current = rows[position];
             const replacement = { ...current, label: `${current.label} @` };
             setRows((items) => {
-              return items.toSpliced(position, 1, replacement);
+              const nextRows = items.toSpliced(position, 1, replacement);
+              return nextRows;
             });
             setOperation("replace at runtime position (snapshot control)");
             setRevision((value) => value + 1);
@@ -614,7 +1001,9 @@ export function StandardTableBenchmark() {
           data-action="table-reverse"
           type="button"
           onClick={() => {
-            setRows((current) => current.toReversed());
+            setRows((current) => {
+              return current.toReversed();
+            });
             setOperation("reverse rows");
             setRevision((value) => value + 1);
           }}
@@ -626,7 +1015,8 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current.toReversed();
+              const reversed = current.toReversed();
+              return reversed;
             });
             setOperation("reverse rows (snapshot control)");
             setRevision((value) => value + 1);
@@ -635,14 +1025,916 @@ export function StandardTableBenchmark() {
           Reverse rows (snapshot control)
         </button>
         <button
-          data-action="table-sort"
+          data-action="table-reverse-queued"
+          type="button"
+          onClick={() => {
+            setRows((current) => current.toReversed());
+            setRows((current) => current.toReversed());
+            setOperation("reverse rows twice in one commit");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reverse rows twice
+        </button>
+        <button
+          data-action="table-reverse-queued-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              const reversed = current.toReversed();
+              return reversed;
+            });
+            setRows((current) => {
+              const reversed = current.toReversed();
+              return reversed;
+            });
+            setOperation("reverse rows twice (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reverse rows twice (snapshot control)
+        </button>
+        <button
+          data-action="table-reverse-pipeline"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current.toReversed().toReversed();
+            });
+            setOperation("reverse rows twice in one setter");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reverse pipeline
+        </button>
+        <button
+          data-action="table-reverse-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              const nextRows = current.toReversed().toReversed();
+              return nextRows;
+            });
+            setOperation("reverse rows twice in one setter (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reverse pipeline (snapshot control)
+        </button>
+        <button
+          data-action="table-filter-reorder-pipeline"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current
+                .filter((item) => {
+                  return item.id % 10_000 !== 5_001;
+                })
+                .toReversed()
+                .toReversed();
+            });
+            setOperation("filter and reorder rows in one setter");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Filter + reorder pipeline
+        </button>
+        <button
+          data-action="table-filter-reorder-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              const nextRows = current
+                .filter((item) => {
+                  return item.id % 10_000 !== 5_001;
+                })
+                .toReversed()
+                .toReversed();
+              return nextRows;
+            });
+            setOperation("filter and reorder rows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Filter + reorder pipeline (snapshot control)
+        </button>
+        <button
+          data-action="table-structural-append-queued"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_000_000) * 10_000 + 1,
+              label: "queued incoming row",
+              amount: 2_048,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) =>
+              current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              }),
+            );
+            setRows((current) => [...current, incoming]);
+            setOperation("remove and append across queued setters");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued remove + append
+        </button>
+        <button
+          data-action="table-structural-append-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_000_000) * 10_000 + 1,
+              label: "queued incoming row",
+              amount: 2_048,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => {
+              const retained = current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              });
+              return retained;
+            });
+            setRows((current) => {
+              return [...current, incoming];
+            });
+            setOperation("remove and append across queued setters (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued remove + append (snapshot control)
+        </button>
+        <button
+          data-action="table-structural-prepend-queued"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_050_000) * 10_000 + 1,
+              label: "queued prepended row",
+              amount: 2_048,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => current.slice(1));
+            setRows((current) => [incoming, ...current]);
+            setOperation("remove and prepend across queued setters");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued remove + prepend
+        </button>
+        <button
+          data-action="table-structural-prepend-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_050_000) * 10_000 + 1,
+              label: "queued prepended row",
+              amount: 2_048,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => {
+              const retained = current.slice(1);
+              return retained;
+            });
+            setRows((current) => {
+              return [incoming, ...current];
+            });
+            setOperation("remove and prepend across queued setters (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued remove + prepend (snapshot control)
+        </button>
+        <button
+          data-action="table-structural-prepend-map-queued"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_075_000) * 10_000 + 1,
+              label: "queued prepended row",
+              amount: 4_096,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => current.slice(1));
+            setRows((current) => [incoming, ...current]);
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              ),
+            );
+            setRows((current) =>
+              current.map((row) =>
+                row.id === incoming.id ? { ...row, label: "queued mapped prepended row" } : row,
+              ),
+            );
+            setOperation("remove, prepend, and map across queued setters");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued remove + prepend + map
+        </button>
+        <button
+          data-action="table-structural-prepend-map-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_075_000) * 10_000 + 1,
+              label: "queued prepended row",
+              amount: 4_096,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => {
+              const retained = current.slice(1);
+              return retained;
+            });
+            setRows((current) => {
+              return [incoming, ...current];
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              );
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id === incoming.id ? { ...row, label: "queued mapped prepended row" } : row,
+              );
+            });
+            setOperation("remove, prepend, and map (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued remove + prepend + map (snapshot control)
+        </button>
+        <button
+          data-action="table-structural-append-map-queued"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_100_000) * 10_000 + 1,
+              label: "queued incoming row",
+              amount: 4_096,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => current.slice(1));
+            setRows((current) => [...current, incoming]);
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              ),
+            );
+            setRows((current) =>
+              current.map((row) =>
+                row.id === incoming.id ? { ...row, label: "queued mapped incoming row" } : row,
+              ),
+            );
+            setOperation("remove, append, and map across queued setters");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued remove + append + map
+        </button>
+        <button
+          data-action="table-structural-append-map-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_100_000) * 10_000 + 1,
+              label: "queued incoming row",
+              amount: 4_096,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => {
+              const retained = current.slice(1);
+              return retained;
+            });
+            setRows((current) => {
+              return [...current, incoming];
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              );
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id === incoming.id ? { ...row, label: "queued mapped incoming row" } : row,
+              );
+            });
+            setOperation("remove, append, and map (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued remove + append + map (snapshot control)
+        </button>
+        <button
+          data-action="table-filter-append-map-queued"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_200_000) * 10_000 + 1,
+              label: "queued incoming row",
+              amount: 4_096,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) =>
+              current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              }),
+            );
+            setRows((current) => [...current, incoming]);
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              ),
+            );
+            setRows((current) =>
+              current.map((row) =>
+                row.id === incoming.id
+                  ? { ...row, label: "queued filter mapped incoming row" }
+                  : row,
+              ),
+            );
+            setOperation("filter, append, and map across queued setters");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued filter + append + map
+        </button>
+        <button
+          data-action="table-filter-append-map-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_200_000) * 10_000 + 1,
+              label: "queued incoming row",
+              amount: 4_096,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => {
+              const retained = current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              });
+              return retained;
+            });
+            setRows((current) => {
+              return [...current, incoming];
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              );
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id === incoming.id
+                  ? { ...row, label: "queued filter mapped incoming row" }
+                  : row,
+              );
+            });
+            setOperation("filter, append, and map (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued filter + append + map (snapshot control)
+        </button>
+        <button
+          data-action="table-filter-map-append-queued"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_300_000) * 10_000 + 1,
+              label: "queued mapped-before-append row",
+              amount: 4_096,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) =>
+              current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              }),
+            );
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              ),
+            );
+            setRows((current) => [...current, incoming]);
+            setOperation("filter, map, and append across queued setters");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued filter + map + append
+        </button>
+        <button
+          data-action="table-filter-map-append-queued-snapshot"
+          type="button"
+          onClick={() => {
+            const incoming = {
+              id: (seed + 1_300_000) * 10_000 + 1,
+              label: "queued mapped-before-append row",
+              amount: 4_096,
+              region: "AMR" as const,
+              status: "review" as const,
+            };
+            setRows((current) => {
+              const retained = current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              });
+              return retained;
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              );
+            });
+            setRows((current) => {
+              return [...current, incoming];
+            });
+            setOperation("filter, map, and append (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued filter + map + append (snapshot control)
+        </button>
+        <button
+          data-action="table-map-structural-reorder-pipeline"
           type="button"
           onClick={() => {
             setRows((current) =>
-              current.toSorted(
-                (left, right) => left.amount - right.amount || left.id - right.id,
+              current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              }),
+            );
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
               ),
             );
+            setRows((current) => current.toReversed());
+            setRows((current) => current.toReversed());
+            setOperation("filter, review, and reorder rows across queued setters");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued filter + map + reorder
+        </button>
+        <button
+          data-action="table-map-structural-reorder-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              const retained = current.filter((row) => {
+                return row.id % 10_000 !== 7_001;
+              });
+              return retained;
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001
+                  ? { ...row, amount: row.amount + 1, label: `${row.label} reviewed` }
+                  : row,
+              );
+            });
+            setRows((current) => {
+              const reversed = current.toReversed();
+              return reversed;
+            });
+            setRows((current) => {
+              const reversed = current.toReversed();
+              return reversed;
+            });
+            setOperation("filter, review, and reorder rows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queued filter + map + reorder (snapshot control)
+        </button>
+        <button
+          data-action="table-map-reorder-pipeline"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current
+                .map((row) =>
+                  row.id % 10_000 === 5_001
+                    ? { ...row, amount: -1, label: `${row.label} repriced` }
+                    : row,
+                )
+                .toSorted((left, right) => left.amount - right.amount || left.id - right.id);
+            });
+            setOperation("reprice and sort one row");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reprice + sort one row
+        </button>
+        <button
+          data-action="table-map-reorder-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              const nextRows = current
+                .map((row) =>
+                  row.id % 10_000 === 5_001
+                    ? { ...row, amount: -1, label: `${row.label} repriced` }
+                    : row,
+                )
+                .toSorted((left, right) => left.amount - right.amount || left.id - right.id);
+              return nextRows;
+            });
+            setOperation("reprice and sort one row (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reprice + sort one row (snapshot control)
+        </button>
+        <button
+          data-action="table-multi-map-reorder-pipeline"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) => (row.id % 10_000 === 5_001 ? { ...row, amount: -2 } : row))
+                .toSorted((left, right) => left.amount - right.amount || left.id - right.id);
+            });
+            setOperation("review, reprice, and sort one row");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice + sort one row
+        </button>
+        <button
+          data-action="table-multi-map-reorder-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              const nextRows = current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) => (row.id % 10_000 === 5_001 ? { ...row, amount: -2 } : row))
+                .toSorted((left, right) => left.amount - right.amount || left.id - right.id);
+              return nextRows;
+            });
+            setOperation("review, reprice, and sort one row (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice + sort one row (snapshot control)
+        </button>
+        <button
+          data-action="table-multi-map-reverse-pipeline"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                )
+                .toReversed();
+            });
+            setOperation("review, reprice, and reverse rows");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice + reverse rows
+        </button>
+        <button
+          data-action="table-multi-map-reverse-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              const nextRows = current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                )
+                .toReversed();
+              return nextRows;
+            });
+            setOperation("review, reprice, and reverse rows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice + reverse rows (snapshot control)
+        </button>
+        <button
+          data-action="table-multi-map-reverse-parity"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                )
+                .toReversed()
+                .toReversed();
+            });
+            setOperation("review, reprice, and preserve row order through reverse parity");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice + reverse twice
+        </button>
+        <button
+          data-action="table-multi-map-reverse-parity-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              const nextRows = current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                )
+                .toReversed()
+                .toReversed();
+              return nextRows;
+            });
+            setOperation("review, reprice, and reverse twice (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice + reverse twice (snapshot control)
+        </button>
+        <button
+          data-action="table-queued-map-reverse-parity"
+          type="button"
+          onClick={() => {
+            setRows((current) => current.toReversed());
+            setRows((current) => {
+              return current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                )
+                .toReversed();
+            });
+            setOperation("queue reverse, review, reprice, and restore row order");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue reverse + review + restore
+        </button>
+        <button
+          data-action="table-queued-map-reverse-parity-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              const reversed = current.toReversed();
+              return reversed;
+            });
+            setRows((current) => {
+              const nextRows = current
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                )
+                .toReversed();
+              return nextRows;
+            });
+            setOperation("queue reverse, review, reprice, and restore row order (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue reverse + review + restore (snapshot control)
+        </button>
+        <button
+          data-action="table-reorder-then-map-pipeline"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current
+                .toReversed()
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                );
+            });
+            setOperation("reverse rows, then review and reprice one row");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reverse + review one row
+        </button>
+        <button
+          data-action="table-reorder-then-map-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              const nextRows = current
+                .toReversed()
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row) =>
+                  row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+                );
+              return nextRows;
+            });
+            setOperation("reverse rows, then review and reprice one row (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Reverse + review one row (snapshot control)
+        </button>
+        <button
+          data-action="table-queued-reorder-then-map-pipeline"
+          type="button"
+          onClick={() => {
+            setRows((current) => current.toReversed());
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+              ),
+            );
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+              ),
+            );
+            setOperation("queue reverse, then review and reprice one row");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue reverse + review one row
+        </button>
+        <button
+          data-action="table-queued-reorder-then-map-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              const reversed = current.toReversed();
+              return reversed;
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+              );
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+              );
+            });
+            setOperation("queue reverse, then review and reprice one row (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue reverse + review one row (snapshot control)
+        </button>
+        <button
+          data-action="table-queued-map-then-reorder-pipeline"
+          type="button"
+          onClick={() => {
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+              ),
+            );
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+              ),
+            );
+            setRows((current) => current.toReversed());
+            setOperation("queue review and reprice, then reverse rows");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue review + reverse rows
+        </button>
+        <button
+          data-action="table-queued-map-then-reorder-pipeline-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+              );
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+              );
+            });
+            setRows((current) => {
+              const reversed = current.toReversed();
+              return reversed;
+            });
+            setOperation("queue review and reprice, then reverse rows (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue review + reverse rows (snapshot control)
+        </button>
+        <button
+          data-action="table-queued-map-reorder-chain"
+          type="button"
+          onClick={() => {
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+              ),
+            );
+            setRows((current) =>
+              current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+              ),
+            );
+            setRows((current) => current.toReversed());
+            setRows((current) => current.toReversed());
+            setOperation("queue review, then reverse rows twice");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue review + two reversals
+        </button>
+        <button
+          data-action="table-queued-map-reorder-chain-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, label: `${row.label} reviewed` } : row,
+              );
+            });
+            setRows((current) => {
+              return current.map((row) =>
+                row.id % 10_000 === 5_001 ? { ...row, amount: row.amount + 1 } : row,
+              );
+            });
+            setRows((current) => {
+              const reversed = current.toReversed();
+              return reversed;
+            });
+            setRows((current) => {
+              const reversed = current.toReversed();
+              return reversed;
+            });
+            setOperation("queue review, then reverse rows twice (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Queue review + two reversals (snapshot control)
+        </button>
+        <button
+          data-action="table-sort"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              return current.toSorted(
+                (left, right) => left.amount - right.amount || left.id - right.id,
+              );
+            });
             setOperation("sort rows");
             setRevision((value) => value + 1);
           }}
@@ -654,9 +1946,10 @@ export function StandardTableBenchmark() {
           type="button"
           onClick={() => {
             setRows((current) => {
-              return current.toSorted(
+              const sorted = current.toSorted(
                 (left, right) => left.amount - right.amount || left.id - right.id,
               );
+              return sorted;
             });
             setOperation("sort rows (snapshot control)");
             setRevision((value) => value + 1);
@@ -688,7 +1981,11 @@ export function StandardTableBenchmark() {
           onClick={() => {
             setRows((current) => {
               const target = current[Math.floor(current.length / 2)];
-              return target ? current.filter((item) => item.id !== target.id) : current;
+              return target
+                ? current.filter((item) => {
+                    return item.id !== target.id;
+                  })
+                : current;
             });
             setOperation("remove row (snapshot control)");
             setRevision((value) => value + 1);
@@ -711,6 +2008,45 @@ export function StandardTableBenchmark() {
           }}
         >
           Update every 10th
+        </button>
+        <button
+          data-action="table-multi-map-update"
+          type="button"
+          onClick={() => {
+            setRows((current) =>
+              current
+                .map((row, index) =>
+                  index % 10 === 0 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row, index) =>
+                  index % 10 === 0 ? { ...row, amount: row.amount + 1 } : row,
+                ),
+            );
+            setOperation("review and reprice every 10th");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice every 10th
+        </button>
+        <button
+          data-action="table-multi-map-update-snapshot"
+          type="button"
+          onClick={() => {
+            setRows((current) => {
+              const next = current
+                .map((row, index) =>
+                  index % 10 === 0 ? { ...row, label: `${row.label} reviewed` } : row,
+                )
+                .map((row, index) =>
+                  index % 10 === 0 ? { ...row, amount: row.amount + 1 } : row,
+                );
+              return next;
+            });
+            setOperation("review and reprice every 10th (snapshot control)");
+            setRevision((value) => value + 1);
+          }}
+        >
+          Review + reprice every 10th (snapshot control)
         </button>
         <button
           data-action="table-mark"
@@ -966,7 +2302,11 @@ export function StandardTableBenchmark() {
                     data-row-id={row.id}
                     type="button"
                     onClick={() => {
-                      setRows((current) => current.filter((item) => item.id !== row.id));
+                      setRows((current) => {
+                        return current.filter((item) => {
+                          return item.id !== row.id;
+                        });
+                      });
                       setOperation("remove row");
                       setRevision((value) => value + 1);
                     }}

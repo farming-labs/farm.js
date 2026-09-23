@@ -56,14 +56,34 @@ export interface FarmRendererStreamingCapabilities {
 
 export interface FarmRendererCapabilities {
   streaming: FarmRendererStreamingCapabilities;
+  /**
+   * Whether re-rendering an existing root diffs the new tree against the live
+   * DOM instead of rebuilding it.
+   *
+   * Virtual-DOM renderers (React, Preact, Vue) compare the incoming tree with
+   * what is mounted, so a client navigation that re-renders a shared layout
+   * keeps the matching DOM nodes, their focus, and their component state.
+   *
+   * Compile-time fine-grained renderers (Solid, Svelte) have no virtual DOM to
+   * diff against. Their updates flow through bindings created when elements
+   * were constructed, so handing them a freshly materialized tree replaces the
+   * nodes. That is a property of those runtimes, not a gap in their adapters,
+   * and callers that need state to survive a re-render must keep it in a root
+   * they do not re-render rather than expect reconciliation here.
+   */
+  reconcilesRerenders: boolean;
 }
 
 export interface FarmRendererCapabilitiesInput {
   streaming?: Partial<FarmRendererStreamingCapabilities>;
+  reconcilesRerenders?: boolean;
 }
 
 const DEFAULT_RENDERER_CAPABILITIES: Readonly<FarmRendererCapabilities> = Object.freeze({
   streaming: Object.freeze({ node: false, web: false }),
+  // Conservative default: assume a re-render rebuilds until a renderer states
+  // otherwise, so callers do not silently rely on reconciliation.
+  reconcilesRerenders: false,
 });
 
 export function getFarmRendererCapabilities(
@@ -74,6 +94,9 @@ export function getFarmRendererCapabilities(
       node: renderer?.capabilities?.streaming?.node ?? DEFAULT_RENDERER_CAPABILITIES.streaming.node,
       web: renderer?.capabilities?.streaming?.web ?? DEFAULT_RENDERER_CAPABILITIES.streaming.web,
     },
+    reconcilesRerenders:
+      renderer?.capabilities?.reconcilesRerenders ??
+      DEFAULT_RENDERER_CAPABILITIES.reconcilesRerenders,
   };
 }
 
@@ -109,6 +132,23 @@ export interface FarmServerRendererRuntime {
   readonly Suspense: unknown;
   createElement(type: unknown, props?: unknown, ...children: unknown[]): unknown;
   isValidElement(value: unknown): boolean;
+  /** Wraps a route-owned client tree so compiled leaf boundaries stay inside that React root. */
+  wrapClientGraph?(element: unknown): unknown;
+  /**
+   * Optional: locate where a streamed chunk stops being the static shell.
+   *
+   * Partial prerendering caches everything before the first dynamic boundary
+   * and refreshes the rest on the client, so it has to know where that
+   * boundary is. The markers are renderer-specific (React streams Fizz
+   * boundary ids and `$RC`/`$RS` reveal calls, Solid streams `<template
+   * id="pl-N">` with `$df(N)`), so the renderer that emits them owns finding
+   * them. Returns the index to cut at, or -1 when the chunk is entirely
+   * static.
+   *
+   * A renderer that does not implement this gets no static shell at all:
+   * guessing would mean caching a per-request response as if it were shared.
+   */
+  findStaticShellBoundary?(chunk: string): number;
   renderToString(element: unknown): string | Promise<string>;
   /**
    * Optional variant for renderers whose components emit document-head markup
@@ -156,6 +196,7 @@ export const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   ],
   capabilities: {
     streaming: { node: true, web: false },
+    reconcilesRerenders: true,
   },
 });
 

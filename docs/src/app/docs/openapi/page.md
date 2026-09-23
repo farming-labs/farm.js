@@ -27,6 +27,10 @@ export default defineConfig({
 
 The OpenAPI route can be included in generated route types so docs navigation and Link hrefs stay aware of the reference page.
 
+Use an absolute pathname, such as `/docs/reference`. Farm rejects query strings, fragments,
+backslashes, encoded separators, and dot segments such as `..` or `%2e%2e` that browsers
+would reinterpret. Integration route paths and `workflows.route` use the same validation.
+
 ## What gets documented
 
 Farm scans API route files and generates an OpenAPI 3.0.3 spec from the discovered routes, methods, route params, query schemas, body schemas, and response metadata it can infer.

@@ -21,14 +21,38 @@ const requestStore = getRequestStore();
 
 _setCurrentRequestResolver(() => requestStore.getStore());
 
-export function createWebRequestFromFarmRequest(req: FarmRequest): Request {
-  const forwardedHost = req.headers["x-forwarded-host"];
-  const host = Array.isArray(forwardedHost)
-    ? forwardedHost[0]
-    : forwardedHost || req.headers.host || "localhost";
-  const forwardedProto = req.headers["x-forwarded-proto"];
-  const proto = Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto || "http";
-  const fullUrl = new URL(req.url || "/", `${proto}://${host}`).toString();
+export interface FarmRequestURLOptions {
+  origin?: string | URL;
+  trustProxy?: boolean;
+}
+
+export function resolveFarmRequestURL(req: FarmRequest, options: FarmRequestURLOptions = {}): URL {
+  if (options.origin) {
+    return new URL(req.url || "/", options.origin);
+  }
+
+  const forwardedHost = options.trustProxy
+    ? firstForwardedHeaderValue(req.headers["x-forwarded-host"])
+    : undefined;
+  const fallbackHost = firstForwardedHeaderValue(req.headers.host) || "localhost";
+  const forwardedProto = options.trustProxy
+    ? firstForwardedHeaderValue(req.headers["x-forwarded-proto"])
+    : undefined;
+  const normalizedProto = forwardedProto?.toLowerCase();
+  const proto =
+    normalizedProto === "https" || normalizedProto === "http"
+      ? normalizedProto
+      : isEncryptedFarmRequest(req)
+        ? "https"
+        : "http";
+  return new URL(req.url || "/", resolveRequestOrigin(proto, forwardedHost, fallbackHost));
+}
+
+export function createWebRequestFromFarmRequest(
+  req: FarmRequest,
+  options: FarmRequestURLOptions = {},
+): Request {
+  const fullUrl = resolveFarmRequestURL(req, options).toString();
 
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
@@ -58,6 +82,31 @@ export function createWebRequestFromFarmRequest(req: FarmRequest): Request {
   }
 
   return new Request(fullUrl, init);
+}
+
+function isEncryptedFarmRequest(req: FarmRequest): boolean {
+  return Boolean((req.socket as { encrypted?: boolean } | undefined)?.encrypted);
+}
+
+function firstForwardedHeaderValue(value: string | string[] | undefined): string | undefined {
+  const first = Array.isArray(value) ? value[0] : value;
+  const token = first?.split(",", 1)[0]?.trim();
+  return token || undefined;
+}
+
+function resolveRequestOrigin(proto: "http" | "https", host: string | undefined, fallback: string) {
+  for (const candidate of [host, fallback, "localhost"]) {
+    if (!candidate) continue;
+    if (/[\s/?#@\\]/u.test(candidate)) continue;
+    try {
+      const url = new URL(`${proto}://${candidate}`);
+      if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) continue;
+      return url.origin;
+    } catch {
+      // Try the next host instead of turning an untrusted proxy header into a 500.
+    }
+  }
+  return `${proto}://localhost`;
 }
 
 export async function _runWithCurrentRequest<T>(

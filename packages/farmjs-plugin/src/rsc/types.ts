@@ -68,6 +68,9 @@ export interface EntryContext {
   /** Base URL path, e.g. '/' */
   basePath: string;
 
+  /** Resolved same-origin mount for canonical /api routes. */
+  apiBasePath?: string;
+
   /** Route files subdirectory within srcDir */
   routesDir?: string;
 
@@ -92,6 +95,12 @@ export interface EntryContext {
 
   /** Whether debug mode is enabled */
   debug: boolean;
+
+  /** True only for the Vite serve command, never for a production build. */
+  development?: boolean;
+
+  /** Generated import/init fragments for `cache.client.adapter` persistence. */
+  clientCachePersistence?: { imports: string; init: string };
 }
 
 /**

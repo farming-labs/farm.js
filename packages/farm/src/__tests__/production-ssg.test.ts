@@ -276,6 +276,7 @@ export default {
           ? `
 export default {
   srcDir: "src",
+  basePath: "/app",
   images: { provider: "none" },
   i18n: {
     locales: ["en", "fr"],
@@ -613,7 +614,7 @@ describe("production SSG output", () => {
         const publicDir = path.join(root, ".farm", ".output", "public");
         const artifactPaths =
           kind === "i18n"
-            ? ["en/sensitive/index.html", "fr/sensitive/index.html"]
+            ? ["app/en/sensitive/index.html", "app/fr/sensitive/index.html"]
             : ["sensitive/index.html"];
         for (const artifactPath of artifactPaths) {
           await expect(fs.access(path.join(publicDir, artifactPath))).rejects.toThrow();
@@ -621,7 +622,7 @@ describe("production SSG output", () => {
 
         production = await startProductionServer(
           path.join(root, ".farm", ".output", "server"),
-          kind === "i18n" ? "/en/sensitive" : "/sensitive",
+          kind === "i18n" ? "/app/en/sensitive" : "/sensitive",
         );
         if (kind === "context") {
           const tenantAHtml = await fetch(`${production.origin}/sensitive`, {
@@ -646,12 +647,16 @@ describe("production SSG output", () => {
           expect(secondHtml).toMatch(/plugin-page-\d+/);
           expect(secondHtml).not.toBe(firstHtml);
         } else {
-          const english = await fetch(`${production.origin}/en/sensitive`);
-          const french = await fetch(`${production.origin}/fr/sensitive`);
+          const english = await fetch(`${production.origin}/app/en/sensitive`);
+          const french = await fetch(`${production.origin}/app/fr/sensitive`);
           expect(english.status).toBe(200);
           expect(french.status).toBe(200);
-          await expect(english.text()).resolves.toContain("i18n-page");
-          await expect(french.text()).resolves.toContain("i18n-page");
+          const englishHtml = await english.text();
+          const frenchHtml = await french.text();
+          expect(englishHtml).toContain("i18n-page");
+          expect(frenchHtml).toContain("i18n-page");
+          expect(englishHtml).toContain('hreflang="fr" href="/app/fr/sensitive"');
+          expect(frenchHtml).toContain('hreflang="en" href="/app/en/sensitive"');
         }
       } finally {
         await production?.stop();

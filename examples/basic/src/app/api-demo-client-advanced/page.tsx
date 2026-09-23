@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { Link } from '@farm.js/core/client';
-import { api } from '../../lib/api-client';
+import { apiClient } from '../../lib/api';
 
 type LogLine = {
   id: string;
@@ -34,7 +34,7 @@ async function getUsersWithKey(
   policy: 'cache-first' | 'stale-while-revalidate' | 'network-only',
   onStatus?: (event: any) => void,
 ) {
-  return (await api.users.get(
+  return (await apiClient.users.get(
     { query: { limit: '5' } },
     {
       key: USERS_CACHE_KEY,
@@ -118,7 +118,7 @@ export default function APIClientAdvancedDemo() {
     try {
       setUsersResponse((prev: any) => optimisticUpdater(prev ?? previousUsersResponse));
 
-      const {data , error} = await api.users.post(
+      const {data , error} = await apiClient.users.post(
         { body: { name, email } },
         {
           optimistic: {
@@ -153,7 +153,7 @@ export default function APIClientAdvancedDemo() {
     setError(null);
 
     try {
-      const result = await api.users.patch(
+      const result = await apiClient.users.patch(
         { body: { id: selectedUserId, name: `Updated ${Date.now()}` } },
         {
           invalidate: [usersKey || USERS_CACHE_KEY],
@@ -179,7 +179,7 @@ export default function APIClientAdvancedDemo() {
     setError(null);
 
     try {
-      const result = await api.users.delete(
+      const result = await apiClient.users.delete(
         { body: { id: selectedUserId } },
         {
           invalidate: [usersKey || USERS_CACHE_KEY],
@@ -328,7 +328,7 @@ export default function APIClientAdvancedDemo() {
           <h2 className="text-lg font-semibold text-white">Usage Shape</h2>
           <pre className="bg-black/40 rounded-lg p-4 text-xs text-indigo-100 overflow-auto">
 {`// Plain promise calls with client options
-const users = await api.users.get(
+const users = await apiClient.users.get(
   { query: { limit: '5' } },
   {
     key: 'demo:users:list',
@@ -338,7 +338,7 @@ const users = await api.users.get(
 )
 console.log(users.data, users.error, users.key)
 
-const created = await api.users.post(
+const created = await apiClient.users.post(
   { body: { name: 'Ada', email: 'ada@example.com' } },
   {
     optimistic: {

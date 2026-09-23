@@ -2,6 +2,7 @@ import type { HeaderConfig, RedirectConfig } from "./config";
 import { isFarmRedirectStatus, type FarmRedirectStatus } from "./navigation-errors";
 import type { FarmRouteRuntimeConfig } from "./route-runtime";
 import { normalizeFarmRouteRuntimeConfig } from "./route-runtime";
+import { validateConfigRouteSource } from "./plugins/route-pattern";
 
 export type FarmRouteRuleRenderMode = "static" | "dynamic";
 
@@ -38,9 +39,18 @@ export function normalizeRouteRules(routeRules: FarmRouteRules | undefined): Far
   if (!routeRules) return {};
 
   const normalized: FarmRouteRules = {};
+  const normalizedSources = new Map<string, string>();
   for (const [source, rule] of Object.entries(routeRules)) {
-    if (!source || !rule) continue;
+    if (!rule) continue;
     const normalizedSource = normalizeRuleSource(source);
+    validateConfigRouteSource(normalizedSource, `Route rule "${source}" source`);
+    const existingSource = normalizedSources.get(normalizedSource);
+    if (existingSource !== undefined) {
+      throw new Error(
+        `Route rules "${existingSource}" and "${source}" both normalize to "${normalizedSource}".`,
+      );
+    }
+    normalizedSources.set(normalizedSource, source);
     if (
       typeof rule.redirect === "object" &&
       rule.redirect.statusCode !== undefined &&
@@ -107,10 +117,19 @@ export function routeRulesToNitroRouteRules(routeRules: FarmRouteRules): Record<
       nitroRule.prerender = false;
     }
 
-    if (rule.redirect && typeof rule.redirect !== "string") {
-      nitroRule.redirect = rule.redirect.to;
-      if (rule.redirect.statusCode) {
-        nitroRule.statusCode = rule.redirect.statusCode;
+    if (rule.redirect) {
+      const redirect = typeof rule.redirect === "string" ? { to: rule.redirect } : rule.redirect;
+      if (hasExplicitQuery(redirect.to)) {
+        // Nitro merges the incoming query into redirect targets, including when
+        // the target already declares one. Farm's redirect contract replaces
+        // the incoming query in that case, so let the bundled Farm handler own
+        // these redirects instead of changing their meaning in production.
+        delete nitroRule.redirect;
+      } else {
+        nitroRule.redirect = {
+          to: redirect.to,
+          status: redirect.statusCode ?? (redirect.permanent === true ? 308 : 307),
+        };
       }
     }
 
@@ -157,6 +176,15 @@ function normalizeList(value: string | readonly string[] | undefined): string | 
 
 function normalizeRuleSource(source: string): string {
   const trimmed = source.trim();
-  if (!trimmed) return "/";
+  if (!trimmed) {
+    throw new TypeError("Route rule source must be a non-empty pathname pattern.");
+  }
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+function hasExplicitQuery(destination: string): boolean {
+  const queryIndex = destination.indexOf("?");
+  if (queryIndex === -1) return false;
+  const hashIndex = destination.indexOf("#");
+  return hashIndex === -1 || queryIndex < hashIndex;
 }

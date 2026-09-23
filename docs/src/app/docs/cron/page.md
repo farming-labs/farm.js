@@ -43,6 +43,10 @@ Each entry has one job:
 | `description` | no       | Human-readable purpose shown by CLI output and the build manifest.   |
 | `enabled`     | no       | Set to `false` to keep an entry in config without scheduling it.     |
 
+`path` must be a root-relative application pathname. Farm rejects hosts, query strings, hashes,
+dot segments, backslashes, control characters, and encoded path separators so local invocations
+and deployment schedulers call the same route.
+
 Use an array when the same route should run at more than one time:
 
 ```ts
@@ -71,7 +75,10 @@ export const GET = cronRoute(async () => {
 });
 ```
 
-`cronRoute()` verifies `Authorization: Bearer <CRON_SECRET>` whenever `CRON_SECRET` exists. In production it fails closed when the secret is missing, so a forgotten environment variable does not silently expose a mutating route.
+`cronRoute()` verifies `Authorization: Bearer <CRON_SECRET>` whenever `CRON_SECRET` exists.
+The standard authentication scheme is case-insensitive, so schedulers may send either `Bearer` or
+`bearer`. Outside development and test it fails closed when the secret is missing, so a forgotten
+environment variable does not silently expose a mutating route.
 
 Set the same value in the application and scheduler environment:
 
@@ -114,7 +121,7 @@ Use the opt-in development scheduler to run every configured expression in memor
 farm dev --cron
 ```
 
-The development scheduler uses UTC, prints each next run, and skips a run when its previous local invocation is still active. It stops with the dev server and does not persist state across restarts.
+The development scheduler uses UTC, prints each next run, and skips a run when any previous local invocation of the same named job is still active, including one started by another expression in its schedule array. It stops its timers and aborts active requests with the dev server, and it does not persist state across restarts.
 
 ## Schedule Syntax
 
@@ -227,4 +234,14 @@ Farm's local `--cron` runner prevents overlap inside one development process. Th
 | Run short best-effort work after an HTTP response                                | [`after()`](/docs/after)                    |
 | Durable retries, long-running steps, queues, status, cancellation, or dashboards | [Jobs Integration](/docs/integrations/jobs) |
 
-The older `defineCron()` workflow-module API remains available for compatibility. New applications should use `cron` config plus an ordinary API route so local, deployment, security, and testing behavior share one model.
+The older `defineCron()` workflow-module API remains available for compatibility. Its HTTP trigger
+parses `application/json` and `application/*+json` bodies as JSON, wraps other non-empty bodies as
+`{ text }`, and rejects malformed JSON consistently in development and production. New applications
+should use `cron` config plus an ordinary API route so local, deployment, security, and testing
+behavior share one model. Its generated production route also fails closed when no workflow secret
+is configured or available; legacy applications that intentionally expose the route may set
+`workflows.allowUnsecured: true`. Existing workflow-module applications may configure
+`workflows.dir` or `workflows.dirs` with project-relative or absolute directories; absolute
+directories remain rooted outside the project instead of being remounted below it. Production
+preparation replaces the generated workflow wrappers on each run, so removed modules or disabling
+`workflows` cannot leave an executable stale task behind.

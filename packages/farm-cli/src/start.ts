@@ -38,7 +38,21 @@ const PLATFORM_HINTS: Record<string, string> = {
   netlify: "Deploy it with `farm deploy --netlify`",
 };
 
+function resolveStartPort(value: FarmStartOptions["port"]): string | undefined {
+  if (value === undefined || value === "") return undefined;
+  const input = String(value);
+  if (!/^\d+$/.test(input)) {
+    throw new Error("--port must be an integer between 1 and 65535.");
+  }
+  const port = Number(input);
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+    throw new Error("--port must be an integer between 1 and 65535.");
+  }
+  return String(port);
+}
+
 export async function createFarmStartPlan(options: FarmStartOptions = {}): Promise<FarmStartPlan> {
+  const port = resolveStartPort(options.port);
   const root = path.resolve(options.root || process.cwd());
   const userConfig = await loadConfig(root, undefined, "production");
   const deployConfig = resolveDeployConfig(userConfig || {});
@@ -71,7 +85,7 @@ export async function createFarmStartPlan(options: FarmStartOptions = {}): Promi
   }
 
   const env: Record<string, string> = {};
-  if (options.port !== undefined && options.port !== "") env.NITRO_PORT = String(options.port);
+  if (port !== undefined) env.NITRO_PORT = port;
   if (options.host) env.NITRO_HOST = options.host;
 
   return {

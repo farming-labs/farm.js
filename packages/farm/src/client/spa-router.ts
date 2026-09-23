@@ -1,17 +1,23 @@
 "use client";
 
 import { readDeferredDataResponse } from "../deferred";
-import { notifyHistoryChange } from "./history-sync";
+import { notifyHistoryChange, notifyRouterHistoryChange } from "./history-sync";
 import {
   createFarmDeploymentMismatchError,
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from "../deployment";
+import { getHashTargetElement } from "./hash-target";
+import { isFarmExternalNavigationURL, resolveFarmNavigationURL } from "./navigation-url";
+import { applyFarmMetadataToDocument, type NavigationMetadata } from "./metadata-reconciler";
 import type { FarmClientNavigationSession, FarmClientPluginManager } from "./plugin";
 import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-runtime";
 import type { FarmI18nClientSnapshot } from "../i18n/types";
 import type { FarmIslandStrategy } from "../island";
 import type { FarmRouteRenderPlan } from "../navigation/render-plan";
+
+export { getHashTargetElement } from "./hash-target";
+export { isFarmExternalNavigationURL } from "./navigation-url";
 
 /**
  * Farm.js SPA Router
@@ -38,10 +44,7 @@ interface PageData {
     html: string;
     layoutPatterns: string[];
   };
-  metadata?: {
-    title?: string;
-    description?: string;
-  };
+  metadata?: NavigationMetadata;
   layoutModules?: string[];
   routeSlots?: RouteSlotPageData[];
   interception?: {
@@ -150,7 +153,9 @@ export class SPARouter {
   private cache: Map<string, CacheEntry> = new Map();
   private prefetchingUrls: Set<string> = new Set();
   private observers: Map<Element, IntersectionObserver> = new Map();
+  private prefetchTimers: Map<Element, ReturnType<typeof setTimeout>> = new Map();
   private blockers: Set<FarmNavigationBlocker> = new Set();
+  private unloadBlockers: Map<FarmNavigationBlocker, () => boolean> = new Map();
   private navigationListeners: Set<FarmNavigationListener> = new Set();
   private navigationState: FarmNavigationState = IDLE_NAVIGATION_STATE;
   private currentHistoryPath: string | null = null;
@@ -179,7 +184,7 @@ export class SPARouter {
   };
 
   private readonly onBeforeUnload = (event: BeforeUnloadEvent) => {
-    if (this.blockers.size > 0) {
+    if (this.shouldBlockUnload()) {
       event.preventDefault();
       event.returnValue = "";
     }
@@ -230,6 +235,10 @@ export class SPARouter {
   destroy(): void {
     if (typeof window === "undefined") return;
     this.cancelActiveNavigation();
+    for (const observer of this.observers.values()) observer.disconnect();
+    for (const timer of this.prefetchTimers.values()) clearTimeout(timer);
+    this.observers.clear();
+    this.prefetchTimers.clear();
     window.removeEventListener("popstate", this.onPopState);
     window.removeEventListener("beforeunload", this.onBeforeUnload);
   }
@@ -260,8 +269,8 @@ export class SPARouter {
       refresh = false,
     } = options;
 
-    // Parse the URL
-    const url = new URL(href, window.location.origin);
+    // Relative targets resolve against the current document, not the origin.
+    const url = resolveFarmNavigationURL(href, window.location.href);
     const pathname = url.pathname;
     const search = url.search;
     const fullPath = pathname + search;
@@ -392,8 +401,9 @@ export class SPARouter {
    */
   async prefetch(href: string): Promise<void> {
     if (isFarmLocaleChangeHref(href)) return;
-    const url = new URL(href, window.location.origin);
+    const url = resolveFarmNavigationURL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
+    if (this.options.shouldUseDocumentNavigation(url.pathname)) return;
     const fullPath = url.pathname + url.search;
     const interceptFrom = window.location.pathname + window.location.search;
 
@@ -420,15 +430,20 @@ export class SPARouter {
 
     const href = element.getAttribute("href");
     if (!href || this.isExternalUrl(href)) return;
+    this.unobserveForPrefetch(element);
 
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting) {
+            if (this.observers.get(element) !== observer) continue;
             // Delay prefetch slightly to avoid prefetching during scroll
-            setTimeout(() => {
-              this.prefetch(href);
+            const timer = setTimeout(() => {
+              if (this.prefetchTimers.get(element) !== timer) return;
+              this.prefetchTimers.delete(element);
+              void this.prefetch(href);
             }, this.options.prefetchTimeout);
+            this.prefetchTimers.set(element, timer);
 
             // Stop observing after first intersection
             observer.unobserve(element);
@@ -452,12 +467,22 @@ export class SPARouter {
       observer.unobserve(element);
       this.observers.delete(element);
     }
+    const timer = this.prefetchTimers.get(element);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.prefetchTimers.delete(element);
+    }
   }
 
-  addBlocker(blocker: FarmNavigationBlocker): () => void {
+  addBlocker(blocker: FarmNavigationBlocker, shouldBlockUnload?: () => boolean): () => void {
     this.blockers.add(blocker);
+    this.unloadBlockers.set(
+      blocker,
+      shouldBlockUnload ?? (() => this.evaluateBlockerForUnload(blocker)),
+    );
     return () => {
       this.blockers.delete(blocker);
+      this.unloadBlockers.delete(blocker);
     };
   }
 
@@ -491,6 +516,11 @@ export class SPARouter {
     this.writePageState("replace", state, href);
   }
 
+  /** @internal Keep shallow URL-search writes inside the router's history bookkeeping. */
+  writeURLSearch(action: "push" | "replace", href: string): void {
+    this.writePageState(action, readPageState(), href, false);
+  }
+
   private async commitNavigation(options: {
     fullPath: string;
     pageData: PageData;
@@ -500,11 +530,16 @@ export class SPARouter {
     state: unknown;
     url: URL;
   }): Promise<void> {
-    const historyPath = options.pageData.canonicalPath || options.fullPath;
+    const historyUrl = resolveFarmNavigationURL(
+      options.pageData.canonicalPath || options.fullPath,
+      window.location.href,
+    );
+    historyUrl.hash = options.url.hash;
+    const historyPath = historyUrl.pathname + historyUrl.search + historyUrl.hash;
     const historyState = createHistoryState(
       historyPath,
       options.state,
-      undefined,
+      options.replace ? window.history.state : undefined,
       options.pageData.interception?.from ?? null,
     ) as Record<string, unknown>;
     const nextHistoryIndex =
@@ -522,23 +557,11 @@ export class SPARouter {
       window.history.pushState(historyState, "", historyPath);
     }
     this.currentHistoryIndex = nextHistoryIndex;
-    this.currentHistoryPath =
-      new URL(historyPath, window.location.origin).pathname +
-      new URL(historyPath, window.location.origin).search;
+    const resolvedHistoryUrl = resolveFarmNavigationURL(historyPath, window.location.href);
+    this.currentHistoryPath = resolvedHistoryUrl.pathname + resolvedHistoryUrl.search;
+    notifyRouterHistoryChange();
 
-    if (options.pageData.metadata?.title) {
-      document.title = options.pageData.metadata.title;
-    }
-
-    if (options.pageData.metadata?.description) {
-      let metaDesc = document.querySelector('meta[name="description"]');
-      if (!metaDesc) {
-        metaDesc = document.createElement("meta");
-        metaDesc.setAttribute("name", "description");
-        document.head.appendChild(metaDesc);
-      }
-      metaDesc.setAttribute("content", options.pageData.metadata.description);
-    }
+    this.updateDocumentMetadata(options.pageData.metadata);
 
     _hydrateFarmI18n(options.pageData.i18n);
 
@@ -556,7 +579,9 @@ export class SPARouter {
         window.scrollTo(0, 0);
       }
     } else if (this.options.scrollRestoration) {
-      this.restoreScrollPosition(this.currentHistoryPath ?? options.fullPath);
+      const restorePath = this.currentHistoryPath ?? options.fullPath;
+      this.restoreWindowScroll(restorePath);
+      this.restoreScrollElements(restorePath);
     }
   }
 
@@ -631,10 +656,17 @@ export class SPARouter {
 
     const data = await readDeferredDataResponse<PageData>(response);
 
-    // Cache the result
+    // Cache the result. Expiry was previously only consulted on read, so a
+    // long-lived tab that navigates or prefetches many distinct routes grew
+    // this map without bound; sweeping on write bounds it to entries touched
+    // within the cacheMaxAge window.
+    const now = Date.now();
+    for (const [key, entry] of this.cache) {
+      if (now - entry.timestamp >= this.options.cacheMaxAge) this.cache.delete(key);
+    }
     this.cache.set(cacheKey, {
       data,
-      timestamp: Date.now(),
+      timestamp: now,
     });
 
     return data;
@@ -735,10 +767,7 @@ export class SPARouter {
       }
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
 
-      // Update document title
-      if (pageData.metadata?.title) {
-        document.title = pageData.metadata.title;
-      }
+      this.updateDocumentMetadata(pageData.metadata);
 
       _hydrateFarmI18n(pageData.i18n);
 
@@ -747,9 +776,27 @@ export class SPARouter {
         await this.onNavigate(pageData);
       }
 
-      // Restore scroll position
+      // A fragment in the destination URL is an explicit scroll target for the
+      // window and takes precedence over the saved *window* scroll position,
+      // matching forward navigation and native browser back/forward. Element
+      // scroll positions are keyed without the hash (see
+      // getScrollElementStorageKey), so registered scroll containers are
+      // restored regardless of whether a fragment is present, even when the
+      // anchor resolves, so a persistent-layout scroll element is not left at
+      // the prior route's offset on a hash-destination popstate.
+      const destinationPath = window.location.pathname + window.location.search;
+      if (window.location.hash) {
+        const target = getHashTargetElement(window.location.hash);
+        if (target) {
+          target.scrollIntoView();
+        } else if (this.options.scrollRestoration) {
+          this.restoreWindowScroll(destinationPath);
+        }
+      } else if (this.options.scrollRestoration) {
+        this.restoreWindowScroll(destinationPath);
+      }
       if (this.options.scrollRestoration) {
-        this.restoreScrollPosition(window.location.pathname + window.location.search);
+        this.restoreScrollElements(destinationPath);
       }
 
       if (clientNavigation) {
@@ -791,6 +838,33 @@ export class SPARouter {
       }
     }
     return false;
+  }
+
+  private evaluateBlockerForUnload(blocker: FarmNavigationBlocker): boolean {
+    const path = window.location.pathname + window.location.search;
+    const result = blocker({ from: path, to: path, action: "replace" });
+    if (result && typeof result !== "boolean") {
+      void result.catch(() => undefined);
+      return true;
+    }
+    return result === true;
+  }
+
+  private shouldBlockUnload(): boolean {
+    for (const blocker of this.blockers) {
+      try {
+        if (this.unloadBlockers.get(blocker)?.()) return true;
+      } catch {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private updateDocumentMetadata(metadata: PageData["metadata"]): void {
+    // Both call sites run after the history entry is committed, so the current
+    // pathname is the navigated-to page and drives the default canonical.
+    applyFarmMetadataToDocument(metadata, window.location.pathname);
   }
 
   private startNavigation(options: {
@@ -846,12 +920,21 @@ export class SPARouter {
     }
   }
 
-  private writePageState(action: "push" | "replace", state: unknown, href?: string): void {
+  private writePageState(
+    action: "push" | "replace",
+    state: unknown,
+    href?: string,
+    notify = true,
+  ): void {
     if (typeof window === "undefined") return;
 
-    const url = href ? new URL(href, window.location.origin).toString() : window.location.href;
-    const nextPath = new URL(url).pathname + new URL(url).search;
-    const nextState = createHistoryState(nextPath, state, window.history.state) as Record<
+    const url = href
+      ? resolveFarmNavigationURL(href, window.location.href).toString()
+      : window.location.href;
+    const parsedUrl = new URL(url);
+    const nextPath = parsedUrl.pathname + parsedUrl.search;
+    const historyPath = nextPath + parsedUrl.hash;
+    const nextState = createHistoryState(historyPath, state, window.history.state) as Record<
       string,
       unknown
     >;
@@ -868,7 +951,7 @@ export class SPARouter {
     }
     this.currentHistoryPath = nextPath;
 
-    notifyHistoryChange("page-state");
+    if (notify) notifyHistoryChange("page-state");
   }
 
   /**
@@ -892,15 +975,27 @@ export class SPARouter {
   }
 
   /**
-   * Restore scroll position for a path
+   * Restore the saved window scroll position for a path.
    */
-  private restoreScrollPosition(path: string): void {
+  private restoreWindowScroll(path: string): void {
     try {
       const saved = sessionStorage.getItem(`farm-scroll-${path}`);
       if (saved) {
         const { x, y } = JSON.parse(saved);
         setTimeout(() => window.scrollTo(x, y), 0);
       }
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  /**
+   * Restore saved scroll positions for every registered scroll element. Keys
+   * are hash-stripped (see getScrollElementStorageKey), so this runs regardless
+   * of whether the destination URL carries a fragment.
+   */
+  private restoreScrollElements(path: string): void {
+    try {
       for (const [key, element] of this.scrollElements) {
         this.restoreScrollElement(path, key, element);
       }
@@ -929,10 +1024,6 @@ export class SPARouter {
   clearCache(): void {
     this.cache.clear();
   }
-}
-
-export function isFarmExternalNavigationURL(url: URL, currentOrigin: string): boolean {
-  return url.origin !== currentOrigin;
 }
 
 function readBrowserDeploymentId(): string | undefined {
@@ -1042,29 +1133,4 @@ function createNavigationLocation(url: URL): FarmNavigationLocation {
 
 function getScrollElementStorageKey(path: string, key: string): string {
   return `farm-scroll-${path}:${key}`;
-}
-
-export function getHashTargetElement(hash: string): Element | null {
-  // The fragment is not a CSS selector: ids starting with a digit or
-  // containing selector characters (#2-installation, #a.b) throw in
-  // querySelector. Match by id (decoded first, then raw) and fall back to
-  // anchor name, mirroring native fragment navigation.
-  const fragment = hash.startsWith("#") ? hash.slice(1) : hash;
-  if (!fragment) {
-    return null;
-  }
-
-  let decoded = fragment;
-  try {
-    decoded = decodeURIComponent(fragment);
-  } catch {
-    // Keep the raw fragment when the percent-encoding is malformed.
-  }
-
-  return (
-    document.getElementById(decoded) ||
-    document.getElementById(fragment) ||
-    document.getElementsByName(decoded)[0] ||
-    null
-  );
 }

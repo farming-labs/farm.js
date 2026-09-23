@@ -7,6 +7,7 @@ import {
 } from "@farm.js/core";
 import { Cron } from "croner";
 import path from "node:path";
+import { createHttpLocalUrl } from "./local-url";
 
 export interface FarmCronCLIOptions {
   root?: string;
@@ -20,6 +21,7 @@ export interface RunFarmCronOptions extends FarmCronCLIOptions {
   secret?: string;
   timeoutMs?: number;
   fetch?: typeof globalThis.fetch;
+  signal?: AbortSignal;
   trigger?: "manual" | "development";
 }
 
@@ -107,6 +109,8 @@ export async function startFarmCronScheduler(
 ): Promise<FarmCronScheduler> {
   const cron = await loadFarmCronConfig(options);
   const entries: FarmCronSchedulerEntry[] = [];
+  const activeRuns = new Map<string, AbortController>();
+  let stopped = false;
 
   for (const job of cron.jobs) {
     for (const schedule of job.schedule) {
@@ -123,12 +127,27 @@ export async function startFarmCronScheduler(
           },
         },
         async () => {
-          logger.info(`Cron ${job.name} -> ${job.path}`);
-          const result = await invokeFarmCronJob(job, cron, {
-            ...options,
-            trigger: "development",
-          });
-          logger.success(`Cron ${job.name} completed in ${result.durationMs}ms.`);
+          if (stopped) return;
+          if (activeRuns.has(job.name)) {
+            logger.warn(`Cron ${job.name} skipped an overlapping run.`);
+            return;
+          }
+
+          const controller = new AbortController();
+          activeRuns.set(job.name, controller);
+          try {
+            logger.info(`Cron ${job.name} -> ${job.path}`);
+            const result = await invokeFarmCronJob(job, cron, {
+              ...options,
+              signal: controller.signal,
+              trigger: "development",
+            });
+            logger.success(`Cron ${job.name} completed in ${result.durationMs}ms.`);
+          } catch (error) {
+            if (!controller.signal.aborted) throw error;
+          } finally {
+            activeRuns.delete(job.name);
+          }
         },
       );
       entries.push({ job, schedule, timer });
@@ -152,7 +171,9 @@ export async function startFarmCronScheduler(
   return {
     entries,
     stop() {
+      stopped = true;
       for (const entry of entries) entry.timer.stop();
+      for (const controller of activeRuns.values()) controller.abort();
     },
   };
 }
@@ -172,7 +193,15 @@ async function invokeFarmCronJob(
   if (secret) headers.set("authorization", `Bearer ${secret}`);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 10_000);
+  const abortFromCaller = () => controller.abort(options.signal?.reason);
+  if (options.signal?.aborted) abortFromCaller();
+  else options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, options.timeoutMs ?? 10_000);
   timeout.unref?.();
   const startedAt = Date.now();
 
@@ -199,6 +228,9 @@ async function invokeFarmCronJob(
     };
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
+      if (!timedOut && options.signal?.aborted) {
+        throw new Error(`Cron ${job.name} was cancelled.`);
+      }
       throw new Error(`Cron ${job.name} timed out after ${options.timeoutMs ?? 10_000}ms.`);
     }
     if (error instanceof TypeError) {
@@ -209,11 +241,13 @@ async function invokeFarmCronJob(
     throw error;
   } finally {
     clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", abortFromCaller);
   }
 }
 
 function resolveCronTarget(job: FarmCronJob, options: RunFarmCronOptions): string {
-  const baseURL = options.url || `http://${options.host || "localhost"}:${options.port || 3000}`;
+  const baseURL =
+    options.url || createHttpLocalUrl(options.host || "localhost", options.port || 3000);
   const normalizedBase = baseURL.endsWith("/") ? baseURL : `${baseURL}/`;
   return new URL(job.path.replace(/^\/+/, ""), normalizedBase).toString();
 }

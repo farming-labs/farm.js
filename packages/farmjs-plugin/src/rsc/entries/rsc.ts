@@ -29,6 +29,8 @@ export function generateRscEntry(ctx: EntryContext): string {
   const debugLog = `// Debug disabled`;
   let code = `
 import React from 'react';
+import ServerErrorFallback from '/.farm/rsc-entries/error-fallback.tsx';
+import { registerAPIRouteShape } from '@farm.js/core/api/runtime';
 import {
   renderToReadableStream,
 `;
@@ -53,11 +55,24 @@ import {
   applyProductionMiddlewareHeaders,
   createProductionMiddlewareRunner,
 } from '@farm.js/core/middleware';
-import { invokeAPIRouteEndpoint, matchAPIRoute } from '@farm.js/core/api/runtime';
+import {
+  getAllowedAPIRouteMethods,
+  invokeAPIRouteEndpoint,
+  isFarmAPIPathname,
+  matchAPIRouteAtBasePath,
+} from '@farm.js/core/api/runtime';
 import { _runWithAfterRequest } from '@farm.js/core/after';
-import { _runWithCurrentRequest, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
+import { _runWithAPIRequestRuntime, _runWithCurrentRequest, searchParamsToObject } from '@farm.js/core/internal/production-runtime';
+import { getFarmRedirectError, isFarmNotFoundError } from '@farm.js/core/internal/production-runtime';
+import {
+  parseRoutePath,
+  matchFarmPageRoute,
+  compareRouteSpecificity,
+  getRoutePatternSpecificity,
+} from '@farm.js/core/internal/production-runtime';
 
 const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
+const farmApiBasePath = ${JSON.stringify(ctx.apiBasePath ?? "/api")};
 `;
   if (ctx.actionsEnabled) {
     code += `import {
@@ -81,6 +96,9 @@ function debug(...args) {
 }
 
 function applyActionResponseHeaders(headers, request) {
+  // The same page URL serves HTML or Flight depending on Accept.
+  const vary = (headers.get('vary') || '').split(',').map(value => value.trim().toLowerCase());
+  if (!vary.includes('*') && !vary.includes('accept')) headers.append('vary', 'Accept');
   headers.set('x-farm-deployment-id', farmDeploymentId);
   const accept = request.headers.get('accept') || '';
   if (request.method === 'GET' && !accept.includes('text/x-component')) {
@@ -183,20 +201,30 @@ const routeDefinitionModules = collectRouteModuleEntries([${routeSourceRoots
     )
     .join(", ")}]);
 
-const apiRouteMethods = ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'];
+const apiRouteMethods = ['GET', 'HEAD', 'QUERY', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'];
 const apiRouteMap = new Map();
+const apiRouteShapes = new Map();
 
-function registerApiEndpoint(routePath, filePath, method, endpoint) {
+function registerApiEndpoint(routePath, filePath, method, endpoint, sourceIndex) {
   if (!routePath || typeof endpoint !== 'function') return;
+  const replacedPath = registerAPIRouteShape(apiRouteShapes, routePath, filePath, sourceIndex);
+  if (replacedPath) apiRouteMap.delete(replacedPath);
   const normalizedMethod = String(method || 'GET').toUpperCase();
   let route = apiRouteMap.get(routePath);
   if (!route) {
-    route = { path: routePath, methods: [], handlers: {}, files: {} };
+    route = { path: routePath, methods: [], handlers: {}, files: {}, sources: {} };
     apiRouteMap.set(routePath, route);
+  }
+  if (route.sources[normalizedMethod] === sourceIndex) {
+    throw new Error(
+      'Duplicate API route for ' + normalizedMethod + ' ' + routePath + ': ' +
+      route.files[normalizedMethod] + ' conflicts with ' + filePath
+    );
   }
   if (!route.methods.includes(normalizedMethod)) route.methods.push(normalizedMethod);
   route.handlers[normalizedMethod] = endpoint;
   route.files[normalizedMethod] = filePath;
+  route.sources[normalizedMethod] = sourceIndex;
 }
 
 function getProgrammaticApiRoutes(routeModule) {
@@ -224,7 +252,7 @@ function registerApiRouteSources(fileModules, definitionModules, sourceCount) {
       const routePath = relativePath.replace(/\\/route\\.[tj]sx?$/i, '') || '/api';
       for (const method of apiRouteMethods) {
         if (typeof routeModule?.[method] === 'function') {
-          registerApiEndpoint(routePath, filePath, method, routeModule[method]);
+          registerApiEndpoint(routePath, filePath, method, routeModule[method], sourceIndex);
         }
       }
     }
@@ -234,13 +262,13 @@ function registerApiRouteSources(fileModules, definitionModules, sourceCount) {
       const { filePath, module: routeModule } = entry;
       for (const endpoint of Object.values(routeModule)) {
         if (typeof endpoint === 'function' && endpoint.__path) {
-          registerApiEndpoint(endpoint.__path, filePath, endpoint.__method || 'GET', endpoint);
+          registerApiEndpoint(endpoint.__path, filePath, endpoint.__method || 'GET', endpoint, sourceIndex);
         }
       }
 
       for (const route of getProgrammaticApiRoutes(routeModule)) {
         for (const [method, endpoint] of Object.entries(route.methods || {})) {
-          registerApiEndpoint(route.path, filePath, method, endpoint);
+          registerApiEndpoint(route.path, filePath, method, endpoint, sourceIndex);
         }
       }
     }
@@ -251,15 +279,19 @@ registerApiRouteSources(apiRouteModules, routeDefinitionModules, ${routeSourceRo
 
 async function handleAPIRequest(request) {
   const url = new URL(request.url);
-  const match = matchAPIRoute(apiRouteMap, url.pathname);
+  const match = matchAPIRouteAtBasePath(apiRouteMap, url.pathname, farmApiBasePath);
   if (!match) return null;
 
   const method = request.method.toUpperCase();
-  const endpoint = match.route.handlers[method];
+  const endpoint = match.route.handlers[method] ??
+    (method === 'HEAD' ? match.route.handlers.GET : undefined);
   if (!endpoint) {
     return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
       status: 405,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Allow': getAllowedAPIRouteMethods(match.route).join(', '),
+        'Content-Type': 'application/json',
+      },
     });
   }
 
@@ -291,57 +323,6 @@ debug('Discovered middlewares:', Object.keys(middlewares));
 debug('Discovered API routes:', Array.from(apiRouteMap.keys()));
 
 /**
- * Convert loading/error file path to route pattern (segment the boundary applies to).
- * Inlined to avoid runtime dependency on plugin package; logic is simple and covered by e2e.
- */
-function boundaryPathToRoute(filePath, globVal, kind) {
-  const re = kind === 'loading' ? /\\/loading\\.[tj]sx?$/i : /\\/error\\.[tj]sx?$/i;
-  let route = filePath.replace(globVal, '').replace(re, '').replace(/\\\\/g, '/') || '/';
-  route = route.replace(/\\[([^\\]]+)\\]/g, ':$1');
-  return route;
-}
-function getMatchingLoading(pathname, globVal) {
-  const normalized = pathname.replace(/\\/$/, '') || '/';
-  const pathParts = normalized.split('/').filter(Boolean);
-  let best = null, bestLength = -1;
-  for (const filePath of Object.keys(loadings)) {
-    const pattern = boundaryPathToRoute(filePath, globVal, 'loading');
-    const patternParts = pattern === '/' ? [] : pattern.split('/').filter(Boolean);
-    if (patternParts.length > pathParts.length) continue;
-    let matches = true;
-    for (let i = 0; i < patternParts.length; i++) {
-      const p = patternParts[i], seg = pathParts[i];
-      if (!seg || (p.startsWith(':') && p !== ':...') || p === ':...') continue;
-      if (!p.startsWith(':') && p !== seg) { matches = false; break; }
-    }
-    if (matches && patternParts.length > bestLength && loadings[filePath]?.default) {
-      best = loadings[filePath].default; bestLength = patternParts.length;
-    }
-  }
-  return best;
-}
-function getMatchingError(pathname, globVal) {
-  const normalized = pathname.replace(/\\/$/, '') || '/';
-  const pathParts = normalized.split('/').filter(Boolean);
-  let best = null, bestLength = -1;
-  for (const filePath of Object.keys(errors)) {
-    const pattern = boundaryPathToRoute(filePath, globVal, 'error');
-    const patternParts = pattern === '/' ? [] : pattern.split('/').filter(Boolean);
-    if (patternParts.length > pathParts.length) continue;
-    let matches = true;
-    for (let i = 0; i < patternParts.length; i++) {
-      const p = patternParts[i], seg = pathParts[i];
-      if (!seg || (p.startsWith(':') && p !== ':...') || p === ':...') continue;
-      if (!p.startsWith(':') && p !== seg) { matches = false; break; }
-    }
-    if (matches && patternParts.length > bestLength && errors[filePath]?.default) {
-      best = errors[filePath].default; bestLength = patternParts.length;
-    }
-  }
-  return best;
-}
-
-/**
  * Convert middleware file path to route path
  * e.g., '/src/middleware.ts' -> '/'
  * e.g., '/src/counter/middleware.ts' -> '/counter'
@@ -363,16 +344,13 @@ async function executeMiddleware(request) {
 /**
  * Convert file path to route pattern
  * e.g., '/src/about/page.tsx' -> '/about'
- * e.g., '/src/blog/[slug]/page.tsx' -> '/blog/:slug'
+ * e.g., '/blog/[slug]/page.tsx' -> '/blog/[slug]'
  */
 function filePathToRoute(filePath) {
   let route = filePath
     .replace('', '')
     .replace(/\\/page\\.[tj]sx?$/, '')
     .replace(/\\/page$/, '') || '/';
-  
-  // Convert [param] to :param for matching
-  route = route.replace(/\\[([^\\]]+)\\]/g, ':$1');
   
   return route;
 }
@@ -403,52 +381,14 @@ const RouteErrorBoundary = React.Component
       return children;
     };
 
-/**
- * Match a URL pathname to a route pattern
- * Supports dynamic segments like :id and catch-all like *
- */
-function matchPath(pattern, pathname) {
-  const patternParts = pattern.split('/').filter(Boolean);
-  const pathParts = pathname.split('/').filter(Boolean);
-  
-  // Special case for root
-  if (pattern === '/' && pathname === '/') {
-    return { params: {} };
-  }
-  
-  if (patternParts.length !== pathParts.length) {
-    // Check for catch-all
-    const lastPattern = patternParts[patternParts.length - 1];
-    if (!lastPattern?.startsWith(':...')) {
-      return null;
-    }
-  }
-  
-  const params = {};
-  
-  for (let i = 0; i < patternParts.length; i++) {
-    const patternPart = patternParts[i];
-    const pathPart = pathParts[i];
-    
-    if (patternPart.startsWith(':...')) {
-      // Catch-all segment
-      const paramName = patternPart.slice(4);
-      params[paramName] = pathParts.slice(i).join('/');
-      return { params };
-    }
-    
-    if (patternPart.startsWith(':')) {
-      // Dynamic segment
-      const paramName = patternPart.slice(1);
-      params[paramName] = pathPart;
-    } else if (patternPart !== pathPart) {
-      // Static segment mismatch
-      return null;
-    }
-  }
-  
-  return { params };
-}
+// Parse and rank once per entry initialization, not on every request. Use the
+// same validation, decoding and specificity rules as Farm's ordinary router.
+const pageRoutes = Object.entries(pages).map(([filePath, module]) => ({
+  filePath,
+  module,
+  segments: parseRoutePath(filePath).segments,
+  specificity: getRoutePatternSpecificity(filePathToRoute(filePath)),
+})).sort((left, right) => compareRouteSpecificity(left.specificity, right.specificity));
 
 /**
  * Simple file-based router
@@ -457,17 +397,16 @@ function matchPath(pattern, pathname) {
 function matchRoute(pathname) {
   const normalized = pathname.replace(/\\/$/, '') || '/';
   
-  for (const filePath of Object.keys(pages)) {
-    const pattern = filePathToRoute(filePath);
-    const match = matchPath(pattern, normalized);
+  for (const { filePath, module, segments } of pageRoutes) {
+    const match = matchFarmPageRoute(normalized, segments);
     
-    if (match) {
-      debug('Matched route:', pattern, 'for path:', normalized);
+    if (match.matches) {
+      debug('Matched route:', filePath, 'for path:', normalized);
       return {
-        Page: pages[filePath].default,
+        Page: module.default,
         pattern: filePath,
         params: match.params,
-        pageMetadata: pages[filePath].metadata,
+        pageMetadata: module.metadata,
       };
     }
   }
@@ -486,14 +425,14 @@ function mergeDocumentMetadata(...sources) {
 }
 
 /**
- * Find every applicable layout module from root to the page directory.
- * Rendering still uses the nearest layout, while document metadata inherits
- * through the complete root -> nested layouts -> page chain.
+ * Find modules along the selected page's actual file ancestry, root to leaf.
+ * Keep route groups and catch-all folders; matching URL prefixes can pick
+ * boundaries from a sibling page that the router did not select.
  */
-function getLayoutModules(pageFilePath) {
+function getRouteModules(pageFilePath, modules, kind) {
   const tryKeys = (...keys) => {
     for (const k of keys) {
-      if (layouts[k]?.default) return layouts[k];
+      if (modules[k]?.default) return modules[k];
     }
     return null;
   };
@@ -505,18 +444,29 @@ function getLayoutModules(pageFilePath) {
   for (let depth = 0; depth <= parts.length; depth++) {
     const relativeDir = parts.slice(0, depth).join('/');
     const absoluteDir = relativeDir ? '/' + relativeDir : '';
-    let matchedLayout = null;
+    let matchedModule = null;
     for (const ext of extensions) {
-      matchedLayout = tryKeys(
-        absoluteDir + '/layout.' + ext,
-        relativeDir ? relativeDir + '/layout.' + ext : 'layout.' + ext,
+      matchedModule = tryKeys(
+        absoluteDir + '/' + kind + '.' + ext,
+        relativeDir ? relativeDir + '/' + kind + '.' + ext : kind + '.' + ext,
       );
-      if (matchedLayout) break;
+      if (matchedModule) break;
     }
-    if (matchedLayout && !matches.includes(matchedLayout)) matches.push(matchedLayout);
+    if (matchedModule) matches.push(matchedModule);
   }
 
   return matches;
+}
+
+function getLayoutModules(pageFilePath) {
+  return getRouteModules(pageFilePath, layouts, 'layout');
+}
+
+function getMatchingBoundary(pageFilePath, modules, kind) {
+  // Before page selection (for example, middleware failure), only the root
+  // boundary applies. Do not guess a route from a partially processed URL.
+  const matches = getRouteModules(pageFilePath ?? '/page.tsx', modules, kind);
+  return matches.at(-1)?.default ?? null;
 }
 
 /**
@@ -525,6 +475,10 @@ function getLayoutModules(pageFilePath) {
  */
 async function handleFarmRequest(request) {
   let url = new URL(request.url);
+  let matchedPage = null;
+  let errorData = new Map();
+  let errorContext = new Map();
+  let errorHeaders = new Headers();
   try {
   debug('Handling request:', request.method, url.pathname);
 
@@ -533,9 +487,9 @@ async function handleFarmRequest(request) {
     return createFarmDeploymentMismatchResponse(deploymentMismatch);
   }
 
-  const initialApiMatch = matchAPIRoute(apiRouteMap, url.pathname);
+  const initialApiMatch = matchAPIRouteAtBasePath(apiRouteMap, url.pathname, farmApiBasePath);
   const isInitialApiRequest = Boolean(initialApiMatch) ||
-    url.pathname === '/api' || url.pathname.startsWith('/api/');
+    isFarmAPIPathname(url.pathname, farmApiBasePath) || isFarmAPIPathname(url.pathname);
 
   ${
     ctx.actionsEnabled
@@ -573,6 +527,9 @@ async function handleFarmRequest(request) {
   const middlewareData = Object.fromEntries(middlewareResult.data);
   const middlewareContext = middlewareResult.context;
   const middlewareHeaders = new Headers(middlewareResult.headers);
+  errorData = middlewareResult.data;
+  errorContext = middlewareContext;
+  errorHeaders = middlewareHeaders;
   if (middlewareResult.data.size || middlewareContext.size) {
     middlewareHeaders.set('cache-control', 'private, no-store');
   }
@@ -588,7 +545,7 @@ async function handleFarmRequest(request) {
   if (apiResponse) {
     return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
   }
-  if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
+  if (isFarmAPIPathname(url.pathname, farmApiBasePath) || isFarmAPIPathname(url.pathname)) {
     return applyProductionMiddlewareHeaders(new Response(
       JSON.stringify({ error: 'API route not found', pathname: url.pathname }),
       { status: 404, headers: { 'Content-Type': 'application/json' } },
@@ -663,12 +620,22 @@ async function handleFarmRequest(request) {
         if (request.signal.aborted) {
           return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
         }
-        const actionError = sanitizeServerActionError(e);
-        if (actionError.name === 'ServerActionError') {
-          console.error('[Farm.js] Server action failed:', e);
+        // redirect() unwinds by throwing, so it arrives here looking like a
+        // failure. It is control flow, not an error: carry it to the client as
+        // data so the router can navigate. Everything else still goes through
+        // sanitizeServerActionError untouched.
+        const actionRedirect = getFarmRedirectError(e);
+        if (actionRedirect) {
+          returnValue = { ok: false, redirect: { url: actionRedirect.url, status: actionRedirect.status } };
+          debug('Server action redirected:', actionId, actionRedirect.url);
+        } else {
+          const actionError = sanitizeServerActionError(e);
+          if (actionError.name === 'ServerActionError') {
+            console.error('[Farm.js] Server action failed:', e);
+          }
+          returnValue = { ok: false, data: actionError };
+          debug('Server action failed:', actionId, e);
         }
-        returnValue = { ok: false, data: actionError };
-        debug('Server action failed:', actionId, e);
       }
     } else {
       // Progressive enhancement (form submitted before JS loaded)
@@ -698,6 +665,16 @@ async function handleFarmRequest(request) {
         if (request.signal.aborted) {
           return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
         }
+        // No client router here, so the redirect has to be a real HTTP
+        // redirect the browser follows on its own.
+        const formRedirect = getFarmRedirectError(e);
+        if (formRedirect) {
+          debug('Form action redirected:', formRedirect.url);
+          return new Response(null, {
+            status: formRedirect.status,
+            headers: { location: formRedirect.url, 'Cache-Control': 'no-store' },
+          });
+        }
         const actionError = sanitizeServerActionError(e);
         if (actionError.name === 'ServerActionError') {
           console.error('[Farm.js] Form action failed:', e);
@@ -721,6 +698,7 @@ async function handleFarmRequest(request) {
   code += `
   // Match the URL to a page component
   const matched = matchRoute(url.pathname);
+  matchedPage = matched;
   
   if (!matched) {
     debug('404 - No route found for:', url.pathname);
@@ -729,8 +707,6 @@ async function handleFarmRequest(request) {
   
   const { Page, pattern, params, pageMetadata } = matched;
   const LayoutModules = getLayoutModules(pattern);
-  const LayoutModule = LayoutModules[LayoutModules.length - 1];
-  const Layout = LayoutModule?.default || (function PassThrough({ children }) { return children; });
   const metadata = mergeDocumentMetadata(
     ...LayoutModules.map((layoutModule) => layoutModule.metadata),
     pageMetadata,
@@ -753,23 +729,25 @@ async function handleFarmRequest(request) {
   // Helper to create elements without JSX
   const h = React.createElement;
   
-  // Render page content - handle async components
+  // Render page content - only native async functions need direct awaiting.
+  // Synchronous components must retain React's hook dispatcher. Source text
+  // containing the word async does not change how a component executes.
   let pageContent;
-  if (Page.constructor.name === 'AsyncFunction' || Page.toString().includes('async')) {
+  if (Page.constructor.name === 'AsyncFunction') {
     pageContent = await Page(pageProps);
   } else {
     pageContent = h(Page, pageProps);
   }
   
   // Route-level loading boundary: wrap in Suspense so async content shows fallback
-  const LoadingComponent = getMatchingLoading(url.pathname, glob);
+  const LoadingComponent = getMatchingBoundary(pattern, loadings, 'loading');
   if (LoadingComponent) {
     const loadingFallback = h(LoadingComponent, { params, path: url.pathname });
     pageContent = h(React.Suspense, { fallback: loadingFallback }, pageContent);
   }
   
   // Route-level error boundary (Next.js error.tsx): catches render errors in this segment
-  const ErrorComponent = getMatchingError(url.pathname, glob);
+  const ErrorComponent = getMatchingBoundary(pattern, errors, 'error');
   if (ErrorComponent) {
     pageContent = h(RouteErrorBoundary, {
       Fallback: ErrorComponent,
@@ -778,12 +756,16 @@ async function handleFarmRequest(request) {
     });
   }
   
-  // Render layout
-  let layoutContent;
-  if (Layout.constructor.name === 'AsyncFunction' || Layout.toString().includes('async')) {
-    layoutContent = await Layout({ children: pageContent });
-  } else {
-    layoutContent = h(Layout, null, pageContent);
+  // Render layouts inside out so every ancestor wraps its descendants.
+  let layoutContent = pageContent;
+  for (let index = LayoutModules.length - 1; index >= 0; index--) {
+    const Layout = LayoutModules[index].default;
+    const layoutProps = { params: pageProps.params, children: layoutContent };
+    if (Layout.constructor.name === 'AsyncFunction') {
+      layoutContent = await Layout(layoutProps);
+    } else {
+      layoutContent = h(Layout, layoutProps);
+    }
   }
   
   // Single wrapper so #root has exactly one child (avoids duplicate block / "two pages" in DOM).
@@ -885,6 +867,9 @@ async function handleFarmRequest(request) {
     )
   );
   } catch (err) {
+    const redirect = getFarmRedirectError(err);
+    if (redirect) return new Response(null, { status: redirect.status, headers: { location: redirect.url, 'cache-control': 'no-store' } });
+    if (isFarmNotFoundError(err)) return new Response('Not Found', { status: 404, headers: { 'cache-control': 'no-store' } });
     console.error('[RSC] Handler error:', err);
     if (request.method === 'POST') {
       if (request.signal.aborted) {
@@ -899,58 +884,83 @@ async function handleFarmRequest(request) {
         },
       });
     }
-    // If route has error.tsx, render it (Next.js-style: SSR error goes to route error boundary)
+    // Render outside the failed page/layout tree, but retain request context.
     const pathname = url.pathname.replace(/\\/$/, '') || '/';
-    const ErrorComponent = getMatchingError(pathname, glob);
+    const ErrorComponent = getMatchingBoundary(matchedPage?.pattern, errors, 'error');
     if (ErrorComponent) {
       try {
-        const matched = matchRoute(pathname);
-        const layoutPattern = matched ? matched.pattern : null;
-        const LayoutModules = matched ? getLayoutModules(layoutPattern) : [];
-        const Layout = LayoutModules[LayoutModules.length - 1]?.default;
-        const LayoutComp = Layout || (function PassThrough({ children }) { return children; });
-        const errParams = matched ? matched.params : {};
-        const errSearchParams = searchParamsToObject(url.searchParams);
-        const errorElement = h(ErrorComponent, {
-          error: err,
-          reset: () => {},
-          params: errParams,
-          path: pathname,
-          searchParams: errSearchParams,
-        });
-        const layoutContent = LayoutComp.constructor.name === 'AsyncFunction' || LayoutComp.toString().includes('async')
-          ? await LayoutComp({ children: errorElement })
-          : h(LayoutComp, null, errorElement);
-        const rootInner = h('div', { 'data-farm-root': 'true' }, layoutContent);
-        const doc = h('html', null,
-          h('head', null,
-            h('meta', { charSet: 'utf-8' }),
-            h('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' }),
-            h('link', { rel: 'icon', href: 'data:,' }),
-            h('title', null, 'Error'),
-            h('link', { rel: 'stylesheet', href: globalsCssPath, as: 'style', precedence: 'default' })
-          ),
-          h('body', null, h('div', { id: 'root' }, rootInner))
+        return await _runWithCurrentRequest(request, () =>
+          _runWithMiddlewareData(errorData, () =>
+            _runWithMiddlewareContext(errorContext, async () => {
+              const h = React.createElement;
+              const errSearchParams = searchParamsToObject(url.searchParams);
+              const fallbackProps = {
+                params: matchedPage?.params || {},
+                path: pathname,
+                search: url.search,
+                searchParams: errSearchParams,
+                middlewareData: Object.fromEntries(errorData),
+              };
+              // Preserve the original failure in logs, not production payloads.
+              const message = ${ctx.development === true ? "true" : "false"} && err instanceof Error
+                ? err.message : 'Internal Server Error';
+              const isClientBoundary = ErrorComponent.$$typeof === Symbol.for('react.client.reference');
+              const errorElement = isClientBoundary
+                ? h(ServerErrorFallback, { Fallback: ErrorComponent, message, fallbackProps })
+                : h(ErrorComponent, { ...fallbackProps, error: new Error(message), reset: () => {} });
+              const rootInner = h('div', { 'data-farm-root': 'true' }, errorElement);
+              const payload = {
+                root: h('html', null,
+                  h('head', null, h('meta', { charSet: 'utf-8' }), h('title', null, 'Error')),
+                  h('body', null, h('div', { id: 'root' }, rootInner))),
+                rootContent: rootInner,
+                metadata: { title: 'Error' },
+              };
+              const rscStream = renderToReadableStream(payload);
+              const headers = new Headers(errorHeaders);
+              headers.set('cache-control', 'private, no-store');
+              headers.set('x-content-type-options', 'nosniff');
+              applyActionResponseHeaders(headers, request);
+              if ((request.headers.get('accept') || '').includes('text/x-component')) {
+                headers.set('content-type', 'text/x-component');
+                return new Response(rscStream, { status: 500, headers });
+              }
+              let ssr;
+              if (typeof import.meta.viteRsc?.loadModule === 'function') {
+                ssr = await import.meta.viteRsc.loadModule('ssr', 'index');
+              } else if (typeof globalThis.__VITE_RSC_LOAD_SSR__ === 'function') {
+                ssr = await globalThis.__VITE_RSC_LOAD_SSR__();
+              }
+              if (!ssr) {
+                void rscStream.cancel().catch(() => {});
+                throw new Error('SSR environment unavailable');
+              }
+              const html = await ssr.renderHTML({ payload, rscStream });
+              headers.set('content-type', 'text/html; charset=utf-8');
+              return new Response(html, { status: 500, headers });
+            })
+          )
         );
-        const renderToString = (await import('react-dom/server')).renderToString;
-        const html = '<!DOCTYPE html>' + renderToString(doc);
-        return new Response(html, { status: 500, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
-      } catch (e) {
-        console.error('[RSC] Error boundary render failed:', e);
+      } catch (fallbackError) {
+        console.error('[RSC] Error boundary render failed:', fallbackError);
       }
     }
     const message = 'Internal Server Error';
     return new Response(JSON.stringify({ error: true, url: request.url, status: 500, message }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' },
     });
   }
 }
 
 async function handler(request, context) {
-  return _runWithCurrentRequest(request, () =>
+  return _runWithAPIRequestRuntime({
+    basePath: farmApiBasePath,
+    dispatch: async (localRequest) =>
+      (await handleAPIRequest(localRequest)) ?? Response.json({ error: 'Not Found' }, { status: 404 }),
+  }, () => _runWithCurrentRequest(request, () =>
     _runWithAfterRequest(request, () => handleFarmRequest(request), context)
-  );
+  ));
 }
 
 export default { fetch: handler };

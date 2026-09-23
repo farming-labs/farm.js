@@ -1,9 +1,15 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import {
   defineIntegration,
+  forwardIntegrationSetCookies,
   type FarmIntegrationHandlerContext,
   type FarmIntegrationLogger,
 } from "@farm.js/core";
+import {
+  describeIntegrationOriginRejection,
+  resolveIntegrationAllowedOrigins,
+  validateIntegrationRequestOrigin,
+} from "@farm.js/core/integrations";
 import { api as clientApi } from "@farm.js/core/client";
 import {
   createPathInferredClientApi,
@@ -77,6 +83,14 @@ export interface SupabaseIntegrationInput {
   providers?: string[];
   defaultProvider?: string;
   pages?: SupabaseIntegrationPages;
+  /**
+   * Additional origins allowed to submit the sign-in, sign-up, and sign-out
+   * routes, using the same pattern syntax as `serverActions.allowedOrigins`
+   * (`https://app.example.com`, `example.com`, `*.example.com`). The app's own
+   * origin is always trusted; set this only when a different trusted origin
+   * posts these forms.
+   */
+  allowedOrigins?: string[];
   log?: FarmIntegrationLogger;
 }
 
@@ -775,7 +789,6 @@ function createSupabaseHandler(
         for (const cookie of cookiesToSet) {
           setCookies.push(serializeCookie(cookie.name, cookie.value, cookie.options));
         }
-        context.req.set("supabase:set-cookies", [...setCookies]);
       },
     },
   };
@@ -854,12 +867,44 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
     env.appBaseUrl,
   );
   const callbackPath = callbackSettings.callbackPath;
+  const allowedOrigins = resolveIntegrationAllowedOrigins(
+    input.allowedOrigins,
+    "supabase.allowedOrigins",
+  );
   const api = createSupabaseApi({
     loginPath,
     signupPath,
     logoutPath,
     sessionPath,
   });
+
+  /**
+   * Reject a credential or sign-out request that did not come from this app.
+   * Returns the response to send, or null when the request may proceed.
+   */
+  function rejectForeignOrigin(
+    request: Request,
+    clientRequest: boolean,
+    { requireOriginMetadata }: { requireOriginMetadata: boolean },
+  ): Response | null {
+    const result = validateIntegrationRequestOrigin(request, {
+      allowedOrigins,
+      requireOriginMetadata,
+    });
+
+    if (result.ok) {
+      return null;
+    }
+
+    const message = describeIntegrationOriginRejection(result.reason);
+
+    return clientRequest
+      ? jsonError(message, 403)
+      : new Response(message, {
+          status: 403,
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        });
+  }
 
   return defineIntegration({
     category: "auth",
@@ -912,6 +957,13 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
           const returnTo = getReturnTo(requestUrl.searchParams.get("returnTo"), "/dashboard");
 
           if (request.method === "POST") {
+            const rejected = rejectForeignOrigin(request, clientRequest, {
+              requireOriginMetadata: true,
+            });
+            if (rejected) {
+              return rejected;
+            }
+
             const parsedRequest = await parseEmailPasswordRequest(request);
             if (!parsedRequest.ok) {
               if (clientRequest) {
@@ -1093,6 +1145,13 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
             });
           }
 
+          const rejected = rejectForeignOrigin(request, clientRequest, {
+            requireOriginMetadata: true,
+          });
+          if (rejected) {
+            return rejected;
+          }
+
           const parsedRequest = await parseEmailPasswordRequest(context.request);
           if (!parsedRequest.ok) {
             if (clientRequest) {
@@ -1259,6 +1318,17 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
           let returnTo = getReturnTo(requestUrl.searchParams.get("returnTo"), "/");
           const clientRequest = isIntegrationClientRequest(request);
 
+          // A POST carries an Origin in every supported browser, so it is held
+          // to the strict check. A GET sign-out is also reachable as a plain
+          // link or bookmark, where no origin metadata exists at all; those
+          // stay allowed and only an explicitly cross-site GET is rejected.
+          const rejected = rejectForeignOrigin(request, clientRequest, {
+            requireOriginMetadata: request.method === "POST",
+          });
+          if (rejected) {
+            return rejected;
+          }
+
           if (request.method === "POST") {
             const contentType = context.request.headers.get("content-type") || "";
             if (contentType.includes("application/json")) {
@@ -1339,18 +1409,48 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
             {
               matcher: protectedMatchers,
               async handler(_request: Request, context: FarmIntegrationHandlerContext) {
-                const { supabase } = createSupabaseHandler(context, env, input.instance);
-                const {
-                  data: { session },
-                } = await supabase.auth.getSession();
+                const { supabase, setCookies } = createSupabaseHandler(
+                  context,
+                  env,
+                  input.instance,
+                );
+                // getSession() reads the cookie without verifying the token,
+                // so a forged cookie would pass this gate. getUser() checks
+                // the token against Supabase Auth before the route is served.
+                const { data, error } = await supabase.auth.getUser();
 
-                if (session) {
+                if (!error && data?.user) {
+                  // getUser() verifies the token with Supabase Auth, and while
+                  // doing so can rotate the session server-side (e.g. when the
+                  // access token is near expiry), capturing the refreshed
+                  // Set-Cookie in setCookies. This branch returns void so the
+                  // protected route still renders, which means those cookies
+                  // cannot ride on this branch's response — hand them to the
+                  // runtime via forwardIntegrationSetCookies so it forwards
+                  // them on the downstream response, mirroring the failure
+                  // branch's appendSetCookies on its redirect. Without this the
+                  // rotated cookie is dropped, the browser keeps the stale
+                  // refresh token, and the next protected request logs the user
+                  // out via refresh-token reuse detection.
+                  if (setCookies.length > 0) {
+                    forwardIntegrationSetCookies(context, setCookies);
+                  }
                   return;
                 }
 
-                return redirectToPage(signInViewPath, context, env.appBaseUrl, {
+                const redirect = redirectToPage(signInViewPath, context, env.appBaseUrl, {
                   returnTo: `${context.url.pathname}${context.url.search}`,
                 });
+                if (setCookies.length === 0) {
+                  return redirect;
+                }
+
+                // A failed validation can clear or rotate auth cookies; keep
+                // those directives on the redirect so the browser drops the
+                // stale session instead of replaying it on the next request.
+                const headers = new Headers(redirect.headers);
+                appendSetCookies(headers, setCookies);
+                return new Response(null, { status: redirect.status, headers });
               },
             },
           ]

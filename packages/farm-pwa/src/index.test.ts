@@ -114,6 +114,42 @@ describe("pwa browser lifecycle", () => {
 });
 
 describe("pwa production build lifecycle", () => {
+  it.each([undefined, { enabled: false }, { enabled: true }])(
+    "uses the configured HTML output prefix without guessing from folder names: %j",
+    async (i18n) => {
+      const root = await mkdtemp(path.join(tmpdir(), "farm-pwa-plugin-base-"));
+      const publicDir = path.join(root, "public");
+      const localized = i18n?.enabled === true;
+      const homeFile = localized ? "app/en/index.html" : "index.html";
+      const appFile = localized ? "app/en/app/index.html" : "app/index.html";
+      const route = localized ? "/en/app" : "/app";
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      try {
+        for (const file of [homeFile, appFile]) {
+          await mkdir(path.dirname(path.join(publicDir, file)), { recursive: true });
+          await writeFile(path.join(publicDir, file), file);
+        }
+        const plugin = pwa({ offline: route, cache: "auto" });
+        await plugin.configure?.({ root, basePath: "/app", i18n } as never, {} as never);
+        const configured = await plugin.build?.configure?.(
+          { preset: "node-server", output: { dir: root, publicDir } },
+          {} as never,
+        );
+        await configured.hooks["prerender:done"]({ prerenderedRoutes: [] });
+        const worker = await readFile(path.join(publicDir, "app", "sw.js"), "utf8");
+        const homeRoute = localized ? "/app/en" : "/app";
+        const homeUrl = localized ? "/app/en/index.html" : "/app/index.html";
+        expect(worker).toContain(`${JSON.stringify(homeRoute)}:${JSON.stringify(homeUrl)}`);
+        expect(worker).toContain(`"/app${route}":"/app${route}/index.html"`);
+        expect(worker).toContain(`const OFFLINE_FILE = "/app${route}/index.html"`);
+        expect(plugin.client.public).toMatchObject({ workerUrl: "/app/sw.js", scope: "/app/" });
+      } finally {
+        info.mockRestore();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("generates the worker after prerendering and before Nitro compiles public assets", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "farm-pwa-plugin-"));
     const outputDir = path.join(root, ".farm", ".output");

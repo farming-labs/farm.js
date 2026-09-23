@@ -39,6 +39,7 @@ async function runRenderPageElement(
     "params",
     "renderFarmElement",
     "ReactDOMServer",
+    "wrapWithFarmIntegrationProviders",
     `${extractRenderPageElement(source)}\nreturn renderPageElement();`,
   );
   await run(
@@ -58,6 +59,7 @@ async function runRenderPageElement(
       return { html: "" };
     },
     {},
+    (element: unknown) => element,
   );
   return { pageTree };
 }

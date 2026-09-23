@@ -5,7 +5,7 @@ export const hydrate = true;
 <script setup lang="ts">
 import { ref } from "vue";
 import ResourceLinks from "../components/resource-links.vue";
-import { api } from "../lib/api-client";
+import { apiClient } from "../lib/api";
 
 defineOptions({ inheritAttrs: false });
 
@@ -17,7 +17,7 @@ async function callServer() {
   pending.value = true;
   failed.value = false;
   try {
-    const result = await api.greeting.post({
+    const result = await apiClient.greeting.post({
       body: { name: "Vue" },
     });
     if (result.error) throw result.error;

@@ -1,34 +1,17 @@
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import farmRsc from "./index.js";
 import { transformFarmRouteActionClients } from "./route-action-transform";
+import { linkRscFixtureDependencies } from "./test-fixture-dependencies.js";
 
 const fixtures: string[] = [];
 
 function createRscFixture(): string {
   const root = mkdtempSync(path.join(tmpdir(), "farm-route-actions-"));
   fixtures.push(root);
-  const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
-
-  for (const packageName of [
-    "react",
-    "react-dom",
-    "react-server-dom-webpack",
-    "@vitejs/plugin-rsc",
-  ]) {
-    const source = [
-      path.join(repositoryRoot, "node_modules", packageName),
-      path.join(repositoryRoot, "examples/rsc-demo/node_modules", packageName),
-    ].find((candidate) => existsSync(candidate));
-    if (!source) throw new Error(`Missing route action fixture dependency: ${packageName}`);
-
-    const target = path.join(root, "node_modules", packageName);
-    mkdirSync(path.dirname(target), { recursive: true });
-    symlinkSync(realpathSync(source), target, process.platform === "win32" ? "junction" : "dir");
-  }
+  linkRscFixtureDependencies(root);
 
   return root;
 }

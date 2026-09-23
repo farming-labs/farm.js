@@ -116,7 +116,16 @@ Farm writes the route union into the consolidated `src/farm.d.ts` declaration fi
 Changing only the fragment preserves SPA state, honors push versus replace history, and does not
 request route data again.
 Native anchor behavior still takes precedence: for example, a `Link` with a `download` attribute is
-handled by the browser instead of Farm's SPA router.
+handled by the browser instead of Farm's SPA router. Absolute URI schemes such as `mailto:`, `tel:`,
+`sms:`, and same-origin `blob:` URLs are passed through unchanged and are never prefetched as app routes. Literal custom
+schemes such as `customapp:open` are validated from their URI grammar and work without registration.
+Viewport prefetch uses a short scroll guard and is cancelled if its link unmounts before the guard
+expires. Intent prefetches are deduplicated while active; after an attempt settles, a later hover,
+focus, or touch can retry while successful route data remains deduplicated by the router cache.
+Internal `Link` hrefs stay app-relative: when `basePath: "/console"` is configured, `href="/about"`
+renders and navigates to `/console/about`. Do not add the base path to route hrefs yourself.
+For a reusable custom-scheme type, use ``ExternalHref<`customapp:${string}`>`` (or declaration-merge
+`LinkExternalUriSchemes` when the scheme should belong to the default `ExternalHref` union).
 
 **Client navigation**
 
@@ -163,6 +172,21 @@ const href = router.build("/docs/[[...slug]]", {
 ```
 
 This returns `/docs/core/routing`. Optional catch-all params can be omitted, static routes win over dynamic routes, and route groups such as `(marketing)` do not appear in the URL.
+
+These matching rules also apply with experimental React Server Components enabled. Farm prepares page precedence when the route entry initializes, so filesystem discovery order cannot make `/users/[id]` hide `/users/new`. Optional catch-all pages match both their parent URL and deeper paths.
+
+Route matching decodes each URL path segment once before comparing static names or exposing
+`params`. Route names remain literal (including `%`), and malformed percent escapes remain literal
+instead of aborting the request.
+
+A required or optional catch-all must be the final URL segment. Farm reports paths such as
+`docs/[...slug]/edit/page.tsx` during route discovery because the catch-all would otherwise consume
+the `edit` segment and make the route unreachable.
+
+Each dynamic segment in one route must have a unique parameter name. Farm rejects paths such as
+`teams/[id]/members/[id]/page.tsx` instead of silently replacing the outer `id` value.
+The prototype-sensitive names `__proto__`, `constructor`, and `prototype` are reserved because
+JavaScript cannot represent them safely in the plain `params` object.
 For navigation state, `router.isActive(pattern, pathname, { exact: false })` also matches
 descendants after dynamic segments, such as `/users/42/settings` for `/users/[id]`.
 
@@ -185,6 +209,8 @@ export function CurrentUserTab() {
 
 Imperative `push()` and `replace()` calls use SPA navigation for same-origin routes. Absolute
 cross-origin URLs use normal document navigation instead of Farm's local page-data endpoint.
+Internal router paths use the configured application `basePath`, matching `Link`; already-prefixed
+paths are preserved.
 
 ## Navigation blocking
 
@@ -254,6 +280,8 @@ Use stable keys per scroll container. If two elements share a key, the latest mo
 ## Route data cache
 
 Programmatic routes can cache the value returned from `data.main`. This is useful for product pages, docs pages, dashboards, and other route data that should be reused during server rendering or prefetching.
+The first `createRoute` argument is a pathname pattern only; declare typed search parameters with
+`search` and add query strings or hashes when building a navigation URL.
 
 ```tsx
 import { createRoute, invalidate } from "@farm.js/core";
@@ -410,6 +438,13 @@ const publish = useAction(ProductRoute.actions.publish);
 const result = await publish({ id: "p1" });
 ```
 
+For both `useAction` and `useServerFn`, `pending` means at least one submission since the last
+reset is still running. `status`, `result` / `data`, and `error` describe the latest submission.
+If that submission finishes before an older one, its status becomes `success` or `error` while
+`pending` remains `true`. Finishing older work only reduces the pending count; it cannot replace
+the latest result, error, or status. A new submission sets status back to `pending`, and `reset()`
+returns it to `idle`.
+
 The same wrapper supports progressive forms. The form performs a native server action before
 hydration and uses the tracked RPC lifecycle after hydration:
 
@@ -429,6 +464,11 @@ Route action entries must be imported identifiers such as `{ update }` or
 `{ update: updateProduct }`. Do not create them inline inside `createRoute`; the separate module is
 the server boundary Farm uses to generate safe browser references. When provided, `defaultAction`
 must be a string literal matching one of those entries.
+
+`useAction` keeps `Form`'s component identity stable across renders, including when you pass
+inline `optimistic` callbacks or change the target action. Existing fields retain their DOM
+identity, unsaved input, focus, and selection. Submissions use the latest action and options;
+React's normal form reset after a successful function action still applies.
 
 ## Deferred route data
 
@@ -666,6 +706,10 @@ from the rendered React page automatically.
 ## Metadata And OG Images
 
 Export `metadata` for static head tags or `generateMetadata` when the values depend on route params, search params, middleware data, or route data. Farm merges layout metadata from root to leaf, then applies the page metadata last.
+
+During HTML-based client navigation, Farm reconciles the destination document's title, meta tags,
+canonical and alternate links, icons, and manifest link. Tags omitted by the destination are removed,
+so metadata from the previous route cannot remain active.
 
 A layout can define a default title and a `%s` template for child segments. The layout itself uses
 the default; a child string title is substituted into the nearest parent template:
@@ -998,6 +1042,21 @@ export default function DashboardError({ error, reset }: ErrorProps) {
 ```
 
 `error.tsx` receives `error`, `reset`, `params`, `path`, `search`, `searchParams`, middleware data, and plugin context. The closest route error boundary handles normal render/data failures. Redirects and `notFound()` still escape to Farm's redirect and not-found handling.
+
+With experimental RSC enabled, failures before the HTML shell is sent render the nearest
+`error.tsx` through RSC and SSR with status `500` and `Cache-Control: private, no-store`.
+RSC loading and error boundaries follow the selected page's file ancestors, including route
+groups and catch-all folders. For example, `/users/[id]/error.tsx` does not handle a sibling
+`/users/new/page.tsx`. Failures before page selection, such as middleware errors, use only the
+root error boundary when one exists.
+This fallback uses a standalone document shell, outside the failed page/layout tree, so a broken
+layout cannot prevent the error UI from rendering. Client boundaries receive a client-owned
+`reset()` that reloads the current URL. Production responses show a generic error message;
+the original exception stays in server logs. Development responses can show the error message.
+
+If no boundary exists, or the boundary itself fails during SSR, Farm returns a generic non-cacheable
+500 response. Failures after streaming starts cannot change the already-sent status code and remain
+subject to React's streaming recovery behavior.
 
 Place `not-found.*` at the app root to customize unmatched URLs. When the component lives elsewhere,
 set its project-relative path explicitly; Farm uses the same file in development and production and

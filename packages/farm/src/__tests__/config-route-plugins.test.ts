@@ -48,6 +48,53 @@ describe("config route plugins", () => {
     ).toThrow('Redirect "/old" statusCode must be one of 301, 302, 303, 307, or 308');
   });
 
+  it("rejects route sources that browsers normalize differently", () => {
+    for (const source of [
+      "/docs/../admin",
+      "/docs/%2e%2e/admin",
+      "/docs/%2Fadmin",
+      "/docs/%5Cadmin",
+      "/docs\\admin",
+    ]) {
+      expect(() => createRedirectsPlugin([{ source, destination: "/safe" }])).toThrow(
+        /browser-unstable|backslashes/,
+      );
+    }
+  });
+
+  it("falls back safely when a request carries a malformed Host header", async () => {
+    const redirectRequest = createRequest("/old");
+    redirectRequest.headers.host = "%";
+    const redirectResponse = createResponse();
+    await runBeforeRequest(
+      createRedirectsPlugin([{ source: "/old", destination: "/new" }]),
+      redirectRequest,
+      redirectResponse,
+    );
+    expect(redirectResponse.writeHead).toHaveBeenCalledWith(307, { Location: "/new" });
+
+    const rewriteRequest = createRequest("/legacy");
+    rewriteRequest.headers.host = "%";
+    await runBeforeRequest(
+      createRewritesPlugin([{ source: "/legacy", destination: "/current" }]),
+      rewriteRequest,
+      createResponse(),
+    );
+    expect(rewriteRequest.url).toBe("/current");
+
+    const headersRequest = createRequest("/docs");
+    headersRequest.headers.host = "%";
+    const headersResponse = createResponse();
+    await runBeforeRequest(
+      createHeadersPlugin([
+        { source: "/docs", headers: [{ key: "x-farm-safe-host", value: "1" }] },
+      ]),
+      headersRequest,
+      headersResponse,
+    );
+    expect(headersResponse.setHeader).toHaveBeenCalledWith("x-farm-safe-host", "1");
+  });
+
   it("keeps named and plain redirect captures in source order", async () => {
     const plugin = createRedirectsPlugin([
       {
@@ -63,6 +110,60 @@ describe("config route plugins", () => {
     expect(res.writeHead).toHaveBeenCalledWith(307, {
       Location: "/new/guides/start/copy/logo.svg",
     });
+  });
+
+  it("preserves a redirect query unless the destination declares one", async () => {
+    const preserve = createRedirectsPlugin([{ source: "/old", destination: "/new#details" }]);
+    const replace = createRedirectsPlugin([
+      { source: "/legacy", destination: "/current?view=compact" },
+    ]);
+    const preserveResponse = createResponse();
+    const replaceResponse = createResponse();
+
+    await runBeforeRequest(preserve, createRequest("/old?campaign=launch"), preserveResponse);
+    await runBeforeRequest(replace, createRequest("/legacy?view=full"), replaceResponse);
+
+    expect(preserveResponse.writeHead).toHaveBeenCalledWith(307, {
+      Location: "/new?campaign=launch#details",
+    });
+    expect(replaceResponse.writeHead).toHaveBeenCalledWith(307, {
+      Location: "/current?view=compact",
+    });
+  });
+
+  it("keeps wildcard captures root-relative and aligned with production", async () => {
+    const plugin = createRedirectsPlugin([{ source: "/old/:path*", destination: "/:path*" }]);
+    const response = createResponse();
+
+    await runBeforeRequest(plugin, createRequest("/old//evil.example"), response);
+
+    expect(response.writeHead).toHaveBeenCalledWith(307, {
+      Location: "/evil.example",
+    });
+  });
+
+  it("encodes redirect and rewrite captures like the production runtime", async () => {
+    const redirect = createRedirectsPlugin([
+      { source: "/legacy/:path*", destination: "/current/:path*" },
+    ]);
+    const redirectResponse = createResponse();
+
+    await runBeforeRequest(
+      redirect,
+      createRequest("/legacy/guides/a%20b//c%2Fd"),
+      redirectResponse,
+    );
+
+    expect(redirectResponse.writeHead).toHaveBeenCalledWith(307, {
+      Location: "/current/guides/a%20b/c%2Fd",
+    });
+
+    const rewrite = createRewritesPlugin([
+      { source: "/legacy/:path*", destination: "/current/$1" },
+    ]);
+    const rewriteRequest = createRequest("/legacy/guides/a%20b//c%2Fd");
+    await runBeforeRequest(rewrite, rewriteRequest, createResponse());
+    expect(rewriteRequest.url).toBe("/current/guides/a%20b/c%2Fd");
   });
 
   it("treats regular-expression characters as literals", async () => {
@@ -114,6 +215,48 @@ describe("config route plugins", () => {
     expect(res.getHeader("Link")).toBe(
       "</handler.js>; rel=preload; as=script, </configured.css>; rel=preload; as=style",
     );
+  });
+
+  it("preserves configured and handler Set-Cookie fields", async () => {
+    const plugin = createHeadersPlugin([
+      {
+        source: "/account",
+        headers: [
+          { key: "Set-Cookie", value: "theme=dark; Path=/" },
+          { key: "set-cookie", value: "locale=en; Path=/" },
+        ],
+      },
+    ]);
+    const res = createResponse();
+
+    await runBeforeRequest(plugin, createRequest("/account"), res);
+    expect(res.getHeader("Set-Cookie")).toEqual(["theme=dark; Path=/", "locale=en; Path=/"]);
+
+    res.writeHead(200, {
+      "Set-Cookie": ["session=abc; Path=/; HttpOnly", "notice=seen; Path=/"],
+    });
+
+    expect(res.getHeader("Set-Cookie")).toEqual([
+      "session=abc; Path=/; HttpOnly",
+      "notice=seen; Path=/",
+      "theme=dark; Path=/",
+      "locale=en; Path=/",
+    ]);
+  });
+
+  it("does not duplicate configured cookies while finalizing writeHead", async () => {
+    const plugin = createHeadersPlugin([
+      {
+        source: "/account",
+        headers: [{ key: "Set-Cookie", value: "theme=dark; Path=/" }],
+      },
+    ]);
+    const res = createResponse();
+
+    await runBeforeRequest(plugin, createRequest("/account"), res);
+    res.writeHead(200);
+
+    expect(res.getHeader("Set-Cookie")).toBe("theme=dark; Path=/");
   });
 
   it("interpolates named and numbered rewrite captures", async () => {

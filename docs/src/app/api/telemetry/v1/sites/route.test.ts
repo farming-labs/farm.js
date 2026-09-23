@@ -1,9 +1,40 @@
 // @vitest-environment node
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { farmLegacyVercelPreviewSiteWhere } from "../../../../../lib/telemetry-sites";
 import { POST } from "./route";
 
+const prismaMocks = vi.hoisted(() => ({
+  deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+  upsert: vi.fn().mockResolvedValue({}),
+}));
+const attestationMocks = vi.hoisted(() => ({
+  verify: vi.fn(),
+}));
+
+vi.mock("../../../../../lib/prisma", () => ({
+  getPrisma: async () => ({
+    farmProductionSite: prismaMocks,
+  }),
+}));
+vi.mock("../../../../../lib/telemetry-site-attestation", () => ({
+  verifyFarmProductionSiteAttestation: attestationMocks.verify,
+}));
+
 const originalDatabaseUrl = process.env.DATABASE_URL;
+
+beforeEach(() => {
+  prismaMocks.deleteMany.mockClear();
+  prismaMocks.upsert.mockClear();
+  attestationMocks.verify.mockReset().mockResolvedValue({
+    schemaVersion: 1,
+    eventType: "production_site_attestation",
+    packageName: "@farm.js/core",
+    packageVersion: "1.0.0",
+    renderer: "react",
+    deployTarget: "vercel",
+  });
+});
 
 afterEach(() => {
   if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
@@ -45,6 +76,37 @@ describe("production-site telemetry ingestion", () => {
     });
   });
 
+  it("rejects an oversized chunked body without draining it", async () => {
+    delete process.env.DATABASE_URL;
+    let pushed = 0;
+    const chunk = new Uint8Array(1024).fill(0x61);
+    // No content-length: a chunked upload, so the header pre-check cannot help.
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pushed += 1;
+        if (pushed > 4096) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+    });
+
+    const response = await POST(
+      new Request("https://farmjs.dev/api/telemetry/v1/sites", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+        duplex: "half",
+      } as RequestInit & { duplex: "half" }),
+    );
+
+    expect(response.status).toBe(413);
+    // The read must stop shortly past the 8 KB ceiling rather than buffering
+    // the whole 4 MB an unauthenticated caller offered.
+    expect(pushed).toBeLessThan(64);
+  });
+
   it("rejects request-level URL data", async () => {
     const response = await POST(
       request(sitePayload({ siteUrl: "https://example.com/private?token=secret" })),
@@ -59,5 +121,115 @@ describe("production-site telemetry ingestion", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ ok: false, error: "invalid_site" });
+  });
+
+  it("accepts but does not store a known Vercel branch-preview alias", async () => {
+    delete process.env.DATABASE_URL;
+
+    const response = await POST(
+      request(
+        sitePayload({
+          siteUrl: "https://docs-git-fix-query-array-round-trip-kinfe123s-projects.vercel.app",
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      stored: false,
+      warning: "preview_deployment",
+    });
+  });
+
+  it("keeps a production vercel.app origin eligible", async () => {
+    delete process.env.DATABASE_URL;
+
+    const response = await POST(
+      request(sitePayload({ siteUrl: "https://farm-git-tools.vercel.app" })),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      stored: false,
+      warning: "database_not_configured",
+    });
+  });
+
+  it("does not store a site whose origin does not attest Farm", async () => {
+    process.env.DATABASE_URL = "postgresql://telemetry.invalid/farmjs";
+    attestationMocks.verify.mockResolvedValueOnce(undefined);
+
+    const response = await POST(request(sitePayload()));
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      stored: false,
+      warning: "site_unverified",
+    });
+    expect(prismaMocks.upsert).not.toHaveBeenCalled();
+  });
+
+  it("removes a previously stored Vercel branch-preview alias", async () => {
+    process.env.DATABASE_URL = "postgresql://telemetry.invalid/farmjs";
+    const siteUrl = "https://docs-git-fix-query-array-round-trip-kinfe123s-projects.vercel.app";
+
+    const response = await POST(request(sitePayload({ siteUrl })));
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      stored: false,
+      warning: "preview_deployment",
+    });
+    expect(prismaMocks.upsert).not.toHaveBeenCalled();
+    expect(prismaMocks.deleteMany).toHaveBeenCalledWith({ where: { url: siteUrl } });
+    expect(prismaMocks.deleteMany).toHaveBeenCalledWith({
+      where: farmLegacyVercelPreviewSiteWhere,
+    });
+  });
+
+  it("stores metadata returned by the attested origin instead of claimed metadata", async () => {
+    process.env.DATABASE_URL = "postgresql://telemetry.invalid/farmjs";
+    attestationMocks.verify.mockResolvedValueOnce({
+      schemaVersion: 1,
+      eventType: "production_site_attestation",
+      packageName: "@farm.js/core",
+      packageVersion: "2.0.0",
+      renderer: "solid",
+      deployTarget: "cloudflare",
+    });
+
+    const response = await POST(
+      request(
+        sitePayload({
+          packageVersion: "999.0.0",
+          renderer: "fake",
+          deployTarget: "fake",
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ ok: true, stored: true });
+    expect(attestationMocks.verify).toHaveBeenCalledWith("https://example.com");
+    expect(prismaMocks.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          packageName: "@farm.js/core",
+          packageVersion: "2.0.0",
+          renderer: "solid",
+          deployTarget: "cloudflare",
+        }),
+        create: expect.objectContaining({
+          packageName: "@farm.js/core",
+          packageVersion: "2.0.0",
+          renderer: "solid",
+          deployTarget: "cloudflare",
+        }),
+      }),
+    );
   });
 });

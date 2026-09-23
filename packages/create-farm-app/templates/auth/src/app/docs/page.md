@@ -25,5 +25,5 @@ manual wiring required.
 
 ## Learn more
 
-- [Farm.js documentation](https://farm.js.dev/docs)
-- [Configuration guide](https://farm.js.dev/docs/configuration)
+- [Farm.js documentation](https://farmjs.dev/docs)
+- [Configuration guide](https://farmjs.dev/docs/configuration)

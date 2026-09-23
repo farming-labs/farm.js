@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.0-beta.75",
+  "version": "0.1.0-beta.102",
   "description": "Core Farm.js framework for modern integrated apps",
   "keywords": [
     "@farm.js/core",
@@ -44,6 +44,9 @@
       ],
       "integrations": [
         "./dist/integrations.d.ts"
+      ],
+      "schema": [
+        "./dist/schema.d.ts"
       ],
       "cache": [
         "./dist/cache.d.ts"
@@ -191,6 +194,9 @@
         "./types/api.d.ts",
         "./dist/api.d.ts"
       ],
+      "api/client": [
+        "./dist/api/client.d.ts"
+      ],
       "api/route-manager": [
         "./dist/api/route-manager.d.ts"
       ],
@@ -290,6 +296,11 @@
       "types": "./dist/integrations.d.ts",
       "import": "./dist/integrations.mjs",
       "require": "./dist/integrations.cjs"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema.mjs",
+      "require": "./dist/schema.cjs"
     },
     "./cache": {
       "types": "./dist/cache.d.ts",
@@ -476,6 +487,11 @@
       "import": "./dist/api.mjs",
       "require": "./dist/api.cjs"
     },
+    "./api/client": {
+      "types": "./dist/api/client.d.ts",
+      "import": "./dist/api/client.mjs",
+      "require": "./dist/api/client.cjs"
+    },
     "./api/route-manager": {
       "types": "./dist/api/route-manager.d.ts",
       "import": "./dist/api/route-manager.mjs",
@@ -615,6 +631,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "better-call": "^1.0.19",
     "db0": "^0.3.4",
+    "es-module-lexer": "2.0.0",
     "esbuild": "^0.28.0",
     "fast-glob": "^3.3.2",
     "h3": "2.0.1-rc.5",
@@ -665,5 +682,8 @@
     "rolldown": "1.2.0",
     "sharp": "^0.34.5",
     "vite-rolldown": "npm:vite@8.1.5"
+  },
+  "engines": {
+    "node": ">=22.13.0"
   }
 }

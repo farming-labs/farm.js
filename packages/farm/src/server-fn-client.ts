@@ -10,6 +10,9 @@ import {
   type FormHTMLAttributes,
 } from "react";
 import type { ServerFn } from "./server-fn";
+import type { RetryOptions } from "./api/client";
+import { notifyClientObserver } from "./client-observers";
+import { invokeMutationWithRetry } from "./mutation-retry";
 
 export type ServerFnActionStatus = "idle" | "pending" | "success" | "error";
 
@@ -29,6 +32,8 @@ export type UseServerFnOptions<TResult, TError extends Error = Error, TInput = u
   throwOnFormError?: boolean;
   optimistic?: (context: ServerFnOptimisticContext<TInput, TResult>) => TResult | null | undefined;
   rollbackOnError?: boolean;
+  /** Retry failed submissions with the API client's retry shape. Defaults to no retries. */
+  retry?: RetryOptions;
   onSuccess?: (result: TResult) => void;
   onError?: (error: TError) => void;
   onSettled?: (result: TResult | null, error: TError | null) => void;
@@ -83,6 +88,7 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
   const { initialResult = null, resetOnSubmit = true } = options;
   const callbacksRef = useRef<ServerFnActionCallbacks<TResult, TError>>({});
   const requestIdRef = useRef(0);
+  const lastResetIdRef = useRef(0);
   const initialState: ServerFnActionState<TResult, TError> = {
     pendingCount: 0,
     status: "idle",
@@ -97,11 +103,10 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
         | ServerFnActionState<TResult, TError>
         | ((current: ServerFnActionState<TResult, TError>) => ServerFnActionState<TResult, TError>),
     ) => {
-      setState((current) => {
-        const next = typeof value === "function" ? value(current) : value;
-        stateRef.current = next;
-        return next;
-      });
+      // Later submissions in the same React batch must see this transition.
+      const next = typeof value === "function" ? value(stateRef.current) : value;
+      stateRef.current = next;
+      setState(next);
     },
     [],
   );
@@ -125,39 +130,57 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
       });
       const hasOptimisticResult = optimisticResult !== undefined;
 
-      setActionState((current) => ({
-        pendingCount: current.pendingCount + 1,
-        status: "pending",
-        result: hasOptimisticResult ? optimisticResult : resetOnSubmit ? null : current.result,
-        error: null,
-      }));
+      setActionState((current) => {
+        // Optimistic callbacks are app code and may reset or submit again.
+        if (requestId < lastResetIdRef.current) return current;
+        const pendingCount = current.pendingCount + 1;
+        if (requestId !== requestIdRef.current) return { ...current, pendingCount };
+        return {
+          pendingCount,
+          status: "pending",
+          result: hasOptimisticResult ? optimisticResult : resetOnSubmit ? null : current.result,
+          error: null,
+        };
+      });
 
       try {
-        const result = await serverFn(input as TInput | FormData);
+        const result = await invokeMutationWithRetry(
+          () => serverFn(input as TInput | FormData),
+          options.retry,
+          // A reset disowns this submission; stop scheduling retries then.
+          () => requestId >= lastResetIdRef.current,
+        );
         const isLatestRequest = requestId === requestIdRef.current;
 
         setActionState((current) => {
+          // Reset starts a new pending-count generation, not just a new result.
+          if (requestId < lastResetIdRef.current) return current;
           const pendingCount = Math.max(0, current.pendingCount - 1);
 
           if (!isLatestRequest) {
             return {
               ...current,
               pendingCount,
-              status: pendingCount > 0 ? "pending" : current.status,
             };
           }
 
           return {
             pendingCount,
-            status: pendingCount > 0 ? "pending" : "success",
+            status: "success",
             result,
             error: null,
           };
         });
 
         if (isLatestRequest) {
-          callbacksRef.current.onSuccess?.(result);
-          callbacksRef.current.onSettled?.(result, null);
+          notifyClientObserver(callbacksRef.current.onSuccess, [result], "Action onSuccess");
+          if (requestId === requestIdRef.current) {
+            notifyClientObserver(
+              callbacksRef.current.onSettled,
+              [result, null],
+              "Action onSettled",
+            );
+          }
         }
 
         return result;
@@ -166,19 +189,19 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
         const isLatestRequest = requestId === requestIdRef.current;
 
         setActionState((current) => {
+          if (requestId < lastResetIdRef.current) return current;
           const pendingCount = Math.max(0, current.pendingCount - 1);
 
           if (!isLatestRequest) {
             return {
               ...current,
               pendingCount,
-              status: pendingCount > 0 ? "pending" : current.status,
             };
           }
 
           return {
             pendingCount,
-            status: pendingCount > 0 ? "pending" : "error",
+            status: "error",
             result:
               hasOptimisticResult && options.rollbackOnError
                 ? previousResult
@@ -190,14 +213,23 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
         });
 
         if (isLatestRequest) {
-          callbacksRef.current.onError?.(error);
-          callbacksRef.current.onSettled?.(null, error);
+          notifyClientObserver(callbacksRef.current.onError, [error], "Action onError");
+          if (requestId === requestIdRef.current) {
+            notifyClientObserver(callbacksRef.current.onSettled, [null, error], "Action onSettled");
+          }
         }
 
         throw error;
       }
     },
-    [options.optimistic, options.rollbackOnError, resetOnSubmit, serverFn, setActionState],
+    [
+      options.optimistic,
+      options.retry,
+      options.rollbackOnError,
+      resetOnSubmit,
+      serverFn,
+      setActionState,
+    ],
   ) as ServerFnSubmit<TInput, TResult>;
 
   const formAction = useCallback(
@@ -214,7 +246,7 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
   );
 
   const reset = useCallback(() => {
-    requestIdRef.current += 1;
+    lastResetIdRef.current = ++requestIdRef.current;
     setActionState({
       pendingCount: 0,
       status: "idle",
@@ -255,17 +287,22 @@ export function useAction<TInput, TResult, TError extends Error = Error>(
 ): UseActionReturn<TInput, TResult, TError> {
   const serverFn = resolveServerFnTarget(target);
   const action = useServerFn(serverFn, options);
+  const formActionRef = useRef(action.formAction);
+  formActionRef.current = action.formAction;
 
   const Form = useMemo(() => {
+    // Keep both the component and its action stable, even when a parent caches
+    // the form element. Resolve the latest target/options at submission time.
+    const submitForm = (formData: FormData) => formActionRef.current(formData);
     const ActionForm = (props: UseActionFormProps) =>
       createElement("form", {
         ...props,
-        action: action.formAction,
+        action: submitForm,
       });
 
     ActionForm.displayName = "FarmActionForm";
     return ActionForm;
-  }, [action.formAction]);
+  }, []);
 
   return useMemo(() => {
     const call = ((input?: TInput | FormData) =>

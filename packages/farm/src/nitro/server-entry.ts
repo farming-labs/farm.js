@@ -25,6 +25,7 @@ import {
   parseFarmLayoutChainHeader,
 } from "../navigation/render-plan";
 import { resolveFarmPageDataFailure } from "../navigation/page-data-error";
+import { mergeMetadata } from "../metadata";
 
 // Managers will be available via globalThis.__FARM_REGISTRY__
 // They are injected via Nitro hooks (ready hook) or set during build
@@ -114,7 +115,7 @@ async function defaultHandler({
   const sr = serverRenderer || managers.serverRenderer;
   const activeDeploymentId = deploymentId || managers.deploymentId;
 
-  const redirectMatch = rm?.matchRedirect(pathname);
+  const redirectMatch = rm?.matchRedirect(pathname, url.search);
   if (redirectMatch) {
     return new Response(`Redirecting to ${redirectMatch.destination}`, {
       status: redirectMatch.statusCode,
@@ -141,6 +142,11 @@ async function defaultHandler({
       // Parse the target path
       const targetUrl = new URL(targetPath, url.origin);
       const targetPathname = targetUrl.pathname;
+      const targetRequest = new Request(targetUrl, {
+        method: "GET",
+        headers: request.headers,
+        signal: request.signal,
+      });
 
       // Find the route
       const match = rm.matchRoute(targetPathname);
@@ -210,21 +216,11 @@ async function defaultHandler({
         ? (hydrationStrategies[0] ?? "load")
         : "load";
 
-      for (const layoutModule of layoutModules) {
-        if (layoutModule.metadata) {
-          mergedMetadata = { ...mergedMetadata, ...layoutModule.metadata };
-        }
-      }
-
-      if (routeModule.metadata) {
-        mergedMetadata = { ...mergedMetadata, ...routeModule.metadata };
-      }
-
       // Build search params (repeated keys collect into arrays, matching dev)
       const searchParams = searchParamsToObject(targetUrl.searchParams);
       const routeContext = sr
         ? await sr.resolveRouteContext({
-            request,
+            request: targetRequest,
             params,
             search: searchParams,
             path: targetUrl.pathname,
@@ -242,6 +238,29 @@ async function defaultHandler({
         search: searchParams,
         routePath: route.pattern,
       });
+
+      // Collect metadata exactly the way a full-page load does: static and
+      // generated interleaved per layer, deep-merged with mergeMetadata so a
+      // page's openGraph extends a layout's instead of replacing it. Layouts
+      // receive the params, the route receives its full resolved props. Keep
+      // this in step with the dev handler in vite.ts.
+      for (const layoutModule of layoutModules) {
+        mergedMetadata = mergeMetadata(mergedMetadata, layoutModule.metadata);
+        if (typeof (layoutModule as any).generateMetadata === "function") {
+          mergedMetadata = mergeMetadata(
+            mergedMetadata,
+            await (layoutModule as any).generateMetadata({ params: routeProps.params }),
+          );
+        }
+      }
+      mergedMetadata = mergeMetadata(mergedMetadata, routeModule.metadata);
+      if (typeof (routeModule as any).generateMetadata === "function") {
+        mergedMetadata = mergeMetadata(
+          mergedMetadata,
+          await (routeModule as any).generateMetadata(routeProps),
+        );
+      }
+
       const renderPlan = createFarmRouteRenderPlan({
         pageShouldHydrate: shouldHydrate,
         layoutShouldHydrate,
@@ -300,10 +319,11 @@ async function defaultHandler({
               layoutPatterns: destinationLayoutPatterns,
             }
           : undefined,
-        metadata: {
-          title: mergedMetadata.title,
-          description: mergedMetadata.description,
-        },
+        // The full merged metadata, not a title/description projection: client
+        // navigation reconciles the same head tags a full-page load renders,
+        // so it needs the same input. Keep this in step with the dev handler
+        // in vite.ts.
+        metadata: mergedMetadata,
         layoutModules: layouts.map((l) => l.modulePath),
       };
 

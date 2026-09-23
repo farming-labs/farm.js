@@ -16,6 +16,11 @@ Svelte conventions and the features that remain React-specific.
 
 ## Rendering options
 
+RSC page URLs return HTML for document visits and a Flight payload for requests accepting
+`text/x-component`. Both representations include `Vary: Accept`. When you enable shared caching,
+configure the CDN or reverse proxy to honor `Vary`; do not cache these responses by URL alone.
+Farm preserves existing `Vary` fields, including `Origin` and Nitro's `Accept-Encoding`.
+
 | Mode    | How to opt in                                  | Best for                                |
 | ------- | ---------------------------------------------- | --------------------------------------- |
 | Dynamic | Default for request-bound pages                | Dashboards and personalized UI.         |
@@ -57,6 +62,10 @@ export default function BlogPage() {
 
 Use dynamic rendering for request-specific pages such as dashboards, account settings, and pages that depend on cookies, headers, or per-user data.
 
+With experimental React Server Components enabled, Farm streams HTML while inserting the styles,
+hydration payload, and client script. HTML injection preserves UTF-8 bytes across stream chunks,
+including emoji and non-ASCII content, without buffering the entire page.
+
 **src/app/dashboard/page.tsx**
 
 ```tsx
@@ -85,6 +94,9 @@ If an explicitly static route directly reads request APIs or request props, Farm
 read and keeps the route dynamic instead of freezing request-specific HTML into a shared artifact.
 This check covers the route module itself; continue reviewing imported components and data loaders,
 because request-bound work in transitive imports cannot be proven safe from the route source alone.
+
+Farm serves generated HTML only for `GET` and `HEAD` requests. Other request methods continue through
+the live route instead of receiving a cached page document.
 
 **src/app/about/page.tsx**
 
@@ -160,8 +172,9 @@ splits production route modules behind dynamic imports. Deferred routes therefor
 their route chunk until its trigger while preserving the initial SSR output.
 
 These strategies control hydration of the initial server-rendered document. During client-side
-navigation, the navigation itself signals user intent, so Farm loads and renders the destination
-route immediately instead of leaving the previous route visible while waiting for another trigger.
+navigation, the navigation itself signals user intent, so Farm loads and renders a route-wide
+destination immediately instead of leaving the previous route visible while waiting for another
+trigger.
 
 | Strategy      | Hydration trigger                                                     |
 | ------------- | --------------------------------------------------------------------- |
@@ -170,12 +183,31 @@ route immediately instead of leaving the previous route visible while waiting fo
 | `visible`     | When the route boundary approaches the viewport.                      |
 | `idle`        | During browser idle time, with a timeout fallback.                    |
 
+With [isolated client hydration](/docs/configuration#isolated-client-hydration), each eligible
+client module keeps its own strategy, including after SPA navigation. Sibling boundaries can mix
+all four strategies: one boundary's trigger never hydrates another, and an interaction click is
+claimed and replayed once by the boundary that contains it. Removing a boundary cancels its pending
+observer, idle callback, or interaction listener.
+
+Farm uses the same isolated boundary metadata for Vite development, streamed or buffered SSR, and
+statically generated HTML. In development, updating a client module rerenders every live boundary
+created from that module without importing or replacing its server-owned layout; sibling boundary
+state stays mounted. If one page needs the route-wide fallback, that fallback stays on the page
+boundary and does not promote otherwise eligible client leaves in its server-owned layout.
+Farm also keeps graphs above four statically bounded isolated roots route-wide. Data-dependent
+boundary lists use the same fallback because their root count is unknown before streaming. This
+measured guard prevents request, marker, root, and hydration overhead from growing past the first
+observed crossover; the [benchmark report](https://github.com/farming-labs/farm.js/blob/main/benchmarks/isolated-hydration/results/latest.md) includes route-wide, isolated, and RSC controls with raw samples.
+The representative fixtures also run route-wide and isolated hydration with Farm's experimental
+React compiler enabled, proving both the initial hydration cost and repeated state-update cost of
+the combined path.
+
 The export must be one of these static string literals so Farm can analyze it without executing
 application code. Without an explicit route-level `island` export, a route that imports client
 boundaries with different strategies safely falls back to `load` because its current route-level
 React-compatible root cannot schedule those children independently. Keep interactive leaves small today; a
-future compiler boundary can reuse the same export for independently hydrated nested component
-islands.
+eligible leaves can also use Farm's experimental React compiler for direct state binding updates
+after their independent roots mount.
 
 ### Async pages stay server-only
 
@@ -194,7 +226,9 @@ components support.
 split without changing runtime behavior, or to `"enabled"` to hydrate safe leaves independently.
 Unsupported routes keep the existing route-wide ownership model. See
 [Isolated client hydration](/docs/configuration#isolated-client-hydration) for the modes and safety
-rules.
+rules. This experiment is disabled when RSC owns the route. Integration providers also keep the
+route-wide root unless they explicitly declare that they can be recreated around independent
+isolated roots.
 
 ## Automatic optimized boundaries
 

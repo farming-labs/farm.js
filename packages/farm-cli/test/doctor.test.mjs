@@ -55,6 +55,41 @@ test("uses the running DevTools snapshot as the source of truth", async () => {
   assert.ok(report.checks.some((check) => check.code === "EPHEMERAL_PRODUCTION_STORAGE"));
 });
 
+test("preserves live runtime health without matching diagnostics", async () => {
+  for (const [health, status] of [
+    ["attention", "warn"],
+    ["error", "fail"],
+  ]) {
+    const report = await runFarmDoctor({
+      url: "http://localhost:4319",
+      fetch: async () =>
+        Response.json({
+          health,
+          project: { name: "storefront", root: "/repo/storefront" },
+          deployment: { target: "node", preset: "node-server" },
+          counts: {
+            pages: 1,
+            layouts: 1,
+            apiRoutes: 0,
+            middleware: 0,
+            integrations: 0,
+            storageMounts: 0,
+            cronJobs: 0,
+            workflows: 0,
+          },
+          diagnostics: [],
+        }),
+    });
+
+    assert.equal(report.health, health);
+    assert.ok(
+      report.checks.some(
+        (check) => check.code === "LIVE_RUNTIME_HEALTH" && check.status === status,
+      ),
+    );
+  }
+});
+
 test("inspects a project without starting its runtime", async () => {
   const root = await createTempProject();
 
@@ -84,6 +119,36 @@ test("inspects a project without starting its runtime", async () => {
   }
 });
 
+test("enforces the Node 22.13 runtime baseline", async () => {
+  const root = await createTempProject();
+  const originalNodeVersion = Object.getOwnPropertyDescriptor(process.versions, "node");
+
+  try {
+    Object.defineProperty(process.versions, "node", {
+      ...originalNodeVersion,
+      configurable: true,
+      value: "22.12.0",
+    });
+    const unsupported = await runFarmDoctor({ root, offline: true });
+    const unsupportedCheck = unsupported.checks.find((check) => check.code === "NODE_UNSUPPORTED");
+    assert.equal(unsupportedCheck?.status, "fail");
+    assert.equal(unsupportedCheck?.action, "Upgrade Node.js to version 22.13 or newer.");
+
+    Object.defineProperty(process.versions, "node", {
+      ...originalNodeVersion,
+      configurable: true,
+      value: "22.13.0",
+    });
+    const supported = await runFarmDoctor({ root, offline: true });
+    assert.ok(supported.checks.some((check) => check.code === "NODE_SUPPORTED"));
+  } finally {
+    if (originalNodeVersion) {
+      Object.defineProperty(process.versions, "node", originalNodeVersion);
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("reports missing cron routes and ephemeral serverless storage", async () => {
   const root = await createTempProject({
     target: "vercel",
@@ -99,6 +164,25 @@ test("reports missing cron routes and ephemeral serverless storage", async () =>
     assert.ok(codes.includes("CRON_ROUTE_MISSING"));
     assert.ok(codes.includes("CRON_SECRET_NOT_SET"));
     assert.ok(codes.includes("EPHEMERAL_PRODUCTION_STORAGE"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("finds cron routes mounted under a custom API base path", async () => {
+  const root = await createTempProject({
+    apiBasePath: "/v2/api",
+    cronPath: "/v2/api/maintenance/cleanup",
+  });
+
+  try {
+    const report = await runFarmDoctor({
+      root,
+      offline: true,
+      env: { CRON_SECRET: "configured" },
+    });
+
+    assert.ok(!report.checks.some((check) => check.code === "CRON_ROUTE_MISSING"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -187,6 +271,95 @@ test("recognizes Vue pages and creates a Vue root layout", async () => {
   }
 });
 
+test("recognizes routes using the configured renderer extension", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-doctor-svelte-"));
+
+  try {
+    await mkdir(path.join(root, "src/app"), { recursive: true });
+    await writeFile(
+      path.join(root, "package.json"),
+      JSON.stringify({ name: "svelte-doctor", dependencies: { "@farm.js/core": "workspace:*" } }),
+    );
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      `export default {
+  renderer: {
+    name: "svelte",
+    vite: "@farm.js/svelte/vite",
+    server: "@farm.js/svelte/server",
+    client: "@farm.js/svelte/client",
+    componentExtensions: [".svelte"],
+  },
+};
+`,
+    );
+    await writeFile(path.join(root, "src/app/page.svelte"), "<main>Svelte</main>\n");
+    await writeFile(path.join(root, "src/app/layout.svelte"), "<slot />\n");
+
+    const report = await runFarmDoctor({ root, offline: true });
+
+    assert.ok(report.checks.some((check) => check.code === "APP_ROUTER_READY"));
+    assert.ok(report.checks.some((check) => check.code === "ROOT_LAYOUT_READY"));
+    assert.ok(!report.checks.some((check) => check.code === "NO_PAGE_ROUTES"));
+    assert.ok(!report.checks.some((check) => check.code === "ROOT_LAYOUT_MISSING"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+for (const fixture of [
+  {
+    renderer: "preact",
+    extension: ".tsx",
+    expected: /ComponentChildren.*from "preact"/,
+    rejected: /from "react"/,
+  },
+  {
+    renderer: "svelte",
+    extension: ".svelte",
+    expected: /Snippet.*from "svelte"/,
+    rejected: /from "react"/,
+  },
+]) {
+  test(`creates a ${fixture.renderer} root layout with renderer-native source`, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), `farm-cli-doctor-${fixture.renderer}-`));
+    const layoutPath = path.join(root, `src/app/layout${fixture.extension}`);
+
+    try {
+      await mkdir(path.join(root, "src/app"), { recursive: true });
+      await writeFile(
+        path.join(root, "package.json"),
+        JSON.stringify({
+          name: `${fixture.renderer}-doctor`,
+          dependencies: { "@farm.js/core": "workspace:*" },
+        }),
+      );
+      await writeFile(
+        path.join(root, "farm.config.mjs"),
+        `export default {
+  renderer: {
+    name: ${JSON.stringify(fixture.renderer)},
+    vite: "@farm.js/${fixture.renderer}/vite",
+    server: "@farm.js/${fixture.renderer}/server",
+    client: "@farm.js/${fixture.renderer}/client",
+    componentExtensions: [${JSON.stringify(fixture.extension)}],
+  },
+};
+`,
+      );
+
+      const report = await runFarmDoctor({ root, offline: true, fix: true });
+      const source = await readFile(layoutPath, "utf8");
+
+      assert.ok(report.fixes?.some((fix) => fix.filePath.endsWith(`layout${fixture.extension}`)));
+      assert.match(source, fixture.expected);
+      assert.doesNotMatch(source, fixture.rejected);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test("applies safe fixes inside a configured project root", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-doctor-root-"));
   const projectRoot = path.join(root, "application");
@@ -239,6 +412,7 @@ async function createTempProject(options = {}) {
     [
       "export default {",
       `  deploy: { target: '${target}' },`,
+      ...(options.apiBasePath ? [`  api: { basePath: '${options.apiBasePath}' },`] : []),
       `  storage: ${storage},`,
       "  cron: {",
       `    cleanup: { schedule: '0 2 * * *', path: '${cronPath}' },`,

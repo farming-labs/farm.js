@@ -82,10 +82,31 @@ export interface ClientModuleHydrationPlan extends ClientModuleMetadata {
   mode: FarmIsolatedClientHydrationMode;
   legacyShouldHydrate: boolean;
   legacyIslandStrategy: FarmIslandStrategy | null;
+  estimatedIsolatedRootCount: number;
   isolatedHydrationEligible: boolean;
   hasIsolatedClientBoundaries: boolean;
   isolatedBoundaries: IsolatedClientBoundaryReference[];
+  costGuardExceeded?: true;
   fallbackReason?: string;
+}
+
+/** @internal Largest measured statically bounded independent-root plan. */
+export const FARM_ISOLATED_HYDRATION_MAX_BOUNDARIES = 4;
+
+function isolatedHydrationBoundaryLimit(): number {
+  const benchmarkRoot = process.env.FARM_INTERNAL_ISOLATED_HYDRATION_BENCHMARK_ROOT;
+  const benchmarkLimit = Number(process.env.FARM_INTERNAL_ISOLATED_HYDRATION_BENCHMARK_LIMIT);
+  const resolvedBenchmarkRoot = benchmarkRoot ? path.resolve(benchmarkRoot) : null;
+  const isBenchmarkFixture =
+    process.env.FARM_INTERNAL_BENCHMARK === "isolated-hydration" &&
+    resolvedBenchmarkRoot !== null &&
+    (process.cwd() === resolvedBenchmarkRoot ||
+      process.cwd().startsWith(`${resolvedBenchmarkRoot}${path.sep}`));
+  return isBenchmarkFixture &&
+    Number.isSafeInteger(benchmarkLimit) &&
+    benchmarkLimit > FARM_ISOLATED_HYDRATION_MAX_BOUNDARIES
+    ? benchmarkLimit
+    : FARM_ISOLATED_HYDRATION_MAX_BOUNDARIES;
 }
 
 interface ParsedClientModuleMetadata {
@@ -106,6 +127,18 @@ const RESOLVABLE_SOURCE_EXTENSIONS = [
   ".cts",
   ".cjs",
 ] as const;
+
+export function resolveFarmIsolatedClientHydrationMode(
+  mode: FarmIsolatedClientHydrationMode | undefined,
+  options: {
+    serverComponents?: boolean;
+    hasUnsupportedIntegrationProvider?: boolean;
+  } = {},
+): FarmIsolatedClientHydrationMode {
+  if (options.serverComponents) return "off";
+  if (mode === "enabled" && options.hasUnsupportedIntegrationProvider) return "off";
+  return mode ?? "off";
+}
 
 export function hasUseClientDirective(content: string | null): boolean {
   if (!content) {
@@ -394,7 +427,7 @@ export function stripUseClientDirective(content: string): string {
   // Comments (and other directives) may precede "use client"; keep them and
   // remove only the directive itself.
   return content.replace(
-    /^((?:\s|\/\/[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*)(["'])use client\2\s*;?\s*/,
+    /^((?:\s|\/\/[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/|(?:"[^"\n]*"|'[^'\n]*')\s*;?)*)(["'])use client\2\s*;?\s*/,
     "$1",
   );
 }
@@ -496,14 +529,20 @@ export function getClientModuleHydrationPlan(
   const resolvedPath = resolveModuleSourcePath(modulePath, root);
   const content = readIfExists(resolvedPath ?? "");
   const parsed = parseClientModuleMetadata(content, true);
-  const emptyPlan = (fallbackReason?: string): ClientModuleHydrationPlan => ({
+  const emptyPlan = (
+    fallbackReason?: string,
+    costGuardExceeded = false,
+    estimatedIsolatedRootCount = 0,
+  ): ClientModuleHydrationPlan => ({
     ...metadata,
     mode,
     legacyShouldHydrate: metadata.shouldHydrate,
     legacyIslandStrategy: metadata.islandStrategy,
+    estimatedIsolatedRootCount,
     isolatedHydrationEligible: false,
     hasIsolatedClientBoundaries: false,
     isolatedBoundaries: [],
+    ...(costGuardExceeded ? { costGuardExceeded: true as const } : {}),
     ...(fallbackReason ? { fallbackReason } : {}),
   });
 
@@ -521,7 +560,19 @@ export function getClientModuleHydrationPlan(
     return emptyPlan(inspection.fallbackReason);
   }
   if (inspection.fallbackReason) {
-    return emptyPlan(inspection.fallbackReason);
+    return emptyPlan(
+      inspection.fallbackReason,
+      inspection.costGuardExceeded,
+      inspection.estimatedBoundaryCount,
+    );
+  }
+  const boundaryLimit = isolatedHydrationBoundaryLimit();
+  if (inspection.estimatedBoundaryCount > boundaryLimit) {
+    return emptyPlan(
+      `the client graph can create ${inspection.estimatedBoundaryCount} isolated roots, above the measured limit of ${boundaryLimit}`,
+      true,
+      inspection.estimatedBoundaryCount,
+    );
   }
 
   const enabled = mode === "enabled";
@@ -532,10 +583,114 @@ export function getClientModuleHydrationPlan(
     mode,
     legacyShouldHydrate: metadata.shouldHydrate,
     legacyIslandStrategy: metadata.islandStrategy,
+    estimatedIsolatedRootCount: inspection.estimatedBoundaryCount,
     isolatedHydrationEligible: true,
     hasIsolatedClientBoundaries: enabled,
     isolatedBoundaries: inspection.boundaries,
   };
+}
+
+interface FarmIsolatedHydrationRoutePlan {
+  mode: FarmIsolatedClientHydrationMode;
+  shouldHydrate: boolean;
+  islandStrategy: FarmIslandStrategy | null;
+  legacyShouldHydrate: boolean;
+  legacyIslandStrategy: FarmIslandStrategy | null;
+  estimatedIsolatedRootCount: number;
+  hasIsolatedClientBoundaries: boolean;
+  isolatedBoundaries: IsolatedClientBoundaryReference[];
+  costGuardExceeded?: true;
+  fallbackReason?: string;
+}
+
+interface FarmIsolatedHydrationRouteOwner {
+  pattern: string;
+  depth: number;
+  metadata: FarmIsolatedHydrationRoutePlan;
+}
+
+function restoreRouteWideHydration(
+  metadata: FarmIsolatedHydrationRoutePlan,
+  fallbackReason?: string,
+): void {
+  metadata.shouldHydrate = metadata.legacyShouldHydrate;
+  metadata.islandStrategy = metadata.legacyIslandStrategy;
+  metadata.hasIsolatedClientBoundaries = false;
+  metadata.isolatedBoundaries = [];
+  if (fallbackReason) {
+    metadata.costGuardExceeded = true;
+    metadata.fallbackReason = fallbackReason;
+  }
+}
+
+/** @internal Applies the measured root budget to each complete layout and page chain. */
+export function enforceFarmIsolatedHydrationRouteBudget(
+  layouts: FarmIsolatedHydrationRouteOwner[],
+  routes: FarmIsolatedHydrationRouteOwner[],
+  layoutAppliesToRoute: (layoutPattern: string, routePattern: string) => boolean,
+): void {
+  const boundaryLimit = isolatedHydrationBoundaryLimit();
+  const sortedLayouts = [...layouts].sort((left, right) => left.depth - right.depth);
+
+  for (const route of routes) {
+    if (route.metadata.mode !== "enabled") continue;
+    const applicableLayouts = sortedLayouts.filter((layout) =>
+      layoutAppliesToRoute(layout.pattern, route.pattern),
+    );
+    if (applicableLayouts.some((layout) => layout.metadata.shouldHydrate)) continue;
+
+    const layoutRootCount = applicableLayouts.reduce(
+      (count, layout) =>
+        count +
+        (layout.metadata.hasIsolatedClientBoundaries
+          ? layout.metadata.estimatedIsolatedRootCount
+          : 0),
+      0,
+    );
+    const routeRootCount = route.metadata.hasIsolatedClientBoundaries
+      ? route.metadata.estimatedIsolatedRootCount
+      : 0;
+    const totalRootCount = layoutRootCount + routeRootCount;
+    if (totalRootCount <= boundaryLimit) continue;
+
+    let accumulatedLayoutRoots = 0;
+    const overflowingLayout = applicableLayouts.find((layout) => {
+      if (layout.metadata.hasIsolatedClientBoundaries) {
+        accumulatedLayoutRoots += layout.metadata.estimatedIsolatedRootCount;
+      }
+      return accumulatedLayoutRoots > boundaryLimit;
+    });
+    const fallbackReason = `the matched route ${route.pattern} can create ${totalRootCount} isolated roots, above the measured limit of ${boundaryLimit}`;
+
+    if (overflowingLayout) {
+      restoreRouteWideHydration(overflowingLayout.metadata, fallbackReason);
+    } else if (route.metadata.hasIsolatedClientBoundaries) {
+      restoreRouteWideHydration(route.metadata, fallbackReason);
+    }
+  }
+
+  for (const layout of sortedLayouts) {
+    const hasRouteWideAncestor = sortedLayouts.some(
+      (ancestor) =>
+        ancestor !== layout &&
+        ancestor.depth < layout.depth &&
+        ancestor.metadata.shouldHydrate &&
+        layoutAppliesToRoute(ancestor.pattern, layout.pattern),
+    );
+    if (hasRouteWideAncestor && layout.metadata.hasIsolatedClientBoundaries) {
+      restoreRouteWideHydration(layout.metadata);
+    }
+  }
+
+  for (const route of routes) {
+    const hasRouteWideLayout = sortedLayouts.some(
+      (layout) =>
+        layout.metadata.shouldHydrate && layoutAppliesToRoute(layout.pattern, route.pattern),
+    );
+    if (hasRouteWideLayout && route.metadata.hasIsolatedClientBoundaries) {
+      restoreRouteWideHydration(route.metadata);
+    }
+  }
 }
 
 /**
@@ -552,59 +707,478 @@ export function isIsolatableClientBoundarySource(content: string | null): boolea
   );
 }
 
+function getStaticImportBindings(content: string | null): Map<string, string[]> {
+  const bindings = new Map<string, string[]>();
+  if (!content) return bindings;
+  const tokens = tokenizeModuleSource(content);
+
+  for (let index = 0; index < tokens.length; index++) {
+    if (tokens[index].value !== "import" || tokens[index - 1]?.value === ".") continue;
+    const first = tokens[index + 1];
+    if (!first || first.value === "type" || first.value === "(" || first.kind === "string") {
+      continue;
+    }
+
+    let fromIndex = -1;
+    for (let cursor = index + 1; cursor < tokens.length; cursor++) {
+      if (tokens[cursor].value === ";") break;
+      if (tokens[cursor].value === "from" && tokens[cursor + 1]?.kind === "string") {
+        fromIndex = cursor;
+        break;
+      }
+    }
+    if (fromIndex === -1) continue;
+    const specifier = tokens[fromIndex + 1].value;
+    const clause = tokens.slice(index + 1, fromIndex);
+    const localNames: string[] = [];
+
+    if (clause[0]?.kind === "identifier" && clause[0].value !== "type") {
+      localNames.push(clause[0].value);
+    }
+    const namespaceAs = clause.findIndex(
+      (token, clauseIndex) => token.value === "*" && clause[clauseIndex + 1]?.value === "as",
+    );
+    if (namespaceAs !== -1 && clause[namespaceAs + 2]?.kind === "identifier") {
+      localNames.push(clause[namespaceAs + 2].value);
+    }
+
+    const openingBrace = clause.findIndex((token) => token.value === "{");
+    const closingBrace = clause.findIndex(
+      (token, clauseIndex) => clauseIndex > openingBrace && token.value === "}",
+    );
+    if (openingBrace !== -1 && closingBrace !== -1) {
+      let entryStart = openingBrace + 1;
+      for (let cursor = entryStart; cursor <= closingBrace; cursor++) {
+        if (cursor !== closingBrace && clause[cursor]?.value !== ",") continue;
+        const entry = clause.slice(entryStart, cursor).filter((token) => token.value !== "type");
+        const asIndex = entry.findIndex((token) => token.value === "as");
+        const local = asIndex === -1 ? entry[0] : entry[asIndex + 1];
+        if (local?.kind === "identifier") localNames.push(local.value);
+        entryStart = cursor + 1;
+      }
+    }
+
+    bindings.set(
+      specifier,
+      Array.from(new Set([...(bindings.get(specifier) ?? []), ...localNames])),
+    );
+  }
+
+  return bindings;
+}
+
+/**
+ * Elements whose content model the HTML parser enforces. A boundary marker
+ * emitted inside one of these is relocated or ignored before any script runs:
+ * in a table the marker and its row are foster-parented out of the table, in a
+ * select the options stop being direct children and the control renders empty,
+ * and inside svg the marker is created in the SVG namespace as an unknown
+ * element whose children never render. RFC 0001 requires these to take the
+ * route-wide fallback.
+ */
+const PARSER_SENSITIVE_JSX_CONTAINERS = new Set([
+  "table",
+  "thead",
+  "tbody",
+  "tfoot",
+  "tr",
+  "select",
+  "optgroup",
+  "svg",
+]);
+
+/**
+ * Names a parser-sensitive element that encloses a use of one of the bindings,
+ * or undefined when every use is in ordinary flow content.
+ *
+ * Ambiguity resolves toward reporting a container: the caller turns a hit into
+ * the complete route-wide fallback, which is always correct, while a miss would
+ * leave the silent DOM corruption in place.
+ */
+function findParserSensitiveJsxContainer(
+  content: string | null,
+  localBindings: string[],
+): string | undefined {
+  if (!content || localBindings.length === 0) return undefined;
+  const names = new Set(localBindings);
+  const tokens = tokenizeModuleSource(content);
+  const openDepth = new Map<string, number>();
+
+  const isSelfClosing = (openingIndex: number): boolean => {
+    for (let index = openingIndex; index < tokens.length; index++) {
+      if (tokens[index].value === ">") return tokens[index - 1]?.value === "/";
+    }
+    return false;
+  };
+
+  for (let index = 0; index < tokens.length - 1; index++) {
+    if (tokens[index].value !== "<") continue;
+
+    if (tokens[index + 1].value === "/") {
+      const closing = tokens[index + 2]?.value;
+      if (closing && openDepth.has(closing)) {
+        openDepth.set(closing, Math.max(0, (openDepth.get(closing) ?? 0) - 1));
+      }
+      continue;
+    }
+
+    const tag = tokens[index + 1].value;
+    if (names.has(tag)) {
+      for (const [container, depth] of openDepth) {
+        if (depth > 0) return container;
+      }
+      continue;
+    }
+    if (PARSER_SENSITIVE_JSX_CONTAINERS.has(tag) && !isSelfClosing(index)) {
+      openDepth.set(tag, (openDepth.get(tag) ?? 0) + 1);
+    }
+  }
+
+  return undefined;
+}
+
+function countStaticJsxUses(content: string | null, localBindings: string[]): number {
+  if (!content || localBindings.length === 0) return 0;
+  const names = new Set(localBindings);
+  const tokens = tokenizeModuleSource(content);
+  let count = 0;
+  for (let index = 0; index < tokens.length - 1; index++) {
+    if (tokens[index].value === "<" && names.has(tokens[index + 1].value)) count++;
+  }
+  return count;
+}
+
+function findMatchingToken(
+  tokens: ModuleSourceToken[],
+  openingIndex: number,
+  opening: string,
+  closing: string,
+): number {
+  let depth = 0;
+  for (let index = openingIndex; index < tokens.length; index++) {
+    if (tokens[index].value === opening) depth++;
+    if (tokens[index].value !== closing) continue;
+    depth--;
+    if (depth === 0) return index;
+  }
+  return tokens.length - 1;
+}
+
+function containsClientJsx(
+  tokens: ModuleSourceToken[],
+  start: number,
+  end: number,
+  clientBindings: Set<string>,
+): boolean {
+  for (let index = start; index < end; index++) {
+    if (tokens[index].value === "<" && clientBindings.has(tokens[index + 1]?.value)) return true;
+  }
+  return false;
+}
+
+function findStatementEnd(tokens: ModuleSourceToken[], start: number): number {
+  let parentheses = 0;
+  let brackets = 0;
+  let braces = 0;
+  const statementStarters = new Set([
+    "class",
+    "const",
+    "export",
+    "function",
+    "import",
+    "let",
+    "var",
+  ]);
+  for (let index = start; index < tokens.length; index++) {
+    const value = tokens[index].value;
+    if (
+      index > start &&
+      parentheses === 0 &&
+      brackets === 0 &&
+      braces === 0 &&
+      tokens[index].line > tokens[index - 1].line &&
+      statementStarters.has(value)
+    ) {
+      return index;
+    }
+    if (value === ";" && parentheses === 0 && brackets === 0 && braces === 0) return index;
+    if (value === "(") parentheses++;
+    if (value === ")") parentheses--;
+    if (value === "[") brackets++;
+    if (value === "]") brackets--;
+    if (value === "{") braces++;
+    if (value === "}") braces--;
+  }
+  return tokens.length;
+}
+
+function getClientRenderingHelpers(
+  tokens: ModuleSourceToken[],
+  clientBindings: Set<string>,
+): Set<string> {
+  const helperBodies = new Map<string, [start: number, end: number]>();
+  for (let index = 0; index < tokens.length; index++) {
+    let helperName: string | undefined;
+    let bodyStart = -1;
+    let bodyEnd = -1;
+
+    if (tokens[index].value === "function" && tokens[index + 1]?.kind === "identifier") {
+      helperName = tokens[index + 1].value;
+      const parametersStart = tokens.findIndex(
+        (token, tokenIndex) => tokenIndex > index + 1 && token.value === "(",
+      );
+      const parametersEnd =
+        parametersStart === -1 ? index + 1 : findMatchingToken(tokens, parametersStart, "(", ")");
+      bodyStart = tokens.findIndex(
+        (token, tokenIndex) => tokenIndex > parametersEnd && token.value === "{",
+      );
+      if (bodyStart !== -1) bodyEnd = findMatchingToken(tokens, bodyStart, "{", "}");
+    } else if (
+      (tokens[index].value === "const" ||
+        tokens[index].value === "let" ||
+        tokens[index].value === "var") &&
+      tokens[index + 1]?.kind === "identifier"
+    ) {
+      helperName = tokens[index + 1].value;
+      let assignmentIndex = -1;
+      let arrowIndex = -1;
+      for (let cursor = index + 2; cursor < tokens.length; cursor++) {
+        if (tokens[cursor].value === ";") break;
+        if (assignmentIndex === -1 && tokens[cursor].value === "=") assignmentIndex = cursor;
+        if (tokens[cursor].value === "=" && tokens[cursor + 1]?.value === ">") {
+          arrowIndex = cursor;
+          break;
+        }
+      }
+      if (arrowIndex !== -1) {
+        bodyStart = arrowIndex + 2;
+        bodyEnd =
+          tokens[bodyStart]?.value === "{"
+            ? findMatchingToken(tokens, bodyStart, "{", "}")
+            : findStatementEnd(tokens, bodyStart);
+      } else if (assignmentIndex !== -1) {
+        bodyStart = assignmentIndex + 1;
+        bodyEnd = findStatementEnd(tokens, bodyStart);
+      }
+    }
+
+    if (helperName && bodyStart !== -1 && bodyEnd !== -1) {
+      helperBodies.set(helperName, [bodyStart, bodyEnd]);
+    }
+  }
+
+  const helpers = new Set<string>();
+  let addedHelper = true;
+  while (addedHelper) {
+    addedHelper = false;
+    for (const [helperName, [bodyStart, bodyEnd]] of helperBodies) {
+      if (helpers.has(helperName)) continue;
+      const rendersClientBoundary =
+        containsClientJsx(tokens, bodyStart, bodyEnd, clientBindings) ||
+        tokens.slice(bodyStart, bodyEnd).some((token) => helpers.has(token.value));
+      if (!rendersClientBoundary) continue;
+      helpers.add(helperName);
+      addedHelper = true;
+    }
+  }
+  return helpers;
+}
+
+/**
+ * True when a boundary is handed a React element, as JSX children or as an
+ * element-valued prop.
+ *
+ * Boundary props cross to the browser as JSON, and an element cannot be
+ * serialized. Without this check the SSR wrapper drops the marker for that
+ * boundary and the component renders as ordinary server markup that nothing
+ * ever hydrates, leaving an interactive-looking widget permanently dead with
+ * no browser-visible diagnostic. String and number children serialize fine and
+ * are deliberately not flagged.
+ */
+function passesElementValuedProps(content: string | null, localBindings: string[]): boolean {
+  if (!content || localBindings.length === 0) return false;
+  const names = new Set(localBindings);
+  const tokens = tokenizeModuleSource(content);
+
+  for (let index = 0; index < tokens.length - 1; index++) {
+    if (tokens[index].value !== "<" || !names.has(tokens[index + 1].value)) continue;
+    const name = tokens[index + 1].value;
+
+    // Walk the opening tag, watching for an element inside an attribute
+    // expression such as icon={<Icon />}.
+    let cursor = index + 2;
+    let braceDepth = 0;
+    let selfClosing = false;
+    for (; cursor < tokens.length; cursor++) {
+      const value = tokens[cursor].value;
+      if (value === "{") braceDepth++;
+      else if (value === "}") braceDepth--;
+      else if (value === "<" && braceDepth > 0) return true;
+      else if (value === ">" && braceDepth === 0) {
+        selfClosing = tokens[cursor - 1]?.value === "/";
+        break;
+      }
+    }
+    if (selfClosing || cursor >= tokens.length) continue;
+
+    // The first tag after the opening one decides it: the boundary's own
+    // closing tag means no element children, anything else is an element child.
+    for (let child = cursor + 1; child < tokens.length; child++) {
+      if (tokens[child].value !== "<") continue;
+      const closesBoundary = tokens[child + 1]?.value === "/" && tokens[child + 2]?.value === name;
+      if (!closesBoundary) return true;
+      break;
+    }
+  }
+
+  return false;
+}
+
+function hasDynamicJsxCardinality(content: string | null, localBindings: string[]): boolean {
+  if (!content || localBindings.length === 0) return false;
+  const clientBindings = new Set(localBindings);
+  const tokens = tokenizeModuleSource(content);
+  const renderingHelpers = getClientRenderingHelpers(tokens, clientBindings);
+  const containsDynamicRenderer = (start: number, end: number) =>
+    containsClientJsx(tokens, start, end, clientBindings) ||
+    tokens.slice(start, end).some((token) => renderingHelpers.has(token.value));
+
+  for (let index = 0; index < tokens.length; index++) {
+    let callStart = -1;
+    if (
+      tokens[index].value === "." &&
+      (tokens[index + 1]?.value === "map" || tokens[index + 1]?.value === "flatMap") &&
+      tokens[index + 2]?.value === "("
+    ) {
+      callStart = index + 2;
+    } else if (
+      tokens[index].value === "Array" &&
+      tokens[index + 1]?.value === "." &&
+      tokens[index + 2]?.value === "from" &&
+      tokens[index + 3]?.value === "("
+    ) {
+      callStart = index + 3;
+    }
+    if (callStart !== -1) {
+      const callEnd = findMatchingToken(tokens, callStart, "(", ")");
+      if (containsDynamicRenderer(callStart + 1, callEnd)) return true;
+      index = callEnd;
+      continue;
+    }
+
+    if (
+      (tokens[index].value === "for" || tokens[index].value === "while") &&
+      tokens[index + 1]?.value === "("
+    ) {
+      const conditionEnd = findMatchingToken(tokens, index + 1, "(", ")");
+      const bodyStart = conditionEnd + 1;
+      const bodyEnd =
+        tokens[bodyStart]?.value === "{"
+          ? findMatchingToken(tokens, bodyStart, "{", "}")
+          : tokens.findIndex((token, tokenIndex) => tokenIndex > bodyStart && token.value === ";");
+      if (containsDynamicRenderer(bodyStart, bodyEnd === -1 ? tokens.length : bodyEnd)) return true;
+    }
+  }
+
+  return false;
+}
+
 function collectIsolatedClientBoundaries(
   ownerPath: string,
   root: string | undefined,
-): { boundaries: IsolatedClientBoundaryReference[]; fallbackReason?: string } {
+): {
+  boundaries: IsolatedClientBoundaryReference[];
+  estimatedBoundaryCount: number;
+  costGuardExceeded?: boolean;
+  fallbackReason?: string;
+} {
   const boundaries = new Map<string, IsolatedClientBoundaryReference>();
-  const visited = new Set<string>();
+  const estimates = new Map<string, number>();
+  const visiting = new Set<string>();
   let fallbackReason: string | undefined;
+  let costGuardExceeded = false;
   const projectRoot = root ? path.resolve(root) : undefined;
 
-  const visit = (moduleSourcePath: string) => {
-    if (fallbackReason || visited.has(moduleSourcePath)) return;
-    visited.add(moduleSourcePath);
+  const visit = (moduleSourcePath: string): number => {
+    if (fallbackReason) return 0;
+    const cached = estimates.get(moduleSourcePath);
+    if (cached !== undefined) return cached;
+    if (visiting.has(moduleSourcePath)) return 0;
+    visiting.add(moduleSourcePath);
     const content = readIfExists(moduleSourcePath);
     const parsed = parseClientModuleMetadata(content, false);
 
     if (parsed.isClientComponent) {
       if (projectRoot && !path.resolve(moduleSourcePath).startsWith(`${projectRoot}${path.sep}`)) {
         fallbackReason = `client boundary ${moduleSourcePath} is outside the application root`;
-        return;
+        return 0;
       }
       if (!isIsolatableClientBoundarySource(content)) {
         fallbackReason = `client boundary ${moduleSourcePath} uses an unsupported export shape`;
-        return;
+        return 0;
       }
       boundaries.set(moduleSourcePath, {
         modulePath: moduleSourcePath,
         islandStrategy: parsed.islandStrategy ?? "load",
       });
-      return;
+      estimates.set(moduleSourcePath, 1);
+      visiting.delete(moduleSourcePath);
+      return 1;
     }
 
     if (parsed.hasHydrateExport) {
       fallbackReason = `imported module ${moduleSourcePath} explicitly exports hydrate = true`;
-      return;
+      return 0;
     }
 
-    for (const specifier of getImportSpecifiers(content)) {
+    const importedBindings = getStaticImportBindings(content);
+    let estimatedBoundaryCount = 0;
+    for (const specifier of new Set(getImportSpecifiers(content))) {
       const importedPath = resolveImportedModuleSourcePath(moduleSourcePath, specifier, root);
       if (!importedPath) continue;
       if (!specifier.startsWith(".") && !specifier.startsWith("/")) {
         const packageMetadata = inspectPackageClientBoundary(importedPath, root, new Set());
         if (packageMetadata.shouldHydrate) {
           fallbackReason = `package client boundary ${specifier} cannot yet be isolated`;
-          return;
+          return 0;
         }
         continue;
       }
-      visit(importedPath);
+      const importedBoundaryCount = visit(importedPath);
+      if (fallbackReason || importedBoundaryCount === 0) continue;
+      const localBindings = importedBindings.get(specifier) ?? [];
+      const staticUses = countStaticJsxUses(content, localBindings);
+      if (staticUses > 0) {
+        const container = findParserSensitiveJsxContainer(content, localBindings);
+        if (container) {
+          fallbackReason = `the client boundary imported from ${specifier} renders inside <${container}>, where the HTML parser relocates its hydration marker`;
+          return 0;
+        }
+        if (passesElementValuedProps(content, localBindings)) {
+          fallbackReason = `the client boundary imported from ${specifier} receives React elements, which cannot cross the boundary as serialized props`;
+          return 0;
+        }
+      }
+      if (staticUses > 0 && hasDynamicJsxCardinality(content, localBindings)) {
+        fallbackReason = `the client boundary count imported from ${specifier} is data-dependent`;
+        costGuardExceeded = true;
+        return 0;
+      }
+      estimatedBoundaryCount += importedBoundaryCount * Math.max(1, staticUses);
     }
+
+    estimates.set(moduleSourcePath, estimatedBoundaryCount);
+    visiting.delete(moduleSourcePath);
+    return estimatedBoundaryCount;
   };
 
-  visit(ownerPath);
-  return { boundaries: Array.from(boundaries.values()), fallbackReason };
+  const estimatedBoundaryCount = visit(ownerPath);
+  return {
+    boundaries: Array.from(boundaries.values()),
+    estimatedBoundaryCount,
+    costGuardExceeded,
+    fallbackReason,
+  };
 }
 
 export function isClientComponentModule(modulePath: string, root?: string): boolean {

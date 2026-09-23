@@ -10,6 +10,10 @@ Integrations are the Farm layer for connecting product services to your app. A p
 
 Farm treats every integration as a small server plugin. That means an integration can participate in framework startup and shutdown, own HTTP routes, and still expose a compact typed API to the rest of the app.
 
+A plugin extends framework behavior; an integration owns a configured service capability, such
+as its SDK client, lifecycle, models, or providers. They can share route machinery without being
+the same public contract. Their API routes can be consumed through one [shared API setup](/docs/api-client#integration-callers).
+
 ## Import the dedicated adapter package
 
 New applications should import each Farm adapter from its dedicated package, such as
@@ -56,7 +60,10 @@ export default defineConfig({
 });
 ```
 
-The object key is the application namespace. If you register Stripe as `billing`, the typed caller lives at `api.billing`. If you register it as `stripe`, it lives at `api.stripe`.
+The object key is the application namespace. Registering Stripe as `billing` exposes
+`api.integrations.billing` with `createApiClients`, or `api.billing` with the integration-only
+`createIntegrations` factory. The same distinction applies to `apiClient`; registering it as
+`stripe` changes the `billing` segment to `stripe`.
 
 ## Own the provider instance in application code
 
@@ -113,6 +120,125 @@ Provider pages show the exact constructor and any integration-owned options that
 
 ## Create callers
 
+### One setup for app routes and integrations
+
+If the app uses file or plugin routes as well as integrations, use `createApiClients` once in
+`src/lib/api.ts`. Export the configured registry's type from a server-only module:
+
+**src/lib/integrations.ts**
+
+```ts
+import { billing } from "../integrations/billing";
+
+export const appIntegrations = { billing } as const;
+export type AppIntegrations = typeof appIntegrations;
+```
+
+Here `billing` is the integration defined in the [custom integration guide](/docs/integrations/custom#choose-the-http-surface).
+`appIntegrations` is the real server-side object containing it. `AppIntegrations` is only a
+TypeScript description of that object: `typeof` does not create another integration, and
+`as const` preserves its literal types rather than freezing it at runtime.
+
+Register that object with Farm once:
+
+**farm.config.ts**
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { appIntegrations } from "./src/lib/integrations";
+
+export default defineConfig({
+  integrations: appIntegrations,
+});
+```
+
+This is where Farm registers the integrations and their routes. Keep provider instances and
+credentials in the server-only registry. Next, create callers for those already-configured
+services in the shared module; this does not create new provider instances:
+
+**src/lib/api.ts**
+
+```ts
+import { createApiClients } from "@farm.js/core/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
+import type { AppIntegrations } from "./integrations";
+
+export const { api, apiClient } = createApiClients<APIRouter, AppIntegrations>({
+  routes: apiRoutes,
+  integrations: {
+    data: { appName: "farm-dashboard" },
+  },
+});
+```
+
+The inputs have different jobs:
+
+| Input             | What it supplies                                                                      | Present in browser JavaScript?                              |
+| ----------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `APIRouter`       | Generated types for file and plugin routes.                                           | No; it is a type.                                           |
+| `AppIntegrations` | Types for the configured integration operations.                                      | No; `import type` is erased.                                |
+| `apiRoutes`       | Generated paths and methods used to resolve app-route URLs, including dynamic params. | Yes; it is schema-free route metadata, not server handlers. |
+
+The `integrations.data` option above is optional request metadata, not another integration
+registration. You can omit it. The factory returns `api` for server calls and `apiClient` for
+browser calls; both are exported from this one module.
+
+App routes use paths such as `apiClient.hello.get(...)`; integration calls use
+`apiClient.integrations.billing.checkout.post(...)` or `api.integrations.billing.checkout.post(...)`.
+`farm generate`, development startup, and builds emit the route manifest. Import only the
+integration registry's type; the configured registry supplies integration metadata at runtime.
+No second `createIntegrations()` call is needed.
+
+Shared setup does not unify result or transport behavior: integrations retain `{ data, error }`
+results and server-side HTTP fallback, while app-route `api` calls require a Farm request and
+return `{ data, error, key }` without HTTP fallback. See [Integration callers](/docs/api-client#integration-callers)
+for the full contract.
+
+### Integration-only setup
+
+`createIntegrations()` remains supported and is not deprecated. There is no required migration:
+keep it when you prefer separate route and integration caller modules, or when only integration
+callers are needed. For separate modules, set `integrations: false` on the app-route
+`createApiClients()` setup and keep `createIntegrations()` for the integration callers. This
+does not change integration registration in `farm.config.ts`.
+
+Existing caller options can also be a reason to keep `createIntegrations()`. The factories do
+not have interchangeable option signatures:
+
+| Need                                                                                         | `createIntegrations()`                    | `createApiClients()`                                                                              |
+| -------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Shared `baseURL`, `headers`, `credentials`, or `data` defaults                               | Pass them in `clientOptions`.             | Pass them under `integrations`. These options alone do not require a separate factory.            |
+| Setup-level `request`, `forwardHeaders`, or separate server defaults                         | Pass a separate `serverOptions` argument. | No separate server-options argument; server integration calls support per-call overrides instead. |
+| Explicit integration definitions or API contracts, for example in isolated packages or tests | Use the source-map overload.              | Uses the configured integration registry.                                                         |
+
+For example, a request-scoped server helper can bind a request and its forwarding policy once:
+
+**src/lib/api.server.ts**
+
+```ts
+import { createIntegrations } from "@farm.js/core/client";
+import type { AppIntegrations } from "./integrations";
+
+export function createRequestIntegrationApi(request: Request) {
+  const { api } = createIntegrations<AppIntegrations>(
+    { data: { appName: "farm-dashboard" } },
+    { request, forwardHeaders: ["cookie", "authorization"] },
+  );
+
+  return api;
+}
+```
+
+Keep this helper in server-only code and call it per request; do not cache a request-bound
+caller globally or import it into browser code. A `serverOptions` argument is not a bundler
+security boundary: private headers, tokens, and requests must stay out of shared client modules.
+Forward credentials only to trusted destinations.
+
+The examples below use this integration-only setup and therefore omit `.integrations`. In an app using the
+shared factory above, reuse that pair and add `.integrations` to these integration call paths
+instead of creating another pair. Integration defaults such as `data` go inside its
+`integrations` option.
+
 **src/lib/api.ts**
 
 ```ts
@@ -127,6 +253,14 @@ export const { api, apiClient } = createIntegrations<AppIntegrations>({
 ```
 
 `apiClient` is the browser caller. `api` is the server caller. Both preserve the same integration namespace so a route like `/api/billing/checkout` can become `api.billing.checkout.post(...)`, and a single-method endpoint can be called directly when there is only one method.
+
+HTTP calls use the same API-root rules on both sides. For example, `baseURL:
+"https://example.com/backend/v2"` maps `/api/billing/status` to
+`https://example.com/backend/v2/billing/status` for browser calls and server HTTP fallback.
+A root-relative base such as `/backend/v2` uses the browser origin or the server request's origin.
+Server-specific and per-call `baseURL` overrides follow the same rules. Registered local handlers
+still dispatch at their canonical route path without an HTTP round trip; a gateway prefix does
+not remount them. Only forward credentials to trusted HTTP destinations.
 
 ## Integration surface
 
@@ -301,6 +435,105 @@ export default defineConfig({
 | [Cloudflare Agents](/docs/integrations/cf-agent) | Wrangler development process, `/agents` WebSocket proxy, combined Worker output and deployment metadata. | Agent classes, Durable Object bindings, `useAgent()`, and callable RPC. |
 
 Same-origin routing is not an authorization boundary. Authenticate agent HTTP and WebSocket requests in application middleware or provider routing hooks, and authorize every sensitive tool or callable method on the server.
+
+## Header defaults
+
+`createIntegrations` supports static headers and sync or async header resolvers, just like
+[`createApiClients`](/docs/api-client#header-defaults). Use a resolver when defaults must be read
+at call time rather than captured when the module loads:
+
+```ts
+import { createIntegrations } from "@farm.js/core/client";
+import type { AppIntegrations } from "./integrations";
+
+export const { api, apiClient } = createIntegrations<AppIntegrations>({
+  headers: () => ({
+    "Accept-Language":
+      typeof document === "undefined" ? "en" : document.documentElement.lang || "en",
+  }),
+});
+```
+
+`headers: async () => ({ ... })` is also supported. Each operation resolves its instance headers
+once, for both browser HTTP calls and server dispatch (including the server HTTP fallback).
+The existing separate factories and explicit-source overloads accept the same option.
+
+Custom header precedence, lowest to highest, is: forwarded server request headers, instance
+defaults, operation-definition headers, then per-call `headers`. Overrides are case-insensitive;
+per-call headers remain plain objects. Farm still controls protocol/body headers, such as its
+integration marker and JSON/form encoding. Resolver failures return `{ data: null, error }`
+without dispatching or fetching.
+
+The second, server-options argument to `createIntegrations` can provide a different `headers`
+resolver for `api`; it replaces the first argument's header defaults rather than merging them.
+Keep any server-only version in a server-only module. A function or the server-options argument
+does not itself hide secrets from a browser bundle. For ordinary session cookies, retain Farm's
+existing request forwarding and browser credential behavior instead of copying secrets into
+shared defaults. The example's English server default overrides a forwarded language; omit that
+default if the incoming request should decide it.
+
+## Cancellation and deadlines
+
+`createIntegrations<AppIntegrations>({ timeoutMs: 10_000 })` sets one whole-call deadline for
+both callers. The separate server-options argument can override it for `api`. The same option
+works in the existing integration-only factories and in `createApiClients`'s `integrations`
+options. A call can pass `{ signal, timeoutMs }` as its second argument:
+
+```ts
+const controller = new AbortController();
+const pending = apiClient.billing.checkout(
+  { body: { priceId: "price_123" } },
+  { signal: controller.signal, timeoutMs: 5_000 },
+);
+controller.abort();
+const { error } = await pending;
+```
+
+The deadline includes header resolution, HTTP or local dispatch, and response decoding.
+`0` disables it; use an integer between `0` and `2147483647`. Cancellation returns the normal
+`{ data: null, error }` result. Farm deadlines produce an error named `TimeoutError`; ordinary
+`controller.abort()` produces `AbortError`. A custom abort reason is normalized to an error.
+
+Direct server handlers receive the combined per-call and incoming request signal on their
+`Request`, just as HTTP calls receive the call signal. Cancellation stops waiting, not side
+effects: handlers must pass the signal to their own work when supported. A handler ignoring it
+can still finish or write data. For raw `Response` operations the deadline ends when the response
+is returned; use the signal to cancel subsequent HTTP body consumption.
+
+## Custom HTTP transport
+
+`createIntegrations<AppIntegrations>({ fetch: customFetch })` accepts the same fetch-compatible
+function as [`createApiClients`](/docs/api-client#custom-http-transport). Both HTTP callers and
+the server HTTP fallback use it; registered local integration handlers still dispatch directly.
+Farm supplies the resolved URL and `RequestInit`, including the cancellation signal.
+
+The separate server-options argument can replace `fetch` for `api`, and the existing
+integration-only factories accept it too. With combined route/integration callers, shared
+`fetch` is inherited unless `integrations.fetch` overrides it. Keep shared wrappers browser-safe
+and preserve request credentials, headers, and signals. Return a Web `Response`; do not put
+provider SDKs or server credentials in a shared module.
+
+## Shared lifecycle hooks
+
+Integration callers accept the same [`onRequest`, `onResponse`, and `onError`
+observers](/docs/api-client#shared-lifecycle-hooks) on the instance and in the second, per-call
+argument. Shared hooks run before per-call hooks; neither replaces the other. Per-call
+`onResponse` data is inferred from the operation's response type, while instance data is `unknown`.
+On failure the observer receives `undefined` data; the operation result still uses `{ data: null, error }`.
+
+Hooks cover browser HTTP, server HTTP fallback, and registered local dispatch. Response events
+include the path, method, request ID, timestamp, and available response/status. Integrations
+have one attempt (`attempt: 0`); these hooks do not introduce automatic retries. Resolver and
+cancellation failures are reported too, even when no HTTP request was sent.
+
+`onError` runs on final failure. Hook return values are ignored; throwing or rejecting hooks are
+reported without changing the result, and promises are not awaited. Do not rely on observer
+completion for authorization, transactions, or required background work.
+
+The separate server-options argument replaces the corresponding instance hook for `api`;
+`createApiClients`'s `integrations` options can override shared defaults in the same way.
+Per-call hooks still compose after the effective instance hook. Shared observer modules must
+remain browser-safe and should log only intentional, non-sensitive metadata.
 
 ## Shared data
 

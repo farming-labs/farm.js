@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -118,6 +118,157 @@ test("executes beta upgrades and skips local Farm packages", async () => {
         },
       ],
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("upgrades every manifest section when a Farm package is repeated", async () => {
+  const root = await createTempProject({
+    packageManager: "pnpm@8.12.1",
+    devDependencies: {
+      "@farm.js/core": "^0.1.0-beta.3",
+    },
+    peerDependencies: {
+      "@farm.js/core": "^0.1.0-beta.2",
+    },
+  });
+
+  try {
+    const plan = await createFarmUpgradePlan({ root, channel: "beta" });
+
+    assert.deepEqual(
+      plan.packages.map(({ name, current, section }) => ({ name, current, section })),
+      [
+        {
+          name: "@farm.js/core",
+          current: "^0.1.0-beta.3",
+          section: "devDependencies",
+        },
+        {
+          name: "@farm.js/core",
+          current: "^0.1.0-beta.2",
+          section: "peerDependencies",
+        },
+      ],
+    );
+    assert.deepEqual(
+      plan.commands.map(({ command, args }) => ({ command, args })),
+      [
+        {
+          command: "pnpm",
+          args: ["add", "--save-dev", "@farm.js/core@beta"],
+        },
+        {
+          command: "pnpm",
+          args: ["add", "--save-peer", "@farm.js/core@beta"],
+        },
+        {
+          command: "pnpm",
+          args: ["install"],
+        },
+      ],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("restores repeated sections after the package manager relocates a package", async () => {
+  const root = await createTempProject({
+    devDependencies: { "@farm.js/core": "^0.1.0-beta.3" },
+    peerDependencies: { "@farm.js/core": "^0.1.0-beta.2" },
+  });
+
+  try {
+    const commands = [];
+    await upgradeFarm({
+      root,
+      channel: "beta",
+      packageManager: "pnpm",
+      runCommand: async (command) => {
+        commands.push(command.args);
+        if (command.args[0] !== "add") return;
+        const manifestPath = path.join(root, "package.json");
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        delete manifest.devDependencies?.["@farm.js/core"];
+        delete manifest.peerDependencies?.["@farm.js/core"];
+        const section = command.args.includes("--save-peer")
+          ? "peerDependencies"
+          : "devDependencies";
+        manifest[section] = { ...manifest[section], "@farm.js/core": "^0.1.0-beta.91" };
+        await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+      },
+    });
+
+    const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+    assert.equal(manifest.devDependencies["@farm.js/core"], "^0.1.0-beta.91");
+    assert.equal(manifest.peerDependencies["@farm.js/core"], "^0.1.0-beta.91");
+    assert.deepEqual(commands.at(-1), ["install"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("restores the upgraded specifier when a repeated section is left stale", async () => {
+  const root = await createTempProject({
+    devDependencies: { "@farm.js/core": "^0.1.0-beta.3" },
+    peerDependencies: { "@farm.js/core": "^0.1.0-beta.2" },
+  });
+
+  try {
+    await upgradeFarm({
+      root,
+      channel: "beta",
+      packageManager: "yarn",
+      runCommand: async (command) => {
+        if (command.args[0] !== "add") return;
+        if (command.args.includes("--peer")) return;
+        const manifestPath = path.join(root, "package.json");
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        manifest.devDependencies = {
+          ...manifest.devDependencies,
+          "@farm.js/core": "^0.1.0-beta.99",
+        };
+        await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+      },
+    });
+
+    const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+    assert.equal(manifest.devDependencies["@farm.js/core"], "^0.1.0-beta.99");
+    assert.equal(manifest.peerDependencies["@farm.js/core"], "^0.1.0-beta.99");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("does not silently no-op when repeated sections start equal and one is left stale", async () => {
+  const root = await createTempProject({
+    devDependencies: { "@farm.js/core": "^0.1.0-beta.3" },
+    peerDependencies: { "@farm.js/core": "^0.1.0-beta.3" },
+  });
+
+  try {
+    await upgradeFarm({
+      root,
+      channel: "beta",
+      packageManager: "yarn",
+      runCommand: async (command) => {
+        if (command.args[0] !== "add") return;
+        if (command.args.includes("--peer")) return;
+        const manifestPath = path.join(root, "package.json");
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        manifest.devDependencies = {
+          ...manifest.devDependencies,
+          "@farm.js/core": "^0.1.0-beta.99",
+        };
+        await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+      },
+    });
+
+    const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+    assert.equal(manifest.devDependencies["@farm.js/core"], "^0.1.0-beta.99");
+    assert.equal(manifest.peerDependencies["@farm.js/core"], "^0.1.0-beta.99");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -32,6 +32,7 @@ export {
   parsePreviewPublicUrl,
   previewFarm,
   resolvePreviewTarget,
+  runPreviewTunnel,
   type PreviewFarmOptions,
   type PreviewFarmResult,
   type PreviewTarget,
@@ -96,6 +97,7 @@ export {
   type FrameworkMigrationPlan,
 } from "./migrate";
 export { migrateFarmAuth, type MigrateFarmAuthOptions } from "./auth";
+export { listSchemaTableOwners, migrateSchema, type MigrateSchemaOptions } from "./schema-migrate";
 export {
   createFarmUpgradePlan,
   detectFarmPackageManager,

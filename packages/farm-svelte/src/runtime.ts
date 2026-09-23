@@ -46,6 +46,17 @@ export function getFarmSvelteChildren(element: FarmSvelteElement): unknown[] {
   return Array.isArray(propChildren) ? [...propChildren] : [propChildren];
 }
 
+/**
+ * Raw HTML from a React-shaped `dangerouslySetInnerHTML`, for rendering as
+ * element content via `{@html}`. Returns undefined when the element does not
+ * set inner HTML, so the caller falls back to normal child rendering.
+ */
+export function getFarmSvelteInnerHtml(element: FarmSvelteElement): string | undefined {
+  const raw = element.props?.dangerouslySetInnerHTML as { __html?: unknown } | undefined;
+  if (!raw || typeof raw !== "object") return undefined;
+  return raw.__html == null ? "" : String(raw.__html);
+}
+
 // CSS properties whose numeric values are unitless in React's style objects.
 const UNITLESS_STYLE_PROPERTIES = new Set([
   "animation-iteration-count",
@@ -73,6 +84,7 @@ const UNITLESS_STYLE_PROPERTIES = new Set([
   "opacity",
   "order",
   "orphans",
+  "scale",
   "stop-opacity",
   "stroke-dasharray",
   "stroke-dashoffset",
@@ -125,13 +137,29 @@ export function normalizeFarmSvelteProps(element: FarmSvelteElement): Record<str
     props.for = props.htmlFor;
     delete props.htmlFor;
   }
-  if ("dangerouslySetInnerHTML" in props) {
-    const html = props.dangerouslySetInnerHTML as { __html?: unknown } | undefined;
-    props.innerHTML = html?.__html == null ? "" : String(html.__html);
-    delete props.dangerouslySetInnerHTML;
-  }
+  // dangerouslySetInnerHTML sets element *content*, not an attribute. Spreading
+  // an `innerHTML` prop onto <svelte:element> would serialize it as a literal
+  // (escaped) `innerhtml="..."` attribute, so it is stripped here and rendered
+  // via `{@html}` in compat-root using getFarmSvelteInnerHtml().
+  delete props.dangerouslySetInnerHTML;
+  delete props.innerHTML;
   if (props.style && typeof props.style === "object" && !Array.isArray(props.style)) {
     props.style = farmStyleObjectToCss(props.style as Record<string, unknown>);
+  }
+
+  // React reconciliation metadata, never DOM attributes. Svelte would spread
+  // them onto <svelte:element> as literal key="..."/ref="[object Object]".
+  delete props.key;
+  delete props.ref;
+  // React seeds uncontrolled inputs by rendering defaultValue/defaultChecked as
+  // value/checked; a dead `defaultvalue` attribute would leak otherwise.
+  if ("defaultValue" in props && !("value" in props)) {
+    props.value = props.defaultValue;
+    delete props.defaultValue;
+  }
+  if ("defaultChecked" in props && !("checked" in props)) {
+    props.checked = props.defaultChecked;
+    delete props.defaultChecked;
   }
 
   for (const key of Object.keys(props)) {

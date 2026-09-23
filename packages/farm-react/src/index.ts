@@ -112,6 +112,7 @@ const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
     "@farm.js/react/compiler-runtime",
   ],
   capabilities: {
+    reconcilesRerenders: true,
     streaming: { node: true, web: false },
   },
 });
@@ -126,6 +127,7 @@ export function react(options: ReactRendererOptions = {}): FarmRenderer {
     dedupe: [...(REACT_RENDERER.dedupe || [])],
     optimizeDeps: [...(REACT_RENDERER.optimizeDeps || [])],
     capabilities: {
+      reconcilesRerenders: true,
       streaming: { ...REACT_RENDERER.capabilities?.streaming },
     },
     options: {

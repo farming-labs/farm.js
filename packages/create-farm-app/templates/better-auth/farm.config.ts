@@ -1,8 +1,10 @@
 import { defineConfig } from "@farm.js/core";
+import { devtools } from "@farm.js/devtools";
 import { betterAuth } from "@farm.js/better-auth";
 import { auth } from "./src/lib/auth.ts";
 
 export default defineConfig({
+  plugins: [devtools()],
   srcDir: "src",
   theme: {
     default: "dark",
@@ -15,6 +17,14 @@ export default defineConfig({
   },
   experimental: {
     serverComponents: true,
+  },
+  migrations: {
+    commands: [
+      {
+        name: "Better Auth schema",
+        command: "pnpm auth:migrate",
+      },
+    ],
   },
   vite: {
     server: {

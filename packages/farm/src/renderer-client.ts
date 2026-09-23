@@ -9,6 +9,7 @@ import {
 } from "./client/spa-router";
 import { subscribeHistoryChange } from "./client/history-sync";
 import { getFarmClientDataCache, type FarmClientCacheStatus } from "./client-cache";
+import { attachRevalidationListeners } from "./client-revalidation";
 import type { ServerFn } from "./server-fn";
 import type { ServerQuery } from "./server-query";
 import {
@@ -26,6 +27,12 @@ import {
   subscribeFarmI18n,
 } from "./i18n/client-runtime";
 import type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i18n/types";
+import {
+  applyFarmBasePath,
+  getFarmBasePath,
+  normalizeFarmBasePath,
+  stripFarmBasePath,
+} from "./base-path";
 
 export interface FarmClientStore<TSnapshot> {
   getSnapshot(): TSnapshot;
@@ -57,7 +64,8 @@ export interface FarmRendererRouter extends FarmClientStore<FarmRendererRouterSn
 }
 
 export function createRendererRouter(options: FarmRendererRouterOptions = {}): FarmRendererRouter {
-  const basePath = options.basePath || "";
+  const basePath =
+    options.basePath === undefined ? getFarmBasePath() : normalizeFarmBasePath(options.basePath);
   const matcher = options.routes?.length ? createFarmRouter([...options.routes]) : null;
   const router = getSPARouter();
   let snapshot = readRendererRouterSnapshot(basePath, matcher, router.getNavigationState());
@@ -172,6 +180,7 @@ export function createRendererAction<TInput, TResult, TError extends Error = Err
   const initialResult = options.initialResult ?? null;
   let requestId = 0;
   let pendingCount = 0;
+  let latestSettledStatus: FarmActionSnapshot<TResult, TError>["status"] = "idle";
   let snapshot: FarmActionSnapshot<TResult, TError> = {
     pending: false,
     status: "idle",
@@ -208,6 +217,7 @@ export function createRendererAction<TInput, TResult, TError extends Error = Err
         const result = await serverFn(input as TInput | FormData);
         pendingCount = Math.max(0, pendingCount - 1);
         if (currentRequest === requestId) {
+          latestSettledStatus = "success";
           update({
             pending: pendingCount > 0,
             status: pendingCount > 0 ? "pending" : "success",
@@ -216,12 +226,15 @@ export function createRendererAction<TInput, TResult, TError extends Error = Err
           });
           options.onSuccess?.(result);
           options.onSettled?.(result, null);
+        } else if (pendingCount === 0) {
+          update({ ...snapshot, pending: false, status: latestSettledStatus });
         }
         return result;
       } catch (cause) {
         pendingCount = Math.max(0, pendingCount - 1);
         const error = normalizeRendererClientError(cause) as TError;
         if (currentRequest === requestId) {
+          latestSettledStatus = "error";
           update({
             pending: pendingCount > 0,
             status: pendingCount > 0 ? "pending" : "error",
@@ -235,6 +248,8 @@ export function createRendererAction<TInput, TResult, TError extends Error = Err
           });
           options.onError?.(error);
           options.onSettled?.(null, error);
+        } else if (pendingCount === 0) {
+          update({ ...snapshot, pending: false, status: latestSettledStatus });
         }
         throw error;
       }
@@ -242,6 +257,7 @@ export function createRendererAction<TInput, TResult, TError extends Error = Err
     reset() {
       requestId += 1;
       pendingCount = 0;
+      latestSettledStatus = "idle";
       update({ pending: false, status: "idle", data: initialResult, error: null });
     },
   } as FarmAction<TInput, TResult, TError>;
@@ -288,19 +304,15 @@ export function createRendererQuery<TInput, TData>(
     });
     if (!cache.get(key) || cache.isStale(key)) void run().catch(() => undefined);
 
-    if (typeof window !== "undefined") {
-      const refresh = () => {
+    cleanupBrowser = attachRevalidationListeners(
+      () => {
         if (cache.isStale(key)) void run().catch(() => undefined);
-      };
-      const onFocus = options.refetchOnWindowFocus === false ? undefined : refresh;
-      const onOnline = options.refetchOnReconnect === false ? undefined : refresh;
-      if (onFocus) window.addEventListener("focus", onFocus);
-      if (onOnline) window.addEventListener("online", onOnline);
-      cleanupBrowser = () => {
-        if (onFocus) window.removeEventListener("focus", onFocus);
-        if (onOnline) window.removeEventListener("online", onOnline);
-      };
-    }
+      },
+      {
+        refetchOnWindowFocus: options.refetchOnWindowFocus,
+        refetchOnReconnect: options.refetchOnReconnect,
+      },
+    );
   };
 
   return {
@@ -386,12 +398,7 @@ function readRendererRouterSnapshot(
   }
 
   const url = new URL(window.location.href);
-  const normalizedBase = basePath.replace(/\/+$/, "");
-  const pathname =
-    normalizedBase &&
-    (url.pathname === normalizedBase || url.pathname.startsWith(`${normalizedBase}/`))
-      ? url.pathname.slice(normalizedBase.length) || "/"
-      : url.pathname;
+  const pathname = stripFarmBasePath(url.pathname, basePath);
   const i18n = getFarmI18nClientState();
   const routePathname = i18n ? stripFarmLocaleFromPathname(pathname, i18n) : pathname;
 
@@ -405,7 +412,7 @@ function readRendererRouterSnapshot(
 }
 
 function resolveRendererHref(href: string, basePath: string): string {
-  return href.startsWith("/") ? `${basePath}${href}` : href;
+  return applyFarmBasePath(href, basePath);
 }
 
 function resolveRendererServerFn<TInput, TResult, TError extends Error>(

@@ -23,6 +23,7 @@ export { unwrapMiddleware, getFromMiddleware, hasMiddlewareData } from "./helper
 export {
   createProductionMiddlewareRunner,
   applyProductionMiddlewareHeaders,
+  matchesMiddlewareConfig,
 } from "./production-runtime";
 export * from "./vite-plugin";
 

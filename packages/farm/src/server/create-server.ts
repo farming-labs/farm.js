@@ -3,7 +3,7 @@ import type { FarmConfig } from "../types";
 import { farmI18nClientBridgePlugin, farmPlugin } from "../vite";
 import { logger } from "../utils";
 import { loadConfig, resolveConfig } from "../config";
-import { PluginManager } from "../plugin";
+import { FarmRuntimeShutdownError, PluginManager } from "../plugin";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
 import fs from "fs";
 import path from "path";
@@ -32,6 +32,13 @@ import {
 import { loadFarmRendererVitePlugins, resolveFarmRenderer } from "../renderer";
 
 export const DEFAULT_FARM_DEV_SERVER_PORT = 3000;
+
+/**
+ * Upper bound on waiting for Vite's own close. Vite 5.4 can strand its plugin
+ * container's in-flight promises when closed after dependency discovery has
+ * started (#1263); farm's shutdown must not inherit that hang.
+ */
+const VITE_CLOSE_TIMEOUT_MS = 10_000;
 
 // Farm.js branding plugin for createServer
 function createBrandingPlugin() {
@@ -293,16 +300,92 @@ export async function createServer(config: FarmConfig = {}) {
     (server as any).__farmPluginManager = pluginManager;
     (server as any).__farmInstrumentation = instrumentation;
     const closeViteServer = server.close.bind(server);
-    server.close = async () => {
-      try {
-        await closeViteServer();
-      } finally {
-        await instrumentation?.shutdown();
-      }
+
+    /**
+     * Tear the whole dev runtime down once, collecting every failure.
+     *
+     * Plugin disposers own real resources — database pools, queue consumers —
+     * so a caller awaiting close() has to be able to await them too, and a
+     * failure has to surface instead of disappearing into an event listener.
+     */
+    let shutdownPromise: Promise<void> | undefined;
+    const shutdownFarmDevRuntime = (): Promise<void> => {
+      shutdownPromise ??= (async () => {
+        const failures: Array<{ label: string; error: unknown }> = [];
+        const step = async (label: string, run: () => Promise<unknown> | undefined) => {
+          try {
+            await run();
+          } catch (error) {
+            failures.push({ label, error });
+          }
+        };
+
+        // Stop serving first, then release what the plugins hold, then flush
+        // telemetry last so shutdown problems are still reported.
+        // Vite 5.4's close() can deadlock after the client entry has been
+        // transformed: background pre-transforms of its bare imports wait in
+        // the optimized-deps load hook for a dependency run that
+        // depsOptimizer.close() cancels without settling, and the plugin
+        // container then awaits those promises forever (#1263). Bound the wait
+        // so farm's own teardown — plugin disposers, instrumentation — still
+        // runs, and report loudly instead of hanging the caller. The listen
+        // sockets and watchers have already settled by this point; only the
+        // container's internal await is stuck.
+        await step("Vite server close", async () => {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const timedOut = new Promise<"timeout">((resolve) => {
+            timer = setTimeout(() => resolve("timeout"), VITE_CLOSE_TIMEOUT_MS);
+            timer.unref?.();
+          });
+          try {
+            const outcome = await Promise.race([
+              closeViteServer().then(() => "closed" as const),
+              timedOut,
+            ]);
+            if (outcome === "timeout") {
+              logger.error(
+                `Vite server close did not settle within ${VITE_CLOSE_TIMEOUT_MS}ms; ` +
+                  "continuing shutdown without it (https://github.com/farming-labs/farm.js/issues/1263)",
+              );
+              // Best effort, all idempotent: make sure nothing keeps serving
+              // even though the container promise is stranded.
+              await Promise.allSettled([
+                new Promise<void>((resolve) => {
+                  if (!server.httpServer || !server.httpServer.listening) return resolve();
+                  server.httpServer.close(() => resolve());
+                }),
+                Promise.resolve(server.watcher?.close?.()).catch(() => {}),
+                Promise.resolve((server as any).ws?.close?.()).catch(() => {}),
+              ]);
+            }
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        });
+        await step("Plugin runtime shutdown", () =>
+          pluginManager?.closeRuntime("dev-server-closed"),
+        );
+        await step("Instrumentation shutdown", () => instrumentation?.shutdown());
+
+        // A single failure propagates unchanged so existing callers keep the
+        // error they already handle; several are aggregated with their stage.
+        if (failures.length === 1) throw failures[0]!.error;
+        if (failures.length > 1) {
+          throw new FarmRuntimeShutdownError(
+            `Dev server shutdown failed during ${failures.map(({ label }) => label).join(", ")}`,
+            failures.map(({ error }) => error),
+          );
+        }
+      })();
+      return shutdownPromise;
     };
+
+    server.close = shutdownFarmDevRuntime;
+    // A directly closed HTTP server still has to release the same resources.
+    // close() is memoized, so this cannot double-dispose.
     server.httpServer?.once("close", () => {
-      instrumentation?.shutdown().catch((error) => {
-        logger.warn(`Instrumentation shutdown failed: ${error}`);
+      shutdownFarmDevRuntime().catch((error) => {
+        logger.warn(`Dev server shutdown failed: ${error}`);
       });
     });
 
@@ -336,14 +419,26 @@ export async function createServer(config: FarmConfig = {}) {
  */
 export async function startDevServer(config: FarmConfig = {}, port?: number) {
   const server = await createServer(config);
-  await server.listen(port);
-  const pluginManager = (server as any).__farmPluginManager as PluginManager | undefined;
-  if (pluginManager) {
-    await pluginManager.startRuntime();
-    server.httpServer?.once("close", () => {
-      pluginManager.closeRuntime("dev-server-closed").catch(() => {});
-    });
+
+  try {
+    await server.listen(port);
+    const pluginManager = (server as any).__farmPluginManager as PluginManager | undefined;
+    // Shutdown is owned by the close() installed in createServer, which awaits
+    // the plugin runtime and reports failures rather than swallowing them.
+    await pluginManager?.startRuntime();
+  } catch (error) {
+    // createServer already opened watchers, instrumentation, and plugin
+    // resources. A failure here — an occupied port is the common one — would
+    // otherwise leave all of them running with no handle to close them, since
+    // the caller never receives the server.
+    try {
+      await server.close();
+    } catch (closeError) {
+      logger.error(`Failed to clean up after a failed dev server start: ${closeError}`);
+    }
+    throw error;
   }
+
   // Branding is handled by farmBrandingPlugin in vite.ts
   return server;
 }

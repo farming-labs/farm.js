@@ -18,7 +18,7 @@ describe("RSC entry search params", () => {
     // ?tag=a&tag=b reached RSC pages as { tag: "b" } while every other
     // environment delivers { tag: ["a", "b"] }.
     expect(entrySource).toContain(
-      "import { _runWithCurrentRequest, searchParamsToObject } from '@farm.js/core/internal/production-runtime';",
+      "import { _runWithAPIRequestRuntime, _runWithCurrentRequest, searchParamsToObject } from '@farm.js/core/internal/production-runtime';",
     );
     expect(entrySource).toContain("const searchParams = searchParamsToObject(url.searchParams);");
     expect(entrySource).toContain(
@@ -28,7 +28,7 @@ describe("RSC entry search params", () => {
   });
 
   it("keeps repeated values in the legacy development fallback", () => {
-    expect(fallbackSource).toContain("const { searchParamsToObject } = require_(");
+    expect(fallbackSource).toMatch(/const \{[^}]*searchParamsToObject[^}]*\} = require_\(/);
     expect(fallbackSource).toContain('"@farm.js/core/internal/production-runtime"');
     expect(fallbackSource).toContain("const searchParams = searchParamsToObject(");
     expect(fallbackSource).not.toContain(

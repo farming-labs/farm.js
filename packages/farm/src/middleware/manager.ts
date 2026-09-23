@@ -26,6 +26,8 @@ import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { createCliColors } from "../cli-colors";
 import { appendMiddlewareRoutePath } from "./path";
+import type { FarmServerConfig, ResolvedFarmServerConfig } from "../server-http";
+import { resolveFarmRequestURL } from "../server/request";
 
 export interface DiscoveredMiddleware {
   path: string;
@@ -49,16 +51,19 @@ export class MiddlewareManager {
   private viteServer?: ViteDevServer;
   private appDirs: string[];
   private i18n?: ResolvedFarmI18nConfig;
+  private server?: FarmServerConfig | ResolvedFarmServerConfig;
 
   constructor(
     appDir: string | readonly string[],
     viteServer?: ViteDevServer,
     config?: FarmMiddlewareConfig,
     i18n?: ResolvedFarmI18nConfig,
+    server?: FarmServerConfig | ResolvedFarmServerConfig,
   ) {
     this.appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
     this.viteServer = viteServer;
     this.i18n = i18n;
+    this.server = server;
     this.configure(config);
   }
 
@@ -105,8 +110,8 @@ export class MiddlewareManager {
 
     // Sort by path depth (root first, then nested)
     this.middleware.sort((a, b) => {
-      const depthA = a.path.split("/").length;
-      const depthB = b.path.split("/").length;
+      const depthA = a.path.split("/").filter(Boolean).length;
+      const depthB = b.path.split("/").filter(Boolean).length;
       return depthA - depthB;
     });
 
@@ -167,10 +172,7 @@ export class MiddlewareManager {
   /**
    * Load a middleware file
    */
-  private async loadMiddleware(
-    filePath: string,
-    routePath: string,
-  ): Promise<DiscoveredMiddleware | null> {
+  private async loadMiddleware(filePath: string, routePath: string): Promise<DiscoveredMiddleware> {
     try {
       // Load the module
       let module: any;
@@ -183,10 +185,7 @@ export class MiddlewareManager {
 
       const normalized = normalizeMiddlewareModule(module, routePath);
       if (!normalized) {
-        logger.warn(
-          `Middleware file ${filePath} must export a default handler or a named middleware handler`,
-        );
-        return null;
+        throw new Error("must export a default handler or a named middleware handler");
       }
 
       return {
@@ -197,8 +196,7 @@ export class MiddlewareManager {
         source: "file",
       };
     } catch (error) {
-      logger.error(`Failed to load middleware ${filePath}: ${error}`);
-      return null;
+      throw new Error(`Failed to load middleware ${filePath}: ${error}`);
     }
   }
 
@@ -206,7 +204,7 @@ export class MiddlewareManager {
    * Execute middleware for a request
    */
   async execute(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-    const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const url = resolveFarmRequestURL(req, { trustProxy: this.server?.trustProxy });
     const pathname = url.pathname;
     const routePathname = this.i18n?.enabled
       ? stripFarmLocaleFromPathname(pathname, this.i18n)
@@ -215,7 +213,7 @@ export class MiddlewareManager {
     const startTime = Date.now();
 
     let parentData: MiddlewareContext["parent"] | undefined;
-    let ctx = createContext(req, res, this.viteServer);
+    let ctx = createContext(req, res, this.viteServer, undefined, this.server);
 
     if (this.globalConfig) {
       const globalMatch = this.matchesConfig(routePathname, this.globalConfig, ctx);
@@ -271,7 +269,7 @@ export class MiddlewareManager {
 
       // Create new context with parent data
       if (parentData) {
-        ctx = createContext(req, res, this.viteServer, parentData);
+        ctx = createContext(req, res, this.viteServer, parentData, this.server);
         if (routeMatch.params) {
           ctx.params = { ...ctx.params, ...routeMatch.params };
         }
@@ -424,7 +422,11 @@ export class MiddlewareManager {
     }
 
     if (pattern.endsWith("(.*)")) {
-      const prefix = pattern.slice(0, -4);
+      // Strip a trailing slash before the wildcard so `/admin/(.*)` matches the
+      // `/admin` subtree like `/admin/**` does. Without this the prefix keeps
+      // its slash and the check becomes startsWith("/admin//"), which no path
+      // satisfies, so the matcher silently matches nothing.
+      const prefix = pattern.slice(0, -4).replace(/\/$/, "");
       return { matched: pathname === prefix || pathname.startsWith(`${prefix}/`) };
     }
 

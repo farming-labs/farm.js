@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import {
   createIntegrationOrm,
+  declareSchemaTables,
   defineIntegration,
   integrationRoute,
   type FarmIntegration,
@@ -2854,8 +2855,8 @@ function getBillingMeter(
   return meter ?? null;
 }
 
-function hasConfiguredStorageRuntimeClient(context: FarmIntegrationHandlerContext): boolean {
-  const storage = (context.config as { storage?: unknown }).storage;
+function hasConfiguredStorageRuntimeClient(config: { storage?: unknown }): boolean {
+  const storage = config.storage;
   return (
     !!storage &&
     typeof storage === "object" &&
@@ -2864,14 +2865,15 @@ function hasConfiguredStorageRuntimeClient(context: FarmIntegrationHandlerContex
   );
 }
 
-async function resolveConfiguredStorageRuntimeClient(
-  context: FarmIntegrationHandlerContext,
-): Promise<unknown | undefined> {
-  if (!hasConfiguredStorageRuntimeClient(context)) {
+async function resolveConfiguredStorageRuntimeClient(config: {
+  storage?: unknown;
+}): Promise<unknown | undefined> {
+  // The guard is what establishes the shape, so narrowing happens after it.
+  if (!hasConfiguredStorageRuntimeClient(config)) {
     return undefined;
   }
 
-  const storage = (context.config as { storage?: { client?: unknown } }).storage;
+  const storage = config.storage as { client?: unknown };
   const client = storage?.client;
   return typeof client === "function"
     ? await (client as () => unknown | Promise<unknown>)()
@@ -2891,7 +2893,7 @@ function createBillingHookTools(
     stripe,
     storage: {
       getClient() {
-        clientPromise ??= resolveConfiguredStorageRuntimeClient(context);
+        clientPromise ??= resolveConfiguredStorageRuntimeClient(context.config);
         return clientPromise;
       },
       getOrm() {
@@ -2909,7 +2911,7 @@ function resolveConfiguredBillingStorage(
   context: FarmIntegrationHandlerContext,
   tools: StripeBillingHookTools,
 ): StripeBillingStorageAdapter | undefined {
-  if (!hasConfiguredStorageRuntimeClient(context)) {
+  if (!hasConfiguredStorageRuntimeClient(context.config)) {
     return undefined;
   }
 
@@ -3248,6 +3250,28 @@ function createBillingSnapshotFromSubscriptionChange(
   };
 }
 
+/**
+ * Decide whether a checkout session belongs to the authenticated owner.
+ *
+ * Session ids travel through success-url query strings, browser history, and
+ * referrers, so holding one is not proof of ownership. Checkout stamps
+ * `ownerId`/`ownerKind` into session metadata, which is the authoritative
+ * binding; the owner's stored customer id is accepted as a fallback for
+ * sessions created before that metadata existed.
+ */
+function sessionBelongsToOwner(
+  session: StripeSessionResult,
+  owner: StripeBillingOwner,
+  ownerCustomerId: string | undefined,
+): boolean {
+  const sessionOwnerId = session.metadata?.ownerId;
+  const sessionOwnerKind = session.metadata?.ownerKind;
+  if (sessionOwnerId) {
+    return sessionOwnerId === owner.id && (!sessionOwnerKind || sessionOwnerKind === owner.kind);
+  }
+  return Boolean(ownerCustomerId) && session.customerId === ownerCustomerId;
+}
+
 async function resolveBillingSnapshotForSession(
   session: StripeSessionResult,
   products: readonly ResolvedStripeProduct[],
@@ -3269,11 +3293,32 @@ async function resolveBillingSnapshotForSession(
     );
     existingSnapshot = await getByCustomerId(session.customerId);
     if (!owner) {
+      // No signed-in caller (the webhook path): the session's customer is the
+      // only binding available.
       owner = existingSnapshot?.owner ?? null;
     }
   }
 
   if (!owner) {
+    return null;
+  }
+
+  // A signed-in caller must not be able to bind someone else's checkout to
+  // themselves by presenting its session id. Checkout stamps ownerId into the
+  // session metadata, and an already-persisted snapshot names the customer's
+  // real owner; either disagreeing with the caller means this session is not
+  // theirs.
+  const sessionOwnerId = session.metadata?.ownerId;
+  const sessionOwnerKind = session.metadata?.ownerKind;
+  const boundOwner = existingSnapshot?.owner;
+  const mismatchesCaller =
+    (sessionOwnerId !== undefined &&
+      (sessionOwnerId !== owner.id ||
+        (sessionOwnerKind !== undefined && sessionOwnerKind !== owner.kind))) ||
+    (boundOwner !== undefined &&
+      boundOwner !== null &&
+      (boundOwner.id !== owner.id || boundOwner.kind !== owner.kind));
+  if (mismatchesCaller) {
     return null;
   }
 
@@ -3600,7 +3645,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
     }),
   );
 
-  return defineIntegration({
+  const integration = defineIntegration({
     category: "payment",
     type: "stripe",
     instance: {
@@ -5221,7 +5266,11 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
         async handler(request, context) {
           const body = await readJsonObject(request);
           try {
-            let customerId = typeof body.customerId === "string" ? body.customerId : undefined;
+            const requestedCustomerId =
+              typeof body.customerId === "string" ? body.customerId : undefined;
+            const requestedSessionId =
+              typeof body.sessionId === "string" ? body.sessionId : undefined;
+            let customerId: string | undefined;
 
             const billingTools = input.billing
               ? createBillingHookTools(context, stripeSdk, integrationSchema)
@@ -5234,20 +5283,54 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               billingTools,
             );
 
-            if (!customerId && typeof body.sessionId === "string") {
-              const session = await instance.retrieveCheckoutSession(body.sessionId);
-              customerId = session.customerId ?? undefined;
-            }
-
-            if (!customerId && input.billing) {
+            if (input.billing) {
+              // A portal session exposes invoices, payment methods, and
+              // cancellation, so the signed-in owner is the only identity we
+              // trust here. A customerId or sessionId from the request is
+              // treated as a claim to verify, never as the identity itself.
               const owner = await resolveBillingOwner(input.billing, context, persistence.tools);
-              if (owner) {
-                const getBillingAccount = requireBillingMethod(
-                  persistence.getBillingAccount,
-                  "getBillingAccount",
+              if (!owner) {
+                return Response.json(
+                  { error: "Stripe portal requires an authenticated billing owner." },
+                  { status: 401 },
                 );
-                const snapshot = await getBillingAccount(owner);
-                customerId = snapshot?.stripeCustomerId ?? undefined;
+              }
+
+              const getBillingAccount = requireBillingMethod(
+                persistence.getBillingAccount,
+                "getBillingAccount",
+              );
+              const snapshot = await getBillingAccount(owner);
+              customerId = snapshot?.stripeCustomerId ?? undefined;
+
+              if (requestedCustomerId && requestedCustomerId !== customerId) {
+                return Response.json(
+                  { error: "Stripe portal customerId does not belong to the billing owner." },
+                  { status: 403 },
+                );
+              }
+
+              if (requestedSessionId) {
+                const session = await instance.retrieveCheckoutSession(requestedSessionId);
+                // Checkout stamps the owner into session metadata, which lets a
+                // just-completed checkout open the portal before its snapshot
+                // has been persisted without trusting a bare session id.
+                if (!sessionBelongsToOwner(session, owner, customerId)) {
+                  return Response.json(
+                    { error: "Stripe portal sessionId does not belong to the billing owner." },
+                    { status: 403 },
+                  );
+                }
+                customerId = customerId ?? session.customerId ?? undefined;
+              }
+            } else {
+              // Without billing there is no owner to authenticate against, so
+              // the caller supplies the customer directly. This path is for
+              // server-side callers that already did their own authorization.
+              customerId = requestedCustomerId;
+              if (!customerId && requestedSessionId) {
+                const session = await instance.retrieveCheckoutSession(requestedSessionId);
+                customerId = session.customerId ?? undefined;
               }
             }
 
@@ -5374,5 +5457,14 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
       ),
       ...webhookRoutes,
     ],
+  });
+
+  // Declared so `farm stripe migrate` can create the billing tables, and
+  // `farm generate --orm` can include them in schema artifacts. The connection
+  // lives in the app's `storage.client`, not in this integration's options.
+  return declareSchemaTables(integration, {
+    name: "stripe",
+    schema: integrationSchema,
+    resolveClient: (config) => resolveConfiguredStorageRuntimeClient(config),
   });
 }

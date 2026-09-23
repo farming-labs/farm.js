@@ -3,6 +3,8 @@ import { FARM_VERSION } from "./version";
 export const FARM_PRODUCTION_SITE_TELEMETRY_SCHEMA_VERSION = 1 as const;
 export const FARM_PRODUCTION_SITE_TELEMETRY_EVENT_TYPE = "production_site_active" as const;
 export const FARM_PRODUCTION_SITE_TELEMETRY_PACKAGE_NAME = "@farm.js/core" as const;
+export const FARM_PRODUCTION_SITE_ATTESTATION_PATH = "/.well-known/farm-telemetry" as const;
+export const FARM_PRODUCTION_SITE_ATTESTATION_EVENT_TYPE = "production_site_attestation" as const;
 
 const DEFAULT_SITE_TELEMETRY_ENDPOINT = "https://farmjs.dev/api/telemetry/v1/sites";
 const REQUEST_TIMEOUT_MS = 3_000;
@@ -15,6 +17,15 @@ export interface FarmProductionSiteTelemetryPayload {
   schemaVersion: typeof FARM_PRODUCTION_SITE_TELEMETRY_SCHEMA_VERSION;
   eventType: typeof FARM_PRODUCTION_SITE_TELEMETRY_EVENT_TYPE;
   siteUrl: string;
+  packageName: typeof FARM_PRODUCTION_SITE_TELEMETRY_PACKAGE_NAME;
+  packageVersion: string;
+  renderer: string;
+  deployTarget: string;
+}
+
+export interface FarmProductionSiteAttestation {
+  schemaVersion: typeof FARM_PRODUCTION_SITE_TELEMETRY_SCHEMA_VERSION;
+  eventType: typeof FARM_PRODUCTION_SITE_ATTESTATION_EVENT_TYPE;
   packageName: typeof FARM_PRODUCTION_SITE_TELEMETRY_PACKAGE_NAME;
   packageVersion: string;
   renderer: string;
@@ -37,6 +48,7 @@ interface OriginReportState {
 }
 
 export interface FarmProductionSiteReporter {
+  handleAttestation(request: Request): Response | null;
   report(requestUrl: string | URL, waitUntil?: (promise: Promise<unknown>) => void): void;
 }
 
@@ -97,10 +109,54 @@ export function createFarmProductionSiteReporter(
   const retryIntervalMs = options.retryIntervalMs ?? RETRY_INTERVAL_MS;
   const send = options.fetch ?? globalThis.fetch;
   const reportStates = new Map<string, OriginReportState>();
+  const attestation: FarmProductionSiteAttestation = {
+    schemaVersion: FARM_PRODUCTION_SITE_TELEMETRY_SCHEMA_VERSION,
+    eventType: FARM_PRODUCTION_SITE_ATTESTATION_EVENT_TYPE,
+    packageName: FARM_PRODUCTION_SITE_TELEMETRY_PACKAGE_NAME,
+    packageVersion: sanitizeDetail(FARM_VERSION, "unknown"),
+    renderer: sanitizeDetail(options.renderer, "custom"),
+    deployTarget: sanitizeDetail(options.deployTarget, "custom"),
+  };
 
   return {
+    handleAttestation(request) {
+      if (productionTelemetryDisabled()) return null;
+
+      let pathname: string;
+      try {
+        pathname = new URL(request.url).pathname;
+      } catch {
+        return null;
+      }
+      if (pathname !== FARM_PRODUCTION_SITE_ATTESTATION_PATH) return null;
+
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        return new Response("Method Not Allowed", {
+          status: 405,
+          headers: {
+            allow: "GET, HEAD",
+            "cache-control": "no-store",
+            "content-type": "text/plain; charset=utf-8",
+            "x-content-type-options": "nosniff",
+          },
+        });
+      }
+
+      return new Response(request.method === "HEAD" ? null : JSON.stringify(attestation), {
+        status: 200,
+        headers: {
+          "cache-control": "no-store",
+          "content-type": "application/json; charset=utf-8",
+          "x-content-type-options": "nosniff",
+        },
+      });
+    },
     report(requestUrl, waitUntil) {
       if (productionTelemetryDisabled()) return;
+      if (!isProductionDeploymentEnvironment()) {
+        debug("production-site check-in skipped outside a production deployment");
+        return;
+      }
 
       const siteUrl = detectFarmProductionSiteOrigin(requestUrl);
       if (!siteUrl) return;
@@ -121,9 +177,9 @@ export function createFarmProductionSiteReporter(
         eventType: FARM_PRODUCTION_SITE_TELEMETRY_EVENT_TYPE,
         siteUrl,
         packageName: FARM_PRODUCTION_SITE_TELEMETRY_PACKAGE_NAME,
-        packageVersion: sanitizeDetail(FARM_VERSION, "unknown"),
-        renderer: sanitizeDetail(options.renderer, "custom"),
-        deployTarget: sanitizeDetail(options.deployTarget, "custom"),
+        packageVersion: attestation.packageVersion,
+        renderer: attestation.renderer,
+        deployTarget: attestation.deployTarget,
       };
       state.pending = deliver(send, resolveSiteTelemetryEndpoint(options.endpoint), payload)
         .then((delivered) => {
@@ -151,9 +207,14 @@ export function createFarmProductionSiteReporter(
 
 async function deliver(
   send: typeof fetch,
-  endpoint: string,
+  endpoint: string | undefined,
   payload: FarmProductionSiteTelemetryPayload,
 ): Promise<boolean> {
+  if (!endpoint) {
+    debug("invalid or insecure production-site telemetry endpoint; check-in skipped");
+    return false;
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   timeout.unref?.();
@@ -186,26 +247,64 @@ async function deliver(
   }
 }
 
-function resolveSiteTelemetryEndpoint(explicit?: string): string {
+function resolveSiteTelemetryEndpoint(explicit?: string): string | undefined {
   const candidate = explicit || process.env.FARM_TELEMETRY_SITE_ENDPOINT;
   if (!candidate) return DEFAULT_SITE_TELEMETRY_ENDPOINT;
 
   try {
     const url = new URL(candidate);
-    const isLocal = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+    const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    const isLocal = ["localhost", "127.0.0.1", "::1"].includes(hostname);
     if (url.protocol === "https:" || (url.protocol === "http:" && isLocal)) {
       return url.toString();
     }
   } catch {
-    // Fall through to the Farm-owned endpoint.
+    // Invalid explicit overrides fail closed below.
   }
-  return DEFAULT_SITE_TELEMETRY_ENDPOINT;
+  return undefined;
 }
 
 function productionTelemetryDisabled(): boolean {
   if (process.env.DO_NOT_TRACK !== undefined && !isFalse(process.env.DO_NOT_TRACK)) return true;
   if (isTrue(process.env.FARM_TELEMETRY_DISABLED)) return true;
   return isFalse(process.env.FARM_TELEMETRY);
+}
+
+/**
+ * Only a provider's production environment represents a production site;
+ * preview, branch, and development deployments must not create dashboard
+ * entries. Each provider exposes this differently, so every signal we can read
+ * is checked. A deployment whose provider exposes no environment metadata stays
+ * eligible, so self-hosted sites continue to report.
+ *
+ * Cloudflare Pages is deliberately absent: it exposes `CF_PAGES_BRANCH` for both
+ * production and preview deployments and no environment flag that distinguishes
+ * them, so there is nothing here that could be read without guessing.
+ */
+function isProductionDeploymentEnvironment(): boolean {
+  // Vercel exposes the deployment environment at build and runtime.
+  const environment = normalizeEnvironment(process.env.VERCEL_ENV);
+  const targetEnvironment = normalizeEnvironment(process.env.VERCEL_TARGET_ENV);
+  if (environment && environment !== "production") return false;
+  if (targetEnvironment && targetEnvironment !== "production") return false;
+
+  // Netlify: CONTEXT is production | deploy-preview | branch-deploy | dev.
+  // CONTEXT is a generic name, so it is only trusted when NETLIFY marks the
+  // build as Netlify's.
+  if (isTrue(process.env.NETLIFY)) {
+    const context = normalizeEnvironment(process.env.CONTEXT);
+    if (context && context !== "production") return false;
+  }
+
+  // Render marks pull-request preview services.
+  if (isTrue(process.env.IS_PULL_REQUEST)) return false;
+
+  return true;
+}
+
+function normalizeEnvironment(value: string | undefined): string | undefined {
+  const normalized = value?.trim().toLowerCase();
+  return normalized || undefined;
 }
 
 function sanitizeDetail(value: string | undefined, fallback: string): string {

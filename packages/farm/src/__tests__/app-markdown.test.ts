@@ -2,11 +2,36 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
+  createFarmMarkdownErrorBody,
   createFarmMarkdownRouteModule,
   createFarmMarkdownSourceResponse,
+  farmRequestWantsMarkdown,
   parseMarkdownFrontmatter,
   resolveMdxConfig,
 } from "../app-markdown";
+
+describe("markdown request negotiation and errors", () => {
+  it("detects Markdown requests by extension or Accept header", () => {
+    expect(farmRequestWantsMarkdown("/guide.md", null)).toBe(true);
+    expect(farmRequestWantsMarkdown("/guide", "text/markdown")).toBe(true);
+    expect(farmRequestWantsMarkdown("/guide", "text/markdown;q=0.9")).toBe(true);
+    // A browser Accept header does not count as a Markdown request.
+    expect(farmRequestWantsMarkdown("/guide", "text/html,application/xhtml+xml,*/*;q=0.8")).toBe(
+      false,
+    );
+    expect(farmRequestWantsMarkdown("/guide", "text/markdown;q=0")).toBe(false);
+    expect(farmRequestWantsMarkdown("/guide", null)).toBe(false);
+  });
+
+  it("builds a Markdown error body with an explanation and a link", () => {
+    const body = createFarmMarkdownErrorBody(404, "/missing.md", "/");
+    expect(body).toContain("# Page not found");
+    expect(body).toContain("/missing.md");
+    expect(body).toContain("](/)");
+    expect(body.length).toBeGreaterThan(20);
+    expect(createFarmMarkdownErrorBody(500, "/x")).toContain("Request failed (500)");
+  });
+});
 
 describe("app markdown pages", () => {
   it("parses frontmatter from markdown sources", () => {

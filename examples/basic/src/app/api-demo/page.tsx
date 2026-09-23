@@ -1,31 +1,14 @@
 
 import React from 'react';
 import { Link } from '@farm.js/core/client';
-import { GET as helloGet } from "../api/hello/route"
+import { api } from '../../lib/api';
 export default async function APIDemo() {
-  const baseURL = 'http://localhost:3000';
-  console.log({process: process.env})
-  let helloResponse;
-  let usersResponse;
-  try {
-    const helloRes = await helloGet({
-      query: {
-        name: 'wonderfull something'
-      }
-    })
-    console.log({helloRes})
-    helloResponse = helloRes
-  } catch (error) {
-    helloResponse = { message: 'Error fetching data', timestamp: new Date().toISOString() };
-  }
-  
-  try {
-    const usersRes = await fetch(`${baseURL}/api/users`);
-    usersResponse = await usersRes.json();
-} 
-  catch (error) {
-    usersResponse = { users: [], total: 0, limit: 10, offset: 0 };
-  }
+  const [hello, users] = await Promise.all([
+    api.hello.get({ query: { name: 'Farm.js' } }),
+    api.users.get(),
+  ]);
+  const helloResponse = hello.data ?? { message: hello.error?.message };
+  const usersResponse = users.data ?? { message: users.error?.message };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white p-8">
@@ -51,7 +34,7 @@ export default async function APIDemo() {
               </pre>
             </div>
             <p className="mt-4 text-gray-400 text-sm">
-              ✅ Fetched in async server component: <code className="bg-gray-700 px-2 py-1 rounded">await fetch('/api/hello?name=Farm.js')</code>
+              ✅ Called locally on the server: <code className="bg-gray-700 px-2 py-1 rounded">{'await api.hello.get({ query: { name: "Farm.js" } })'}</code>
             </p>
           </div>
 
@@ -66,7 +49,7 @@ export default async function APIDemo() {
               </pre>
             </div>
             <p className="mt-4 text-gray-400 text-sm">
-              ✅ Fetched in async server component: <code className="bg-gray-700 px-2 py-1 rounded">await fetch('/api/users')</code>
+              ✅ Same shared api.ts as the browser caller: <code className="bg-gray-700 px-2 py-1 rounded">await api.users.get()</code>
             </p>
           </div>
 

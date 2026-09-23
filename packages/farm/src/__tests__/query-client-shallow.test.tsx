@@ -8,7 +8,14 @@ import { useSearchParams } from "../navigation";
 import { pushState as pushFarmPageState, readPageState, SPARouter } from "../client/spa-router";
 import { usePageState } from "../client/router";
 import { FARM_HISTORY_CHANGE_EVENT, notifyHistoryChange } from "../client/history-sync";
-import { asString, useQueryState, useQueryStates } from "../query/client";
+import {
+  asArrayOf,
+  asJson,
+  asString,
+  createParser,
+  useQueryState,
+  useQueryStates,
+} from "../query/client";
 
 describe("useQueryState shallow routing", () => {
   let container: HTMLDivElement;
@@ -96,6 +103,41 @@ describe("useQueryState shallow routing", () => {
 
     expect(window.location.search).toBe("?url=https%3A%2F%2Fexample.com");
     expect(popstate).not.toHaveBeenCalled();
+  });
+
+  it("reads every repeated value through useQueryState", () => {
+    window.history.replaceState(null, "", "/?tag=react&tag=vite");
+    let value: string[] | null = null;
+
+    function App() {
+      [value] = useQueryState("tag", asArrayOf(asString));
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    expect(value).toEqual(["react", "vite"]);
+  });
+
+  it("reads every repeated value through useQueryStates", () => {
+    window.history.replaceState(null, "", "/?tag=react&tag=vite");
+    let value: string[] | null = null;
+
+    function App() {
+      const [state] = useQueryStates({ tag: asArrayOf(asString) });
+      value = state.tag;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    expect(value).toEqual(["react", "vite"]);
   });
 
   it("does not trigger SPA navigation when shallow is true and Farm router is installed", async () => {
@@ -251,6 +293,197 @@ describe("useQueryState shallow routing", () => {
     expect(historyChange).toHaveBeenCalledTimes(1);
   });
 
+  it("reads the current URL when a useQueryState key changes", () => {
+    window.history.replaceState(null, "", "/?first=one&second=two");
+    let value: string | null = null;
+
+    function App({ queryKey }: { queryKey: string }) {
+      [value] = useQueryState(queryKey, asString);
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App, { queryKey: "first" }));
+    });
+    expect(value).toBe("one");
+
+    act(() => {
+      root?.render(createElement(App, { queryKey: "second" }));
+    });
+    expect(value).toBe("two");
+  });
+
+  it("replaces useQueryStates output when its parser keys change", () => {
+    window.history.replaceState(null, "", "/?first=one&second=two");
+    let value: Record<string, string | null> = {};
+
+    function App({ queryKey }: { queryKey: "first" | "second" }) {
+      [value] = useQueryStates({ [queryKey]: asString });
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App, { queryKey: "first" }));
+    });
+    expect(value).toEqual({ first: "one" });
+
+    act(() => {
+      root?.render(createElement(App, { queryKey: "second" }));
+    });
+    expect(value).toEqual({ second: "two" });
+  });
+
+  it("does not loop when useQueryState receives an inline parser returning objects", () => {
+    window.history.replaceState(null, "", '/?filters={"status":"open"}');
+    let renders = 0;
+
+    function App() {
+      renders += 1;
+      useQueryState("filters", asJson<{ status: string }>());
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    expect(renders).toBe(1);
+  });
+
+  it("does not loop when useQueryStates receives an inline parser map", () => {
+    window.history.replaceState(null, "", '/?filters={"status":"open"}');
+    let renders = 0;
+
+    function App() {
+      renders += 1;
+      useQueryStates({ filters: asJson<{ status: string }>() });
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    expect(renders).toBe(1);
+  });
+
+  it("compares self-referential array values without recursing forever", () => {
+    type CyclicValue = Array<string | CyclicValue>;
+    const parser = createParser({
+      parse: (value): CyclicValue => {
+        const parsed: CyclicValue = [value];
+        parsed.push(parsed);
+        return parsed;
+      },
+      serialize: (value) => String(value[0]),
+    });
+    let renders = 0;
+
+    function App() {
+      renders += 1;
+      useQueryState("value", parser);
+      return null;
+    }
+
+    window.history.replaceState(null, "", "/?value=one");
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    expect(renders).toBe(1);
+  });
+
+  it("resynchronizes primitive state when a default changes its serialized value", () => {
+    vi.useFakeTimers();
+    let value: string | null = null;
+    let setValue!: (next: string | null) => void;
+
+    function App() {
+      [value, setValue] = useQueryState("q", asString.withDefault!("fallback"));
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    act(() => {
+      setValue("");
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?q=fallback");
+    expect(value).toBe("fallback");
+  });
+
+  it("replaces object state when the useQueryState key changes", () => {
+    window.history.replaceState(null, "", '/?first={"id":1}&second={"id":1}');
+    const parser = asJson<{ id: number }>();
+    let value: { id: number } | null = null;
+
+    function App({ queryKey }: { queryKey: "first" | "second" }) {
+      [value] = useQueryState(queryKey, parser);
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App, { queryKey: "first" }));
+    });
+    const firstValue = value;
+    act(() => {
+      root?.render(createElement(App, { queryKey: "second" }));
+    });
+
+    expect(value).toEqual({ id: 1 });
+    expect(value).not.toBe(firstValue);
+  });
+
+  it("replaces useQueryStates values when parser-visible hidden state changes", () => {
+    window.history.replaceState(null, "", "/?item=one");
+    type ParsedItem = { value: string; mode: string };
+    const parseItem = (value: string, mode: string): ParsedItem => {
+      const item = { value } as ParsedItem;
+      Object.defineProperty(item, "mode", { value: mode, configurable: true });
+      return item;
+    };
+    const oldParser = createParser({
+      parse: (value) => parseItem(value, "old"),
+      serialize: (value) => `${value.value}:${value.mode}`,
+    });
+    const nextParser = createParser({
+      parse: (value) => parseItem(value, "next"),
+      serialize: (value) => `${value.value}:${value.mode}`,
+    });
+    let values: { item: ParsedItem | null } = { item: null };
+
+    function App({ parser }: { parser: typeof oldParser }) {
+      [values] = useQueryStates({ item: parser });
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App, { parser: oldParser }));
+    });
+    const oldValue = values.item;
+    expect(oldValue?.mode).toBe("old");
+
+    act(() => {
+      root?.render(createElement(App, { parser: nextParser }));
+    });
+    expect(values.item?.mode).toBe("next");
+    expect(values.item).not.toBe(oldValue);
+  });
+
   it("composes throttled updates for different query keys", () => {
     vi.useFakeTimers();
 
@@ -305,6 +538,184 @@ describe("useQueryState shallow routing", () => {
     expect(window.location.search).toBe("?q=old");
   });
 
+  it("cancels a throttled update when its hook unmounts", () => {
+    vi.useFakeTimers();
+    let setQuery!: (value: string | null) => void;
+
+    function App() {
+      const [, updateQuery] = useQueryState("q", asString, { throttleMs: 50 });
+      setQuery = updateQuery;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    act(() => {
+      setQuery("old-page");
+      root?.unmount();
+    });
+    root = undefined;
+    window.history.replaceState(null, "", "/next");
+
+    act(() => {
+      vi.runAllTimers();
+    });
+
+    expect(window.location.pathname + window.location.search).toBe("/next");
+  });
+
+  it("does not let an earlier hook cancel a newer throttled update", () => {
+    vi.useFakeTimers();
+    let setFirst!: (value: string | null) => void;
+    let setSecond!: (value: string | null) => void;
+
+    function First() {
+      const [, updateQuery] = useQueryState("q", asString, { throttleMs: 50 });
+      setFirst = updateQuery;
+      return null;
+    }
+    function Second() {
+      const [, updateQuery] = useQueryState("q", asString, { throttleMs: 50 });
+      setSecond = updateQuery;
+      return null;
+    }
+    function App({ showFirst }: { showFirst: boolean }) {
+      return createElement(
+        "div",
+        null,
+        showFirst ? createElement(First) : null,
+        createElement(Second),
+      );
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App, { showFirst: true }));
+    });
+    act(() => {
+      setFirst("first");
+      setSecond("second");
+      root?.render(createElement(App, { showFirst: false }));
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?q=second");
+  });
+
+  it("cancels an older throttled write before an immediate update", () => {
+    vi.useFakeTimers();
+    let setQuery!: (value: string | null) => void;
+
+    function App({ throttle }: { throttle: boolean }) {
+      const [, updateQuery] = useQueryState("q", asString, {
+        throttleMs: throttle ? 50 : 0,
+      });
+      setQuery = updateQuery;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App, { throttle: true }));
+    });
+    act(() => {
+      setQuery("old");
+      root?.render(createElement(App, { throttle: false }));
+    });
+    act(() => {
+      setQuery("new");
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?q=new");
+  });
+
+  it("cancels an older throttled multi-key write before an immediate update", () => {
+    vi.useFakeTimers();
+    let setQueries!: (updates: { q?: string | null; page?: string | null }) => void;
+    const parsers = { q: asString, page: asString };
+
+    function App({ throttle }: { throttle: boolean }) {
+      const [, updateQueries] = useQueryStates(parsers, {
+        throttleMs: throttle ? 50 : 0,
+      });
+      setQueries = updateQueries;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App, { throttle: true }));
+    });
+    act(() => {
+      setQueries({ q: "old", page: "1" });
+      root?.render(createElement(App, { throttle: false }));
+    });
+    act(() => {
+      setQueries({ q: "new", page: "2" });
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?q=new&page=2");
+  });
+
+  it("keeps throttled useQueryStates writes for different key sets", () => {
+    vi.useFakeTimers();
+    let setQueries!: (updates: { q?: string | null; page?: string | null }) => void;
+    const parsers = { q: asString, page: asString };
+
+    function App() {
+      const [, updateQueries] = useQueryStates(parsers, { throttleMs: 50 });
+      setQueries = updateQueries;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    act(() => {
+      setQueries({ q: "search" });
+      setQueries({ page: "2" });
+      vi.runAllTimers();
+    });
+
+    expect(window.location.search).toBe("?q=search&page=2");
+  });
+
+  it("keeps throttled key sets distinct when query names contain commas", () => {
+    vi.useFakeTimers();
+    let setQueries!: (updates: {
+      "a,b"?: string | null;
+      a?: string | null;
+      b?: string | null;
+    }) => void;
+    const parsers = { "a,b": asString, a: asString, b: asString };
+
+    function App() {
+      const [, updateQueries] = useQueryStates(parsers, { throttleMs: 50 });
+      setQueries = updateQueries;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    act(() => {
+      setQueries({ "a,b": "combined" });
+      setQueries({ a: "left", b: "right" });
+      vi.runAllTimers();
+    });
+
+    const searchParams = new URLSearchParams(window.location.search);
+    expect(searchParams.get("a,b")).toBe("combined");
+    expect(searchParams.get("a")).toBe("left");
+    expect(searchParams.get("b")).toBe("right");
+  });
+
   it("preserves Farm page history state when updating query params", async () => {
     vi.useFakeTimers();
     spaRouter = new SPARouter({ scrollRestoration: false });
@@ -342,6 +753,93 @@ describe("useQueryState shallow routing", () => {
     expect((window.history.state as { path?: string }).path).toBe(
       "/?url=https%3A%2F%2Fexample.com",
     );
+  });
+
+  it("advances the SPA router history index for shallow query pushes", () => {
+    vi.useFakeTimers();
+    spaRouter = new SPARouter({ scrollRestoration: false });
+    (window as any).__FARM_SPA_ROUTER__ = spaRouter;
+    let setQuery!: (value: string | null) => void;
+
+    function App() {
+      const [, set] = useQueryState("q", asString);
+      setQuery = set;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    act(() => {
+      setQuery("first");
+    });
+
+    expect(window.history.state).toMatchObject({
+      path: "/?q=first",
+      __farmHistoryIndex: 1,
+    });
+    expect((spaRouter as any).currentHistoryPath).toBe("/?q=first");
+
+    act(() => {
+      setQuery("second");
+    });
+
+    expect(window.history.state).toMatchObject({
+      path: "/?q=second",
+      __farmHistoryIndex: 2,
+    });
+    expect((spaRouter as any).currentHistoryIndex).toBe(2);
+  });
+
+  it("keeps the hash in SPA router state during shallow query writes", () => {
+    vi.useFakeTimers();
+    window.history.replaceState(null, "", "/#details");
+    spaRouter = new SPARouter({ scrollRestoration: false });
+    (window as any).__FARM_SPA_ROUTER__ = spaRouter;
+    let setQuery!: (value: string | null) => void;
+
+    function App() {
+      const [, set] = useQueryState("q", asString);
+      setQuery = set;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    act(() => {
+      setQuery("value");
+    });
+
+    expect(window.location.hash).toBe("#details");
+    expect(window.history.state).toMatchObject({ path: "/?q=value#details" });
+  });
+
+  it("preserves primitive history state through the router fallback", () => {
+    vi.useFakeTimers();
+    spaRouter = new SPARouter({ scrollRestoration: false });
+    (window as any).__FARM_SPA_ROUTER__ = spaRouter;
+    window.history.replaceState("app-owned", "", "/");
+    let setQuery!: (value: string | null) => void;
+
+    function App() {
+      const [, set] = useQueryState("q", asString);
+      setQuery = set;
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+    act(() => {
+      setQuery("value");
+    });
+
+    expect(window.location.search).toBe("?q=value");
+    expect(window.history.state).toBe("app-owned");
   });
 
   it("does not leak SPA router popstate listeners across tests", async () => {

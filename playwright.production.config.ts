@@ -25,7 +25,7 @@ export default defineConfig({
     ? undefined
     : {
         command: [
-          "FARM_VITE_BUILDER=rolldown corepack pnpm --dir examples/basic exec farm build --preset node-server",
+          "FARM_VITE_BUILDER=rolldown pnpm --dir examples/basic exec farm build --preset node-server",
           `NODE_ENV=production CRON_SECRET=farm-production-e2e-secret HOST=127.0.0.1 PORT=${port} node examples/basic/.farm/.output/server/index.mjs`,
         ].join(" && "),
         url: baseURL,

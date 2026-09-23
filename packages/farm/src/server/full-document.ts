@@ -49,6 +49,11 @@ export function opensFarmFullDocument(markup: string): boolean {
   return /^<!doctype/i.test(inner) || /^<html[\s>]/i.test(inner);
 }
 
+/** Remove document title elements before inserting a higher-priority title. */
+export function removeFarmDocumentTitles(markup: string): string {
+  return markup.replace(/<title\b[^>]*>[\s\S]*?<\/title>\s*/gi, "");
+}
+
 export interface FarmFullDocumentAssets {
   /** Farm-managed `<head>` markup (styles, client/runtime scripts, metadata). */
   headAssets: string;
@@ -56,6 +61,8 @@ export interface FarmFullDocumentAssets {
   bodyFooter: string;
   /** Extra `<html>` attributes to merge (theme, direction). */
   htmlAttributes?: string;
+  /** Existing attributes Farm owns and must replace before merging. */
+  replaceHtmlAttributes?: readonly string[];
 }
 
 /**
@@ -71,10 +78,17 @@ export function composeFarmFullDocument(
   let html = documentHtml;
 
   if (assets.htmlAttributes) {
-    html = html.replace(
-      /<html\b([^>]*)>/i,
-      (_match, attrs: string) => `<html${attrs}${assets.htmlAttributes}>`,
-    );
+    html = html.replace(/<html\b([^>]*)>/i, (_match, attrs: string) => {
+      let nextAttributes = attrs;
+      for (const name of assets.replaceHtmlAttributes ?? []) {
+        const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        nextAttributes = nextAttributes.replace(
+          new RegExp("\\s+" + escapedName + "=(?:\"[^\"]*\"|'[^']*'|[^\\s>]+)", "gi"),
+          "",
+        );
+      }
+      return `<html${nextAttributes}${assets.htmlAttributes}>`;
+    });
   }
 
   // Ensure a hydration root exists so the client can mount, matching the shell.

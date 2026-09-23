@@ -6,3 +6,6 @@ allowBuilds:
   esbuild: true
   sharp: true
   vue-demi: true
+
+minimumReleaseAgeExclude:
+  - "@farm.js/*"

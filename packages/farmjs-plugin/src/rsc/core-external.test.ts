@@ -12,15 +12,18 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import viteRsc from "@vitejs/plugin-rsc";
 import { createBuilder } from "vite";
 import { describe, expect, it } from "vitest";
+import { resolveFarmAPIRequestURL } from "@farm.js/core/api";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
-import farmRsc from "./index.js";
+import farmRsc, { defineConfig } from "./index.js";
 import { buildRscNitro } from "./nitro-build.js";
+import { linkRscFixtureDependencies } from "./test-fixture-dependencies.js";
 
 const delay = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -55,6 +58,51 @@ async function stopProcess(child: ChildProcess): Promise<void> {
 }
 
 describe("RSC core runtime bundling", () => {
+  it("passes API configuration through the standalone config helper", () => {
+    const api = { basePath: async () => "/backend" };
+    expect((defineConfig({ api }) as any).api).toBe(api);
+  });
+
+  it.each(["serve", "build"] as const)(
+    "resolves async API configuration once for the %s client and generated entry",
+    async (command) => {
+      const root = mkdtempSync(path.join(tmpdir(), "farm-rsc-api-config-"));
+      try {
+        linkRscFixtureDependencies(root);
+        const plugin = farmRsc().find(
+          (candidate) => candidate.name === "@farm.js/plugin/rsc:config",
+        );
+        const configHook = plugin!.config as (
+          config: Record<string, unknown>,
+          env: { command: "serve" | "build"; mode: string },
+        ) => Promise<any>;
+        let calls = 0;
+        const resolved = await configHook(
+          {
+            root,
+            experimental: { serverComponents: true },
+            api: {
+              basePath: async ({ mode, root: apiRoot }: { mode: string; root: string }) => {
+                calls++;
+                expect(apiRoot).toBe(root);
+                return `/${mode}-api`;
+              },
+            },
+          },
+          { command, mode: command === "build" ? "production" : "development" },
+        );
+        const basePath = command === "build" ? "/production-api" : "/development-api";
+        expect(calls).toBe(1);
+        expect(resolved.define.__FARM_API_BASE_URL__).toBe(JSON.stringify(basePath));
+        expect(readFileSync(path.join(root, ".farm/rsc-entries/entry.rsc.tsx"), "utf8")).toContain(
+          `const farmApiBasePath = ${JSON.stringify(basePath)};`,
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("does not prefix absolute Vite environment output paths with the project root", () => {
     const root = path.resolve("/workspace/app");
     const absoluteOutDir = path.join(root, ".nitro", "vite", "dist", "rsc");
@@ -190,62 +238,261 @@ export const schema = z.string();`;
     ).toThrow(/@farm.js\/core\/storage is not supported.*isolated server output/s);
   });
 
-  it("builds and boots a real RSC app with exact-root runtime imports outside the workspace", async () => {
-    const fixtureRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-root-runtime-"));
-    const isolatedRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-root-output-"));
-    const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-    let child: ChildProcess | undefined;
+  it.each([
+    { name: "default", api: undefined, baseURL: "/api", mount: "/api" },
+    { name: "cache-variants", api: undefined, baseURL: "/api", mount: "/api" },
+    { name: "nested-layouts", api: undefined, baseURL: "/api", mount: "/api" },
+    {
+      name: "custom",
+      api: {
+        basePath: async ({ mode }: { mode: string }) =>
+          mode === "production" ? "/backend" : "/dev-backend",
+      },
+      baseURL: "/backend",
+      mount: "/backend",
+    },
+    { name: "root", api: { basePath: "/" }, baseURL: "/", mount: "" },
+    {
+      name: "external",
+      api: { baseURL: "https://api.example.test/v1" },
+      baseURL: "https://api.example.test/v1",
+      mount: "/api",
+    },
+  ])(
+    "builds and boots an isolated RSC app with the $name API root",
+    async ({ name, api, baseURL, mount }) => {
+      const fixtureRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-root-runtime-"));
+      const isolatedRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-root-output-"));
+      const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+      let child: ChildProcess | undefined;
 
-    try {
-      const srcDir = path.join(fixtureRoot, "src");
-      mkdirSync(srcDir, { recursive: true });
-      writeFileSync(
-        path.join(fixtureRoot, "package.json"),
-        JSON.stringify({
-          name: "farm-rsc-root-runtime-fixture",
-          private: true,
-          type: "module",
-        }),
-      );
-      const fixtureModules = path.join(fixtureRoot, "node_modules");
-      for (const packageName of [
-        "@farm.js/core",
-        "@vitejs/plugin-rsc",
-        "better-call",
-        "react",
-        "react-dom",
-        "react-server-dom-webpack",
-        "rsc-html-stream",
-        "vite",
-      ]) {
-        const linkPath = path.join(fixtureModules, packageName);
-        const packagePath = [
-          path.join(packageRoot, "node_modules", packageName),
-          path.resolve(packageRoot, "../../examples/rsc-demo/node_modules", packageName),
-        ].find((candidate) => existsSync(candidate));
-        if (!packagePath) throw new Error(`Missing fixture dependency: ${packageName}`);
-        mkdirSync(path.dirname(linkPath), { recursive: true });
-        symlinkSync(
-          realpathSync(packagePath),
-          linkPath,
-          process.platform === "win32" ? "junction" : "dir",
+      try {
+        const srcDir = path.join(fixtureRoot, "src");
+        mkdirSync(srcDir, { recursive: true });
+        if (name === "default" || name === "custom") {
+          const writeRoute = (file: string, source: string) => {
+            const target = path.join(srcDir, file);
+            mkdirSync(path.dirname(target), { recursive: true });
+            writeFileSync(target, source);
+          };
+          writeRoute(
+            "broken/page.tsx",
+            `export default async function Page() { throw new Error("private page failure"); }`,
+          );
+          writeRoute(
+            "layout-failure/page.tsx",
+            `export default function Page() { return <p>page</p>; }`,
+          );
+          writeRoute(
+            "layout-failure/layout.tsx",
+            `export default async function Layout() { throw new Error("private layout failure"); }`,
+          );
+          writeRoute(
+            "sync-failure/page.tsx",
+            `export default function Page() { throw new Error("private sync failure"); }`,
+          );
+          writeRoute(
+            "middleware.ts",
+            `export function middleware(request, context) {
+            if (new URL(request.url).pathname === "/middleware-failure") throw new Error("private middleware failure");
+            context.headers.set("cache-control", "public, max-age=60");
+          }`,
+          );
+          writeRoute(
+            "go/page.tsx",
+            `import { redirect } from "@farm.js/core/navigation"; export default async function Page() { redirect("/", 307); }`,
+          );
+          writeRoute(
+            "missing/page.tsx",
+            `import { notFound } from "@farm.js/core/navigation"; export default async function Page() { notFound(); }`,
+          );
+          if (name === "default") {
+            writeRoute(
+              "accounts/[id]/page.tsx",
+              `export default async function Page() { throw new Error("private dynamic account failure"); }`,
+            );
+            writeRoute(
+              "accounts/[id]/error.tsx",
+              `"use client"; export default function ErrorPage() { return <main>Dynamic account error rendered</main>; }`,
+            );
+            writeRoute(
+              "accounts/new/page.tsx",
+              `export default async function Page() { throw new Error("private static account failure"); }`,
+            );
+            for (const [folder, marker] of [
+              ["(shop)/products", "Grouped product error rendered"],
+              ["docs/[[...slug]]", "Optional docs error rendered"],
+              ["middleware-failure", "Unselected page error rendered"],
+            ]) {
+              writeRoute(
+                `${folder}/page.tsx`,
+                `export default async function Page() { throw new Error("private boundary ancestry failure"); }`,
+              );
+              writeRoute(
+                `${folder}/error.tsx`,
+                `"use client"; export default function ErrorPage() { return <main>${marker}</main>; }`,
+              );
+            }
+            writeRoute(
+              "users/[id]/page.tsx",
+              `export default function Page({ params }) { return <main>Dynamic user {params.id}</main>; }`,
+            );
+            writeRoute(
+              "users/new/page.tsx",
+              `export default function Page() { return <main>Static new user</main>; }`,
+            );
+            writeRoute(
+              "optional/[[...slug]]/page.tsx",
+              `export default function Page({ params }) { return <main>Optional catch-all {JSON.stringify(params)}</main>; }`,
+            );
+            writeRoute(
+              "(marketing)/pricing/page.tsx",
+              `export default function Page() { return <p>Grouped pricing</p>; }`,
+            );
+            writeRoute(
+              "error.tsx",
+              `"use client"; export default function ErrorPage({ error, reset, path, searchParams }) {
+              return <main>Route error rendered <p>{error.message}</p><p>{path}</p><p>{JSON.stringify(searchParams)}</p><button onClick={reset}>Reset</button></main>;
+            }`,
+            );
+            writeRoute(
+              "hook-control/page.tsx",
+              `import { useId } from "react"; export default function Page() { const id = useId(); return <main id={id}>Hook control</main>; }`,
+            );
+            writeRoute(
+              "hook-sniff/page.tsx",
+              `import { useId } from "react"; export default function Page() { const label = "async is just text"; const id = useId(); return <main id={id}>Hook scan {label}</main>; }`,
+            );
+            writeRoute(
+              "hook-layout/layout.tsx",
+              `import { useId } from "react"; export default function Layout({ children }) { const id = useId(); const label = "async is just text"; return <section id={id}>Hook layout {label} {children}</section>; }`,
+            );
+            writeRoute(
+              "hook-layout/page.tsx",
+              `export default function Page() { return <main>Hook layout page</main>; }`,
+            );
+            writeRoute(
+              "async-layout/[id]/layout.tsx",
+              `export default async function Layout({ children }) { await Promise.resolve(); return <aside>Async layout {children}</aside>; }`,
+            );
+            writeRoute(
+              "async-layout/[id]/page.tsx",
+              `export default async function Page({ params }) { await Promise.resolve(); return <p>Async page {params.id}</p>; }`,
+            );
+            writeRoute(
+              "bad-boundary/page.tsx",
+              `export default async function Page() { throw new Error("private original failure"); }`,
+            );
+            writeRoute(
+              "bad-boundary/error.tsx",
+              `"use client"; export default function ErrorPage() { throw new Error("private boundary failure"); }`,
+            );
+            writeRoute(
+              "server-boundary/page.tsx",
+              `export default async function Page() { throw new Error("private server failure"); }`,
+            );
+            writeRoute(
+              "server-boundary/error.tsx",
+              `export default function ErrorPage({ error }) { return <main>Server error rendered {error.message}</main>; }`,
+            );
+          }
+        }
+        writeFileSync(
+          path.join(fixtureRoot, "package.json"),
+          JSON.stringify({
+            name: "farm-rsc-root-runtime-fixture",
+            private: true,
+            type: "module",
+          }),
         );
-      }
-      writeFileSync(
-        path.join(srcDir, "layout.tsx"),
-        `export default function Layout({ children }) {
-  return <html><body>{children}</body></html>;
+        if (name === "cache-variants") {
+          writeFileSync(
+            path.join(srcDir, "middleware.ts"),
+            `export function middleware(request, context) {
+            context.headers.set("cache-control", "public, max-age=60");
+            context.headers.set("vary", new URL(request.url).searchParams.has("wildcard") ? "*" : "Origin, aCcEpT");
+          }`,
+          );
+        }
+        const fixtureModules = path.join(fixtureRoot, "node_modules");
+        if (name === "nested-layouts") {
+          const writeRoute = (file: string, source: string) => {
+            const target = path.join(srcDir, file);
+            mkdirSync(path.dirname(target), { recursive: true });
+            writeFileSync(target, source);
+          };
+          writeRoute(
+            "nested/layout.tsx",
+            `import { useId } from "react"; export default function Layout({ children }) { const id = useId(); return <section id={id}>Nested layout {children}</section>; }`,
+          );
+          writeRoute(
+            "nested/page.tsx",
+            `export default function Page() { return <main>Nested page</main>; }`,
+          );
+          writeRoute(
+            "components/provider.tsx",
+            `"use client";
+            import { createContext, useContext } from "react";
+            const Context = createContext("missing provider");
+            export function Provider({ children }) { return <Context.Provider value="root provider present">{children}</Context.Provider>; }
+            export function Consumer() { return <p>{useContext(Context)}</p>; }
+          `,
+          );
+          writeRoute(
+            "nested/client/page.tsx",
+            `"use client";
+            import { useState } from "react"; import { Consumer } from "../../components/provider";
+            export default function Page() { const [count, setCount] = useState(0); return <main>Client page<Consumer /><button onClick={() => setCount(count + 1)}>Count {count}</button></main>; }
+          `,
+          );
+          writeRoute(
+            "async-layout/[id]/layout.tsx",
+            `export default async function Layout({ children, params }) { await Promise.resolve(); return <aside>Async layout {params.id} {children}</aside>; }`,
+          );
+          writeRoute(
+            "async-layout/[id]/page.tsx",
+            `export default async function Page() { await Promise.resolve(); return <p>Async page</p>; }`,
+          );
+        }
+        for (const packageName of [
+          "@farm.js/core",
+          "@vitejs/plugin-rsc",
+          "better-call",
+          "react",
+          "react-dom",
+          "react-server-dom-webpack",
+          "rsc-html-stream",
+          "vite",
+        ]) {
+          const linkPath = path.join(fixtureModules, packageName);
+          const packagePath = [
+            path.join(packageRoot, "node_modules", packageName),
+            path.resolve(packageRoot, "../../examples/rsc-demo/node_modules", packageName),
+          ].find((candidate) => existsSync(candidate));
+          if (!packagePath) throw new Error(`Missing fixture dependency: ${packageName}`);
+          mkdirSync(path.dirname(linkPath), { recursive: true });
+          symlinkSync(
+            realpathSync(packagePath),
+            linkPath,
+            process.platform === "win32" ? "junction" : "dir",
+          );
+        }
+        writeFileSync(
+          path.join(srcDir, "layout.tsx"),
+          `${name === "nested-layouts" ? 'import { Provider } from "./components/provider";' : ""}
+export default function Layout({ children }) {
+  return ${name === "nested-layouts" ? "<section>Root layout marker <Provider>{children}</Provider></section>" : "<html><body>{children}</body></html>"};
 }`,
-      );
-      writeFileSync(
-        path.join(srcDir, "page.tsx"),
-        `export default function Page() {
+        );
+        writeFileSync(
+          path.join(srcDir, "page.tsx"),
+          `export default function Page() {
   return <main>RSC root runtime fixture</main>;
 }`,
-      );
-      writeFileSync(
-        path.join(srcDir, "routes.ts"),
-        `import {
+        );
+        writeFileSync(
+          path.join(srcDir, "routes.ts"),
+          `import {
   createEndpoint,
   createRoute,
   getCurrentRequest,
@@ -304,117 +551,367 @@ export const rootRuntime = createEndpoint("/api/root-runtime", {
     notFound: recognizesNotFound(),
   };
 });
+
+export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ body }) => ({ body }));
 `,
-      );
+        );
 
-      const plugins = farmRsc({ routesDir: "" }).filter(
-        (plugin) => plugin.name !== "@farm.js/plugin/rsc:nitro-build",
-      );
-      plugins.push(
-        ...viteRsc({
-          serverHandler: false,
-          entries: {
-            rsc: "./.farm/rsc-entries/entry.rsc.tsx",
-            ssr: "./.farm/rsc-entries/entry.ssr.tsx",
-            client: "./.farm/rsc-entries/entry.browser.tsx",
-          },
-        }),
-      );
+        const plugins = farmRsc({ routesDir: "" }).filter(
+          (plugin) => plugin.name !== "@farm.js/plugin/rsc:nitro-build",
+        );
+        plugins.push(
+          ...viteRsc({
+            serverHandler: false,
+            entries: {
+              rsc: "./.farm/rsc-entries/entry.rsc.tsx",
+              ssr: "./.farm/rsc-entries/entry.ssr.tsx",
+              client: "./.farm/rsc-entries/entry.browser.tsx",
+            },
+          }),
+        );
 
-      const builder = await createBuilder({
-        root: fixtureRoot,
-        configFile: false,
-        logLevel: "silent",
-        srcDir: "src",
-        outDir: "dist",
-        experimental: { serverComponents: true, serverActions: false },
-        plugins,
-      } as never);
-      await builder.buildApp();
+        const builder = await createBuilder({
+          root: fixtureRoot,
+          configFile: false,
+          logLevel: "silent",
+          srcDir: "src",
+          outDir: "dist",
+          esbuild: { jsxDev: false },
+          experimental: { serverComponents: true, serverActions: true },
+          api,
+          plugins,
+        } as never);
+        expect(builder.config.define?.__FARM_API_BASE_URL__).toBe(JSON.stringify(baseURL));
+        await builder.buildApp();
 
-      const rscPath = path.join(fixtureRoot, "dist", "rsc", "index.js");
-      const ssrPath = path.join(fixtureRoot, "dist", "ssr", "index.js");
-      const clientDir = path.join(fixtureRoot, "dist", "client");
-      const rscCode = readFileSync(rscPath, "utf-8");
-      expect(rscCode).not.toMatch(/from\s*["']@farm.js\/core["']/);
+        const rscPath = path.join(fixtureRoot, "dist", "rsc", "index.js");
+        const ssrPath = path.join(fixtureRoot, "dist", "ssr", "index.js");
+        const clientDir = path.join(fixtureRoot, "dist", "client");
+        const rscCode = readFileSync(rscPath, "utf-8");
+        expect(rscCode).not.toMatch(/from\s*["']@farm.js\/core["']/);
 
-      const outputDir = path.join(fixtureRoot, ".output");
-      await buildRscNitro({
-        root: fixtureRoot,
-        rendererPath: rscPath,
-        ssrPath,
-        publicDir: clientDir,
-        outputDir,
-        preset: "node-server",
-      });
+        const outputDir = path.join(fixtureRoot, ".output");
+        await buildRscNitro({
+          root: fixtureRoot,
+          rendererPath: rscPath,
+          ssrPath,
+          publicDir: clientDir,
+          outputDir,
+          preset: "node-server",
+        });
 
-      const outputPackage = JSON.parse(
-        readFileSync(path.join(outputDir, "server", "package.json"), "utf-8"),
-      ) as { dependencies?: Record<string, string> };
-      expect(outputPackage.dependencies).not.toHaveProperty("@farm.js/core");
-      for (const buildOnlyPackage of ["vite", "nitro", "rollup", "rolldown", "esbuild"]) {
-        expect(outputPackage.dependencies).not.toHaveProperty(buildOnlyPackage);
-        expect(existsSync(path.join(outputDir, "server", "node_modules", buildOnlyPackage))).toBe(
+        const outputPackage = JSON.parse(
+          readFileSync(path.join(outputDir, "server", "package.json"), "utf-8"),
+        ) as { dependencies?: Record<string, string> };
+        expect(outputPackage.dependencies).not.toHaveProperty("@farm.js/core");
+        for (const buildOnlyPackage of ["vite", "nitro", "rollup", "rolldown", "esbuild"]) {
+          expect(outputPackage.dependencies).not.toHaveProperty(buildOnlyPackage);
+          expect(existsSync(path.join(outputDir, "server", "node_modules", buildOnlyPackage))).toBe(
+            false,
+          );
+        }
+        expect(existsSync(path.join(outputDir, "server", "node_modules", "@farm.js", "core"))).toBe(
           false,
         );
-      }
-      expect(existsSync(path.join(outputDir, "server", "node_modules", "@farm.js", "core"))).toBe(
-        false,
-      );
 
-      const isolatedOutput = path.join(isolatedRoot, ".output");
-      cpSync(outputDir, isolatedOutput, { recursive: true });
-      rmSync(fixtureRoot, { recursive: true, force: true });
+        const isolatedOutput = path.join(isolatedRoot, ".output");
+        cpSync(outputDir, isolatedOutput, { recursive: true });
+        rmSync(fixtureRoot, { recursive: true, force: true });
 
-      const port = await availablePort();
-      let logs = "";
-      child = spawn(process.execPath, [path.join(isolatedOutput, "server", "index.mjs")], {
-        cwd: isolatedRoot,
-        env: {
-          ...process.env,
-          HOST: "127.0.0.1",
-          PORT: String(port),
-          NODE_ENV: "production",
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      child.stdout?.on("data", (chunk) => {
-        logs += chunk.toString();
-      });
-      child.stderr?.on("data", (chunk) => {
-        logs += chunk.toString();
-      });
+        const port = await availablePort();
+        let logs = "";
+        child = spawn(process.execPath, [path.join(isolatedOutput, "server", "index.mjs")], {
+          cwd: isolatedRoot,
+          env: {
+            ...process.env,
+            HOST: "127.0.0.1",
+            PORT: String(port),
+            NODE_ENV: "production",
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        child.stdout?.on("data", (chunk) => {
+          logs += chunk.toString();
+        });
+        child.stderr?.on("data", (chunk) => {
+          logs += chunk.toString();
+        });
 
-      let response: Response | undefined;
-      const deadline = Date.now() + 15_000;
-      while (Date.now() < deadline && child.exitCode === null) {
-        try {
-          response = await fetch(`http://127.0.0.1:${port}/api/root-runtime`, {
-            headers: { "x-root-runtime": "isolated" },
-          });
-          break;
-        } catch {
-          await delay(50);
+        let response: Response | undefined;
+        const deadline = Date.now() + 15_000;
+        while (Date.now() < deadline && child.exitCode === null) {
+          try {
+            response = await fetch(`http://127.0.0.1:${port}/api/root-runtime`, {
+              headers: { "x-root-runtime": "isolated" },
+            });
+            break;
+          } catch {
+            await delay(50);
+          }
         }
-      }
 
-      expect(response, logs).toBeDefined();
-      expect(response?.status, logs).toBe(200);
-      await expect(response?.json()).resolves.toEqual({
-        runtime: "bundled-root-facade",
-        marker: "isolated",
-        requestPath: "/api/root-runtime",
-        route: { kind: "page", path: "/root-public-api" },
-        cache: "root-cache-ok",
-        query: "query-ok",
-        workflow: { id: "root-runtime-workflow", kind: "farm-workflow" },
-        redirect: true,
-        notFound: true,
-      });
-    } finally {
-      if (child) await stopProcess(child);
-      rmSync(fixtureRoot, { recursive: true, force: true });
-      rmSync(isolatedRoot, { recursive: true, force: true });
-    }
-  }, 120_000);
+        expect(response, logs).toBeDefined();
+        expect(response?.status, logs).toBe(200);
+        await expect(response?.json()).resolves.toEqual({
+          runtime: "bundled-root-facade",
+          marker: "isolated",
+          requestPath: "/api/root-runtime",
+          route: { kind: "page", path: "/root-public-api" },
+          cache: "root-cache-ok",
+          query: "query-ok",
+          workflow: { id: "root-runtime-workflow", kind: "farm-workflow" },
+          redirect: true,
+          notFound: true,
+        });
+
+        const origin = `http://127.0.0.1:${port}`;
+        if (name === "default") {
+          for (const [pathname, expected, excluded] of [
+            ["/accounts/new", "Route error rendered", "Dynamic account error rendered"],
+            ["/accounts/alice", "Dynamic account error rendered", "Route error rendered"],
+            ["/products", "Grouped product error rendered", "Route error rendered"],
+            ["/docs", "Optional docs error rendered", "Route error rendered"],
+            ["/docs/a/b", "Optional docs error rendered", "Route error rendered"],
+            ["/middleware-failure", "Route error rendered", "Unselected page error rendered"],
+          ]) {
+            for (const accept of ["text/html", "text/x-component"]) {
+              const response = await fetch(origin + pathname, {
+                headers: { accept },
+                signal: AbortSignal.timeout(10_000),
+              });
+              const body = await response.text();
+              expect(response.status, logs).toBe(500);
+              expect(response.headers.get("content-type")).toContain(accept);
+              expect(response.headers.get("cache-control")).toBe("private, no-store");
+              expect(body).not.toContain("private ");
+              // Flight contains client module references; HTML contains rendered fallback UI.
+              if (accept === "text/html") {
+                expect(body, logs).toContain(expected);
+                expect(body, logs).not.toContain(excluded);
+              }
+            }
+          }
+          for (const uploadCase of [
+            {
+              path: "/api/echo",
+              headers: { "content-length": "10000001", "content-type": "application/octet-stream" },
+              body: Buffer.from("abc"),
+            },
+            {
+              path: "/",
+              headers: { "x-farm-action-id": "unresolved-action", "content-type": "text/plain" },
+              body: Buffer.alloc(1_000_001, 120),
+            },
+          ]) {
+            const uploadResult = await new Promise<{ status: number; outcome: string }>(
+              (resolve) => {
+                const upload = httpRequest(
+                  origin + uploadCase.path,
+                  { method: "POST", headers: { ...uploadCase.headers, origin } },
+                  (response) => {
+                    response.resume();
+                    resolve({ status: response.statusCode || 0, outcome: "response" });
+                    upload.destroy();
+                  },
+                );
+                upload.on("error", (error) => resolve({ status: 0, outcome: error.message }));
+                upload.setTimeout(10_000, () => {
+                  resolve({ status: 0, outcome: "timed out without response" });
+                  upload.destroy();
+                });
+                upload.write(uploadCase.body);
+                // Leave the upload open: either the declared or streamed limit is exceeded.
+              },
+            );
+            expect(
+              uploadResult,
+              `Oversized upload to ${uploadCase.path} should receive 413 before the client finishes sending`,
+            ).toEqual({ status: 413, outcome: "response" });
+          }
+        }
+        if (name === "default" || name === "custom") {
+          for (const route of ["broken", "layout-failure", "sync-failure", "middleware-failure"]) {
+            const error = await fetch(origin + "/" + route + "?tag=a&tag=b", {
+              signal: AbortSignal.timeout(10_000),
+            });
+            const body = await error.text();
+            expect(error.status, logs).toBe(500);
+            expect(error.headers.get("cache-control")).toBe("private, no-store");
+            expect(body).not.toContain("private page failure");
+            expect(body).not.toContain("private layout failure");
+            expect(body).not.toContain("private sync failure");
+            expect(body).not.toContain("private middleware failure");
+            if (name === "default") {
+              expect(error.headers.get("content-type")).toContain("text/html");
+              expect(body, logs).toContain("Route error rendered");
+              expect(body).toContain("Internal Server Error");
+              expect(body).toContain("Reset");
+              expect(body).toContain("/" + route);
+              expect(body).toContain("&quot;tag&quot;:[&quot;a&quot;,&quot;b&quot;]");
+            } else {
+              expect(JSON.parse(body).message).toBe("Internal Server Error");
+            }
+          }
+          expect(logs).not.toContain("glob is not defined");
+          expect(logs).toContain("private page failure");
+          const go = await fetch(origin + "/go", { redirect: "manual" });
+          expect(go.status).toBe(307);
+          expect(go.headers.get("location")).toBe("/");
+          expect((await fetch(origin + "/missing")).status).toBe(404);
+          const postFailure = await fetch(origin + "/middleware-failure", {
+            method: "POST",
+            headers: { origin },
+            body: "x",
+          });
+          expect(postFailure.status).toBe(500);
+          expect(await postFailure.text()).toBe("Server function failed");
+          if (name === "default") {
+            const flight = await fetch(origin + "/broken", {
+              headers: { accept: "text/x-component" },
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(flight.status).toBe(500);
+            expect(flight.headers.get("content-type")).toContain("text/x-component");
+            const body = await flight.text();
+            expect(body).toContain("rootContent");
+            expect(body).not.toContain("private page failure");
+            const serverBoundary = await fetch(origin + "/server-boundary", {
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(serverBoundary.status).toBe(500);
+            expect(await serverBoundary.text(), logs).toContain("Server error rendered");
+            const badBoundary = await fetch(origin + "/bad-boundary", {
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(badBoundary.status).toBe(500);
+            expect(await badBoundary.json()).toMatchObject({ message: "Internal Server Error" });
+          }
+        }
+        const aliasedResponse = await fetch(`${origin}${mount}/root-runtime`);
+        expect(aliasedResponse.status, logs).toBe(200);
+        expect((await aliasedResponse.json()).requestPath).toBe(`${mount}/root-runtime`);
+        if (name === "default") {
+          for (const [pathname, marker] of [
+            ["/users/new", "Static new user"],
+            ["/users/alice", "Dynamic user"],
+            ["/optional", "Optional catch-all"],
+            ["/optional/a/b", "Optional catch-all"],
+            ["/pricing", "Grouped pricing"],
+          ]) {
+            for (const accept of ["text/html", "text/x-component"]) {
+              const response = await fetch(origin + pathname, {
+                headers: { accept },
+                signal: AbortSignal.timeout(10_000),
+              });
+              expect(response.status, logs).toBe(200);
+              expect(await response.text(), logs).toContain(marker);
+            }
+          }
+        }
+
+        if (name === "cache-variants") {
+          for (const accept of ["text/html", "text/x-component"]) {
+            const page = await fetch(origin + "/", {
+              headers: { accept },
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(page.status, logs).toBe(200);
+            expect(page.headers.get("content-type")).toContain(accept);
+            expect(await page.text(), logs).toContain("RSC root runtime fixture");
+            expect(page.headers.get("cache-control")).toBe("public, max-age=60");
+            const fields = page.headers.get("vary")?.toLowerCase().split(/,\s*/);
+            expect(fields).toEqual(expect.arrayContaining(["accept", "origin", "accept-encoding"]));
+            expect(fields?.filter((value) => value === "accept")).toHaveLength(1);
+            const wildcard = await fetch(origin + "/?wildcard", {
+              headers: { accept },
+              signal: AbortSignal.timeout(10_000),
+            });
+            expect(await wildcard.text(), logs).toContain("RSC root runtime fixture");
+            expect(wildcard.headers.get("vary")).toBe("*");
+          }
+        }
+        if (name === "nested-layouts") {
+          for (const [pathname, markers] of [
+            ["/", ["Root layout marker"]],
+            ["/nested", ["Root layout marker", "Nested layout", "Nested page"]],
+            ["/async-layout/42", ["Root layout marker", "Async layout", "42", "Async page"]],
+          ] as const) {
+            for (const accept of ["text/html", "text/x-component"]) {
+              const response = await fetch(origin + pathname, {
+                headers: { accept },
+                signal: AbortSignal.timeout(10_000),
+              });
+              expect(response.status, logs).toBe(200);
+              const body = await response.text();
+              for (const marker of markers) expect(body, logs).toContain(marker);
+            }
+          }
+          const client = await fetch(origin + "/nested/client", {
+            signal: AbortSignal.timeout(10_000),
+          });
+          expect(client.status, logs).toBe(200);
+          const body = await client.text();
+          for (const marker of [
+            "Root layout marker",
+            "Nested layout",
+            "root provider present",
+            "Client page",
+          ]) {
+            expect(body, logs).toContain(marker);
+          }
+        }
+        // A custom API prefix is not a server-action URL, even with actions enabled.
+        const post = await fetch(`${origin}${mount}/echo`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: "https://other.example" },
+          body: JSON.stringify({ message: "hello" }),
+        });
+        expect(post.status, logs).toBe(200);
+        expect(await post.json()).toEqual({ body: { message: "hello" } });
+        const pagePost = await fetch(origin + "/", {
+          method: "POST",
+          headers: { origin: "https://other.example" },
+          body: "not an action",
+        });
+        expect(pagePost.status).toBe(403);
+        if (name === "default") {
+          for (const [pathname, markers] of [
+            ["/hook-control", ["Hook control"]],
+            ["/hook-sniff", ["Hook scan", "async is just text"]],
+            ["/hook-layout", ["Hook layout", "Hook layout page", "async is just text"]],
+            ["/async-layout/42", ["Async layout", "42", "Async page"]],
+          ] as const) {
+            for (const accept of ["text/html", "text/x-component"]) {
+              const response = await fetch(origin + pathname, {
+                headers: { accept },
+                signal: AbortSignal.timeout(10_000),
+              });
+              expect(response.status, logs).toBe(200);
+              const body = await response.text();
+              for (const marker of markers) expect(body, logs).toContain(marker);
+            }
+          }
+        }
+
+        const missing = await fetch(`${origin}${mount}/missing-api-route`);
+        expect(missing.status).toBe(404);
+        if (mount) expect((await missing.json()).error).toBe("API route not found");
+        if (baseURL.startsWith("/")) {
+          const clientURL = resolveFarmAPIRequestURL(
+            "/api/root-runtime",
+            JSON.parse(builder.config.define!.__FARM_API_BASE_URL__ as string),
+            origin,
+          );
+          expect((await fetch(clientURL)).status).toBe(200);
+        } else {
+          expect((await fetch(origin + "/v1/root-runtime")).status).toBe(404);
+        }
+      } finally {
+        if (child) await stopProcess(child);
+        rmSync(fixtureRoot, { recursive: true, force: true });
+        rmSync(isolatedRoot, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
 });

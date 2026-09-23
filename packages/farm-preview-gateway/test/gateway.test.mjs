@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
+import { createServer, request as createRequest } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { createNodePreviewGatewayHandler, MemoryPreviewGatewayStore } from "../dist/index.js";
 
 test("proxies a public preview request through the gateway queue", async () => {
@@ -23,7 +24,14 @@ test("proxies a public preview request through the gateway queue", async () => {
 
     assert.equal(session.publicUrl, `${gateway.url}/__preview/docs-check`);
 
-    const publicRequest = fetch(`${gateway.url}/__preview/docs-check/docs?hello=world`);
+    const publicRequest = fetch(`${gateway.url}/__preview/docs-check/docs?hello=world`, {
+      headers: {
+        forwarded: "for=127.0.0.1;host=evil.example;proto=https",
+        "x-forwarded-for": "127.0.0.1",
+        "x-forwarded-host": "evil.example",
+        "x-forwarded-proto": "https",
+      },
+    });
     const pollResponse = await fetch(
       `${gateway.url}/api/sessions/${session.id}/requests?token=${session.token}&wait=1000`,
     );
@@ -32,6 +40,10 @@ test("proxies a public preview request through the gateway queue", async () => {
     assert.equal(poll.requests.length, 1);
     assert.equal(poll.requests[0].method, "GET");
     assert.equal(poll.requests[0].path, "/docs?hello=world");
+    assert.equal(poll.requests[0].headers.forwarded, undefined);
+    assert.equal(poll.requests[0].headers["x-forwarded-for"], undefined);
+    assert.equal(poll.requests[0].headers["x-forwarded-host"], new URL(gateway.url).host);
+    assert.equal(poll.requests[0].headers["x-forwarded-proto"], "http");
 
     await fetch(
       `${gateway.url}/api/sessions/${session.id}/responses/${poll.requests[0].id}?token=${session.token}`,
@@ -54,6 +66,44 @@ test("proxies a public preview request through the gateway queue", async () => {
     const response = await publicRequest;
     assert.equal(response.status, 202);
     assert.equal(await response.text(), "preview-ok");
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("rejects oversized agent responses and completes the public request safely", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store, { maxResponseBodyBytes: 8 });
+
+  try {
+    const session = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "response-limit", localUrl: "http://localhost:4321" }),
+    }).then((response) => response.json());
+
+    const publicRequest = fetch(`${gateway.url}/__preview/response-limit/large`);
+    const poll = await fetch(
+      `${gateway.url}/api/sessions/${session.id}/requests?token=${session.token}&wait=1000`,
+    ).then((response) => response.json());
+    const upload = await fetch(
+      `${gateway.url}/api/sessions/${session.id}/responses/${poll.requests[0].id}?token=${session.token}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          status: 200,
+          headers: { "content-type": "text/plain" },
+          body: Buffer.from("123456789").toString("base64"),
+          encoding: "base64",
+        }),
+      },
+    );
+
+    assert.equal(upload.status, 413);
+    const response = await publicRequest;
+    assert.equal(response.status, 502);
+    assert.match(await response.text(), /exceeded the 8 byte limit/);
   } finally {
     await gateway.close();
   }
@@ -128,6 +178,95 @@ test("replays every Set-Cookie header to the public visitor", async () => {
   }
 });
 
+test("removes headers nominated by Connection in both polling proxy directions", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store);
+
+  try {
+    const session = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "connection-check", localUrl: "http://localhost:4321" }),
+    }).then((response) => response.json());
+
+    const publicRequest = requestWithHeaders(`${gateway.url}/__preview/connection-check/headers`, {
+      connection: "x-request-hop",
+      "x-request-hop": "remove-me",
+    });
+    const poll = await fetch(
+      `${gateway.url}/api/sessions/${session.id}/requests?token=${session.token}&wait=1000`,
+    ).then((response) => response.json());
+    assert.equal(poll.requests[0].headers["x-request-hop"], undefined);
+
+    await fetch(
+      `${gateway.url}/api/sessions/${session.id}/responses/${poll.requests[0].id}?token=${session.token}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          status: 200,
+          headers: {
+            connection: "x-response-hop",
+            "x-response-hop": "remove-me",
+          },
+          body: Buffer.from("ok").toString("base64"),
+          encoding: "base64",
+        }),
+      },
+    );
+
+    const response = await publicRequest;
+    assert.equal(response.status, 200);
+    assert.equal(response.headers["x-response-hop"], undefined);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("preserves Content-Encoding for compressed public request bodies", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store);
+
+  try {
+    const session = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "encoding-check", localUrl: "http://localhost:4321" }),
+    }).then((response) => response.json());
+    const compressedBody = gzipSync(JSON.stringify({ message: "compressed" }));
+
+    const publicRequest = fetch(`${gateway.url}/__preview/encoding-check/messages`, {
+      method: "POST",
+      headers: {
+        "content-encoding": "gzip",
+        "content-type": "application/json",
+      },
+      body: compressedBody,
+    });
+    const poll = await fetch(
+      `${gateway.url}/api/sessions/${session.id}/requests?token=${session.token}&wait=1000`,
+    ).then((response) => response.json());
+    const queued = poll.requests[0];
+
+    assert.equal(queued.headers["content-encoding"], "gzip");
+    assert.deepEqual(JSON.parse(gunzipSync(Buffer.from(queued.body, "base64")).toString("utf8")), {
+      message: "compressed",
+    });
+
+    await fetch(
+      `${gateway.url}/api/sessions/${session.id}/responses/${queued.id}?token=${session.token}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: 204 }),
+      },
+    );
+    assert.equal((await publicRequest).status, 204);
+  } finally {
+    await gateway.close();
+  }
+});
+
 test("expires stale preview clients before queueing public requests", async () => {
   const store = new MemoryPreviewGatewayStore();
   const gateway = await createGatewayServer(store, {
@@ -157,6 +296,37 @@ test("expires stale preview clients before queueing public requests", async () =
     assert.equal(response.status, 404);
     assert.match(await response.text(), /No active Farm preview/);
     assert.ok(elapsedMs < 1000, `expected stale request to fail quickly, got ${elapsedMs}ms`);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("queues cancellation when a public visitor disconnects", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store);
+
+  try {
+    const session = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "cancel-check", localUrl: "http://localhost:4321" }),
+    }).then((response) => response.json());
+
+    const publicRequest = createRequest(`${gateway.url}/__preview/cancel-check/slow`);
+    publicRequest.on("error", () => undefined);
+    publicRequest.end();
+
+    const firstPoll = await fetch(
+      `${gateway.url}/api/sessions/${session.id}/requests?token=${session.token}&wait=1000`,
+    ).then((response) => response.json());
+    assert.equal(firstPoll.requests[0].cancelled, undefined);
+    publicRequest.destroy();
+
+    const secondPoll = await fetch(
+      `${gateway.url}/api/sessions/${session.id}/requests?token=${session.token}&wait=1000`,
+    ).then((response) => response.json());
+    assert.equal(secondPoll.requests[0].id, firstPoll.requests[0].id);
+    assert.equal(secondPoll.requests[0].cancelled, true);
   } finally {
     await gateway.close();
   }
@@ -282,4 +452,31 @@ async function createGatewayServer(store, options = {}) {
         server.close((error) => (error ? reject(error) : resolve()));
       }),
   };
+}
+
+function requestWithHeaders(value, headers) {
+  const url = new URL(value);
+  return new Promise((resolve, reject) => {
+    const request = createRequest(
+      {
+        host: url.hostname,
+        port: url.port,
+        path: `${url.pathname}${url.search}`,
+        headers,
+      },
+      (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.once("end", () => {
+          resolve({
+            status: response.statusCode,
+            body: Buffer.concat(chunks).toString(),
+            headers: response.headers,
+          });
+        });
+      },
+    );
+    request.once("error", reject);
+    request.end();
+  });
 }

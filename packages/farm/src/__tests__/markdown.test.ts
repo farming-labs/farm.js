@@ -306,6 +306,16 @@ describe("htmlToMarkdown", () => {
     ).toContain("[Read docs](/docs)");
   });
 
+  it("decodes entities once and replaces invalid numeric code points", () => {
+    expect(htmlToMarkdown("<p>&amp;lt; stays literal</p>", { includeMetadata: false })).toBe(
+      "&lt; stays literal\n",
+    );
+    expect(htmlToMarkdown("<p>&#x1F680;</p>", { includeMetadata: false })).toBe("🚀\n");
+    expect(htmlToMarkdown("<p>&#1114112; &#xD800; &#0;</p>", { includeMetadata: false })).toBe(
+      "� � �\n",
+    );
+  });
+
   it("prefers page content over layout chrome", () => {
     expect(
       htmlToMarkdown(

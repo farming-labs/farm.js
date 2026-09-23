@@ -39,6 +39,21 @@ describe("Svelte renderer", () => {
     expect(html).toContain("Hello from Svelte");
   });
 
+  it("renders dangerouslySetInnerHTML as element content, not an attribute", async () => {
+    const html = await renderToString(
+      createElement("div", {
+        className: "rich",
+        dangerouslySetInnerHTML: { __html: "<b>bold</b> and <em>italic</em>" },
+      }),
+    );
+
+    expect(html).toContain("<b>bold</b> and <em>italic</em>");
+    expect(html).toContain('class="rich"');
+    // The raw HTML must not leak into an escaped innerhtml="..." attribute.
+    expect(html).not.toMatch(/innerhtml=/i);
+    expect(html).not.toContain("&lt;b&gt;");
+  });
+
   it("does not require a renderer-specific hydration bootstrap", () => {
     expect(generateHydrationScript()).toBe("");
   });
@@ -83,5 +98,26 @@ describe("Svelte renderer", () => {
     } finally {
       await rm(fixtureDirectory, { recursive: true, force: true });
     }
+  });
+
+  it("emits numeric scale without a px unit, matching React's unitless set", async () => {
+    const html = await renderToString(
+      createElement("div", { style: { scale: 1.5, opacity: 0.5, width: 100, zIndex: 3 } }),
+    );
+
+    expect(html).toMatch(/scale:\s*1\.5(?!px)/);
+    expect(html).not.toMatch(/scale:\s*1\.5px/);
+    expect(html).toMatch(/opacity:\s*0?\.5(?!px)/);
+    expect(html).toMatch(/z-index:\s*3(?!px)/);
+    expect(html).toMatch(/width:\s*100px/);
+  });
+
+  it("keeps translate and rotate unit-bearing, matching React's unitless set", async () => {
+    const html = await renderToString(
+      createElement("div", { style: { translate: 10, rotate: 45 } }),
+    );
+
+    expect(html).toMatch(/translate:\s*10px/);
+    expect(html).toMatch(/rotate:\s*45px/);
   });
 });

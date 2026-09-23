@@ -90,7 +90,7 @@ aliases, server rendering and streaming, and browser hydration. See the
 Create a ready-to-run Preact application from the CLI:
 
 ```bash
-pnpm create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
 ```
 
 ### Svelte
@@ -124,7 +124,7 @@ typed server calls, and current compatibility boundaries.
 Create a ready-to-run Svelte application from the CLI:
 
 ```bash
-pnpm create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
 ```
 
 ### Vue
@@ -163,7 +163,7 @@ current compatibility boundaries.
 Create a ready-to-run Vue application from the CLI:
 
 ```bash
-pnpm create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
 ```
 
 ### Solid
@@ -194,7 +194,7 @@ calls, and current compatibility boundaries.
 Create a ready-to-run Solid application directly from the CLI:
 
 ```bash
-pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
 ```
 
 Omitting `renderer` selects React. The renderer option is currently available for the Basic starter;
@@ -245,33 +245,48 @@ mount, and shortcut together.
 
 ## Important options
 
-| Option        | Use it for                                                                        |
-| ------------- | --------------------------------------------------------------------------------- |
-| extends       | Composing local or package Farm layers with project-first overrides.              |
-| srcDir        | Changing the app source folder from the default src.                              |
-| renderer      | Selecting React (default) or an adapter such as Preact, Svelte, Vue, or Solid.    |
-| api           | Configuring the public root used by Farm's typed browser API client.              |
-| integrations  | Registering built-in or custom integrations.                                      |
-| auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.       |
-| theme         | Enabling light, dark, and system modes with client and server APIs.               |
-| storage       | Configuring KV drivers/mounts and, in the current beta, an integration DB client. |
-| migrations    | Running one-shot schema/provider commands with `farm migrate`.                    |
-| cron          | Mapping portable UTC schedules to ordinary GET API routes.                        |
-| i18n          | Configuring locale routes, detection, message catalogs, typing, and direction.    |
-| docs          | Serving the built-in docs runtime and docs API.                                   |
-| md            | Restricting or disabling automatic markdown mirrors like /pricing.md.             |
-| mdx           | Rendering `page.md` and `page.mdx` app routes, plus MDX components.               |
-| telemetry     | Controlling automatic production-site reporting to Farm's usage dashboard.        |
-| deploy        | Selecting a target, preset, and output directory.                                 |
-| deploymentId  | Detecting stale browser requests during rolling deployments.                      |
-| trailingSlash | Choosing the canonical URL shape for application page routes and links.           |
-| routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns. |
-| security      | Applying an app-wide CSP with an enforcing or report-only response header.        |
-| serverActions | Restricting trusted action origins and request body size.                         |
-| images        | Configuring responsive widths, remote allowlists, formats, and optimizer limits.  |
-| performance   | Budgeting image and font preload hints without changing the rendered resources.   |
-| experimental  | Auditing or enabling opt-in rendering experiments such as isolated hydration.     |
-| openapi       | Publishing API reference docs.                                                    |
+| Option        | Use it for                                                                            |
+| ------------- | ------------------------------------------------------------------------------------- |
+| extends       | Composing local or package Farm layers with project-first overrides.                  |
+| srcDir        | Changing the app source folder from the default src.                                  |
+| renderer      | Selecting React (default) or an adapter such as Preact, Svelte, Vue, or Solid.        |
+| api           | Configuring the public root used by Farm's typed browser API client.                  |
+| integrations  | Registering built-in or custom integrations.                                          |
+| auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.           |
+| theme         | Enabling light, dark, and system modes with client and server APIs.                   |
+| storage       | Configuring KV drivers/mounts and, in the current beta, an integration DB client.     |
+| migrations    | Running one-shot schema/provider commands with `farm migrate`.                        |
+| cron          | Mapping portable UTC schedules to ordinary GET API routes.                            |
+| i18n          | Configuring locale routes, detection, message catalogs, typing, and direction.        |
+| docs          | Serving the built-in docs runtime and docs API.                                       |
+| md            | Restricting or disabling automatic markdown mirrors like /pricing.md.                 |
+| mdx           | Rendering `page.md` and `page.mdx` app routes, plus MDX components.                   |
+| telemetry     | Controlling automatic production-site reporting to Farm's usage dashboard.            |
+| deploy        | Selecting a target, preset, and output directory.                                     |
+| deploymentId  | Detecting stale browser requests during rolling deployments.                          |
+| trailingSlash | Choosing the canonical URL shape for application page routes and links.               |
+| routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns.     |
+| security      | Applying an app-wide CSP with an enforcing or report-only response header.            |
+| serverActions | Restricting trusted action origins and request body size.                             |
+| images        | Configuring responsive widths, remote allowlists, formats, and optimizer limits.      |
+| performance   | Budgeting image and font preload hints without changing the rendered resources.       |
+| experimental  | Auditing or enabling opt-in rendering experiments such as isolated hydration and PPR. |
+| openapi       | Publishing API reference docs.                                                        |
+
+## Application base path
+
+Set `basePath` when the complete application is mounted below the origin root. Farm applies the
+canonical path consistently to routes, links, assets, and runtime endpoints:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  basePath: "/console",
+});
+```
+
+Farm accepts a leading-slash or bare pathname and removes duplicate and trailing slashes. It rejects
+URLs, query strings, hashes, backslashes, control characters, and `.` or `..` segments because a
+browser could otherwise resolve a different path than Farm's server router.
 
 ## Trailing slashes
 
@@ -315,10 +330,20 @@ public URL in the browser bundle.
 A root-relative API root is also mounted by Farm in development and production. For example,
 `api: { basePath: "/v2/api" }` makes a route declared at `app/api/users/route.ts` available at
 `/v2/api/users`. Farm treats an absolute `baseURL` as external and does not remount the current
-application's API routes for it.
+application's API routes for it. `basePath` rejects backslashes, control characters, and `.` or
+`..` segments, including encoded path separators. Root-relative `baseURL` and `basePath` values
+must begin with one slash; network-path references such as `//api.example.com` are rejected so the
+server mount and browser URL cannot resolve to different origins or paths.
 
-The option configures `createAPIClient()` automatically. An explicit per-client `baseURL` still
+The option configures the HTTP `apiClient` returned by `createApiClients()` automatically
+(and the existing `createAPIClient()` factory). The paired server `api` always uses the local app's
+registered routes and server mount, never an external browser API origin. An explicit per-client `baseURL` still
 takes precedence.
+
+This also applies to RSC builds and their Nitro servers, including apps configured with
+`defineConfig` from `@farm.js/plugin/rsc`. API requests at the custom prefix stay on the API
+pipeline rather than being decoded as server actions. The canonical `/api` routes remain available;
+an external API URL changes the client destination only, not the local server mount.
 
 ## Isolated client hydration
 
@@ -348,13 +373,63 @@ The option has three modes:
 An eligible boundary is a local, statically analyzable `"use client"` module with a default or
 named capitalized component export and serializable props. Farm preserves its server-rendered HTML,
 emits the client component as a separate browser chunk, and hydrates that leaf as its own React
-root. Package boundaries, re-export graphs, ambiguous exports, and routes that still require
-route-wide hydration retain the existing behavior. If runtime props cannot be serialized, Farm
-preserves the SSR output and leaves that boundary inert instead of executing unsafe client code.
+root. Sibling leaves receive independent roots. Client components imported by another client
+component stay in their parent's root, so Farm never creates overlapping roots for one client
+graph. Props travel in an HTML-safe, non-executable JSON payload. Plain objects, arrays, strings,
+booleans, finite numbers, and `null` are supported.
+
+Package boundaries, re-export graphs, ambiguous exports, React-element children, functions,
+symbols, class instances, circular objects, and routes that still require shared React context keep
+the route-wide path when Farm can identify them statically. If an unsupported value is discovered
+only while rendering, Farm preserves the SSR output and leaves that boundary inert with a
+development diagnostic. Module-load and root-render failures likewise restore the original server
+HTML and report the boundary reference plus the original error.
+
+An integration provider is route-wide by default because an independent root cannot inherit its
+context. A provider that is safe to instantiate around every isolated root can declare
+`supportsIsolatedHydration: true`; otherwise Farm retains route-wide hydration for the app.
+
+Farm also applies a measured graph-cost guard. Up to four statically bounded isolated roots can use
+the isolated plan. A page or layout with a larger client graph stays on route-wide hydration and
+prints the owner, detected count, and limit. Lists whose boundary count depends on runtime data also
+stay route-wide because Farm cannot prove their root cost before streaming. In the maintained
+40-sample Chrome browser benchmark, eight independent roots were the first stress shape to exceed the
+route-wide hydration budget. See the [raw samples and full cost table](https://github.com/farming-labs/farm.js/blob/main/benchmarks/isolated-hydration/results/latest.md).
+The same report includes compiler-enabled route-wide and isolated controls. It verifies that every
+measured leaf actually compiled, then checks initial hydration and repeated state updates
+independently.
+
+SPA navigation preserves isolated roots that live in a shared layout, including their state and DOM
+identity. Farm unmounts roots in the outgoing route subtree before replacing it, then hydrates only
+the boundaries introduced by the incoming fragment. Superseded navigation work is aborted before it
+can hydrate stale HTML.
 
 This flag does not enable RSC, change the meaning of `"use client"`, or make Server Components part
-of the wire format. Treat `"enabled"` as an experimental performance option and measure the route's
-client JavaScript and interaction cost before adopting it broadly.
+of the wire format. When `experimental.serverComponents` is enabled, the RSC transport remains the
+owner and Farm ignores isolated client hydration. Treat `"enabled"` as an experimental performance
+option and measure the route's client JavaScript and interaction cost before adopting it broadly.
+The maintained benchmark includes equivalent RSC controls rather than assuming the non-RSC path is
+faster.
+
+## Partial Prerendering
+
+Partial Prerendering (static-shell caching) is experimental and disabled by default. Enable it
+app-wide with `experimental.ppr`, then opt individual routes in with `export const ppr = true`,
+the Next-compatible `export const experimental_ppr = true`, or a `"use ppr"` directive. Route
+declarations are inert while the flag is off, and those routes render fully dynamically.
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  experimental: {
+    ppr: true,
+  },
+});
+```
+
+See [Cache and PPR](/docs/cache-ppr) for shell caching, Suspense holes, invalidation, and
+observability events.
 
 ## Images
 
@@ -491,7 +566,13 @@ export default defineConfig({
 
 Farm checks `Content-Length` when present and also counts the received bytes, so chunked requests cannot bypass `bodySizeLimit`. Oversized requests receive `413 Payload Too Large` before the route or integration handler runs. Server Actions keep their separate, tighter `serverActions.bodySizeLimit` setting.
 
-`trustProxy` defaults to `false`. Enable it only when the app is behind a trusted reverse proxy that removes client-supplied forwarding headers and writes its own `X-Forwarded-For` value. A directly exposed Farm server must leave it disabled so a client cannot spoof the address used by rate limits, logs, or access policy.
+Body rejection initiates stream cancellation without waiting for producer cleanup. This also applies to cloned requests: an unread original body cannot delay the rejection, and a cleanup failure does not replace the `413` response.
+
+The RSC development bridge applies these limits too. `POST`, `PUT`, `PATCH`, `DELETE`, and `QUERY`
+bodies keep their original bytes, including multipart uploads and binary data. `GET` and `HEAD`
+remain bodyless. Action origin validation runs before buffering an action body.
+
+`trustProxy` defaults to `false`. Enable it only when the app is behind a trusted reverse proxy that removes client-supplied forwarding headers and writes its own `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` values. Farm uses those headers for the client address and public request URL only when the proxy is trusted. A directly exposed Farm server must leave it disabled so a client cannot spoof the address or authority used by rate limits, redirects, authentication callbacks, logs, or access policy.
 
 Workflow runner secrets are accepted only through `Authorization: Bearer <secret>` or `X-Farm-Workflow-Secret`. Farm does not accept secrets in query strings because URLs are commonly retained in logs, browser history, and referrer data.
 
@@ -542,6 +623,8 @@ Do not use `allowedOrigins` as a replacement for CORS or as a public API allowli
 
 `bodySizeLimit` accepts bytes or strings such as `"500kb"`, `"2mb"`, and `"2MiB"`. Farm checks `Content-Length` when present and also counts streamed bytes, so chunked requests cannot bypass the limit.
 
+When streamed action input exceeds the limit, Farm cancels it without awaiting producer cleanup or another branch of a cloned request. Cleanup errors do not replace the action's `413` rejection.
+
 Rejected requests use generic, non-cacheable responses: `403` for origin failures, `413` for oversized bodies, and `415` for unsupported content types. Detailed parsing or execution errors stay in server logs.
 
 ## Next-style route exports
@@ -564,14 +647,19 @@ export default async function BlogPage() {
 Farm's `redirects()`, `rewrites()`, and `headers()` config functions use the same source pattern
 syntax. `:name` captures one path segment, while `:name*` and plain `*` capture the remaining
 characters. Redirect and rewrite destinations can reuse named captures or use numbered captures
-such as `$1`. All other source characters are matched literally.
-For rewrites, the incoming query string is preserved when the destination has no query. A query
-written in the destination replaces the incoming query string.
+such as `$1`. Captured path segments are decoded and safely re-encoded before interpolation;
+empty segments in catch-all captures are removed consistently in development and production. All
+other source characters are matched literally. Sources must be pathname patterns beginning with
+`/`; query strings and hashes belong in redirect or rewrite destinations and are rejected in
+sources because matching operates on the request pathname.
+For redirects and rewrites, the incoming query string is preserved when the destination has no
+query. A query written in the destination replaces the incoming query string.
 Rewrites use after-files semantics in development and production: an existing Farm page, API,
 integration, docs, image, or metadata route wins, and the rewrite is considered only as a fallback.
 Configured response headers are applied after route handlers in both modes, so they win when the
 same header is returned by a handler. `Link` is additive: handler and configured link values are
-merged instead of replacing one another.
+merged instead of replacing one another. `Set-Cookie` is also additive, and each handler or
+configured cookie remains a separate response header.
 
 ```ts
 export default defineConfig({
@@ -758,6 +846,8 @@ Prefer a CI release or commit identifier when a deployment runs on multiple serv
 
 ## Production notes
 
+- Production route discovery disables filesystem watching, including when `vite.server.watch`
+  is configured. That option still applies to development; a one-shot build does not need a live watcher.
 - Keep secrets in environment variables, not committed config.
 - Use `storage.driver` and `storage.mounts` for KV data read through `getStorage()`.
 - Use a raw object at `storage.client` only when schema-backed integrations need a database client; see [Database and ORM Clients](/docs/integrations/orm-storage).

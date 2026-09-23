@@ -1,10 +1,12 @@
 import { EventEmitter } from "events";
+import { Readable } from "node:stream";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "zod";
 import { definePlugin, PluginManager, type FarmPluginIntegrationContext } from "../plugin";
 import {
   defineIntegration,
   dispatchIntegrationRequest,
+  forwardIntegrationSetCookies,
   getFarmIntegrationPluginOwner,
   getFarmIntegrationPluginServerRuntime,
   getRegisteredIntegrationRuntime,
@@ -179,6 +181,56 @@ describe("integrations runtime", () => {
     expect(globalIntegration).toBeUndefined();
   });
 
+  it.each([undefined, "ALL", "all"] as const)(
+    "dispatches integration routes with method %s for every request method",
+    async (method) => {
+      const integration = defineIntegration({
+        category: "custom",
+        type: "methodless-route",
+        instance: {},
+        routes: [
+          {
+            path: "/api/methodless",
+            method,
+            handler: async () => new Response("ok"),
+          },
+        ],
+      });
+
+      const manager = createManager();
+      manager.addPlugins(resolveIntegrationPlugins({ methodless: integration }));
+      await manager.runHookParallel("init");
+      const runtime = getRegisteredIntegrationRuntime("methodless")!;
+
+      for (const method of ["GET", "POST", "PATCH", "DELETE"]) {
+        const match = matchIntegrationRoute(
+          { methodless: integration },
+          { pathname: "/api/methodless", method },
+        );
+        expect(match?.route.methods).toEqual(["ALL"]);
+        const res = createResponse();
+        expect(
+          await manager.runHookParallel(
+            "beforeRequest",
+            Object.assign(Readable.from([]), {
+              url: "/api/methodless",
+              method,
+              headers: { host: "localhost" },
+            }) as any,
+            res as any,
+          ),
+        ).toBe(true);
+        expect(res.body.toString()).toBe("ok");
+        const response = await dispatchIntegrationRequest(
+          runtime,
+          new Request("http://localhost/api/methodless", { method }),
+        );
+        expect(await response?.text()).toBe("ok");
+      }
+      await manager.runHookParallel("shutdown", { reason: "test" });
+    },
+  );
+
   it("keeps static plugin arrays compatible and propagates server ownership", () => {
     const contributedPlugin = {
       name: "platform:contribution",
@@ -223,6 +275,85 @@ describe("integrations runtime", () => {
       { pathname: "/items/%E0", method: "GET" },
     );
     expect(dynamic?.params).toEqual({ id: "%E0" });
+  });
+
+  it("matches the most specific integration route regardless of declaration order", async () => {
+    const integration = defineIntegration({
+      category: "agent",
+      type: "specific-routes",
+      instance: {},
+      routes: [
+        integrationRoute.get("/api/[...path]", {
+          handler: async () => new Response("catch-all"),
+        }),
+        integrationRoute.get("/api/items/[id]", {
+          handler: async () => new Response("dynamic"),
+        }),
+        integrationRoute.get("/api/items/new", {
+          handler: async () => new Response("static"),
+        }),
+      ],
+    });
+
+    expect(
+      matchIntegrationRoute({ agent: integration }, { pathname: "/api/items/new", method: "GET" })
+        ?.route.path,
+    ).toBe("/api/items/new");
+    expect(
+      matchIntegrationRoute({ agent: integration }, { pathname: "/api/items/123", method: "GET" })
+        ?.route.path,
+    ).toBe("/api/items/[id]");
+    const manager = createManager();
+    manager.addPlugins(resolveIntegrationPlugins({ specific: integration }));
+    await manager.runHookParallel("init");
+    const runtime = getRegisteredIntegrationRuntime("specific")!;
+    for (const [pathname, expected] of [
+      ["/api/items/new", "static"],
+      ["/api/items/123", "dynamic"],
+      ["/api/other/deep", "catch-all"],
+    ]) {
+      const res = createResponse();
+      expect(
+        await manager.runHookParallel("beforeRequest", createRequest(pathname) as any, res as any),
+      ).toBe(true);
+      expect(res.body.toString()).toBe(expected);
+      const response = await dispatchIntegrationRequest(
+        runtime,
+        new Request(`http://localhost${pathname}`),
+      );
+      expect(await response?.text()).toBe(expected);
+    }
+    await manager.runHookParallel("shutdown", { reason: "test" });
+  });
+
+  it("rejects integration catch-all parameters before later path segments", () => {
+    expect(() =>
+      defineIntegration({
+        category: "agent",
+        type: "invalid-catch-all",
+        instance: {},
+        routes: [
+          integrationRoute.get("/api/[...slug]/admin", {
+            handler: async () => new Response("unexpected"),
+          }),
+        ],
+      }),
+    ).toThrow(
+      'Catch-all segment "[...slug]" must be the final segment in route "/api/[...slug]/admin".',
+    );
+  });
+
+  it("rejects integration routes that browsers reinterpret", () => {
+    for (const path of ["/api/../admin", "/api/%2e%2e/admin", "/api/%2Fadmin", "/api\\admin"]) {
+      expect(() =>
+        defineIntegration({
+          category: "custom",
+          type: "unstable-route",
+          instance: {},
+          routes: [{ path, handler: async () => new Response("unexpected") }],
+        }),
+      ).toThrow();
+    }
   });
 
   it("rejects duplicate plugin names from one integration", () => {
@@ -484,6 +615,52 @@ describe("integrations runtime", () => {
     const endLog = log.mock.calls.find((call) => call[0]?.phase === "request:end")?.[0];
     expect(endLog?.context.get("handled")).toBe("yes");
     expect(endLog?.context.get("seed")).toBe("shared-value");
+  });
+
+  it("isolates integration log failures from lifecycle and request handling", async () => {
+    const handler = vi.fn(() => Response.json({ ok: true }));
+    const log = vi.fn(() => {
+      throw new Error("log sink unavailable");
+    });
+    const manager = createManager();
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        isolatedLogs: defineIntegration({
+          category: "custom",
+          type: "isolated-logs",
+          instance: {},
+          log,
+          routes: [
+            {
+              path: "/api/isolated-logs",
+              methods: ["GET"],
+              handler,
+            },
+          ],
+        }),
+      }),
+    );
+
+    await expect(manager.runHookParallel("init")).resolves.toBe(false);
+
+    const req = createRequest("/api/isolated-logs");
+    const res = createResponse();
+    await expect(manager.runHookParallel("beforeRequest", req as any, res as any)).resolves.toBe(
+      true,
+    );
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body.toString())).toEqual({ ok: true });
+
+    const runtime = getRegisteredIntegrationRuntime("isolatedLogs");
+    expect(runtime).toBeDefined();
+    const response = await dispatchIntegrationRequest(
+      runtime!,
+      new Request("http://localhost/api/isolated-logs"),
+    );
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toEqual({ ok: true });
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(log).toHaveBeenCalled();
   });
 
   it("runs integration middleware before routes and can short-circuit the request", async () => {
@@ -1460,5 +1637,174 @@ describe("integrations runtime", () => {
         method: "GET",
       }),
     ).toBeNull();
+  });
+
+  it("forwards an integration middleware's Set-Cookie onto the Node response when the middleware returns void", async () => {
+    const integration = defineIntegration({
+      category: "auth",
+      type: "refresh-forwarder",
+      instance: {},
+      middleware: [
+        {
+          matcher: "/dashboard(.*)",
+          async handler(_request, context) {
+            // A void-returning middleware (e.g. an authenticated protected-route
+            // branch that refreshed the session server-side) hands the rotated
+            // Set-Cookie to the runtime; the page still renders downstream.
+            forwardIntegrationSetCookies(context, ["sb-test-auth-token=rotated; Path=/"]);
+          },
+        },
+      ],
+    });
+    const manager = createManager();
+    manager.addPlugins(resolveIntegrationPlugins({ refresh: integration }));
+    await manager.runHookParallel("init");
+
+    const req = createRequest("/dashboard");
+    const res = createResponse();
+    const handled = await manager.runHookParallel("beforeRequest", req as any, res as any);
+
+    // void middleware does not short-circuit the request.
+    expect(handled).toBe(false);
+    expect(res.writableEnded).toBe(false);
+    // the rotated cookie still reached the response the runtime is building.
+    const setCookie = res.getHeader("Set-Cookie");
+    const setCookieText = Array.isArray(setCookie) ? setCookie.join("\n") : String(setCookie ?? "");
+    expect(setCookieText).toContain("sb-test-auth-token=rotated");
+
+    await manager.runHookParallel("shutdown", { reason: "test" });
+  });
+
+  it("accumulates forwarded Set-Cookie from multiple void middleware without double-applying", async () => {
+    const integration = defineIntegration({
+      category: "auth",
+      type: "multi-refresh-forwarder",
+      instance: {},
+      middleware: [
+        {
+          matcher: "/dashboard(.*)",
+          async handler(_request, context) {
+            forwardIntegrationSetCookies(context, ["first=1; Path=/"]);
+          },
+        },
+        {
+          matcher: "/dashboard(.*)",
+          async handler(_request, context) {
+            forwardIntegrationSetCookies(context, ["second=2; Path=/"]);
+          },
+        },
+      ],
+    });
+    const manager = createManager();
+    manager.addPlugins(resolveIntegrationPlugins({ multi: integration }));
+    await manager.runHookParallel("init");
+
+    const req = createRequest("/dashboard");
+    const res = createResponse();
+    await manager.runHookParallel("beforeRequest", req as any, res as any);
+
+    const setCookie = res.getHeader("Set-Cookie");
+    const setCookieText = Array.isArray(setCookie) ? setCookie.join("\n") : String(setCookie ?? "");
+    expect(setCookieText).toContain("first=1");
+    expect(setCookieText).toContain("second=2");
+    // read-and-clear keeps each batch applied at most once.
+    expect(setCookieText.match(/first=1/g)?.length).toBe(1);
+    expect(setCookieText.match(/second=2/g)?.length).toBe(1);
+
+    await manager.runHookParallel("shutdown", { reason: "test" });
+  });
+
+  it("forwards an integration middleware's Set-Cookie onto the route response in dispatchIntegrationRequest", async () => {
+    const integration = defineIntegration({
+      category: "custom",
+      type: "refresh-route",
+      instance: {},
+      middleware: [
+        {
+          matcher: "/api/protected(.*)",
+          async handler(_request, context) {
+            forwardIntegrationSetCookies(context, ["sb-test-auth-token=rotated; Path=/"]);
+            // return void → continue to the matched route handler.
+          },
+        },
+      ],
+      routes: [
+        {
+          path: "/api/protected",
+          method: "GET",
+          handler: async () =>
+            new Response(JSON.stringify({ ok: true }), {
+              headers: { "content-type": "application/json" },
+            }),
+        },
+      ],
+    });
+    const manager = createManager();
+    manager.addPlugins(resolveIntegrationPlugins({ refresh: integration }));
+    await manager.runHookParallel("init");
+    const runtime = getRegisteredIntegrationRuntime("refresh")!;
+
+    const response = await dispatchIntegrationRequest(
+      runtime,
+      new Request("http://localhost/api/protected"),
+    );
+
+    expect(response).toBeInstanceOf(Response);
+    expect(response!.status).toBe(200);
+    expect(await response!.json()).toEqual({ ok: true });
+    expect(response!.headers.get("set-cookie")).toContain("sb-test-auth-token=rotated");
+
+    await manager.runHookParallel("shutdown", { reason: "test" });
+  });
+
+  it("forwards integration middleware Set-Cookie onto a short-circuiting middleware Response in dispatchIntegrationRequest", async () => {
+    const integration = defineIntegration({
+      category: "custom",
+      type: "refresh-then-redirect",
+      instance: {},
+      middleware: [
+        {
+          matcher: "/api/protected(.*)",
+          async handler(_request, context) {
+            forwardIntegrationSetCookies(context, ["sb-test-auth-token=rotated; Path=/"]);
+            // A later middleware short-circuits with its own Response; prior
+            // forwarded cookies must still ride on that response.
+            return undefined;
+          },
+        },
+        {
+          matcher: "/api/protected(.*)",
+          async handler() {
+            return new Response(null, {
+              status: 302,
+              headers: { location: "/login" },
+            });
+          },
+        },
+      ],
+      routes: [
+        {
+          path: "/api/protected",
+          method: "GET",
+          handler: async () => new Response("unreachable"),
+        },
+      ],
+    });
+    const manager = createManager();
+    manager.addPlugins(resolveIntegrationPlugins({ redirect: integration }));
+    await manager.runHookParallel("init");
+    const runtime = getRegisteredIntegrationRuntime("redirect")!;
+
+    const response = await dispatchIntegrationRequest(
+      runtime,
+      new Request("http://localhost/api/protected"),
+    );
+
+    expect(response).toBeInstanceOf(Response);
+    expect(response!.status).toBe(302);
+    expect(response!.headers.get("location")).toBe("/login");
+    expect(response!.headers.get("set-cookie")).toContain("sb-test-auth-token=rotated");
+
+    await manager.runHookParallel("shutdown", { reason: "test" });
   });
 });

@@ -45,9 +45,9 @@ export function pwa(options: PwaPluginOptions = {}) {
   const resolved = resolvePwaOptions(options);
   let configuredRoot = ".";
   let configuredBasePath = "/";
+  let htmlBasePath = "/";
   let configuredOutputDir = ".farm/.output";
   const publicConfig = {
-    enabled: resolved.enabled,
     workerUrl: "/sw.js",
     scope: "/",
     update: resolved.update,
@@ -61,6 +61,10 @@ export function pwa(options: PwaPluginOptions = {}) {
       configuredRoot = config.root ?? ".";
       const basePath = normalizeBasePath(config.basePath);
       configuredBasePath = basePath;
+      // Only localized SSG output already includes the application's basePath.
+      const i18n = config.i18n;
+      htmlBasePath =
+        i18n && typeof i18n === "object" && "enabled" in i18n && i18n.enabled ? basePath : "/";
       configuredOutputDir = `${config.root ?? "."}/.farm/.output`;
       publicConfig.workerUrl = withBasePath("/sw.js", basePath);
       publicConfig.scope = basePath === "/" ? "/" : `${basePath}/`;
@@ -68,8 +72,6 @@ export function pwa(options: PwaPluginOptions = {}) {
 
     build: {
       configure(nitroConfig) {
-        if (!resolved.enabled) return nitroConfig;
-
         let generated = false;
         const hooks = nitroConfig.hooks ?? {};
         const previousPrerenderDone = hooks["prerender:done"];
@@ -82,6 +84,7 @@ export function pwa(options: PwaPluginOptions = {}) {
             publicDir: nitroConfig.output?.publicDir,
             preset: nitroConfig.preset ?? "node-server",
             basePath: configuredBasePath,
+            htmlBasePath,
             options: resolved,
           });
           generated = true;
@@ -114,7 +117,7 @@ export function pwa(options: PwaPluginOptions = {}) {
       public: publicConfig,
 
       async setup({ public: config, isProd }) {
-        if (!config.enabled || !isProd || !("serviceWorker" in navigator)) return undefined;
+        if (!isProd || !("serviceWorker" in navigator)) return undefined;
 
         const registration = await navigator.serviceWorker.register(
           config.workerUrl,

@@ -1,4 +1,10 @@
 import type { ParsedRoute } from "./types";
+import {
+  assertBrowserStableRoutePath,
+  assertTerminalCatchAll,
+  assertUniqueRouteParameters,
+} from "./routing/specificity";
+import { extractProgrammaticPageCallPathLiterals } from "./route-call-scanner";
 
 export const PROGRAMMATIC_ROUTE_FILE_NAMES = [
   "farm.route.ts",
@@ -88,30 +94,41 @@ export function parseProgrammaticRoutePath(
 ): ParsedRoute {
   const fileName = type === "layout" ? "layout.tsx" : "page.tsx";
   const normalized = normalizeProgrammaticRoutePath(routePath);
+  assertTerminalCatchAll(normalized);
+  assertUniqueRouteParameters(normalized);
   const filePath =
     normalized === "/" ? fileName : `${normalized.slice(1).replace(/\/+$/, "")}/${fileName}`;
 
   return {
     filePath,
-    segments: normalized.split("/").filter(Boolean).map(parseRouteSegment),
+    segments: normalized
+      .split("/")
+      .filter(Boolean)
+      .filter((segment) => !(segment.startsWith("(") && segment.endsWith(")")))
+      .map(parseRouteSegment),
     type,
   };
 }
 
 export function scanProgrammaticPagePaths(source: string): string[] {
   const paths = new Set<string>();
-  const callRe = /\b(?:page|createRoute)\s*\(\s*(["'`])([^"'`]+)\1/g;
 
-  for (const match of source.matchAll(callRe)) {
-    if (match[2]) paths.add(normalizeProgrammaticRoutePath(match[2]));
+  for (const routePath of extractProgrammaticPageCallPathLiterals(source)) {
+    paths.add(normalizeProgrammaticRoutePath(routePath));
   }
 
   return Array.from(paths);
 }
 
 export function normalizeProgrammaticRoutePath(routePath: string): string {
+  if (routePath.includes("?") || routePath.includes("#")) {
+    throw new TypeError(
+      `Programmatic route path "${routePath}" must be a pathname without a query string or hash.`,
+    );
+  }
   const withSlash = routePath.startsWith("/") ? routePath : `/${routePath}`;
   const withoutTrailing = withSlash.length > 1 ? withSlash.replace(/\/+$/, "") : withSlash;
+  assertBrowserStableRoutePath(withoutTrailing);
   return withoutTrailing || "/";
 }
 

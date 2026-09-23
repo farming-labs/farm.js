@@ -15,6 +15,7 @@ import {
   createRoute,
   createRouteModuleFromProgrammaticPage,
   defineRoutes,
+  parseProgrammaticRoutePath,
   type InferProgrammaticRouteData,
   type ProgrammaticPageRoute,
 } from "../routes";
@@ -54,6 +55,49 @@ function createConfig(root: string): Required<FarmConfig> {
 }
 
 describe("programmatic routes", () => {
+  it("validates parameters with the programmatic bracket syntax", () => {
+    expect(() => parseProgrammaticRoutePath("/teams/[user.id]/members/[user.id]")).toThrow(
+      'Duplicate route parameter "user.id"',
+    );
+    expect(() => parseProgrammaticRoutePath("/literal/:id/:id/*id/*id")).not.toThrow();
+    expect(() => parseProgrammaticRoutePath("/docs/[...slug]/edit")).toThrow(
+      'Catch-all segment "[...slug]" must be the final segment',
+    );
+    expect(() => parseProgrammaticRoutePath("/products?draft=1")).toThrow(
+      "must be a pathname without a query string or hash",
+    );
+    expect(() => parseProgrammaticRoutePath("/products#details")).toThrow(
+      "must be a pathname without a query string or hash",
+    );
+  });
+
+  it("rejects route declarations that browsers reinterpret", () => {
+    for (const routePath of [
+      "/docs/../admin",
+      "/docs/%2e%2e/admin",
+      "/docs/%2Fadmin",
+      "/docs/%5cadmin",
+      "/docs/%00admin",
+    ]) {
+      expect(() => parseProgrammaticRoutePath(routePath)).toThrow(/browser-unstable/);
+    }
+  });
+
+  it("keeps programmatic route groups out of URL segments", () => {
+    expect(parseProgrammaticRoutePath("/(marketing)/pricing")).toEqual({
+      filePath: "(marketing)/pricing/page.tsx",
+      segments: [
+        {
+          segment: "pricing",
+          isDynamic: false,
+          isOptional: false,
+          isCatchAll: false,
+        },
+      ],
+      type: "page",
+    });
+  });
+
   it("owns typed named actions and resolves a default action", async () => {
     const update = createServerFn({
       input: z.object({ id: z.string(), name: z.string() }),
@@ -244,12 +288,51 @@ describe("programmatic routes", () => {
       statusCode: 308,
       params: { slug: "hello-world" },
     });
+    expect(manager.matchRedirect("/old-blog/hello-world", "?from=archive")).toMatchObject({
+      destination: "/blog/hello-world?from=archive",
+    });
 
     const ssgPages = await manager.collectSSGPages();
     expect(ssgPages.ssg.map((page) => page.urlPath).sort()).toEqual([
       "/blog/farm-router",
       "/blog/hello-world",
     ]);
+  });
+
+  it("rejects duplicate params in programmatic page routes", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-programmatic-routes-"));
+    tempDirs.push(root);
+    const routesFile = path.join(root, "src", "farm.routes.js");
+    fs.mkdirSync(path.dirname(routesFile), { recursive: true });
+    fs.writeFileSync(routesFile, "export {};\n");
+    const manifest = defineRoutes(({ page }) => [
+      page("/teams/[user.id]/members/[user.id]", { component: () => null }),
+    ]);
+    const manager = new RouteManager(createConfig(root), {
+      config: { root },
+      ssrLoadModule: async () => ({ default: manifest }),
+    } as any);
+    manager.setRendererRuntime(createTestRendererRuntime() as any);
+
+    await expect(manager.discoverRoutes()).rejects.toThrow('Duplicate route parameter "user.id"');
+  });
+
+  it("rejects duplicate params in programmatic layout routes", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-programmatic-routes-"));
+    tempDirs.push(root);
+    const routesFile = path.join(root, "src", "farm.routes.js");
+    fs.mkdirSync(path.dirname(routesFile), { recursive: true });
+    fs.writeFileSync(routesFile, "export {};\n");
+    const manifest = defineRoutes(({ layout }) => [
+      layout("/teams/[id]/members/[id]", { component: ({ children }) => children }),
+    ]);
+    const manager = new RouteManager(createConfig(root), {
+      config: { root },
+      ssrLoadModule: async () => ({ default: manifest }),
+    } as any);
+    manager.setRendererRuntime(createTestRendererRuntime() as any);
+
+    await expect(manager.discoverRoutes()).rejects.toThrow('Duplicate route parameter "id"');
   });
 
   it("rejects duplicate page routes across file and programmatic definitions", async () => {

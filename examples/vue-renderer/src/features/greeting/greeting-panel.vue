@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { api } from "./client";
+import { apiClient } from "./api";
 
 const message = ref("Ready for a typed server call.");
 const detail = ref("createServerFn is waiting on the server");
@@ -12,7 +12,7 @@ async function callServer() {
   failed.value = false;
 
   try {
-    const result = await api.greeting.post({
+    const result = await apiClient.greeting.post({
       body: { name: "Vue" },
     });
 

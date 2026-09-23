@@ -4,13 +4,18 @@ import { IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { withFarmRequestTracing } from "../vite";
+import { resolveFarmRequestURL } from "../server/request";
+import type { FarmRequest } from "../types";
 
-function createNodeRequest(url: string): IncomingMessage {
+function createNodeRequest(
+  url: string,
+  headers: Record<string, string> = { host: "localhost:3000" },
+): IncomingMessage {
   const socket = new Socket();
   const req = new IncomingMessage(socket);
   req.url = url;
   req.method = "GET";
-  req.headers = { host: "localhost:3000" };
+  req.headers = headers;
   return req;
 }
 
@@ -114,6 +119,51 @@ describe("dev request boundary", () => {
     middleware(createNodeRequest("/ok"), res, () => {});
     await settle();
 
+    expect(res.statusCode).toBe(204);
+  });
+
+  it("falls back safely when the Host header is malformed", async () => {
+    const middleware = withFarmRequestTracing(async (_req, res) => {
+      res.statusCode = 204;
+      res.end();
+    });
+
+    const { res } = createNodeResponse();
+    expect(() =>
+      middleware(createNodeRequest("/ok", { host: "not a valid host" }), res, () => {}),
+    ).not.toThrow();
+    await settle();
+
+    expect(res.statusCode).toBe(204);
+  });
+
+  it("uses the configured proxy-aware URL resolver for request tracing", async () => {
+    let tracedUrl: URL | undefined;
+    const middleware = withFarmRequestTracing(
+      async (_req, res) => {
+        res.statusCode = 204;
+        res.end();
+      },
+      undefined,
+      (request) => {
+        tracedUrl = resolveFarmRequestURL(request as FarmRequest, { trustProxy: true });
+        return tracedUrl;
+      },
+    );
+
+    const { res } = createNodeResponse();
+    middleware(
+      createNodeRequest("/account?tab=profile", {
+        host: "internal:3000",
+        "x-forwarded-host": "app.example.com",
+        "x-forwarded-proto": "https",
+      }),
+      res,
+      () => {},
+    );
+    await settle();
+
+    expect(tracedUrl?.toString()).toBe("https://app.example.com/account?tab=profile");
     expect(res.statusCode).toBe(204);
   });
 });

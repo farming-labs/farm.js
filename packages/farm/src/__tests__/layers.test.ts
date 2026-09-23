@@ -15,6 +15,8 @@ import {
 import { MiddlewareManager } from "../middleware/manager";
 import { discoverMiddlewareRoutes, hasFarmRuntimeConfigModule } from "../nitro/universal-build";
 import { RouteManager } from "../routing/route-manager";
+import { createProgrammaticRouteModuleId } from "../routes-shared";
+import { toViteModuleId } from "../utils";
 import { farmPlugin } from "../vite";
 
 const temporaryRoots: string[] = [];
@@ -237,7 +239,10 @@ describe("Farm layers", () => {
     writeSource(baseRoot, "src/app/products/page.tsx");
     writeSource(baseRoot, "src/app/admin/page.tsx");
     writeSource(baseRoot, "src/app/products/loading.tsx");
+    writeSource(baseRoot, "src/app/users/[id]/page.tsx");
+    writeSource(baseRoot, "src/app/@modal/(.)users/[id]/page.tsx");
     writeSource(root, "src/app/products/page.tsx");
+    writeSource(root, "src/app/users/[slug]/page.tsx");
 
     const config = await resolveConfig({ root, extends: ["./layers/base"] }, "development");
     const manager = new RouteManager(config as any);
@@ -255,6 +260,15 @@ describe("Farm layers", () => {
     expect(manager.getLoadings().get("/products")?.modulePath).toBe(
       path.join(baseRoot, "src/app/products/loading.tsx"),
     );
+    expect(manager.getRoutes().has("/users/[id]")).toBe(false);
+    expect(manager.getRoutes().get("/users/[slug]")?.modulePath).toBe(
+      path.join(root, "src/app/users/[slug]/page.tsx"),
+    );
+    expect(
+      [...manager.getRouteSlots().values()].some(
+        (slot) => slot.interception && slot.pattern === "/users/[id]",
+      ),
+    ).toBe(true);
     expect(
       manager.generateClientManifest(root).routes.find((route) => route.pattern === "/admin")
         ?.modulePath,
@@ -351,6 +365,20 @@ describe("Farm layers", () => {
       "#layers/commerce": path.join(layerRoot, "src"),
     });
     expect(viteConfig.server.fs.allow).toEqual([root, layerRoot]);
+  });
+
+  it("imports an external programmatic route through Vite's filesystem namespace", async () => {
+    const root = createProject();
+    const externalRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "farm-external-layer-")));
+    temporaryRoots.push(externalRoot);
+    const routeFile = writeSource(externalRoot, "src/routes.ts");
+    const plugin = farmPlugin({ root });
+    const moduleId = createProgrammaticRouteModuleId(routeFile, "page", "/reports");
+
+    const source = await (plugin.load as (id: string) => Promise<string>)(moduleId);
+
+    expect(source).toContain(`from ${JSON.stringify(toViteModuleId(routeFile, root))}`);
+    expect(source).not.toContain(`from ${JSON.stringify(routeFile)}`);
   });
 });
 

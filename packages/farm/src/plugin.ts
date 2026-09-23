@@ -1,3 +1,7 @@
+import type { PluginRoutes, PluginRoutesFactory } from "./api/route";
+// Plugin factories must emit declarations through public exports, never bundled
+// declaration chunk paths, even when they only import @farm.js/core/plugin.
+export type { PluginRoutes, PluginRoutesFactory, RouteDefinition } from "./api/route";
 import type { FarmConfig, FarmRequest, FarmResponse } from "./types";
 import type { ViteDevServer } from "vite";
 import type { FarmClientPlugin } from "./client/plugin";
@@ -13,6 +17,8 @@ import {
 import { getFarmPluginIntegrationContext } from "./plugin-integration-context";
 
 type MaybePromise<T> = T | Promise<T>;
+/** @internal Marks a Node response whose intercepted end is awaiting response hooks. */
+export const FARM_NODE_RESPONSE_END_PENDING = Symbol.for("farm.nodeResponseEndPending");
 declare const FARM_PLUGIN_INTEGRATION_INSTANCE: unique symbol;
 declare const FARM_PLUGIN_INTEGRATION_BOUND: unique symbol;
 
@@ -465,10 +471,13 @@ export interface FarmPlugin<
   TClientPublic = any,
   TIntegrationInstance = unknown,
   TIntegrationBound extends boolean = false,
+  TRoutes extends PluginRoutes = PluginRoutes,
 > {
   name: string;
   version?: string;
   enforce?: "pre" | "post";
+  /** Declarative API routes, mounted through the normal dev and production API pipeline. */
+  routes?: PluginRoutesFactory<TRoutes>;
 
   /** Transform Farm config before the development or production pipeline is created. */
   configure?: (
@@ -668,8 +677,20 @@ export class PluginManager {
           if (typeof dispose !== "function") {
             throw new TypeError("Farm lifecycle.onShutdown requires a cleanup function");
           }
-          if (this.runtimeClosePromise || this.runtimeClosed) {
-            throw new Error("Farm runtime cleanup cannot be registered after shutdown begins");
+          // Shutdown never waits for startup, because a plugin whose
+          // runtime.start() hangs still has to be able to stop. Setup can
+          // therefore finish after the runtime is already closed, and the only
+          // way not to leak what it just opened is to release it now. This is
+          // what the disposer would have done moments earlier.
+          if (this.runtimeClosed) {
+            void (async () => {
+              try {
+                await dispose();
+              } catch (error) {
+                console.error("Farm runtime cleanup registered after shutdown failed:", error);
+              }
+            })();
+            return () => {};
           }
 
           this.runtimeDisposers.push(dispose);
@@ -1126,12 +1147,19 @@ export class PluginManager {
         this.runtimeShutdownHooksRunning = false;
       }
 
-      const disposers = this.runtimeDisposers.splice(0).reverse();
-      for (const dispose of disposers) {
-        try {
-          await dispose();
-        } catch (error) {
-          errors.push(error);
+      // Shutdown deliberately does not wait for startup: a plugin whose
+      // runtime.start() never resolves still has to be able to stop. Setup can
+      // therefore finish while disposal is already running, so keep draining
+      // until nothing new is registered instead of splicing once and stranding
+      // whatever arrived late.
+      while (this.runtimeDisposers.length > 0) {
+        const batch = this.runtimeDisposers.splice(0).reverse();
+        for (const dispose of batch) {
+          try {
+            await dispose();
+          } catch (error) {
+            errors.push(error);
+          }
         }
       }
 
@@ -1363,7 +1391,7 @@ export class PluginManager {
           // Check if response is already sent (only for beforeRequest)
           if (hookName === "beforeRequest") {
             const res = args[1];
-            if (res && res.writableEnded) {
+            if (res && (res.writableEnded || res[FARM_NODE_RESPONSE_END_PENDING])) {
               return true;
             }
           }
@@ -1421,6 +1449,7 @@ export function definePlugin<
   TClientState = unknown,
   TClientPublic = undefined,
   TIntegrationInstance = unknown,
+  const TRoutes extends PluginRoutes = PluginRoutes,
 >(
   plugin: FarmPlugin<
     TState,
@@ -1428,9 +1457,18 @@ export function definePlugin<
     TClientState,
     TClientPublic,
     TIntegrationInstance,
-    false
+    false,
+    TRoutes
   >,
-): FarmPlugin<TState, TRequestContext, TClientState, TClientPublic, TIntegrationInstance, false> {
+): FarmPlugin<
+  TState,
+  TRequestContext,
+  TClientState,
+  TClientPublic,
+  TIntegrationInstance,
+  false,
+  TRoutes
+> {
   return plugin;
 }
 

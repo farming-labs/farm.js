@@ -11,6 +11,12 @@ import { notifyHistoryChange, subscribeHistoryChange } from "./history-sync";
 import { getFarmI18nClientState } from "../i18n/client-runtime";
 import { _resolveCurrentRequest } from "../server/request-bridge";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
+import {
+  applyFarmBasePath,
+  getFarmBasePath,
+  normalizeFarmBasePath,
+  stripFarmBasePath,
+} from "../base-path";
 
 interface RouterState {
   pathname: string;
@@ -34,6 +40,27 @@ export interface UseBlockerReturn {
   active: boolean;
 }
 
+function shouldBlockUnload(options: UseBlockerOptions): boolean {
+  const path = window.location.pathname + window.location.search;
+  const context: FarmNavigationBlockerContext = {
+    from: path,
+    to: path,
+    action: "replace",
+  };
+  const when = typeof options.when === "function" ? options.when(context) : options.when;
+  if (!when) return false;
+  if (!options.shouldBlock) return true;
+
+  try {
+    const result = options.shouldBlock(context);
+    if (typeof result === "boolean") return result;
+    void result.catch(() => undefined);
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Hook for accessing router state and navigation
  */
@@ -48,7 +75,7 @@ export interface UseBlockerReturn {
 function navigateViaRouter(href: string, basePath: string, replace: boolean): void {
   if (typeof window === "undefined") return;
 
-  const url = href.startsWith("/") ? basePath + href : href;
+  const url = applyFarmBasePath(href, basePath);
   const spaRouter = getInstalledFarmSPARouter();
   if (spaRouter) {
     void spaRouter.navigate(url, { replace });
@@ -64,7 +91,8 @@ function navigateViaRouter(href: string, basePath: string, replace: boolean): vo
 }
 
 export function useRouter(options: UseRouterOptions = {}) {
-  const basePath = options.basePath || "";
+  const basePath =
+    options.basePath === undefined ? getFarmBasePath() : normalizeFarmBasePath(options.basePath);
   const routes = options.routes;
   const routeKey =
     routes?.map((route) => (typeof route === "string" ? route : route.path)).join("\n") || "";
@@ -169,22 +197,25 @@ export function useBlocker(options: UseBlockerOptions): UseBlockerReturn {
       return;
     }
 
-    return getSPARouter().addBlocker(async (context) => {
-      const current = optionsRef.current;
-      const when = typeof current.when === "function" ? current.when(context) : current.when;
+    return getSPARouter().addBlocker(
+      async (context) => {
+        const current = optionsRef.current;
+        const when = typeof current.when === "function" ? current.when(context) : current.when;
 
-      if (!when) return false;
+        if (!when) return false;
 
-      if (current.shouldBlock && !(await current.shouldBlock(context))) {
-        return false;
-      }
+        if (current.shouldBlock && !(await current.shouldBlock(context))) {
+          return false;
+        }
 
-      if (current.message && typeof window.confirm === "function") {
-        return !window.confirm(current.message);
-      }
+        if (current.message && typeof window.confirm === "function") {
+          return !window.confirm(current.message);
+        }
 
-      return true;
-    });
+        return true;
+      },
+      () => shouldBlockUnload(optionsRef.current),
+    );
   }, [active]);
 
   return { active };
@@ -253,14 +284,10 @@ function readCurrentUrl(): URL | undefined {
 }
 
 function normalizeClientPathname(pathname: string, basePath: string) {
-  const normalizedBase = basePath.replace(/\/+$/, "");
-  const isUnderBase =
-    normalizedBase && (pathname === normalizedBase || pathname.startsWith(`${normalizedBase}/`));
-  const withoutBase = isUnderBase ? pathname.slice(normalizedBase.length) || "/" : pathname;
-  return withoutBase || "/";
+  return stripFarmBasePath(pathname, basePath);
 }
 
 function resolveClientHref(href: string | undefined, basePath: string): string | undefined {
   if (!href) return undefined;
-  return href.startsWith("/") ? basePath + href : href;
+  return applyFarmBasePath(href, basePath);
 }

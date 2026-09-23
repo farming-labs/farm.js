@@ -16,7 +16,7 @@
   {/if}
   <span class="resource-link-item">
     {#if primary}<span class="resource-separator" aria-hidden="true">/</span>{/if}
-    <a href="https://farm.js.dev">
+    <a href="https://farmjs.dev">
       <svg
         class="resource-icon"
         viewBox="0 0 24 24"

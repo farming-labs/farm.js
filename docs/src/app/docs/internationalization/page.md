@@ -150,6 +150,11 @@ The same app route serves every locale. A file such as `src/app/products/page.ts
 
 Farm canonicalizes locale paths. With `prefix-except-default`, a request for `/en/products` redirects to `/products`.
 
+When the application has a `basePath`, the locale prefix stays inside that mount path. For example,
+`basePath: "/store"` produces `/store/products` for the default locale and
+`/store/fr/products` for French. Server redirects, `Link`, locale switching, metadata alternates,
+static generation, and production routing all preserve the same order.
+
 `Link` preserves the active locale automatically:
 
 ```tsx
@@ -367,6 +372,10 @@ export default defineConfig({
 | `strict`         | `true` in production    | Require matching keys and ICU variable signatures.                      |
 | `cookie`         | `farm_locale`, one year | Name, lifetime, path, SameSite, and Secure behavior.                    |
 | `direction`      | Inferred                | Per-locale `ltr` or `rtl` overrides.                                    |
+
+The locale cookie `path` must be a root-relative pathname; cookie attributes, URL queries and
+hashes, dot segments, backslashes, and encoded path separators are rejected. `sameSite` accepts
+`"lax"`, `"strict"`, or `"none"`.
 
 For a custom catalog layout, include `{locale}` in the path:
 

@@ -1,25 +1,38 @@
 ---
 title: "API Client"
-description: "Call app API routes with api.hello.get style inference, cache policies, invalidation, retries, callbacks, and optimistic updates."
+description: "Call app API routes with apiClient.hello.get style inference, cache policies, invalidation, retries, callbacks, and optimistic updates."
 section: "Data and APIs"
 ---
 
 # API Client
 
-Call app API routes with api.hello.get style inference, cache policies, invalidation, retries, callbacks, and optimistic updates.
+Call app API routes with apiClient.hello.get style inference, cache policies, invalidation, retries, callbacks, and optimistic updates.
 
-## Create the client
+## Create both callers once
 
-**src/lib/api-client.ts**
+**src/lib/api.ts**
 
 ```ts
-import { createAPIClient } from "@farm.js/core/client";
-import type { APIRouter } from "./api.generated";
+import { createApiClients } from "@farm.js/core/api/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
 
-export const api = createAPIClient<APIRouter>();
+export const { api, apiClient } = createApiClients<APIRouter>({ routes: apiRoutes });
 ```
 
-The client uses the current origin and `/api` by default. To point every default client at another
+`@farm.js/core/api/client` is the renderer-neutral entry for typed API callers. The existing
+`@farm.js/core/client` export remains supported for React apps that also use Farm's client hooks.
+
+Define each endpoint once in a file route or plugin. This shared module imports only generated
+paths/methods and types, never server handlers or credentials. Import `api` in server code and
+`apiClient` in browser code; do not create another caller in either component.
+
+Both app-route callers return `{ data, error, key }` and preserve the same input, output, method,
+and dynamic-parameter inference. Keep secrets out of this shared module, including its options.
+
+If the app also has integrations, add `AppIntegrations` as the second type argument to this same
+factory. You do not need a second caller setup. See [Integration callers](#integration-callers).
+
+The HTTP client uses the current origin and `/api` by default. To point every default client at another
 API, configure it once in `farm.config.ts`:
 
 ```ts
@@ -42,7 +55,7 @@ For a cross-origin API that uses cookies or HTTP authentication, pass the browse
 mode when creating the client:
 
 ```ts
-export const api = createAPIClient<APIRouter>({
+export const { api, apiClient } = createApiClients<APIRouter>({
   baseURL: "https://api.example.com/v1",
   credentials: "include",
 });
@@ -51,12 +64,175 @@ export const api = createAPIClient<APIRouter>({
 Farm forwards `credentials` to every route request from that client. The API must also allow the
 calling origin and credentialed requests through its CORS policy.
 
+## Header defaults
+
+Instance `headers` accepts a string-valued object or a function returning one. The function can
+be synchronous or asynchronous; Farm calls it when an operation is called, not when the client
+is created.
+
+```ts
+import { createApiClients } from "@farm.js/core/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
+
+export const { api, apiClient } = createApiClients<APIRouter>({
+  routes: apiRoutes,
+  headers: () => ({
+    "Accept-Language":
+      typeof document === "undefined" ? "en" : document.documentElement.lang || "en",
+  }),
+});
+
+// This call overrides the instance language without changing later calls.
+await apiClient.hello.get({ headers: { "accept-language": "fr" } });
+```
+
+Use `headers: async () => ({ ... })` when obtaining defaults requires asynchronous work.
+The exported `ClientHeaders` type describes all three forms. Static objects remain supported;
+per-call `headers` remain objects, not resolver functions.
+
+Header names are case-insensitive. App routes merge forwarded server request headers first,
+then instance defaults, then per-call headers. Thus the example explicitly chooses English on
+the server; omit its `Accept-Language` default when you want `api` to preserve the incoming
+request's language. The existing server forwarding allowlist is unchanged.
+
+Farm snapshots the resolved defaults once per operation call, before cache lookup or dispatch.
+Cache hits still resolve headers; changed effective headers isolate the route client's cache
+and in-flight deduplication. Retries reuse the same snapshot. A thrown error, rejected promise,
+or invalid header produces the normal error result without fetching or returning cached data.
+
+These defaults also apply to `api.integrations` and `apiClient.integrations` when enabled.
+Providing `integrations.headers` replaces the shared header defaults for integration calls only;
+it does not merge the two resolvers. See [integration header defaults](/docs/integrations#header-defaults)
+for integration-specific precedence and separate server defaults.
+
+A resolver is not a server-only boundary. Anything imported into this shared module may reach
+the browser, and the resolver runs wherever its caller runs. Do not put provider credentials or
+private environment values here. Read request-specific values inside the resolver or a
+request-scoped server module, never by mutating a shared singleton with one user's credentials.
+
+## Cancellation and deadlines
+
+Set `timeoutMs` on `createApiClients` for a default deadline, or override it per call:
+
+```ts
+export const { api, apiClient } = createApiClients<APIRouter>({
+  routes: apiRoutes,
+  timeoutMs: 10_000,
+});
+
+const controller = new AbortController();
+const pending = apiClient.hello.get({}, { signal: controller.signal, timeoutMs: 2_000 });
+controller.abort();
+const result = await pending;
+// result.error.code is "aborted" (or "timeout" when Farm's deadline expires).
+```
+
+The budget starts at call time and includes asynchronous header resolution, transport,
+response decoding, and retry waits. `0` disables the deadline (also the default); accepted
+values are integers from `0` to `2147483647`. A per-call `0` disables an instance deadline.
+Keep `signal` per call, not on a shared long-lived instance.
+
+Cancellation returns `{ data: undefined, error, key }` with status `0`, stops retries, skips
+cached results when already aborted, and rolls back pending optimistic updates even when
+`rollbackOnError` is false. Calls with a signal or deadline do not participate in in-flight
+deduplication, so one caller cannot cancel another. Completed results can still use the cache.
+Background revalidation retains its call budget until it finishes. A returned stream is handed
+to the caller: the deadline ends at that handoff, not at the end of stream consumption; the
+caller's signal still reaches the underlying HTTP request.
+
+Local `api` dispatch combines the call signal with the incoming request signal. Handlers can
+pass `request.signal` to cancellable work. Farm stops waiting when cancelled, but a handler or
+custom transport that ignores the signal may continue running. Cancellation cannot undo
+completed writes or external side effects.
+
+These defaults also reach integration callers; `integrations.timeoutMs` overrides the shared
+deadline. See [integration cancellation](/docs/integrations#cancellation-and-deadlines).
+
+## Custom HTTP transport
+
+Pass a fetch-compatible function when a caller needs an HTTP wrapper for testing or tracing:
+
+```ts
+export const { api, apiClient } = createApiClients<APIRouter>({
+  routes: apiRoutes,
+  fetch: async (url, init) => {
+    const response = await globalThis.fetch(url, init);
+    return response;
+  },
+});
+```
+
+The function has the same type as `globalThis.fetch` and receives Farm's resolved URL and
+`RequestInit`, including headers, credentials, body, and cancellation signal. Return a normal
+`Response` and forward the signal in wrappers. Farm still handles decoding, errors, retries,
+and deadlines. Without this option, Farm uses global fetch as before. Supply a bound function
+if your implementation requires a particular `this` value.
+
+This replaces HTTP only: `apiClient` uses it, but server `api` still dispatches app routes
+locally. Integration HTTP calls (including server HTTP fallback) inherit it;
+`integrations.fetch` overrides it for integrations. Registered local integration handlers
+do not use HTTP and are unchanged.
+
+App-route caches stay private to instances with a custom transport, even with
+`cache.scope: "shared"` or `credentials: "omit"`: wrappers can add identity that Farm cannot
+see. If a wrapper changes users internally, also reflect that identity in the caller's
+header resolver or create a new instance; Farm cannot detect hidden identity changes.
+
+## Shared lifecycle hooks
+
+Set `onRequest`, `onResponse`, or `onError` on the caller instance for shared logging or error
+reporting. These are ordinary callbacks, not React hooks:
+
+```ts
+export const { api, apiClient } = createApiClients<APIRouter>({
+  routes: apiRoutes,
+  onRequest(event) {
+    console.debug(event.method, event.path);
+  },
+  onResponse(_data, _error, event) {
+    console.debug("Status:", event.status);
+  },
+  onError(error) {
+    console.error(error.message);
+  },
+});
+
+await apiClient.hello.get(
+  {},
+  {
+    onError(error) {
+      // Handle this call's error in the UI as well as shared reporting.
+      console.debug("Could not load greeting:", error.message);
+    },
+  },
+);
+```
+
+Shared hooks run first, then the corresponding per-call hook. Per-call route response types
+remain inferred. Shared hooks use `unknown` data because one instance covers many routes;
+`ClientLifecycleHooks`, `ClientRequestEvent`, and `ClientResponseEvent` are exported for reusable
+observers. Return values are ignored. Promises are not awaited, and thrown/rejected shared
+hooks are reported through `globalThis.reportError` (or console) without failing the call.
+Asynchronous work may finish out of order even though callbacks are invoked shared-first.
+
+`onRequest`/`onResponse` observe execution attempts, including retries and background refreshes,
+not cache hits. Deduplicated requests share attempt events. `onError` runs once on final failure
+for each logical call, including background failures; it does not run for each failed retry.
+An attempt can fail before HTTP dispatch, such as header resolution or cancellation. A response
+event observes a completed attempt; aborting inside it cannot retroactively cancel that result.
+These hooks do not add retries or replace existing per-call success, settlement, or status hooks.
+
+Shared defaults apply to integration callers too. `integrations.onRequest`, `onResponse`, and
+`onError` replace the corresponding shared default for integrations; per-call hooks still compose.
+Local server calls run their hooks on the server; HTTP callers run them where invoked. Keep
+shared observers browser-safe and avoid logging credentials, request bodies, or personal data.
+
 ## Call a route
 
 **Browser usage**
 
 ```ts
-const result = await api.hello.post({
+const result = await apiClient.hello.post({
   body: { name: "Ada" },
 });
 
@@ -67,17 +243,94 @@ if (result.error) {
 }
 ```
 
+If a route path contains a lowercase HTTP method segment such as `get`, `post`, or `delete` that
+collides with a method on its parent route, the generated client exposes a leading-slash literal
+alias so the two cannot be confused:
+
+```ts
+// Both src/app/api/users/route.ts and src/app/api/users/get/route.ts export GET.
+const result = await apiClient["/users/get"].get();
+```
+
+The leading slash marks the whole key as a literal API path. This also works when the method-named
+segment is in the middle of a colliding route, for example
+`apiClient["/users/get/profile"].post(...)`. Non-conflicting paths keep their ordinary nested form.
+
 A typed `HEAD` route is called with `.head()`. Its result keeps the same `{ data, error, key }`
 shape, with `data` set to `undefined` because HTTP HEAD responses do not have a body.
 
 Array-valued query inputs use repeated URL parameters. For example,
 
 ```ts
-await api.posts.get({ query: { tag: ["react", "vite"] } });
+await apiClient.posts.get({ query: { tag: ["react", "vite"] } });
 // GET /api/posts?tag=react&tag=vite
 ```
 
 This is the same array representation that API route query schemas receive.
+
+## Scoped dynamic routes
+
+`farm generate`, development startup, and production builds emit `apiRoutes` alongside
+`APIRouter` in `src/lib/api.generated.ts`. Pass that manifest to enable parameter resolution:
+
+```ts
+import { createApiClients } from "@farm.js/core/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
+
+export const { api, apiClient } = createApiClients<APIRouter>({ routes: apiRoutes });
+```
+
+For `POST /api/projects/[projectId]/uploads/[uploadId]`:
+
+```ts
+const project = apiClient.projects.$params({ projectId: "project-123" });
+
+const result = await project.uploads.post({
+  params: { uploadId: "upload-456" },
+  body: { title: "Design draft" },
+});
+
+if (result.error) throw result.error;
+console.log(result.data?.title);
+```
+
+`$params()` returns a reusable, immutable caller and sends no request. Only the explicit HTTP
+method executes the call. Bound parameters do not have to be repeated and cannot be overwritten
+by a descendant call. You can bind the final parameter as well:
+
+```ts
+const upload = project.uploads.$params({ uploadId: "upload-456" });
+await upload.post({ body: { title: "Updated draft" } });
+```
+
+The generated types describe registered methods, required parameters, validated input, and JSON
+response data. The runtime manifest contains only paths and methods; importing it never imports
+the config, server handlers, validators, or credentials into the browser. Existing static clients
+without a manifest remain supported.
+
+Binding preserves position: `/files/[id]/versions` uses
+`apiClient.files.$params({ id }).versions.get()`, while `/files/versions/[id]` uses
+`apiClient.files.versions.get({ params: { id } })`. Catch-all parameters use arrays:
+`apiClient.docs.$params({ parts: ["guides", "start"] }).get()` for `/api/docs/[...parts]`.
+Optional catch-alls can bind an empty object. Intermediate parameters must be bound before
+accessing their children through the shorthand; existing bracket-pattern access remains available.
+
+The client encodes parameter values, respects the configured API base URL/path, and rejects
+missing/unknown parameters, unsafe values, unregistered methods, and ambiguous calls before
+fetching. A supplied `undefined` ID never falls back to a collection request. Static server
+routes still win: if `/api/uploads/stats` exists, calling `/api/uploads/[id]` with `id: "stats"`
+throws a shadowing error rather than calling the wrong endpoint. Choose non-conflicting IDs or paths.
+
+Resolved URLs participate in caching and invalidation, so different bound IDs remain separate.
+Bind the final parameter before passing a route reference to a hook or invalidation helper when
+you need one concrete resource; collection/detail overloads otherwise describe multiple inputs.
+Plugin paths containing HTTP method names use a literal alias such as
+`apiClient["/projects/get"].get()`. `$params` is reserved for the scope helper.
+
+Both callers returned by `createApiClients()` support these scopes. Use `api` for local calls
+during a Farm server request and `apiClient` for HTTP calls. For standalone HTTP calls from server
+code, give `apiClient` a trusted absolute `baseURL` and explicitly forward only the credentials
+the target needs. See [Server callers](#server-callers) for local-dispatch boundaries.
 
 ## Type-safe QUERY requests
 
@@ -85,7 +338,7 @@ A route that exports `QUERY` becomes a `.query()` caller. Its body and response 
 the endpoint, just like the existing `.get()` and `.post()` callers:
 
 ```ts
-const result = await api.products.search.query(
+const result = await apiClient.products.search.query(
   {
     body: {
       filters: [{ field: "category", value: "tools" }],
@@ -112,16 +365,22 @@ path, URL query parameters, request body, `Content-Type`, and `Content-Encoding`
 requests need an explicit cache key because a generated multipart boundary cannot be represented
 reliably before `fetch` sends the request.
 
+Farm adds `Content-Type: application/json` when it serializes a JSON request body. Bodyless
+requests do not receive that header, and an explicitly configured content type takes precedence
+regardless of header casing.
+
 ## Upload files and consume progress streams
 
 `toFormData()` retains the endpoint's body shape while sending files as real multipart fields. When
 an endpoint returns `jsonStream()`, the generated client exposes a typed, single-consumer async
-iterable:
+iterable. Concurrent `next()` calls on the same iterator are served in order, including items
+already buffered in a transport chunk. Cancellation interrupts outstanding reads without waiting
+for another chunk; `cancel()` itself still waits for producer cleanup:
 
 ```ts
 import { toFormData } from "@farm.js/core/api";
 
-const result = await api.imports.post({
+const result = await apiClient.imports.post({
   body: toFormData({
     title: "Quarterly report",
     file,
@@ -146,6 +405,11 @@ multipart boundary. Do not set `Content-Type` manually. Stream items are decoded
 consumer advances the iterator, and `result.data.cancel()` aborts the response reader when the UI
 no longer needs progress.
 
+`jsonStream()` closes its source iterator at most once when cancelled or when a source/serialization
+error occurs. A pending source read that finishes after cancellation is discarded. Explicit
+cancellation waits for that cleanup and exposes cleanup failures; a source/serialization failure
+keeps its original error even if cleanup also fails.
+
 ## Track mutations in React
 
 `useMutation` gives generated API methods and Farm server functions the same pending, result, and
@@ -156,12 +420,12 @@ into React Server Actions.
 "use client";
 
 import { useMutation } from "@farm.js/core/client";
-import { api } from "@/lib/api-client";
+import { apiClient } from "@/lib/api";
 
 export function CreateProductButton() {
-  const createProduct = useMutation(api.products.post, {
+  const createProduct = useMutation(apiClient.products.post, {
     request: {
-      invalidate: [[api.products.get]],
+      invalidate: [[apiClient.products.get]],
     },
   });
 
@@ -189,9 +453,82 @@ const product = await createProduct.mutateAsync({
 ```
 
 The return value includes `data`, `error`, `variables`, `status`, `pending`, and `reset`. Pass the
-existing API-client cache, retry, invalidation, and optimistic options through `request`. Local
-`optimistic` state on `useMutation` is separate from an API cache update: it controls
-`mutation.data`, while `request.optimistic` updates shared cached queries.
+existing API-client cache, retry, invalidation, and optimistic options through `request`. A
+server-function target honors `request.retry`, `request.optimistic`, and `request.invalidate`
+with the same shapes; the remaining `request` options describe API-route transport and continue
+to apply to API routes only. Local `optimistic` state on `useMutation` is separate from an API
+cache update: it controls `mutation.data`, while `request.optimistic` updates shared cached
+queries.
+
+For a server-function target, optimistic updates and invalidations name explicit structured cache
+keys, since the shared cache is the surface a server function can reach:
+
+```tsx
+const rename = useMutation(renameProduct, {
+  request: {
+    optimistic: {
+      update: [[["product", id], (current) => ({ ...current, name })]],
+      rollbackOnError: true,
+    },
+    invalidate: [["product", id]],
+  },
+});
+```
+
+The updater applies to the shared client cache before the server function runs, so a
+`useServerQuery` watching `["product", id]` renders the new name immediately. On success the
+update commits and the invalidation travels the shared invalidation bus, exactly like a
+server-declared `invalidates`; on failure `rollbackOnError` restores the previous entry, and
+without it the touched entry is marked stale. Route-reference tuples such as
+`[apiClient.products.get]` need an API caller's route identity and are skipped for
+server-function targets; server-side keys the client cannot know about belong in the server
+function's own `invalidates`.
+Each local optimistic callback receives the latest scheduled mutation data, even when multiple
+submissions occur before React rerenders. With `rollbackOnError: true`, a failed latest submission
+restores the snapshot captured immediately before that submission's optimistic update.
+
+### Pause offline submissions
+
+By default a mutation dispatches regardless of connectivity and a submission with no network
+fails after its retries. Opt into offline awareness with `networkMode: "online"`:
+
+```tsx
+const createProduct = useMutation(apiClient.products.post, {
+  networkMode: "online",
+});
+
+// createProduct.paused is true while the browser is offline;
+// the submission dispatches automatically on the `online` event.
+```
+
+While the browser reports offline, a new submission waits in a `paused` state instead of
+dispatching, and a dispatch that failed with a connectivity error while offline pauses and
+rides the next reconnect instead of surfacing that error. `pending` stays true and `status`
+stays `"pending"` for a paused submission; the new `paused` flag distinguishes "waiting for
+connection" from "on the wire" so the UI can say so. Paused submissions resume in submission
+order on the `online` event. `reset()` rejects paused submissions immediately rather than
+leaving them waiting, and a disowned submission never dispatches after a later reconnect.
+Optimistic state applied before the pause stays visible while waiting.
+
+The pause window is in-memory: a reload drops paused submissions, so keep them short-lived and
+surface `paused` to the user. `useFetcher` accepts the same option and exposes the same flag.
+The default `networkMode: "always"` preserves existing behavior exactly.
+
+For overlapping submissions, `status`, `data`, and `error` describe the latest submission.
+Older completions do not replace its result or run completion callbacks. `pending` separately
+tracks whether any submission is still running, so it can remain `true` after the latest one
+succeeds or fails. `useFetcher` follows the same rules.
+
+Mutation `onSuccess`, `onError`, and `onSettled` callbacks are non-awaited observers. A thrown
+error or rejected promise is reported through `reportError` (or `console.error` as a fallback),
+without changing the target result, rolling back a successful mutation, or decrementing pending
+work again. Use the awaited `mutateAsync` result for required follow-up work. If a callback resets
+the hook or submits again, the older submission does not run a stale `onSettled` callback.
+
+`reset()` clears the displayed mutation state; it does not cancel the underlying work. Calls
+started before reset still settle their own promises, but cannot change the new state or run its
+completion callbacks. If you submit again, `pending` counts only calls started after reset.
+`useFetcher.reset()` follows the same rule.
 
 ## Submit without navigation
 
@@ -202,12 +539,12 @@ It accepts generated API methods, Farm server functions, and ordinary async func
 "use client";
 
 import { useFetcher } from "@farm.js/core/client";
-import { api } from "@/lib/api-client";
+import { apiClient } from "@/lib/api";
 
 export function CreateProductForm() {
-  const createProduct = useFetcher(api.products.post, {
+  const createProduct = useFetcher(apiClient.products.post, {
     request: {
-      invalidate: [[api.products.get]],
+      invalidate: [[apiClient.products.get]],
     },
   });
 
@@ -226,16 +563,26 @@ export function CreateProductForm() {
 }
 ```
 
-The fetcher exposes `state` (`idle` or `submitting`), `status`, `pending`, `data`, `error`,
+The fetcher exposes `state` (`idle` or `submitting`), `status`, `pending`, `paused`, `data`, `error`,
 `variables`, the active `formData`, `submit`, `submitAsync`, `Form`, and `reset`. It uses the same
 optimistic updates, rollback, callbacks, typed errors, and API-client request options as
 `useMutation`.
 
-Generated API forms map fields to `{ body: ... }` by default, or `{ query: ... }` for GET routes.
+Generated API forms map text fields to a JSON `{ body: ... }` by default, or `{ query: ... }`
+for GET/HEAD routes. For body methods, `<fetcher.Form encType="multipart/form-data">` preserves
+the FormData body, including repeated fields and files. A submit button's `formEncType` can
+override the form encoding. Imperative `submit(formData)` / `submitAsync(formData)` also preserve
+multipart data when it contains a File or Blob; text-only imperative input keeps the JSON default.
+For a text-only multipart endpoint, pass `{ body: toFormData(values) }` directly or use a mapper
+that returns `{ body: formData }`. Unsafe field names are filtered without mutating the original
+FormData. `mapFormData` overrides these defaults, and server functions still receive FormData
+directly. Native file-upload forms should declare `encType="multipart/form-data"` so their
+pre-hydration fallback also transmits files.
+
 Use `mapFormData` when the validated input needs coercion or a different shape:
 
 ```tsx
-const quantity = useFetcher(api.cart.post, {
+const quantity = useFetcher(apiClient.cart.post, {
   mapFormData(formData) {
     return {
       body: {
@@ -253,22 +600,43 @@ progressive-enhancement path before JavaScript loads. Generated GET and POST API
 real endpoint URL as their native fallback; a native fallback navigates to the endpoint response,
 while the hydrated fetcher stays on the page.
 
+If `mapFormData` throws, the target and optimistic callback are not called. The fetcher reports
+`status: "error"`, updates `error`, and runs `onError`/`onSettled` with `variables: undefined`.
+This also applies to `<fetcher.Form>` and fire-and-forget `submit`; `submitAsync` rejects with the
+same error. `formData` is cleared when submission finishes. Older work still contributes to
+`pending`, but cannot overwrite this newer error; `reset()` clears it as usual.
+
+Local mapping failures are wrapped in `FetcherInputError` from `@farm.js/core/client`, with
+`code: "input_error"`, `status: 0` (no HTTP response), and the original thrown value in `cause`.
+Its message preserves an original Error message or thrown string. Fetcher error types and
+callbacks include this case alongside the target's existing errors. Narrow with
+`error instanceof FetcherInputError` before handling provider-specific errors. Request-level
+callbacks under `request` still receive only API-client errors, not local mapping failures.
+
 ## Client options
 
-- cache: choose cache-first, network-only, or stale-while-revalidate.
+- cache: choose cache-first, network-only, or stale-while-revalidate; `persist` allows the
+  configured [client cache adapter](#persist-the-client-cache) to store the read.
 - retry: retry transient failures with count and delay.
 - invalidate: mark typed route keys stale after mutations.
 - optimistic: update cached query data before the server response returns.
 - onRequest, onResponse, onSuccess, onError, onSettled, and onStatus: observe the full client lifecycle.
 
+`onResponse` is a transport observer. If it throws or returns a rejected promise, Farm reports that
+failure through the platform `reportError` hook (or the console fallback) without retrying or
+changing the completed API result.
+
 Use a structured cache key when an API response intentionally shares data with route data or a [`createServerQuery`](/docs/server-queries):
 
 ```ts
-const product = await api.products.get(
+const { apiClient: publicApi } = createApiClients<APIRouter>({ credentials: "omit" });
+
+const product = await publicApi.products.get(
   { query: { id } },
   {
     cache: {
       key: ["product", id],
+      scope: "shared",
       policy: "stale-while-revalidate",
       staleTime: 30_000,
     },
@@ -276,11 +644,53 @@ const product = await api.products.get(
 );
 ```
 
-Structured keys use Farm's route-data key contract. Default API cache keys include the API origin and remain isolated from other clients.
+Structured keys use Farm's route-data key contract. Default API cache keys include the API origin.
+Same-origin and otherwise credentialed requests keep their cache private to the created client, and
+changing explicit headers or credentials clears that private cache. This prevents a new client from
+reusing a response produced under an earlier cookie identity without placing credential values in a
+public cache key. Invalidate session-specific reads when the same client logs in or out.
+
+Private caches follow the lifetime of their caller: on runtimes with `WeakRef`, the shared
+invalidation channel does not keep an abandoned cache alive. Cleanup occurs during finalization
+or a later invalidation, not on a guaranteed schedule. Keep reusable callers at module scope;
+`gcTime` controls expiration of individual entries, not caller disposal: an expired entry is
+evicted on its next read, and a periodic background sweep also removes expired entries that no
+consumer is watching, so unread keys do not accumulate in long-lived sessions. Older runtimes
+without `WeakRef` retain the existing strong subscription, so avoid repeatedly creating callers
+there. Request-local server caches do not subscribe to the global invalidation channel.
+
+Use `scope: "shared"` only for public data requested with `credentials: "omit"` and no custom
+headers that intentionally shares a structured key with route data or another API client:
+
+```ts
+cache: {
+  key: ["catalog", "featured"],
+  scope: "shared",
+  policy: "cache-first",
+}
+```
+
+Requests with `credentials: "omit"` and no custom headers may share by default because they carry
+no browser identity. `scope: "client"` can keep those requests private as well. Credentialed or
+header-carrying requests remain client-scoped even if `scope: "shared"` is supplied.
 
 Set `cache.dedupeMs` to join identical requests started within that window. If an older request is
 still running after the window expires, the newer request becomes the cache owner; the older result
 still returns to its original caller but cannot replace the newer cached value.
+
+The same ownership rule applies across different caller instances using a shared cache key.
+The newest network read owns that entry even if it fails or is cancelled; an older pending
+response cannot restore superseded data. Transport deduplication remains per caller, and private,
+credentialed, custom-transport, and request-local server caches remain isolated.
+
+Invalidation also protects against reads already in flight: their results still return to their
+callers, but cannot become fresh cache entries after that key is invalidated. The next read can
+fetch current data, even when invalidation and request startup happen in the same millisecond.
+Unrelated cache keys are unaffected.
+
+This includes mutation `invalidate` targets whose first read has not populated the cache yet.
+Explicit keys and typed route references receive the same protection in private, shared, and
+request-local server caches. Failed mutations leave those reads unchanged.
 
 ## Optimistic cache updates
 
@@ -289,7 +699,7 @@ implemented by Farm's own typed API client and shared cache. A mutation can upda
 query result immediately, roll it back after an error, and invalidate it after the server responds.
 
 ```ts
-const products = await api.products.get(
+const products = await apiClient.products.get(
   { query: { category } },
   {
     cache: {
@@ -300,7 +710,7 @@ const products = await api.products.get(
   },
 );
 
-const createProduct = api.products.post(
+const createProduct = apiClient.products.post(
   {
     body: {
       name,
@@ -328,19 +738,172 @@ await createProduct;
 ```
 
 The updater runs synchronously before the POST finishes. `products.key` preserves the cached
-response type, so `current` is inferred from `api.products.get`. You can also target a generated
-route directly with `[api.products.get, { query: { category } }, updater]`.
+response type, so `current` is inferred from `apiClient.products.get`. You can also target a generated
+route directly with `[apiClient.products.get, { query: { category } }, updater]`.
 
 With `rollbackOnError: true`, Farm restores the exact previous cache entry when the mutation fails.
-After the request settles, invalidation marks the key stale so mounted consumers or the next read
-can load the canonical server result.
+After a successful mutation, invalidation marks the key stale so mounted consumers or the next read
+can load the canonical server result. Failed mutations do not invalidate known-good cached reads;
+when rollback is disabled, only cache entries changed optimistically are marked stale so the next
+read loads canonical data.
+
+Use `invalidate: { targets: [[apiClient.products.get, input]], refetch: true }` to
+refresh a previously cached API read in the background after a successful mutation. Farm reuses
+that read's resolved route, input, key, cache policy settings, retry settings, and deadline, forcing
+a fresh read instead of replaying the mutation. Duplicate targets refresh once. Explicit cache
+keys work too; expired/missing entries or keys populated outside the API client are only invalidated
+because they have no retained API read to replay.
+
+Background refetch resolves current header defaults, does not reuse the old caller's abort signal
+or per-call callbacks, and never repeats optimistic updates or mutation invalidations. Shared
+lifecycle hooks still observe it. A failed refetch leaves the entry stale and does not fail the
+already successful mutation. Read recipes expire or are removed with their cache entries.
+
+## Cross-tab invalidation
+
+By default, invalidations stay inside the tab that produced them: a mutation in one tab marks
+keys stale there, while a second tab keeps its cached reads until its own focus or reconnect
+refresh fires. Opt into same-origin cross-tab propagation with
+`enableCrossTabCacheInvalidation`:
+
+```ts
+"use client";
+
+import { enableCrossTabCacheInvalidation } from "@farm.js/core/client";
+
+// Call once during client startup; returns a disposer.
+enableCrossTabCacheInvalidation();
+```
+
+Invalidations from mutations, server functions, and explicit cache invalidation are posted to a
+`BroadcastChannel` and applied in every other tab through the normal invalidation path, so
+mounted stale queries there refetch on their own. Only invalidation keys cross the channel,
+never cached data or responses, which leaves private and credentialed cache scoping untouched.
+Each tab refetches through its own credentials.
+
+The call is idempotent, safe during server rendering, and a no-op in environments without
+`BroadcastChannel`. Pass `channelName` to isolate multiple Farm apps served from one origin;
+enabling two different channel names in the same tab is an error.
+
+## Persist the client cache
+
+The browser cache is in memory: a reload starts cold. Opt into persistence by pointing
+`cache.client.adapter` at a client module and marking the reads that may be stored:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  cache: {
+    client: {
+      adapter: "./src/cache-adapter",
+    },
+  },
+});
+```
+
+The path resolves from the project root and the module is bundled into the browser entry — the
+server never imports it. Its default export implements five callbacks over any storage:
+
+```ts title="src/cache-adapter.ts"
+import { defineClientCacheAdapter, type PersistedEntry } from "@farm.js/core/client";
+
+const PREFIX = "farm-cache:";
+
+export default defineClientCacheAdapter({
+  async keys() {
+    return Object.keys(localStorage)
+      .filter((key) => key.startsWith(PREFIX))
+      .map((key) => key.slice(PREFIX.length));
+  },
+  async get(key) {
+    const raw = localStorage.getItem(PREFIX + key);
+    return raw ? (JSON.parse(raw) as PersistedEntry) : null;
+  },
+  async set(key, entry) {
+    localStorage.setItem(PREFIX + key, JSON.stringify(entry));
+  },
+  async delete(key) {
+    localStorage.removeItem(PREFIX + key);
+  },
+  async clear() {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith(PREFIX)) localStorage.removeItem(key);
+    }
+  },
+});
+```
+
+Farm owns every policy decision — what may be stored, when writes flush, how entries load — and
+the adapter is plain keyed storage. `set` is an upsert; there is no separate create. An adapter
+over IndexedDB, OPFS, or a native bridge has the same shape, and the optional `setMany`/`getMany`
+batch methods let it use one transaction per flush. `storageClientCacheAdapter` wraps any
+Farm/unstorage-style key-value client into this contract, mirroring the server's
+`storageCacheAdapter`, so one KV implementation can serve both caches — against two physically
+separate stores.
+
+### Nothing persists without opting in
+
+Persisted data lives on the device, so persistence is allowlist-only. Mark reads where they are
+declared:
+
+```ts
+export const catalogQuery = createServerQuery({
+  key: () => ["catalog", "featured"],
+  staleTime: "5m",
+  persist: true,
+  async handler() {
+    return loadCatalog();
+  },
+});
+```
+
+```ts
+await apiClient.products.get(
+  { query: { category } },
+  {
+    cache: {
+      key: ["products", category],
+      policy: "stale-while-revalidate",
+      staleTime: 30_000,
+      persist: true,
+    },
+  },
+);
+```
+
+Only successful, `persist`-flagged entries in the shared cache are written, debounced in the
+background. Private and credentialed API caches never reach the adapter regardless of the flag.
+`cache.client` also accepts `version` — a build or deploy id salted into every entry so a deploy
+drops incompatible data — and an optional coarse `persistKey` filter on the engine.
+
+### Lifecycle and limits
+
+On startup, persisted entries load **stale-but-visible**: the data renders immediately and the
+normal stale-while-revalidate path refreshes it on first read, so freshness semantics do not
+change. Expired and version-mismatched entries are dropped during load. Deletes, garbage
+collection, and `clear()` mirror to the adapter. If the adapter fails — quota, private browsing,
+a broken driver — persistence disables itself for the session and the app continues memory-only;
+the cache is disposable by design.
+
+Call `clearPersistedCache()` on logout or any session change so the next visitor on a shared
+device cannot warm-start into another user's data:
+
+```ts
+import { clearPersistedCache } from "@farm.js/core/client";
+
+await clearPersistedCache();
+```
+
+Persistence stores confirmed reads only. Pending optimistic updates and in-flight mutations are
+never written; a reload drops them.
 
 ## Result shape
 
-API and integration callers return a consistent result object:
+App-route and integration callers both expose `data` and `error`, so callers can branch on
+`result.error`. App-route results also include a typed cache `key`; integration results retain
+their own error contract and do not include that cache key.
 
 ```ts
-const result = await api.hello.post({
+const result = await apiClient.hello.post({
   body: {
     name: "Ada",
   },
@@ -355,46 +918,176 @@ console.log(result.data.message);
 ```
 
 This makes client components easier to write because failed responses do not need to be caught with `try/catch` unless you want that behavior.
+For app routes, if an HTTP error body is malformed, Farm still returns an `http_error` with the real status and
+`Response`; the decoding failure is available as `error.cause`.
 
 ## Server callers
 
-Use server callers when the operation needs cookies, request headers, server-only credentials, or internal integration dispatch.
+Import `api` from the same shared module. No endpoint imports, second factory, or request-bound
+instance are needed:
 
-```ts
-import { createServerAPIClient } from "@farm.js/core/client";
-import type { APIRouter } from "./api.generated";
+```tsx
+import { api } from "@/lib/api";
 
-export async function loader(request: Request) {
-  const api = createServerAPIClient<APIRouter>({
-    request,
-  });
-
-  return await api.hello.post({
-    body: {
-      name: "Ada",
-    },
-  });
+export default async function Page() {
+  const result = await api.hello.post({ body: { name: "Ada" } });
+  if (result.error) throw result.error;
+  return <p>{result.data?.message}</p>;
 }
 ```
 
-## Integration callers
+`api` resolves the current request and that app's registered routes at call time. It works in Farm
+server pages, queries, actions, and API handlers in development and the default universal
+production runtime. Constructing the pair at module scope is safe. Calling `api` in the browser
+or outside an active Farm request throws an actionable error; it never silently falls back to HTTP.
 
-Integrations use the same ergonomic style:
+The local caller uses the app's server API mount, including custom base paths. A public
+`baseURL` pointing at another origin affects `apiClient`, not local dispatch. The current
+request's `Cookie`, `Authorization`, and `Accept-Language` headers are inherited; shared options
+and per-call headers can override them. Other headers are not implicitly forwarded. Do not place
+private tokens in the shared module: read them in server code and pass them per call where needed.
+
+Local calls use the same route matching, params, input/output validation, endpoint middleware,
+body limits, and response decoding as HTTP routes. They still serialize request/response data;
+they avoid a network round trip, not all serialization. Request cancellation is inherited.
+Opt-in caches and in-flight requests are isolated by request and credentials, never shared between
+users. Dynamic `$params()` scopes work identically for both callers.
+
+### Direct-call boundaries
+
+`api` is a direct endpoint caller, **not a replay of the full HTTP request pipeline**. It does not
+run path-level HTTP middleware, redirects/rewrites, plugin request/response lifecycle hooks, or
+deployment-layer checks. Put authorization and other rules required for both transports in the
+endpoint's `middleware`. Use `apiClient` when an operation must go through HTTP middleware.
+
+Response cookies and headers from a local endpoint do not automatically become headers on the
+outer page response. Post-response work scheduled by an endpoint uses the enclosing request's
+lifecycle. Integrations remain available under `api.integrations` and `apiClient.integrations`,
+using their existing integration-dispatch semantics.
+
+### Existing factories
+
+`createAPIClient()` remains supported for an HTTP-only caller, including standalone scripts with
+an absolute `baseURL`. `createServerAPIClient({ hello: { get: GET } })` remains supported for
+explicit endpoint-function maps in server-only modules. It returns the supplied functions and
+their raw results; passing only `{ request }` does **not** discover routes. Prefer the paired
+factory for a shared module and a consistent `{ data, error, key }` app-route result.
+
+The HTTP-only factory retains the same route and integration inference:
 
 ```ts
-const checkout = await apiClient.billing.checkout.post({
-  body: {
-    productId: "pro",
-    successPath: "/dashboard",
-  },
+import { createAPIClient } from "@farm.js/core/client";
+import type { APIRouter } from "./api.generated";
+import type { AppIntegrations } from "./integrations";
+
+const http = createAPIClient<APIRouter, AppIntegrations>();
+// Integration callers are under http.integrations.<configured namespace>.
+
+const routesOnly = createAPIClient<APIRouter>({ integrations: false });
+// Only the app's route tree is exposed; no reserved integration caller namespace.
+```
+
+`integrations: false` disables only the caller namespace, not the configured providers or their
+HTTP routes. These overloads are available from the published `@farm.js/core/client` entry;
+there is no need to import framework internals or cast the options.
+
+## Integration callers
+
+Use the same shared module for file routes, plugin routes, and configured integrations:
+
+**src/lib/api.ts**
+
+```ts
+import { createApiClients } from "@farm.js/core/client";
+import { apiRoutes, type APIRouter } from "./api.generated";
+import type { AppIntegrations } from "./integrations";
+
+export const { api, apiClient } = createApiClients<APIRouter, AppIntegrations>({
+  routes: apiRoutes,
 });
 ```
 
-If an integration operation is marked server-only, call it from `api`, not `apiClient`.
+Export `AppIntegrations = typeof appIntegrations` from the server-only module containing the
+registry passed to `farm.config.ts`'s `integrations` field. Import only its type here, not the
+registry value or provider SDKs. The type describes existing integrations; it does not register
+them. Farm supplies their caller metadata at runtime.
+
+File and plugin routes keep their generated paths, such as `apiClient.hello.post(...)`.
+Integrations live under the reserved `.integrations` namespace on both callers. For example, with
+the `billing` integration from the [custom integration guide](/docs/integrations/custom#shared-registration):
+
+```ts
+// Browser code
+const checkout = await apiClient.integrations.billing.checkout.post({
+  body: { priceId: "price_123" },
+});
+
+// Server code
+const serverCheckout = await api.integrations.billing.checkout.post({
+  body: { priceId: "price_123" },
+});
+```
+
+Integration-specific defaults belong in `integrations: { data, headers, ... }` in the shared
+factory options. Only put browser-safe values there. Set `integrations: false` if the app does
+not need the reserved namespace.
+
+The shared factory does not change integration execution semantics. Integration calls return
+`{ data, error }`, not the app-route `{ data, error, key }` cache contract. Server integration
+calls dispatch to a registered handler when possible and can fall back to HTTP when local
+dispatch is unavailable. App-route `api` calls instead require an active Farm server request and
+never fall back to HTTP. Operations marked `isServer: true` remain available only through
+`api.integrations`, not `apiClient.integrations`.
+
+### Integration-only callers
+
+`createIntegrations<AppIntegrations>()` remains supported and is not deprecated. Existing apps
+do not need to migrate. Use it when only integration callers are needed, or when you prefer to
+keep them separate from app-route callers. It returns integration namespaces directly:
+`apiClient.billing.checkout.post(...)` and `api.billing.checkout.post(...)`.
+With `createApiClients`, those same calls need the
+`.integrations` segment. Choose one setup for the shared module; do not create both pairs for
+the same integrations. Switching factories requires updating the namespace and moving shared
+integration defaults into the `integrations` option; it is not a drop-in rename.
+The paired factory discovers configured integrations; it does not accept the integration-only
+factory's explicit source map or separate server-options argument.
+
+Options are another reason to choose the separate factory. Shared `baseURL`, `headers`,
+`credentials`, and `data` defaults work with either setup: put them under `integrations` when
+using `createApiClients()`. Keep `createIntegrations()` when you want setup-level `request` or
+`forwardHeaders`, separate server defaults, or explicit source maps. The paired factory's
+server integration calls still accept per-call overrides. See the [options comparison and
+request-scoped example](/docs/integrations#integration-only-setup). Keep request-bound callers
+and private server options in server-only code, not in the shared browser module.
+
+For deliberately separate modules, use `createApiClients<APIRouter>({ routes: apiRoutes,
+integrations: false })` for app routes and `createIntegrations<AppIntegrations>()` for integration
+callers. Disabling the paired factory's namespace does not unregister integrations or their
+HTTP routes; it only leaves integration access to the separate caller module.
 
 ## Server Function Form Actions
 
 `createServerFn` pairs with `useServerFn` when a mutation is naturally a form action. Use `optimistic` to show the next UI state immediately, then let the server result replace it when the action completes.
+
+Both hooks accept `retry` with the API client's shape, `{ count, delay }`, where `delay` is a
+fixed wait or an `(attempt) => ms` backoff starting at attempt `1`. The default remains a single
+attempt. Retries rerun the whole submission against the server function, so keep retried handlers
+idempotent. `reset()` stops a waiting retry: the submission rejects with its last error and no
+further attempts start.
+
+For both `useServerFn` and `useAction`, `reset()` restores `initialResult` (or `null`), clears
+the error, and returns the hook to idle. It does not cancel server work: promises from earlier
+submissions still resolve or reject, but their completions no longer change hook state or invoke
+completion callbacks. Requests started after the reset have their own pending count, so older
+work cannot clear their pending state.
+
+The `onSuccess`, `onError`, and `onSettled` options on these hooks are notification callbacks.
+Thrown errors and rejected promises from them are reported through `reportError`, or the console
+when unavailable, without replacing the server result/error or changing the pending count.
+Callbacks are not awaited; put required work in the server function or explicitly await it after
+the call. If `onSuccess` or `onError` synchronously resets the hook or starts another submission,
+the superseded submission's `onSettled` callback is skipped. `throwOnFormError` still controls
+whether `formAction` rethrows the server error, not a notification error.
 
 **src/actions/todos.ts**
 
@@ -535,6 +1228,15 @@ export function TodoForm() {
 ```
 
 The optimistic callback receives the raw input, `formData` for form submissions, and the current result. Return `undefined` when a submission should not change the optimistic result. Use `rollbackOnError` for reversible UI state; keep authorization and validation on the server function itself.
+
+For `useServerFn` and `useAction`, `current` includes earlier optimistic transitions from the same
+React batch. Three submissions that each return `(current ?? 0) + 1` from an initial result of `0`
+therefore show `3`, even before React rerenders. The callback runs once per submission, including
+in Strict Mode. A failed latest submission with `rollbackOnError` restores the result immediately
+before that submission, including a previous optimistic value; a same-batch `reset()` restores
+the initial snapshot for subsequent submissions. If an optimistic callback itself resets or starts
+new work, the older transition cannot replace the reset or newer result. Reset still does not
+cancel execution of an already-started submission.
 
 When the function is called from the browser, `request` is the underlying Web `Request` and `signal` aborts with that request. A direct call made while rendering can inherit the current render request; a background or direct call outside request scope has no `request` and receives a stable, non-aborted signal. The same values are available to middleware. Pass `signal` to database or network clients that support cancellation.
 

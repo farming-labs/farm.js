@@ -114,11 +114,13 @@ analyzer({
 
 ## Options
 
+Adding `analyzer()` to `plugins` enables analysis. Remove it from the array when analysis is not
+needed.
+
 | Option    | Type                          | Default              | Purpose                                      |
 | --------- | ----------------------------- | -------------------- | -------------------------------------------- |
-| `enabled` | `boolean`                     | `true`               | Temporarily disable analysis.                |
-| `output`  | `string \| false`             | `.farm/analyze.html` | HTML report path, or no HTML report.         |
-| `json`    | `boolean \| string`           | `false`              | Write companion JSON or use a custom path.   |
+| `output`  | `string \| false`             | `.farm/analyze.html` | Project-relative HTML report path, or none.  |
+| `json`    | `boolean \| string`           | `false`              | Write companion JSON or use a relative path. |
 | `open`    | `boolean`                     | `false`              | Open the HTML report after the build.        |
 | `metric`  | `"raw" \| "gzip" \| "brotli"` | `"gzip"`             | Compression metric used by limits.           |
 | `limits`  | `AnalyzerLimits`              | `{}`                 | Optional page, asset, client, server limits. |

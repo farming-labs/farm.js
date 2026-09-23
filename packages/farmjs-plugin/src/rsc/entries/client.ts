@@ -71,6 +71,7 @@ import { applyFarmCacheInvalidations } from '@farm.js/core/cache';
 import {
   beginFarmServerQueryAction,
   completeFarmServerQueryAction,
+  shouldApplyFarmServerQueryActionResult,
 } from '@farm.js/core/server-query/client';
 `;
   }
@@ -82,8 +83,11 @@ import {
     actionSetup = `
 ${serverFnTransportErrorClientRuntime}
 
-// Ref for payload setter (used by server action callback and refetch)
+// Refs for payload setter and router navigation. refetch() is defined inside
+// main(), so the action callback reaches it through this ref rather than by
+// closing over it.
 const setPayloadRef = { current: null };
+const farmNavigateRef = { current: null };
 
 // Ensure __viteRscCallServer is a function before any other chunk may call it (avoids "is not a function")
 if (typeof globalThis.__viteRscCallServer !== 'function') {
@@ -129,9 +133,19 @@ setServerCallback(async (id, args) => {
     console.error('[Farm.js] Action response missing payload.root / payload.rootContent');
     return;
   }
-  setPayloadRef.current?.(p);
-  applyFarmCacheInvalidations(p.returnValue?.invalidations);
+  if (shouldApplyFarmServerQueryActionResult(serverQueryInvocation)) {
+    setPayloadRef.current?.(p);
+    applyFarmCacheInvalidations(p.returnValue?.invalidations);
+  }
   if (!p.returnValue || !p.returnValue.ok) {
+    // A redirect() from the action comes back as data, not as a 3xx, so the
+    // router performs the navigation here.
+    if (p.returnValue?.redirect?.url) {
+      debug('Server action redirected:', p.returnValue.redirect.url);
+      history.pushState(null, '', p.returnValue.redirect.url);
+      await farmNavigateRef.current?.(location.href);
+      return;
+    }
     debug('Server action failed:', id);
     throw createFarmServerFnTransportError(p.returnValue?.data);
   }
@@ -141,11 +155,14 @@ setServerCallback(async (id, args) => {
   } else {
     actionSetup = `
 const setPayloadRef = { current: null };
+const farmNavigateRef = { current: null };
 `;
   }
 
   return `${imports}
+${ctx.clientCachePersistence?.imports ?? ""}
 ${actionSetup}
+${ctx.clientCachePersistence?.init ?? ""}
 const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
 
 function reportDeploymentMismatch(response) {
@@ -228,7 +245,16 @@ async function main() {
           if (a.hasAttribute('data-native') || a.hasAttribute('data-reload')) {
             return;
           }
-          
+          if (e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return;
+          if (e.button !== 0) return;
+
+          // Same-document fragment link: let the browser update the hash and
+          // scroll to the anchor natively. Refetching the route here would
+          // discard the browser's fragment scroll and re-render for nothing.
+          if (a.hash && a.pathname === location.pathname && a.search === location.search) {
+            return;
+          }
+
           e.preventDefault();
           history.pushState(null, '', a.href);
           nav();
@@ -254,6 +280,7 @@ async function main() {
   }
   
   // Fetch new RSC payload for a URL
+  farmNavigateRef.current = (url) => refetch(url);
   async function refetch(url) {
     debug('Fetching RSC for:', url);
     
@@ -277,6 +304,19 @@ async function main() {
         return;
       }
       
+      // A server redirect during navigation is followed transparently by
+      // fetch, so the payload is for res.url while the address bar still shows
+      // the URL the click pushed. Reconcile it so refresh, share, and back all
+      // reflect the page actually rendered (auth gates redirect this way).
+      if (res.redirected && res.url) {
+        const dest = new URL(res.url);
+        if (dest.origin === location.origin) {
+          const target = dest.pathname + dest.search + dest.hash;
+          if (target !== location.pathname + location.search + location.hash) {
+            history.replaceState(null, '', target);
+          }
+        }
+      }
       const newPayload = await createFromReadableStream(res.body);
       setPayloadRef.current?.(newPayload);
       debug('RSC navigation complete');

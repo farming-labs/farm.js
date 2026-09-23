@@ -8,7 +8,7 @@ type VitePluginLike = {
 type VitePluginHook = (...args: any[]) => any;
 
 /**
- * Tailwind 4.1 supports Farm's Node 18 baseline, but its Vite plugin resolves
+ * Tailwind 4.1 supports Farm's Node baseline, but its Vite plugin resolves
  * against Farm's Vite 5 compatibility dependency. When that plugin runs in
  * Vite 8 it mistakes the active environment for its own Vite environment and
  * calls an API that Vite 5 does not export. Keep its documented Vite 5 hook

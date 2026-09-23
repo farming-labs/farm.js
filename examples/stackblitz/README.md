@@ -13,6 +13,8 @@ It shows three things in one page:
 ## Notes for contributors
 
 Unlike the other examples, this app installs `@farm.js/core` and `@farm.js/cli` from npm instead of `workspace:*`, because StackBlitz opens the directory standalone and runs a plain `npm install`. It is deliberately excluded from the pnpm workspace in the repo root's `pnpm-workspace.yaml`.
+The beta release preparation script keeps its published Farm package versions synchronized with the
+workspace manifests.
 
 To run it locally:
 

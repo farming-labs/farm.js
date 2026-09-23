@@ -1,7 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { getCookieValue, parseCookieHeaderMap } from "../../../farm-integration-utils/src/cookies";
-import { getReturnTo } from "../../../farm-integration-utils/src/url";
+import {
+  getReturnTo,
+  resolveAppPath,
+  toAbsoluteUrl,
+} from "../../../farm-integration-utils/src/url";
 
 describe("getReturnTo open-redirect hardening", () => {
   it("keeps ordinary root-relative paths", () => {
@@ -25,6 +29,24 @@ describe("getReturnTo open-redirect hardening", () => {
     expect(getReturnTo("", "/dashboard")).toBe("/dashboard");
     expect(getReturnTo(null, "/dashboard")).toBe("/dashboard");
     expect(getReturnTo(undefined)).toBe("/");
+  });
+});
+
+describe("resolveAppPath open-redirect hardening", () => {
+  it("keeps same-origin application paths", () => {
+    const request = new Request("https://app.example.com/account");
+    const path = resolveAppPath("/billing/success?plan=pro", "Checkout successPath");
+
+    expect(path).toBe("/billing/success?plan=pro");
+    expect(toAbsoluteUrl(path!, request).origin).toBe("https://app.example.com");
+  });
+
+  it("rejects path forms that browsers resolve to another origin", () => {
+    for (const value of ["//evil.example", "/\\evil.example", "/\\/evil.example"]) {
+      expect(() => resolveAppPath(value, "Checkout successPath")).toThrow(
+        "same-origin root-relative path",
+      );
+    }
   });
 });
 

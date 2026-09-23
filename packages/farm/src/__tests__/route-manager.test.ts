@@ -7,6 +7,7 @@ import {
   RouteManager,
   shouldSuggestStaticRenderingForI18n,
 } from "../routing/route-manager";
+import { defineIntegration } from "../integrations";
 import type { FarmConfig } from "../types";
 
 /** "/test" is not an absolute path on Windows, so resolve it per platform. */
@@ -288,6 +289,203 @@ describe("RouteManager", () => {
       );
     });
 
+    it("keeps an isolated layout when a sibling page needs route-wide hydration", async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "farm-route-local-hydration-"));
+      temporaryDirectories.push(root);
+      await mkdir(path.join(root, "src", "app", "fallback"), { recursive: true });
+      await mkdir(path.join(root, "src", "components"), { recursive: true });
+      await writeFile(
+        path.join(root, "src", "components", "counter.tsx"),
+        `'use client';\nexport default function Counter() { return null; }`,
+      );
+      await writeFile(
+        path.join(root, "src", "components", "fallback.tsx"),
+        `'use client';\nfunction Fallback() { return null; }\nexport { Fallback };`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        `import Counter from "../components/counter";\nexport default function Layout({ children }) { return <><Counter />{children}</>; }`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `export default function Page() { return null; }`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "fallback", "page.tsx"),
+        `import { Fallback } from "../../components/fallback";\nexport default function Page() { return <Fallback />; }`,
+      );
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) return ["page.tsx", "fallback/page.tsx"];
+        if (pattern.includes("layout")) return ["layout.tsx"];
+        return [];
+      });
+      mockConfig.root = root;
+      mockConfig.experimental = {
+        serverComponents: false,
+        serverActions: false,
+        isolatedClientHydration: "enabled",
+      };
+      routeManager = new RouteManager(mockConfig);
+      await routeManager.discoverRoutes();
+
+      const manifest = routeManager.generateClientManifest(root);
+      expect(manifest.layouts).toEqual([
+        expect.objectContaining({
+          pattern: "/",
+          shouldHydrate: false,
+          hasIsolatedClientBoundaries: true,
+        }),
+      ]);
+      expect(manifest.routes.find((route) => route.pattern === "/")).toMatchObject({
+        shouldHydrate: false,
+      });
+      expect(manifest.routes.find((route) => route.pattern === "/fallback")).toMatchObject({
+        shouldHydrate: true,
+        renderPlan: { hydration: "route-island" },
+      });
+      expect(routeManager.getIsolatedClientBoundaryModules(root)).toEqual(
+        new Set([path.join(root, "src", "components", "counter.tsx")]),
+      );
+    });
+
+    it("enforces the isolated-root budget across every layout in a matched route", async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "farm-route-hydration-budget-"));
+      temporaryDirectories.push(root);
+      await mkdir(path.join(root, "src", "app", "safe"), { recursive: true });
+      await mkdir(path.join(root, "src", "app", "overflow"), { recursive: true });
+      await mkdir(path.join(root, "src", "components"), { recursive: true });
+
+      const componentNames = [
+        "root-one",
+        "root-two",
+        "safe-one",
+        "safe-two",
+        "overflow-one",
+        "overflow-two",
+        "overflow-three",
+      ];
+      await Promise.all(
+        componentNames.map((name) =>
+          writeFile(
+            path.join(root, "src", "components", `${name}.tsx`),
+            `'use client';\nexport default function Counter() { return <button>${name}</button>; }`,
+          ),
+        ),
+      );
+      await writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        `import One from "../components/root-one";
+import Two from "../components/root-two";
+export default function Layout({ children }) { return <><One /><Two />{children}</>; }`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "safe", "layout.tsx"),
+        `import One from "../../components/safe-one";
+import Two from "../../components/safe-two";
+export default function Layout({ children }) { return <><One /><Two />{children}</>; }`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "overflow", "layout.tsx"),
+        `import One from "../../components/overflow-one";
+import Two from "../../components/overflow-two";
+import Three from "../../components/overflow-three";
+export default function Layout({ children }) { return <><One /><Two /><Three />{children}</>; }`,
+      );
+      await Promise.all(
+        ["page.tsx", "safe/page.tsx", "overflow/page.tsx"].map((file) =>
+          writeFile(
+            path.join(root, "src", "app", file),
+            `export default function Page() { return <main>${file}</main>; }`,
+          ),
+        ),
+      );
+
+      const { globFiles, logger } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["page.tsx", "safe/page.tsx", "overflow/page.tsx"];
+        }
+        if (pattern.includes("layout")) {
+          return ["layout.tsx", "safe/layout.tsx", "overflow/layout.tsx"];
+        }
+        return [];
+      });
+      vi.mocked(logger.warn).mockClear();
+      mockConfig.root = root;
+      mockConfig.experimental = {
+        serverComponents: false,
+        serverActions: false,
+        isolatedClientHydration: "enabled",
+      };
+      routeManager = new RouteManager(mockConfig);
+      await routeManager.discoverRoutes();
+
+      const manifest = routeManager.generateClientManifest(root);
+      const rootLayout = manifest.layouts.find((layout) => layout.pattern === "/");
+      const safeLayout = manifest.layouts.find((layout) => layout.pattern === "/safe");
+      const overflowLayout = manifest.layouts.find((layout) => layout.pattern === "/overflow");
+
+      expect(rootLayout).toMatchObject({
+        shouldHydrate: false,
+        hasIsolatedClientBoundaries: true,
+      });
+      expect(rootLayout?.isolatedBoundaries).toHaveLength(2);
+      expect(safeLayout).toMatchObject({
+        shouldHydrate: false,
+        hasIsolatedClientBoundaries: true,
+      });
+      expect(safeLayout?.isolatedBoundaries).toHaveLength(2);
+      expect(overflowLayout).toMatchObject({ shouldHydrate: true });
+      expect(overflowLayout?.hasIsolatedClientBoundaries).toBeUndefined();
+      expect(overflowLayout?.isolatedBoundaries).toBeUndefined();
+      expect(routeManager.getIsolatedClientBoundaryModules(root)).toEqual(
+        new Set(
+          ["root-one", "root-two", "safe-one", "safe-two"].map((name) =>
+            path.join(root, "src", "components", `${name}.tsx`),
+          ),
+        ),
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "the matched route /overflow can create 5 isolated roots, above the measured limit of 4",
+        ),
+      );
+    });
+
+    it("explains when a route-wide integration provider disables isolated roots", async () => {
+      const { logger } = await import("../utils");
+      vi.mocked(logger.warn).mockClear();
+      mockConfig.experimental = {
+        serverComponents: false,
+        serverActions: false,
+        isolatedClientHydration: "enabled",
+      };
+      mockConfig.integrations = {
+        acme: defineIntegration({
+          category: "custom",
+          type: "acme",
+          instance: {},
+          providers: [
+            {
+              name: "acme",
+              type: "client",
+              component: { module: "@/components/acme-provider" },
+            },
+          ],
+        }),
+      };
+      routeManager = new RouteManager(mockConfig);
+
+      routeManager.generateClientManifest(mockConfig.root);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'integration provider "acme" does not declare supportsIsolatedHydration: true',
+        ),
+      );
+    });
+
     it("should discover page/layout/loading/error files", async () => {
       const { globFiles } = await import("../utils");
       vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
@@ -347,6 +545,35 @@ describe("RouteManager", () => {
       });
 
       await expect(routeManager.discoverRoutes()).rejects.toThrow('Duplicate page route "/about"');
+    });
+
+    it("rejects dynamic page routes that match the same URL shape", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["users/[id]/page.tsx", "users/[slug]/page.tsx"];
+        }
+        return [];
+      });
+
+      await expect(routeManager.discoverRoutes()).rejects.toThrow(
+        'Ambiguous page routes "/users/[id]" and "/users/[slug]" match the same URLs.',
+      );
+    });
+
+    it("keeps colon and star page segments literal", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["users/:id/page.tsx", "users/[id]/page.tsx", "files/*path/page.tsx"];
+        }
+        return [];
+      });
+
+      await expect(routeManager.discoverRoutes()).resolves.toBeUndefined();
+      expect(Array.from(routeManager.getRoutes().keys())).toEqual(
+        expect.arrayContaining(["/users/:id", "/users/[id]", "/files/*path"]),
+      );
     });
 
     it("rejects ambiguous markdown representations for one page", async () => {

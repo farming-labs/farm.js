@@ -80,6 +80,39 @@ describe("Farm API config", () => {
     expect(() => normalizeFarmAPIConfig({ basePath: "/api?version=1" })).toThrow(
       "cannot contain a query string or hash",
     );
+    expect(() => normalizeFarmAPIConfig({ basePath: "/api\\admin" })).toThrow(
+      "cannot contain backslashes or control characters",
+    );
+    expect(() => normalizeFarmAPIConfig({ basePath: "\n/api" })).toThrow(
+      "cannot contain backslashes or control characters",
+    );
+    expect(() => normalizeFarmAPIConfig({ basePath: "/api/\u0085admin" })).toThrow(
+      "cannot contain backslashes or control characters",
+    );
+    expect(() => normalizeFarmAPIConfig({ basePath: "/api/%0Aadmin" })).toThrow(
+      "cannot contain backslashes or control characters",
+    );
+    expect(() => normalizeFarmAPIConfig({ basePath: "/api/../admin" })).toThrow(
+      'cannot contain "." or ".." path segments',
+    );
+    expect(() => normalizeFarmAPIConfig({ basePath: "/api/%2e%2e/admin" })).toThrow(
+      'cannot contain "." or ".." path segments',
+    );
+    expect(() => normalizeFarmAPIConfig({ basePath: "/api/%2Fadmin" })).toThrow(
+      "cannot contain percent-encoded path separators",
+    );
+    expect(() => normalizeFarmAPIConfig({ basePath: "//api.example.com" })).toThrow(
+      "must be a pathname",
+    );
+    expect(() => normalizeFarmAPIConfig({ baseURL: "//api.example.com" })).toThrow(
+      "not a network-path reference",
+    );
+    expect(() => normalizeFarmAPIConfig({ baseURL: "/api/%2fadmin" })).toThrow(
+      "cannot contain percent-encoded path separators",
+    );
+    expect(() =>
+      normalizeFarmAPIConfig({ baseURL: "https://api.example.com/api/%2Fadmin" }),
+    ).toThrow("cannot contain percent-encoded path separators");
   });
 
   it("replaces the canonical /api prefix when the API root has a path", () => {

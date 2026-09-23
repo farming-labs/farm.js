@@ -1,4 +1,5 @@
 import React from "react";
+import { applyFarmBasePath } from "../base-path";
 import { DEFAULT_NOT_FOUND_STYLES } from "./not-found-styles";
 
 export { DEFAULT_NOT_FOUND_STYLES } from "./not-found-styles";
@@ -31,7 +32,7 @@ export function DefaultNotFoundPage(_props: NotFoundPageProps) {
           >
             Not found
           </p>
-          <a className="farm-default-not-found__home" href="/">
+          <a className="farm-default-not-found__home" href={applyFarmBasePath("/")}>
             GO HOME
           </a>
         </div>

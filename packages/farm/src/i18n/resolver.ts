@@ -1,4 +1,5 @@
 import { localizeFarmPathname, resolveFarmLocalePath } from "./routing";
+import { stripFarmBasePath } from "../base-path";
 import type { FarmI18nLocaleSource, ResolvedFarmI18nConfig } from "./types";
 
 export interface FarmLocaleResolution {
@@ -39,8 +40,16 @@ export function resolveFarmLocaleRequest(
   const pathMatch = resolveFarmLocalePath(url.pathname, config);
   if (pathMatch.explicit && pathMatch.locale) {
     const canonicalPath = localizeFarmPathname(pathMatch.pathname, pathMatch.locale, config);
+    // The locale canonical is always trailing-slash-free, but the app's dedicated
+    // trailing-slash redirect owns that normalization. When the only difference is
+    // a trailing slash, defer to it: otherwise, under trailingSlash: true, the i18n
+    // redirect (strip) and the trailing-slash redirect (add) bounce a locale URL
+    // between 307 and 308 forever and every locale page becomes unreachable.
+    const differsOnlyByTrailingSlash =
+      canonicalPath !== url.pathname &&
+      (url.pathname.length > 1 ? url.pathname.replace(/\/+$/, "") : url.pathname) === canonicalPath;
     const redirect =
-      options.redirect !== false && canonicalPath !== url.pathname
+      options.redirect !== false && canonicalPath !== url.pathname && !differsOnlyByTrailingSlash
         ? `${canonicalPath}${url.search}${url.hash}`
         : undefined;
     return {
@@ -57,7 +66,7 @@ export function resolveFarmLocaleRequest(
   const detected = detectLocale(request, config);
   const shouldRedirect =
     options.redirect !== false &&
-    !isInternalOrApiPath(url.pathname) &&
+    !isInternalOrApiPath(stripFarmBasePath(url.pathname, config.basePath)) &&
     config.routing !== "none" &&
     (config.routing === "prefix-always" || detected.locale !== config.defaultLocale);
 
@@ -101,6 +110,8 @@ export function matchFarmLocale(
   if (exact) return exact;
 
   const language = canonical.split("-")[0]?.toLowerCase();
+  const base = locales.find((locale) => locale.toLowerCase() === language);
+  if (base) return base;
   return locales.find((locale) => locale.split("-")[0]?.toLowerCase() === language);
 }
 

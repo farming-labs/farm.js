@@ -87,4 +87,106 @@ describe("generated metadata images", () => {
     expect(response.headers.get("content-type")).toBe("image/custom");
     expect(await response.text()).toBe("custom");
   });
+
+  it("cancels a custom image response body that HEAD discards", async () => {
+    let cancelled = false;
+    const custom = new Response(
+      new ReadableStream({
+        pull() {},
+        cancel() {
+          cancelled = true;
+        },
+      }),
+      { headers: { "Content-Type": "image/custom" } },
+    );
+
+    const response = await createFarmMetadataImageResponse(custom, {}, { method: "HEAD" });
+
+    expect(response.body).toBeNull();
+    expect(response.headers.get("content-type")).toBe("image/custom");
+    expect(cancelled).toBe(true);
+  });
+});
+
+function createLazyDiv(label = "Lazy") {
+  return React.lazy(async () => ({
+    default: function LazyInner() {
+      return <div className="flex h-full w-full bg-black text-white">{label}</div>;
+    },
+  }));
+}
+
+describe("lazy metadata images", () => {
+  it("renders a React.lazy component to a PNG on the first (cold-start) request", async () => {
+    const LazyDiv = createLazyDiv("Cold start");
+
+    const response = await createFarmMetadataImageResponse(<LazyDiv />, {
+      size: { width: 120, height: 63 },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    const bytes = Buffer.from(await response.arrayBuffer());
+    expect(bytes.subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+    expect(imageSize(bytes)).toMatchObject({ width: 120, height: 63, type: "png" });
+  });
+
+  it("renders all concurrent cold-start React.lazy requests to PNGs", async () => {
+    const LazyDiv = createLazyDiv("Concurrent");
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 4 }, () =>
+        createFarmMetadataImageResponse(<LazyDiv />, { size: { width: 120, height: 63 } }),
+      ),
+    );
+
+    expect(results.every((r) => r.status === "fulfilled")).toBe(true);
+    const responses = results.map((r) => (r as PromiseFulfilledResult<Response>).value);
+    for (const response of responses) {
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("image/png");
+      const bytes = Buffer.from(await response.arrayBuffer());
+      expect(bytes.subarray(0, 8)).toEqual(
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
+    }
+  });
+
+  it("surfaces a rejected React.lazy import as an error without masking it", async () => {
+    const LazyFail = React.lazy(async () => {
+      throw new Error("import failed");
+    });
+
+    let caught: unknown;
+    try {
+      await createFarmMetadataImageResponse(<LazyFail />, { size: { width: 120, height: 63 } });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe("import failed");
+  });
+});
+
+describe("wrapped metadata images", () => {
+  it("unwraps a React.lazy component nested under React.memo", async () => {
+    const LazyInner = createLazyDiv("Nested");
+    const Wrapped = React.memo(function LazyWrapper() {
+      return <LazyInner />;
+    });
+
+    const response = await createFarmMetadataImageResponse(<Wrapped />, {
+      size: { width: 120, height: 63 },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    const bytes = Buffer.from(await response.arrayBuffer());
+    expect(bytes.subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+  });
 });

@@ -1,10 +1,26 @@
 import type { ConfigEnv, Plugin, UserConfig, ViteDevServer, HmrContext, Connect } from "vite";
-import type { FarmConfig } from "./types";
+import type { FarmConfig, FarmRequest } from "./types";
 import { FarmApp } from "./app";
-import { logger, toViteModuleId } from "./utils";
+import { logger, toPosixPath, toViteModuleId } from "./utils";
 import { defaultGlobalCSS } from "./default-styles";
-import type { FarmPlugin, FarmPluginRuntimeSession, PluginManager } from "./plugin";
+import {
+  FARM_NODE_RESPONSE_END_PENDING,
+  type FarmPlugin,
+  type FarmPluginRuntimeSession,
+  type PluginManager,
+} from "./plugin";
 import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
+import {
+  generateClientCachePersistenceCode,
+  resolveFarmClientCacheAdapterEntry,
+  type ClientCachePersistenceEntryCode,
+} from "./client-cache-persistence-build";
+
+export {
+  generateClientCachePersistenceCode,
+  resolveFarmClientCacheAdapterEntry,
+} from "./client-cache-persistence-build";
+export type { ClientCachePersistenceEntryCode } from "./client-cache-persistence-build";
 import { APIRouteManager } from "./api/route-manager";
 import { DEFAULT_FARM_API_BASE_PATH } from "./api/config";
 import { resolveFarmAPIServerBasePath } from "./api/server-path";
@@ -19,13 +35,21 @@ import {
 } from "./routes-shared";
 import type { FarmDocsAPIHandler } from "./docs";
 import { createMarkdownMirrorResponse, resolveMarkdownMirrorTarget } from "./markdown";
-import { createFarmMarkdownSourceResponse, isFarmMarkdownPageFile } from "./app-markdown";
-import { sendWebResponse } from "./server/response";
+import {
+  FARM_MARKDOWN_CONTENT_TYPE,
+  createFarmMarkdownErrorBody,
+  createFarmMarkdownSourceResponse,
+  farmRequestWantsMarkdown,
+  isFarmMarkdownPageFile,
+  normalizeFarmMarkdownRoutePath,
+} from "./app-markdown";
+import { applyWebResponseHeaders, sendWebResponse } from "./server/response";
 import {
   getClientModuleMetadata,
   getIslandStrategyExport,
   hasUseClientDirective,
   isIsolatableClientBoundarySource,
+  resolveFarmIsolatedClientHydrationMode,
   stripUseClientDirective,
 } from "./utils/client-component";
 import {
@@ -52,8 +76,15 @@ import { farmEnvironmentFunctionsPlugin } from "./environment-vite";
 import { FARM_VERSION } from "./version";
 import { createDeferredDataResponse } from "./deferred";
 import { _withAfterNodeMiddleware } from "./after";
+import { _runWithAPIRequestRuntime } from "./api/server-context";
+import type { APIRequestRuntime } from "./api/server-client-bridge";
 import { shouldBypassFarmRouterForDottedPath } from "./dev-static";
 import { findClientServerFnViolation, formatServerFnBoundaryError } from "./server-query-boundary";
+import {
+  analyzeClientBoundary,
+  formatClientBoundaryWarning,
+  shouldInspectClientBoundary,
+} from "./client-boundary-env";
 import {
   createFarmDeploymentMismatchResponse,
   FARM_DEPLOYMENT_ID_HEADER,
@@ -64,6 +95,7 @@ import { farmImageImportsPlugin } from "./image-vite";
 import { farmFontImportsPlugin } from "./font-vite";
 import { resolveFarmLayoutFonts } from "./font";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
+import { isFarmI18nCatalogFile, resolveFarmI18nMessagePath } from "./i18n/config";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { localizeFarmPathname } from "./i18n/routing";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
@@ -74,6 +106,7 @@ import {
 } from "./server/vite-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "./docs/fonts";
 import {
+  createFarmNodeRequestAbortSignal,
   createFarmRequestBodyErrorResponse,
   readNodeRequestBody,
   resolveFarmServerConfig,
@@ -83,12 +116,14 @@ import { createFarmThemeCssPlugin } from "./theme/vite";
 import { searchParamsToObject } from "./search-params";
 import { emitFarmEvent, runWithFarmRequestSpan } from "./observability";
 import {
+  getFarmRendererCapabilities,
   isReactRenderer,
   loadFarmRendererVitePlugins,
   REACT_RENDERER,
   resolveFarmRenderer,
 } from "./renderer";
 import type { FarmRenderer } from "./renderer";
+import { generateFarmIntegrationProviderClientCode } from "./integration-provider-build";
 import type { FarmIslandStrategy } from "./island";
 import { resolveRouteRenderingConfig } from "./ssg";
 import {
@@ -98,12 +133,17 @@ import {
   parseFarmLayoutChainHeader,
 } from "./navigation/render-plan";
 import { resolveFarmPageDataFailure } from "./navigation/page-data-error";
+import { mergeMetadata } from "./metadata";
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
+import { resolveFarmRequestURL } from "./server/request";
+import { reportOpenAPIDevGenerationResult } from "./openapi/dev-status";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
   images?: FarmUserConfig["images"];
   publicDir?: FarmUserConfig["publicDir"];
+  /** @internal Modules selected by the compiled isolated-hydration ownership plan. */
+  isolatedClientBoundaryModules?: ReadonlySet<string>;
 }
 
 type TypeArtifactSelection = Pick<
@@ -128,6 +168,10 @@ const createEmptyTypeArtifactSelection = (): TypeArtifactSelection => ({
 });
 
 const FARM_I18N_CLIENT_BRIDGE_ID = "\0farm-i18n-client-bridge";
+
+// The @farm.js/devtools plugin serves this path itself; reaching the built-in
+// dashboard render means the app is still on the deprecated core UI.
+let warnedDeprecatedDevtoolsDashboard = false;
 const EMPTY_FARM_DOCS_SEARCH_CLIENT_RUNTIME = `
 function isFarmDocsSearchPage() {
   return false;
@@ -254,6 +298,7 @@ function createRequestFromNodeRequest(
     headers: Record<string, string | string[] | undefined>;
   },
   url: URL,
+  signal?: AbortSignal,
 ): Request {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
@@ -267,20 +312,28 @@ function createRequestFromNodeRequest(
   return new Request(url.toString(), {
     method: req.method || "GET",
     headers,
+    signal,
   });
 }
+
+export { createFarmNodeRequestAbortSignal } from "./server-http";
 
 /** Exported for tests: the request boundary all Farm dev middlewares share. */
 export function withFarmRequestTracing(
   handler: Parameters<typeof _withAfterNodeMiddleware>[0],
+  apiRuntime?: APIRequestRuntime,
+  resolveTraceUrl: (request: Connect.IncomingMessage) => URL = (request) =>
+    resolveFarmRequestURL(request as FarmRequest),
 ): Connect.NextHandleFunction {
   const middleware = _withAfterNodeMiddleware(handler);
   return (req, res, next) => {
-    const traceUrl = new URL(`http://${req.headers.host || "localhost:3000"}${req.url || "/"}`);
+    const traceUrl = resolveTraceUrl(req);
     const traceRequest = createRequestFromNodeRequest(req, traceUrl);
-    const result = runWithFarmRequestSpan(traceRequest, () => middleware(req, res, next), {
-      getStatusCode: () => res.statusCode || 200,
-    });
+    const run = () =>
+      runWithFarmRequestSpan(traceRequest, () => middleware(req, res, next), {
+        getStatusCode: () => res.statusCode || 200,
+      });
+    const result = apiRuntime ? _runWithAPIRequestRuntime(apiRuntime, run) : run();
     // connect ignores returned promises, so a rejection from the handler
     // becomes an unhandled rejection and kills the dev server process. A
     // throw from one request must cost that request a 500, not an outage.
@@ -360,9 +413,251 @@ function applyWebResponseToNodeResponse(
   for (const name of res.getHeaderNames()) {
     res.removeHeader(name);
   }
-  response.headers.forEach((value, key) => {
-    res.setHeader(key, value);
-  });
+  applyWebResponseHeaders(res as any, response.headers);
+}
+
+function toNodeResponseBuffer(chunk: unknown, encoding?: unknown): Buffer | undefined {
+  if (chunk === undefined || chunk === null || typeof chunk === "function") return undefined;
+  if (Buffer.isBuffer(chunk)) return chunk;
+  if (chunk instanceof Uint8Array) return Buffer.from(chunk);
+  return Buffer.from(
+    String(chunk),
+    typeof encoding === "string" ? (encoding as BufferEncoding) : "utf8",
+  );
+}
+
+function applyNodeWriteHeadHeaders(res: any, headers: unknown): void {
+  if (Array.isArray(headers)) {
+    const grouped = new Map<string, { name: string; values: Array<string | number> }>();
+    for (let index = 0; index + 1 < headers.length; index += 2) {
+      const name = String(headers[index]);
+      const key = name.toLowerCase();
+      const entry = grouped.get(key) ?? { name, values: [] };
+      const value = headers[index + 1];
+      entry.values.push(...(Array.isArray(value) ? value : [value]).map(String));
+      grouped.set(key, entry);
+    }
+    for (const { name, values } of grouped.values()) {
+      res.setHeader(name, values.length === 1 ? values[0] : values);
+    }
+    return;
+  }
+
+  if (!headers || typeof headers !== "object") return;
+  for (const [name, value] of Object.entries(headers)) {
+    if (value !== undefined) res.setHeader(name, value);
+  }
+}
+
+function interceptFarmDevPageResponse(options: {
+  req: any;
+  res: any;
+  pm: PluginManager;
+  runtimeSession?: FarmPluginRuntimeSession;
+  hasRuntimeAfterHook: boolean;
+  hasAfterResponseHook: boolean;
+  hasHTMLTransformHook: boolean;
+  renderPayload: Record<string, unknown>;
+  method: string;
+  urlPath: string;
+  pathname: string;
+  startTime: number;
+  logResponse(method: string, path: string, status: number, durationMs: number, type: "PAGE"): void;
+  emitError(error: unknown): Promise<void>;
+}): { isEnded(): boolean } {
+  const {
+    req,
+    res,
+    pm,
+    runtimeSession,
+    hasRuntimeAfterHook,
+    hasAfterResponseHook,
+    hasHTMLTransformHook,
+    renderPayload,
+    method,
+    urlPath,
+    startTime,
+  } = options;
+  const originalWrite = res.write.bind(res);
+  const originalEnd = res.end.bind(res);
+  const originalWriteHead = res.writeHead.bind(res);
+  const originalFlushHeaders = res.flushHeaders?.bind(res);
+  let afterResponseCalled = false;
+  let interceptedEnd = false;
+  const htmlChunks: Buffer[] = [];
+  const responseChunks: Buffer[] = [];
+  let didStreamHtml = false;
+  const bufferPluginResponse = Boolean(
+    hasHTMLTransformHook || (runtimeSession && hasRuntimeAfterHook),
+  );
+  const shouldBufferCurrentResponse = () => {
+    const contentTypeHeader = res.getHeader("content-type") || res.getHeader("Content-Type");
+    const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
+    return contentType.includes("text/html")
+      ? bufferPluginResponse
+      : Boolean(runtimeSession && hasRuntimeAfterHook);
+  };
+
+  res.writeHead = ((statusCode: number, ...args: unknown[]) => {
+    const statusMessage = typeof args[0] === "string" ? args[0] : undefined;
+    const headers = statusMessage === undefined ? args[0] : args[1];
+    res.statusCode = statusCode;
+    if (statusMessage !== undefined) res.statusMessage = statusMessage;
+    applyNodeWriteHeadHeaders(res, headers);
+
+    if (shouldBufferCurrentResponse()) return res;
+    return statusMessage === undefined
+      ? originalWriteHead(statusCode)
+      : originalWriteHead(statusCode, statusMessage);
+  }) as any;
+
+  if (originalFlushHeaders) {
+    res.flushHeaders = (() =>
+      shouldBufferCurrentResponse() ? undefined : originalFlushHeaders()) as any;
+  }
+
+  res.write = ((chunk: unknown, ...args: unknown[]) => {
+    const contentTypeHeader = res.getHeader("content-type") || res.getHeader("Content-Type");
+    const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
+    const isHtmlResponse = contentType.includes("text/html");
+    const bufferChunk = toNodeResponseBuffer(chunk, args[0]);
+
+    if (isHtmlResponse && bufferChunk) {
+      htmlChunks.push(bufferChunk);
+      didStreamHtml = true;
+    } else if (runtimeSession && hasRuntimeAfterHook && bufferChunk) {
+      responseChunks.push(bufferChunk);
+    }
+
+    const shouldBufferResponse = isHtmlResponse
+      ? bufferPluginResponse
+      : Boolean(runtimeSession && hasRuntimeAfterHook);
+    if (shouldBufferResponse) {
+      const callback = args.find((arg) => typeof arg === "function") as (() => void) | undefined;
+      callback?.();
+      return true;
+    }
+
+    const writeResult = originalWrite(chunk, ...args);
+    if (isHtmlResponse && typeof res.flush === "function") res.flush();
+    return writeResult;
+  }) as any;
+
+  res.end = ((...args: unknown[]) => {
+    interceptedEnd = true;
+    res[FARM_NODE_RESPONSE_END_PENDING] = true;
+    if (afterResponseCalled) return res;
+
+    afterResponseCalled = true;
+    options.logResponse(method, urlPath, res.statusCode || 200, Date.now() - startTime, "PAGE");
+    const originalEndArgs = [...args];
+    const callback =
+      typeof originalEndArgs[originalEndArgs.length - 1] === "function"
+        ? (originalEndArgs[originalEndArgs.length - 1] as () => void)
+        : undefined;
+    const contentTypeHeader = res.getHeader("content-type") || res.getHeader("Content-Type");
+    const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
+    const isHtmlResponse = contentType.includes("text/html");
+    const finalChunk = toNodeResponseBuffer(args[0], args[1]);
+    if (finalChunk) {
+      if (isHtmlResponse) htmlChunks.push(finalChunk);
+      else if (runtimeSession && hasRuntimeAfterHook) responseChunks.push(finalChunk);
+    }
+
+    Promise.resolve()
+      .then(async () => {
+        if (isHtmlResponse) {
+          const fullHtml = Buffer.concat(htmlChunks).toString("utf8");
+          if (!didStreamHtml || bufferPluginResponse) {
+            let html = await pm.runHookSerial("transformHTML", fullHtml);
+            html = await pm.runHookSerial("afterRender", html, renderPayload);
+            originalEndArgs.length = 0;
+            originalEndArgs.push(html);
+            if (callback) originalEndArgs.push(callback);
+          } else {
+            await pm.runHookSerial("transformHTML", fullHtml);
+            await pm.runHookSerial("afterRender", fullHtml, renderPayload);
+          }
+        }
+
+        if (runtimeSession) {
+          pm.copyRequestContext(req, runtimeSession.request);
+          const status = res.statusCode || 200;
+          const canHaveBody =
+            method !== "HEAD" && status !== 204 && status !== 205 && status !== 304;
+          const firstArg = originalEndArgs[0];
+          const responseBody = canHaveBody
+            ? isHtmlResponse
+              ? didStreamHtml && !bufferPluginResponse
+                ? Buffer.concat(htmlChunks)
+                : toNodeResponseBuffer(firstArg, originalEndArgs[1])
+              : hasRuntimeAfterHook
+                ? Buffer.concat(responseChunks)
+                : toNodeResponseBuffer(firstArg, originalEndArgs[1])
+            : null;
+          const runtimeResponse = await pm.endRuntimeRequest(
+            runtimeSession,
+            new Response(responseBody ? toRequestBody(responseBody) : responseBody, {
+              status,
+              headers: createHeadersFromNodeResponse(res),
+            }),
+          );
+          applyWebResponseToNodeResponse(runtimeResponse, res);
+
+          const canReplaceOutput = isHtmlResponse
+            ? !didStreamHtml || bufferPluginResponse
+            : hasRuntimeAfterHook;
+          if (canReplaceOutput) {
+            const body = runtimeResponse.body
+              ? Buffer.from(await runtimeResponse.arrayBuffer())
+              : undefined;
+            originalEndArgs.length = 0;
+            if (body) originalEndArgs.push(body);
+            if (callback) originalEndArgs.push(callback);
+          }
+        }
+      })
+      .then(() =>
+        hasAfterResponseHook ? pm.runHookParallel("afterResponse", req, res) : undefined,
+      )
+      .then(() => {
+        res.write = originalWrite;
+        res.end = originalEnd;
+        res.writeHead = originalWriteHead;
+        if (originalFlushHeaders) res.flushHeaders = originalFlushHeaders;
+        delete res[FARM_NODE_RESPONSE_END_PENDING];
+        originalEnd(...originalEndArgs);
+      })
+      .catch((error) => {
+        void options.emitError(error);
+        console.error("Error in afterResponse hook:", error);
+        const shouldBufferResponse = isHtmlResponse
+          ? bufferPluginResponse
+          : Boolean(runtimeSession && hasRuntimeAfterHook);
+        if (shouldBufferResponse) {
+          const body = Buffer.concat(isHtmlResponse ? htmlChunks : responseChunks);
+          res.write = originalWrite;
+          res.end = originalEnd;
+          res.writeHead = originalWriteHead;
+          if (originalFlushHeaders) res.flushHeaders = originalFlushHeaders;
+          delete res[FARM_NODE_RESPONSE_END_PENDING];
+          originalEnd(body, callback);
+        } else {
+          res.write = originalWrite;
+          res.end = originalEnd;
+          res.writeHead = originalWriteHead;
+          if (originalFlushHeaders) res.flushHeaders = originalFlushHeaders;
+          delete res[FARM_NODE_RESPONSE_END_PENDING];
+          originalEnd(...originalEndArgs);
+        }
+      });
+
+    return res;
+  }) as any;
+
+  return {
+    isEnded: () => interceptedEnd || res.writableEnded,
+  };
 }
 
 function getFullEnvDefine(config: FarmVitePluginOptions): {
@@ -633,6 +928,59 @@ function isFarmConfigFile(file: string, root: string): boolean {
   return FARM_CONFIG_FILENAMES.has(relative);
 }
 
+const warnedClientBoundaryIds = new Set<string>();
+
+/**
+ * Warn once per module about server-only access in client-compiled code:
+ * module-scope non-public process.env reads (undefined in the browser, #560)
+ * and node: builtin imports (silently stubbed by farm:browser-external-stub).
+ * Diagnostics only; behavior is unchanged (#1065).
+ */
+function warnClientBoundaryOnce(
+  context: { parse(code: string): unknown },
+  id: string,
+  code: string,
+  config: FarmVitePluginOptions,
+): void {
+  if (warnedClientBoundaryIds.has(id)) return;
+
+  let program: unknown;
+  try {
+    program = context.parse(code);
+  } catch {
+    // Unparseable at this stage; another transform will surface the error.
+    return;
+  }
+  const publicKeys = new Set(Object.keys((config as any).env?.public ?? {}));
+  const findings = analyzeClientBoundary(program as any, publicKeys);
+
+  if (
+    findings.envKeys.length === 0 &&
+    findings.publicEnvKeys.length === 0 &&
+    findings.builtinImports.length === 0
+  ) {
+    return;
+  }
+  warnedClientBoundaryIds.add(id);
+  logger.warn(formatClientBoundaryWarning(id, findings));
+}
+
+/**
+ * Whether Farm should append its own client-root HMR handler to a
+ * `"use client"` module.
+ *
+ * Re-rendering the whole root on every edit only makes sense for a renderer
+ * that diffs the result against the live DOM. On Solid and Svelte `render()`
+ * tears the tree down and rebuilds it, so a one character change in any client
+ * component would wipe the page's state. Those renderers ship their own HMR
+ * integration (solid-refresh, svelte's hot API) which preserves component
+ * state, and appending an `import.meta.hot.accept` here would swallow the
+ * update before theirs could run.
+ */
+export function shouldEmitFarmClientRootHmr(renderer?: FarmRenderer): boolean {
+  return getFarmRendererCapabilities(resolveFarmRenderer(renderer)).reconcilesRerenders;
+}
+
 export function farmPlugin(
   options: FarmVitePluginOptions = {},
   initialPluginManager?: PluginManager,
@@ -739,10 +1087,11 @@ export function farmPlugin(
       const serverConfig = resolveFarmServerConfig(farmConfig.server);
       let imageHandler: FarmImageHandler | null = null;
       if (farmConfig.images.provider !== "none") {
-        const { createNodeImageUrlValidator, createSharpImageTransformer } =
+        const { createNodeImageFetcher, createNodeImageUrlValidator, createSharpImageTransformer } =
           await import("./image-sharp");
         imageHandler = createFarmImageHandler(farmConfig.images, {
           transform: createSharpImageTransformer(),
+          fetchRemote: createNodeImageFetcher(farmConfig.images),
           validateRemoteUrl: createNodeImageUrlValidator(farmConfig.images),
           onError(error) {
             logger.error(
@@ -755,9 +1104,9 @@ export function farmPlugin(
       server.watcher.add(sourceRoots.map((source) => path.join(source.root, source.srcDir)));
       if (farmConfig.i18n.enabled) {
         server.watcher.add(
-          farmConfig.i18n.messages.includes("{locale}")
-            ? path.dirname(farmConfig.i18n.messages)
-            : farmConfig.i18n.messages,
+          farmConfig.i18n.locales.map((locale) =>
+            resolveFarmI18nMessagePath(farmConfig.i18n, locale),
+          ),
         );
       }
       const workflowConfig = farmConfig.workflows;
@@ -779,6 +1128,7 @@ export function farmPlugin(
             root: farmConfig.root,
             srcDir: farmConfig.srcDir,
             layers: farmConfig.layers,
+            plugins: farmConfig.plugins,
             extraRoutes: getExtraRouteTypes(),
             suppressLintOnLink: farmConfig.suppressLintOnLink,
             componentExtensions: farmConfig.renderer.componentExtensions,
@@ -806,9 +1156,8 @@ export function farmPlugin(
             await openAPIManager.invalidateCache();
           }
         } catch (e) {
-          if (process.env.FARM_VERBOSE) {
-            logger.warn("Type artifact generation failed: " + (e as Error).message);
-          }
+          const message = e instanceof Error ? e.message : String(e);
+          logger.warn(`Route type generation failed (farm.d.ts may be stale): ${message}`);
           if (pm) {
             await emitPluginError("type-artifact-generation", e, { reason });
           }
@@ -864,26 +1213,24 @@ export function farmPlugin(
         /\/(?:opengraph-image|twitter-image)(?:\.(?:png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
           file.replace(/\\/g, "/"),
         );
-      const isI18nCatalogFile = (file: string) =>
-        farmConfig.i18n.enabled &&
-        file
-          .replace(/\\/g, "/")
-          .startsWith(farmConfig.i18n.messages.replace(/\\/g, "/").replace("{locale}", ""));
+      const isI18nCatalogFile = (file: string) => isFarmI18nCatalogFile(farmConfig.i18n, file);
       let typeArtifactGenScheduled: ReturnType<typeof setTimeout> | null = null;
       let pendingTypeArtifacts = createEmptyTypeArtifactSelection();
       let pendingTypeArtifactReason = "";
       let routeRefreshScheduled: ReturnType<typeof setTimeout> | null = null;
+      let pendingRouteRefreshIncludesMiddleware = false;
       const scheduleTypeArtifactGen = (
         file: string,
         event: string,
         selection: TypeArtifactSelection,
       ) => {
+        const normalizedFile = toPosixPath(file);
         for (const [artifact, enabled] of Object.entries(selection)) {
           if (enabled) {
             pendingTypeArtifacts[artifact as keyof TypeArtifactSelection] = true;
           }
         }
-        pendingTypeArtifactReason ||= `${event} ${file.split("/app/")[1] || file}`;
+        pendingTypeArtifactReason ||= `${event} ${normalizedFile.split("/app/")[1] || normalizedFile}`;
         if (typeArtifactGenScheduled) return;
         typeArtifactGenScheduled = setTimeout(() => {
           typeArtifactGenScheduled = null;
@@ -922,23 +1269,29 @@ export function farmPlugin(
               .then(() => server.ws.send({ type: "full-reload", path: "*" }))
               .catch((error) => logger.warn(`i18n catalog reload failed: ${error.message}`));
           }
-          if (
+          const isRouteRefreshEvent =
             (ev !== "change" || isStaticMetadataImageFile(file)) &&
             (isAppRuntimeFile(file) ||
               isProgrammaticRouteFile(file) ||
               (isProgrammaticRouteSourceFile(file) &&
-                (ev === "unlink" || fileContainsProgrammaticPageRoute(file)))) &&
-            !routeRefreshScheduled
-          ) {
-            routeRefreshScheduled = setTimeout(() => {
-              routeRefreshScheduled = null;
-              Promise.all([
-                refreshRouteDiscovery?.(`${ev} ${file}`),
-                file.includes("middleware.") ? middlewareManager?.reload() : undefined,
-              ])
-                .then(() => server.ws.send({ type: "full-reload", path: "*" }))
-                .catch((error) => logger.warn(`Route refresh failed: ${error.message}`));
-            }, 50);
+                (ev === "unlink" || fileContainsProgrammaticPageRoute(file))));
+          if (isRouteRefreshEvent) {
+            if (file.includes("middleware.")) {
+              pendingRouteRefreshIncludesMiddleware = true;
+            }
+            if (!routeRefreshScheduled) {
+              routeRefreshScheduled = setTimeout(() => {
+                routeRefreshScheduled = null;
+                const reloadsMiddleware = pendingRouteRefreshIncludesMiddleware;
+                pendingRouteRefreshIncludesMiddleware = false;
+                Promise.all([
+                  refreshRouteDiscovery?.(`${ev} ${file}`),
+                  reloadsMiddleware ? middlewareManager?.reload() : undefined,
+                ])
+                  .then(() => server.ws.send({ type: "full-reload", path: "*" }))
+                  .catch((error) => logger.warn(`Route refresh failed: ${error.message}`));
+              }, 50);
+            }
           }
         });
       });
@@ -977,6 +1330,7 @@ export function farmPlugin(
       }
 
       apiRouteManager = new APIRouteManager(appDirs, server, {
+        plugins: farmConfig.plugins,
         i18n: farmApp.getI18nRuntime(),
         bodySizeLimit: serverConfig.bodySizeLimit,
         basePath: apiServerBasePath,
@@ -1024,6 +1378,7 @@ export function farmPlugin(
         server,
         farmConfig.middleware,
         farmConfig.i18n,
+        farmConfig.server,
       );
       await middlewareManager.discover();
       if (pm) {
@@ -1040,8 +1395,8 @@ export function farmPlugin(
       if (options.openapi?.enabled) {
         const { OpenAPIManager } = await loadFarmOpenAPIDevRuntime();
         openAPIManager = new OpenAPIManager(appDirs, options.openapi);
-        await openAPIManager.generateSpec();
-        logger.success("✅ OpenAPI documentation enabled");
+        const spec = await openAPIManager.generateSpec();
+        reportOpenAPIDevGenerationResult(spec);
       }
 
       refreshRouteDiscovery = async (reason: string) => {
@@ -1130,9 +1485,17 @@ export function farmPlugin(
           });
         }
 
-        const [React, ReactDOMServer, layoutModules] = await Promise.all([
-          import("react"),
-          import("react-dom/server"),
+        // The app's layouts are authored for whichever renderer it selected, so
+        // they have to be composed and rendered through that renderer's server
+        // module. The production entry already resolves this the same way
+        // (nitro/universal-build.ts, rendererServerImports); importing react
+        // and react-dom/server literally here made dev disagree with prod for
+        // every non-React app.
+        const docsRenderer = resolveFarmRenderer((farmApp?.getConfig() ?? options).renderer);
+        const [rendererRuntime, layoutModules] = await Promise.all([
+          isReactRenderer(docsRenderer)
+            ? import("./renderer/react/server")
+            : server.ssrLoadModule(docsRenderer.server),
           Promise.all(
             layoutEntries.map((layout) => routeManager.loadLayoutModule(layout.modulePath)),
           ),
@@ -1148,10 +1511,7 @@ export function farmPlugin(
           ? (hydrationStrategies[0] ?? "load")
           : "load";
         const params = matchedRoute.params || {};
-        const toUrlPath = (absolutePath: string) =>
-          absolutePath.startsWith(farmConfig.root)
-            ? absolutePath.slice(farmConfig.root.length)
-            : absolutePath;
+        const toUrlPath = (absolutePath: string) => toViteModuleId(absolutePath, farmConfig.root);
         const clientLayouts = Object.fromEntries(
           layoutEntries.map((layout) => [
             layout.pattern,
@@ -1191,7 +1551,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         })};
 </script>`;
 
-        let wrappedElement: any = React.createElement("div", {
+        let wrappedElement: any = rendererRuntime.createElement("div", {
           id: "__farm_page__",
           "data-farm-client": "false",
           "data-farm-layout-client": "true",
@@ -1202,15 +1562,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         for (let index = layoutModules.length - 1; index >= 0; index--) {
           const LayoutComponent = layoutModules[index].default;
           if (LayoutComponent) {
-            wrappedElement = React.createElement(LayoutComponent, {
+            wrappedElement = rendererRuntime.createElement(LayoutComponent, {
               children: wrappedElement,
               params,
             });
           }
         }
 
-        const rootMarkup = ReactDOMServer.renderToString(
-          React.createElement("div", { id: "root" }, wrappedElement),
+        const rootMarkup = await rendererRuntime.renderToString(
+          rendererRuntime.createElement("div", { id: "root" }, wrappedElement),
         );
         const html = source.replace(bodyMatch[0], `<body${bodyMatch[1]}>${rootMarkup}</body>`);
         const headers = new Headers(response.headers);
@@ -1270,15 +1630,38 @@ window.__FARM_MANIFEST__ = ${inlineValue({
       };
 
       // Register middleware directly (not in return function) to ensure it runs early
+      const withAPIRequestTracing = (handler: Parameters<typeof withFarmRequestTracing>[0]) =>
+        withFarmRequestTracing(
+          handler,
+          {
+            basePath: apiServerBasePath,
+            dispatch: async (request) => {
+              // Resolve at call time so HMR never leaves a captured endpoint map.
+              const handler = apiRouteManager.getHandler();
+              return handler
+                ? handler(request)
+                : Response.json({ error: "Not Found" }, { status: 404 });
+            },
+          },
+          (request) => {
+            const currentConfig = farmApp?.getConfig() ?? options;
+            const currentServerConfig = resolveFarmServerConfig(currentConfig.server);
+            return resolveFarmRequestURL(request as FarmRequest, {
+              trustProxy: currentServerConfig.trustProxy,
+            });
+          },
+        );
       server.middlewares.use(
-        withFarmRequestTracing(async (req, res, next) => {
+        withAPIRequestTracing(async (req, res, next) => {
           const requestUrl = req.url || "/";
           const requestMethod = req.method || "GET";
-          const fullUrl = `http://${req.headers.host || "localhost:3000"}${requestUrl}`;
-          const parsedRequestUrl = new URL(fullUrl);
-          const requestPathname = parsedRequestUrl.pathname;
           const currentConfig = farmApp?.getConfig() ?? options;
           const currentServerConfig = resolveFarmServerConfig(currentConfig.server);
+          const parsedRequestUrl = resolveFarmRequestURL(req as FarmRequest, {
+            trustProxy: currentServerConfig.trustProxy,
+          });
+          const fullUrl = parsedRequestUrl.toString();
+          const requestPathname = parsedRequestUrl.pathname;
 
           if (imageHandler && requestPathname === farmConfig.images.path) {
             const imageResponse = await imageHandler(
@@ -1373,14 +1756,58 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             if (requestPathname.endsWith(".json")) {
               res.end(JSON.stringify(snapshot, null, 2));
             } else {
+              if (!warnedDeprecatedDevtoolsDashboard) {
+                warnedDeprecatedDevtoolsDashboard = true;
+                logger.warn(
+                  "The built-in DevTools dashboard is deprecated. Install @farm.js/devtools and add devtools() to plugins in farm.config.ts.",
+                );
+              }
               const { renderFarmDevtoolsHtml } = await loadFarmDevtoolsUIRuntime();
               res.end(renderFarmDevtoolsHtml(snapshot));
             }
             return;
           }
 
+          // The OpenAPI spec and reference, docs, raw markdown-source, the
+          // markdown mirror, and the Markdown 404 fallback expose page content
+          // or route-existence, so app middleware must pass before they are
+          // sent — matching the production entry, where these handlers run
+          // after the middleware runner.
+          const runAppMiddlewareForContentRoute = async (): Promise<boolean> => {
+            if (!middlewareManager?.hasMiddleware()) return false;
+            const middlewareRequest = createRequestFromNodeRequest(req, new URL(fullUrl));
+            return farmApp
+              .getServerRenderer()
+              .runWithRequestContext(middlewareRequest, () => middlewareManager!.execute(req, res));
+          };
+
+          // Serve the raw OpenAPI spec as JSON at a predictable URL for agents
+          // and API tooling.
+          if (
+            openAPIManager &&
+            options.openapi?.specRoute &&
+            requestPathname === options.openapi.specRoute
+          ) {
+            if (await runAppMiddlewareForContentRoute()) return;
+            if (requestMethod !== "GET" && requestMethod !== "HEAD") {
+              res.statusCode = 405;
+              res.setHeader("Allow", "GET, HEAD");
+              res.setHeader("Content-Type", "text/plain; charset=utf-8");
+              res.end("Method Not Allowed");
+              return;
+            }
+            const spec = await openAPIManager.getSpec();
+            const body = JSON.stringify(spec);
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "application/json; charset=utf-8");
+            res.setHeader("Cache-Control", "no-store");
+            res.end(requestMethod === "HEAD" ? undefined : body);
+            return;
+          }
+
           // Handle OpenAPI docs route
-          if (openAPIManager && req.url === options.openapi?.route) {
+          if (openAPIManager && requestPathname === options.openapi?.route) {
+            if (await runAppMiddlewareForContentRoute()) return;
             const docsHandler = openAPIManager.getDocsRouteHandler();
             return docsHandler(req, res);
           }
@@ -1398,6 +1825,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             });
             const docsResponse = await farmDocsHandler(docsRequest.clone());
             if (docsResponse) {
+              if (await runAppMiddlewareForContentRoute()) return;
               await sendWebResponse(
                 res,
                 await wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse),
@@ -1429,6 +1857,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             },
           });
           if (markdownSourceResponse) {
+            if (await runAppMiddlewareForContentRoute()) return;
             await sendWebResponse(res, markdownSourceResponse);
             return;
           }
@@ -1444,8 +1873,30 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             renderPage: async (request) => fetch(request),
           });
           if (markdownResponse) {
+            if (await runAppMiddlewareForContentRoute()) return;
             await sendWebResponse(res, markdownResponse);
             return;
+          }
+
+          // No Markdown source or mirror matched. When the client explicitly
+          // asked for Markdown (a `.md` URL or `Accept: text/markdown`) and no
+          // page route exists, return a Markdown 404 body rather than letting a
+          // `.md` request fall through to a static-asset 404 or an HTML shell.
+          if (farmRequestWantsMarkdown(requestPathname, req.headers.accept)) {
+            const markdownRoute = farmApp
+              .getRouteManager()
+              .matchRoute(normalizeFarmMarkdownRoutePath(requestPathname));
+            if (!markdownRoute.route) {
+              if (await runAppMiddlewareForContentRoute()) return;
+              res.statusCode = 404;
+              res.setHeader("Content-Type", FARM_MARKDOWN_CONTENT_TYPE);
+              res.setHeader("X-Farm-Markdown-Error", "404");
+              res.setHeader("Cache-Control", "no-store");
+              res.end(
+                createFarmMarkdownErrorBody(404, requestPathname, farmConfig.basePath || "/"),
+              );
+              return;
+            }
           }
 
           const markdownPageTarget = resolveMarkdownMirrorTarget(
@@ -1627,7 +2078,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             return;
           }
 
-          const redirectMatch = farmApp.getRouteManager().matchRedirect(requestPathname);
+          const redirectMatch = farmApp
+            .getRouteManager()
+            .matchRedirect(requestPathname, parsedRequestUrl.search);
           if (redirectMatch) {
             res.statusCode = redirectMatch.statusCode;
             res.setHeader("Location", redirectMatch.destination);
@@ -1642,8 +2095,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             const startTime = Date.now();
             const method = req.method || "GET";
             const urlPath = req.url || "/";
-            const pathname = new URL(urlPath, `http://${req.headers.host || "localhost:3000"}`)
-              .pathname;
+            const pathname = resolveFarmRequestURL(req as FarmRequest, {
+              trustProxy: currentServerConfig.trustProxy,
+            }).pathname;
 
             try {
               if (pm) {
@@ -1895,11 +2349,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
           // Handle SPA page-data requests for client-side navigation
           if (req.url?.startsWith("/__farm/page-data")) {
-            const urlObj = new URL(req.url, `http://${req.headers.host || "localhost:3000"}`);
+            const urlObj = parsedRequestUrl;
             const targetPath = urlObj.searchParams.get("path") || "/";
 
             try {
-              const request = createRequestFromNodeRequest(req, urlObj);
+              const request = createRequestFromNodeRequest(
+                req,
+                urlObj,
+                createFarmNodeRequestAbortSignal(req, res),
+              );
               const deploymentMismatch = getFarmDeploymentMismatch(
                 request,
                 farmConfig.deploymentId,
@@ -1916,6 +2374,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               const targetRequest = new Request(targetRequestUrl, {
                 method: "GET",
                 headers: request.headers,
+                signal: request.signal,
               });
               await farmApp.getServerRenderer().runWithRequestContext(targetRequest, async () => {
                 const routeManager = farmApp.getRouteManager();
@@ -2000,27 +2459,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   ? (hydrationStrategies[0] ?? "load")
                   : "load";
 
-                for (const layoutModule of layoutModules) {
-                  if ((layoutModule as any).metadata) {
-                    mergedMetadata = {
-                      ...mergedMetadata,
-                      ...(layoutModule as any).metadata,
-                    };
-                  }
-                }
-
-                if ((routeModule as any).metadata) {
-                  mergedMetadata = {
-                    ...mergedMetadata,
-                    ...(routeModule as any).metadata,
-                  };
-                }
-
                 // Build search params
                 const targetUrl = new URL(targetPath, "http://localhost");
                 const searchParams = searchParamsToObject(targetUrl.searchParams);
                 const routeContext = await resolveFarmRouteContext(farmApp.getConfig(), {
-                  request,
+                  request: targetRequest,
                   params,
                   search: searchParams,
                   path: targetUrl.pathname,
@@ -2037,6 +2480,29 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   search: searchParams,
                   routePath: route.pattern,
                 });
+
+                // Collect metadata exactly the way a full-page load does:
+                // static and generated interleaved per layer, deep-merged with
+                // mergeMetadata so a page's openGraph extends a layout's
+                // instead of replacing it. Layouts receive the params,
+                // the route receives its full resolved props.
+                for (const layoutModule of layoutModules) {
+                  mergedMetadata = mergeMetadata(mergedMetadata, (layoutModule as any).metadata);
+                  if (typeof (layoutModule as any).generateMetadata === "function") {
+                    mergedMetadata = mergeMetadata(
+                      mergedMetadata,
+                      await (layoutModule as any).generateMetadata({ params: routeProps.params }),
+                    );
+                  }
+                }
+                mergedMetadata = mergeMetadata(mergedMetadata, (routeModule as any).metadata);
+                if (typeof (routeModule as any).generateMetadata === "function") {
+                  mergedMetadata = mergeMetadata(
+                    mergedMetadata,
+                    await (routeModule as any).generateMetadata(routeProps),
+                  );
+                }
+
                 const routeSlots = await Promise.all(
                   slots.map(async (slot) => {
                     const slotModule = await routeManager.loadRouteModule(slot.route.modulePath);
@@ -2048,7 +2514,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                           entry.pattern === slot.route.pattern,
                       ) ?? getClientModuleMetadata(slot.route.modulePath, server.config.root);
                     const slotContext = await resolveFarmRouteContext(farmApp.getConfig(), {
-                      request,
+                      request: targetRequest,
                       params: slot.params,
                       search: searchParams,
                       path: targetUrl.pathname,
@@ -2097,12 +2563,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
                 // Convert absolute paths to URL paths (relative to project root)
                 const projectRoot = server.config.root;
-                const toUrlPath = (absolutePath: string) => {
-                  if (absolutePath.startsWith(projectRoot)) {
-                    return absolutePath.slice(projectRoot.length);
-                  }
-                  return absolutePath;
-                };
+                const toUrlPath = (absolutePath: string) =>
+                  toViteModuleId(absolutePath, projectRoot);
 
                 const renderPlan = createFarmRouteRenderPlan({
                   pageShouldHydrate: shouldHydrate,
@@ -2169,10 +2631,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     html: fragmentHtml,
                     layoutPatterns: destinationLayoutPatterns,
                   },
-                  metadata: {
-                    title: mergedMetadata.title,
-                    description: mergedMetadata.description,
-                  },
+                  // The full merged metadata, not a title/description
+                  // projection: client navigation reconciles the same head
+                  // tags a full-page load renders, so it needs the same input.
+                  metadata: mergedMetadata,
                   layoutModules: layouts.map((l) => toUrlPath(l.modulePath)),
                   routeSlots: routeSlots.map(({ renderModule: _renderModule, ...slot }) => ({
                     ...slot,
@@ -2230,8 +2692,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           const startTime = Date.now();
           const method = req.method || "GET";
           const urlPath = req.url || "/";
-          const pathname = new URL(urlPath, `http://${req.headers.host || "localhost:3000"}`)
-            .pathname;
+          const pathname = resolveFarmRequestURL(req as FarmRequest, {
+            trustProxy: currentServerConfig.trustProxy,
+          }).pathname;
           const routeManager = farmApp.getRouteManager();
           const hasBeforeRouteMatchHook = pm?.hasHook("beforeRouteMatch") ?? false;
           const hasAfterRouteMatchHook = pm?.hasHook("afterRouteMatch") ?? false;
@@ -2299,6 +2762,34 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             }
           }
 
+          // Runtime response transforms need the complete byte stream, including
+          // responses completed by middleware or beforeRequest hooks.
+          const shouldInterceptResponse = Boolean(
+            pm &&
+            (hasAfterResponseHook ||
+              hasHTMLTransformHook ||
+              (runtimeSession && hasRuntimeAfterHook)),
+          );
+          const responseInterceptor =
+            pm && shouldInterceptResponse
+              ? interceptFarmDevPageResponse({
+                  req,
+                  res,
+                  pm,
+                  runtimeSession,
+                  hasRuntimeAfterHook,
+                  hasAfterResponseHook,
+                  hasHTMLTransformHook,
+                  renderPayload,
+                  method,
+                  urlPath,
+                  pathname,
+                  startTime,
+                  logResponse,
+                  emitError: (error) => emitPluginError("response-end", error, { pathname }),
+                })
+              : undefined;
+
           try {
             if (middlewareManager?.hasMiddleware()) {
               const middlewareRequest = createRequestFromNodeRequest(req, new URL(fullUrl));
@@ -2308,18 +2799,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   middlewareManager!.execute(req, res),
                 );
               if (handled) {
-                if (pm && runtimeSession) {
-                  pm.copyRequestContext(req, runtimeSession.request);
-                  await pm.endRuntimeRequest(
-                    runtimeSession,
-                    new Response(null, {
-                      status: res.statusCode || 200,
-                      headers: createHeadersFromNodeResponse(res),
-                    }),
-                  );
+                if (!responseInterceptor?.isEnded()) {
+                  const duration = Date.now() - startTime;
+                  logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
                 }
-                const duration = Date.now() - startTime;
-                logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
                 return; // Middleware handled the response
               }
             }
@@ -2339,169 +2822,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               );
             }
 
-            if (res.writableEnded) {
-              if (pm && runtimeSession) {
-                pm.copyRequestContext(req, runtimeSession.request);
-                await pm.endRuntimeRequest(
-                  runtimeSession,
-                  new Response(null, {
-                    status: res.statusCode || 200,
-                    headers: createHeadersFromNodeResponse(res),
-                  }),
-                );
+            if (res.writableEnded || responseInterceptor?.isEnded()) {
+              if (!responseInterceptor?.isEnded()) {
+                const duration = Date.now() - startTime;
+                logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
               }
-              // Log response if already ended
-              const duration = Date.now() - startTime;
-              logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
               return;
-            }
-
-            // Only intercept streamed output when an installed plugin can
-            // observe or replace the response. The default dev path can write
-            // directly to Node without buffering and replaying the whole HTML.
-            const shouldInterceptResponse = Boolean(
-              pm &&
-              (hasAfterResponseHook ||
-                hasHTMLTransformHook ||
-                (runtimeSession && hasRuntimeAfterHook)),
-            );
-            if (pm && shouldInterceptResponse) {
-              const originalWrite = res.write.bind(res);
-              const originalEnd = res.end.bind(res);
-              let afterResponseCalled = false;
-              const htmlChunks: Buffer[] = [];
-              let didStreamHtml = false;
-              const bufferPluginResponse = Boolean(
-                hasHTMLTransformHook || (runtimeSession && hasRuntimeAfterHook),
-              );
-
-              res.write = ((chunk: any, ...args: any[]) => {
-                const contentTypeHeader =
-                  res.getHeader("content-type") || res.getHeader("Content-Type");
-                const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
-                const isHtmlResponse = contentType.includes("text/html");
-
-                if (isHtmlResponse && chunk !== undefined && chunk !== null) {
-                  const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
-                  htmlChunks.push(bufferChunk);
-                  didStreamHtml = true;
-                  if (bufferPluginResponse) {
-                    const callback = args.find((arg) => typeof arg === "function");
-                    callback?.();
-                    return true;
-                  }
-                  const writeResult = originalWrite(chunk, ...args);
-                  if (typeof (res as any).flush === "function") {
-                    (res as any).flush();
-                  }
-                  return writeResult;
-                }
-
-                return originalWrite(chunk, ...args);
-              }) as any;
-
-              res.end = ((...args: any[]) => {
-                if (!afterResponseCalled && pm) {
-                  afterResponseCalled = true;
-                  const duration = Date.now() - startTime;
-                  logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
-                  const originalEndArgs = [...args];
-                  Promise.resolve()
-                    .then(async () => {
-                      const contentTypeHeader =
-                        res.getHeader("content-type") || res.getHeader("Content-Type");
-                      const contentType =
-                        typeof contentTypeHeader === "string" ? contentTypeHeader : "";
-                      const isHtmlResponse = contentType.includes("text/html");
-                      if (isHtmlResponse) {
-                        const firstArg = args[0];
-                        if (typeof firstArg === "string" || Buffer.isBuffer(firstArg)) {
-                          const bufferChunk = Buffer.isBuffer(firstArg)
-                            ? firstArg
-                            : Buffer.from(firstArg, "utf-8");
-                          htmlChunks.push(bufferChunk);
-                        }
-
-                        const fullHtml = Buffer.concat(htmlChunks).toString("utf-8");
-                        let html = fullHtml;
-                        if (!didStreamHtml || bufferPluginResponse) {
-                          html = await pm.runHookSerial("transformHTML", html);
-                          html = await pm.runHookSerial("afterRender", html, renderPayload);
-                          const callback =
-                            typeof originalEndArgs[originalEndArgs.length - 1] === "function"
-                              ? originalEndArgs[originalEndArgs.length - 1]
-                              : undefined;
-                          originalEndArgs.length = 0;
-                          originalEndArgs.push(html);
-                          if (callback) originalEndArgs.push(callback);
-                        } else {
-                          await pm.runHookSerial("transformHTML", fullHtml);
-                          await pm.runHookSerial("afterRender", fullHtml, renderPayload);
-                        }
-                      }
-
-                      if (runtimeSession) {
-                        pm.copyRequestContext(req, runtimeSession.request);
-                        const status = res.statusCode || 200;
-                        const canHaveBody =
-                          method !== "HEAD" && status !== 204 && status !== 205 && status !== 304;
-                        const firstArg = originalEndArgs[0];
-                        const responseBody = canHaveBody
-                          ? isHtmlResponse
-                            ? didStreamHtml && !bufferPluginResponse
-                              ? Buffer.concat(htmlChunks)
-                              : typeof firstArg === "string" || Buffer.isBuffer(firstArg)
-                                ? firstArg
-                                : undefined
-                            : typeof firstArg === "string" || Buffer.isBuffer(firstArg)
-                              ? firstArg
-                              : undefined
-                          : null;
-                        const runtimeResponse = await pm.endRuntimeRequest(
-                          runtimeSession,
-                          new Response(
-                            Buffer.isBuffer(responseBody)
-                              ? responseBody.toString("utf8")
-                              : responseBody,
-                            {
-                              status,
-                              headers: createHeadersFromNodeResponse(res),
-                            },
-                          ),
-                        );
-                        applyWebResponseToNodeResponse(runtimeResponse, res);
-
-                        if (!didStreamHtml || bufferPluginResponse) {
-                          const callback =
-                            typeof originalEndArgs[originalEndArgs.length - 1] === "function"
-                              ? originalEndArgs[originalEndArgs.length - 1]
-                              : undefined;
-                          const body = runtimeResponse.body
-                            ? Buffer.from(await runtimeResponse.arrayBuffer())
-                            : undefined;
-                          originalEndArgs.length = 0;
-                          if (body) originalEndArgs.push(body);
-                          if (callback) originalEndArgs.push(callback);
-                        }
-                      }
-                    })
-                    .then(() =>
-                      hasAfterResponseHook
-                        ? pm.runHookParallel("afterResponse", req, res)
-                        : undefined,
-                    )
-                    .then(() => {
-                      originalEnd(...originalEndArgs);
-                    })
-                    .catch((err) => {
-                      emitPluginError("response-end", err, { pathname }).catch(() => {});
-                      console.error("Error in afterResponse hook:", err);
-                      originalEnd(...originalEndArgs);
-                    });
-                } else {
-                  originalEnd(...args);
-                }
-              }) as any;
             }
 
             // Note: __FARM_PROPS__ is set by the renderer with actual page props (params, searchParams)
@@ -2543,7 +2869,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         return id;
       }
 
-      if (id === "/@farm/client" || id === "/@farm/client.js") {
+      if (isFarmClientVirtualId(id)) {
         return id;
       }
 
@@ -2573,7 +2899,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         return generateProgrammaticRouteModule(id, server?.config.root || options.root, renderer);
       }
 
-      if (id === "/@farm/client" || id === "/@farm/client.js") {
+      if (isFarmClientVirtualId(id)) {
         const resolvedConfig = farmApp?.getConfig();
         const renderer = resolvedConfig?.renderer || resolveFarmRenderer(options.renderer);
         const integrations = resolvedConfig?.integrations || options.integrations;
@@ -2603,9 +2929,21 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         const generatedDevIndicatorsClientRuntime = farmApp
           ? generateFarmDevIndicatorsClientRuntime(farmApp.getConfig().devIndicators)
           : "";
+        const integrationProviders = isReactRenderer(renderer)
+          ? getIntegrationProviders(integrations)
+          : [];
+        const isolatedHydrationMode = resolveFarmIsolatedClientHydrationMode(
+          resolvedConfig?.experimental?.isolatedClientHydration,
+          {
+            serverComponents: resolvedConfig?.experimental?.serverComponents === true,
+            hasUnsupportedIntegrationProvider: integrationProviders
+              .filter((provider) => provider.component || provider.type === "clerk")
+              .some((provider) => provider.supportsIsolatedHydration !== true),
+          },
+        );
 
         return generateClientCode(
-          isReactRenderer(renderer) ? getIntegrationProviders(integrations) : [],
+          integrationProviders,
           [
             ...getIntegrationDocumentNavigationMatchers(integrations),
             ...(docsRuntime?.getFarmDocsDocumentNavigationMatchers(docs) ?? []),
@@ -2618,8 +2956,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           resolvedConfig?.publicRuntimeConfig || options.publicRuntimeConfig,
           isReactRenderer(renderer) ? docs?.adapter?.react : undefined,
           renderer,
-          resolvedConfig?.experimental?.isolatedClientHydration === "enabled",
+          isolatedHydrationMode === "enabled",
           resolvedConfig?.trailingSlash ?? false,
+          resolvedConfig?.basePath ?? "/",
+          generateClientCachePersistenceCode(
+            resolveFarmClientCacheAdapterEntry(root, resolvedConfig?.cache),
+          ),
         );
       }
 
@@ -2721,6 +3063,10 @@ export const manifest = getManifest();
         }
       }
 
+      if (!transformOptions?.ssr && shouldInspectClientBoundary(id, code)) {
+        warnClientBoundaryOnce(this, id, code, farmApp?.getConfig() ?? options);
+      }
+
       if (typeof imageImports.transform === "function") {
         const imageModule = await imageImports.transform.call(this, code, id, transformOptions);
         if (imageModule) return imageModule;
@@ -2767,16 +3113,36 @@ export const manifest = getManifest();
         transformed = true;
 
         const currentConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
+        const configuredProviders = getIntegrationProviders(currentConfig.integrations).filter(
+          (provider) => provider.component || provider.type === "clerk",
+        );
         const isolatedHydrationEnabled =
-          currentConfig.experimental?.isolatedClientHydration === "enabled" &&
-          currentConfig.experimental?.serverComponents !== true &&
-          isReactRenderer(resolveFarmRenderer(currentConfig.renderer));
-        if (isolatedHydrationEnabled && isIsolatableClientBoundarySource(clientBoundarySource)) {
-          const root = currentConfig.root || server?.config.root || process.cwd();
-          const cleanId = id.split("?", 1)[0];
+          resolveFarmIsolatedClientHydrationMode(
+            currentConfig.experimental?.isolatedClientHydration,
+            {
+              serverComponents: currentConfig.experimental?.serverComponents === true,
+              hasUnsupportedIntegrationProvider: configuredProviders.some(
+                (provider) => provider.supportsIsolatedHydration !== true,
+              ),
+            },
+          ) === "enabled" && isReactRenderer(resolveFarmRenderer(currentConfig.renderer));
+        let isolatedModuleReference: string | null = null;
+        const root = currentConfig.root || server?.config.root || process.cwd();
+        const cleanId = id.split("?", 1)[0];
+        const selectedIsolatedModules =
+          options.isolatedClientBoundaryModules ??
+          farmApp?.getRouteManager().getIsolatedClientBoundaryModules(root);
+        const selectedForIsolatedHydration =
+          selectedIsolatedModules?.has(path.resolve(cleanId)) === true;
+        if (
+          isolatedHydrationEnabled &&
+          selectedForIsolatedHydration &&
+          isIsolatableClientBoundarySource(clientBoundarySource)
+        ) {
+          isolatedModuleReference = toViteModuleId(cleanId, root);
           const transformedBoundary = transformIsolatedClientBoundaryModule({
             code: transformedCode,
-            moduleReference: toViteModuleId(cleanId, root),
+            moduleReference: isolatedModuleReference,
             islandStrategy: getIslandStrategyExport(clientBoundarySource) ?? "load",
             parse: (source) => this.parse(source) as unknown as FarmModuleAstNode,
           });
@@ -2804,19 +3170,49 @@ export const manifest = getManifest();
 
         // Add HMR support for client components
         // This ensures React re-renders when the component updates
-        const hmrCode = `
+        const isolatedHmrUpdate = isolatedModuleReference
+          ? `
+    if (
+      newModule &&
+      newModule.__farm_client_boundary_originals__ &&
+      window.__FARM_ISOLATED_HYDRATION_RUNTIME__
+    ) {
+      window.__FARM_ISOLATED_HYDRATION_RUNTIME__.updateModule(
+        ${JSON.stringify(isolatedModuleReference)},
+        newModule,
+      );
+      return;
+    }`
+          : "";
+        // Re-rendering the whole root on every edit only makes sense for a
+        // renderer that diffs the result against the live DOM. On Solid and
+        // Svelte `render()` tears the tree down and rebuilds it, so a one
+        // character change in any client component would wipe the page's
+        // state. Those renderers ship their own HMR integration (solid-refresh
+        // and svelte's hot API) which preserves component state, so leave the
+        // module for them to accept: appending our own `import.meta.hot.accept`
+        // here would swallow the update instead of letting theirs run.
+        const hmrCode = !shouldEmitFarmClientRootHmr(currentConfig.renderer)
+          ? ""
+          : `
 if (import.meta.hot) {
   import.meta.hot.accept((newModule) => {
+    ${isolatedHmrUpdate}
     if (newModule && newModule.default && window.__FARM_REACT_ROOT__) {
       // Re-render with the new component
       const React = window.__FARM_REACT__;
       const props = window.__FARM_PROPS__ || {};
       const nextElement = React.createElement(newModule.default, props);
       const wrapProviders = window.__FARM_WRAP_PROVIDERS__;
+      const wrapClientGraph = window.__FARM_WRAP_CLIENT_GRAPH__;
       Promise.resolve(
         typeof wrapProviders === 'function' ? wrapProviders(nextElement) : nextElement
       ).then((wrappedElement) => {
-        window.__FARM_REACT_ROOT__.render(wrappedElement);
+        window.__FARM_REACT_ROOT__.render(
+          typeof wrapClientGraph === 'function'
+            ? wrapClientGraph(wrappedElement)
+            : wrappedElement
+        );
       });
     }
   });
@@ -2988,6 +3384,20 @@ if (import.meta.hot) {
 
       const currentFarmConfig = farmApp?.getConfig();
       const normalizedFile = file.replace(/\\/g, "/");
+      if (
+        currentFarmConfig &&
+        /\/route\.(?:ts|tsx|js|jsx)$/.test(normalizedFile) &&
+        getFarmAppDirectories(currentFarmConfig).some((appDir) =>
+          normalizedFile.startsWith(`${toPosixPath(appDir)}/api/`),
+        )
+      ) {
+        // Vite has not invalidated these modules yet. Refreshing only generated
+        // types leaves both HTTP and direct server calls bound to old handlers.
+        for (const mod of modules) server.moduleGraph.invalidateModule(mod);
+        await refreshRouteDiscovery?.(`updated ${file}`);
+        server.ws.send({ type: "full-reload", path: "*" });
+        return [];
+      }
       const currentSrcRoot = currentFarmConfig
         ? getFarmSourceRoots(currentFarmConfig)
             .map((source) => path.join(source.root, source.srcDir).replace(/\\/g, "/"))
@@ -3036,9 +3446,35 @@ if (import.meta.hot) {
         return [];
       }
 
-      if (file.includes("/app/")) {
+      const isolatedHydrationMode = currentFarmConfig?.experimental?.isolatedClientHydration;
+      if (
+        currentSrcRoot &&
+        (isolatedHydrationMode === "enabled" || isolatedHydrationMode === "analyze") &&
+        /\.[cm]?[jt]sx?$/.test(normalizedFile)
+      ) {
+        const routeManager = farmApp?.getRouteManager();
+        if (routeManager) {
+          const previousPlan = JSON.stringify(
+            routeManager.generateClientManifest(currentFarmConfig.root),
+          );
+          routeManager.invalidateClientManifest();
+          const nextPlan = JSON.stringify(
+            routeManager.generateClientManifest(currentFarmConfig.root),
+          );
+          const planChanged = previousPlan !== nextPlan;
+          const manifestModule = server.moduleGraph.getModuleById("/@farm/manifest");
+          if (manifestModule) server.moduleGraph.invalidateModule(manifestModule);
+          if (planChanged) {
+            for (const mod of modules) server.moduleGraph.invalidateModule(mod);
+            server.ws.send({ type: "full-reload", path: "*" });
+            return [];
+          }
+        }
+      }
+
+      if (normalizedFile.includes("/app/")) {
         // Hot reload middleware changes
-        if (file.includes("middleware.")) {
+        if (normalizedFile.includes("middleware.")) {
           if (middlewareManager) {
             await middlewareManager.reload();
             logger.success("✅ Middleware reloaded!");
@@ -3062,8 +3498,8 @@ if (import.meta.hot) {
           server.moduleGraph.invalidateModule(manifestModule);
         }
 
-        if (file.includes("page.") || file.includes("layout.")) {
-          const shortPath = file.split("/app/")[1] || file;
+        if (normalizedFile.includes("page.") || normalizedFile.includes("layout.")) {
+          const shortPath = normalizedFile.split("/app/")[1] || normalizedFile;
           logUpdate("PAGE", `updated ${shortPath}`);
 
           for (const mod of modules) {
@@ -3082,6 +3518,11 @@ if (import.meta.hot) {
       return modules;
     },
   };
+}
+
+function isFarmClientVirtualId(id: string): boolean {
+  const pathname = id.split("?", 1)[0];
+  return pathname === "/@farm/client" || pathname === "/@farm/client.js";
 }
 
 function generateProgrammaticRouteModule(
@@ -3383,11 +3824,7 @@ export const OPTIONS = __farmRoute.methods.OPTIONS;
 }
 
 function toProgrammaticRouteImportSpecifier(filePath: string, root?: string): string {
-  if (root && filePath.startsWith(root)) {
-    return filePath.slice(root.length) || "/";
-  }
-
-  return filePath;
+  return root ? toViteModuleId(filePath, root) : filePath;
 }
 
 type RouteModuleLike = {
@@ -3464,11 +3901,7 @@ function parseRouteModuleSchema(
 }
 
 function generateClientCode(
-  integrationProviders: Array<{
-    name: string;
-    type: string;
-    props?: Record<string, unknown>;
-  }> = [],
+  integrationProviders: ReturnType<typeof getIntegrationProviders> = [],
   documentNavigationMatchers: string[] = [],
   docsSearchClientRuntime = EMPTY_FARM_DOCS_SEARCH_CLIENT_RUNTIME,
   devtoolsClientRuntime = "",
@@ -3480,11 +3913,10 @@ function generateClientCode(
   renderer: FarmRenderer = REACT_RENDERER,
   isolatedHydrationEnabled = false,
   trailingSlash = false,
+  basePath = "/",
+  clientCachePersistence: ClientCachePersistenceEntryCode = { imports: "", init: "" },
 ): string {
-  const hasClerkProvider = integrationProviders.some((provider) => provider.type === "clerk");
-  const providerImportBlock = hasClerkProvider
-    ? `import { ClerkProvider } from '@clerk/react';`
-    : "";
+  const providerClientCode = generateFarmIntegrationProviderClientCode(integrationProviders, root);
   const clientPluginEntry = generateFarmClientPluginEntryCode(
     plugins,
     root,
@@ -3494,6 +3926,9 @@ function generateClientCode(
   const rendererClientImports = isReactRenderer(renderer)
     ? `import React from 'react'\nimport { hydrateRoot, createRoot } from 'react-dom/client'`
     : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
+  const isolatedHydrationImport = isolatedHydrationEnabled
+    ? `import { createFarmIsolatedHydrationRuntime, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'`
+    : "";
   const docsAdapterImportBlock = docsAdapterReact
     ? `import * as FarmDocsAdapterReact from ${JSON.stringify(docsAdapterReact)};
 
@@ -3511,68 +3946,40 @@ async function hydrateFarmDocsAdapterRuntime() {
 }`
     : `async function hydrateFarmDocsAdapterRuntime() { return false; }`;
   const isolatedHydrationRuntime = isolatedHydrationEnabled
-    ? `const farmIsolatedBoundaryRoots = new Map();
+    ? `const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
+  ReactRuntime: React,
+  hydrateRoot,
+  load: (reference) => import(/* @vite-ignore */ reference),
+  schedule: scheduleFarmIslandHydration,
+  wrap: wrapWithIntegrationProviders,
+});
+window.__FARM_ISOLATED_HYDRATION_RUNTIME__ = farmIsolatedHydrationRuntime;
 
 function disposeFarmIsolatedClientBoundaries(scope) {
-  for (const [container, root] of farmIsolatedBoundaryRoots) {
-    if (container === scope || scope.contains(container)) {
-      try { root.unmount(); } catch {}
-      farmIsolatedBoundaryRoots.delete(container);
-    }
-  }
+  farmIsolatedHydrationRuntime.dispose(scope);
 }
 
-async function hydrateFarmIsolatedClientBoundaries(scope = document) {
-  const candidates = Array.from(scope.querySelectorAll('farm-client-boundary[data-farm-client-boundary]'));
-  const boundaries = candidates.filter((container) => {
-    if (farmIsolatedBoundaryRoots.has(container)) return false;
-    return !container.parentElement?.closest('farm-client-boundary[data-farm-client-boundary]');
-  });
-  await Promise.all(boundaries.map(async (container) => {
-    const reference = container.getAttribute('data-farm-client-boundary');
-    const exportName = container.getAttribute('data-farm-client-export') || 'default';
-    const strategy = container.getAttribute('data-farm-island-strategy') || 'load';
-    if (!reference) return;
-    const scheduled = scheduleFarmIslandHydration({
-      container,
-      strategy,
-      hydrate: async () => {
-        try {
-          const module = await import(/* @vite-ignore */ reference);
-          const Component = module.__farm_client_boundary_originals__?.[exportName];
-          if (typeof Component !== 'function' && typeof Component !== 'object') {
-            throw new Error('compiled original export was not found');
-          }
-          const props = JSON.parse(container.getAttribute('data-farm-client-props') || '{}');
-          const root = hydrateRoot(container, React.createElement(Component, props));
-          farmIsolatedBoundaryRoots.set(container, root);
-        } catch (error) {
-          console.warn(
-            '[Farm.js] Could not hydrate isolated client boundary ' + reference + '#' + exportName + '. Server HTML was preserved.',
-            error,
-          );
-        }
-      },
-    });
-    if (strategy === 'load') await scheduled;
-    else void scheduled.catch((error) => console.warn('[Farm.js] Deferred boundary hydration failed:', error));
-  }));
+async function hydrateFarmIsolatedClientBoundaries(scope = document, signal) {
+  await farmIsolatedHydrationRuntime.hydrate(scope, signal);
 }`
     : "";
 
   return `
 ${rendererClientImports}
+${isolatedHydrationImport}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
-import { scheduleFarmIslandHydration, searchParamsToObject, setFarmTrailingSlashPreference } from '@farm.js/core/internal/client-runtime'
+import { isFarmRouteActive } from '@farm.js/core/router'
+import { scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from '@farm.js/core/deployment'
-${providerImportBlock}
+${providerClientCode.imports}
 ${clientPluginEntry.imports}
+${clientCachePersistence.imports}
 ${docsSearchClientRuntime}
 ${devtoolsClientRuntime}
 ${docsAdapterImportBlock}
@@ -3583,16 +3990,18 @@ ${docsAdapterImportBlock}
 
 // Expose React for HMR
 window.__FARM_REACT__ = React;
-const integrationProviders = ${JSON.stringify(integrationProviders)};
 const integrationDocumentNavigationMatchers = ${JSON.stringify(documentNavigationMatchers)};
 
+setFarmBasePath(${JSON.stringify(basePath)});
 setFarmTrailingSlashPreference(${JSON.stringify(trailingSlash)});
 installChunkErrorRecovery();
+${clientCachePersistence.init}
 
 let reactRoot = null;
 ${isolatedHydrationRuntime}
 
 function matchesDocumentNavigation(pathname) {
+  pathname = stripFarmBasePath(pathname);
   return integrationDocumentNavigationMatchers.some((matcher) => {
     if (matcher === '/(.*)' || matcher === '*') {
       return true;
@@ -3605,20 +4014,10 @@ function matchesDocumentNavigation(pathname) {
   });
 }
 
-function wrapWithIntegrationProviders(element) {
-  let wrapped = element;
-
-  for (let i = integrationProviders.length - 1; i >= 0; i--) {
-    const provider = integrationProviders[i];
-    if (provider.type === 'clerk') {
-      wrapped = React.createElement(ClerkProvider, provider.props || {}, wrapped);
-    }
-  }
-
-  return wrapped;
-}
+${providerClientCode.runtime}
 
 window.__FARM_WRAP_PROVIDERS__ = wrapWithIntegrationProviders;
+${isolatedHydrationEnabled ? "window.__FARM_WRAP_CLIENT_GRAPH__ = (element) => wrapFarmIsolatedClientGraph(React, element);" : ""}
 
 // Get manifest from window (inlined by server in HTML)
 // Fallback to empty manifest if not available yet
@@ -3637,9 +4036,17 @@ function matchSegment(urlSegment, routeSegment) {
   return { [routeSegment.segment]: urlSegment };
 }
 
+function decodeRouteSegment(segment) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 function matchRoute(pathname, routeSegments) {
   const normalizedPath = pathname === '/' ? '' : pathname.replace(/^\\//, '').replace(/\\/$/, '');
-  const pathSegments = normalizedPath ? normalizedPath.split('/') : [];
+  const pathSegments = normalizedPath ? normalizedPath.split('/').map(decodeRouteSegment) : [];
   
   // Handle catch-all routes
   const hasCatchAll = routeSegments.some(s => s.isCatchAll);
@@ -3674,6 +4081,7 @@ function matchRoute(pathname, routeSegments) {
 }
 
 function findRoute(pathname) {
+  pathname = stripFarmBasePath(pathname);
   const manifest = getManifest();
   const routes = Object.values(manifest.routes);
   
@@ -3687,20 +4095,13 @@ function findRoute(pathname) {
 }
 
 function findLayouts(pathname) {
+  pathname = stripFarmBasePath(pathname);
   const manifest = getManifest();
   const layouts = Object.values(manifest.layouts);
-  const normalizedPath = pathname === '/' ? '/' : pathname.replace(/\\/$/, '');
   const matchingLayouts = [];
   
   for (const layout of layouts) {
-    // Root layout matches everything
-    if (layout.pattern === '/') {
-      matchingLayouts.push(layout);
-      continue;
-    }
-    // Check if pathname starts with layout pattern
-    if (normalizedPath.startsWith(layout.pattern) || 
-        normalizedPath === layout.pattern.replace(/\\/[^/]+$/, '')) {
+    if (layout.pattern === '/' || isFarmRouteActive(layout.pattern, pathname, { exact: false })) {
       matchingLayouts.push(layout);
     }
   }
@@ -3947,8 +4348,17 @@ window.__FARM_CLIENT_RUNTIME__ = farmClientRuntime;
 void farmClientRuntime.start();
 
 if (import.meta.hot) {
-  import.meta.hot.dispose(() => {
-    void farmClientRuntime.close('hmr');
+  // Vite awaits a promise returned from dispose before evaluating the new
+  // module, so the old runtime is fully closed before its successor starts.
+  // The router is destroyed afterwards — plugins may still touch navigation
+  // during close — and unconditionally, or every entry reload would leave
+  // another popstate/beforeunload listener behind.
+  import.meta.hot.dispose(async () => {
+    try {
+      await farmClientRuntime.close('hmr');
+    } finally {
+      spaRouter.destroy();
+    }
   });
 }
 
@@ -4010,9 +4420,8 @@ async function renderRouteSlot(slot, mode = 'render') {
     normalizeServerProps(slot.props || {}),
     window.__FARM_DEFERRED_DATA__ || {},
   );
-  const element = wrapWithIntegrationProviders(
-    React.createElement(SlotComponent, props),
-  );
+  let element = wrapWithIntegrationProviders(React.createElement(SlotComponent, props));
+  ${isolatedHydrationEnabled ? "element = wrapFarmIsolatedClientGraph(React, element);" : ""}
   const key = getRouteSlotKey(slot);
   const existingRoot = routeSlotRoots.get(key);
 
@@ -4412,6 +4821,8 @@ async function tryHydrateImportedPage(
   }
   if (signal?.aborted || !container?.isConnected) return false;
 
+  ${isolatedHydrationEnabled ? "wrappedElement = wrapFarmIsolatedClientGraph(React, wrappedElement);" : ""}
+
   if (useHydrate) {
     try {
       reactRoot = hydrateRoot(container, wrappedElement);
@@ -4497,11 +4908,13 @@ function replaceNavigationBoundary(container, fragment, currentPatterns, nextPat
     : fragment.querySelector('#__farm_page__');
 
   if (!currentTarget || !nextTarget) {
+    ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(container);" : ""}
     container.replaceChildren(fragment);
     activateFragmentScripts(container);
-    return;
+    return container;
   }
 
+  ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentTarget);" : ""}
   currentTarget.replaceWith(nextTarget);
   activateFragmentScripts(nextTarget);
   if (fragmentTreeRoot && fragmentTreeRoot !== nextTarget) fragmentTreeRoot.remove();
@@ -4517,6 +4930,7 @@ function replaceNavigationBoundary(container, fragment, currentPatterns, nextPat
     activateFragmentScripts(support);
     setTimeout(() => support.remove(), 0);
   }
+  return nextTarget;
 }
 
 let activeLayoutPatterns = readActiveLayoutPatterns();
@@ -4630,8 +5044,9 @@ async function renderPage(pageData) {
         },
       );
     } else {
-      ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(container);" : ""}
+      ${isolatedHydrationEnabled ? "let isolatedHydrationScope = container;" : ""}
       if (activeLayoutShouldHydrate) {
+        ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(container);" : ""}
         if (appRoot) { try { appRoot.unmount(); } catch (error) {} appRoot = null; }
         if (reactRoot) { try { reactRoot.unmount(); } catch (error) {} reactRoot = null; }
         container.replaceChildren(fragment);
@@ -4640,15 +5055,27 @@ async function renderPage(pageData) {
         if (appRoot) { try { appRoot.unmount(); } catch (error) {} appRoot = null; }
         if (reactRoot) { try { reactRoot.unmount(); } catch (error) {} reactRoot = null; }
         delete window.__FARM_REACT_ROOT__;
-        replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns);
+        ${
+          isolatedHydrationEnabled
+            ? "isolatedHydrationScope = replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns) || container;"
+            : "replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns);"
+        }
       }
 
+      const hydrationController = new AbortController();
+      if (
+        shouldHydrate${
+          isolatedHydrationEnabled
+            ? " || (hasIsolatedClientBoundaries && !layoutShouldHydrate)"
+            : ""
+        }
+      ) {
+        pendingPageHydrationController = hydrationController;
+      }
       if (shouldHydrate) {
         const hydrationContainer = layoutShouldHydrate
           ? container
           : document.getElementById('__farm_page__') || container;
-        const hydrationController = new AbortController();
-        pendingPageHydrationController = hydrationController;
         const scheduledHydration = scheduleFarmIslandHydration({
           container: hydrationContainer,
           strategy: route.islandStrategy,
@@ -4678,10 +5105,15 @@ async function renderPage(pageData) {
             console.warn('[Farm.js] Deferred island hydration failed:', error);
           });
         }
-      }${
+      }
+      ${
         isolatedHydrationEnabled
-          ? ` else if (hasIsolatedClientBoundaries) {
-        await hydrateFarmIsolatedClientBoundaries(container);
+          ? `if (hasIsolatedClientBoundaries && !layoutShouldHydrate) {
+        await hydrateFarmIsolatedClientBoundaries(
+          isolatedHydrationScope,
+          hydrationController.signal,
+        );
+        if (hydrationController.signal.aborted) return;
       }`
           : ""
       }
@@ -4706,6 +5138,8 @@ async function renderPage(pageData) {
 spaRouter.setNavigationHandler(renderPage);
 
 async function hydrate() {
+  await farmClientRuntime.start();
+
   if (isFarmDocsSearchPage()) {
     await mountFarmDocsSearch();
   }
@@ -4725,10 +5159,12 @@ async function hydrate() {
     // Check if this is a client component (set by SSR)
     const isClientComponent = window.__FARM_IS_CLIENT__ === true;
     const modulePath = window.__FARM_PAGE_MODULE__;
-
-    if (!modulePath) {
-      console.error('[Farm.js] No page module path found')
-      return
+    ${
+      isolatedHydrationEnabled
+        ? `const hasIsolatedClientBoundaries =
+      window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true ||
+      Boolean(rootContainer.querySelector('farm-client-boundary[data-farm-client-boundary]'));`
+        : ""
     }
 
     let pageProps = normalizeServerProps(window.__FARM_PROPS__);
@@ -4737,7 +5173,8 @@ async function hydrate() {
     const pageShouldHydrate =
       typeof window.__FARM_PAGE_SHOULD_HYDRATE__ === 'boolean'
         ? window.__FARM_PAGE_SHOULD_HYDRATE__
-        : isClientComponent || findRoute(window.location.pathname)?.route?.shouldHydrate === true;
+        : isClientComponent ||
+          findRoute(window.location.pathname)?.route?.shouldHydrate === true;
     const layoutShouldHydrate = window.__FARM_LAYOUT_SHOULD_HYDRATE__ === true;
     const shouldHydrate =
       window.__FARM_SHOULD_HYDRATE__ === true ||
@@ -4746,17 +5183,21 @@ async function hydrate() {
     const hydratedSlots = await hydrateInitialRouteSlots();
     ${
       isolatedHydrationEnabled
-        ? `const hasIsolatedClientBoundaries =
-      window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true;
-    if (hasIsolatedClientBoundaries && !pageShouldHydrate && !layoutShouldHydrate) {
-      await hydrateFarmIsolatedClientBoundaries(rootContainer);
-      replayPreHydrationClicks();
+        ? `if (hasIsolatedClientBoundaries && !pageShouldHydrate && !layoutShouldHydrate) {
+      const hydrationController = new AbortController();
+      pendingPageHydrationController = hydrationController;
+      await hydrateFarmIsolatedClientBoundaries(rootContainer, hydrationController.signal);
+      if (hydrationController.signal.aborted) return;
       return;
     }`
         : ""
     }
     if (!shouldHydrate) {
       if (hydratedSlots) replayPreHydrationClicks();
+      return
+    }
+    if (!modulePath) {
+      console.error('[Farm.js] No page module path found')
       return
     }
 
@@ -4796,7 +5237,7 @@ async function hydrate() {
     const hydrationController = new AbortController();
     pendingPageHydrationController = hydrationController;
     try {
-      await scheduleFarmIslandHydration({
+      const pageHydration = scheduleFarmIslandHydration({
         container: pageContainer,
         strategy: islandStrategy,
         signal: hydrationController.signal,
@@ -4857,6 +5298,16 @@ async function hydrate() {
           }
         },
       });
+      ${
+        isolatedHydrationEnabled
+          ? `const isolatedHydration =
+        hasIsolatedClientBoundaries &&
+        !layoutShouldHydrate
+          ? hydrateFarmIsolatedClientBoundaries(rootContainer, hydrationController.signal)
+          : Promise.resolve();
+      await Promise.all([pageHydration, isolatedHydration]);`
+          : "await pageHydration;"
+      }
     } finally {
       if (pendingPageHydrationController === hydrationController) {
         pendingPageHydrationController = null;
@@ -4881,8 +5332,8 @@ function isModifierEvent(e) {
   return !!(e.metaKey || e.altKey || e.ctrlKey || e.shiftKey);
 }
 
-function isExternalUrl(href) {
-  return href.startsWith('http://') || href.startsWith('https://') || href.startsWith('//');
+function hasAbsoluteNavigationHref(href) {
+  return /^[a-zA-Z][a-zA-Z\\d+.-]*:/.test(href) || href.startsWith('//');
 }
 
 document.addEventListener('click', function(event) {
@@ -4898,9 +5349,10 @@ document.addEventListener('click', function(event) {
   
   const href = target.getAttribute('href');
   if (!href) return;
+  if (target.hasAttribute('download')) return;
   
-  // Don't intercept external links
-  if (isExternalUrl(href)) return;
+  // Leave absolute URLs and non-HTTP schemes to the browser.
+  if (hasAbsoluteNavigationHref(href)) return;
   
   // Don't intercept hash-only links
   if (href.startsWith('#')) return;
@@ -4928,7 +5380,7 @@ document.addEventListener('click', function(event) {
     : viewTransitionValue === 'true';
   
   spaRouter.navigate(href, { replace, scroll, viewTransition });
-}, true);  // Use capture phase to handle before React
+});
 
 if (import.meta.hot) {
   import.meta.hot.on('vite:beforeUpdate', () => {

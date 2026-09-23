@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ServerRenderer } from "../server/renderer";
+import { ServerRenderer, shouldServePrerenderedPage } from "../server/renderer";
 
 const tempDirs = new Set<string>();
 
@@ -67,5 +67,16 @@ describe("SSG manifest loading", () => {
         ]),
       ),
     ).not.toThrow();
+  });
+});
+
+describe("SSG request eligibility", () => {
+  it("only serves pre-rendered HTML for production retrieval requests", () => {
+    expect(shouldServePrerenderedPage("production", "GET")).toBe(true);
+    expect(shouldServePrerenderedPage("production", "head")).toBe(true);
+    expect(shouldServePrerenderedPage("production", undefined)).toBe(true);
+    expect(shouldServePrerenderedPage("production", "POST")).toBe(false);
+    expect(shouldServePrerenderedPage("production", "DELETE")).toBe(false);
+    expect(shouldServePrerenderedPage("development", "GET")).toBe(false);
   });
 });

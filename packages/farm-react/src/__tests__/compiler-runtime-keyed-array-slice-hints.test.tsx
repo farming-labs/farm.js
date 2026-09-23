@@ -165,6 +165,81 @@ function createSliceHarness(initialItems: Item[], readsCollection = false) {
 }
 
 describe("compiled keyed-array slice hints", () => {
+  it("preserves native runtime-bound coercion exactly once and in order", () => {
+    const source = [
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+      { id: "d", label: "Delta" },
+    ];
+    const coercions: string[] = [];
+    const start = {
+      valueOf() {
+        coercions.push("start");
+        return 1;
+      },
+    };
+    const end = {
+      valueOf() {
+        coercions.push("end");
+        return 3;
+      },
+    };
+
+    const result = createCompilerKeyedArraySlice(
+      source,
+      source.slice,
+      start as unknown as number,
+      end as unknown as number,
+    );
+
+    expect(result).toEqual([source[1], source[2]]);
+    expect(coercions).toEqual(["start", "end"]);
+  });
+
+  it("keeps native results on complete reconciliation for unsafe or no-op runtime bounds", async () => {
+    const harness = createSliceHarness(
+      ["a", "b", "c", "d"].map((id) => ({ id, label: id.toUpperCase() })),
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    const b = container.querySelector('[data-key="b"]');
+
+    harness.counters.keyReads = 0;
+    await act(async () => {
+      harness.slice(1.5);
+      await flushCompilerUpdates();
+    });
+
+    expect(container.textContent).toBe("BCD");
+    expect(container.querySelector('[data-key="b"]')).toBe(b);
+    expect(harness.counters.keyReads).toBeGreaterThan(0);
+
+    harness.counters.keyReads = 0;
+    await act(async () => {
+      harness.slice(Number.NaN);
+      await flushCompilerUpdates();
+    });
+
+    expect(container.textContent).toBe("BCD");
+    expect(container.querySelector('[data-key="b"]')).toBe(b);
+    expect(harness.counters.keyReads).toBeGreaterThan(0);
+
+    harness.counters.keyReads = 0;
+    await act(async () => {
+      harness.slice(0);
+      await flushCompilerUpdates();
+    });
+
+    expect(container.textContent).toBe("BCD");
+    expect(container.querySelector('[data-key="b"]')).toBe(b);
+    expect(harness.counters.keyReads).toBeGreaterThan(0);
+    expect(harness.counters.executions).toBe(1);
+  });
+
   it("removes a prefix without reading or rebuilding surviving rows", async () => {
     const initialItems = Array.from(
       { length: 2_048 },
@@ -499,6 +574,70 @@ describe("compiled keyed-array slice hints", () => {
         [...container.querySelectorAll('[data-owner="compiled"] li')].map((row) => row.outerHTML),
       ).toEqual(
         [...container.querySelectorAll('[data-owner="react"] li')].map((row) => row.outerHTML),
+      );
+    }
+    expect(harness.counters.executions).toBe(1);
+  }, 20_000);
+
+  it("matches React through 1,000 randomized runtime-bound slices", async () => {
+    const initialItems = Array.from(
+      { length: 5_000 },
+      (_, index): Item => ({ id: `random-row-${index}`, label: `Random row ${index}` }),
+    );
+    const harness = createSliceHarness(initialItems);
+    let sliceReact: (start: number, end?: number) => void = () => undefined;
+    let seed = 0x51ce;
+    const random = () => {
+      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+      return seed;
+    };
+    function Normal() {
+      const [items, setItems] = useState(initialItems);
+      sliceReact = (start, end) =>
+        setItems((previous) =>
+          end === undefined ? previous.slice(start) : previous.slice(start, end),
+        );
+      return (
+        <ol data-owner="random-react">
+          {items.map((item) => (
+            <li data-key={item.id} key={item.id}>
+              {item.label}
+            </li>
+          ))}
+        </ol>
+      );
+    }
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () =>
+      root.render(
+        <>
+          <div data-owner="random-compiled">
+            <harness.Feed />
+          </div>
+          <Normal />
+        </>,
+      ),
+    );
+
+    for (let batch = 0; batch < 20; batch += 1) {
+      await act(async () => {
+        for (let update = 0; update < 50; update += 1) {
+          const removal = 1 + (random() % 3);
+          if (random() % 2 === 0) {
+            harness.slice(removal);
+            sliceReact(removal);
+          } else {
+            harness.slice(0, -removal);
+            sliceReact(0, -removal);
+          }
+        }
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector('[data-owner="random-compiled"]')?.textContent).toBe(
+        container.querySelector('[data-owner="random-react"]')?.textContent,
       );
     }
     expect(harness.counters.executions).toBe(1);
