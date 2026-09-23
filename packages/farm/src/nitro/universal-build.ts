@@ -8247,11 +8247,7 @@ export default async function farmNitroEventHandler(event) {
     srcDir: root,
     buildDir: path.join(root, distDir, ".nitro"),
     compatibilityDate: "2024-12-01",
-    output: {
-      dir: outputDir,
-      serverDir: path.join(outputDir, "server"),
-      publicDir: path.join(outputDir, "public"),
-    },
+    output: resolveFarmNitroOutputConfig(preset, outputDir),
     publicAssets: [
       {
         dir: clientOutputDir,
@@ -8586,6 +8582,31 @@ export default async function farmNitroEventHandler(event) {
   }
 
   logger.success(`✅ Nitro build completed with preset: ${preset}`);
+}
+
+/**
+ * Keep Farm's conventional server/public split only for targets whose
+ * post-processing and runtime adapters consume it. Platform presets such as
+ * Cloudflare Pages and Netlify define their own output layout (for example
+ * `_worker.js` or `.netlify/functions-internal`); supplying these directories
+ * here overrides Nitro's preset defaults and produces an undeployable bundle.
+ */
+export function resolveFarmNitroOutputConfig(
+  preset: string,
+  outputDir: string,
+): NonNullable<NitroConfig["output"]> {
+  const farmOwnsOutputLayout =
+    preset === "node-server" || preset === "vercel" || preset === "vercel-edge";
+
+  return {
+    dir: outputDir,
+    ...(farmOwnsOutputLayout
+      ? {
+          serverDir: path.join(outputDir, "server"),
+          publicDir: path.join(outputDir, "public"),
+        }
+      : {}),
+  };
 }
 
 async function copyPrebuiltSSRBundle(
