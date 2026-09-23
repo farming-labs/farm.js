@@ -4,6 +4,7 @@ import {
   disposeFarmAuth as runDispose,
   getFarmAuthRuntime,
   migrateFarmAuth as runMigration,
+  compileFarmAuthMigration as runCompileMigration,
 } from "./runtime.js";
 
 interface FarmAuthIntegrationOptions {
@@ -49,6 +50,10 @@ export function createFarmAuthIntegration(
 
 export async function migrateFarmAuth(): Promise<void> {
   await runMigration();
+}
+
+export async function compileFarmAuthMigration(): Promise<string> {
+  return runCompileMigration();
 }
 
 export async function disposeFarmAuth(): Promise<void> {

@@ -154,12 +154,16 @@ authCommand
   .description("Create or update the Farm Auth database schema")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("-c, --config <config>", "Path to farm config file")
+  .option("-w, --write <file>", "Write the statements to a file instead of running them")
+  .option("--dry-run", "Print the statements instead of running them")
   .action(async (options) => {
     try {
       const { migrateFarmAuth } = require("../dist/index.js");
       await migrateFarmAuth({
         root: options.root,
         configPath: options.config,
+        write: options.write,
+        dryRun: options.dryRun,
       });
     } catch (error) {
       console.error("Failed to migrate Farm Auth:", error);
