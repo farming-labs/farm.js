@@ -1,6 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { executeSyncOperation, SyncOperationError, type SyncOrmClient } from "./server";
 import { resolveSyncModels } from "./types";
+
+// Importing the full core entry in this package test would initialize Farm's
+// build-time esbuild integration. The sync factory only needs these two plugin
+// helpers, so keep the production-hook test focused on the integration itself.
+vi.mock("@farm.js/core", () => ({
+  declareSchemaTables: (target: object) => target,
+  definePlugin: (plugin: object) => plugin,
+}));
+
+const { sync } = await import("./index");
 
 const schema = {
   models: {
@@ -248,6 +258,41 @@ describe("executeSyncOperation", () => {
     });
 
     expect(store[0]).toMatchObject({ id: "1", title: "renamed" });
+  });
+});
+
+describe("sync production runtime hook", () => {
+  it("serves sync requests through the Web Request/Response boundary", async () => {
+    const { orm } = makeOrm([
+      { id: "1", title: "mine", listId: "list-a", updatedAt: "2026-01-01T00:00:00.000Z" },
+    ]);
+    const plugin = sync({
+      schema: schema as any,
+      client: orm,
+      models: { tasks: "read" },
+      where: false,
+    });
+
+    const response = await plugin.runtime!.before!({
+      request: new Request("https://app.test/_farm/sync", {
+        method: "POST",
+        body: JSON.stringify({ model: "tasks", operation: "list" }),
+        headers: { "content-type": "application/json" },
+      }),
+      ctx: {},
+      kind: "request",
+      req: {} as never,
+      route: undefined,
+      signal: new AbortController().signal,
+      waitUntil() {},
+    } as any);
+
+    expect(response).toBeInstanceOf(Response);
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({
+      rows: [{ id: "1", title: "mine" }],
+      full: true,
+    });
   });
 });
 

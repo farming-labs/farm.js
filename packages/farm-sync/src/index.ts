@@ -115,12 +115,29 @@ export function sync(options: SyncPluginOptions) {
       },
     },
 
+    // The production runtime only has a Web Request/Response boundary. Keep
+    // the endpoint on the runtime hook so it is handled by both Nitro and the
+    // development server instead of relying solely on the legacy Node hook.
+    runtime: {
+      async before({ request }) {
+        return handleSyncRequest(request, undefined, {
+          path,
+          models,
+          middleware: options.middleware,
+          resolveOrm,
+        });
+      },
+    },
+
     async beforeRequest(req, res) {
       const pathname = (req.url ?? "").split("?")[0];
       if (pathname !== path) return;
 
       if (req.method !== "POST") {
-        sendJson(res, 405, { error: { code: "invalid_input", message: "Sync uses POST." } });
+        await sendNodeResponse(
+          res,
+          jsonResponse(405, { error: { code: "invalid_input", message: "Sync uses POST." } }),
+        );
         return;
       }
 
@@ -128,37 +145,36 @@ export function sync(options: SyncPluginOptions) {
       try {
         body = await readJsonBody(req);
       } catch {
-        sendJson(res, 400, {
-          error: { code: "invalid_input", message: "Request body must be JSON." },
-        });
+        await sendNodeResponse(
+          res,
+          jsonResponse(400, {
+            error: { code: "invalid_input", message: "Request body must be JSON." },
+          }),
+        );
         return;
       }
       if (!body || typeof body.model !== "string" || typeof body.operation !== "string") {
-        sendJson(res, 400, {
-          error: { code: "invalid_input", message: "Request body needs `model` and `operation`." },
-        });
+        await sendNodeResponse(
+          res,
+          jsonResponse(400, {
+            error: {
+              code: "invalid_input",
+              message: "Request body needs `model` and `operation`.",
+            },
+          }),
+        );
         return;
       }
 
       // The operation layer works in web-standard terms, so adapt once here.
       const request = toWebRequest(req, path);
-
-      try {
-        const context = await runMiddleware(options.middleware, request);
-        const orm = await resolveOrm();
-        const result = await executeSyncOperation({ body, models, orm, request, context });
-        sendJson(res, 200, result);
-      } catch (error) {
-        if (error instanceof SyncOperationError) {
-          sendJson(res, error.status, { error: { code: error.code, message: error.message } });
-          return;
-        }
-        // Never leak an internal message to the browser.
-        console.error("[farm:sync] operation failed", error);
-        sendJson(res, 500, {
-          error: { code: "server_error", message: "The sync operation failed." },
-        });
-      }
+      const response = await handleSyncRequest(request, body, {
+        path,
+        models,
+        middleware: options.middleware,
+        resolveOrm,
+      });
+      if (response) await sendNodeResponse(res, response);
     },
   });
 
@@ -183,6 +199,77 @@ export function sync(options: SyncPluginOptions) {
       return undefined;
     },
   });
+}
+
+type SyncRequestHandlerOptions = {
+  path: string;
+  models: Map<string, ResolvedSyncModel>;
+  middleware: readonly SyncMiddleware[] | undefined;
+  resolveOrm: () => Promise<SyncOrmClient>;
+};
+
+async function handleSyncRequest(
+  request: Request,
+  bodyOverride: SyncRequestBody | undefined,
+  options: SyncRequestHandlerOptions,
+): Promise<Response | undefined> {
+  const pathname = new URL(request.url).pathname;
+  if (pathname !== options.path) return undefined;
+
+  if (request.method !== "POST") {
+    return jsonResponse(405, { error: { code: "invalid_input", message: "Sync uses POST." } });
+  }
+
+  let body: SyncRequestBody;
+  try {
+    body = bodyOverride ?? ((await request.clone().json()) as SyncRequestBody);
+  } catch {
+    return jsonResponse(400, {
+      error: { code: "invalid_input", message: "Request body must be JSON." },
+    });
+  }
+  if (!body || typeof body.model !== "string" || typeof body.operation !== "string") {
+    return jsonResponse(400, {
+      error: { code: "invalid_input", message: "Request body needs `model` and `operation`." },
+    });
+  }
+
+  try {
+    const context = await runMiddleware(options.middleware, request);
+    const orm = await options.resolveOrm();
+    const result = await executeSyncOperation({
+      body,
+      models: options.models,
+      orm,
+      request,
+      context,
+    });
+    return jsonResponse(200, result);
+  } catch (error) {
+    if (error instanceof SyncOperationError) {
+      return jsonResponse(error.status, {
+        error: { code: error.code, message: error.message },
+      });
+    }
+    // Never leak an internal message to the browser.
+    console.error("[farm:sync] operation failed", error);
+    return jsonResponse(500, {
+      error: { code: "server_error", message: "The sync operation failed." },
+    });
+  }
+}
+
+function jsonResponse(status: number, payload: unknown): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8" },
+  });
+}
+
+async function sendNodeResponse(res: any, response: Response): Promise<void> {
+  res.statusCode = response.status;
+  response.headers.forEach((value, name) => res.setHeader?.(name, value));
+  res.end(Buffer.from(await response.arrayBuffer()));
 }
 
 async function runMiddleware(
@@ -232,21 +319,6 @@ async function resolveSyncClient(
 async function buildOrm(schema: FarmSchema, client: unknown): Promise<SyncOrmClient> {
   const { createIntegrationOrm } = await import("@farm.js/core");
   return (await createIntegrationOrm({ schema, client })) as unknown as SyncOrmClient;
-}
-
-/**
- * Write a JSON response using the Node primitives every Farm runtime provides.
- * The richer `res.status().json()` helpers are not present on every path.
- */
-function sendJson(res: any, status: number, payload: unknown): void {
-  if (typeof res.writeHead === "function") {
-    res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify(payload));
-    return;
-  }
-  res.statusCode = status;
-  res.setHeader?.("content-type", "application/json; charset=utf-8");
-  res.end(JSON.stringify(payload));
 }
 
 /** True when every exposed model is already reachable with the methods sync calls. */
