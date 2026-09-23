@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import {
   createIntegrationOrm,
+  declareSchemaTables,
   defineIntegration,
   integrationRoute,
   type FarmIntegration,
@@ -2854,8 +2855,8 @@ function getBillingMeter(
   return meter ?? null;
 }
 
-function hasConfiguredStorageRuntimeClient(context: FarmIntegrationHandlerContext): boolean {
-  const storage = (context.config as { storage?: unknown }).storage;
+function hasConfiguredStorageRuntimeClient(config: { storage?: unknown }): boolean {
+  const storage = config.storage;
   return (
     !!storage &&
     typeof storage === "object" &&
@@ -2864,14 +2865,15 @@ function hasConfiguredStorageRuntimeClient(context: FarmIntegrationHandlerContex
   );
 }
 
-async function resolveConfiguredStorageRuntimeClient(
-  context: FarmIntegrationHandlerContext,
-): Promise<unknown | undefined> {
-  if (!hasConfiguredStorageRuntimeClient(context)) {
+async function resolveConfiguredStorageRuntimeClient(config: {
+  storage?: unknown;
+}): Promise<unknown | undefined> {
+  // The guard is what establishes the shape, so narrowing happens after it.
+  if (!hasConfiguredStorageRuntimeClient(config)) {
     return undefined;
   }
 
-  const storage = (context.config as { storage?: { client?: unknown } }).storage;
+  const storage = config.storage as { client?: unknown };
   const client = storage?.client;
   return typeof client === "function"
     ? await (client as () => unknown | Promise<unknown>)()
@@ -2891,7 +2893,7 @@ function createBillingHookTools(
     stripe,
     storage: {
       getClient() {
-        clientPromise ??= resolveConfiguredStorageRuntimeClient(context);
+        clientPromise ??= resolveConfiguredStorageRuntimeClient(context.config);
         return clientPromise;
       },
       getOrm() {
@@ -2909,7 +2911,7 @@ function resolveConfiguredBillingStorage(
   context: FarmIntegrationHandlerContext,
   tools: StripeBillingHookTools,
 ): StripeBillingStorageAdapter | undefined {
-  if (!hasConfiguredStorageRuntimeClient(context)) {
+  if (!hasConfiguredStorageRuntimeClient(context.config)) {
     return undefined;
   }
 
@@ -3643,7 +3645,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
     }),
   );
 
-  return defineIntegration({
+  const integration = defineIntegration({
     category: "payment",
     type: "stripe",
     instance: {
@@ -5455,5 +5457,14 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
       ),
       ...webhookRoutes,
     ],
+  });
+
+  // Declared so `farm stripe migrate` can create the billing tables, and
+  // `farm generate --orm` can include them in schema artifacts. The connection
+  // lives in the app's `storage.client`, not in this integration's options.
+  return declareSchemaTables(integration, {
+    name: "stripe",
+    schema: integrationSchema,
+    resolveClient: (config) => resolveConfiguredStorageRuntimeClient(config),
   });
 }
