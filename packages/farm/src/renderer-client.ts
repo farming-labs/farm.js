@@ -27,6 +27,8 @@ import {
   subscribeFarmI18n,
 } from "./i18n/client-runtime";
 import type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i18n/types";
+
+export type { FarmI18nClientSnapshot, FarmI18nLocale, FarmTranslator } from "./i18n/types";
 import {
   applyFarmBasePath,
   getFarmBasePath,

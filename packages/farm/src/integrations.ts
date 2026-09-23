@@ -11,6 +11,21 @@ import type {
   FarmSchemaReference,
 } from "./schema";
 
+// Keep the schema types available from the integrations entrypoint as well.
+// Integration declarations reference these types, and exporting them here
+// keeps those declarations nameable for consumers that import integration
+// helpers directly.
+export type {
+  FarmSchema,
+  FarmSchemaConstraint,
+  FarmSchemaField,
+  FarmSchemaFieldType,
+  FarmSchemaModel,
+  FarmSchemaModelExtension,
+  FarmSchemaModelOverride,
+  FarmSchemaReference,
+} from "./schema";
+
 // Origin validation for integration auth routes is part of the integration
 // contract, so it is re-exported here alongside defineIntegration rather than
 // only from the package root.
