@@ -1994,6 +1994,12 @@ function keyedRowIdentity(key: React.Key): string {
   return String(key);
 }
 
+function keyedRowInstancesByKey(
+  instances: readonly CompilerKeyedRowInstance[],
+): Map<string, CompilerKeyedRowInstance> {
+  return new Map(instances.map((instance) => [instance.key, instance]));
+}
+
 function keyedIdentityTargetSnapshot(value: unknown): CompilerKeyedIdentityTargetSnapshot {
   const kind = typeof value;
   return value === null ||
@@ -4600,10 +4606,7 @@ function reconcileCompilerKeyedArrayRollingWindow(
     for (const instance of incoming) fragment.append(instance.element);
     root.append(fragment);
   }
-  const nextInstances = new Map(
-    [...survivors, ...incoming].map((instance) => [instance.key, instance]),
-  );
-  return nextInstances;
+  return keyedRowInstancesByKey([...survivors, ...incoming]);
 }
 
 function reconcileCompilerKeyedArrayPosition(
@@ -6699,9 +6702,7 @@ function createKeyedRangesBlockComponent(
         }
         anchor = instance.element;
       }
-      this.rangeInstances[rangeIndex] = new Map(
-        nextInstances.map((instance) => [instance.key, instance]),
-      );
+      this.rangeInstances[rangeIndex] = keyedRowInstancesByKey(nextInstances);
     }
 
     private reconcile(afterCommit?: () => void): void {
