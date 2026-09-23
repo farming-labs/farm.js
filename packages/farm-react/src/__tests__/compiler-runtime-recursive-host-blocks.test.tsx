@@ -46,6 +46,15 @@ function host(
   return { kind: "element", tag, attributes, styles: [], children };
 }
 
+function LocalFallbackCounter() {
+  const [count, setCount] = useState(0);
+  return (
+    <button type="button" onClick={() => setCount((value) => value + 1)}>
+      Local: {count}
+    </button>
+  );
+}
+
 function click(container: Element, action: string): void {
   const button = container.querySelector<HTMLButtonElement>(`[data-action="${action}"]`);
   if (!button) throw new Error(`Missing action: ${action}`);
@@ -754,22 +763,25 @@ describe("compiled recursive host-block runtime", () => {
     (["HostConditional", "ConditionalRanges"] as const).flatMap((kind) =>
       (["static", "hybrid"] as const).flatMap((reactivity) =>
         (["outer", "nested"] as const).flatMap((updates) =>
-          (["keyed-ranges", "mixed-ranges"] as const).map((nestedKind) => ({
-            kind,
-            reactivity,
-            updates,
-            nestedKind,
-          })),
+          (["keyed-ranges", "mixed-ranges"] as const).flatMap((nestedKind) =>
+            (["mount", "hydrate"] as const).map((lifecycle) => ({
+              kind,
+              lifecycle,
+              reactivity,
+              updates,
+              nestedKind,
+            })),
+          ),
         ),
       ),
     ),
   )(
-    "keeps $kind fallback live after duplicate keys ($reactivity, $updates, $nestedKind)",
-    async ({ kind, reactivity, updates, nestedKind }) => {
+    "preserves safe $kind nested fallback state ($reactivity, $updates, $nestedKind, $lifecycle)",
+    async ({ kind, lifecycle, reactivity, updates, nestedKind }) => {
       let setItems: ((next: unknown) => void) | undefined;
       let ownerRenders = 0;
-      const Panel = createCompiledComponent({
-        displayName: "RecursiveDuplicateKeys",
+      const Panel = createCompiledComponent<{ prefix: string }>({
+        displayName: "RecursiveFallbackState",
         reactivity,
         initialize: () => [
           true,
@@ -778,7 +790,7 @@ describe("compiled recursive host-block runtime", () => {
             { id: "b", label: "Beta" },
           ],
         ],
-        render(_props: Record<string, never>, state, blocks) {
+        render(props, state, blocks) {
           ownerRenders += 1;
           setItems = state[1].set;
           const items = () => state[1].get() as Item[];
@@ -819,11 +831,20 @@ describe("compiled recursive host-block runtime", () => {
             }),
             bindings: [],
           };
-          const props = {
+          const blockProps = {
             id: 0,
             render: () => (
-              <div>
-                <section>
+              <div data-surface="recursive-fallback" data-prefix={props.prefix}>
+                <section data-state>
+                  <aside>
+                    <LocalFallbackCounter />
+                    <input aria-label="Text" defaultValue="draft" />
+                    <textarea aria-label="Note" defaultValue="draft" />
+                    <select aria-label="Choice" defaultValue="a">
+                      <option value="a">A</option>
+                      <option value="b">B</option>
+                    </select>
+                  </aside>
                   <ul>
                     {items().map((item) => (
                       <li key={item.id}>{item.label}</li>
@@ -837,9 +858,9 @@ describe("compiled recursive host-block runtime", () => {
           return (
             <main>
               {kind === "HostConditional"
-                ? React.createElement(blocks.HostConditional, { ...props, ...condition })
+                ? React.createElement(blocks.HostConditional, { ...blockProps, ...condition })
                 : React.createElement(blocks.ConditionalRanges, {
-                    ...props,
+                    ...blockProps,
                     ranges: [condition],
                     trailing: 0,
                   })}
@@ -852,33 +873,340 @@ describe("compiled recursive host-block runtime", () => {
         ],
       });
 
+      function Parent() {
+        const [prefix, setPrefix] = useState("before");
+        return (
+          <>
+            <button data-parent-prefix type="button" onClick={() => setPrefix("after")} />
+            <Panel prefix={prefix} />
+          </>
+        );
+      }
+
       const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
       const container = document.createElement("div");
       document.body.append(container);
-      const root = createRoot(container);
+      const tree = (
+        <StrictMode>
+          <Parent />
+        </StrictMode>
+      );
+      if (lifecycle === "hydrate") container.innerHTML = renderToString(tree);
+      const recoverable = vi.fn();
+      const root =
+        lifecycle === "hydrate"
+          ? hydrateRoot(container, tree, { onRecoverableError: recoverable })
+          : createRoot(container);
       roots.push(root);
-      await act(async () => root.render(<Panel />));
-      const rendersAfterMount = ownerRenders;
       await act(async () => {
+        if (lifecycle === "mount") root.render(tree);
+        await flushCompilerUpdates();
+      });
+      expect(recoverable).not.toHaveBeenCalled();
+      const surface = container.querySelector<HTMLElement>("[data-surface='recursive-fallback']")!;
+      const input = container.querySelector<HTMLInputElement>("input")!;
+      const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
+      const select = container.querySelector<HTMLSelectElement>("select")!;
+      await act(async () => {
+        surface.querySelector("button")!.click();
+      });
+      input.value = "typed text";
+      textarea.value = "typed note";
+      select.value = "b";
+      input.focus();
+      input.setSelectionRange(1, 4, "backward");
+
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>("[data-parent-prefix]")?.click();
         setItems?.([
-          { id: "a", label: "First" },
-          { id: "a", label: "Second" },
+          { id: "b", label: "Beta renamed" },
+          { id: "a", label: "Alpha renamed" },
         ]);
         await flushCompilerUpdates();
       });
+      expect(container.querySelector("[data-surface='recursive-fallback']")).toBe(surface);
+      expect(container.querySelector("input")).toBe(input);
+      expect(container.querySelector("textarea")).toBe(textarea);
+      expect(container.querySelector("select")).toBe(select);
+      expect(input.value).toBe("typed text");
+      expect(textarea.value).toBe("typed note");
+      expect(select.value).toBe("b");
+      expect(surface.querySelector("button")?.textContent).toBe("Local: 1");
+      expect(document.activeElement).toBe(input);
+      expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([
+        1,
+        4,
+        "backward",
+      ]);
+      expect(surface.dataset.prefix).toBe("after");
+      expect([...surface.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
+        "Beta renamed",
+        "Alpha renamed",
+      ]);
+      const rendersAfterParentUpdate = ownerRenders;
+
+      await act(async () => {
+        setItems?.([
+          { id: "duplicate", label: "First" },
+          { id: "duplicate", label: "Second" },
+        ]);
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector("input")).not.toBe(input);
+      expect(container.querySelector("[data-state] button")?.textContent).toBe("Local: 0");
       expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
         "First",
         "Second",
       ]);
 
       await act(async () => {
-        setItems?.([{ id: "c", label: "Recovered" }]);
+        setItems?.([
+          { id: "a", label: "Alpha recovered" },
+          { id: "b", label: "Beta recovered" },
+        ]);
         await flushCompilerUpdates();
       });
+      const recoveredInput = container.querySelector<HTMLInputElement>("input")!;
+      recoveredInput.value = "recovered";
+      await act(async () =>
+        container.querySelector<HTMLButtonElement>("[data-state] button")?.click(),
+      );
+
+      await act(async () => {
+        setItems?.([
+          { id: "b", label: "Beta final" },
+          { id: "a", label: "Alpha final" },
+        ]);
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector("input")).toBe(recoveredInput);
+      expect(recoveredInput.value).toBe("recovered");
+      expect(container.querySelector("[data-state] button")?.textContent).toBe("Local: 1");
       expect([...container.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
-        "Recovered",
+        "Beta final",
+        "Alpha final",
       ]);
-      expect(ownerRenders).toBe(rendersAfterMount);
+      expect(ownerRenders).toBe(rendersAfterParentUpdate);
+      consoleError.mockRestore();
+    },
+  );
+
+  it.each(["keyed-ranges", "mixed-ranges"] as const)(
+    "checks every nested keyed row before preserving %s fallback state",
+    async (nestedKind) => {
+      interface Group {
+        id: string;
+        items: Item[];
+      }
+
+      let setGroups: ((next: unknown) => void) | undefined;
+      const Panel = createCompiledComponent({
+        displayName: "RecursivePerRowFallbackState",
+        initialize: () => [
+          true,
+          [
+            {
+              id: "first",
+              items: [
+                { id: "a", label: "Alpha" },
+                { id: "b", label: "Beta" },
+              ],
+            },
+            {
+              id: "second",
+              items: [
+                { id: "x", label: "X-ray" },
+                { id: "y", label: "Yankee" },
+              ],
+            },
+          ] satisfies Group[],
+        ],
+        render(_props: Record<string, never>, state, blocks) {
+          const groups = () => state[1].get() as Group[];
+          setGroups = state[1].set;
+          const groupRange = {
+            before: 0,
+            items: groups,
+            rowKey: (group: unknown) => (group as Group).id,
+            create: (groupValue: unknown) => {
+              const group = groupValue as Group;
+              const itemRange = {
+                before: 0,
+                items: () => group.items,
+                rowKey: (item: unknown) => {
+                  const key = (item as Item).id;
+                  if (key === "throw-key") throw new Error("unreadable nested key");
+                  return key;
+                },
+                create: (item: unknown) => host("li", [(item as Item).label]),
+                bindings: [
+                  {
+                    kind: "text" as const,
+                    path: [],
+                    read: (item: unknown) => (item as Item).label,
+                  },
+                ],
+              };
+              const block: NonNullable<CompilerHostElement["block"]> =
+                nestedKind === "keyed-ranges"
+                  ? {
+                      kind: "keyed-ranges",
+                      id: 2,
+                      ranges: [itemRange],
+                      trailing: 0,
+                    }
+                  : {
+                      kind: "mixed-ranges",
+                      id: 2,
+                      ranges: [{ kind: "keyed", ...itemRange }],
+                      trailing: 0,
+                    };
+              return host("article", [
+                host("h2", [group.id]),
+                {
+                  ...host(
+                    "ul",
+                    group.items.map((item) => host("li", [item.label])),
+                  ),
+                  block,
+                },
+              ]);
+            },
+            bindings: [],
+          };
+          const branch: CompilerHostConditionalBranch = {
+            create: () => ({
+              ...host("section", [
+                {
+                  ...host("div"),
+                  block: {
+                    kind: "keyed-ranges",
+                    id: 1,
+                    ranges: [groupRange],
+                    trailing: 0,
+                    staticChildrenOnly: true,
+                  },
+                },
+              ]),
+            }),
+            bindings: [],
+          };
+          return (
+            <main>
+              <blocks.HostConditional
+                id={0}
+                render={() => (
+                  <div>
+                    <section>
+                      <aside>
+                        <input aria-label="Nested row draft" defaultValue="draft" />
+                      </aside>
+                      <div>
+                        {groups().map((group) => (
+                          <article key={group.id}>
+                            <h2>{group.id}</h2>
+                            <ul>
+                              {group.items.map((item) => (
+                                <li key={item.id}>{item.label}</li>
+                              ))}
+                            </ul>
+                          </article>
+                        ))}
+                      </div>
+                    </section>
+                  </div>
+                )}
+                test={() => state[0].get()}
+                truthy={branch}
+              />
+            </main>
+          );
+        },
+        bindings: [
+          { kind: "block", id: 0, dependencies: [0] },
+          { kind: "block", id: 1, parent: 0, dependencies: [] },
+          { kind: "block", id: 2, parent: 1, dependencies: [1] },
+        ],
+      });
+
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      roots.push(root);
+      await act(async () => {
+        root.render(
+          <StrictMode>
+            <Panel />
+          </StrictMode>,
+        );
+        await flushCompilerUpdates();
+      });
+
+      const initialInput = container.querySelector<HTMLInputElement>(
+        "[aria-label='Nested row draft']",
+      )!;
+      initialInput.value = "typed";
+      await act(async () => {
+        setGroups?.([
+          { id: "first", items: [{ id: "a", label: "Alpha safe" }] },
+          {
+            id: "second",
+            items: [
+              { id: "y", label: "Yankee safe" },
+              { id: "x", label: "X-ray safe" },
+            ],
+          },
+        ] satisfies Group[]);
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector("[aria-label='Nested row draft']")).toBe(initialInput);
+      expect(initialInput.value).toBe("typed");
+
+      await act(async () => {
+        setGroups?.([
+          { id: "first", items: [{ id: "a", label: "Alpha" }] },
+          {
+            id: "second",
+            items: [
+              { id: "duplicate", label: "One" },
+              { id: "duplicate", label: "Two" },
+            ],
+          },
+        ] satisfies Group[]);
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector("[aria-label='Nested row draft']")).not.toBe(initialInput);
+
+      await act(async () => {
+        setGroups?.([
+          { id: "first", items: [{ id: "a", label: "Alpha" }] },
+          { id: "second", items: [{ id: "x", label: "Recovered" }] },
+        ] satisfies Group[]);
+        await flushCompilerUpdates();
+      });
+      const recoveredInput = container.querySelector<HTMLInputElement>(
+        "[aria-label='Nested row draft']",
+      )!;
+      recoveredInput.value = "recovered";
+      await act(async () => {
+        setGroups?.([
+          { id: "first", items: [{ id: "a", label: "Alpha final" }] },
+          { id: "second", items: [{ id: "x", label: "Recovered final" }] },
+        ] satisfies Group[]);
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector("[aria-label='Nested row draft']")).toBe(recoveredInput);
+      expect(recoveredInput.value).toBe("recovered");
+
+      await act(async () => {
+        setGroups?.([
+          { id: "first", items: [{ id: "a", label: "Alpha" }] },
+          { id: "second", items: [{ id: "throw-key", label: "Unreadable" }] },
+        ] satisfies Group[]);
+        await flushCompilerUpdates();
+      });
+      expect(container.querySelector("[aria-label='Nested row draft']")).not.toBe(recoveredInput);
       consoleError.mockRestore();
     },
   );

@@ -2225,8 +2225,10 @@ from reusing an identity made ambiguous by the preceding duplicate keys.
 Mixed conditional-and-keyed range containers use the same recovery rule for their direct keyed
 ranges. Once React owns the fallback subtree, branch changes and uniquely keyed list updates keep
 unaffected controls, focus, selection, child state, and DOM identity. Duplicate or unreadable keys
-still reset the subtree, followed by one recovery reset when the keys become safe again. Nested
-keyed fallback boundaries remain conservative and continue to use complete resets.
+still reset the subtree, followed by one recovery reset when the keys become safe again. The same
+rule applies recursively to keyed ranges nested inside conditional branches, mixed ranges, and
+keyed rows: Farm inspects every live nested row before reuse, while any duplicate, unreadable key,
+or failed descriptor read keeps the complete React reset.
 
 For example, changing `[A, B, C, D]` to `[D, A, B, C]` keeps `[A, B, C]` as the LIS and moves only
 `D`. Reversing four rows needs three moves because the LIS has length one. Insertions and removals

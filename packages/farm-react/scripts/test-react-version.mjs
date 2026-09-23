@@ -534,6 +534,14 @@ const testSource = String.raw`
           const context = kind + "/" + reactivity + "/" + lifecycle + "/" + updates;
           const host = (tag, children = []) => ({ kind: "element", tag, attributes: [], styles: [], children });
           let update, owners = 0;
+          function NestedRecoveryCounter() {
+            const [count, setCount] = React.useState(0);
+            return React.createElement(
+              "button",
+              { "data-nested-local": true, onClick: () => setCount((value) => value + 1) },
+              "Local: " + count,
+            );
+          }
           const Panel = createCompiledComponent({
             displayName: "CompatibilityNestedRecovery",
             reactivity,
@@ -557,6 +565,10 @@ const testSource = String.raw`
               return React.createElement("main", null, React.createElement(blocks[kind], {
                 id: 0,
                 render: () => React.createElement("div", null, React.createElement("section", null,
+                  React.createElement("aside", null,
+                    React.createElement(NestedRecoveryCounter),
+                    React.createElement("input", { "aria-label": "Nested draft", defaultValue: "draft" }),
+                  ),
                   React.createElement("ul", null, items().map((item) => React.createElement("li", { key: item.id }, item.label))))),
                 ...(kind === "HostConditional" ? condition : { ranges: [condition], trailing: 0 }),
               }));
@@ -578,16 +590,26 @@ const testSource = String.raw`
               if (lifecycle === "mount") root.render(tree);
             });
             const initialOwners = owners;
-            for (const items of [
-              [{ id: "a", label: "First" }, { id: "a", label: "Second" }],
-              [{ id: "c", label: "Recovered" }],
-              [],
-              [{ id: "d", label: "Fresh" }],
-            ]) {
-              await React.act(async () => update(items));
-              assert.deepEqual([...target.querySelectorAll("li")].map((row) => row.textContent), items.map((item) => item.label), context);
-              assert.equal(owners, initialOwners, context);
-            }
+            const initialInput = target.querySelector("[aria-label='Nested draft']");
+            await React.act(async () => target.querySelector("[data-nested-local]").click());
+            initialInput.value = "typed";
+            await React.act(async () => update([{ id: "b", label: "Beta safe" }, { id: "a", label: "Alpha safe" }]));
+            assert.equal(target.querySelector("[aria-label='Nested draft']"), initialInput, context);
+            assert.equal(initialInput.value, "typed", context);
+            assert.equal(target.querySelector("[data-nested-local]").textContent, "Local: 1", context);
+
+            await React.act(async () => update([{ id: "duplicate", label: "First" }, { id: "duplicate", label: "Second" }]));
+            assert.notEqual(target.querySelector("[aria-label='Nested draft']"), initialInput, context);
+            await React.act(async () => update([{ id: "c", label: "Recovered" }]));
+            const recoveredInput = target.querySelector("[aria-label='Nested draft']");
+            recoveredInput.value = "recovered";
+            await React.act(async () => target.querySelector("[data-nested-local]").click());
+            await React.act(async () => update([{ id: "d", label: "Fresh" }]));
+            assert.equal(target.querySelector("[aria-label='Nested draft']"), recoveredInput, context);
+            assert.equal(recoveredInput.value, "recovered", context);
+            assert.equal(target.querySelector("[data-nested-local]").textContent, "Local: 1", context);
+            assert.deepEqual([...target.querySelectorAll("li")].map((row) => row.textContent), ["Fresh"], context);
+            assert.equal(owners, initialOwners, context);
             assert.deepEqual(errors, [], context);
           } catch (error) {
             nestedRecoveryFailures.push({ context, message: error.message });
