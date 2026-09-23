@@ -1885,7 +1885,7 @@ export default function PageOwner() { return <section data-page-owner><LiveCount
     }
   }, 180_000);
 
-  it("retries an incomplete Rolldown client bundle after the parallel SSR build", async () => {
+  it("recovers an incomplete Rolldown client bundle after the parallel SSR build", async () => {
     const root = await createProductionFixture();
 
     try {
@@ -1918,7 +1918,7 @@ export default function Page() {
       const buildWithIncompleteFirstClient = (async (inlineConfig: any) => {
         if (!inlineConfig.build?.ssr) {
           clientBuildAttempts++;
-          if (clientBuildAttempts === 1) {
+          if (clientBuildAttempts <= 2) {
             const outputDir = path.resolve(inlineConfig.root, inlineConfig.build.outDir);
             await fs.mkdir(outputDir, { recursive: true });
             await fs.writeFile(path.join(outputDir, "farm-client.js"), "");
@@ -1940,6 +1940,8 @@ export default function Page() {
         productionVite: retryingProductionVite,
       });
 
+      // The second Rolldown attempt is deliberately incomplete too. The
+      // production build must recover through the compatibility Rollup path.
       expect(clientBuildAttempts).toBe(2);
       await expect(
         fs.readFile(path.join(root, ".farm", "client", "farm-client.js"), "utf8"),

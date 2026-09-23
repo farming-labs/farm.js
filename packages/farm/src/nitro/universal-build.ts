@@ -913,18 +913,42 @@ export async function buildUniversal(
       // traversing its entry graph. Preserve the fast parallel path, then
       // recover only that invalid result once the SSR graph is fully drained.
       logger.warn("Client bundle was incomplete; retrying after the SSR build...");
-      await buildClient(
-        productionVite,
-        config,
-        root,
-        srcDir,
-        clientOutputDir,
-        pageRoutes,
-        layoutRoutes,
-        routeSlots,
-        isolatedClientBoundaryModules,
-        hydrationPlanCache,
-      );
+      try {
+        await buildClient(
+          productionVite,
+          config,
+          root,
+          srcDir,
+          clientOutputDir,
+          pageRoutes,
+          layoutRoutes,
+          routeSlots,
+          isolatedClientBoundaryModules,
+          hydrationPlanCache,
+        );
+      } catch (retryError) {
+        if (!(retryError instanceof IncompleteClientBuildOutputError)) throw retryError;
+
+        // A second Rolldown pass can observe the same incomplete graph when a
+        // renderer or build plugin leaves process-global state behind. Keep
+        // the server/SSR bundle on the selected builder, but use Vite's
+        // compatibility Rollup path for the client rather than shipping a
+        // missing browser entry.
+        logger.warn("Client bundle remained incomplete; falling back to Rollup...");
+        const rollupVite = await loadFarmProductionVite("rollup");
+        await buildClient(
+          rollupVite,
+          config,
+          root,
+          srcDir,
+          clientOutputDir,
+          pageRoutes,
+          layoutRoutes,
+          routeSlots,
+          isolatedClientBoundaryModules,
+          hydrationPlanCache,
+        );
+      }
     }
 
     const ssrResult = ssrBuildResult.value;

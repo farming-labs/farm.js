@@ -93,6 +93,17 @@ describe.sequential("production Vite selection", () => {
     });
   });
 
+  it("allows a build recovery to select Rollup without changing the environment", async () => {
+    process.env.FARM_VITE_BUILDER = "rolldown";
+
+    await expect(loadFarmProductionVite("rollup")).resolves.toEqual({
+      build: viteMocks.rollupBuild,
+      createServer: viteMocks.rollupCreateServer,
+      loadEnv: viteMocks.rollupLoadEnv,
+      builder: "rollup",
+    });
+  });
+
   it("falls back to Rollup by default on an unsupported Node release", async () => {
     useNodeVersion("20.18.3");
     delete process.env.FARM_VITE_BUILDER;
