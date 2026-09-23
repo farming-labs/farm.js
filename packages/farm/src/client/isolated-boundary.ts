@@ -287,12 +287,21 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
 
         const controller = new AbortController();
         pending.set(container, controller);
+        const releasePending = () => {
+          if (pending.get(container) === controller) pending.delete(container);
+        };
+        // An aborted pass will never hydrate this container, so stop reserving it as
+        // soon as it aborts rather than when `scheduled` settles. A slow module import
+        // keeps the scheduled work pending long after the abort, and until it settles
+        // the next pass filters this boundary out and leaves it inert. `dispose` drops
+        // its reservations on abort for the same reason.
+        controller.signal.addEventListener("abort", releasePending, { once: true });
         const abort = () => controller.abort();
         if (signal?.aborted) abort();
         else signal?.addEventListener("abort", abort, { once: true });
         const cleanup = () => {
           signal?.removeEventListener("abort", abort);
-          if (pending.get(container) === controller) pending.delete(container);
+          releasePending();
         };
 
         let scheduled: Promise<unknown>;
@@ -346,6 +355,10 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
                 });
                 container.setAttribute("data-farm-hydrated", "true");
               } catch (error) {
+                // A module import that rejects after this pass was aborted must not
+                // restore server HTML over whatever owns the container now, and a
+                // failure `restore` already reported must not be reported twice.
+                if (controller.signal.aborted) return;
                 failRoot(container, reference, exportName, serverHTML, error);
                 controller.abort();
               }

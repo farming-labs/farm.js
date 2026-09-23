@@ -268,6 +268,66 @@ describe("isolated client boundary", () => {
     expect(runtime.rootCount()).toBe(0);
   });
 
+  it("rehydrates a boundary whose earlier pass was aborted while its module was still loading", async () => {
+    function Slow() {
+      return <button>Slow</button>;
+    }
+    const Boundary = createFarmIsolatedClientBoundary(
+      React,
+      Slow,
+      "/src/slow.tsx",
+      "default",
+      "load",
+    );
+    document.body.innerHTML = renderToString(<Boundary />);
+    const container = document.querySelector("farm-client-boundary")!;
+
+    let imports = 0;
+    let enteredFirstImport!: () => void;
+    let releaseFirstImport!: () => void;
+    const firstImportEntered = new Promise<void>((resolve) => {
+      enteredFirstImport = resolve;
+    });
+    const firstImportReleased = new Promise<void>((resolve) => {
+      releaseFirstImport = resolve;
+    });
+    const runtime = createFarmIsolatedHydrationRuntime({
+      ReactRuntime: React,
+      hydrateRoot,
+      load: async () => {
+        imports += 1;
+        if (imports === 1) {
+          enteredFirstImport();
+          await firstImportReleased;
+        }
+        return { __farm_client_boundary_originals__: { default: Slow } };
+      },
+      schedule: async ({ hydrate }) => hydrate(),
+    });
+
+    // Navigation A starts hydrating, then navigation B aborts it mid-import.
+    const aborted = new AbortController();
+    const abortedPass = runtime.hydrate(document, aborted.signal);
+    await firstImportEntered;
+    aborted.abort();
+
+    // Navigation B's own pass must not treat the dead reservation as in-flight work.
+    await act(async () => {
+      await runtime.hydrate(document);
+    });
+    expect(imports).toBe(2);
+    expect(container.getAttribute("data-farm-hydrated")).toBe("true");
+    expect(runtime.rootCount()).toBe(1);
+
+    // The aborted import settling afterwards must not restore server HTML over it.
+    releaseFirstImport();
+    await act(async () => {
+      await abortedPass;
+    });
+    expect(container.getAttribute("data-farm-hydrated")).toBe("true");
+    expect(runtime.rootCount()).toBe(1);
+  });
+
   it("updates every live instance of a changed module without replacing sibling roots", async () => {
     function Before({ name }: { name: string }) {
       return <output data-version={name}>before:{name}</output>;
