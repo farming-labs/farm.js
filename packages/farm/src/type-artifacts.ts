@@ -16,6 +16,7 @@ import { getFarmAppDirectories, getFarmSourceRoots, type ResolvedFarmLayer } fro
 import { writeFileIfChanged } from "./write-file-if-changed";
 import type { FarmPlugin } from "./plugin";
 import { resolvePluginRoutes } from "./api/route";
+import { createSyncModelTypeDeclarations } from "./schema-model-types";
 
 export { generateFarmI18nTypes };
 
@@ -229,6 +230,11 @@ export async function generateFarmTypeArtifacts(
         outFile: options.i18nTypesOutFile,
       });
     }
+  }
+
+  if (shouldRefreshUnifiedTypes) {
+    const syncModelTypes = createSyncModelTypeDeclarations(options.plugins);
+    if (syncModelTypes) unifiedSections.push(syncModelTypes);
   }
 
   if (shouldRefreshUnifiedTypes) {
