@@ -202,6 +202,19 @@ function normalizeProps(element: FarmVueElement): {
   };
 }
 
+function withComponentChildren(props: Record<string, unknown>, children: unknown[]) {
+  if (children.length === 0) return props;
+  props.children = children.length === 1 ? children[0] : children;
+  return props;
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    ((typeof value === "object" && value !== null) || typeof value === "function") &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
+}
+
 function asVNodeChildren(children: unknown[]): VNodeChild {
   if (children.length === 0) return undefined;
   // React treats `false`, `true`, `null`, and `undefined` as children that do
@@ -241,6 +254,18 @@ export function materializeVueElement(value: unknown): VNodeChild {
 
   if ((typeof value.type !== "function" && typeof value.type !== "object") || !value.type) {
     throw new TypeError("FARMJS Vue renderer received an invalid component type.");
+  }
+
+  if (typeof value.type === "function") {
+    const rendered = (value.type as (props: Record<string, unknown>) => unknown)(
+      withComponentChildren(props, children),
+    );
+    if (isThenable(rendered)) {
+      throw new TypeError(
+        "FARMJS Vue renderer does not support async function components; use Vue Suspense or a synchronous component.",
+      );
+    }
+    return materializeVueElement(rendered);
   }
 
   const slots = children.length

@@ -79,6 +79,25 @@ describe("Vue renderer", () => {
     expect(html).toContain('<section class="layout"><p>Nested route</p></section>');
   });
 
+  it("materializes plain function components before handing them to Vue", async () => {
+    const Layout = ({ children }: { children?: unknown }) =>
+      createElement("section", { class: "function-layout" }, children);
+
+    const html = await renderToString(
+      createElement(Layout, { children: createElement("p", null, "Function route") }),
+    );
+
+    expect(html).toContain('<section class="function-layout"><p>Function route</p></section>');
+  });
+
+  it("reports async function components instead of rendering a promise", async () => {
+    const AsyncComponent = async () => createElement("p", null, "not supported");
+
+    await expect(renderToString(createElement(AsyncComponent, null))).rejects.toThrow(
+      "does not support async function components",
+    );
+  });
+
   it("reports a render error as a shell error", async () => {
     const Boom = defineComponent({
       setup: () => () => {
