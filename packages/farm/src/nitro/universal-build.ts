@@ -8739,6 +8739,7 @@ async function postProcessVercelOutput(
     outputDir,
     routeRuntimeManifest,
     fs,
+    config.basePath,
   );
 
   // Rebuild the routes around Farm's `__nitro` function while preserving the

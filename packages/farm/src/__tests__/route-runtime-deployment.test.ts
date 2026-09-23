@@ -268,6 +268,19 @@ describe("Vercel route runtime output", () => {
     await expect(readFunctionConfig(outputDir, "__nitro")).resolves.not.toHaveProperty(
       "maxDuration",
     );
+
+    const basePathRoutes = await createFarmVercelRouteRuntimeFunctions(
+      outputDir,
+      manifest,
+      fsPromises,
+      "/app",
+    );
+    expect(basePathRoutes).toEqual([
+      expect.objectContaining({ src: "/app/api/eu" }),
+      { src: "/app/products/([^/]+)", dest: "/__nitro" },
+      expect.objectContaining({ src: "/app/reports" }),
+      expect.objectContaining({ src: "/app/admin(?:/(.*))?" }),
+    ]);
   });
 
   it("converts static, dynamic, and catch-all Farm patterns", () => {
@@ -276,6 +289,14 @@ describe("Vercel route runtime output", () => {
     expect(farmRoutePatternToVercelSource("/docs/[...slug]")).toBe("/docs/(.+)");
     expect(farmRoutePatternToVercelSource("/docs/[[...slug]]")).toBe("/docs(?:/(.*))?");
     expect(farmRoutePatternToVercelSource("/api/**")).toBe("/api(?:/(.*))?");
+  });
+
+  it("prefixes route-specific functions with the configured app base path", () => {
+    expect(farmRoutePatternToVercelSource("/reports", "/app")).toBe("/app/reports");
+    expect(farmRoutePatternToVercelSource("/", "/app")).toBe("/app");
+    expect(farmRoutePatternToVercelSource("/docs/[[...slug]]", "/app/")).toBe(
+      "/app/docs(?:/(.*))?",
+    );
   });
 });
 
