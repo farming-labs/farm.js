@@ -19,6 +19,7 @@ export async function createFarmVercelRouteRuntimeFunctions(
   outputDir: string,
   manifest: FarmRouteRuntimeManifest,
   fs: FileSystemPromises,
+  basePath = "/",
 ): Promise<FarmVercelRuntimeRoute[]> {
   const dynamicRoutes = manifest.routes.filter(
     (route) => route.rendering === "dynamic" && route.runtime !== "edge",
@@ -69,7 +70,7 @@ export async function createFarmVercelRouteRuntimeFunctions(
   const routes: FarmVercelRuntimeRoute[] = [];
   const seenSources = new Set<string>();
   for (const route of configuredRoutes) {
-    const src = farmRoutePatternToVercelSource(route.pattern);
+    const src = farmRoutePatternToVercelSource(route.pattern, basePath);
     if (seenSources.has(src)) continue;
     seenSources.add(src);
     const key = createFarmRouteRuntimeKey({
@@ -95,9 +96,10 @@ export async function createFarmVercelRouteRuntimeFunctions(
   return routes;
 }
 
-export function farmRoutePatternToVercelSource(pattern: string): string {
+export function farmRoutePatternToVercelSource(pattern: string, basePath = "/"): string {
   const normalized = normalizePattern(pattern);
-  if (normalized === "/") return "/";
+  const normalizedBasePath = normalizeBasePath(basePath);
+  if (normalized === "/") return normalizedBasePath || "/";
 
   let source = "";
   for (const segment of normalized.split("/").filter(Boolean)) {
@@ -112,7 +114,8 @@ export function farmRoutePatternToVercelSource(pattern: string): string {
     }
   }
 
-  return source || "/";
+  if (!normalizedBasePath) return source || "/";
+  return source === "/" ? normalizedBasePath : `${normalizedBasePath}${source}`;
 }
 
 async function configureVercelFunction(
@@ -163,6 +166,13 @@ function normalizePattern(value: string): string {
   const trimmed = value.trim();
   const withSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
   return withSlash.length > 1 ? withSlash.replace(/\/+$/, "") : withSlash;
+}
+
+function normalizeBasePath(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "/") return "";
+  const withSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return withSlash.replace(/\/+$/g, "") || "/";
 }
 
 function escapeRegExp(value: string): string {
