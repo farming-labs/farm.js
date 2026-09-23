@@ -11,8 +11,8 @@ describe("Farm Nitro output layout", () => {
     (preset) => {
       expect(resolveFarmNitroOutputConfig(preset, "/tmp/farm-output")).toEqual({
         dir: "/tmp/farm-output",
-        serverDir: "/tmp/farm-output/server",
-        publicDir: "/tmp/farm-output/public",
+        serverDir: path.join("/tmp/farm-output", "server"),
+        publicDir: path.join("/tmp/farm-output", "public"),
       });
     },
   );
