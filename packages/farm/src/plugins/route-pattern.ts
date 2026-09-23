@@ -41,9 +41,31 @@ export function resolveConfigRoutePathname(
   pathname: string,
   i18n?: ResolvedFarmI18nConfig,
 ): { pathname: string; locale?: string } {
-  if (!i18n?.enabled) return { pathname: normalizeConfigRoutePathname(pathname) };
-  const match = resolveFarmLocalePath(pathname, i18n);
-  return { pathname: normalizeConfigRoutePathname(match.pathname), locale: match.locale };
+  const localizedPathname = i18n?.enabled ? resolveFarmLocalePath(pathname, i18n) : { pathname };
+  return {
+    pathname: normalizeConfigRoutePathname(decodeConfigRoutePathname(localizedPathname.pathname)),
+    ...(i18n?.enabled ? { locale: localizedPathname.locale } : {}),
+  };
+}
+
+/**
+ * Decode request segments without turning an encoded slash into a new segment.
+ * The production matcher performs the same operation after splitting the URL,
+ * so config rules must see identical values in development and production.
+ * Malformed escape sequences remain untouched and are rejected by the pattern
+ * comparison instead of making the dev server throw while handling a request.
+ */
+function decodeConfigRoutePathname(pathname: string): string {
+  return pathname
+    .split("/")
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    })
+    .join("/");
 }
 
 /**
