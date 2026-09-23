@@ -667,12 +667,13 @@ describe("generateRuntimePathMatcherSource", () => {
     // Catch-all segments went through a bare decodeURIComponent, so a
     // malformed percent-encoded path threw URIError out of route matching in
     // deployed apps (#502).
-    expect(matcher).toContain("map(decodeRouteSegment)");
+    expect(matcher).toContain("splitRuntimePath(pathname).map(decodeRouteSegment)");
     expect(matcher).not.toContain("map(decodeURIComponent)");
     // The only decodeURIComponent left is the one inside the guard's try.
     expect(matcher.split("decodeURIComponent(").length - 1).toBe(1);
     expect(matcher).toContain("function decodeRouteSegment(segment)");
-    expect(matcher).toContain("segment !== decodeRouteSegment(pathnameSegment)");
+    expect(matcher).toContain("segment !== pathnameSegment");
+    expect(matcher).toContain('matched[name] = consumedSegments.join("/")');
 
     const matchRuntimePathPattern = new Function(
       matcher + "; return matchRuntimePathPattern;",
@@ -713,6 +714,25 @@ describe("generateRuntimePathMatcherSource", () => {
     const stateUpperBound =
       pattern.split("/").filter(Boolean).length * pathname.split("/").filter(Boolean).length;
     expect(runtime.getUncachedStateVisits()).toBeLessThanOrEqual(stateUpperBound);
+  });
+
+  it("decodes each request segment once before backtracking", () => {
+    const instrumented =
+      "let decodeCalls = 0;\n" +
+      matcher.replace(
+        "function decodeRouteSegment(segment) {",
+        "function decodeRouteSegment(segment) { decodeCalls += 1;",
+      );
+    const runtime = new Function(
+      instrumented + "; return { matchRuntimePathPattern, getDecodeCalls: () => decodeCalls };",
+    )() as {
+      matchRuntimePathPattern: (pattern: string, pathname: string) => Record<string, string> | null;
+      getDecodeCalls: () => number;
+    };
+    const pathname = `/docs/${Array.from({ length: 40 }, (_, index) => `part-${index}`).join("/")}`;
+
+    expect(runtime.matchRuntimePathPattern("/docs/:slug*/missing", pathname)).toBeNull();
+    expect(runtime.getDecodeCalls()).toBe(pathname.split("/").filter(Boolean).length);
   });
 });
 
