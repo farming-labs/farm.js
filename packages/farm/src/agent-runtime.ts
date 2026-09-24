@@ -556,10 +556,12 @@ function createProxyRequestHeaders(input: Headers, incomingUrl: URL): Headers {
   // Node fetch supplies its own compression preference when this header is
   // absent, then exposes a decoded body with the original encoding headers.
   headers.set("accept-encoding", "identity");
-  if (!headers.has("x-forwarded-host")) headers.set("x-forwarded-host", incomingUrl.host);
-  if (!headers.has("x-forwarded-proto")) {
-    headers.set("x-forwarded-proto", incomingUrl.protocol.replace(":", ""));
-  }
+  // incomingUrl is the framework's trusted resolution of this request - a
+  // legitimately proxied value is already folded into it when trustProxy is
+  // configured. Preserving client-supplied forwarded headers here would hand
+  // the upstream attacker-controlled authority, so they are always replaced.
+  headers.set("x-forwarded-host", incomingUrl.host);
+  headers.set("x-forwarded-proto", incomingUrl.protocol.replace(":", ""));
   return headers;
 }
 

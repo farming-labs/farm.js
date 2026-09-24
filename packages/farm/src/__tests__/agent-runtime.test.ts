@@ -186,6 +186,34 @@ describe("agent runtime proxy", () => {
     expect(await response.text()).toBe("POST:hello:done");
   });
 
+  it("replaces client-supplied forwarded headers with the trusted request authority", async () => {
+    // A spoofed X-Forwarded-Host must never reach the upstream: the rest of
+    // the framework gates forwarded-authority trust behind trustProxy, and a
+    // proxied value that IS trusted is already folded into the request URL.
+    const server = createServer((request, response) => {
+      response.writeHead(200, {
+        "x-upstream-forwarded-host": request.headers["x-forwarded-host"] || "",
+        "x-upstream-forwarded-proto": request.headers["x-forwarded-proto"] || "",
+      });
+      response.end("ok");
+    });
+    const origin = await listen(server);
+    cleanups.push(() => close(server));
+
+    const response = await proxyAgentRuntimeRequest(
+      new Request("http://farm.test/agents/demo", {
+        headers: {
+          "x-forwarded-host": "evil.example",
+          "x-forwarded-proto": "https",
+        },
+      }),
+      origin,
+    );
+
+    expect(response.headers.get("x-upstream-forwarded-host")).toBe("farm.test");
+    expect(response.headers.get("x-upstream-forwarded-proto")).toBe("http");
+  });
+
   it("does not forward stale compression metadata after fetch decodes the body", async () => {
     const payload = "decoded agent response";
     const compressed = gzipSync(payload);
