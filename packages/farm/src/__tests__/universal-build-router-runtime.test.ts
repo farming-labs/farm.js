@@ -837,3 +837,19 @@ describe("generateRedirectInterpolationSource", () => {
     });
   }
 });
+
+describe("toBakedMarkdownSourcePath", () => {
+  it("never bakes the build machine's absolute path into production output", async () => {
+    const { toBakedMarkdownSourcePath } = await import("../nitro/universal-build");
+    const path = await import("node:path");
+    const root = path.resolve("/home/runner/work/app");
+
+    expect(toBakedMarkdownSourcePath(root, path.join(root, "src", "app", "guide", "page.md"))).toBe(
+      "src/app/guide/page.md",
+    );
+    // Outside the root: disclose nothing beyond the filename.
+    expect(toBakedMarkdownSourcePath(root, path.resolve("/etc/secrets/page.md"))).toBe("page.md");
+    expect(toBakedMarkdownSourcePath(root, "src/app/page.md")).toBe("src/app/page.md");
+    expect(toBakedMarkdownSourcePath(root, undefined)).toBe("");
+  });
+});
