@@ -51,7 +51,7 @@ export function content<const TCollections extends ContentCollections>(
   // Writes need the live sources and schemas; the snapshot module carries
   // only data. Registered here so both dev and the production runtime (where
   // the config module is evaluated too) can reach them.
-  registerContentWriteRuntime(
+  const unregisterWriteRuntime = registerContentWriteRuntime(
     Object.fromEntries(
       Object.entries(options.collections).map(([name, definition]) => [
         name,
@@ -172,16 +172,32 @@ export function content<const TCollections extends ContentCollections>(
         server.httpServer?.once("close", () => server.watcher.off?.("all", onFile));
 
         // A successful write refreshes the snapshot immediately in development.
-        setContentAfterWrite(async () => {
-          const settled = (rebuildQueue = rebuildQueue.then(async () => {
-            if (!(await rebuild())) return;
-            const modules = server.moduleGraph.getModulesByFile?.(generatedFile);
-            for (const module of modules ?? []) server.moduleGraph.invalidateModule(module);
-            server.ws.send({ type: "full-reload" });
-          }));
+        // The stored chain must always settle: a rejected tail would swallow
+        // the next watcher rebuild entirely, so the error report lives inside
+        // the chain and the queue continues past it.
+        const disposeAfterWrite = setContentAfterWrite(async () => {
+          const settled = (rebuildQueue = rebuildQueue
+            .then(async () => {
+              if (!(await rebuild())) return;
+              const modules = server.moduleGraph.getModulesByFile?.(generatedFile);
+              for (const module of modules ?? []) server.moduleGraph.invalidateModule(module);
+              server.ws.send({ type: "full-reload" });
+            })
+            .catch((error) => {
+              const message = error instanceof Error ? error.message : String(error);
+              server.ws.send({
+                type: "error",
+                err: { message, stack: error instanceof Error ? error.stack : undefined },
+              });
+            }));
           await settled;
         });
-        server.httpServer?.once("close", () => setContentAfterWrite(undefined));
+        // Vite restart creates the replacement server before closing this one;
+        // the scoped disposers only clear registrations this server owns.
+        server.httpServer?.once("close", () => {
+          disposeAfterWrite();
+          unregisterWriteRuntime();
+        });
 
         // Remote sources have no file events; poll the ones that asked for it.
         // One timer at the smallest requested cadence keeps ordering simple,
@@ -192,17 +208,23 @@ export function content<const TCollections extends ContentCollections>(
           .map((candidate) => candidate.refreshInterval)
           .filter((value): value is number => typeof value === "number");
         if (intervals.length > 0) {
+          // A persistently failing remote fetch reports once per distinct
+          // message, not once per tick - the overlay is a signal, not a log.
+          let lastPollError: string | undefined;
           const timer = setInterval(
             () => {
               rebuildQueue = rebuildQueue
                 .then(async () => {
                   if (!(await rebuild())) return;
+                  lastPollError = undefined;
                   const modules = server.moduleGraph.getModulesByFile?.(generatedFile);
                   for (const module of modules ?? []) server.moduleGraph.invalidateModule(module);
                   server.ws.send({ type: "full-reload" });
                 })
                 .catch((error) => {
                   const message = error instanceof Error ? error.message : String(error);
+                  if (message === lastPollError) return;
+                  lastPollError = message;
                   server.ws.send({
                     type: "error",
                     err: { message, stack: error instanceof Error ? error.stack : undefined },

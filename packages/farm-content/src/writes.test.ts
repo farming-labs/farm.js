@@ -67,7 +67,7 @@ describe("collection write surface", () => {
     await expect(posts.update("x", {})).rejects.toThrow(/title must be a string/);
   });
 
-  it("fires the after-write hook once per successful write, not on failure", async () => {
+  it("fires the after-write hook per write, including validation failures", async () => {
     const afterWrite = vi.fn(async () => {});
     setContentAfterWrite(afterWrite);
     const posts = runtimeWith(writableSource()).posts!;
@@ -76,11 +76,56 @@ describe("collection write surface", () => {
     await posts.delete("a");
     expect(afterWrite).toHaveBeenCalledTimes(2);
 
+    // The CMS accepted this write even though it fails the collection schema:
+    // the caller must see the rejection AND the snapshot must still refresh,
+    // so readers see the CMS's real state rather than a stale one.
     const failing = runtimeWith(
       writableSource({ create: async () => ({ id: "bad", data: {} }) }),
     ).posts!;
     await expect(failing.create({ data: {} })).rejects.toThrow();
-    expect(afterWrite).toHaveBeenCalledTimes(2); // unchanged
+    expect(afterWrite).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not fail the caller when the after-write refresh throws", async () => {
+    setContentAfterWrite(async () => {
+      throw new Error("rebuild exploded");
+    });
+    const posts = runtimeWith(writableSource()).posts!;
+    await expect(posts.create({ data: { title: "a" } })).resolves.toMatchObject({ id: "new" });
+  });
+
+  it("scopes after-write disposal to its own registration across a restart", () => {
+    const first = vi.fn(async () => {});
+    const second = vi.fn(async () => {});
+    const disposeFirst = setContentAfterWrite(first);
+    // Vite restart: the NEW server registers before the OLD server closes.
+    setContentAfterWrite(second);
+    disposeFirst(); // the old server's close handler
+    const runtime = (globalThis as Record<string, any>)["__FARM_CONTENT_WRITE_RUNTIME__"];
+    expect(runtime.afterWrite).toBe(second);
+  });
+
+  it("unregisters only its own collection registrations", () => {
+    const unregister = registerContentWriteRuntime({ posts: { schema } });
+    registerContentWriteRuntime({ posts: { schema } }); // replacement registration
+    unregister(); // stale disposer must not remove the replacement
+    const runtime = (globalThis as Record<string, any>)["__FARM_CONTENT_WRITE_RUNTIME__"];
+    expect(runtime.registrations.posts).toBeDefined();
+  });
+
+  it("rejects reserved registration names and keeps the registry prototype clean", () => {
+    expect(() => registerContentWriteRuntime({ ["__proto__"]: { schema } } as never)).toThrow(
+      /reserved/,
+    );
+    const runtime = (globalThis as Record<string, any>)["__FARM_CONTENT_WRITE_RUNTIME__"];
+    expect(Object.getPrototypeOf(runtime.registrations)).toBe(null);
+  });
+
+  it("answers protocol probes with undefined instead of throwing", async () => {
+    const handles = runtimeWith(writableSource());
+    await expect(Promise.resolve(handles)).resolves.toBe(handles); // `then` probe
+    expect(() => JSON.stringify(handles)).not.toThrow(); // `toJSON` probe
+    expect(() => (handles as Record<string, any>).missing!.all()).toThrow(/Unknown collection/);
   });
 
   it("explains read-only collections and missing verbs", async () => {
