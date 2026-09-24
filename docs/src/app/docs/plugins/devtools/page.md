@@ -11,7 +11,7 @@ development-only workspace: browse routes and their runtime settings, inspect co
 integrations, and compare application source with the JavaScript Vite served. The interface
 uses the Farm logo, locally bundled Geist fonts, light and dark themes, and syntax-highlighted
 code with copy controls. It replaces the deprecated built-in dashboard from
-[DevTools and Doctor](/docs/devtools).
+[Built-in DevTools](/docs/devtools).
 
 ## Setup
 
@@ -120,5 +120,5 @@ bodies, cookies, or application records. Browser source can still contain litera
 into client code; the inspector does not claim to redact source code. The read-only snapshot
 endpoint and `farm doctor` retain their existing behavior.
 
-See [DevTools and Doctor](/docs/devtools) for the core dashboard and terminal checks, and
+See [Built-in DevTools](/docs/devtools) for the core dashboard, [Doctor](/docs/doctor) for terminal checks, and
 [Hints](/docs/plugins/hints) for opt-in accessibility and performance checks.
