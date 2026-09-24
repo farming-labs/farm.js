@@ -126,4 +126,66 @@ export { product };`,
       ),
     ).toThrow("createServerQuery(...)");
   });
+
+  it("fails closed for a server function re-exported as the default export", () => {
+    expect(() =>
+      transformFarmServerFns(
+        `import { createServerFn } from "@farm.js/core";
+const save = createServerFn({ handler: async () => true });
+export default save;`,
+        "/app/src/actions.ts",
+      ),
+    ).toThrow(
+      'Server function "save" cannot be re-exported as the default export. Export it inline instead: export default createServerFn(...)',
+    );
+  });
+
+  it("fails closed for a server function re-exported through a renamed binding", () => {
+    expect(() =>
+      transformFarmServerFns(
+        `import { createServerFn } from "@farm.js/core";
+const save = createServerFn({ handler: async () => true });
+export const persist = save;`,
+        "/app/src/actions.ts",
+      ),
+    ).toThrow(
+      'Server function "save" cannot be re-exported through another exported binding. Export it inline instead: export const persist = createServerFn(...)',
+    );
+  });
+
+  it("fails closed when a comment hides the specifier inside an export clause", () => {
+    expect(() =>
+      transformFarmServerFns(
+        `import { createServerFn } from "@farm.js/core";
+const save = createServerFn({ handler: async () => true });
+export { /* re-export */ save };`,
+        "/app/src/actions.ts",
+      ),
+    ).toThrow('Server function "save" cannot be re-exported with an export clause.');
+  });
+
+  it("fails closed when the server function is assigned after its declaration", () => {
+    expect(() =>
+      transformFarmServerFns(
+        `import { createServerFn } from "@farm.js/core";
+let save;
+save = createServerFn({ handler: async () => true });
+export { save };`,
+        "/app/src/actions.ts",
+      ),
+    ).toThrow('Server function "save" cannot be re-exported with an export clause.');
+  });
+
+  it("ignores export-shaped text inside strings and comments", () => {
+    const result = transformFarmServerFns(
+      `import { createServerFn } from "@farm.js/core";
+// export { save };
+const note = "export default save;";
+export const save = createServerFn({ handler: async () => note });`,
+      "/app/src/actions.ts",
+    );
+
+    expect(result?.exports).toEqual(["save"]);
+    expect(result?.code).toContain('"use server"');
+  });
 });
