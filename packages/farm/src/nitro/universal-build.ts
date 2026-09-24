@@ -1812,7 +1812,9 @@ function matchRuntimePathPattern(pattern, pathname) {
       if (pathnameSegment === undefined) return null;
 
       if (dynamic || namedDynamic) {
-        params[(dynamic || namedDynamic)[1]] = decodeRouteSegment(pathnameSegment);
+        // Segments were already decoded once at entry; decoding again here
+        // turns a literal "%2541BC" request into "ABC" and diverges from dev.
+        params[(dynamic || namedDynamic)[1]] = pathnameSegment;
         pathIndex += 1;
         patternIndex += 1;
         continue;

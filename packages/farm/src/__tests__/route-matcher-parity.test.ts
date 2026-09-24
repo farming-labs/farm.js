@@ -86,6 +86,10 @@ describe("config route matcher dev/prod parity", () => {
     { pattern: "/files/:path*", path: "/files/a/b", name: "path", expected: "a/b" },
     { pattern: "/files/:path*", path: "/files", name: "path", expected: "" },
     { pattern: "/docs/:slug", path: "/docs/hello%20world", name: "slug", expected: "hello world" },
+    // Double-encoded input must decode exactly once. Decoding twice turns a
+    // literal "%2541BC" segment into "ABC" and can resolve the wrong record.
+    { pattern: "/docs/:slug", path: "/docs/%2541BC", name: "slug", expected: "%41BC" },
+    { pattern: "/docs/:slug", path: "/docs/a%252Fb", name: "slug", expected: "a%2Fb" },
   ];
 
   for (const { pattern, path, name, expected } of captureCases) {
@@ -101,4 +105,13 @@ describe("config route matcher dev/prod parity", () => {
       expect({ dev: devCapture, prod: prodCapture }).toEqual({ dev: expected, prod: expected });
     });
   }
+
+  // Page routes go through the same generated matcher with bracket syntax, so
+  // a percent-bearing slug has to survive with a single decode there too.
+  it("decodes bracket-syntax page params exactly once", () => {
+    expect(prodMatch("/docs/[slug]", "/docs/%2541BC")).toMatchObject({ slug: "%41BC" });
+    expect(prodMatch("/docs/[slug]", "/docs/hello%2520world")).toMatchObject({
+      slug: "hello%20world",
+    });
+  });
 });
