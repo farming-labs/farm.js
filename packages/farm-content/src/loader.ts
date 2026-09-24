@@ -98,6 +98,7 @@ const runtime = createContentRuntime(decodeContentValue(${JSON.stringify(encoded
 export const getCollection = runtime.getCollection;
 export const getEntry = runtime.getEntry;
 export const getEntryOrThrow = runtime.getEntryOrThrow;
+export const collections = runtime.collections;
 `;
   return writeFileIfChanged(outputFile, source);
 }

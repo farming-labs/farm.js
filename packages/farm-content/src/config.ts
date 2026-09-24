@@ -43,6 +43,9 @@ export interface ContentRemoteOptions {
   fetch(): Promise<readonly ContentRemoteDocument[]>;
   /** Development re-fetch cadence in milliseconds. */
   refreshInterval?: number;
+  create?: ContentRemoteSource["create"];
+  update?: ContentRemoteSource["update"];
+  delete?: ContentRemoteSource["delete"];
 }
 
 /** A content source that fetches documents instead of reading local files. */
@@ -66,11 +69,20 @@ export function remote(options: ContentRemoteOptions): ContentRemoteSource {
     );
   }
 
+  for (const verb of ["create", "update", "delete"] as const) {
+    if (options[verb] !== undefined && typeof options[verb] !== "function") {
+      throw new TypeError(`remote(${JSON.stringify(name)}) ${verb} must be a function`);
+    }
+  }
+
   return Object.freeze({
     kind: "remote" as const,
     name,
     fetch: options.fetch,
     ...(options.refreshInterval !== undefined ? { refreshInterval: options.refreshInterval } : {}),
+    ...(options.create ? { create: options.create } : {}),
+    ...(options.update ? { update: options.update } : {}),
+    ...(options.delete ? { delete: options.delete } : {}),
   });
 }
 

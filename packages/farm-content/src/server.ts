@@ -1,4 +1,4 @@
-import type { AppContentEntry, ContentCollectionName } from "./types.js";
+import type { AppContentEntry, ContentCollectionHandle, ContentCollectionName } from "./types.js";
 
 function missingPlugin(): never {
   throw new Error(
@@ -29,9 +29,22 @@ export async function getEntryOrThrow<TName extends ContentCollectionName>(
   return missingPlugin();
 }
 
+/**
+ * The per-collection handle: reads from the validated snapshot, writes
+ * through the source's create/update/delete callbacks. Development rebuilds
+ * the snapshot after a write; production serves the bundled snapshot until
+ * the next build, so pair writes with a deploy hook.
+ */
+export const collections: {
+  readonly [TName in ContentCollectionName]: ContentCollectionHandle<
+    AppContentEntry<TName>["data"]
+  >;
+} = new Proxy(Object.create(null), { get: () => missingPlugin() });
+
 export type {
   AppContentEntry,
   AppContentRegistry,
+  ContentCollectionHandle,
   ContentCollectionName,
   ContentEntry,
 } from "./types.js";

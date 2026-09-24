@@ -5,6 +5,7 @@ import fg from "fast-glob";
 import { asset } from "./assets.js";
 import { collection, files, isSupportedContentFile } from "./config.js";
 import { loadContentCollections, writeContentServerModule } from "./loader.js";
+import { registerContentWriteRuntime, setContentAfterWrite } from "./runtime.js";
 import type { ContentCollections, ContentOptions, ContentPlugin } from "./types.js";
 
 const CONTENT_SERVER_ID = "@farm.js/content/server";
@@ -46,6 +47,22 @@ export function content<const TCollections extends ContentCollections>(
   options: ContentOptions<TCollections>,
 ): ContentPlugin<TCollections> {
   validateOptions(options);
+
+  // Writes need the live sources and schemas; the snapshot module carries
+  // only data. Registered here so both dev and the production runtime (where
+  // the config module is evaluated too) can reach them.
+  registerContentWriteRuntime(
+    Object.fromEntries(
+      Object.entries(options.collections).map(([name, definition]) => [
+        name,
+        {
+          ...(definition.source.kind === "remote" ? { source: definition.source } : {}),
+          schema: definition.schema,
+        },
+      ]),
+    ),
+  );
+
   let root = process.cwd();
   let generatedFile = "";
   let sourceFiles = new Set<string>();
@@ -153,6 +170,18 @@ export function content<const TCollections extends ContentCollections>(
         };
         server.watcher.on("all", onFile);
         server.httpServer?.once("close", () => server.watcher.off?.("all", onFile));
+
+        // A successful write refreshes the snapshot immediately in development.
+        setContentAfterWrite(async () => {
+          const settled = (rebuildQueue = rebuildQueue.then(async () => {
+            if (!(await rebuild())) return;
+            const modules = server.moduleGraph.getModulesByFile?.(generatedFile);
+            for (const module of modules ?? []) server.moduleGraph.invalidateModule(module);
+            server.ws.send({ type: "full-reload" });
+          }));
+          await settled;
+        });
+        server.httpServer?.once("close", () => setContentAfterWrite(undefined));
 
         // Remote sources have no file events; poll the ones that asked for it.
         // One timer at the smallest requested cadence keeps ordering simple,
