@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/sync",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "Local-first collections for Farm.js: schema-driven reads, optimistic writes, offline queueing",
   "keywords": [
     "farm.js",
