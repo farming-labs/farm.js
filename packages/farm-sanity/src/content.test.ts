@@ -81,7 +81,9 @@ describe("sanitySource writes", () => {
     const set = vi.fn(() => ({ commit }));
     const patch = vi.fn(() => ({ set }));
     const client = {
-      fetch: vi.fn(async () => [{ _id: "d1", slug: { current: "hello" }, title: "Hi" }]),
+      fetch: vi.fn(
+        async (): Promise<unknown> => [{ _id: "d1", slug: { current: "hello" }, title: "Hi" }],
+      ),
       withConfig: vi.fn(function (this: unknown) {
         return client;
       }),
