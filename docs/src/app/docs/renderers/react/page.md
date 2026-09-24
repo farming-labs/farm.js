@@ -2454,7 +2454,8 @@ and a removed block stops receiving work. Descendant-only updates remain live, i
 hydration, and real unmounts still dispose those subscriptions. The existing fallback eligibility
 rules are unchanged. Subscription discovery follows only the branch React actually rendered:
 hidden branches are not evaluated, and their descendants remain unsubscribed until that branch is
-shown.
+shown. Refreshing the active set keeps listeners whose block IDs did not change, removes only stale
+IDs, and subscribes only newly mounted IDs instead of rebuilding every listener after each render.
 
 Host conditional and conditional-range containers keep a stable key after entering React fallback
 when their descendants are either React-owned or conditional-only compiled blocks. Later updates
@@ -2523,6 +2524,8 @@ The package and example test suites verify more than generated code:
   unmount;
 - fallback subscription discovery skips hidden direct and nested branches in static and hybrid
   modes after mount or hydration;
+- stable fallback descendants retain their existing listeners across committed host-conditional,
+  conditional-range, and mixed-range updates;
 - compatible Fast Refresh preserves state, while binding errors reach React error boundaries;
 - hydration mismatches follow React's recoverable-error path and remain interactive;
 - compiler-owned conditionals preserve a same-branch DOM instance, patch nested text, attributes,

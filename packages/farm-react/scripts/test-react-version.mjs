@@ -485,6 +485,7 @@ const testSource = String.raw`
             assert.deepEqual([input.selectionStart, input.selectionEnd, input.selectionDirection], [1, 4, "backward"], context);
           };
           for (const [index, value] of [[1, 1], [0, false], [1, 2], [0, true], [1, -1], [1, 3]]) {
+            const previousListeners = new Map(owner.blockRefreshListeners);
             await React.act(async () => { update(index, value); updateControl(index, value); });
             assert.equal(target.innerHTML, controlTarget.innerHTML, context);
             const activeNestedId = target.querySelector("article")
@@ -495,6 +496,11 @@ const testSource = String.raw`
               descendants && activeNestedId !== null ? [0, activeNestedId] : [0],
               context,
             );
+            for (const [id, listener] of previousListeners) {
+              if (owner.blockRefreshListeners.has(id)) {
+                assert.equal(owner.blockRefreshListeners.get(id), listener, context + "/listener " + id);
+              }
+            }
             assert.equal(owners, initialOwners, context);
             checkDomState();
           }
@@ -1883,7 +1889,10 @@ const testSource = String.raw`
   const mixedFallbackContainer = document.createElement("div");
   document.body.append(mixedFallbackContainer);
   const mixedFallbackRoot = createRoot(mixedFallbackContainer);
-  flushSync(() => mixedFallbackRoot.render(React.createElement(MixedFallback)));
+  let mixedFallbackOwner;
+  flushSync(() => mixedFallbackRoot.render(React.createElement(MixedFallback, {
+    ref: (instance) => { if (instance) mixedFallbackOwner = instance; },
+  })));
   await Promise.resolve();
   await Promise.resolve();
   const updateMixedFallback = async (model) => {
@@ -1898,7 +1907,9 @@ const testSource = String.raw`
   mixedFallbackInput.value = "typed";
   mixedFallbackInput.focus();
   mixedFallbackInput.setSelectionRange(1, 4, "backward");
+  const mixedFallbackListener = mixedFallbackOwner.blockRefreshListeners.get(0);
   await updateMixedFallback({ loading: true, items: [{ id: "b", label: "Beta updated" }, { id: "a", label: "Alpha updated" }] });
+  assert.equal(mixedFallbackOwner.blockRefreshListeners.get(0), mixedFallbackListener);
   assert.equal(mixedFallbackContainer.querySelector("[data-mixed-fallback]"), mixedFallbackSurface);
   assert.equal(mixedFallbackContainer.querySelector("[aria-label='Mixed draft']"), mixedFallbackInput);
   assert.equal(mixedFallbackInput.value, "typed");

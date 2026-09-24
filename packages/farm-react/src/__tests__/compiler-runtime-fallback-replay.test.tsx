@@ -491,19 +491,23 @@ describe("conditional fallback lifecycle replay", () => {
         expect(creates.falsy).toBe(0);
         expect(creates.nestedFalsy).toBe(0);
 
+        const outerListener = owner!.blockRefreshListeners.get(0);
         creates.truthy = 0;
         creates.nestedTruthy = 0;
         await act(async () => cells[0].set(false));
         expect([...owner!.blockRefreshListeners.keys()].sort()).toEqual([0, 2]);
+        expect(owner!.blockRefreshListeners.get(0)).toBe(outerListener);
         expect(creates.falsy).toBeGreaterThan(0);
         expect(creates.nestedFalsy).toBe(0);
         expect(creates.truthy).toBe(0);
         expect(creates.nestedTruthy).toBeGreaterThan(0);
 
+        const activeListener = owner!.blockRefreshListeners.get(2);
         const beforeActiveUpdate = renders;
         await act(async () => cells[2].set(11));
         expect(renders).toBeGreaterThan(beforeActiveUpdate);
         expect(container.querySelector("em")?.textContent).toBe("11");
+        expect(owner!.blockRefreshListeners.get(2)).toBe(activeListener);
 
         const beforeInactiveUpdate = renders;
         await act(async () => cells[1].set(2));
@@ -512,6 +516,7 @@ describe("conditional fallback lifecycle replay", () => {
 
         await act(async () => cells[0].set(true));
         expect([...owner!.blockRefreshListeners.keys()].sort()).toEqual([0, 1]);
+        expect(owner!.blockRefreshListeners.get(0)).toBe(outerListener);
         expect(container.querySelector("em")?.textContent).toBe("2");
 
         const beforeFormerBranchUpdate = renders;
