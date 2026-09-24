@@ -92,6 +92,7 @@ import { createFarmSourceAlias } from "../server/vite-config";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import { createFarmThemeCssPlugin } from "../theme/vite";
 import { resolveFarmInstrumentationFile } from "../instrumentation";
+import { getFarmPresetRuntime } from "../deployment";
 import {
   getFarmRendererCapabilities,
   isReactRenderer,
@@ -312,6 +313,35 @@ async function canUseRolldownBuilder(): Promise<boolean> {
     // Rolldown is optional so --no-optional installs retain Rollup.
     return false;
   }
+}
+
+/**
+ * Alias that points React's server entry at its Web-stream build.
+ *
+ * React splits `react-dom/server` by export condition: the Node build exports
+ * renderToPipeableStream, and only the browser/edge build exports
+ * renderToReadableStream. `./server.browser` exists in both React 18 and 19.
+ */
+export const FARM_REACT_WEB_SERVER_ALIAS = {
+  find: /^react-dom\/server$/,
+  replacement: "react-dom/server.browser",
+} as const;
+
+/**
+ * Whether the SSR graph must resolve React's server entry to the Web-stream
+ * build instead of the Node one.
+ *
+ * Vite resolves the SSR graph with Node conditions, and React applications
+ * bundle react-dom rather than externalizing it, so without this an edge
+ * preset inlines the Node build. `renderToReadableStream` is then missing and
+ * the production renderer silently falls back off its Web streaming path, even
+ * though the target has no Node streams to fall back to.
+ */
+export function shouldAliasReactServerToWebBuild(
+  renderer: Pick<FarmRenderer, "name"> | undefined,
+  preset: string,
+): boolean {
+  return isReactRenderer(renderer) && getFarmPresetRuntime(preset) === "edge";
 }
 
 function isCloudflareImagePreset(preset: string): boolean {
@@ -4029,6 +4059,9 @@ async function buildSSRInMemory(
               ]
             : true,
       },
+      ...(shouldAliasReactServerToWebBuild(config.renderer, preset)
+        ? { resolve: { alias: [FARM_REACT_WEB_SERVER_ALIAS] } }
+        : {}),
       define: {
         __FARM_API_BASE_URL__: JSON.stringify(config.api.baseURL),
         __FARM_ENV__: JSON.stringify(config.env || { server: {}, public: {} }),
