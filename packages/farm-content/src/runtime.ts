@@ -71,17 +71,51 @@ const WRITE_RUNTIME_KEY = "__FARM_CONTENT_WRITE_RUNTIME__";
 
 function writeRuntime(): ContentWriteRuntime {
   const scope = globalThis as { [WRITE_RUNTIME_KEY]?: ContentWriteRuntime };
-  return (scope[WRITE_RUNTIME_KEY] ??= { registrations: {} });
+  return (scope[WRITE_RUNTIME_KEY] ??= { registrations: Object.create(null) });
 }
+
+const RESERVED_REGISTRATION_NAMES = new Set(["__proto__", "constructor", "prototype"]);
+
+const PROTOCOL_PROBE_KEYS = new Set([
+  "then",
+  "toJSON",
+  "constructor",
+  "$$typeof",
+  "nodeType",
+  "asymmetricMatch",
+  "@@__IMMUTABLE_ITERABLE__@@",
+]);
 
 export function registerContentWriteRuntime(
   registrations: Record<string, ContentWriteRegistration>,
-): void {
-  Object.assign(writeRuntime().registrations, registrations);
+): () => void {
+  const target = writeRuntime().registrations;
+  const names: string[] = [];
+  // Own keys assigned one by one onto a null-prototype record: a collection
+  // literally named __proto__ must become data, never the record's prototype.
+  for (const name of Object.keys(registrations)) {
+    if (RESERVED_REGISTRATION_NAMES.has(name)) {
+      throw new Error(`[farm:content] Collection name ${JSON.stringify(name)} is reserved`);
+    }
+    target[name] = registrations[name]!;
+    names.push(name);
+  }
+  return () => {
+    for (const name of names) {
+      if (target[name] === registrations[name]) delete target[name];
+    }
+  };
 }
 
-export function setContentAfterWrite(afterWrite: (() => Promise<void>) | undefined): void {
-  writeRuntime().afterWrite = afterWrite;
+export function setContentAfterWrite(afterWrite: (() => Promise<void>) | undefined): () => void {
+  const state = writeRuntime();
+  state.afterWrite = afterWrite;
+  // Vite's restart creates the new server (registering its hook) BEFORE it
+  // closes the old one, so an unconditional clear in the old server's close
+  // handler would disarm the replacement. Only the current owner may clear.
+  return () => {
+    if (state.afterWrite === afterWrite) state.afterWrite = undefined;
+  };
 }
 
 function requireWritableSource(name: string, verb: "create" | "update" | "delete") {
@@ -132,8 +166,14 @@ async function validateAgainstSchema(
 async function settleWrite<T>(result: T): Promise<T> {
   // The CMS accepted the write; refresh the local snapshot where a dev server
   // is present. In production the snapshot is bundled, so the change becomes
-  // visible on the next build - pair writes with a deploy hook.
-  await writeRuntime().afterWrite?.();
+  // visible on the next build - pair writes with a deploy hook. A failing
+  // refresh must not report the persisted write as failed: the dev pipeline
+  // surfaces its own errors.
+  try {
+    await writeRuntime().afterWrite?.();
+  } catch {
+    // reported by the dev pipeline's own channel
+  }
   return result;
 }
 
@@ -186,7 +226,14 @@ export function createContentRuntime(collections: RuntimeCollections) {
           const document = await (callback as NonNullable<ContentRemoteSource["create"]>)(input);
           // The source of truth answered; make sure what it stored still
           // satisfies the collection's schema before anyone trusts it.
-          await validateAgainstSchema(registration.schema, document.data);
+          // The CMS changed either way, so the snapshot refreshes even when
+          // validation rejects - readers should see the CMS's real state.
+          try {
+            await validateAgainstSchema(registration.schema, document.data);
+          } catch (error) {
+            await settleWrite(undefined);
+            throw error;
+          }
           return settleWrite(document);
         },
         update: async (id: string, patch: { data?: Record<string, unknown>; body?: string }) => {
@@ -195,7 +242,12 @@ export function createContentRuntime(collections: RuntimeCollections) {
             id,
             patch,
           );
-          await validateAgainstSchema(registration.schema, document.data);
+          try {
+            await validateAgainstSchema(registration.schema, document.data);
+          } catch (error) {
+            await settleWrite(undefined);
+            throw error;
+          }
           return settleWrite(document);
         },
         delete: async (id: string) => {
@@ -209,9 +261,13 @@ export function createContentRuntime(collections: RuntimeCollections) {
     return handle;
   };
 
+  // Runtimes probe objects with protocol keys: await checks `then`,
+  // JSON.stringify checks `toJSON`, test matchers poke a few more. Those
+  // probes must see undefined; only a real unknown collection name throws.
   const collectionsProxy = new Proxy(Object.create(null) as Record<string, unknown>, {
     get(_target, property) {
       if (typeof property !== "string") return undefined;
+      if (!(property in collections) && PROTOCOL_PROBE_KEYS.has(property)) return undefined;
       return collectionHandle(property);
     },
     has: (_target, property) => typeof property === "string" && property in collections,
