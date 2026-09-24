@@ -1,4 +1,10 @@
-import { declareSchemaTables, definePlugin } from "@farm.js/core";
+import {
+  declareSchemaTables,
+  definePlugin,
+  describeIntegrationOriginRejection,
+  resolveIntegrationAllowedOrigins,
+  validateIntegrationRequestOrigin,
+} from "@farm.js/core";
 import type { FarmSchema, FarmSqlDialect } from "@farm.js/core";
 import { executeSyncOperation, SyncOperationError, type SyncOrmClient } from "./server.js";
 import {
@@ -40,6 +46,13 @@ export type SyncPluginOptions = {
    * cannot be detected from its shape.
    */
   dialect?: FarmSqlDialect;
+  /**
+   * Extra origins allowed to call the sync endpoint, using the
+   * `serverActions.allowedOrigins` pattern syntax. Sync writes ride the
+   * caller's cookies, so cross-site requests are rejected unless the origin is
+   * listed here.
+   */
+  allowedOrigins?: readonly string[];
 };
 
 export type SyncMiddlewareContext = {
@@ -79,6 +92,12 @@ export function sync(options: SyncPluginOptions) {
   if (models.size === 0) {
     throw new Error("sync(): no models are exposed. Add at least one entry to `models`.");
   }
+
+  // Resolved once so an invalid pattern fails at startup, not per request.
+  const allowedOrigins = resolveIntegrationAllowedOrigins(
+    options.allowedOrigins,
+    "sync().allowedOrigins",
+  );
 
   let ormPromise: Promise<SyncOrmClient> | undefined;
   const resolveOrm = (): Promise<SyncOrmClient> => {
@@ -125,6 +144,7 @@ export function sync(options: SyncPluginOptions) {
           models,
           middleware: options.middleware,
           resolveOrm,
+          allowedOrigins,
         });
       },
     },
@@ -173,6 +193,7 @@ export function sync(options: SyncPluginOptions) {
         models,
         middleware: options.middleware,
         resolveOrm,
+        allowedOrigins,
       });
       if (response) await sendNodeResponse(res, response);
     },
@@ -206,6 +227,7 @@ type SyncRequestHandlerOptions = {
   models: Map<string, ResolvedSyncModel>;
   middleware: readonly SyncMiddleware[] | undefined;
   resolveOrm: () => Promise<SyncOrmClient>;
+  allowedOrigins: readonly string[];
 };
 
 async function handleSyncRequest(
@@ -218,6 +240,19 @@ async function handleSyncRequest(
 
   if (request.method !== "POST") {
     return jsonResponse(405, { error: { code: "invalid_input", message: "Sync uses POST." } });
+  }
+
+  // Sync operations ride the caller's cookies, and a cross-site page can send
+  // this POST as a simple request with no preflight. Reject foreign origins
+  // before touching the body, mirroring the server-action origin contract.
+  const origin = validateIntegrationRequestOrigin(request, {
+    allowedOrigins: options.allowedOrigins,
+    requireOriginMetadata: true,
+  });
+  if (!origin.ok) {
+    return jsonResponse(403, {
+      error: { code: "unauthorized", message: describeIntegrationOriginRejection(origin.reason) },
+    });
   }
 
   let body: SyncRequestBody;

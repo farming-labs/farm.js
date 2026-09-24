@@ -78,16 +78,17 @@ export default defineConfig({
 
 ### Options
 
-| Option       | Purpose                                                             |
-| ------------ | ------------------------------------------------------------------- |
-| `schema`     | the declarative schema above                                        |
-| `storage`    | a mount name from `storage.mounts`                                  |
-| `client`     | your database instead of a mount; see below                         |
-| `models`     | which models the browser may touch: `"write"`, `"read"`, or `false` |
-| `where`      | the row filter applied to every read and write, server side         |
-| `middleware` | request middleware producing the context `where` reads              |
-| `persist`    | keep rows on the device for warm starts. Default `true`             |
-| `path`       | the endpoint the browser calls. Default `/_farm/sync`               |
+| Option           | Purpose                                                                                          |
+| ---------------- | ------------------------------------------------------------------------------------------------ |
+| `schema`         | the declarative schema above                                                                     |
+| `storage`        | a mount name from `storage.mounts`                                                               |
+| `client`         | your database instead of a mount; see below                                                      |
+| `models`         | which models the browser may touch: `"write"`, `"read"`, or `false`                              |
+| `where`          | the row filter applied to every read and write, server side                                      |
+| `middleware`     | request middleware producing the context `where` reads                                           |
+| `persist`        | keep rows on the device for warm starts. Default `true`                                          |
+| `path`           | the endpoint the browser calls. Default `/_farm/sync`                                            |
+| `allowedOrigins` | extra origins allowed to call the endpoint, in the `serverActions.allowedOrigins` pattern syntax |
 
 ## Point it at your database
 
@@ -331,6 +332,12 @@ const withOrg = createServerMiddleware({
 
 Sync never inspects authentication itself; it reads the object your middleware
 built, so any auth provider works.
+
+Because operations ride the caller's cookies, the endpoint also enforces the
+same origin contract as server actions: a POST from another site — including a
+simple request that skips the CORS preflight — is rejected with `403` before
+the body is read. A trusted second origin, such as a separate marketing site
+embedding the app, goes in `allowedOrigins`.
 
 ## Persistence
 
