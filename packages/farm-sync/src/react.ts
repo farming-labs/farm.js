@@ -85,11 +85,6 @@ export function useLiveQuery<TRow extends SyncRow = SyncRow>(
   const name = resolveModelName(model);
   const store = getSyncStore(name);
 
-  const predicateRef = useRef(predicate);
-  predicateRef.current = predicate;
-  const optionsRef = useRef(options);
-  optionsRef.current = options;
-
   const subscribe = useCallback((listener: () => void) => store.subscribe(listener), [store]);
 
   // Rows live in the browser, so the server has none. Both sides must agree on
@@ -131,28 +126,30 @@ export function useLiveQuery<TRow extends SyncRow = SyncRow>(
     hydrateModel(name);
   }, [name, options.enabled]);
 
-  // Recompute only when the underlying rows change; the predicate is read from
-  // a ref so an inline arrow does not invalidate the memo every render.
+  // The memo depends on the real predicate and options, not refs: a predicate
+  // that closes over changed state (row => row.status === filter) must produce
+  // fresh rows on the next render, not stay frozen until some row mutates. An
+  // inline arrow recomputes every render, which is the correct trade; a caller
+  // with a large collection keeps memoization by passing a stable predicate.
   const visible = useMemo(() => {
-    const current = predicateRef.current;
-    const opts = optionsRef.current;
-    let result = current ? (rows as TRow[]).filter((row) => current(row)) : (rows as TRow[]);
+    let result = predicate ? (rows as TRow[]).filter((row) => predicate(row)) : (rows as TRow[]);
 
-    if (opts.orderBy) {
-      const direction = opts.direction === "desc" ? -1 : 1;
+    if (options.orderBy) {
+      const direction = options.direction === "desc" ? -1 : 1;
+      const orderBy = options.orderBy;
       result = [...result].sort((a, b) => {
-        const left = opts.orderBy!(a);
-        const right = opts.orderBy!(b);
+        const left = orderBy(a);
+        const right = orderBy(b);
         if (left === right) return 0;
         return (left < right ? -1 : 1) * direction;
       });
     }
-    if (opts.offset || opts.limit !== undefined) {
-      const start = opts.offset ?? 0;
-      result = result.slice(start, opts.limit === undefined ? undefined : start + opts.limit);
+    if (options.offset || options.limit !== undefined) {
+      const start = options.offset ?? 0;
+      result = result.slice(start, options.limit === undefined ? undefined : start + options.limit);
     }
     return result;
-  }, [rows]);
+  }, [rows, predicate, options.orderBy, options.direction, options.offset, options.limit]);
 
   const client = useMemo(() => getSyncModelClient(name), [name]);
 
