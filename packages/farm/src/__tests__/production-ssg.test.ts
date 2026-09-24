@@ -21,6 +21,7 @@ async function createFixture(externalRewriteOrigin?: string): Promise<string> {
   await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
   await fs.mkdir(path.join(root, "src", "app", "static"), { recursive: true });
   await fs.mkdir(path.join(root, "src", "app", "refreshing"), { recursive: true });
+  await fs.mkdir(path.join(root, "src", "app", "refreshing-directive"), { recursive: true });
   await fs.mkdir(path.join(root, "src", "app", "blog", "[slug]"), { recursive: true });
   await fs.mkdir(path.join(root, "src", "app", "guarded"), { recursive: true });
   await fs.mkdir(path.join(root, "src", "app", "configured"), { recursive: true });
@@ -131,6 +132,15 @@ export const ssg = true;
 export const revalidate = 60;
 export default function RefreshingPage() {
   return <main data-rendered-at={Date.now()}>refreshing-page</main>;
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "refreshing-directive", "page.tsx"),
+    `
+"use ssg; 60";
+export default function RefreshingDirectivePage() {
+  return <main data-rendered-at={Date.now()}>refreshing-directive-page</main>;
 }
 `.trim(),
   );
@@ -472,6 +482,15 @@ describe("production SSG output", () => {
         "public, s-maxage=60, stale-while-revalidate=300",
       );
       expect(renderedAt(secondRefreshingHtml)).not.toBe(renderedAt(firstRefreshingHtml));
+
+      // The directive form must reach production with the same ISR contract
+      // as the export form; it previously served private, no-store because
+      // the runtime reads only module exports.
+      const directiveRefreshing = await fetch(`${production.origin}/refreshing-directive`);
+      expect(directiveRefreshing.status).toBe(200);
+      expect(directiveRefreshing.headers.get("cache-control")).toBe(
+        "public, s-maxage=60, stale-while-revalidate=300",
+      );
 
       const firstGuarded = await fetch(`${production.origin}/guarded`);
       expect(firstGuarded.headers.get("x-app-middleware")).toBe("yes");

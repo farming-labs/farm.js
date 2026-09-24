@@ -26,6 +26,7 @@ import type { Rollup } from "vite";
 import os from "os";
 import path from "path";
 import { constants as fsConstants, existsSync, readFileSync } from "fs";
+import { parseRouteRenderingDirective } from "../ssg";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
 import { isDeepStrictEqual } from "node:util";
@@ -4240,6 +4241,14 @@ function applyConfiguredResponseHeaders(response, pathname) {
 `.trim();
 }
 
+function parseRouteRenderingDirectiveFromDisk(modulePath: string) {
+  try {
+    return parseRouteRenderingDirective(readFileSync(modulePath, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
 function generateVirtualEntryCode(
   apiRoutes: Array<{ path: string; filePath: string; methods: string[]; pluginMethods?: string[] }>,
   pageRoutes: UniversalPageRoute[],
@@ -4443,12 +4452,18 @@ function generateVirtualEntryCode(
       `import * as ${varName} from ${toVirtualEntryImportSpecifier(route.modulePath)};`,
     );
     const clientMetadata = pageHydrationPlans.get(route.modulePath)!;
+    // Directives are parsed from source at build time; the runtime only sees
+    // module exports, so the parsed form must ride the registration for
+    // \"use ssg; 60\" routes to keep their ISR cache headers in production.
+    const renderingDirective = parseRouteRenderingDirectiveFromDisk(route.modulePath);
     pageRegistrations.push(`
   {
     pattern: ${JSON.stringify(route.pattern)},
     module: ${varName},
     shouldHydrate: ${JSON.stringify(clientMetadata.shouldHydrate)},
-    islandStrategy: ${JSON.stringify(clientMetadata.islandStrategy)},
+    islandStrategy: ${JSON.stringify(clientMetadata.islandStrategy)},${
+      renderingDirective ? `\n    rendering: ${JSON.stringify(renderingDirective)},` : ""
+    }
     ${
       route.source !== undefined
         ? `markdownSource: {
@@ -4613,6 +4628,7 @@ function generateVirtualEntryCode(
   localizeFarmHref,
   localizeFarmPathname,
   manageFarmDocumentPreloads,
+  mergeRouteRenderingDirectiveConfig,
   manageFarmLinkHeaderPreloads,
   mergeMetadata,
   matchesFarmIfNoneMatch,
@@ -6304,22 +6320,21 @@ ${
 const pprShellCache = getFarmDataCache();
 const experimentalPPREnabled = ${JSON.stringify(config.experimental?.ppr === true)};
 
-function resolvePPRConfig(routeModule) {
-  if (!experimentalPPREnabled || !routeModule || routeModule.dynamic === "force-dynamic") {
+function resolveRouteRenderingView(route) {
+  // The same merge development uses: baked directive config under the
+  // module's explicit exports. Routes registered without either stay dynamic.
+  return mergeRouteRenderingDirectiveConfig(route && route.rendering, route && route.module, {
+    experimentalPPR: experimentalPPREnabled,
+  });
+}
+
+function resolvePPRConfig(route) {
+  if (!experimentalPPREnabled || !route || !route.module) {
     return { enabled: false };
   }
 
-  if (routeModule.dynamic === "force-static" || routeModule.dynamic === "error") {
-    return { enabled: false };
-  }
-
-  const enabled = routeModule.ppr === true || routeModule.experimental_ppr === true;
-  const revalidate =
-    typeof routeModule.revalidate === "number" && routeModule.revalidate > 0
-      ? routeModule.revalidate
-      : undefined;
-
-  return { enabled, revalidate };
+  const view = resolveRouteRenderingView(route);
+  return { enabled: view.ppr, revalidate: view.revalidate };
 }
 
 function getPPRShellBypassReason(request, middlewareData, middlewareContext) {
@@ -6361,23 +6376,21 @@ function getPPRHeaders(status, config) {
   return headers;
 }
 
-function getRouteSharedCacheControl(routeModule, pprCanCache) {
-  if (!routeModule || routeModule.dynamic === "force-dynamic") {
+function getRouteSharedCacheControl(route, pprCanCache) {
+  if (!route || !route.module) {
     return null;
   }
 
-  const isStaticRoute =
-    routeModule.ssg === true ||
-    routeModule.dynamic === "force-static" ||
-    routeModule.dynamic === "error";
-  if (!isStaticRoute && !pprCanCache) {
+  const view = resolveRouteRenderingView(route);
+  if (view.dynamic === "force-dynamic") {
+    return null;
+  }
+  if (!view.ssg && !pprCanCache) {
     return null;
   }
 
   const revalidate =
-    typeof routeModule.revalidate === "number" && routeModule.revalidate > 0
-      ? routeModule.revalidate
-      : 60;
+    typeof view.revalidate === "number" && view.revalidate > 0 ? view.revalidate : 60;
   return "public, s-maxage=" + revalidate + ", stale-while-revalidate=300";
 }
 
@@ -6727,7 +6740,7 @@ async function handleFarmRequestInContext(
     emitFarmEvent({ type: "route.matched", pathname, route: route.pattern, params });
     
     try {
-      const pprConfig = resolvePPRConfig(route.module);
+      const pprConfig = resolvePPRConfig(route);
       const pprBypassReason = pprConfig.enabled
         ? getPPRShellBypassReason(request, middlewareData, middlewareContext)
         : undefined;
@@ -7140,7 +7153,7 @@ async function handleFarmRequestInContext(
           middlewareData?.size ||
           middlewareContext?.size
         );
-        const sharedCacheControl = getRouteSharedCacheControl(route.module, pprCanCache);
+        const sharedCacheControl = getRouteSharedCacheControl(route, pprCanCache);
         const responseHeaders = {
           "Content-Type": "text/html; charset=utf-8",
           "Cache-Control": renderedPage.stream || hasRequestScopedRender || !sharedCacheControl

@@ -1,5 +1,6 @@
 export { _runWithAfterRequest } from "../after";
 export { farmSecretsMatch } from "../secret-compare";
+export { mergeRouteRenderingDirectiveConfig } from "../route-rendering";
 export type { FarmServerConfig } from "../server-http";
 export {
   bufferFarmRequestBody,

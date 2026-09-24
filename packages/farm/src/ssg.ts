@@ -50,6 +50,13 @@
  */
 
 import { readFile } from "fs/promises";
+import {
+  mergeRouteRenderingDirectiveConfig,
+  type DirectiveRenderingConfig,
+  type RouteRenderingConfig,
+  type RouteRenderingDynamic,
+  type RouteRenderingOptions,
+} from "./route-rendering";
 import type {
   RouteModule,
   SSGPage,
@@ -65,35 +72,16 @@ interface RouteEntry {
   pattern: string;
 }
 
-export type RouteRenderingDynamic = NonNullable<RouteModule["dynamic"]>;
-
-export interface RouteRenderingConfig {
-  ssg: boolean;
-  ppr: boolean;
-  revalidate?: number;
-  dynamic?: RouteRenderingDynamic;
-  directive?: string;
-}
-
-export interface RouteRenderingOptions {
-  /**
-   * Whether `experimental.ppr` is enabled in the app config. Route-level PPR
-   * opt-ins (`ppr`, `experimental_ppr`, `"use ppr"`) are inert without it.
-   */
-  experimentalPPR?: boolean;
-}
+export type {
+  DirectiveRenderingConfig,
+  RouteRenderingConfig,
+  RouteRenderingDynamic,
+  RouteRenderingOptions,
+} from "./route-rendering";
 
 export interface StaticRouteCandidateAnalysis {
   candidate: boolean;
   blockers: string[];
-}
-
-interface DirectiveRenderingConfig {
-  ssg: boolean;
-  ppr: boolean;
-  revalidate?: number;
-  dynamic?: RouteRenderingDynamic;
-  directive: string;
 }
 
 const OPTIONAL_CATCH_ALL_SEGMENT = /^\[\[\.\.\.([^\]]+)\]\]$/;
@@ -127,62 +115,7 @@ function resolveConfiguredRouteRenderingConfig(
   source?: string,
   options?: RouteRenderingOptions,
 ): RouteRenderingConfig {
-  const pprEnabled = options?.experimentalPPR === true;
-  const directiveConfig = parseRouteRenderingDirective(source);
-  let ssg = directiveConfig?.ssg ?? false;
-  let requestedPPR = directiveConfig?.ppr ?? false;
-  let revalidate = directiveConfig?.revalidate;
-  const moduleDynamic = normalizeDynamicMode(mod?.dynamic);
-  const dynamic = moduleDynamic ?? directiveConfig?.dynamic;
-  const hasExplicitSsg = typeof mod?.ssg === "boolean";
-  const hasExplicitPPR =
-    typeof mod?.ppr === "boolean" || typeof mod?.experimental_ppr === "boolean";
-
-  if (hasExplicitSsg) {
-    ssg = mod!.ssg === true;
-  }
-
-  if (hasExplicitPPR) {
-    requestedPPR = mod?.ppr === true || mod?.experimental_ppr === true;
-  }
-
-  if (typeof mod?.revalidate === "number") {
-    if (mod.revalidate > 0) {
-      revalidate = mod.revalidate;
-      // A PPR opt-in keeps the route dynamic even while experimental.ppr is
-      // off: the page expects Suspense holes, so falling back to ISR would
-      // bake request-time content into a shared static artifact.
-      if (!hasExplicitSsg && !requestedPPR) {
-        ssg = true;
-      }
-    } else {
-      revalidate = undefined;
-      if (!hasExplicitSsg) {
-        ssg = false;
-      }
-    }
-  } else if (mod?.revalidate === false) {
-    revalidate = undefined;
-  }
-
-  if (moduleDynamic === "force-static" || moduleDynamic === "error") {
-    ssg = true;
-    requestedPPR = false;
-  } else if (moduleDynamic === "force-dynamic") {
-    ssg = false;
-    requestedPPR = false;
-    revalidate = undefined;
-  }
-
-  const ppr = pprEnabled && !ssg && requestedPPR;
-
-  return {
-    ssg,
-    ppr,
-    revalidate: ssg || ppr ? revalidate : undefined,
-    dynamic,
-    directive: directiveConfig?.directive,
-  };
+  return mergeRouteRenderingDirectiveConfig(parseRouteRenderingDirective(source), mod, options);
 }
 
 /**
@@ -544,18 +477,6 @@ function parseKnownRenderingDirective(directive: string): DirectiveRenderingConf
     revalidate: typeof revalidate === "number" && revalidate > 0 ? revalidate : undefined,
     directive,
   };
-}
-
-function normalizeDynamicMode(value: unknown): RouteRenderingDynamic | undefined {
-  switch (value) {
-    case "auto":
-    case "force-static":
-    case "force-dynamic":
-    case "error":
-      return value;
-    default:
-      return undefined;
-  }
 }
 
 function readDirectivePrologue(source: string): string[] {
