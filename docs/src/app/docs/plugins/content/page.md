@@ -426,6 +426,44 @@ A dedicated `@farm.js/<provider>` package is only ever ergonomics on top of this
 env vars, a default id, provider-aware errors. Start with `remote()`; extract the package when
 the conventions settle.
 
+### Publishing a source package
+
+Anyone can ship an adapter - a CMS vendor, a community author. Farm's own `sanitySource` and
+`contentfulSource` use nothing a third party cannot: they import exactly two **type-only** names
+from `@farm.js/content` and return the plain `remote()` shape. The conventions that make an
+adapter feel first-party:
+
+```ts
+import type { ContentRemoteDocument, ContentRemoteSource } from "@farm.js/content";
+
+export function myCmsSource(options: MyCmsSourceOptions): ContentRemoteSource {
+  // ...
+}
+```
+
+1. **Type-only dependency.** Import only types from `@farm.js/content`; declare it as an
+   optional peer. Your package then has zero runtime coupling to Farm and works with every
+   version that keeps the shape.
+2. **The provider SDK is a peer dependency** with literal imports, so bundlers can trace it and
+   apps control the version.
+3. **Resolve credentials lazily**, from conventional env vars (`MYCMS_TOKEN`) with explicit
+   options and an existing-client escape hatch. Importing `farm.config.ts` without the env set
+   must not throw; the first `fetch()` should, with a message naming the env vars.
+4. **Pick route-friendly default IDs** (a slug over an internal id) and document the fallback.
+   If writes address documents differently than reads identify them, resolve the mapping inside
+   the source, the way `sanitySource` maps slugs back to `_id`.
+5. **Name errors after yourself.** Every thrown message should carry the source `name`, so a
+   failing build says which provider and which document.
+6. **Implement writes only when the provider can confirm them.** Each verb returns the stored
+   document, which Farm re-validates against the collection schema. Omit verbs you cannot
+   honor - the collection handle explains what is missing better than a broken write.
+7. **Test against the real SDK shape** - the reference suites in `packages/farm-sanity` and
+   `packages/farm-contentful` cover fetching, id derivation, pagination, credential failures,
+   and write flows, and are the template worth copying.
+
+An adapter that follows these is indistinguishable from an official one. Open a pull request to
+add it to the table above.
+
 For **live content** that must update without a rebuild, keep the provider SDK in a server-only
 module and fetch through a [Server Query](/docs/server-queries) instead. Farm can validate the
 response, cache published content, and share the typed result with server or client consumers.
