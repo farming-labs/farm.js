@@ -1106,7 +1106,10 @@ export function Chart() {}
     );
     expect(source).toContain('if (error?.name === "FarmDeploymentMismatchError") return;');
     expect(source).toContain("this.fetchPage(pathname, false, false)");
-    expect(source).toContain("this.fetchPage(pathname, interceptFrom, false, false)");
+    // Prefetch warms the bare navigation key with a plain request; the
+    // intercept identity would both miss every real navigation and send the
+    // shared-cache bypass header.
+    expect(source).toContain("this.fetchPage(pathname, undefined, false, false)");
   });
 
   it("refreshes hydratable production routes from uncached server HTML", () => {
