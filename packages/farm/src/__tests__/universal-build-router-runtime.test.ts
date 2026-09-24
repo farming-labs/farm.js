@@ -447,6 +447,49 @@ describe("generateUniversalRouterStateProperties", () => {
     expect([...router.prefetchCache.keys()]).toEqual(["/settings"]);
   });
 
+  it("expires prefetched documents after 30 seconds and bounds the cache", () => {
+    vi.useFakeTimers();
+    try {
+      const createRouter = new Function(
+        "window",
+        "IDLE_NAVIGATION_STATE",
+        "createNavigationLocation",
+        `return ({${runtime} prefetchCache: new Map()});`,
+      ) as (
+        windowValue: { location: { pathname: string; search: string } },
+        idleState: object,
+        createLocation: (url: URL) => object,
+      ) => {
+        readFreshPrefetch(cacheKey: string): string | undefined;
+        storePrefetchedHtml(cacheKey: string, html: string): void;
+        prefetchCache: Map<string, { html: string; at: number }>;
+      };
+      const router = createRouter(
+        { location: { pathname: "/", search: "" } },
+        { state: "idle", pending: false },
+        (url) => ({ href: url.href }),
+      );
+
+      router.storePrefetchedHtml("/reports", "<html>reports</html>");
+      expect(router.readFreshPrefetch("/reports")).toBe("<html>reports</html>");
+
+      // A prefetched document must not outlive a mutation window forever.
+      vi.advanceTimersByTime(30001);
+      expect(router.readFreshPrefetch("/reports")).toBeUndefined();
+      expect(router.prefetchCache.has("/reports")).toBe(false);
+
+      // A long-lived tab hover-prefetching many links stays bounded.
+      for (let index = 0; index < 40; index += 1) {
+        router.storePrefetchedHtml(`/page-${index}`, "<html>x</html>");
+      }
+      expect(router.prefetchCache.size).toBe(25);
+      expect(router.readFreshPrefetch("/page-14")).toBeUndefined(); // evicted oldest
+      expect(router.readFreshPrefetch("/page-39")).toBe("<html>x</html>");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("restores a blocked pop without assuming indexed entries are contiguous", () => {
     const history = {
       state: null as Record<string, unknown> | null,

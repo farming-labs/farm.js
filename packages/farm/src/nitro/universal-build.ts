@@ -2056,6 +2056,29 @@ export function generateUniversalRouterStateProperties(): string {
     }
   },
 
+  // Cached documents go stale the moment a mutation lands, and a long-lived
+  // tab prefetching on hover accumulates full HTML forever - so entries have
+  // the same 30 second lifetime the development router uses, and the cache
+  // keeps at most 25 documents, evicting the oldest first.
+  readFreshPrefetch: function(cacheKey) {
+    const entry = this.prefetchCache.get(cacheKey);
+    if (!entry) return undefined;
+    if (Date.now() - entry.at > 30000) {
+      this.prefetchCache.delete(cacheKey);
+      return undefined;
+    }
+    return entry.html;
+  },
+  storePrefetchedHtml: function(cacheKey, html) {
+    this.prefetchCache.delete(cacheKey);
+    this.prefetchCache.set(cacheKey, { html: html, at: Date.now() });
+    while (this.prefetchCache.size > 25) {
+      const oldest = this.prefetchCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.prefetchCache.delete(oldest);
+    }
+  },
+
   setNavigationState: function(state) {
     this.navigationState = state;
     for (const listener of this.navigationListeners) listener(state);
@@ -2479,8 +2502,8 @@ ${generateUniversalRouterStateProperties()}
   
   fetchPage: async function(url, fresh = false, recover = true, signal) {
     if (fresh) this.clearPrefetchedPath(url);
-    const cached = fresh ? undefined : this.prefetchCache.get(url);
-    if (cached) return cached;
+    const cached = fresh ? undefined : this.readFreshPrefetch(url);
+    if (cached !== undefined) return cached;
     
     const response = await fetchFarmNavigationDocument(
       url,
@@ -2544,10 +2567,10 @@ ${generateUniversalRouterStateProperties()}
     if (isFarmDocsPath(url.pathname)) return;
     
     const pathname = url.pathname + url.search;
-    if (this.prefetchCache.has(pathname)) return;
+    if (this.readFreshPrefetch(pathname) !== undefined) return;
     
     this.fetchPage(pathname, false, false)
-      .then(function(html) { spaRouter.prefetchCache.set(pathname, html); })
+      .then(function(html) { spaRouter.storePrefetchedHtml(pathname, html); })
       .catch(function(error) {
         clearFarmPrefetchCacheOnDeploymentMismatch(spaRouter, error);
       });
@@ -3447,8 +3470,8 @@ ${generateUniversalRouterStateProperties()}
   fetchPage: async function(url, interceptFrom, fresh = false, recover = true, signal) {
     const cacheKey = interceptFrom ? url + "\\nintercept:" + interceptFrom : url;
     if (fresh) this.clearPrefetchedPath(url);
-    const cached = fresh ? undefined : this.prefetchCache.get(cacheKey);
-    if (cached) return cached;
+    const cached = fresh ? undefined : this.readFreshPrefetch(cacheKey);
+    if (cached !== undefined) return cached;
     
     const response = await fetchFarmNavigationDocument(
       url,
@@ -3461,7 +3484,7 @@ ${generateUniversalRouterStateProperties()}
     );
     if (!response.ok) throw new Error("Failed to fetch page");
     const html = await response.text();
-    this.prefetchCache.set(cacheKey, html);
+    this.storePrefetchedHtml(cacheKey, html);
     return html;
   },
   
@@ -3594,13 +3617,14 @@ ${generateUniversalRouterStateProperties()}
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (isFarmDocsPath(url.pathname)) return;
     
+    // A prefetch warms an ordinary future navigation, which reads the bare
+    // URL key. Carrying the intercept identity here both missed every real
+    // navigation (double fetch per prefetched link) and sent
+    // X-Farm-Intercept-From, which bypasses the shared cache server-side.
     const pathname = url.pathname + url.search;
-    const interceptFrom = this.currentPath;
-    const cacheKey = pathname + "\\nintercept:" + interceptFrom;
-    if (this.prefetchCache.has(cacheKey)) return;
+    if (this.readFreshPrefetch(pathname) !== undefined) return;
     
-    this.fetchPage(pathname, interceptFrom, false, false)
-      .then(function(html) { spaRouter.prefetchCache.set(cacheKey, html); })
+    this.fetchPage(pathname, undefined, false, false)
       .catch(function(error) {
         clearFarmPrefetchCacheOnDeploymentMismatch(spaRouter, error);
       });
