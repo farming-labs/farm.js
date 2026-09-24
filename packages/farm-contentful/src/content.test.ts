@@ -32,16 +32,60 @@ describe("contentfulSource", () => {
   });
 
   it("pages past Contentful's page cap until total is reached", async () => {
+    const first = Array.from({ length: 1000 }, (_, index) =>
+      entry(`a${index}`, { slug: `a${index}` }),
+    );
+    const second = Array.from({ length: 200 }, (_, index) =>
+      entry(`b${index}`, { slug: `b${index}` }),
+    );
     const { client, getEntries } = stubClient([
-      { items: [entry("a", { slug: "a" })], total: 2 },
-      { items: [entry("b", { slug: "b" })], total: 2 },
+      { items: first, total: 1200 },
+      { items: second, total: 1200 },
     ]);
-    const source = contentfulSource({ client, contentType: "post", query: { limit: 1 } });
+    const source = contentfulSource({ client, contentType: "post" });
+
+    const documents = await source.fetch();
+    expect(documents).toHaveLength(1200);
+    expect(getEntries).toHaveBeenCalledTimes(2);
+    expect(getEntries.mock.calls[1]![0]).toMatchObject({ skip: 1000 });
+  });
+
+  it("limit caps the total entries loaded, matching Contentful's own semantics", async () => {
+    const { client, getEntries } = stubClient([
+      {
+        items: [entry("a", { slug: "a" }), entry("b", { slug: "b" })],
+        total: 5,
+      },
+    ]);
+    const source = contentfulSource({ client, contentType: "post", query: { limit: 2 } });
 
     const documents = await source.fetch();
     expect(documents.map((doc) => doc.id)).toEqual(["a", "b"]);
-    expect(getEntries).toHaveBeenCalledTimes(2);
-    expect(getEntries.mock.calls[1]![0]).toMatchObject({ skip: 1, limit: 1 });
+    expect(getEntries).toHaveBeenCalledTimes(1);
+    expect(getEntries.mock.calls[0]![0]).toMatchObject({ limit: 2 });
+  });
+
+  it("terminates against a provider that repeats the same page forever", async () => {
+    // A broken proxy that ignores skip: without the total-derived bound this
+    // looped for the lifetime of the config load.
+    const page = { items: [entry("a", { slug: "a" }), entry("b", { slug: "b" })], total: 5 };
+    const { client, getEntries } = stubClient([page, page, page, page, page, page, page, page]);
+    const source = contentfulSource({ client, contentType: "post" });
+
+    const documents = await source.fetch();
+    expect(documents.length).toBeLessThanOrEqual(6);
+    expect(getEntries.mock.calls.length).toBeLessThanOrEqual(3);
+  });
+
+  it("treats a non-positive limit as zero entries without calling the API", async () => {
+    const { client, getEntries } = stubClient([{ items: [entry("a", { slug: "a" })], total: 1 }]);
+    await expect(
+      contentfulSource({ client, contentType: "post", query: { limit: 0 } }).fetch(),
+    ).resolves.toEqual([]);
+    await expect(
+      contentfulSource({ client, contentType: "post", query: { limit: -3 } }).fetch(),
+    ).resolves.toEqual([]);
+    expect(getEntries).not.toHaveBeenCalled();
   });
 
   it("forwards query parameters but owns content_type and skip", async () => {

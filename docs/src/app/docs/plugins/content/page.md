@@ -373,7 +373,8 @@ posts: collection({
 - credentials resolve from `CONTENTFUL_SPACE_ID` and `CONTENTFUL_ACCESS_TOKEN`, or pass an
   existing client.
 - entry IDs default to a string `fields.slug`, falling back to `sys.id`.
-- pagination past Contentful's 1000-entry page cap is handled internally; `content_type` and
+- pagination past Contentful's 1000-entry page cap is handled internally, bounded by the
+  reported total; `limit` caps the total entries loaded. `content_type` and
   `skip` are owned by the source, everything else in `query` passes through.
 - set `host: "preview.contentful.com"` with `CONTENTFUL_PREVIEW_TOKEN` to load drafts.
 - the source is read-only for now: Contentful writes go through its separate management SDK in a

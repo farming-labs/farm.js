@@ -93,15 +93,31 @@ export function contentfulSource(options: ContentfulSourceOptions): ContentRemot
     ...(options.refreshInterval !== undefined ? { refreshInterval: options.refreshInterval } : {}),
     async fetch(): Promise<readonly ContentRemoteDocument[]> {
       const resolved = resolveClient();
-      const pageSize = Math.min(Number(options.query?.limit ?? PAGE_SIZE) || PAGE_SIZE, PAGE_SIZE);
+      const requestedLimit = options.query?.limit;
+      const maximumEntries =
+        typeof requestedLimit === "number" && Number.isFinite(requestedLimit)
+          ? Math.max(Math.floor(requestedLimit), 0)
+          : Infinity;
+      if (maximumEntries === 0) return [];
+      const pageSize = Math.min(
+        maximumEntries === Infinity ? PAGE_SIZE : maximumEntries,
+        PAGE_SIZE,
+      );
       const entries: ContentfulEntryLike[] = [];
 
-      // getEntries pages at most 1000 entries; keep fetching until `total`.
+      // getEntries pages at most 1000 entries per call. `limit` caps the
+      // TOTAL entries loaded - Contentful's own semantics for one call - and
+      // the loop is bounded by `total` and by page progress, so a
+      // misbehaving provider that repeats a page cannot spin config loading
+      // forever.
       for (let skip = 0; ; skip += pageSize) {
         const page = (await resolved.getEntries({
           ...options.query,
           content_type: options.contentType,
-          limit: pageSize,
+          limit: Math.min(
+            pageSize,
+            maximumEntries === Infinity ? pageSize : maximumEntries - entries.length,
+          ),
           skip,
         })) as unknown as ContentfulQueryResult;
         if (!page || !Array.isArray(page.items)) {
@@ -110,7 +126,12 @@ export function contentfulSource(options: ContentfulSourceOptions): ContentRemot
           );
         }
         entries.push(...page.items);
+        if (entries.length >= maximumEntries) {
+          entries.length = Math.min(entries.length, maximumEntries);
+          break;
+        }
         if (entries.length >= page.total || page.items.length === 0) break;
+        if (skip + pageSize >= page.total) break;
       }
 
       return entries.map((entry, index) => {
