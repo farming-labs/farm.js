@@ -292,94 +292,76 @@ export default async function PostPage({ params }: PageProps<"/posts/[...slug]">
 
 ## Use a hosted CMS
 
-A collection's source does not have to be files. `remote()` fetches documents from anywhere -
-a CMS, an API, a database - and runs them through the same schema validation, transforms, and
-generated types:
+A collection's source does not have to be files. `remote()` is the one interface every CMS,
+API, or database plugs into - implement it once and the rest of this page applies unchanged:
+the same schema validation, transforms, generated types, and server reads and writes.
+
+### The source interface
 
 ```ts
 import { collection, content, remote } from "@farm.js/content";
 
-content({
-  collections: {
-    posts: collection({
-      source: remote({
-        name: "cms:posts",
-        fetch: async () => loadDocumentsSomehow(), // [{ id, data, body? }, ...]
-        refreshInterval: 30_000, // dev only: poll and reload on change
-      }),
-      schema: post,
-    }),
-  },
-});
+source: remote({
+  // names the source in error messages, e.g. "mycms:posts"
+  name: "mycms:posts",
+
+  // REQUIRED - resolve to an array of documents:
+  //   id:   stable, route-friendly, unique in the collection (a slug)
+  //   data: goes through the collection schema, so YOUR schema is the boundary
+  //   body: optional Markdown, for entry.body and word counts
+  fetch: async () => [{ id, data, body }],
+
+  // OPTIONAL - dev only: re-fetch this often and reload when documents changed
+  refreshInterval: 30_000,
+
+  // OPTIONAL - the write surface, one callback per verb, same shape as fetch.
+  // Each returns the provider's CONFIRMED document; omit any verb and
+  // collections.<name>.<verb>() says exactly what is missing.
+  create: async ({ data, body }) => confirmedDocument,
+  update: async (id, patch) => confirmedDocument,
+  delete: async (id) => {},
+}),
 ```
 
-Remote content is a **build-time snapshot**, exactly like files: documents are fetched while the
-configuration loads, validated, and bundled into production output. Publishing new content means a
-new build - point the provider's webhook at a deploy hook. In development, `refreshInterval` polls
-and reloads only when the documents actually changed; entries are sorted by ID so re-fetch order
-never churns the generated module. Remote collections cannot declare
-[typed asset fields](#manage-local-assets), which resolve files on disk.
+That is the entire integration surface. Everything below holds for every provider:
 
-Integrations can hand you a ready-made source. With [`@farm.js/sanity`](/docs/integrations/sanity):
+- **Snapshot semantics.** Documents are fetched while the configuration loads, validated, and
+  bundled into production output. Publishing means rebuilding: point the provider's webhook at a
+  deploy hook. Entries sort by ID so fetch order never churns the generated module.
+- **Development.** `refreshInterval` polls and reloads only when documents actually changed. A
+  successful write rebuilds the snapshot immediately.
+- **Writes.** `collections.<name>.create/update/delete` route through the callbacks, and the
+  confirmed document is re-validated against the collection schema before anyone trusts it. In
+  production the write lands in the CMS while the running deployment serves the bundled snapshot
+  until the next build. Gate every write behind your own
+  [server function](/docs/api-client): Farm never exposes content writes to the browser.
+- **Limits.** Remote collections cannot declare [typed asset fields](#manage-local-assets),
+  which resolve files on disk.
 
-```ts
-import { sanitySource } from "@farm.js/sanity";
-
-posts: collection({
-  source: sanitySource({
-    query: `*[_type == "post"]{ _id, slug, title, publishedAt }`,
-    refreshInterval: 30_000,
-  }),
-  schema: post,
-});
-```
-
-`sanitySource` resolves its project from `SANITY_PROJECT_ID` and `SANITY_DATASET` or accepts an
-existing client, uses `slug.current` (falling back to `_id`) as the entry ID, and skips the CDN by
-default so a build sees the freshest documents.
-
-Contentful works the same way with `@farm.js/contentful`:
-
-```ts
-import { contentfulSource } from "@farm.js/contentful";
-
-posts: collection({
-  source: contentfulSource({
-    contentType: "post",
-    query: { order: ["-sys.createdAt"] },
-  }),
-  schema: post,
-});
-```
-
-It resolves `CONTENTFUL_SPACE_ID` and `CONTENTFUL_ACCESS_TOKEN`, uses a string `fields.slug`
-(falling back to `sys.id`) as the entry ID, and pages past Contentful's 1000-entry cap internally.
-Set `host: "preview.contentful.com"` with `CONTENTFUL_PREVIEW_TOKEN` to load drafts.
-
-### Write through the collection
-
-A remote source may also implement `create`, `update`, and `delete` - the same
-callback-per-verb shape as `fetch`. Collections with a writable source expose them on the
-server-side `collections` handle, typed like everything else:
+### Reading and writing entries
 
 ```ts
 import { collections } from "@farm.js/content/server";
 
+const posts = await collections.posts.all(); // the validated snapshot
 await collections.posts.update("hello-world", { data: { title: "New title" } });
 await collections.posts.create({ data: { title: "Drafted from the app" } });
 await collections.posts.delete("old-post");
 ```
 
-The CMS stays the source of truth: each verb returns the provider's confirmed document, which is
-validated against the collection schema before anyone trusts it. In development a successful
-write rebuilds the snapshot immediately, so the screen reflects it on reload. **In production the
-snapshot is bundled**: the write lands in the CMS, and the running deployment serves the previous
-content until the provider's webhook triggers your deploy hook. A collection whose source omits a
-verb, or whose source is `files()`, reports exactly that when the verb is called - local files are
-edited on disk.
+### Official sources
 
-Gate every write behind your own [server function](/docs/api-client): Farm never exposes content
-writes to the browser directly, so authorization stays in app code.
+Provider packages implement the interface for you - each is one import plus its credentials, and
+everything above applies as written:
+
+| Provider   | Source                                        | Setup                                                                                     |
+| ---------- | --------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Sanity     | `sanitySource` from `@farm.js/sanity`         | [Sanity integration → Content collections](/docs/integrations/sanity#content-collections) |
+| Contentful | `contentfulSource` from `@farm.js/contentful` | package README: env vars, entry IDs, preview host, pagination                             |
+
+Building a source for another provider is exactly the `remote()` block above with the provider's
+SDK inside `fetch` - no Farm package required, though a dedicated package is welcome once the
+credential conventions settle.
 
 For **live content** that must update without a rebuild, keep the provider SDK in a server-only
 module and fetch through a [Server Query](/docs/server-queries) instead. Farm can validate the

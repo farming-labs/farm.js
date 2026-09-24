@@ -105,35 +105,30 @@ export default async function PostsPage() {
 
 ## Content collections
 
-Feed Sanity documents into [the content plugin](/docs/plugins/content) and they get the same
-schema validation, transforms, and generated server types as local Markdown:
+`sanitySource` feeds Sanity documents into [the content plugin](/docs/plugins/content#use-a-hosted-cms),
+which owns everything shared - validation, generated types, snapshot semantics, the write
+surface, and the deploy-hook update story. This page only covers what is Sanity-specific:
 
 ```ts
 import { collection, content } from "@farm.js/content";
 import { sanitySource } from "@farm.js/sanity";
 
-content({
-  collections: {
-    posts: collection({
-      source: sanitySource({
-        query: `*[_type == "post"]{ _id, slug, title, publishedAt }`,
-        refreshInterval: 30_000, // dev only
-      }),
-      schema: post,
-    }),
-  },
+posts: collection({
+  source: sanitySource({
+    query: `*[_type == "post"]{ _id, slug, title, publishedAt }`,
+  }),
+  schema: post,
 });
 ```
 
-The documents are fetched while the configuration loads and bundled as a build-time snapshot, so
-publishing means rebuilding: point a Sanity webhook at your platform's deploy hook.
-
-With a write token the source also powers the collection write surface. Pass `writeToken` (or set
-`SANITY_API_WRITE_TOKEN`) and `createType` for creation, then call
-`collections.posts.create/update/delete` from server code; updates and deletes address documents
-by the same entry ID reads use, resolving the slug back to the Sanity `_id`. The
-[cache-invalidation webhook](#invalidate-on-publish) below is the complementary path for content read at runtime
-through server queries.
+- credentials resolve from `SANITY_PROJECT_ID` and `SANITY_DATASET`, or pass an existing client.
+- entry IDs default to `slug.current`, falling back to `_id`; writes resolve the slug back to the
+  Sanity `_id` automatically.
+- the CDN is skipped by default so a build sees the freshest documents.
+- writes need `writeToken` (or `SANITY_API_WRITE_TOKEN`) plus `createType` for creation; without a
+  token the source is read-only.
+- the [invalidation webhook](#invalidate-on-publish) below is the complementary path for content
+  read at runtime through server queries.
 
 ## Serve images
 
