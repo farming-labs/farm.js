@@ -661,6 +661,7 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
         ],
       };
       let updateModel: (next: CompilerStateUpdater) => void = () => undefined;
+      let owner: { blockRefreshListeners: Map<number, unknown> };
       const FallbackMixedRanges = createCompiledComponent<{ prefix: string }>({
         displayName: "FallbackMixedRangesState",
         reactivity,
@@ -765,7 +766,12 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
         return (
           <>
             <button data-parent-prefix type="button" onClick={() => setPrefix("after")} />
-            <FallbackMixedRanges prefix={prefix} />
+            {React.createElement(FallbackMixedRanges, {
+              prefix,
+              ref: (instance: unknown) => {
+                if (instance) owner = instance as typeof owner;
+              },
+            } as React.Attributes & { prefix: string })}
           </>
         );
       }
@@ -801,6 +807,7 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
       select.value = "b";
       input.focus();
       input.setSelectionRange(1, 4, "backward");
+      const fallbackListener = owner!.blockRefreshListeners.get(0);
 
       await act(async () => {
         container.querySelector<HTMLButtonElement>("[data-parent-prefix]")?.click();
@@ -830,6 +837,7 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
       ]);
       expect(surface.querySelector("p")?.textContent).toBe("Loading…");
       expect(surface.dataset.prefix).toBe("after");
+      expect(owner!.blockRefreshListeners.get(0)).toBe(fallbackListener);
       expect(
         [...surface.querySelectorAll<HTMLElement>("article")].map((row) => row.textContent),
       ).toEqual(["Beta renamed", "Alpha renamed"]);

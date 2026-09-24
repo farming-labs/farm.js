@@ -3557,6 +3557,27 @@ function collectActiveCompilerHostBlockIds(
   ids.add(block.id);
 }
 
+function reconcileCompilerFallbackSubscriptions(
+  owner: Pick<ConditionalBlockOwner, "subscribe">,
+  subscriptions: Map<number, () => void>,
+  ids: ReadonlySet<number>,
+  refresh: CompilerBlockRefresh,
+): void {
+  for (const [id, unsubscribe] of subscriptions) {
+    if (ids.has(id)) continue;
+    unsubscribe();
+    subscriptions.delete(id);
+  }
+  for (const id of ids) {
+    if (!subscriptions.has(id)) subscriptions.set(id, owner.subscribe(id, refresh));
+  }
+}
+
+function clearCompilerFallbackSubscriptions(subscriptions: Map<number, () => void>): void {
+  for (const unsubscribe of subscriptions.values()) unsubscribe();
+  subscriptions.clear();
+}
+
 /**
  * React can preserve a fallback subtree only while every mounted keyed range has
  * an unambiguous identity. Inspect the complete live descriptor because nested
@@ -5346,7 +5367,7 @@ function createHostConditionalBlockComponent(
     private propSyncQueued = false;
     private currentProps = this.props;
     private unsubscribe: (() => void) | undefined;
-    private fallbackUnsubscribers: Array<() => void> = [];
+    private readonly fallbackUnsubscribers = new Map<number, () => void>();
     private fallbackKeysWereUnsafe = false;
     private activeBranch: "truthy" | "falsy" | null = null;
     private instance: CompilerHostInstance | null = null;
@@ -5356,23 +5377,24 @@ function createHostConditionalBlockComponent(
       this.activateFallback();
     };
 
+    private refreshFallbackDescendant: CompilerBlockRefresh = (afterCommit) => {
+      this.prepareFallbackUpdate();
+      this.forceUpdate(afterCommit);
+    };
+
     private subscribeFallbackDescendants(): void {
-      for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
-      this.fallbackUnsubscribers = [];
       const ids = new Set<number>();
       const selection = hostConditionalSelection(this.currentProps);
       if (selection.kind === "branch") {
         collectActiveCompilerHostBlockIds(selection.branch.create(), ids);
       }
       ids.delete(this.currentProps.id);
-      for (const id of ids) {
-        this.fallbackUnsubscribers.push(
-          owner.subscribe(id, (afterCommit) => {
-            this.prepareFallbackUpdate();
-            this.forceUpdate(afterCommit);
-          }),
-        );
-      }
+      reconcileCompilerFallbackSubscriptions(
+        owner,
+        this.fallbackUnsubscribers,
+        ids,
+        this.refreshFallbackDescendant,
+      );
     }
 
     private hasUnsafeFallbackKeys(): boolean {
@@ -5547,8 +5569,7 @@ function createHostConditionalBlockComponent(
     componentWillUnmount(): void {
       this.mounted = false;
       this.unsubscribe?.();
-      for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
-      this.fallbackUnsubscribers = [];
+      clearCompilerFallbackSubscriptions(this.fallbackUnsubscribers);
       this.fallbackKeysWereUnsafe = false;
       this.instance?.scope?.cleanup();
       // React 18 replays lifecycles without detaching refs; captureRoot owns ref cleanup.
@@ -5599,7 +5620,7 @@ function createConditionalRangesBlockComponent(
     private propFallbackQueued = false;
     private currentProps = this.props;
     private unsubscribe: (() => void) | undefined;
-    private fallbackUnsubscribers: Array<() => void> = [];
+    private readonly fallbackUnsubscribers = new Map<number, () => void>();
     private fallbackKeysWereUnsafe = false;
     private rangeInstances: Array<ConditionalRangeInstance | null> = [];
     private staticSegments: Element[][] = [];
@@ -5610,9 +5631,12 @@ function createConditionalRangesBlockComponent(
       this.activateFallback();
     };
 
+    private refreshFallbackDescendant: CompilerBlockRefresh = (afterCommit) => {
+      this.prepareFallbackUpdate();
+      this.forceUpdate(afterCommit);
+    };
+
     private subscribeFallbackDescendants(): void {
-      for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
-      this.fallbackUnsubscribers = [];
       const ids = new Set<number>();
       for (const range of this.currentProps.ranges) {
         const selection = hostConditionalSelection(range);
@@ -5621,14 +5645,12 @@ function createConditionalRangesBlockComponent(
         }
       }
       ids.delete(this.currentProps.id);
-      for (const id of ids) {
-        this.fallbackUnsubscribers.push(
-          owner.subscribe(id, (afterCommit) => {
-            this.prepareFallbackUpdate();
-            this.forceUpdate(afterCommit);
-          }),
-        );
-      }
+      reconcileCompilerFallbackSubscriptions(
+        owner,
+        this.fallbackUnsubscribers,
+        ids,
+        this.refreshFallbackDescendant,
+      );
     }
 
     private hasUnsafeFallbackKeys(): boolean {
@@ -5901,8 +5923,7 @@ function createConditionalRangesBlockComponent(
     componentWillUnmount(): void {
       this.mounted = false;
       this.unsubscribe?.();
-      for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
-      this.fallbackUnsubscribers = [];
+      clearCompilerFallbackSubscriptions(this.fallbackUnsubscribers);
       this.fallbackKeysWereUnsafe = false;
       for (const instance of this.rangeInstances) instance?.host.scope?.cleanup();
       // Keep the attached root for React 18 replay; captureRoot clears real detachments.
@@ -9899,7 +9920,7 @@ function createMixedRangesBlockComponent(
     private propFallbackQueued = false;
     private currentProps = this.props;
     private controller: CompilerNestedMixedRanges | null = null;
-    private fallbackUnsubscribers: Array<() => void> = [];
+    private readonly fallbackUnsubscribers = new Map<number, () => void>();
 
     private captureRoot = (root: Element | null) => {
       this.root = root;
@@ -9907,9 +9928,18 @@ function createMixedRangesBlockComponent(
     };
 
     private clearFallbackSubscriptions(): void {
-      for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
-      this.fallbackUnsubscribers = [];
+      clearCompilerFallbackSubscriptions(this.fallbackUnsubscribers);
     }
+
+    private refreshFallbackBlock: CompilerBlockRefresh = (afterCommit) => {
+      if (!this.mounted || !this.state.fallback) {
+        afterCommit?.();
+        return;
+      }
+      const nextDescriptor = this.currentProps.create();
+      this.prepareFallbackUpdate(nextDescriptor);
+      this.forceUpdate(afterCommit);
+    };
 
     private readFallbackBlockIds(descriptor: CompilerHostElement): Set<number> {
       const ids = new Set<number>();
@@ -9924,22 +9954,14 @@ function createMixedRangesBlockComponent(
     }
 
     private subscribeFallbackBlocks(): void {
-      this.clearFallbackSubscriptions();
       const descriptor = this.currentProps.create();
       const ids = this.readFallbackBlockIds(descriptor);
-      for (const id of ids) {
-        this.fallbackUnsubscribers.push(
-          owner.subscribe(id, (afterCommit) => {
-            if (!this.mounted || !this.state.fallback) {
-              afterCommit?.();
-              return;
-            }
-            const nextDescriptor = this.currentProps.create();
-            this.prepareFallbackUpdate(nextDescriptor);
-            this.forceUpdate(afterCommit);
-          }),
-        );
-      }
+      reconcileCompilerFallbackSubscriptions(
+        owner,
+        this.fallbackUnsubscribers,
+        ids,
+        this.refreshFallbackBlock,
+      );
     }
 
     private adopt(): boolean {
