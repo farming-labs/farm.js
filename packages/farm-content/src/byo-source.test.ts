@@ -127,3 +127,100 @@ describe("bring-your-own source", () => {
     await expect(posts.delete("alpha")).rejects.toThrow(/does not implement delete\(\)/);
   });
 });
+
+describe("bring-your-own source: the docs' WordPress example", () => {
+  /** The wp-json shapes the docs example maps, behind a stubbed fetch. */
+  function stubWordPress() {
+    const posts = new Map([
+      [
+        "hello-world",
+        {
+          slug: "hello-world",
+          title: { rendered: "Hello" },
+          date: "2026-09-24",
+          content: { rendered: "<p>Hi</p>" },
+        },
+      ],
+      [
+        "about",
+        {
+          slug: "about",
+          title: { rendered: "About" },
+          date: "2026-09-01",
+          content: { rendered: "<p>Us</p>" },
+        },
+      ],
+    ]);
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        const slug = new URL(url).searchParams.get("slug")!;
+        const patch = JSON.parse(String(init.body));
+        const updated = { ...posts.get(slug)!, title: { rendered: patch.title } };
+        posts.set(slug, updated);
+        return new Response(JSON.stringify(updated));
+      }
+      return new Response(JSON.stringify([...posts.values()]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return { posts, fetchMock };
+  }
+
+  const wordpress = () =>
+    remote({
+      name: "wp:posts",
+      fetch: async () => {
+        const posts = await fetch("https://blog.example.com/wp-json/wp/v2/posts?per_page=100").then(
+          (response) => response.json(),
+        );
+        return posts.map((post: any) => ({
+          id: post.slug,
+          data: { title: post.title.rendered, publishedAt: post.date },
+          body: post.content.rendered,
+        }));
+      },
+      update: async (id, patch) => {
+        const updated = await fetch(`https://blog.example.com/wp-json/wp/v2/posts?slug=${id}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(patch.data),
+        }).then((response) => response.json());
+        return { id, data: { title: updated.title.rendered, publishedAt: updated.date } };
+      },
+    });
+
+  it("loads with bodies and word counts through the real pipeline", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "farm-byo-wp-"));
+    roots.push(root);
+    stubWordPress();
+
+    const loaded = await loadContentCollections(
+      root,
+      {
+        posts: collection({
+          source: wordpress(),
+          schema: postSchema,
+          transform: ({ data, words }) => ({ ...data, words }),
+        }),
+      },
+      new Set(),
+    );
+
+    const entries = loaded.collections.posts!;
+    expect(entries.map((entry) => entry.id)).toEqual(["about", "hello-world"]);
+    expect(entries[1]!.body).toBe("<p>Hi</p>");
+    expect(entries[1]!.data).toMatchObject({ title: "Hello", words: 1 });
+  });
+
+  it("mutates WordPress through the inline callback and confirms the stored state", async () => {
+    const { posts } = stubWordPress();
+    registerContentWriteRuntime({ posts: { source: wordpress(), schema: postSchema } });
+    const { collections } = createContentRuntime({ posts: [] });
+
+    const confirmed = await (collections as Record<string, any>).posts.update("hello-world", {
+      data: { title: "Renamed" },
+    });
+
+    expect(confirmed.data).toMatchObject({ title: "Renamed" });
+    expect(posts.get("hello-world")!.title.rendered).toBe("Renamed");
+  });
+});
