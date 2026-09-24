@@ -1,5 +1,6 @@
 import React, { act, StrictMode, useState } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot, hydrateRoot, type Root } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createCompiledComponent,
@@ -237,6 +238,128 @@ describe("conditional fallback lifecycle replay", () => {
         expect({ owners, renders }).toEqual(beforeUnmount);
         expect(detached.outerHTML).toBe(detachedHTML);
         expect(detached.isConnected).toBe(false);
+      },
+    );
+  }
+
+  for (const kind of ["HostConditional", "ConditionalRanges"] as const) {
+    it.each(
+      (["static", "hybrid"] as const).flatMap((reactivity) =>
+        (["mount", "hydrate"] as const).map((lifecycle) => ({ reactivity, lifecycle })),
+      ),
+    )(
+      `${kind} fallback rebinds changing descendant listeners: $reactivity, $lifecycle`,
+      async ({ reactivity, lifecycle }) => {
+        let owner: { blockRefreshListeners: Map<number, unknown> };
+        let cells: readonly CompilerCell[];
+        let renders = 0;
+        const Panel = createCompiledComponent({
+          displayName: "FallbackListenerRebind",
+          reactivity,
+          initialize: () => [false, 1, 10],
+          render(_props: Record<string, never>, state, blocks) {
+            cells = state;
+            const readNestedId = () => (state[0].get() ? 2 : 1);
+            const branch = {
+              create: (): CompilerHostElement => {
+                const nestedId = readNestedId();
+                const nested = {
+                  create: () => host("span", [Number(state[nestedId].get())]),
+                  bindings: [],
+                };
+                return {
+                  ...host("article", [nested.create()]),
+                  block: {
+                    kind: "conditional-ranges",
+                    id: nestedId,
+                    trailing: 0,
+                    ranges: [{ before: 0, test: () => true, truthy: nested }],
+                  },
+                };
+              },
+              bindings: [],
+            };
+            const condition = { before: 0, test: () => true, truthy: branch };
+            const props = {
+              id: 0,
+              // The undeclared aside deliberately transfers this block to React.
+              render: () => {
+                renders += 1;
+                const nestedId = readNestedId();
+                return (
+                  <section>
+                    <aside>React fallback</aside>
+                    <article>
+                      <span data-descendant={nestedId}>{Number(state[nestedId].get())}</span>
+                    </article>
+                  </section>
+                );
+              },
+            };
+            return (
+              <main>
+                {kind === "HostConditional"
+                  ? React.createElement(blocks.HostConditional, { ...props, ...condition })
+                  : React.createElement(blocks.ConditionalRanges, {
+                      ...props,
+                      ranges: [condition],
+                      trailing: 0,
+                    })}
+              </main>
+            );
+          },
+          bindings: [
+            { kind: "block", id: 0, dependencies: [0] },
+            { kind: "block", id: 1, parent: 0, dependencies: [1] },
+            { kind: "block", id: 2, parent: 0, dependencies: [2] },
+          ],
+        });
+        const tree = React.createElement(Panel, {
+          ref: (instance: unknown) => {
+            if (instance) owner = instance as typeof owner;
+          },
+        } as React.Attributes);
+        const container = document.createElement("div");
+        document.body.append(container);
+        if (lifecycle === "hydrate") container.innerHTML = renderToString(tree);
+        const root = lifecycle === "hydrate" ? hydrateRoot(container, tree) : createRoot(container);
+        roots.add(root);
+        await act(async () => {
+          if (lifecycle === "mount") root.render(tree);
+        });
+
+        expect([...owner!.blockRefreshListeners.keys()].sort()).toEqual([0, 1]);
+        expect(container.querySelector("span")?.textContent).toBe("1");
+
+        await act(async () => cells[0].set(true));
+        expect([...owner!.blockRefreshListeners.keys()].sort()).toEqual([0, 2]);
+        expect(container.querySelector("span")?.getAttribute("data-descendant")).toBe("2");
+        expect(container.querySelector("span")?.textContent).toBe("10");
+
+        const beforeCurrentUpdate = renders;
+        await act(async () => cells[2].set(11));
+        expect(renders).toBeGreaterThan(beforeCurrentUpdate);
+        expect(container.querySelector("span")?.textContent).toBe("11");
+
+        const beforeStaleUpdate = renders;
+        await act(async () => cells[1].set(2));
+        expect(renders).toBe(beforeStaleUpdate);
+        expect(container.querySelector("span")?.textContent).toBe("11");
+
+        await act(async () => cells[0].set(false));
+        expect([...owner!.blockRefreshListeners.keys()].sort()).toEqual([0, 1]);
+        await act(async () => cells[1].set(3));
+        expect(container.querySelector("span")?.textContent).toBe("3");
+
+        const beforeUnmountedUpdates = renders;
+        await act(async () => root.unmount());
+        roots.delete(root);
+        expect(owner!.blockRefreshListeners.size).toBe(0);
+        await act(async () => {
+          cells[1].set(4);
+          cells[2].set(12);
+        });
+        expect(renders).toBe(beforeUnmountedUpdates);
       },
     );
   }

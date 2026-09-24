@@ -414,10 +414,11 @@ const testSource = String.raw`
           render(_props, cells, blocks) {
             owners += 1;
             update = (index, value) => cells[index].set(value);
+            const readNestedId = () => cells[1].get() < 0 ? 2 : 1;
             const nested = { create: () => host("em", [cells[1].get()]), bindings: [] };
             const branch = { create: () => ({
               ...host("article", cells[1].get() >= 0 ? [nested.create()] : []),
-              block: descendants ? { kind: "conditional-ranges", id: 1, trailing: 0,
+              block: descendants ? { kind: "conditional-ranges", id: readNestedId(), trailing: 0,
                 ranges: [{ before: 0, test: () => cells[1].get() >= 0, truthy: nested }],
               } : undefined,
             }), bindings: [] };
@@ -431,7 +432,8 @@ const testSource = String.raw`
             }));
           },
           bindings: descendants
-            ? [{ kind: "block", id: 0, dependencies: [0] }, { kind: "block", id: 1, parent: 0, dependencies: [1] }]
+            ? [{ kind: "block", id: 0, dependencies: [0] }, { kind: "block", id: 1, parent: 0, dependencies: [1] },
+              { kind: "block", id: 2, parent: 0, dependencies: [1] }]
             : [{ kind: "block", id: 0, dependencies: [0, 1] }],
         });
         function Control() {
@@ -485,7 +487,7 @@ const testSource = String.raw`
           for (const [index, value] of [[1, 1], [0, false], [1, 2], [0, true], [1, -1], [1, 3]]) {
             await React.act(async () => { update(index, value); updateControl(index, value); });
             assert.equal(target.innerHTML, controlTarget.innerHTML, context);
-            assert.deepEqual([...owner.blockRefreshListeners.keys()].sort(), descendants ? [0, 1] : [0], context);
+            assert.deepEqual([...owner.blockRefreshListeners.keys()].sort(), descendants ? [0, value < 0 ? 2 : 1] : [0], context);
             assert.equal(owners, initialOwners, context);
             checkDomState();
           }

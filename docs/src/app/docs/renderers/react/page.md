@@ -2448,8 +2448,11 @@ disposed owners cannot update the detached nodes or a new component instance.
 
 If a host conditional or conditional-range container has already requested React fallback,
 Strict Mode replay restores its nested fallback subscriptions instead of attempting compiled
-adoption again. Descendant-only updates remain live, including after hydration, and real
-unmounts still dispose those subscriptions. The existing fallback eligibility rules are unchanged.
+adoption again. Each committed fallback render also refreshes that subscription set, so a nested
+block introduced by a parent, local condition, or compatible Fast Refresh becomes live immediately
+and a removed block stops receiving work. Descendant-only updates remain live, including after
+hydration, and real unmounts still dispose those subscriptions. The existing fallback eligibility
+rules are unchanged.
 
 Host conditional and conditional-range containers keep a stable key after entering React fallback
 when their descendants are either React-owned or conditional-only compiled blocks. Later updates
@@ -2513,6 +2516,9 @@ The package and example test suites verify more than generated code:
   Strict Mode preserve the primitive prop optimization afterward;
 - nested fallback blocks read one coherent render snapshot, and an abandoned concurrent render
   cannot publish prop cells or replace the last committed compiled element;
+- host conditional and conditional-range fallbacks rebind changing descendant listeners in static
+  and hybrid modes after mount or hydration, drop removed listeners, and dispose the active set on
+  unmount;
 - compatible Fast Refresh preserves state, while binding errors reach React error boundaries;
 - hydration mismatches follow React's recoverable-error path and remain interactive;
 - compiler-owned conditionals preserve a same-branch DOM instance, patch nested text, attributes,
