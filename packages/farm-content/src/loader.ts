@@ -13,6 +13,9 @@ import {
 import { isSupportedContentFile } from "./config.js";
 import { resolveMarkdownAssets } from "./markdown-assets.js";
 import type {
+  ContentAssetValue,
+  ContentRemoteDocument,
+  ContentRemoteSource,
   ContentCollection,
   ContentCollections,
   ContentEntry,
@@ -60,7 +63,7 @@ export async function writeContentServerModule(
   outputFile: string,
   collections: Readonly<Record<string, readonly ContentEntry<any>[]>>,
   assetImports: ReadonlyMap<string, ContentAssetImport> = new Map(),
-): Promise<void> {
+): Promise<boolean> {
   const outputDirectory = path.dirname(outputFile);
   await mkdir(outputDirectory, { recursive: true });
   const actualOutputDirectory = await realpath(outputDirectory);
@@ -96,7 +99,7 @@ export const getCollection = runtime.getCollection;
 export const getEntry = runtime.getEntry;
 export const getEntryOrThrow = runtime.getEntryOrThrow;
 `;
-  await writeFileIfChanged(outputFile, source);
+  return writeFileIfChanged(outputFile, source);
 }
 
 async function stageContentAsset(outputDirectory: string, filePath: string): Promise<string> {
@@ -132,6 +135,9 @@ async function loadCollection(
   assetImports: Map<string, ContentAssetImport>,
 ): Promise<ContentEntry<any>[]> {
   const source = definition.source;
+  if (source.kind === "remote") {
+    return loadRemoteCollection(name, definition, source);
+  }
   const relativeFiles = await fg([...source.patterns], {
     cwd: root,
     absolute: false,
@@ -233,6 +239,94 @@ async function loadCollection(
         body: resolvedBody.body,
         bodyAssets: freezeContentValue(resolvedBody.assets),
         filePath: relativeFile,
+      }),
+    );
+  }
+
+  return entries;
+}
+
+/**
+ * A remote collection goes through the same validation and transform pipeline
+ * as files; only acquisition differs. Documents are sorted by ID so the
+ * generated module is stable across fetches that return in a different order.
+ */
+async function loadRemoteCollection(
+  name: string,
+  definition: ContentCollection<any>,
+  source: ContentRemoteSource,
+): Promise<ContentEntry<any>[]> {
+  let documents: readonly ContentRemoteDocument[];
+  try {
+    documents = await source.fetch();
+  } catch (error) {
+    throw new Error(
+      `[farm:content] Collection ${JSON.stringify(name)} failed to fetch from ${JSON.stringify(source.name)}: ${errorMessage(error)}`,
+      { cause: error },
+    );
+  }
+  if (!Array.isArray(documents)) {
+    throw new Error(
+      `[farm:content] Collection ${JSON.stringify(name)}: source ${JSON.stringify(source.name)} must resolve to an array of documents`,
+    );
+  }
+
+  const ids = new Set<string>();
+  const sorted = [...documents].sort((left, right) =>
+    String(left?.id ?? "").localeCompare(String(right?.id ?? "")),
+  );
+  const entries: ContentEntry<any>[] = [];
+
+  for (const document of sorted) {
+    if (
+      !document ||
+      typeof document !== "object" ||
+      typeof document.id !== "string" ||
+      !document.id
+    ) {
+      throw new Error(
+        `[farm:content] Collection ${JSON.stringify(name)}: every document from ${JSON.stringify(source.name)} needs a non-empty string id`,
+      );
+    }
+    if (ids.has(document.id)) {
+      throw new Error(
+        `[farm:content] Collection ${JSON.stringify(name)} has duplicate entry ID ${JSON.stringify(document.id)} from ${JSON.stringify(source.name)}`,
+      );
+    }
+    ids.add(document.id);
+    if (!document.data || typeof document.data !== "object" || Array.isArray(document.data)) {
+      throw new Error(
+        `[farm:content] Collection ${JSON.stringify(name)}: document ${JSON.stringify(document.id)} from ${JSON.stringify(source.name)} needs an object \`data\``,
+      );
+    }
+
+    const reference = `${source.name}/${document.id}`;
+    const validatedData = await validateContentData(
+      definition.schema,
+      document.data,
+      name,
+      reference,
+    );
+    const body = typeof document.body === "string" ? document.body : "";
+    const baseEntry = {
+      id: document.id,
+      data: validatedData,
+      body,
+      bodyAssets: Object.freeze([]) as readonly ContentAssetValue[],
+      filePath: reference,
+      words: countWords(body),
+    };
+    const transformed = definition.transform
+      ? await definition.transform(baseEntry)
+      : baseEntry.data;
+
+    entries.push(
+      Object.freeze({
+        id: document.id,
+        data: freezeContentValue(transformed),
+        body,
+        bodyAssets: freezeContentValue([]),
+        filePath: reference,
       }),
     );
   }
@@ -508,13 +602,14 @@ function freezeContentValue<T>(value: T, ancestors = new Set<object>()): T {
   }
 }
 
-async function writeFileIfChanged(filePath: string, source: string): Promise<void> {
+async function writeFileIfChanged(filePath: string, source: string): Promise<boolean> {
   try {
-    if ((await readFile(filePath, "utf8")) === source) return;
+    if ((await readFile(filePath, "utf8")) === source) return false;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
   await writeFile(filePath, source, "utf8");
+  return true;
 }
 
 function errorMessage(error: unknown): string {

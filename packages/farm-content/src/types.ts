@@ -9,6 +9,37 @@ export interface ContentFileSource {
   readonly base?: string;
 }
 
+/** One document delivered by a remote source, before validation. */
+export interface ContentRemoteDocument {
+  /** Stable route-friendly identifier, unique within the collection. */
+  readonly id: string;
+  /** Structured data; goes through the collection schema like frontmatter. */
+  readonly data: Record<string, unknown>;
+  /** Optional Markdown body. Defaults to an empty string. */
+  readonly body?: string;
+}
+
+/**
+ * A source that fetches documents instead of reading local files - a CMS, an
+ * API, a database. Fetched while the configuration loads, validated through
+ * the same schema pipeline as files, and bundled into production output as
+ * the same build-time snapshot. The shape is structural on purpose: an
+ * integration can return it without importing this package at runtime.
+ */
+export interface ContentRemoteSource {
+  readonly kind: "remote";
+  /** Names the source in error messages, e.g. "sanity:posts". */
+  readonly name: string;
+  fetch(): Promise<readonly ContentRemoteDocument[]>;
+  /**
+   * Development only: re-fetch this often (milliseconds) and reload when the
+   * documents changed. Leave unset for fetch-on-rebuild only.
+   */
+  readonly refreshInterval?: number;
+}
+
+export type ContentSource = ContentFileSource | ContentRemoteSource;
+
 export interface ContentSchemaIssue {
   readonly message: string;
   readonly path?: readonly unknown[];
@@ -134,7 +165,7 @@ export interface ContentCollectionInput<
   TTransformed = InferContentSchema<TSchema>,
   TAssets extends ContentAssetsInput = undefined,
 > {
-  source: ContentFileSource;
+  source: ContentSource;
   schema: TSchema;
   /**
    * Process relative assets. `true` manages Markdown/MDX body references. An object also declares
@@ -148,7 +179,7 @@ export interface ContentCollectionInput<
 }
 
 export interface ContentCollection<TData = unknown, TSchemaData = TData> {
-  readonly source: ContentFileSource;
+  readonly source: ContentSource;
   readonly schema: ContentSchema<TSchemaData>;
   readonly assets?: true | ContentAssetFields;
   readonly transform?: (entry: ContentTransformContext<any>) => unknown | Promise<unknown>;
