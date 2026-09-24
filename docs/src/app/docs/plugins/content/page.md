@@ -357,11 +357,186 @@ everything above applies as written:
 | Provider   | Source                                        | Setup                                                                                     |
 | ---------- | --------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | Sanity     | `sanitySource` from `@farm.js/sanity`         | [Sanity integration → Content collections](/docs/integrations/sanity#content-collections) |
-| Contentful | `contentfulSource` from `@farm.js/contentful` | package README: env vars, entry IDs, preview host, pagination                             |
+| Contentful | `contentfulSource` from `@farm.js/contentful` | [below](#contentful-setup)                                                                |
 
-Building a source for another provider is exactly the `remote()` block above with the provider's
-SDK inside `fetch` - no Farm package required, though a dedicated package is welcome once the
-credential conventions settle.
+#### Contentful setup
+
+```ts
+import { contentfulSource } from "@farm.js/contentful";
+
+posts: collection({
+  source: contentfulSource({ contentType: "post", query: { order: ["-sys.createdAt"] } }),
+  schema: post,
+});
+```
+
+- credentials resolve from `CONTENTFUL_SPACE_ID` and `CONTENTFUL_ACCESS_TOKEN`, or pass an
+  existing client.
+- entry IDs default to a string `fields.slug`, falling back to `sys.id`.
+- pagination past Contentful's 1000-entry page cap is handled internally; `content_type` and
+  `skip` are owned by the source, everything else in `query` passes through.
+- set `host: "preview.contentful.com"` with `CONTENTFUL_PREVIEW_TOKEN` to load drafts.
+- the source is read-only for now: Contentful writes go through its separate management SDK in a
+  [server function](/docs/api-client).
+
+### Bring your own CMS
+
+Any system that can answer "give me the documents" plugs in the same way - here is the whole
+direction, using WordPress's REST API as a stand-in for whatever you run. No Farm package, no
+SDK, just the interface:
+
+```ts
+import { collection, content, remote } from "@farm.js/content";
+
+const wordpress = remote({
+  name: "wp:posts",
+  fetch: async () => {
+    const posts = await fetch("https://blog.example.com/wp-json/wp/v2/posts?per_page=100").then(
+      (response) => response.json(),
+    );
+    return posts.map((post) => ({
+      id: post.slug, // 1. pick a stable, route-friendly id
+      data: { title: post.title.rendered, publishedAt: post.date }, // 2. shape data for YOUR schema
+      body: post.content.rendered, // 3. optional body
+    }));
+  },
+  refreshInterval: 30_000, // 4. dev reloads when documents change
+
+  // 5. optional: implement writes and collections.<name>.update() lights up
+  update: async (id, patch) => {
+    const updated = await wpApi(`posts?slug=${id}`, { method: "POST", body: patch.data });
+    return { id, data: updated };
+  },
+});
+```
+
+The direction, in order:
+
+1. **Map documents** to `{ id, data, body? }` in `fetch` - the provider's SDK, a REST call, a
+   database query, anything.
+2. **Pick stable IDs** - a slug beats an internal database id, because entry IDs become routes.
+3. **Let your schema be the boundary** - shape `data` for the collection schema and consumers
+   never learn which CMS is behind it. Swapping providers later changes only the `source:` line.
+4. **Wire updates** - the provider's publish webhook points at your deploy hook, and
+   `refreshInterval` covers development.
+5. **Add writes when the app needs them** - one callback per verb, each returning the provider's
+   confirmed document, gated behind your own server functions.
+
+#### Even the official providers work this way
+
+The packages under `@farm.js/*` are the same interface published with conventions attached -
+nothing more. Here is Sanity, complete with mutations, as a bring-your-own source over its plain
+HTTP API; drop it in `farm.config.ts` and reads, types, and `collections.posts.update()` all work
+with no package and no SDK:
+
+```ts
+const sanityApi = `https://${process.env.SANITY_PROJECT_ID}.api.sanity.io/v2026-03-01`;
+const dataset = process.env.SANITY_DATASET;
+
+const sanityPosts = remote({
+  name: "sanity:posts",
+
+  fetch: async () => {
+    const query = encodeURIComponent(`*[_type == "post"]{ _id, slug, title, publishedAt }`);
+    const { result } = await fetch(`${sanityApi}/data/query/${dataset}?query=${query}`).then(
+      (response) => response.json(),
+    );
+    return result.map((doc) => ({ id: doc.slug?.current ?? doc._id, data: doc }));
+  },
+
+  // Mutations are one endpoint away. The write surface, schema re-validation,
+  // and dev rebuild behave exactly as with the official package.
+  update: async (id, patch) => {
+    const response = await fetch(`${sanityApi}/data/mutate/${dataset}?returnDocuments=true`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${process.env.SANITY_API_WRITE_TOKEN}`,
+      },
+      body: JSON.stringify({
+        mutations: [
+          { patch: { query: `*[slug.current == $id][0]`, params: { id }, set: patch.data } },
+        ],
+      }),
+    });
+    const { results } = await response.json();
+    return { id, data: results[0].document };
+  },
+
+  create: async ({ data }) => {
+    const response = await fetch(`${sanityApi}/data/mutate/${dataset}?returnDocuments=true`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${process.env.SANITY_API_WRITE_TOKEN}`,
+      },
+      body: JSON.stringify({ mutations: [{ create: { _type: "post", ...data } }] }),
+    });
+    const { results } = await response.json();
+    const doc = results[0].document;
+    return { id: doc.slug?.current ?? doc._id, data: doc };
+  },
+});
+```
+
+Contentful reads inline the same way:
+
+```ts
+fetch: async () => {
+  const url =
+    `https://cdn.contentful.com/spaces/${process.env.CONTENTFUL_SPACE_ID}` +
+    `/environments/master/entries?access_token=${process.env.CONTENTFUL_ACCESS_TOKEN}&content_type=post`;
+  const { items } = await fetch(url).then((response) => response.json());
+  return items.map((item) => ({ id: item.fields.slug ?? item.sys.id, data: item.fields }));
+},
+```
+
+What the inline versions leave to you is exactly what the packages add: pagination past provider
+page caps, linked-entry resolution, slug-to-id mapping for writes, lazy credential errors, and
+preview switches. Use whichever tier fits - they are interchangeable, and this path is covered by
+the plugin's own test suite, so it stays working.
+
+A dedicated `@farm.js/<provider>` package is only ever ergonomics on top of this: conventional
+env vars, a default id, provider-aware errors. Start with `remote()`; extract the package when
+the conventions settle.
+
+### Publishing a source package
+
+Anyone can ship an adapter - a CMS vendor, a community author. Farm's own `sanitySource` and
+`contentfulSource` use nothing a third party cannot: they import exactly two **type-only** names
+from `@farm.js/content` and return the plain `remote()` shape. The conventions that make an
+adapter feel first-party:
+
+```ts
+import type { ContentRemoteDocument, ContentRemoteSource } from "@farm.js/content";
+
+export function myCmsSource(options: MyCmsSourceOptions): ContentRemoteSource {
+  // ...
+}
+```
+
+1. **Type-only dependency.** Import only types from `@farm.js/content`; declare it as an
+   optional peer. Your package then has zero runtime coupling to Farm and works with every
+   version that keeps the shape.
+2. **The provider SDK is a peer dependency** with literal imports, so bundlers can trace it and
+   apps control the version.
+3. **Resolve credentials lazily**, from conventional env vars (`MYCMS_TOKEN`) with explicit
+   options and an existing-client escape hatch. Importing `farm.config.ts` without the env set
+   must not throw; the first `fetch()` should, with a message naming the env vars.
+4. **Pick route-friendly default IDs** (a slug over an internal id) and document the fallback.
+   If writes address documents differently than reads identify them, resolve the mapping inside
+   the source, the way `sanitySource` maps slugs back to `_id`.
+5. **Name errors after yourself.** Every thrown message should carry the source `name`, so a
+   failing build says which provider and which document.
+6. **Implement writes only when the provider can confirm them.** Each verb returns the stored
+   document, which Farm re-validates against the collection schema. Omit verbs you cannot
+   honor - the collection handle explains what is missing better than a broken write.
+7. **Test against the real SDK shape** - the reference suites in `packages/farm-sanity` and
+   `packages/farm-contentful` cover fetching, id derivation, pagination, credential failures,
+   and write flows, and are the template worth copying.
+
+An adapter that follows these is indistinguishable from an official one. Open a pull request to
+add it to the table above.
 
 For **live content** that must update without a rebuild, keep the provider SDK in a server-only
 module and fetch through a [Server Query](/docs/server-queries) instead. Farm can validate the
