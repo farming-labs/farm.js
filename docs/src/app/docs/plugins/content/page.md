@@ -357,11 +357,74 @@ everything above applies as written:
 | Provider   | Source                                        | Setup                                                                                     |
 | ---------- | --------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | Sanity     | `sanitySource` from `@farm.js/sanity`         | [Sanity integration → Content collections](/docs/integrations/sanity#content-collections) |
-| Contentful | `contentfulSource` from `@farm.js/contentful` | package README: env vars, entry IDs, preview host, pagination                             |
+| Contentful | `contentfulSource` from `@farm.js/contentful` | [below](#contentful-setup)                                                                |
 
-Building a source for another provider is exactly the `remote()` block above with the provider's
-SDK inside `fetch` - no Farm package required, though a dedicated package is welcome once the
-credential conventions settle.
+#### Contentful setup
+
+```ts
+import { contentfulSource } from "@farm.js/contentful";
+
+posts: collection({
+  source: contentfulSource({ contentType: "post", query: { order: ["-sys.createdAt"] } }),
+  schema: post,
+});
+```
+
+- credentials resolve from `CONTENTFUL_SPACE_ID` and `CONTENTFUL_ACCESS_TOKEN`, or pass an
+  existing client.
+- entry IDs default to a string `fields.slug`, falling back to `sys.id`.
+- pagination past Contentful's 1000-entry page cap is handled internally; `content_type` and
+  `skip` are owned by the source, everything else in `query` passes through.
+- set `host: "preview.contentful.com"` with `CONTENTFUL_PREVIEW_TOKEN` to load drafts.
+- the source is read-only for now: Contentful writes go through its separate management SDK in a
+  [server function](/docs/api-client).
+
+### Bring your own CMS
+
+Any system that can answer "give me the documents" plugs in the same way - here is the whole
+direction, using WordPress's REST API as a stand-in for whatever you run. No Farm package, no
+SDK, just the interface:
+
+```ts
+import { collection, content, remote } from "@farm.js/content";
+
+const wordpress = remote({
+  name: "wp:posts",
+  fetch: async () => {
+    const posts = await fetch("https://blog.example.com/wp-json/wp/v2/posts?per_page=100").then(
+      (response) => response.json(),
+    );
+    return posts.map((post) => ({
+      id: post.slug, // 1. pick a stable, route-friendly id
+      data: { title: post.title.rendered, publishedAt: post.date }, // 2. shape data for YOUR schema
+      body: post.content.rendered, // 3. optional body
+    }));
+  },
+  refreshInterval: 30_000, // 4. dev reloads when documents change
+
+  // 5. optional: implement writes and collections.<name>.update() lights up
+  update: async (id, patch) => {
+    const updated = await wpApi(`posts?slug=${id}`, { method: "POST", body: patch.data });
+    return { id, data: updated };
+  },
+});
+```
+
+The direction, in order:
+
+1. **Map documents** to `{ id, data, body? }` in `fetch` - the provider's SDK, a REST call, a
+   database query, anything.
+2. **Pick stable IDs** - a slug beats an internal database id, because entry IDs become routes.
+3. **Let your schema be the boundary** - shape `data` for the collection schema and consumers
+   never learn which CMS is behind it. Swapping providers later changes only the `source:` line.
+4. **Wire updates** - the provider's publish webhook points at your deploy hook, and
+   `refreshInterval` covers development.
+5. **Add writes when the app needs them** - one callback per verb, each returning the provider's
+   confirmed document, gated behind your own server functions.
+
+A dedicated `@farm.js/<provider>` package is only ever ergonomics on top of this: conventional
+env vars, a default id, provider-aware errors. Start with `remote()`; extract the package when
+the conventions settle.
 
 For **live content** that must update without a rebuild, keep the provider SDK in a server-only
 module and fetch through a [Server Query](/docs/server-queries) instead. Farm can validate the
