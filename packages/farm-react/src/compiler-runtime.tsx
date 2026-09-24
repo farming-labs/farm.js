@@ -5561,6 +5561,10 @@ function createHostConditionalBlockComponent(
       } else if (!this.adopt()) this.activateFallback();
     }
 
+    componentDidUpdate(): void {
+      if (this.state.fallback) this.subscribeFallbackDescendants();
+    }
+
     componentWillUnmount(): void {
       this.mounted = false;
       this.unsubscribe?.();
@@ -5907,6 +5911,10 @@ function createConditionalRangesBlockComponent(
         this.subscribeFallbackDescendants();
         this.fallbackKeysWereUnsafe = this.hasUnsafeFallbackKeys();
       } else if (!this.adopt()) this.activateFallback();
+    }
+
+    componentDidUpdate(): void {
+      if (this.state.fallback) this.subscribeFallbackDescendants();
     }
 
     componentWillUnmount(): void {
