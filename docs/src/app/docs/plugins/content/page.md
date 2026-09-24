@@ -422,6 +422,80 @@ The direction, in order:
 5. **Add writes when the app needs them** - one callback per verb, each returning the provider's
    confirmed document, gated behind your own server functions.
 
+#### Even the official providers work this way
+
+The packages under `@farm.js/*` are the same interface published with conventions attached -
+nothing more. Here is Sanity, complete with mutations, as a bring-your-own source over its plain
+HTTP API; drop it in `farm.config.ts` and reads, types, and `collections.posts.update()` all work
+with no package and no SDK:
+
+```ts
+const sanityApi = `https://${process.env.SANITY_PROJECT_ID}.api.sanity.io/v2026-03-01`;
+const dataset = process.env.SANITY_DATASET;
+
+const sanityPosts = remote({
+  name: "sanity:posts",
+
+  fetch: async () => {
+    const query = encodeURIComponent(`*[_type == "post"]{ _id, slug, title, publishedAt }`);
+    const { result } = await fetch(`${sanityApi}/data/query/${dataset}?query=${query}`).then(
+      (response) => response.json(),
+    );
+    return result.map((doc) => ({ id: doc.slug?.current ?? doc._id, data: doc }));
+  },
+
+  // Mutations are one endpoint away. The write surface, schema re-validation,
+  // and dev rebuild behave exactly as with the official package.
+  update: async (id, patch) => {
+    const response = await fetch(`${sanityApi}/data/mutate/${dataset}?returnDocuments=true`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${process.env.SANITY_API_WRITE_TOKEN}`,
+      },
+      body: JSON.stringify({
+        mutations: [
+          { patch: { query: `*[slug.current == $id][0]`, params: { id }, set: patch.data } },
+        ],
+      }),
+    });
+    const { results } = await response.json();
+    return { id, data: results[0].document };
+  },
+
+  create: async ({ data }) => {
+    const response = await fetch(`${sanityApi}/data/mutate/${dataset}?returnDocuments=true`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${process.env.SANITY_API_WRITE_TOKEN}`,
+      },
+      body: JSON.stringify({ mutations: [{ create: { _type: "post", ...data } }] }),
+    });
+    const { results } = await response.json();
+    const doc = results[0].document;
+    return { id: doc.slug?.current ?? doc._id, data: doc };
+  },
+});
+```
+
+Contentful reads inline the same way:
+
+```ts
+fetch: async () => {
+  const url =
+    `https://cdn.contentful.com/spaces/${process.env.CONTENTFUL_SPACE_ID}` +
+    `/environments/master/entries?access_token=${process.env.CONTENTFUL_ACCESS_TOKEN}&content_type=post`;
+  const { items } = await fetch(url).then((response) => response.json());
+  return items.map((item) => ({ id: item.fields.slug ?? item.sys.id, data: item.fields }));
+},
+```
+
+What the inline versions leave to you is exactly what the packages add: pagination past provider
+page caps, linked-entry resolution, slug-to-id mapping for writes, lazy credential errors, and
+preview switches. Use whichever tier fits - they are interchangeable, and this path is covered by
+the plugin's own test suite, so it stays working.
+
 A dedicated `@farm.js/<provider>` package is only ever ergonomics on top of this: conventional
 env vars, a default id, provider-aware errors. Start with `remote()`; extract the package when
 the conventions settle.
