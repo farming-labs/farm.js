@@ -126,7 +126,12 @@ content({
 ```
 
 The documents are fetched while the configuration loads and bundled as a build-time snapshot, so
-publishing means rebuilding: point a Sanity webhook at your platform's deploy hook. The
+publishing means rebuilding: point a Sanity webhook at your platform's deploy hook.
+
+With a write token the source also powers the collection write surface. Pass `writeToken` (or set
+`SANITY_API_WRITE_TOKEN`) and `createType` for creation, then call
+`collections.posts.create/update/delete` from server code; updates and deletes address documents
+by the same entry ID reads use, resolving the slug back to the Sanity `_id`. The
 [cache-invalidation webhook](#invalidate-on-publish) below is the complementary path for content read at runtime
 through server queries.
 

@@ -30,6 +30,14 @@ export interface SanityContentSourceOptions {
   body?: (document: Record<string, unknown>) => string | undefined;
   /** Development re-fetch cadence in milliseconds. */
   refreshInterval?: number;
+  /**
+   * Enables `collections.<name>.create/update/delete`. Defaults to
+   * `SANITY_API_WRITE_TOKEN`; without it the source stays read-only.
+   * Keep write tokens server-side only.
+   */
+  writeToken?: string;
+  /** Sanity `_type` for documents made through `create`. Required to create. */
+  createType?: string;
 }
 
 /**
@@ -69,10 +77,69 @@ export function sanitySource(options: SanityContentSourceOptions): ContentRemote
     return client;
   };
 
+  const writeToken = options.writeToken ?? process.env.SANITY_API_WRITE_TOKEN;
+  let writeClient: SanityClient | undefined;
+  const resolveWriteClient = (): SanityClient => {
+    if (writeClient) return writeClient;
+    const base = resolveClient();
+    // The write path never reads through the CDN and may need a stronger token.
+    writeClient = base.withConfig({ useCdn: false, ...(writeToken ? { token: writeToken } : {}) });
+    return writeClient;
+  };
+
+  // Entry ids are slugs by default, but Sanity mutations address `_id`.
+  // Remember the mapping from the last fetch and fall back to a lookup.
+  const documentIds = new Map<string, string>();
+  const resolveDocumentId = async (id: string): Promise<string> => {
+    const known = documentIds.get(id);
+    if (known) return known;
+    const bySlug = await resolveWriteClient().fetch<string | null>(
+      "*[slug.current == $id][0]._id",
+      { id },
+    );
+    return bySlug ?? id;
+  };
+
+  const toDocument = (record: Record<string, unknown>): ContentRemoteDocument => {
+    const id = resolveId(record) || (record._id as string);
+    if (typeof record._id === "string") documentIds.set(id, record._id);
+    const body = options.body?.(record);
+    return { id, data: record, ...(typeof body === "string" ? { body } : {}) };
+  };
+
+  const writes = writeToken
+    ? {
+        create: async (input: { data: Record<string, unknown>; body?: string }) => {
+          if (!options.createType) {
+            throw new Error(
+              `sanitySource(${JSON.stringify(name)}) needs \`createType\` (the Sanity _type) to create documents`,
+            );
+          }
+          const created = await resolveWriteClient().create({
+            _type: options.createType,
+            ...input.data,
+          });
+          return toDocument(created as unknown as Record<string, unknown>);
+        },
+        update: async (id: string, patch: { data?: Record<string, unknown>; body?: string }) => {
+          const documentId = await resolveDocumentId(id);
+          const updated = await resolveWriteClient()
+            .patch(documentId)
+            .set(patch.data ?? {})
+            .commit();
+          return toDocument(updated as unknown as Record<string, unknown>);
+        },
+        delete: async (id: string) => {
+          await resolveWriteClient().delete(await resolveDocumentId(id));
+        },
+      }
+    : {};
+
   return {
     kind: "remote",
     name,
     ...(options.refreshInterval !== undefined ? { refreshInterval: options.refreshInterval } : {}),
+    ...writes,
     async fetch(): Promise<readonly ContentRemoteDocument[]> {
       const result = await resolveClient().fetch(options.query, options.params ?? {});
       if (!Array.isArray(result)) {
@@ -96,6 +163,7 @@ export function sanitySource(options: SanityContentSourceOptions): ContentRemote
               `index ${index}; give documents a slug or pass an \`id\` function`,
           );
         }
+        if (typeof record._id === "string") documentIds.set(id, record._id);
         const body = options.body?.(record);
         return {
           id,

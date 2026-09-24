@@ -74,3 +74,72 @@ describe("sanitySource", () => {
     expect(source.refreshInterval).toBe(30_000);
   });
 });
+
+describe("sanitySource writes", () => {
+  const writeStub = () => {
+    const commit = vi.fn(async () => ({ _id: "d1", slug: { current: "hello" }, title: "Patched" }));
+    const set = vi.fn(() => ({ commit }));
+    const patch = vi.fn(() => ({ set }));
+    const client = {
+      fetch: vi.fn(async () => [{ _id: "d1", slug: { current: "hello" }, title: "Hi" }]),
+      withConfig: vi.fn(function (this: unknown) {
+        return client;
+      }),
+      create: vi.fn(async (doc: Record<string, unknown>) => ({
+        ...doc,
+        _id: "made",
+        slug: { current: "made-slug" },
+      })),
+      patch,
+      delete: vi.fn(async () => ({})),
+    };
+    return { client: client as unknown as SanityClient, raw: client, set, commit };
+  };
+
+  it("stays read-only without a write token", () => {
+    const { client } = writeStub();
+    const saved = process.env.SANITY_API_WRITE_TOKEN;
+    delete process.env.SANITY_API_WRITE_TOKEN;
+    try {
+      const source = sanitySource({ client, query: "q" });
+      expect(source.update).toBeUndefined();
+      expect(source.create).toBeUndefined();
+      expect(source.delete).toBeUndefined();
+    } finally {
+      if (saved !== undefined) process.env.SANITY_API_WRITE_TOKEN = saved;
+    }
+  });
+
+  it("updates by slug using the id learned from the last fetch", async () => {
+    const { client, raw, set } = writeStub();
+    const source = sanitySource({ client, query: "q", writeToken: "wt" });
+
+    await source.fetch(); // learns hello -> d1
+    const doc = await source.update!("hello", { data: { title: "Patched" } });
+
+    expect(raw.patch).toHaveBeenCalledWith("d1");
+    expect(set).toHaveBeenCalledWith({ title: "Patched" });
+    expect(doc).toMatchObject({ id: "hello", data: { title: "Patched" } });
+  });
+
+  it("falls back to a slug lookup when the id was never fetched", async () => {
+    const { client, raw } = writeStub();
+    raw.fetch = vi.fn(async () => "resolved-id");
+    const source = sanitySource({ client, query: "q", writeToken: "wt" });
+
+    await source.delete!("some-slug");
+    expect(raw.fetch).toHaveBeenCalledWith("*[slug.current == $id][0]._id", { id: "some-slug" });
+    expect(raw.delete).toHaveBeenCalledWith("resolved-id");
+  });
+
+  it("create requires a createType and returns the confirmed document", async () => {
+    const { client, raw } = writeStub();
+    const source = sanitySource({ client, query: "q", writeToken: "wt" });
+    await expect(source.create!({ data: { title: "New" } })).rejects.toThrow(/createType/);
+
+    const typed = sanitySource({ client, query: "q", writeToken: "wt", createType: "post" });
+    const doc = await typed.create!({ data: { title: "New" } });
+    expect(raw.create).toHaveBeenCalledWith({ _type: "post", title: "New" });
+    expect(doc).toMatchObject({ id: "made-slug" });
+  });
+});

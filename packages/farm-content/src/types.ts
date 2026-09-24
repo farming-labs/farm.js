@@ -26,6 +26,12 @@ export interface ContentRemoteDocument {
  * the same build-time snapshot. The shape is structural on purpose: an
  * integration can return it without importing this package at runtime.
  */
+/** The document fields a write sends to a remote source. */
+export interface ContentRemoteWrite {
+  readonly data: Record<string, unknown>;
+  readonly body?: string;
+}
+
 export interface ContentRemoteSource {
   readonly kind: "remote";
   /** Names the source in error messages, e.g. "sanity:posts". */
@@ -36,6 +42,15 @@ export interface ContentRemoteSource {
    * documents changed. Leave unset for fetch-on-rebuild only.
    */
   readonly refreshInterval?: number;
+  /**
+   * Optional write callbacks, mirroring fetch: the callback is the entire
+   * provider-specific surface. A source that omits them is read-only, and
+   * `collections.<name>.create/update/delete` reports which verb is missing.
+   * The CMS stays the source of truth: each returns the confirmed document.
+   */
+  create?(input: ContentRemoteWrite): Promise<ContentRemoteDocument>;
+  update?(id: string, patch: Partial<ContentRemoteWrite>): Promise<ContentRemoteDocument>;
+  delete?(id: string): Promise<void>;
 }
 
 export type ContentSource = ContentFileSource | ContentRemoteSource;
@@ -153,6 +168,25 @@ export interface ContentEntry<TData = Record<string, unknown>> {
   readonly bodyAssets: readonly ContentAssetValue[];
   /** Project-relative source path with POSIX separators. */
   readonly filePath: string;
+}
+
+/**
+ * The server-side handle for one collection: reads from the validated
+ * snapshot, writes through the source's callbacks. In development a write
+ * rebuilds the snapshot immediately; in production the write lands in the
+ * CMS and the running deployment serves the bundled snapshot until the
+ * next build, so pair writes with a deploy hook.
+ */
+export interface ContentCollectionHandle<TData = Record<string, unknown>> {
+  all(): Promise<readonly ContentEntry<TData>[]>;
+  get(id: string): Promise<ContentEntry<TData> | undefined>;
+  getOrThrow(id: string): Promise<ContentEntry<TData>>;
+  create(input: { data: Record<string, unknown>; body?: string }): Promise<ContentRemoteDocument>;
+  update(
+    id: string,
+    patch: { data?: Partial<TData> & Record<string, unknown>; body?: string },
+  ): Promise<ContentRemoteDocument>;
+  delete(id: string): Promise<void>;
 }
 
 export interface ContentTransformContext<TData> extends ContentEntry<TData> {

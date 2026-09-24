@@ -356,6 +356,31 @@ It resolves `CONTENTFUL_SPACE_ID` and `CONTENTFUL_ACCESS_TOKEN`, uses a string `
 (falling back to `sys.id`) as the entry ID, and pages past Contentful's 1000-entry cap internally.
 Set `host: "preview.contentful.com"` with `CONTENTFUL_PREVIEW_TOKEN` to load drafts.
 
+### Write through the collection
+
+A remote source may also implement `create`, `update`, and `delete` - the same
+callback-per-verb shape as `fetch`. Collections with a writable source expose them on the
+server-side `collections` handle, typed like everything else:
+
+```ts
+import { collections } from "@farm.js/content/server";
+
+await collections.posts.update("hello-world", { data: { title: "New title" } });
+await collections.posts.create({ data: { title: "Drafted from the app" } });
+await collections.posts.delete("old-post");
+```
+
+The CMS stays the source of truth: each verb returns the provider's confirmed document, which is
+validated against the collection schema before anyone trusts it. In development a successful
+write rebuilds the snapshot immediately, so the screen reflects it on reload. **In production the
+snapshot is bundled**: the write lands in the CMS, and the running deployment serves the previous
+content until the provider's webhook triggers your deploy hook. A collection whose source omits a
+verb, or whose source is `files()`, reports exactly that when the verb is called - local files are
+edited on disk.
+
+Gate every write behind your own [server function](/docs/api-client): Farm never exposes content
+writes to the browser directly, so authorization stays in app code.
+
 For **live content** that must update without a rebuild, keep the provider SDK in a server-only
 module and fetch through a [Server Query](/docs/server-queries) instead. Farm can validate the
 response, cache published content, and share the typed result with server or client consumers.
