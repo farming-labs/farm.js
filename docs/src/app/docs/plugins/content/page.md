@@ -425,9 +425,51 @@ The direction, in order:
 #### Even the official providers work this way
 
 The packages under `@farm.js/*` are the same interface published with conventions attached -
-nothing more. Here is Sanity, complete with mutations, as a bring-your-own source over its plain
-HTTP API; drop it in `farm.config.ts` and reads, types, and `collections.posts.update()` all work
-with no package and no SDK:
+nothing more. The callbacks are ordinary functions, so the natural way to bring your own Sanity
+is your own `@sanity/client` instance: GROQ for reads (mutations are not GROQ - Sanity's mutation
+API is `create`/`patch`/`delete`, in the SDK and over HTTP alike), and the client's mutation
+methods for writes:
+
+```ts
+import { createClient } from "@sanity/client";
+
+const sanity = createClient({
+  projectId: process.env.SANITY_PROJECT_ID!,
+  dataset: process.env.SANITY_DATASET!,
+  apiVersion: "2026-03-01",
+  token: process.env.SANITY_API_WRITE_TOKEN, // server-only; enables the write callbacks
+  useCdn: false, // builds want the freshest documents
+});
+
+const sanityPosts = remote({
+  name: "sanity:posts",
+
+  fetch: async () => {
+    const docs = await sanity.fetch(`*[_type == "post"]{ _id, slug, title, publishedAt }`);
+    return docs.map((doc) => ({ id: doc.slug?.current ?? doc._id, data: doc }));
+  },
+
+  update: async (id, patch) => {
+    // Mutations address _id, entry ids are slugs: one GROQ lookup bridges them.
+    const documentId = await sanity.fetch(`*[slug.current == $id][0]._id`, { id });
+    const updated = await sanity.patch(documentId).set(patch.data).commit();
+    return { id, data: updated };
+  },
+
+  create: async ({ data }) => {
+    const doc = await sanity.create({ _type: "post", ...data });
+    return { id: doc.slug?.current ?? doc._id, data: doc };
+  },
+
+  delete: async (id) => {
+    await sanity.delete(await sanity.fetch(`*[slug.current == $id][0]._id`, { id }));
+  },
+});
+```
+
+This is, almost line for line, what `sanitySource` does for you - it only adds the env
+conventions, the id-mapping cache, and the error naming. The same also works with no SDK at all,
+over Sanity's plain HTTP API:
 
 ```ts
 const sanityApi = `https://${process.env.SANITY_PROJECT_ID}.api.sanity.io/v2026-03-01`;
@@ -444,8 +486,8 @@ const sanityPosts = remote({
     return result.map((doc) => ({ id: doc.slug?.current ?? doc._id, data: doc }));
   },
 
-  // Mutations are one endpoint away. The write surface, schema re-validation,
-  // and dev rebuild behave exactly as with the official package.
+  // Mutations are one endpoint away; the write surface, schema re-validation,
+  // and dev rebuild behave identically to the SDK version above.
   update: async (id, patch) => {
     const response = await fetch(`${sanityApi}/data/mutate/${dataset}?returnDocuments=true`, {
       method: "POST",
@@ -461,20 +503,6 @@ const sanityPosts = remote({
     });
     const { results } = await response.json();
     return { id, data: results[0].document };
-  },
-
-  create: async ({ data }) => {
-    const response = await fetch(`${sanityApi}/data/mutate/${dataset}?returnDocuments=true`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${process.env.SANITY_API_WRITE_TOKEN}`,
-      },
-      body: JSON.stringify({ mutations: [{ create: { _type: "post", ...data } }] }),
-    });
-    const { results } = await response.json();
-    const doc = results[0].document;
-    return { id: doc.slug?.current ?? doc._id, data: doc };
   },
 });
 ```
