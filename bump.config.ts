@@ -16,6 +16,7 @@ export default defineConfig({
     "packages/farm-better-auth/package.json",
     "packages/farm-cf-agent/package.json",
     "packages/farm-clerk/package.json",
+    "packages/farm-contentful/package.json",
     "packages/farm-cli/package.json",
     "packages/farm-email/package.json",
     "packages/farm-eve/package.json",

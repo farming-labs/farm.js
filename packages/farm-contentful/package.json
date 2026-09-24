@@ -1,0 +1,48 @@
+{
+  "name": "@farm.js/contentful",
+  "version": "0.1.0-beta.0",
+  "description": "Contentful content source for Farm.js",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farming-labs/farm.js",
+    "directory": "packages/farm-contentful"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "dev": "tsc --watch",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@farm.js/content": "workspace:*",
+    "contentful": "^11.8.6",
+    "typescript": "^5.3.3",
+    "vitest": "^3.2.7"
+  },
+  "peerDependencies": {
+    "@farm.js/content": "workspace:^",
+    "contentful": "^10.0.0 || ^11.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@farm.js/content": {
+      "optional": false
+    }
+  }
+}
