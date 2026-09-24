@@ -487,7 +487,14 @@ const testSource = String.raw`
           for (const [index, value] of [[1, 1], [0, false], [1, 2], [0, true], [1, -1], [1, 3]]) {
             await React.act(async () => { update(index, value); updateControl(index, value); });
             assert.equal(target.innerHTML, controlTarget.innerHTML, context);
-            assert.deepEqual([...owner.blockRefreshListeners.keys()].sort(), descendants ? [0, value < 0 ? 2 : 1] : [0], context);
+            const activeNestedId = target.querySelector("article")
+              ? target.querySelector("em") ? 1 : 2
+              : null;
+            assert.deepEqual(
+              [...owner.blockRefreshListeners.keys()].sort(),
+              descendants && activeNestedId !== null ? [0, activeNestedId] : [0],
+              context,
+            );
             assert.equal(owners, initialOwners, context);
             checkDomState();
           }

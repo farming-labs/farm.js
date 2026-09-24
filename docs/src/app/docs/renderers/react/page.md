@@ -2452,7 +2452,9 @@ adoption again. Each committed fallback render also refreshes that subscription 
 block introduced by a parent, local condition, or compatible Fast Refresh becomes live immediately
 and a removed block stops receiving work. Descendant-only updates remain live, including after
 hydration, and real unmounts still dispose those subscriptions. The existing fallback eligibility
-rules are unchanged.
+rules are unchanged. Subscription discovery follows only the branch React actually rendered:
+hidden branches are not evaluated, and their descendants remain unsubscribed until that branch is
+shown.
 
 Host conditional and conditional-range containers keep a stable key after entering React fallback
 when their descendants are either React-owned or conditional-only compiled blocks. Later updates
@@ -2519,6 +2521,8 @@ The package and example test suites verify more than generated code:
 - host conditional and conditional-range fallbacks rebind changing descendant listeners in static
   and hybrid modes after mount or hydration, drop removed listeners, and dispose the active set on
   unmount;
+- fallback subscription discovery skips hidden direct and nested branches in static and hybrid
+  modes after mount or hydration;
 - compatible Fast Refresh preserves state, while binding errors reach React error boundaries;
 - hydration mismatches follow React's recoverable-error path and remain interactive;
 - compiler-owned conditionals preserve a same-branch DOM instance, patch nested text, attributes,

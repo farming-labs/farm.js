@@ -205,7 +205,7 @@ describe("conditional fallback lifecycle replay", () => {
           });
           expect(target.innerHTML).toBe(control.innerHTML);
           expect([...owner!.blockRefreshListeners.keys()].sort()).toEqual(
-            descendants ? [0, 1] : [0],
+            descendants && Boolean(cells[0].get()) ? [0, 1] : [0],
           );
           expect(owners).toBe(initialOwners);
           checkDomState();
@@ -360,6 +360,164 @@ describe("conditional fallback lifecycle replay", () => {
           cells[2].set(12);
         });
         expect(renders).toBe(beforeUnmountedUpdates);
+      },
+    );
+  }
+
+  for (const kind of ["HostConditional", "ConditionalRanges"] as const) {
+    it.each(
+      (["static", "hybrid"] as const).flatMap((reactivity) =>
+        (["mount", "hydrate"] as const).map((lifecycle) => ({ reactivity, lifecycle })),
+      ),
+    )(
+      `${kind} fallback subscribes only to active descendants: $reactivity, $lifecycle`,
+      async ({ reactivity, lifecycle }) => {
+        let owner: { blockRefreshListeners: Map<number, unknown> };
+        let cells: readonly CompilerCell[];
+        let renders = 0;
+        const creates = {
+          truthy: 0,
+          falsy: 0,
+          nestedTruthy: 0,
+          nestedFalsy: 0,
+        };
+        const Panel = createCompiledComponent({
+          displayName: "FallbackActiveDescendants",
+          reactivity,
+          initialize: () => [true, 1, 10],
+          render(_props: Record<string, never>, state, blocks) {
+            cells = state;
+            const makeBranch = (
+              key: "truthy" | "falsy",
+              nestedId: 1 | 2,
+            ): { create(): CompilerHostElement; bindings: [] } => {
+              const nestedTruthy = {
+                create: () => {
+                  creates.nestedTruthy += 1;
+                  return host("em", [Number(state[nestedId].get())]);
+                },
+                bindings: [],
+              };
+              const nestedFalsy = {
+                create: () => {
+                  creates.nestedFalsy += 1;
+                  return host("strong", ["hidden"]);
+                },
+                bindings: [],
+              };
+              return {
+                create: () => {
+                  creates[key] += 1;
+                  return {
+                    ...host("article", [nestedTruthy.create()]),
+                    block: {
+                      kind: "conditional-ranges",
+                      id: nestedId,
+                      ranges: [
+                        {
+                          before: 0,
+                          test: () => true,
+                          truthy: nestedTruthy,
+                          falsy: nestedFalsy,
+                        },
+                      ],
+                      trailing: 0,
+                    },
+                  };
+                },
+                bindings: [],
+              };
+            };
+            const truthy = makeBranch("truthy", 1);
+            const falsy = makeBranch("falsy", 2);
+            const condition = {
+              before: 0,
+              test: () => Boolean(state[0].get()),
+              truthy,
+              falsy,
+            };
+            const props = {
+              id: 0,
+              // The undeclared aside deliberately transfers this block to React.
+              render: () => {
+                renders += 1;
+                const visible = Boolean(state[0].get());
+                const nestedId = visible ? 1 : 2;
+                return (
+                  <section>
+                    <aside>React fallback</aside>
+                    <article>
+                      <em data-descendant={nestedId}>{Number(state[nestedId].get())}</em>
+                    </article>
+                  </section>
+                );
+              },
+            };
+            return (
+              <main>
+                {kind === "HostConditional"
+                  ? React.createElement(blocks.HostConditional, { ...props, ...condition })
+                  : React.createElement(blocks.ConditionalRanges, {
+                      ...props,
+                      ranges: [condition],
+                      trailing: 0,
+                    })}
+              </main>
+            );
+          },
+          bindings: [
+            { kind: "block", id: 0, dependencies: [0] },
+            { kind: "block", id: 1, parent: 0, dependencies: [1] },
+            { kind: "block", id: 2, parent: 0, dependencies: [2] },
+          ],
+        });
+        const container = document.createElement("div");
+        document.body.append(container);
+        const tree = React.createElement(Panel, {
+          ref: (instance: unknown) => {
+            if (instance) owner = instance as typeof owner;
+          },
+        } as React.Attributes);
+        if (lifecycle === "hydrate") container.innerHTML = renderToString(tree);
+        const root = lifecycle === "hydrate" ? hydrateRoot(container, tree) : createRoot(container);
+        roots.add(root);
+        await act(async () => {
+          if (lifecycle === "mount") root.render(tree);
+        });
+
+        expect([...owner!.blockRefreshListeners.keys()].sort()).toEqual([0, 1]);
+        expect(creates.truthy).toBeGreaterThan(0);
+        expect(creates.nestedTruthy).toBeGreaterThan(0);
+        expect(creates.falsy).toBe(0);
+        expect(creates.nestedFalsy).toBe(0);
+
+        creates.truthy = 0;
+        creates.nestedTruthy = 0;
+        await act(async () => cells[0].set(false));
+        expect([...owner!.blockRefreshListeners.keys()].sort()).toEqual([0, 2]);
+        expect(creates.falsy).toBeGreaterThan(0);
+        expect(creates.nestedFalsy).toBe(0);
+        expect(creates.truthy).toBe(0);
+        expect(creates.nestedTruthy).toBeGreaterThan(0);
+
+        const beforeActiveUpdate = renders;
+        await act(async () => cells[2].set(11));
+        expect(renders).toBeGreaterThan(beforeActiveUpdate);
+        expect(container.querySelector("em")?.textContent).toBe("11");
+
+        const beforeInactiveUpdate = renders;
+        await act(async () => cells[1].set(2));
+        expect(renders).toBe(beforeInactiveUpdate);
+        expect(container.querySelector("em")?.textContent).toBe("11");
+
+        await act(async () => cells[0].set(true));
+        expect([...owner!.blockRefreshListeners.keys()].sort()).toEqual([0, 1]);
+        expect(container.querySelector("em")?.textContent).toBe("2");
+
+        const beforeFormerBranchUpdate = renders;
+        await act(async () => cells[2].set(12));
+        expect(renders).toBe(beforeFormerBranchUpdate);
+        expect(container.querySelector("em")?.textContent).toBe("2");
       },
     );
   }
