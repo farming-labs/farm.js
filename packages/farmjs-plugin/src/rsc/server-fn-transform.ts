@@ -4,9 +4,15 @@ const EXPORT_SERVER_FUNCTION_FACTORY_RE =
   /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*(?:<[^<>]*(?:<[^<>]*>[^<>]*)*>)?\s*\(/g;
 const EXPORT_DEFAULT_SERVER_FUNCTION_FACTORY_RE =
   /\bexport\s+default\s+([A-Za-z_$][\w$]*)\s*(?:<[^<>]*(?:<[^<>]*>[^<>]*)*>)?\s*\(/g;
+// Any assignment counts as a declaration, not only `const x = factory(...)`:
+// splitting `let save; save = createServerFn(...)` must not hide the binding
+// from the fail-closed export checks below.
 const SERVER_FUNCTION_DECLARATION_RE =
-  /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*(?:<[^<>]*(?:<[^<>]*>[^<>]*)*>)?\s*\(/g;
+  /(?<![.\w$])([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*(?:<[^<>]*(?:<[^<>]*>[^<>]*)*>)?\s*\(/g;
 const LOCAL_EXPORT_CLAUSE_RE = /\bexport\s*\{([^}]*)\}/g;
+const EXPORT_DEFAULT_ALIAS_RE = /\bexport\s+default\s+([A-Za-z_$][\w$]*)\s*(?:;|(?=[\r\n])|$)/g;
+const EXPORT_BINDING_ALIAS_RE =
+  /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*(?:;|(?=[,\r\n])|$)/g;
 const MODULE_EXT_RE = /\.[cm]?[jt]sx?$/;
 const DECLARATION_RE = /(^|\n)\s*["']([^"']+)["']\s*;?/g;
 
@@ -32,9 +38,19 @@ export function transformFarmServerFns(
   const reExport = findServerFnReExport(code, factoryNames);
   if (reExport) {
     const factoryName = reExport.factory === "fn" ? "createServerFn" : "createServerQuery";
+    const escape =
+      reExport.form === "clause"
+        ? "with an export clause"
+        : reExport.form === "default"
+          ? "as the default export"
+          : "through another exported binding";
+    const inlineForm =
+      reExport.form === "default"
+        ? `export default ${factoryName}(...)`
+        : `export const ${reExport.exportName} = ${factoryName}(...)`;
     throw new Error(
-      `Server function "${reExport.localName}" cannot be re-exported with an export clause. ` +
-        `Export it inline instead: export const ${reExport.exportName} = ${factoryName}(...).`,
+      `Server function "${reExport.localName}" cannot be re-exported ${escape}. ` +
+        `Export it inline instead: ${inlineForm}.`,
     );
   }
 
@@ -92,10 +108,24 @@ function findServerFunctionFactoryImportNames(code: string) {
   return names;
 }
 
-function findServerFnReExport(code: string, factoryNames: Map<string, "fn" | "query">) {
+type ServerFnReExport = {
+  localName: string;
+  exportName: string;
+  factory: "fn" | "query";
+  form: "clause" | "default" | "binding";
+};
+
+function findServerFnReExport(
+  code: string,
+  factoryNames: Map<string, "fn" | "query">,
+): ServerFnReExport | null {
+  // Comments and string contents must not hide or fake an export: a comment
+  // inside `export { /* … */ save }` previously made the specifier unparsable
+  // and the module shipped untransformed.
+  const scannable = stripCommentsAndStrings(code);
   const declarations = new Map<string, "fn" | "query">();
 
-  for (const match of code.matchAll(SERVER_FUNCTION_DECLARATION_RE)) {
+  for (const match of scannable.matchAll(SERVER_FUNCTION_DECLARATION_RE)) {
     const localName = match[1];
     const factoryName = match[2];
     const factory = factoryName ? factoryNames.get(factoryName) : undefined;
@@ -104,10 +134,10 @@ function findServerFnReExport(code: string, factoryNames: Map<string, "fn" | "qu
 
   if (declarations.size === 0) return null;
 
-  for (const match of code.matchAll(LOCAL_EXPORT_CLAUSE_RE)) {
+  for (const match of scannable.matchAll(LOCAL_EXPORT_CLAUSE_RE)) {
     const clause = match[1] ?? "";
     const clauseEnd = (match.index ?? 0) + match[0].length;
-    if (code.slice(clauseEnd).trimStart().startsWith("from")) continue;
+    if (scannable.slice(clauseEnd).trimStart().startsWith("from")) continue;
 
     for (const specifier of clause.split(",")) {
       const parts = specifier.trim().split(/\s+as\s+/);
@@ -118,11 +148,107 @@ function findServerFnReExport(code: string, factoryNames: Map<string, "fn" | "qu
         localName,
         exportName: parts[1]?.trim() || localName,
         factory: declarations.get(localName)!,
+        form: "clause",
       };
     }
   }
 
+  // `export default save;` — the export-default replacement only recognizes a
+  // direct factory call, so a bare identifier slipped through untransformed.
+  for (const match of scannable.matchAll(EXPORT_DEFAULT_ALIAS_RE)) {
+    const localName = match[1];
+    if (!localName || !declarations.has(localName)) continue;
+    return {
+      localName,
+      exportName: "default",
+      factory: declarations.get(localName)!,
+      form: "default",
+    };
+  }
+
+  // `export const persist = save;` — same escape through a renamed binding.
+  for (const match of scannable.matchAll(EXPORT_BINDING_ALIAS_RE)) {
+    const exportName = match[1];
+    const localName = match[2];
+    if (!exportName || !localName || !declarations.has(localName)) continue;
+    return {
+      localName,
+      exportName,
+      factory: declarations.get(localName)!,
+      form: "binding",
+    };
+  }
+
   return null;
+}
+
+/**
+ * Blank out comments and string/template contents, preserving length, so the
+ * export scans above see only real syntax. Quotes themselves are kept; the
+ * characters between them become spaces.
+ */
+function stripCommentsAndStrings(code: string): string {
+  const output = code.split("");
+  let quote: "'" | '"' | "`" | null = null;
+  let lineComment = false;
+  let blockComment = false;
+  let escaped = false;
+
+  for (let index = 0; index < code.length; index++) {
+    const char = code[index]!;
+    const next = code[index + 1];
+
+    if (lineComment) {
+      if (char === "\n" || char === "\r") lineComment = false;
+      else output[index] = " ";
+      continue;
+    }
+    if (blockComment) {
+      if (char === "*" && next === "/") {
+        blockComment = false;
+        output[index] = " ";
+        output[index + 1] = " ";
+        index++;
+      } else if (char !== "\n") {
+        output[index] = " ";
+      }
+      continue;
+    }
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        output[index] = " ";
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        output[index] = " ";
+        continue;
+      }
+      if (char === quote) {
+        quote = null;
+        continue;
+      }
+      if (char !== "\n") output[index] = " ";
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      lineComment = true;
+      output[index] = " ";
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      blockComment = true;
+      output[index] = " ";
+      continue;
+    }
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+    }
+  }
+
+  return output.join("");
 }
 
 function findServerFnExportReplacements(code: string, factoryNames: Map<string, "fn" | "query">) {
