@@ -2385,7 +2385,10 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
       });
       if ((req.method || "GET").toUpperCase() !== "HEAD") res.write(html);
       res.end();
-      await options.onComplete?.(html);
+      // The buffered document is rendered per request and never split at a
+      // static boundary, so a shell capture must not store it: caching it
+      // would serve this visitor's data to everyone until revalidation.
+      if (!options.captureStaticShell) await options.onComplete?.(html);
       emitFarmEvent({
         type: "render.stream.complete",
         route,
@@ -2678,7 +2681,15 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
               if (clearMiddlewareData) {
                 clearMiddlewareData();
               }
-              if (!didError && options.onComplete) {
+              // A shell capture without a renderer-owned boundary detector has
+              // nothing safe to store: falling back to the full streamed
+              // response would cache one visitor's rendered data as the shared
+              // shell. Cache only what was actually split out as static.
+              if (
+                !didError &&
+                options.onComplete &&
+                (!options.captureStaticShell || staticShellParts)
+              ) {
                 if (staticShellParts) {
                   staticShellParts.push(
                     createDocumentFooter({
