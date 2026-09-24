@@ -230,3 +230,57 @@ describe("useServerFn retry", () => {
     expect(action.status).toBe("error");
   });
 });
+
+describe("invokeMutationWithRetry failure filtering", () => {
+  const failWith = (status: number | undefined) => {
+    let calls = 0;
+    const invoke = async () => {
+      calls += 1;
+      throw Object.assign(
+        new Error(`failed ${status ?? "transport"}`),
+        status !== undefined ? { status } : {},
+      );
+    };
+    return { invoke, calls: () => calls };
+  };
+
+  it("does not retry a 4xx: the server's final answer repeated is still no", async () => {
+    const { invoke, calls } = failWith(400);
+    await expect(invokeMutationWithRetry(invoke, { count: 3 }, () => true)).rejects.toThrow(
+      "failed 400",
+    );
+    expect(calls()).toBe(1);
+  });
+
+  it("still retries transport failures and 5xx", async () => {
+    const transport = failWith(undefined);
+    await expect(
+      invokeMutationWithRetry(transport.invoke, { count: 2 }, () => true),
+    ).rejects.toThrow("failed transport");
+    expect(transport.calls()).toBe(3);
+
+    const server = failWith(503);
+    await expect(invokeMutationWithRetry(server.invoke, { count: 1 }, () => true)).rejects.toThrow(
+      "failed 503",
+    );
+    expect(server.calls()).toBe(2);
+  });
+
+  it("honors a user-supplied shouldRetry in both directions", async () => {
+    const optedOut = failWith(undefined);
+    await expect(
+      invokeMutationWithRetry(optedOut.invoke, { count: 3, shouldRetry: () => false }, () => true),
+    ).rejects.toThrow();
+    expect(optedOut.calls()).toBe(1);
+
+    const optedIn = failWith(404);
+    await expect(
+      invokeMutationWithRetry(
+        optedIn.invoke,
+        { count: 1, shouldRetry: (context) => context.status === 404 },
+        () => true,
+      ),
+    ).rejects.toThrow();
+    expect(optedIn.calls()).toBe(2);
+  });
+});
