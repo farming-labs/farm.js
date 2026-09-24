@@ -3545,35 +3545,16 @@ function materializeCompilerHostChildren(descriptor: CompilerHostElement): reado
   return children;
 }
 
-function collectCompilerHostBlockIds(descriptor: CompilerHostElement, ids: Set<number>): void {
-  for (const child of flattenCompilerHostElements(descriptor.children)) {
-    collectCompilerHostBlockIds(child, ids);
+function collectActiveCompilerHostBlockIds(
+  descriptor: CompilerHostElement,
+  ids: Set<number>,
+): void {
+  for (const child of flattenCompilerHostElements(materializeCompilerHostChildren(descriptor))) {
+    collectActiveCompilerHostBlockIds(child, ids);
   }
   const block = descriptor.block;
   if (!block) return;
-  if (ids.has(block.id)) return;
   ids.add(block.id);
-  if (block.kind === "conditional-ranges") {
-    for (const range of block.ranges) {
-      if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids);
-      if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids);
-    }
-  } else if (block.kind === "keyed-ranges") {
-    for (const range of block.ranges) {
-      const first = materializeIterable(range.items())[0];
-      if (first !== undefined) collectCompilerHostBlockIds(range.create(first, 0), ids);
-    }
-  } else {
-    for (const range of block.ranges) {
-      if (range.kind === "conditional") {
-        if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids);
-        if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids);
-      } else {
-        const first = materializeIterable(range.items())[0];
-        if (first !== undefined) collectCompilerHostBlockIds(range.create(first, 0), ids);
-      }
-    }
-  }
 }
 
 /**
@@ -5379,11 +5360,9 @@ function createHostConditionalBlockComponent(
       for (const unsubscribe of this.fallbackUnsubscribers) unsubscribe();
       this.fallbackUnsubscribers = [];
       const ids = new Set<number>();
-      if (this.currentProps.truthy) {
-        collectCompilerHostBlockIds(this.currentProps.truthy.create(), ids);
-      }
-      if (this.currentProps.falsy) {
-        collectCompilerHostBlockIds(this.currentProps.falsy.create(), ids);
+      const selection = hostConditionalSelection(this.currentProps);
+      if (selection.kind === "branch") {
+        collectActiveCompilerHostBlockIds(selection.branch.create(), ids);
       }
       ids.delete(this.currentProps.id);
       for (const id of ids) {
@@ -5636,8 +5615,10 @@ function createConditionalRangesBlockComponent(
       this.fallbackUnsubscribers = [];
       const ids = new Set<number>();
       for (const range of this.currentProps.ranges) {
-        if (range.truthy) collectCompilerHostBlockIds(range.truthy.create(), ids);
-        if (range.falsy) collectCompilerHostBlockIds(range.falsy.create(), ids);
+        const selection = hostConditionalSelection(range);
+        if (selection.kind === "branch") {
+          collectActiveCompilerHostBlockIds(selection.branch.create(), ids);
+        }
       }
       ids.delete(this.currentProps.id);
       for (const id of ids) {
@@ -9932,7 +9913,7 @@ function createMixedRangesBlockComponent(
 
     private readFallbackBlockIds(descriptor: CompilerHostElement): Set<number> {
       const ids = new Set<number>();
-      collectCompilerHostBlockIds(descriptor, ids);
+      collectActiveCompilerHostBlockIds(descriptor, ids);
       return ids;
     }
 
