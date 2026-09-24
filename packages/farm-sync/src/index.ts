@@ -242,6 +242,15 @@ async function handleSyncRequest(
     return jsonResponse(405, { error: { code: "invalid_input", message: "Sync uses POST." } });
   }
 
+  // The development server invokes runtime hooks with a Request that carries
+  // headers but no body stream, and an upstream consumer can leave the body
+  // unreadable. Neither is a client error: fall through so the Node adapter,
+  // which can read the underlying stream, serves the request instead of this
+  // hook answering 400 for a perfectly valid POST. The Node adapter re-enters
+  // this handler with bodyOverride, so the origin check below still guards
+  // every served request exactly once.
+  if (bodyOverride === undefined && request.body === null) return undefined;
+
   // Sync operations ride the caller's cookies, and a cross-site page can send
   // this POST as a simple request with no preflight. Reject foreign origins
   // before touching the body, mirroring the server-action origin contract.
@@ -258,7 +267,12 @@ async function handleSyncRequest(
   let body: SyncRequestBody;
   try {
     body = bodyOverride ?? ((await request.clone().json()) as SyncRequestBody);
-  } catch {
+  } catch (error) {
+    if (bodyOverride === undefined && (error as Error)?.name !== "SyntaxError") {
+      // clone() throws when the body was already consumed elsewhere; that is
+      // the runtime's shape, not the client's JSON.
+      return undefined;
+    }
     return jsonResponse(400, {
       error: { code: "invalid_input", message: "Request body must be JSON." },
     });
