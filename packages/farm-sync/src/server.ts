@@ -176,6 +176,8 @@ async function insertRow(
       );
     }
     data[resolved.key] = generated;
+  } else {
+    requireScalarKey(resolved, data[resolved.key]);
   }
 
   // Scope and cursor columns are server-owned: client-supplied values are
@@ -192,9 +194,17 @@ async function updateRow(
 ): Promise<Record<string, unknown>> {
   const data = sanitizeInput(resolved, input, { allowKey: false });
   const key = requireKey(resolved, input);
-  const where = { ...scope, [resolved.key]: key };
 
-  const updated = await client.update({ where, data: { ...data, ...cursorStamp(resolved) } });
+  // Scope columns are server-owned on update just like on insert: a client
+  // sending one must not move the row into another caller's scope.
+  for (const field of Object.keys(scope)) {
+    delete data[field];
+  }
+
+  const updated = await client.update({
+    where: scopedKeyFilter(resolved, scope, key),
+    data: { ...data, ...cursorStamp(resolved) },
+  });
   if (!updated) {
     throw new SyncOperationError(
       "not_found",
@@ -212,7 +222,7 @@ async function deleteRow(
   input: Record<string, unknown> | undefined,
 ): Promise<{ deleted: number }> {
   const key = requireKey(resolved, input);
-  const deleted = await client.deleteMany({ where: { ...scope, [resolved.key]: key } });
+  const deleted = await client.deleteMany({ where: scopedKeyFilter(resolved, scope, key) });
   if (deleted === 0) {
     throw new SyncOperationError(
       "not_found",
@@ -231,7 +241,36 @@ function requireKey(resolved: ResolvedSyncModel, input: Record<string, unknown> 
       `${resolved.name}.${resolved.key} is required for this operation.`,
     );
   }
+  return requireScalarKey(resolved, key);
+}
+
+/**
+ * A key must address exactly one row. Objects are rejected because the orm
+ * reads them as operator filters — `{ not: null }` as a delete key would
+ * otherwise match every row in scope.
+ */
+function requireScalarKey(resolved: ResolvedSyncModel, key: unknown) {
+  if (typeof key !== "string" && typeof key !== "number" && typeof key !== "boolean") {
+    throw new SyncOperationError(
+      "invalid_input",
+      `${resolved.name}.${resolved.key} must be a single value.`,
+    );
+  }
   return key;
+}
+
+/**
+ * Combine the row filter with the client's key without letting one overwrite
+ * the other: when the filter itself scopes by the key column, a plain merge
+ * would let the client's key replace the scope entirely.
+ */
+function scopedKeyFilter(
+  resolved: ResolvedSyncModel,
+  scope: Record<string, unknown>,
+  key: unknown,
+): Record<string, unknown> {
+  if (Object.keys(scope).length === 0) return { [resolved.key]: key };
+  return { AND: [scope, { [resolved.key]: key }] };
 }
 
 /** Drop unknown columns so a client cannot write outside the declared schema. */

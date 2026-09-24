@@ -3,11 +3,15 @@ import { executeSyncOperation, SyncOperationError, type SyncOrmClient } from "./
 import { resolveSyncModels } from "./types";
 
 // Importing the full core entry in this package test would initialize Farm's
-// build-time esbuild integration. The sync factory only needs these two plugin
-// helpers, so keep the production-hook test focused on the integration itself.
-vi.mock("@farm.js/core", () => ({
+// build-time esbuild integration. The sync factory only needs the plugin
+// helpers and the origin contract, so pull the real request-security module
+// (it is dependency-light) and stub only the plugin surface.
+vi.mock("@farm.js/core", async () => ({
   declareSchemaTables: (target: object) => target,
   definePlugin: (plugin: object) => plugin,
+  ...(await vi.importActual<Record<string, unknown>>(
+    "../../farm/src/integration-request-security",
+  )),
 }));
 
 const { sync } = await import("./index");
@@ -32,11 +36,13 @@ const schema = {
 function makeOrm(rows: Record<string, unknown>[] = []) {
   const calls: Array<{ op: string; args: unknown }> = [];
   const store = [...rows];
-  const matches = (row: any, where: any) =>
+  const matches = (row: any, where: any): boolean =>
     Object.entries(where ?? {}).every(([field, expected]: [string, any]) =>
-      expected && typeof expected === "object" && "gt" in expected
-        ? new Date(row[field]).getTime() > new Date(expected.gt).getTime()
-        : row[field] === expected,
+      field === "AND"
+        ? (expected as any[]).every((clause) => matches(row, clause))
+        : expected && typeof expected === "object" && "gt" in expected
+          ? new Date(row[field]).getTime() > new Date(expected.gt).getTime()
+          : row[field] === expected,
     );
 
   const orm: SyncOrmClient = {
@@ -277,7 +283,7 @@ describe("sync production runtime hook", () => {
       request: new Request("https://app.test/_farm/sync", {
         method: "POST",
         body: JSON.stringify({ model: "tasks", operation: "list" }),
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", origin: "https://app.test" },
       }),
       ctx: {},
       kind: "request",
@@ -328,5 +334,168 @@ describe("key generation on insert", () => {
     });
 
     expect(created.id).toBe("client-key");
+  });
+});
+
+describe("server-owned scope columns", () => {
+  const context = { listId: "list-a" };
+
+  it("ignores a client attempt to reassign the scope column on update", async () => {
+    const { orm, store } = makeOrm([{ id: "1", title: "mine", listId: "list-a" }]);
+
+    await executeSyncOperation({
+      body: {
+        model: "tasks",
+        operation: "update",
+        // A row moved into another caller's scope would appear in their
+        // synced view as if they authored it.
+        input: { id: "1", title: "renamed", listId: "list-b" },
+      },
+      models: models(),
+      orm,
+      request,
+      context,
+    });
+
+    expect(store[0]).toMatchObject({ id: "1", title: "renamed", listId: "list-a" });
+  });
+
+  it("keeps a primary-key row filter intact instead of letting the client key replace it", async () => {
+    const scoped = resolveSyncModels(
+      schema as any,
+      { tasks: "write" },
+      ({ context: ctx }) => ({ id: (ctx as any).userId }),
+      true,
+    );
+    const { orm, store } = makeOrm([
+      { id: "victim", title: "not yours", listId: "x" },
+      { id: "attacker", title: "yours", listId: "x" },
+    ]);
+
+    await expect(
+      executeSyncOperation({
+        body: { model: "tasks", operation: "update", input: { id: "victim", title: "planted" } },
+        models: scoped,
+        orm,
+        request,
+        context: { userId: "attacker" },
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+
+    await expect(
+      executeSyncOperation({
+        body: { model: "tasks", operation: "delete", input: { id: "victim" } },
+        models: scoped,
+        orm,
+        request,
+        context: { userId: "attacker" },
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+
+    expect(store.find((row) => row.id === "victim")).toMatchObject({ title: "not yours" });
+  });
+});
+
+describe("primary keys must be single values", () => {
+  const context = { listId: "list-a" };
+  const rows = () => [
+    { id: "1", title: "a", listId: "list-a" },
+    { id: "2", title: "b", listId: "list-a" },
+  ];
+
+  it.each(["update", "delete"] as const)(
+    "rejects an operator object as the %s key",
+    async (operation) => {
+      const { orm, store } = makeOrm(rows());
+
+      await expect(
+        executeSyncOperation({
+          body: { model: "tasks", operation, input: { id: { not: null }, title: "x" } },
+          models: models(),
+          orm,
+          request,
+          context,
+        }),
+      ).rejects.toMatchObject({ code: "invalid_input" });
+
+      expect(store).toHaveLength(2);
+      expect(store[0]).toMatchObject({ title: "a" });
+    },
+  );
+
+  it("rejects an operator object as the insert key", async () => {
+    const { orm, store } = makeOrm();
+
+    await expect(
+      executeSyncOperation({
+        body: { model: "tasks", operation: "insert", input: { id: { gte: "" }, title: "x" } },
+        models: models(),
+        orm,
+        request,
+        context,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+
+    expect(store).toHaveLength(0);
+  });
+});
+
+describe("sync endpoint origin checks", () => {
+  const listBody = JSON.stringify({ model: "tasks", operation: "list" });
+
+  function makePlugin(options: Record<string, unknown> = {}) {
+    const { orm } = makeOrm([{ id: "1", title: "mine", listId: "list-a" }]);
+    return sync({
+      schema: schema as any,
+      client: orm,
+      models: { tasks: "read" },
+      where: false,
+      ...options,
+    });
+  }
+
+  async function send(plugin: any, headers: Record<string, string>) {
+    return plugin.runtime!.before!({
+      request: new Request("https://app.test/_farm/sync", {
+        method: "POST",
+        body: listBody,
+        headers: { "content-type": "application/json", ...headers },
+      }),
+      ctx: {},
+      kind: "request",
+      req: {} as never,
+      route: undefined,
+      signal: new AbortController().signal,
+      waitUntil() {},
+    } as any);
+  }
+
+  it("rejects a cross-site request even when it arrives as a simple POST", async () => {
+    const response = await send(makePlugin(), {
+      origin: "https://evil.example",
+      "sec-fetch-site": "cross-site",
+    });
+
+    expect(response?.status).toBe(403);
+    await expect(response?.json()).resolves.toMatchObject({
+      error: { code: "unauthorized" },
+    });
+  });
+
+  it("rejects a state-changing POST with no origin metadata", async () => {
+    const response = await send(makePlugin(), {});
+    expect(response?.status).toBe(403);
+  });
+
+  it("accepts the app's own origin", async () => {
+    const response = await send(makePlugin(), { origin: "https://app.test" });
+    expect(response?.status).toBe(200);
+  });
+
+  it("accepts an origin the app explicitly allows", async () => {
+    const response = await send(makePlugin({ allowedOrigins: ["https://partner.example"] }), {
+      origin: "https://partner.example",
+    });
+    expect(response?.status).toBe(200);
   });
 });
