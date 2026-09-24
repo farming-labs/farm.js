@@ -88,21 +88,33 @@ export function sanitySource(options: SanityContentSourceOptions): ContentRemote
   };
 
   // Entry ids are slugs by default, but Sanity mutations address `_id`.
-  // Remember the mapping from the last fetch and fall back to a lookup.
-  const documentIds = new Map<string, string>();
+  // Resolve live on every write: a cached mapping goes stale the moment an
+  // editor reassigns a slug, and writes are rare enough that one lookup is
+  // the right price for addressing the intended document. When `createType`
+  // is configured the lookup is constrained to it, so a slug shared with an
+  // unrelated document type cannot redirect the mutation.
   const resolveDocumentId = async (id: string): Promise<string> => {
-    const known = documentIds.get(id);
-    if (known) return known;
-    const bySlug = await resolveWriteClient().fetch<string | null>(
-      "*[slug.current == $id][0]._id",
-      { id },
+    const query = options.createType
+      ? "*[slug.current == $id && _type == $type][0]._id"
+      : "*[slug.current == $id][0]._id";
+    const bySlug = await resolveWriteClient().fetch<string | null>(query, {
+      id,
+      ...(options.createType ? { type: options.createType } : {}),
+    });
+    if (bySlug) return bySlug;
+    // An id that is itself a document _id (custom `id` option) still works.
+    const direct = await resolveWriteClient().fetch<string | null>("*[_id == $id][0]._id", {
+      id,
+    });
+    if (direct) return direct;
+    throw new Error(
+      `sanitySource(${JSON.stringify(name)}) could not resolve ${JSON.stringify(id)} to a ` +
+        "document; the write was not sent. The entry may have been deleted or its slug changed.",
     );
-    return bySlug ?? id;
   };
 
   const toDocument = (record: Record<string, unknown>): ContentRemoteDocument => {
     const id = resolveId(record) || (record._id as string);
-    if (typeof record._id === "string") documentIds.set(id, record._id);
     const body = options.body?.(record);
     return { id, data: record, ...(typeof body === "string" ? { body } : {}) };
   };
@@ -115,13 +127,17 @@ export function sanitySource(options: SanityContentSourceOptions): ContentRemote
               `sanitySource(${JSON.stringify(name)}) needs \`createType\` (the Sanity _type) to create documents`,
             );
           }
+          rejectUnsupportedBody(name, input.body);
+          // _type is forced after the spread so request-derived data cannot
+          // redirect the document into another type.
           const created = await resolveWriteClient().create({
-            _type: options.createType,
             ...input.data,
+            _type: options.createType,
           });
           return toDocument(created as unknown as Record<string, unknown>);
         },
         update: async (id: string, patch: { data?: Record<string, unknown>; body?: string }) => {
+          rejectUnsupportedBody(name, patch.body);
           const documentId = await resolveDocumentId(id);
           const updated = await resolveWriteClient()
             .patch(documentId)
@@ -163,7 +179,6 @@ export function sanitySource(options: SanityContentSourceOptions): ContentRemote
               `index ${index}; give documents a slug or pass an \`id\` function`,
           );
         }
-        if (typeof record._id === "string") documentIds.set(id, record._id);
         const body = options.body?.(record);
         return {
           id,
@@ -173,6 +188,14 @@ export function sanitySource(options: SanityContentSourceOptions): ContentRemote
       });
     },
   };
+}
+
+function rejectUnsupportedBody(name: string, body: string | undefined): void {
+  if (typeof body !== "string") return;
+  throw new Error(
+    `sanitySource(${JSON.stringify(name)}) does not store \`body\`: Sanity documents keep ` +
+      "content in fields. Put the text in `data` under the field your schema expects.",
+  );
 }
 
 function defaultDocumentId(document: Record<string, unknown>): string {
