@@ -338,6 +338,24 @@ posts: collection({
 existing client, uses `slug.current` (falling back to `_id`) as the entry ID, and skips the CDN by
 default so a build sees the freshest documents.
 
+Contentful works the same way with `@farm.js/contentful`:
+
+```ts
+import { contentfulSource } from "@farm.js/contentful";
+
+posts: collection({
+  source: contentfulSource({
+    contentType: "post",
+    query: { order: ["-sys.createdAt"] },
+  }),
+  schema: post,
+});
+```
+
+It resolves `CONTENTFUL_SPACE_ID` and `CONTENTFUL_ACCESS_TOKEN`, uses a string `fields.slug`
+(falling back to `sys.id`) as the entry ID, and pages past Contentful's 1000-entry cap internally.
+Set `host: "preview.contentful.com"` with `CONTENTFUL_PREVIEW_TOKEN` to load drafts.
+
 For **live content** that must update without a rebuild, keep the provider SDK in a server-only
 module and fetch through a [Server Query](/docs/server-queries) instead. Farm can validate the
 response, cache published content, and share the typed result with server or client consumers.
