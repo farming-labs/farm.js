@@ -300,6 +300,63 @@ describe("sync production runtime hook", () => {
       full: true,
     });
   });
+
+  it("falls through to the Node adapter when the runtime Request has no body", async () => {
+    // The development server invokes runtime hooks with a Request built from
+    // headers only; the Node stream is readable solely by the legacy
+    // beforeRequest adapter. Answering here would 400 every dev operation.
+    const { orm } = makeOrm([]);
+    const plugin = sync({
+      schema: schema as any,
+      client: orm,
+      models: { tasks: "read" },
+      where: false,
+    });
+
+    const response = await plugin.runtime!.before!({
+      request: new Request("https://app.test/_farm/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      }),
+      ctx: {},
+      kind: "request",
+      req: {} as never,
+      route: undefined,
+      signal: new AbortController().signal,
+      waitUntil() {},
+    } as any);
+
+    expect(response).toBeUndefined();
+  });
+
+  it("falls through when an upstream consumer already read the body", async () => {
+    const { orm } = makeOrm([]);
+    const plugin = sync({
+      schema: schema as any,
+      client: orm,
+      models: { tasks: "read" },
+      where: false,
+    });
+
+    const request = new Request("https://app.test/_farm/sync", {
+      method: "POST",
+      body: JSON.stringify({ model: "tasks", operation: "list" }),
+      headers: { "content-type": "application/json", origin: "https://app.test" },
+    });
+    await request.text(); // consume, like an upstream plugin would
+
+    const response = await plugin.runtime!.before!({
+      request,
+      ctx: {},
+      kind: "request",
+      req: {} as never,
+      route: undefined,
+      signal: new AbortController().signal,
+      waitUntil() {},
+    } as any);
+
+    expect(response).toBeUndefined();
+  });
 });
 
 describe("key generation on insert", () => {
