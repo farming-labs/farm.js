@@ -58,6 +58,8 @@ export default {
   images: {
     path: "/media/image",
     qualities: [60],
+    // The test serves its generated source asset from an isolated loopback server.
+    dangerouslyAllowLocalIP: true,
   },
   redirects() {
     return [{ source: "/legacy", destination: "/dashboard", permanent: true }];

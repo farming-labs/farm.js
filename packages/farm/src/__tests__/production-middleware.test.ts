@@ -1,6 +1,8 @@
 // @vitest-environment node
 
 import fs from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -35,7 +37,7 @@ function readInlineFarmProps(html: string): Record<string, any> {
 describe("production middleware runtime", () => {
   it("runs farm.config middleware and app middleware in a production build", async () => {
     const root = await createMiddlewareProductionFixture();
-    const originalFetch = globalThis.fetch;
+    let imageOriginServer: Server | undefined;
 
     try {
       const userConfig = await loadConfig(root, undefined, "production");
@@ -130,20 +132,25 @@ describe("production middleware runtime", () => {
         path.join(root, ".vercel", "output", "functions", "__nitro.func"),
       );
       expect(nitroBundle).not.toContain("@img/sharp-");
-      globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
-        const url = new URL(input instanceof Request ? input.url : String(input));
-        const requestedAsset = productAssetNames.find((name) => url.pathname.endsWith(name));
-        if (url.origin === "https://example.test" && requestedAsset) {
-          const bytes = await fs.readFile(path.join(staticAssetsDir, requestedAsset));
-          return new Response(bytes, {
-            headers: {
-              "content-type": "image/png",
-              "content-length": String(bytes.byteLength),
-            },
-          });
+      imageOriginServer = createServer(async (request, response) => {
+        const requestedAsset = productAssetNames.find((name) => request.url?.endsWith(name));
+        if (!requestedAsset) {
+          response.writeHead(404).end();
+          return;
         }
-        return originalFetch(input, init);
-      }) as typeof fetch;
+        const bytes = await fs.readFile(path.join(staticAssetsDir, requestedAsset));
+        response.writeHead(200, {
+          "content-type": "image/png",
+          "content-length": String(bytes.byteLength),
+        });
+        response.end(bytes);
+      });
+      await new Promise<void>((resolve, reject) => {
+        imageOriginServer!.once("error", reject);
+        imageOriginServer!.listen(0, "127.0.0.1", resolve);
+      });
+      const imageOriginAddress = imageOriginServer.address() as AddressInfo;
+      const imageOrigin = `http://127.0.0.1:${imageOriginAddress.port}`;
 
       const entryPath = path.join(
         root,
@@ -256,7 +263,7 @@ describe("production middleware runtime", () => {
       expect(staticImageCachedResponse.status).toBe(304);
 
       const optimizedImageResponse = await serverModule.default.fetch(
-        new Request(`https://example.test${optimizedImageHref}`, {
+        new Request(`${imageOrigin}${optimizedImageHref}`, {
           headers: { accept: "image/webp" },
         }),
       );
@@ -530,7 +537,11 @@ describe("production middleware runtime", () => {
       expect(rewriteResponse.status).toBe(200);
       await expect(rewriteResponse.text()).resolves.toContain("current request: /rewrite-target");
     } finally {
-      globalThis.fetch = originalFetch;
+      if (imageOriginServer) {
+        await new Promise<void>((resolve, reject) => {
+          imageOriginServer!.close((error) => (error ? reject(error) : resolve()));
+        });
+      }
       delete (globalThis as any).__farmMiddlewareEvents;
       await cleanupMiddlewareProductionFixture(root);
     }
