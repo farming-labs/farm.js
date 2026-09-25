@@ -79,6 +79,74 @@ describe("OpenAPIGenerator", () => {
       apiKeyCookie: expect.any(Object),
     });
   });
+
+  it("uses explicit endpoint response metadata without inventing responses", async () => {
+    const routeFile = realpathSync(
+      path.resolve("src/__tests__/fixtures/openapi-responses-route.mjs"),
+    );
+    const generator = new OpenAPIGenerator(path.dirname(routeFile), { title: "Responses API" });
+    const spec = await generator.generateSpec([
+      {
+        path: "/api/account",
+        methods: ["GET", "POST", "PUT", "PATCH"],
+        filePath: routeFile,
+        relativePath: "api/account/route.ts",
+      },
+    ]);
+
+    expect(spec.paths["/account"].get.responses).toEqual({
+      200: {
+        description: "Current account",
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: { id: { type: "string" } },
+              required: ["id"],
+            },
+          },
+        },
+      },
+    });
+    expect(spec.paths["/account"].post.responses).toEqual({
+      204: { description: "Account removed" },
+    });
+    expect(spec.paths["/account"].put.responses).toEqual({
+      200: {
+        description: "Streaming response",
+        content: { "application/x-ndjson": {} },
+      },
+    });
+    expect(spec.paths["/account"].patch.responses).toEqual({
+      206: {
+        description: "Binary response",
+        content: {
+          "application/pdf": { schema: { type: "string", format: "binary" } },
+        },
+      },
+    });
+  });
+
+  it("uses a conservative response fallback when metadata is unavailable", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-openapi-response-fallback-"));
+    tempDirs.push(root);
+    const routeFile = path.join(root, "route.mjs");
+    writeFileSync(routeFile, "export const GET = async () => new Response();\n");
+    const generator = new OpenAPIGenerator(root, { title: "Fallback API" });
+    const spec = await generator.generateSpec([
+      {
+        path: "/api/unknown",
+        methods: ["GET"],
+        filePath: realpathSync(routeFile),
+        relativePath: "api/unknown/route.ts",
+      },
+    ]);
+
+    expect(spec.paths["/unknown"].get.responses).toEqual({
+      default: { description: "Response metadata is unavailable." },
+    });
+  });
 });
 
 describe("OpenAPIGenerator dynamic paths", () => {
