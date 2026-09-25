@@ -3339,6 +3339,8 @@ type CompilerBlockRefresh = (afterCommit?: () => void, dirtyState?: ReadonlySet<
 export interface CompilerRuntimeFeatureOwner {
   setRoot(id: number, root: Element | null, expectedRoot?: Element | null): void;
   subscribe(id: number, refresh: CompilerBlockRefresh): () => void;
+  /** Opaque identity used to detect compatible definition replacement. */
+  getDefinitionVersion?(): unknown;
 }
 
 export interface CompilerRuntimeFeature {
@@ -8523,7 +8525,7 @@ function createKeyedRowHostRuntime(): KeyedRowHostRuntime {
 }
 
 function createKeyedRowsBlockComponent(
-  owner: Pick<ConditionalBlockOwner, "subscribe">,
+  owner: Pick<CompilerRuntimeFeatureOwner, "subscribe" | "getDefinitionVersion">,
   options: KeyedRowsRuntimeOptions = {},
 ): React.ComponentType<CompilerKeyedRowsBlockProps> {
   interface State {
@@ -8541,6 +8543,7 @@ function createKeyedRowsBlockComponent(
     private fallbackKeysWereUnsafe = false;
     private propSyncQueued = false;
     private currentProps = this.props;
+    private definitionVersion = owner.getDefinitionVersion?.();
     declare private stop: (() => void) | undefined;
     declare private id: number | undefined;
     private instances = new Map<string, CompilerKeyedRowInstance>();
@@ -9602,6 +9605,7 @@ function createKeyedRowsBlockComponent(
     shouldComponentUpdate(nextProps: CompilerKeyedRowsBlockProps, nextState: State): boolean {
       const wasReactOwned = this.hasReactOwnedRows(this.currentProps);
       const willBeReactOwned = this.hasReactOwnedRows(nextProps);
+      const definitionChanged = this.definitionVersion !== owner.getDefinitionVersion?.();
       this.currentProps = nextProps;
       if (this.state.fallback && nextState.fallback) {
         const unsafeKeys = this.hasUnsafeFallbackKeys();
@@ -9609,7 +9613,7 @@ function createKeyedRowsBlockComponent(
         this.fallbackKeysWereUnsafe = unsafeKeys;
       }
       if (nextState.fallback || this.state.fallback) return true;
-      if (wasReactOwned || willBeReactOwned) {
+      if (definitionChanged || wasReactOwned || willBeReactOwned) {
         // Parent prop updates and Fast Refresh definitions must pass through
         // React so event locations, static row markup, and proxy identities
         // cannot remain tied to an older render definition.
@@ -9622,10 +9626,15 @@ function createKeyedRowsBlockComponent(
 
     componentDidUpdate(previousProps: CompilerKeyedRowsBlockProps): void {
       this.listen();
+      const nextDefinitionVersion = owner.getDefinitionVersion?.();
+      const definitionChanged = this.definitionVersion !== nextDefinitionVersion;
+      this.definitionVersion = nextDefinitionVersion;
       if (
         this.state.fallback ||
         previousProps === this.props ||
-        (!this.hasReactOwnedRows(previousProps) && !this.hasReactOwnedRows(this.props)) ||
+        (!definitionChanged &&
+          !this.hasReactOwnedRows(previousProps) &&
+          !this.hasReactOwnedRows(this.props)) ||
         this.adopt()
       ) {
         return;
@@ -11068,6 +11077,7 @@ export function createCompiledComponentWithFeatures<Props>(
       const featureOwner: CompilerRuntimeFeatureOwner = {
         setRoot: (id, root, expectedRoot) => this.setBlockRoot(id, root, expectedRoot),
         subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
+        getDefinitionVersion: () => definitionReference.current,
       };
       const blockRuntime: Partial<CompilerBlockRuntime> = {
         target: (id) => this.bindingTarget(id),
