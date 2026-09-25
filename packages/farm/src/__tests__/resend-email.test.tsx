@@ -126,6 +126,10 @@ describe("resend email integration", () => {
   const resendStub = createResendStub();
   const integration = resend({
     instance: resendStub as never,
+    // The mounted routes spend real credits, so they require authorization.
+    // This suite's fixture authorizes every caller; the guard itself is
+    // covered by its own describe block below.
+    authorize: () => true,
     defaults: {
       from: "Acme <hello@example.com>",
       replyTo: "support@example.com",
@@ -508,5 +512,112 @@ describe("resend email integration", () => {
         signature: "v1,fake",
       },
     });
+  });
+});
+
+describe("email route authorization", () => {
+  function createGuardedIntegration(
+    options: Parameters<typeof resend>[0] extends never ? never : Record<string, unknown> = {},
+  ) {
+    const resendStub = createResendStub();
+    const integration = resend({
+      instance: resendStub as never,
+      defaults: { from: "Acme <hello@example.com>" },
+      templates: {
+        inviteUser: {
+          component: InviteUserEmail,
+          subject: ({ orgName }) => `Join ${orgName}`,
+        },
+      },
+      ...options,
+    } as never);
+    return { integration, resendStub };
+  }
+
+  function sendRequest(headers: Record<string, string> = {}) {
+    return new Request("http://example.com/api/email/send", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify({
+        templateId: "inviteUser",
+        to: "victim@example.com",
+        data: { orgName: "Acme", inviteUrl: "https://acme.dev/i/1" },
+      }),
+    });
+  }
+
+  function invoke(integration: { routes: any[]; instance: unknown }, request: Request) {
+    const route = integration.routes.find(
+      (candidate) => candidate.path === "/api/email/send" && candidate.method === "POST",
+    );
+    return route!.handler(
+      request,
+      createContext(request, "POST", "/api/email/send", integration.instance),
+    );
+  }
+
+  it("refuses an anonymous caller instead of spending the account's credits", async () => {
+    // The route is mounted the moment the integration is configured, so an
+    // unconfigured guard must fail closed rather than relay mail for anyone.
+    const { integration, resendStub } = createGuardedIntegration();
+
+    const response = await invoke(integration, sendRequest());
+
+    expect(response.status).toBe(401);
+    expect(JSON.parse(await response.text()).error).toMatch(/authorize/);
+    expect(resendStub.emails.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses a cross-site caller even when authorization would pass", async () => {
+    // A session-cookie `authorize` would otherwise accept a forged POST from
+    // any page the victim visits.
+    const { integration, resendStub } = createGuardedIntegration({ authorize: () => true });
+
+    const response = await invoke(
+      integration,
+      sendRequest({ origin: "https://evil.example", "sec-fetch-site": "cross-site" }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(resendStub.emails.send).not.toHaveBeenCalled();
+  });
+
+  it("honors an authorize decision, including a caller-supplied Response", async () => {
+    const denied = createGuardedIntegration({ authorize: () => false });
+    expect((await invoke(denied.integration, sendRequest())).status).toBe(401);
+    expect(denied.resendStub.emails.send).not.toHaveBeenCalled();
+
+    const custom = createGuardedIntegration({
+      authorize: () => new Response("nope", { status: 402 }),
+    });
+    expect((await invoke(custom.integration, sendRequest())).status).toBe(402);
+
+    const allowed = createGuardedIntegration({ authorize: () => true });
+    expect((await invoke(allowed.integration, sendRequest())).status).toBe(200);
+    expect(allowed.resendStub.emails.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("serves an explicit allowUnauthenticated opt-in", async () => {
+    const { integration, resendStub } = createGuardedIntegration({ allowUnauthenticated: true });
+
+    expect((await invoke(integration, sendRequest())).status).toBe(200);
+    expect(resendStub.emails.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("never forwards caller-supplied email headers to the provider", async () => {
+    const { integration, resendStub } = createGuardedIntegration({ authorize: () => true });
+    const request = new Request("http://example.com/api/email/send", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        templateId: "inviteUser",
+        to: "person@example.com",
+        headers: { "Reply-To": "attacker@evil.example", "List-Unsubscribe": "<x>" },
+        data: { orgName: "Acme", inviteUrl: "https://acme.dev/i/1" },
+      }),
+    });
+
+    expect((await invoke(integration, request)).status).toBe(200);
+    expect(resendStub.emails.send.mock.calls[0]![0]).not.toHaveProperty("headers");
   });
 });

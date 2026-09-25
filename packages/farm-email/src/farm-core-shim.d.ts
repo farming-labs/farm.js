@@ -1,4 +1,25 @@
 declare module "@farm.js/core" {
+  export type IntegrationOriginRejection =
+    | "missing-origin"
+    | "opaque-origin"
+    | "invalid-origin"
+    | "cross-site";
+
+  export type IntegrationOriginResult =
+    | { ok: true }
+    | { ok: false; reason: IntegrationOriginRejection };
+
+  export interface IntegrationOriginPolicy {
+    allowedOrigins?: readonly string[];
+    requireOriginMetadata?: boolean;
+  }
+
+  export function validateIntegrationRequestOrigin(
+    request: Request,
+    policy?: IntegrationOriginPolicy,
+  ): IntegrationOriginResult;
+
+  export function describeIntegrationOriginRejection(reason: IntegrationOriginRejection): string;
   export type FarmIntegrationCategory =
     | "auth"
     | "payment"
