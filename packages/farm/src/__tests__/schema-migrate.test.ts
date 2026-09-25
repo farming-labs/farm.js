@@ -11,6 +11,7 @@ import {
 } from "../schema-migrate";
 import {
   collectSchemaModels,
+  escapeSqlString,
   generateSqlStatements,
   renderSqlSchemaFile,
   resolveSchemaModels,
@@ -473,5 +474,62 @@ describe("a third-party plugin", () => {
     expect(result.applied).toEqual(["webhooks"]);
     const columns = database.prepare("pragma table_info('webhooks')").all() as any[];
     expect(columns.map((row) => row.name)).toEqual(["id", "url", "delivered_at"]);
+  });
+});
+
+describe("dialect-specific introspection", () => {
+  function recordingExecutor(rows: Record<string, unknown>[] = []) {
+    const queries: Array<{ sql: string; params?: unknown[] }> = [];
+    const executor: FarmSchemaExecutor = {
+      async execute() {},
+      async query(sql, params) {
+        queries.push({ sql, params });
+        return rows;
+      },
+    };
+    return { executor, queries };
+  }
+
+  it("binds $1 and scopes to the current schema on Postgres", async () => {
+    // pg rejects `?` outright, so introspection threw and migrate could not
+    // run at all against Postgres.
+    const { executor, queries } = recordingExecutor();
+    await planSchemaMigration(models(), "postgres", executor);
+
+    const lookup = queries.find((entry) => entry.sql.includes("information_schema.columns"));
+    expect(lookup?.sql).toContain("table_name = $1");
+    expect(lookup?.sql).toContain("table_schema = current_schema()");
+    expect(lookup?.sql).not.toContain("table_name = ?");
+  });
+
+  it("binds ? and scopes to the current database on MySQL", async () => {
+    const { executor, queries } = recordingExecutor();
+    await planSchemaMigration(models(), "mysql", executor);
+
+    const lookup = queries.find((entry) => entry.sql.includes("information_schema.columns"));
+    expect(lookup?.sql).toContain("table_name = ?");
+    expect(lookup?.sql).toContain("table_schema = database()");
+  });
+
+  it("escapes backslashes in MySQL string literals, and only there", () => {
+    // MySQL treats a backslash as an escape character unless
+    // NO_BACKSLASH_ESCAPES is set, so a default ending in one escaped the
+    // closing quote and broke the generated DDL.
+    expect(escapeSqlString("C:\\path\\", "mysql")).toBe("C:\\\\path\\\\");
+    expect(escapeSqlString("C:\\path\\", "postgres")).toBe("C:\\path\\");
+    expect(escapeSqlString("it's", "mysql")).toBe("it''s");
+    expect(escapeSqlString("it's")).toBe("it''s");
+  });
+
+  it("identifies a mysql2-shaped client instead of assuming Postgres", () => {
+    const mysqlClient = {
+      query: async () => [[], []],
+      escapeId: (value: string) => `\`${value}\``,
+      format: (sql: string) => sql,
+    };
+    const pgClient = { query: async () => ({ rows: [] }) };
+
+    expect(createSchemaExecutor(mysqlClient, "app")?.dialect).toBe("mysql");
+    expect(createSchemaExecutor(pgClient, "app")?.dialect).toBe("postgres");
   });
 });

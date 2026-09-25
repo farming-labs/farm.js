@@ -92,10 +92,22 @@ async function describeTable(
     return new Set(rows.map((row) => String(row.name).toLowerCase()));
   }
 
-  const rows = await executor.query(
-    "select column_name from information_schema.columns where table_name = ?",
-    [table],
-  );
+  // Postgres binds $1 while MySQL binds ?, and the lookup is scoped to the
+  // schema the migration writes into. Without that scope a same-named table
+  // in another schema - or another database on the same MySQL server -
+  // reports columns for a table that does not exist here, so Farm decides it
+  // already exists and silently skips creating it.
+  const [sql, params]: [string, unknown[]] =
+    dialect === "mysql"
+      ? [
+          "select column_name from information_schema.columns where table_name = ? and table_schema = database()",
+          [table],
+        ]
+      : [
+          "select column_name from information_schema.columns where table_name = $1 and table_schema = current_schema()",
+          [table],
+        ];
+  const rows = await executor.query(sql, params);
   if (rows.length === 0) return undefined;
   return new Set(rows.map((row) => String(row.column_name ?? row.COLUMN_NAME).toLowerCase()));
 }
@@ -190,10 +202,15 @@ export function createSchemaExecutor(
   }
 
   if (typeof candidate?.query === "function") {
+    // pg and mysql2 both expose query(), so the driver is identified by what
+    // else it carries: mysql2 ships SQL formatting helpers that pg has no
+    // equivalent for. An unidentifiable client stays postgres, the
+    // long-standing default, and an explicit `dialect` on the declaration
+    // overrides this either way.
+    const isMysqlClient =
+      typeof candidate.escapeId === "function" || typeof candidate.format === "function";
     return {
-      // Postgres and MySQL are told apart by what `query` resolves to, which is
-      // only knowable at call time, so the dialect is settled on first use.
-      dialect: "postgres",
+      dialect: isMysqlClient ? "mysql" : "postgres",
       executor: {
         async execute(sql) {
           await candidate.query(sql);
