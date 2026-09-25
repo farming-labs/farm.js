@@ -21,6 +21,69 @@ afterEach(() => {
 });
 
 describe("OpenAPIGenerator", () => {
+  it("uses local and same-origin API servers for development and production", async () => {
+    const development = new OpenAPIGenerator(
+      os.tmpdir(),
+      { title: "Development API" },
+      {
+        mode: "development",
+        apiBaseURL: "/api",
+      },
+    );
+    const production = new OpenAPIGenerator(
+      os.tmpdir(),
+      { title: "Production API" },
+      {
+        mode: "production",
+        apiBaseURL: "/api",
+      },
+    );
+
+    await expect(development.generateSpec([])).resolves.toMatchObject({
+      servers: [{ url: "http://localhost:3000/api", description: "Development server" }],
+    });
+    await expect(production.generateSpec([])).resolves.toMatchObject({
+      servers: [{ url: "/api", description: "Same-origin API server" }],
+    });
+  });
+
+  it("resolves explicit, Farm, and request-derived server URLs in order", async () => {
+    const explicit = new OpenAPIGenerator(
+      os.tmpdir(),
+      { title: "Explicit API", servers: [{ url: "https://docs.example/v2" }] },
+      { mode: "production", apiBaseURL: "https://farm.example/api" },
+    );
+    const farm = new OpenAPIGenerator(
+      os.tmpdir(),
+      { title: "Farm API" },
+      {
+        mode: "production",
+        apiBaseURL: "https://farm.example/api",
+      },
+    );
+    const request = new OpenAPIGenerator(
+      os.tmpdir(),
+      { title: "Request API" },
+      {
+        mode: "development",
+        apiBaseURL: "/internal-api",
+      },
+    );
+
+    expect((await explicit.generateSpec([], "https://request.example")).servers).toEqual([
+      { url: "https://docs.example/v2" },
+    ]);
+    expect((await farm.generateSpec([], "https://request.example")).servers).toEqual([
+      { url: "https://farm.example/api", description: "Farm API server" },
+    ]);
+    expect((await request.generateSpec([], "http://127.0.0.1:4173")).servers).toEqual([
+      {
+        url: "http://127.0.0.1:4173/internal-api",
+        description: "Current development server",
+      },
+    ]);
+  });
+
   it("represents QUERY with a request body in a valid OpenAPI 3.0 document", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const root = mkdtempSync(path.join(os.tmpdir(), "farm-openapi-query-"));

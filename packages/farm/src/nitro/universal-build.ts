@@ -3867,7 +3867,10 @@ async function buildSSRInMemory(
   } | null = null;
   if (config.openapi.enabled && config.openapi.route) {
     const { OpenAPIManager, renderOpenAPIReferenceHTML } = await import("../openapi/manager");
-    const openAPIManager = new OpenAPIManager(appDirs, config.openapi);
+    const openAPIManager = new OpenAPIManager(appDirs, config.openapi, {
+      mode: "production",
+      apiBaseURL: config.api.baseURL,
+    });
     const spec = await openAPIManager.generateSpec();
     if (!spec) {
       throw new Error("Failed to generate the OpenAPI specification for the production build.");

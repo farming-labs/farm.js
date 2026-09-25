@@ -99,6 +99,17 @@ The configured route serves a Scalar-powered reference page with the generated s
 
 Farm pins the Scalar browser assets to the reviewed version shipped with the framework and verifies CDN responses with subresource integrity. Scalar upgrades therefore arrive with Farm releases instead of floating independently in production.
 
+## Choose the API server URL
+
+Set `openapi.servers` when the document must advertise an explicit public server. Otherwise Farm
+uses an absolute `api.baseURL` when configured. During development, a root-relative API base is
+joined to the current request origin (or `http://localhost:3000` when generating without a
+request). Production documents keep a root-relative API base relative, so deployed clients and the
+interactive reference stay on the deployment's current origin instead of pointing at localhost.
+
+The precedence is `openapi.servers`, an absolute Farm `api.baseURL`, the current development
+request origin plus Farm's API path, then the mode-specific default.
+
 ## Describe authentication
 
 OpenAPI operations are public by default because Farm cannot infer authorization from arbitrary

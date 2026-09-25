@@ -33,6 +33,12 @@ export interface OpenAPISpec {
   };
 }
 
+export interface OpenAPIGeneratorContext {
+  mode?: "development" | "production";
+  /** Resolved Farm `api.baseURL`, including its API path. */
+  apiBaseURL?: string;
+}
+
 type AllowedType = "string" | "number" | "boolean" | "array" | "object";
 const allowedType = new Set(["string", "number", "boolean", "array", "object"]);
 const zodTypeNameKinds: Record<string, string> = {
@@ -100,10 +106,12 @@ function openAPITypeForLiteralValues(values: readonly unknown[]): AllowedType {
 export class OpenAPIGenerator {
   private config: OpenAPIConfig;
   private appDir: string;
+  private context: OpenAPIGeneratorContext;
 
-  constructor(appDir: string, config: OpenAPIConfig) {
+  constructor(appDir: string, config: OpenAPIConfig, context: OpenAPIGeneratorContext = {}) {
     this.appDir = appDir;
     this.config = config;
+    this.context = context;
   }
 
   /**
@@ -337,7 +345,7 @@ export class OpenAPIGenerator {
   /**
    * Generate OpenAPI spec from API routes
    */
-  async generateSpec(routes: APIRouteInfo[]): Promise<OpenAPISpec> {
+  async generateSpec(routes: APIRouteInfo[], requestOrigin?: string): Promise<OpenAPISpec> {
     const spec: OpenAPISpec = {
       openapi: "3.0.3",
       info: {
@@ -347,9 +355,7 @@ export class OpenAPIGenerator {
         ...(this.config.contact && { contact: this.config.contact }),
         ...(this.config.license && { license: this.config.license }),
       },
-      servers: this.config.servers || [
-        { url: "http://localhost:3000", description: "Development server" },
-      ],
+      servers: this.resolveServers(requestOrigin),
       paths: {},
       components: {
         schemas: {},
@@ -406,6 +412,40 @@ export class OpenAPIGenerator {
     }
 
     return spec;
+  }
+
+  /**
+   * Resolve server entries in decreasing order of authority: explicit OpenAPI
+   * servers, Farm's public API base, the current development request origin,
+   * and finally a mode-appropriate default.
+   */
+  resolveServers(requestOrigin?: string): NonNullable<OpenAPISpec["servers"]> {
+    if (this.config.servers !== undefined) return this.config.servers;
+
+    const apiBaseURL = this.context.apiBaseURL || "/api";
+    if (/^https?:\/\//i.test(apiBaseURL)) {
+      return [{ url: apiBaseURL, description: "Farm API server" }];
+    }
+
+    if (requestOrigin) {
+      return [
+        {
+          url: new URL(apiBaseURL, `${requestOrigin.replace(/\/$/, "")}/`).toString(),
+          description: "Current development server",
+        },
+      ];
+    }
+
+    if (this.context.mode === "production") {
+      return [{ url: apiBaseURL, description: "Same-origin API server" }];
+    }
+
+    return [
+      {
+        url: new URL(apiBaseURL, "http://localhost:3000/").toString(),
+        description: "Development server",
+      },
+    ];
   }
 
   /**
