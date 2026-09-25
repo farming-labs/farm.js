@@ -447,7 +447,7 @@ export function getSqlDefaultExpression(field: ResolvedSchemaField, dialect: Far
   }
 
   if (typeof field.default === "string") {
-    return `'${escapeSqlString(field.default)}'`;
+    return `'${escapeSqlString(field.default, dialect)}'`;
   }
 
   if (typeof field.default === "number") {
@@ -503,8 +503,11 @@ export function toCamelCase(value: string) {
   return pascal ? pascal.charAt(0).toLowerCase() + pascal.slice(1) : pascal;
 }
 
-export function escapeSqlString(value: string) {
+export function escapeSqlString(value: string, dialect?: FarmSqlDialect) {
   // Standard-conforming SQL string literal: only quote doubling; backslashes
-  // are literal characters.
-  return value.replace(/'/g, "''");
+  // are literal characters. MySQL is the exception - unless NO_BACKSLASH_ESCAPES
+  // is set it treats a backslash as an escape character, so a value containing
+  // one would escape the closing quote and break the statement.
+  const quoted = value.replace(/'/g, "''");
+  return dialect === "mysql" ? quoted.replace(/\\/g, "\\\\") : quoted;
 }
