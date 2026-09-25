@@ -38,11 +38,21 @@ export interface CreateFarmImageHandlerOptions {
   fetchRemote?: typeof globalThis.fetch;
   transform: FarmImageTransformer;
   validateRemoteUrl?: (url: URL) => void | Promise<void>;
+  /** Adapter-owned origin for local asset fetches. Never derive this from request headers. @internal */
+  trustedLocalOrigin?: string | URL | (() => string | URL | undefined);
   onError?: (error: unknown, request: Request) => void;
   cacheEntries?: number;
 }
 
-export type FarmImageHandler = (request: Request) => Promise<Response | null>;
+export interface FarmImageHandlerContext {
+  /** Adapter-owned origin for this request. Never derive this from request headers. @internal */
+  trustedLocalOrigin?: string | URL;
+}
+
+export type FarmImageHandler = (
+  request: Request,
+  context?: FarmImageHandlerContext,
+) => Promise<Response | null>;
 
 type OptimizedImage = FarmImageTransformResult & {
   etag: string;
@@ -84,11 +94,14 @@ export function createFarmImageHandler(
   const allowedWidths = new Set([...config.deviceSizes, ...config.imageSizes]);
   const allowedQualities = new Set(config.qualities);
 
-  return async function handleFarmImage(request): Promise<Response | null> {
+  return async function handleFarmImage(request, context): Promise<Response | null> {
     const requestUrl = new URL(request.url);
     if (requestUrl.pathname !== config.path) return null;
 
     try {
+      const trustedLocalOrigin = resolveTrustedLocalOrigin(
+        context?.trustedLocalOrigin ?? options.trustedLocalOrigin,
+      );
       if (config.provider === "none") {
         throw new FarmImageRequestError(
           "DISALLOWED_SOURCE",
@@ -104,7 +117,12 @@ export function createFarmImageHandler(
         );
       }
 
-      const sourceUrl = await resolveImageSourceUrl(requestUrl, config, options.validateRemoteUrl);
+      const sourceUrl = await resolveImageSourceUrl(
+        requestUrl,
+        trustedLocalOrigin,
+        config,
+        options.validateRemoteUrl,
+      );
       const width = parseAllowedInteger(requestUrl.searchParams.get("w"), allowedWidths, "width");
       const quality = parseAllowedInteger(
         requestUrl.searchParams.get("q"),
@@ -127,6 +145,7 @@ export function createFarmImageHandler(
           const fetchedSource = await fetchImageSource(
             sourceUrl,
             requestUrl.origin,
+            trustedLocalOrigin,
             config,
             fetcher,
             options.fetchRemote,
@@ -416,6 +435,7 @@ function parseAllowedInteger(
 
 async function resolveImageSourceUrl(
   requestUrl: URL,
+  trustedLocalOrigin: string | undefined,
   config: ResolvedFarmImageConfig,
   validateRemoteUrl: CreateFarmImageHandlerOptions["validateRemoteUrl"],
 ): Promise<URL> {
@@ -426,18 +446,27 @@ async function resolveImageSourceUrl(
 
   let sourceUrl: URL;
   try {
-    sourceUrl = raw.startsWith("/") ? new URL(raw, requestUrl.origin) : new URL(raw);
+    sourceUrl = raw.startsWith("/")
+      ? new URL(raw, trustedLocalOrigin ?? requestUrl.origin)
+      : new URL(raw);
   } catch {
     throw new FarmImageRequestError("INVALID_PARAMETER", 400, "Invalid image source URL");
   }
 
-  await validateImageSourceUrl(sourceUrl, requestUrl.origin, config, validateRemoteUrl);
+  await validateImageSourceUrl(
+    sourceUrl,
+    requestUrl.origin,
+    trustedLocalOrigin,
+    config,
+    validateRemoteUrl,
+  );
   return sourceUrl;
 }
 
 async function validateImageSourceUrl(
   sourceUrl: URL,
   requestOrigin: string,
+  trustedLocalOrigin: string | undefined,
   config: ResolvedFarmImageConfig,
   validateRemoteUrl: CreateFarmImageHandlerOptions["validateRemoteUrl"],
 ): Promise<void> {
@@ -448,7 +477,9 @@ async function validateImageSourceUrl(
     throw new FarmImageRequestError("DISALLOWED_SOURCE", 400, "Unsafe image source URL");
   }
 
-  if (sourceUrl.origin === requestOrigin) {
+  const isLocalSource =
+    sourceUrl.origin === requestOrigin || sourceUrl.origin === trustedLocalOrigin;
+  if (isLocalSource) {
     if (
       sourceUrl.pathname === config.path ||
       !matchesLocalPatterns(sourceUrl, config.localPatterns)
@@ -459,10 +490,8 @@ async function validateImageSourceUrl(
         "Local image source is not allowed",
       );
     }
-    return;
-  }
-
-  if (!matchesRemoteSource(sourceUrl, config)) {
+    if (sourceUrl.origin === trustedLocalOrigin) return;
+  } else if (!matchesRemoteSource(sourceUrl, config)) {
     throw new FarmImageRequestError("DISALLOWED_SOURCE", 400, "Remote image source is not allowed");
   }
   if (!config.dangerouslyAllowLocalIP && isPrivateImageAddress(sourceUrl.hostname)) {
@@ -476,6 +505,7 @@ async function validateImageSourceUrl(
 async function fetchImageSource(
   initialUrl: URL,
   requestOrigin: string,
+  trustedLocalOrigin: string | undefined,
   config: ResolvedFarmImageConfig,
   fetcher: typeof globalThis.fetch,
   fetchRemote: typeof globalThis.fetch | undefined,
@@ -486,7 +516,8 @@ async function fetchImageSource(
 
   for (let redirectCount = 0; ; redirectCount += 1) {
     throwIfAborted(signal);
-    const sourceFetcher = currentUrl.origin === requestOrigin ? fetcher : (fetchRemote ?? fetcher);
+    const sourceFetcher =
+      currentUrl.origin === trustedLocalOrigin ? fetcher : (fetchRemote ?? fetcher);
     const response = await sourceFetcher(currentUrl, {
       method: "GET",
       redirect: "manual",
@@ -524,8 +555,27 @@ async function fetchImageSource(
     }
     await cancelResponseBody(response);
     currentUrl = new URL(location, currentUrl);
-    await validateImageSourceUrl(currentUrl, requestOrigin, config, validateRemoteUrl);
+    await validateImageSourceUrl(
+      currentUrl,
+      requestOrigin,
+      trustedLocalOrigin,
+      config,
+      validateRemoteUrl,
+    );
   }
+}
+
+function resolveTrustedLocalOrigin(
+  configured: CreateFarmImageHandlerOptions["trustedLocalOrigin"],
+): string | undefined {
+  const value = typeof configured === "function" ? configured() : configured;
+  if (!value) return undefined;
+
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new TypeError("trustedLocalOrigin must use http or https");
+  }
+  return url.origin;
 }
 
 type InflightOptimization = {

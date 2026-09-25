@@ -1093,6 +1093,9 @@ export function farmPlugin(
           transform: createSharpImageTransformer(),
           fetchRemote: createNodeImageFetcher(farmConfig.images),
           validateRemoteUrl: createNodeImageUrlValidator(farmConfig.images),
+          // Vite owns this address. Unlike request.url, it cannot be replaced by
+          // a caller-controlled Host header.
+          trustedLocalOrigin: () => server.resolvedUrls?.local[0],
           onError(error) {
             logger.error(
               `Image optimization failed: ${error instanceof Error ? error.message : String(error)}`,

@@ -78,6 +78,49 @@ describe("Farm image optimizer", () => {
     expect(transform).toHaveBeenCalledTimes(1);
   });
 
+  it("does not trust the request authority to bypass private-source checks", async () => {
+    const fetch = vi.fn(async () => new Response(PNG));
+    const fetchRemote = vi.fn(async () => new Response(PNG));
+    const handler = createFarmImageHandler(resolveFarmImageConfig(undefined), {
+      fetch: fetch as typeof globalThis.fetch,
+      fetchRemote: fetchRemote as typeof globalThis.fetch,
+      transform: passthroughTransformer(),
+    });
+    const query = new URLSearchParams({ url: "/admin.png", w: "640", q: "75" });
+
+    const response = await handler(new Request(`http://127.0.0.1/_farm/image?${query}`));
+
+    expect(response?.status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(fetchRemote).not.toHaveBeenCalled();
+  });
+
+  it("uses an adapter-owned origin for local asset requests", async () => {
+    const fetch = vi.fn(
+      async () => new Response(PNG, { headers: { "content-type": "image/png" } }),
+    );
+    const fetchRemote = vi.fn();
+    const validateRemoteUrl = vi.fn();
+    const handler = createFarmImageHandler(resolveFarmImageConfig(undefined), {
+      fetch: fetch as typeof globalThis.fetch,
+      fetchRemote: fetchRemote as typeof globalThis.fetch,
+      validateRemoteUrl,
+      transform: passthroughTransformer(),
+    });
+
+    const response = await handler(new Request(optimizerUrl("/assets/product.png")), {
+      trustedLocalOrigin: "http://127.0.0.1:4173",
+    });
+
+    expect(response?.status).toBe(200);
+    expect(fetch).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:4173/assets/product.png"),
+      expect.any(Object),
+    );
+    expect(fetchRemote).not.toHaveBeenCalled();
+    expect(validateRemoteUrl).not.toHaveBeenCalled();
+  });
+
   it("handles HEAD without returning image bytes", async () => {
     const handler = createFarmImageHandler(resolveFarmImageConfig(undefined), {
       fetch: vi.fn(async () => new Response(PNG)) as typeof fetch,

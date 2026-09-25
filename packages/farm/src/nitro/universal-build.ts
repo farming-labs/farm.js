@@ -6448,7 +6448,7 @@ async function getCachedPPRShell(cacheKey) {
 /**
  * Main request handler - created at runtime with bundled routes
  */
-async function handleFarmRequest(request) {
+async function handleFarmRequest(request, adapterContext) {
   const response = await ${
     config.i18n.enabled
       ? `_runWithFarmI18nRequest(
@@ -6467,12 +6467,18 @@ async function handleFarmRequest(request) {
           farmLocaleResolution
         );
       }
-      const response = await handleFarmRequestInContext(request, farmLocaleResolution);
+      const response = await handleFarmRequestInContext(
+        request,
+        farmLocaleResolution,
+        false,
+        Date.now(),
+        adapterContext,
+      );
       return applyFarmI18nResponse(response, farmLocaleResolution);
     },
     { redirect: !isFarmLocalAPIPathname(new URL(request.url).pathname) }
   )`
-      : "handleFarmRequestInContext(request, null)"
+      : "handleFarmRequestInContext(request, null, false, Date.now(), adapterContext)"
   };
   ${
     config.md?.enabled
@@ -6493,6 +6499,7 @@ async function handleFarmRequestInContext(
   farmLocaleResolution,
   configuredRewriteApplied = false,
   requestStartTime = Date.now(),
+  adapterContext,
 ) {
   let url = new URL(request.url);
   let pathname = url.pathname;
@@ -6535,6 +6542,7 @@ async function handleFarmRequestInContext(
             farmLocaleResolution,
             true,
             requestStartTime,
+            adapterContext,
           )
         );
       }
@@ -6542,7 +6550,9 @@ async function handleFarmRequestInContext(
   }
 
   if (farmImageHandler && pathname === ${JSON.stringify(config.images.path)}) {
-    const imageResponse = await farmImageHandler(request);
+    const imageResponse = await farmImageHandler(request, {
+      trustedLocalOrigin: adapterContext?.trustedLocalOrigin,
+    });
     if (imageResponse) {
       return imageResponse;
     }
@@ -6644,7 +6654,7 @@ async function handleFarmRequestInContext(
       config: farmMarkdownConfig,
       routeExists: (targetPathname) =>
         Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
-      renderPage: (targetRequest) => handleFarmRequest(targetRequest),
+      renderPage: (targetRequest) => handleFarmRequest(targetRequest, adapterContext),
     });
     if (markdownResponse) {
       return applyProductionMiddlewareHeaders(markdownResponse, middlewareHeaders);
@@ -7725,9 +7735,9 @@ async function handleFarmRequestInContext(
   }
 }
 
-async function handleFarmPluginRequest(request, runtimeOptions) {
+async function handleFarmPluginRequest(request, runtimeOptions, adapterContext) {
   if (!farmPluginRuntime || runtimeOptions.kind !== "page") {
-    return handleFarmRequest(request);
+    return handleFarmRequest(request, adapterContext);
   }
 
   const pathname = runtimeOptions.route?.pathname || new URL(request.url).pathname;
@@ -7755,7 +7765,7 @@ async function handleFarmPluginRequest(request, runtimeOptions) {
   };
   await farmPluginRuntime.runHookParallel("beforeRender", renderPayload);
 
-  const response = await handleFarmRequest(request);
+  const response = await handleFarmRequest(request, adapterContext);
   if (
     !hasFarmPluginHTMLTransforms ||
     !response.headers.get("content-type")?.toLowerCase().includes("text/html")
@@ -7851,7 +7861,7 @@ async function handleFarmFetch(request, context) {
               request,
               (runtimeRequest) =>
                 _runWithCurrentRequest(runtimeRequest, () =>
-                  handleFarmPluginRequest(runtimeRequest, runtimeOptions)
+                  handleFarmPluginRequest(runtimeRequest, runtimeOptions, context)
                 ),
               {
                 ...runtimeOptions,
@@ -7860,7 +7870,7 @@ async function handleFarmFetch(request, context) {
                   : undefined,
               },
             )
-          : handleFarmRequest(request);
+          : handleFarmRequest(request, context);
 
         const response = await _runWithCurrentRequest(request, () =>
           _runWithAfterRequest(request, runRequest, context),
@@ -8292,6 +8302,38 @@ function createResponseFinishedHook(event) {
   }
 }
 
+function resolveTrustedLocalOrigin(event, request) {
+  const socket = event.node?.req?.socket
+  const port = socket?.localPort
+  let address = socket?.localAddress
+  if (!address || !Number.isInteger(port) || port <= 0) return undefined
+  if (address.startsWith('::ffff:')) address = address.slice('::ffff:'.length)
+  const hostname = address.includes(':') ? '[' + address + ']' : address
+  const protocol = socket.encrypted ? 'https:' : 'http:'
+  const requestURL = new URL(request.url)
+  let origin
+  try {
+    origin = new URL(protocol + '//' + hostname + ':' + port).origin
+  } catch {
+    return undefined
+  }
+  if (requestURL.origin === origin) return origin
+
+  const requestPort = Number(requestURL.port || (requestURL.protocol === 'https:' ? 443 : 80))
+  const normalizedRequestHostname =
+    requestURL.hostname.startsWith('[') && requestURL.hostname.endsWith(']')
+      ? requestURL.hostname.slice(1, -1)
+      : requestURL.hostname
+  const isLoopback = (value) =>
+    value === 'localhost' || value === '::1' || /^127(?:[.][0-9]{1,3}){3}$/.test(value)
+  return requestURL.protocol === protocol &&
+    requestPort === port &&
+    isLoopback(address) &&
+    isLoopback(normalizedRequestHostname)
+    ? requestURL.origin
+    : undefined
+}
+
 // Export the event handler for Nitro
 export default async function farmNitroEventHandler(event) {
   // Some Node adapters abort their Request on normal IncomingMessage close.
@@ -8303,6 +8345,7 @@ export default async function farmNitroEventHandler(event) {
   const response = await handler.fetch(request, {
     waitUntil: (promise) => event.waitUntil(promise),
     onResponseFinished: createResponseFinishedHook(event),
+    trustedLocalOrigin: resolveTrustedLocalOrigin(event, request),
   })
 
   // Nitro records asset compression negotiation on the event response. Merge
