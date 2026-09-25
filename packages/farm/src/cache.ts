@@ -677,7 +677,11 @@ export class FarmDataCache {
       return value;
     } finally {
       if (leaseToken && adapter?.releaseLease) {
-        await adapter.releaseLease(leaseKey, leaseToken);
+        try {
+          await adapter.releaseLease(leaseKey, leaseToken);
+        } catch (error) {
+          emitFarmEvent({ type: "cache.error", key, operation: "set", error });
+        }
       }
     }
   }
