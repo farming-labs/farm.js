@@ -8446,18 +8446,6 @@ export default async function farmNitroEventHandler(event) {
       },
     ],
     routeRules: {
-      ...(resolveFarmAPIServerBasePath(config.api) === "/"
-        ? {}
-        : {
-            [`${resolveFarmAPIServerBasePath(config.api)}/**`]: {
-              cors: true,
-              headers: {
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "*",
-                "Access-Control-Allow-Headers": "*",
-              },
-            },
-          }),
       "/**": {
         prerender: false,
       },
@@ -8944,7 +8932,6 @@ async function postProcessVercelOutput(
   vercelConfig.routes = buildFarmVercelRoutes({
     presetRoutes: Array.isArray(vercelConfig.routes) ? vercelConfig.routes : [],
     runtimeRoutes,
-    apiBasePath: resolveFarmAPIServerBasePath(config.api),
   });
 
   const vercelConfigWithWorkflowCrons = applyFarmWorkflowVercelCrons(

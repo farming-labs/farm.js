@@ -83,6 +83,19 @@ describe("production middleware runtime", () => {
       // dropped every one of them on Vercel.
       const preservedSourceRoutes = vercelOutputConfig.routes.slice(0, filesystemIndex - 1);
       expect(preservedSourceRoutes.length).toBeGreaterThan(0);
+      expect(preservedSourceRoutes).toContainEqual(
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            "Access-Control-Allow-Origin": "https://client.example",
+          }),
+        }),
+      );
+      expect(
+        vercelOutputConfig.routes.some(
+          (route: { headers?: Record<string, string> }) =>
+            route.headers?.["Access-Control-Allow-Origin"] === "*",
+        ),
+      ).toBe(false);
       expect(
         preservedSourceRoutes.every(
           (route: { handle?: string; continue?: boolean }) =>

@@ -563,18 +563,6 @@ export default defineEventHandler(async (event: H3Event) => {
       : [],
     // Route rules for Vercel
     routeRules: {
-      ...(apiBasePath === "/"
-        ? {}
-        : {
-            [`${apiBasePath}/**`]: {
-              cors: true,
-              headers: {
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "*",
-                "Access-Control-Allow-Headers": "*",
-              },
-            },
-          }),
       "/**": {
         prerender: false,
       },
