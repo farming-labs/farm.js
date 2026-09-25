@@ -1524,6 +1524,33 @@ function errorResponse(error: unknown) {
   );
 }
 
+const warnedLegacyEnvelopes = new Set<string>();
+
+/**
+ * Warn, in development only, that a request used the deprecated
+ * `{ input, options }` envelope.
+ *
+ * The envelope cannot be told apart from an object input that happens to carry
+ * one of its own keys: a payload of `{ input: "abc" }` is read as the envelope
+ * and silently unwrapped to `"abc"`. `$input` is collision-free because the
+ * `$` prefix is reserved.
+ *
+ * Deliberately logs no part of the body, not even its key names. The shape is
+ * already implied by taking this branch, and a job payload can carry user data.
+ * Warns once per operation so a busy dev server is not flooded.
+ */
+function warnDeprecatedLegacyEnvelope(operation: "trigger" | "schedule"): void {
+  if (process.env.NODE_ENV === "production") return;
+  if (warnedLegacyEnvelopes.has(operation)) return;
+  warnedLegacyEnvelopes.add(operation);
+  console.warn(
+    `[farm:jobs] A ${operation} request used the deprecated { input, options } envelope. ` +
+      `That shape is ambiguous with an object input carrying its own "input" key, which is ` +
+      `read as the envelope and unwrapped. Send { $input: ... } instead, which cannot ` +
+      `collide with payload data.`,
+  );
+}
+
 function normalizeTriggerInput(body: Record<string, unknown> | undefined) {
   const value = body || {};
   if (hasOwn(value, "$input")) {
@@ -1534,6 +1561,7 @@ function normalizeTriggerInput(body: Record<string, unknown> | undefined) {
   }
 
   if (isLegacyTriggerBody(value)) {
+    warnDeprecatedLegacyEnvelope("trigger");
     return {
       input: value.input,
       options: value.options as JobsTriggerOptions | undefined,
@@ -1563,6 +1591,7 @@ function normalizeScheduleInput(body: Record<string, unknown> | undefined) {
   }
 
   if (isLegacyScheduleBody(value)) {
+    warnDeprecatedLegacyEnvelope("schedule");
     return {
       input: value.input,
       at: value.at as string | Date | undefined,
