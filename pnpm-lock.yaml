@@ -134,6 +134,9 @@ importers:
       vite:
         specifier: ^5.0.10
         version: 5.4.20(@types/node@20.19.21)
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
 
   examples/auth0-integration:
     dependencies:
