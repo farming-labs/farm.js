@@ -508,7 +508,8 @@ export function detectPlatformDeployTarget(
   env: NodeJS.ProcessEnv = process.env,
 ): FarmDeployTarget | undefined {
   for (const [key, target] of PLATFORM_BUILD_ENV_TARGETS) {
-    if (env[key]) return target;
+    const value = env[key]?.trim().toLowerCase();
+    if (value === "1" || value === "true") return target;
   }
   return undefined;
 }

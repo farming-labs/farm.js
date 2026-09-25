@@ -36,6 +36,11 @@ export default defineConfig({
 
 These targets get the most polished Farm defaults. They map `deploy.target` to a Nitro preset, output directory, and the matching `farm deploy` command when Farm has a deploy wrapper for that platform.
 
+When no target or preset is configured, Farm recognizes platform CI through `VERCEL`, `NETLIFY`,
+and `CF_PAGES`. Detection is enabled only by the values `1` or `true` (case-insensitive); unset,
+empty, `0`, `false`, and other values do not select a platform. An explicit target, preset, or CLI
+override remains authoritative.
+
 ### Immutable fingerprinted assets on Vercel
 
 Farm's Vercel Build Output automatically serves content-hashed files under `assets/` and `chunks/`

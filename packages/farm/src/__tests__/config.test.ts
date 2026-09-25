@@ -940,9 +940,13 @@ describe("detectPlatformDeployTarget", () => {
   it("maps platform build env vars to deploy targets", () => {
     expect(detectPlatformDeployTarget({ VERCEL: "1" })).toBe("vercel");
     expect(detectPlatformDeployTarget({ NETLIFY: "true" })).toBe("netlify");
+    expect(detectPlatformDeployTarget({ NETLIFY: " TRUE " })).toBe("netlify");
     expect(detectPlatformDeployTarget({ CF_PAGES: "1" })).toBe("cloudflare");
     expect(detectPlatformDeployTarget({})).toBeUndefined();
     expect(detectPlatformDeployTarget({ VERCEL: "" })).toBeUndefined();
+    expect(detectPlatformDeployTarget({ VERCEL: "0" })).toBeUndefined();
+    expect(detectPlatformDeployTarget({ VERCEL: "false" })).toBeUndefined();
+    expect(detectPlatformDeployTarget({ VERCEL: "yes" })).toBeUndefined();
   });
 });
 
