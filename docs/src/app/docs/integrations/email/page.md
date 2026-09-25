@@ -26,6 +26,8 @@ export const email = resend({
   apiKey: process.env.RESEND_API_KEY,
   defaults: { from: "hello@example.com" },
   templates,
+  // Required: the mounted routes spend your Resend credits.
+  authorize: async (request) => Boolean(await getSessionUser(request)),
 });
 ```
 
@@ -123,6 +125,42 @@ const templates = {
   }),
 };
 ```
+
+## Authorize the routes
+
+Configuring the integration mounts `POST /api/email/send`, `/schedule`, and `/preview` under your
+app's own origin. Those routes spend your Resend credits and send from your verified domain, so
+they refuse anonymous callers: without `authorize` they answer `401` and nothing is sent.
+
+`authorize` receives the request and the route being called. Return `true` to allow, `false` for a
+generic `401`, or a `Response` to answer the caller yourself.
+
+```ts
+export const email = resend({
+  apiKey: process.env.RESEND_API_KEY,
+  templates,
+  authorize: async (request, { route }) => {
+    const user = await getSessionUser(request);
+    if (!user) return false;
+    // Only staff may schedule campaigns; any signed-in user may send.
+    return route === "schedule" ? user.isStaff : true;
+  },
+});
+```
+
+Farm also rejects cross-site callers before `authorize` runs, so a session-cookie check cannot be
+turned into a forged send by another site. Add extra trusted origins with `allowedOrigins`, using
+the same syntax as `serverActions.allowedOrigins`.
+
+If the base path is already gated by your own middleware or at the edge, opt out explicitly:
+
+```ts
+resend({ templates, allowUnauthenticated: true });
+```
+
+Recipients, sender, and template data still come from the request body, so `authorize` is where you
+decide who may address mail to whom. Email headers are not caller-controlled: they come from your
+template and `defaults` configuration.
 
 ## Production notes
 

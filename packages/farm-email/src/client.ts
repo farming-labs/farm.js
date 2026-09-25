@@ -43,7 +43,6 @@ export interface EmailSendBaseInput {
   bcc?: string | string[];
   from?: string;
   replyTo?: string | string[];
-  headers?: Record<string, string>;
   tags?: Tag[];
   attachments?: Attachment[];
   topicId?: string | null;

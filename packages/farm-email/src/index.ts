@@ -1,5 +1,11 @@
 import { render, toPlainText } from "@react-email/render";
-import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farm.js/core";
+import {
+  defineIntegration,
+  describeIntegrationOriginRejection,
+  integrationRoute,
+  validateIntegrationRequestOrigin,
+  type FarmIntegrationLogger,
+} from "@farm.js/core";
 import { integrationConfig, normalizeWebhookConfig } from "@farm.js/integration-utils";
 import type { FarmWebhookConfig, FarmWebhookEvent } from "@farm.js/integration-utils/webhooks";
 import {
@@ -59,6 +65,21 @@ export interface ResendIntegrationDefaults {
   replyTo?: string | string[];
 }
 
+/** Which mounted route an authorization decision is being made for. */
+export interface ResendEmailAuthorizeContext {
+  route: "send" | "schedule" | "preview";
+}
+
+/**
+ * Decide whether a caller may use the mounted email routes. Return `true` to
+ * allow, `false` for a generic 401, or a `Response` to answer the caller
+ * directly (for example a redirect or a domain-specific error body).
+ */
+export type ResendEmailAuthorize = (
+  request: Request,
+  context: ResendEmailAuthorizeContext,
+) => boolean | Response | Promise<boolean | Response>;
+
 export interface ResendIntegrationInput<TTemplates extends EmailTemplates = EmailTemplates> {
   apiKey?: string;
   instance?: ResendIntegrationInstance;
@@ -67,6 +88,19 @@ export interface ResendIntegrationInput<TTemplates extends EmailTemplates = Emai
   templates: TTemplates;
   webhooks?: ResendWebhookConfig;
   log?: FarmIntegrationLogger;
+  /**
+   * Required to expose the send, schedule, and preview routes. These routes
+   * spend the application's own Resend credits and send from its verified
+   * domain, so they are never anonymously callable by default.
+   */
+  authorize?: ResendEmailAuthorize;
+  /**
+   * Serve the routes with no authorization at all. Only for an application
+   * that already gates the base path in middleware or at the edge.
+   */
+  allowUnauthenticated?: boolean;
+  /** Extra trusted origins, using the `serverActions.allowedOrigins` syntax. */
+  allowedOrigins?: readonly string[];
 }
 
 interface ResolvedResendConfig {
@@ -81,6 +115,56 @@ function createResendApi<
   const TInput extends ResendClientPathOptions = {},
 >(input: TInput = {} as TInput): ResendClientAPI<TTemplates, TInput> {
   return createResendClientApi<TTemplates, TInput>(input);
+}
+
+const MISSING_EMAIL_AUTHORIZE_ERROR =
+  "The email routes are not authorized. These routes spend your Resend credits and send " +
+  "from your verified domain, so they refuse anonymous callers. Pass `authorize` to the " +
+  "email integration, or set `allowUnauthenticated: true` if the base path is already " +
+  "gated by your own middleware.";
+
+/**
+ * Gate a mounted email route.
+ *
+ * Two layers, because either alone is insufficient. The origin check stops a
+ * cross-site page from spending the application's credits through a visitor's
+ * session, but it cannot stop a visitor on the application's own origin from
+ * calling the route directly. `authorize` is therefore the real gate, and the
+ * route fails closed without it. Origin metadata is not required, so a
+ * server-to-server caller that authenticates through `authorize` still works.
+ */
+async function guardEmailRoute(
+  request: Request,
+  route: "send" | "schedule" | "preview",
+  input: {
+    authorize?: ResendEmailAuthorize;
+    allowUnauthenticated?: boolean;
+    allowedOrigins?: readonly string[];
+  },
+): Promise<Response | null> {
+  const origin = validateIntegrationRequestOrigin(request, {
+    allowedOrigins: input.allowedOrigins,
+    requireOriginMetadata: false,
+  });
+  if (!origin.ok) {
+    return Response.json(
+      { error: describeIntegrationOriginRejection(origin.reason) },
+      { status: 403 },
+    );
+  }
+
+  if (input.authorize) {
+    const decision = await input.authorize(request, { route });
+    if (decision instanceof Response) return decision;
+    if (decision !== true) {
+      return Response.json({ error: "Unauthorized email request." }, { status: 401 });
+    }
+    return null;
+  }
+
+  if (input.allowUnauthenticated === true) return null;
+
+  return Response.json({ error: MISSING_EMAIL_AUTHORIZE_ERROR }, { status: 401 });
 }
 
 function normalizeBasePath(path: string | undefined) {
@@ -292,6 +376,9 @@ export function resend<const TTemplates extends EmailTemplates>(
       >(sendPath, {
         responseFormat: "json",
         async handler(request, context) {
+          const denied = await guardEmailRoute(request, "send", input);
+          if (denied) return denied;
+
           const body = (await request.json()) as ResendEmailSendInput<TTemplates>;
           const resolved = await resolveTemplate(body.templateId);
 
@@ -360,7 +447,6 @@ export function resend<const TTemplates extends EmailTemplates>(
               replyTo: replyTo ?? undefined,
               subject,
               react: reactNode,
-              headers: body.headers,
               tags: body.tags,
               attachments: body.attachments,
               topicId: body.topicId,
@@ -398,6 +484,9 @@ export function resend<const TTemplates extends EmailTemplates>(
       >(schedulePath, {
         responseFormat: "json",
         async handler(request, context) {
+          const denied = await guardEmailRoute(request, "schedule", input);
+          if (denied) return denied;
+
           const body = (await request.json()) as ResendEmailScheduleInput<TTemplates>;
           let when: string;
 
@@ -482,7 +571,6 @@ export function resend<const TTemplates extends EmailTemplates>(
               replyTo: replyTo ?? undefined,
               subject,
               react: reactNode,
-              headers: body.headers,
               tags: body.tags,
               attachments: body.attachments,
               topicId: body.topicId,
@@ -521,6 +609,9 @@ export function resend<const TTemplates extends EmailTemplates>(
       >(previewPath, {
         responseFormat: "json",
         async handler(request, context) {
+          const denied = await guardEmailRoute(request, "preview", input);
+          if (denied) return denied;
+
           const body = (await request.json()) as ResendEmailPreviewInput<TTemplates>;
           const resolved = await resolveTemplate(body.templateId);
 
