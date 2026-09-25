@@ -2008,9 +2008,6 @@ importers:
       '@clerk/react':
         specifier: ^6.1.0
         version: 6.1.0(react-dom@19.2.8)(react@19.2.8)
-      '@farm.js/otel':
-        specifier: workspace:*
-        version: link:../farm-otel
       '@farm.js/renderer-tests':
         specifier: workspace:*
         version: link:../farm-renderer-tests
@@ -2507,6 +2504,9 @@ importers:
 
   packages/farm-otel:
     dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@opentelemetry/api':
         specifier: 1.9.1
         version: 1.9.1
