@@ -1397,7 +1397,10 @@ export function farmPlugin(
       // Initialize OpenAPI manager if enabled
       if (options.openapi?.enabled) {
         const { OpenAPIManager } = await loadFarmOpenAPIDevRuntime();
-        openAPIManager = new OpenAPIManager(appDirs, options.openapi);
+        openAPIManager = new OpenAPIManager(appDirs, options.openapi, {
+          mode: "development",
+          apiBaseURL: typeof options.api?.baseURL === "string" ? options.api.baseURL : undefined,
+        });
         const spec = await openAPIManager.generateSpec();
         reportOpenAPIDevGenerationResult(spec);
       }
@@ -1799,7 +1802,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               res.end("Method Not Allowed");
               return;
             }
-            const spec = await openAPIManager.getSpec();
+            const spec = await openAPIManager.getSpec(parsedRequestUrl.origin);
             const body = JSON.stringify(spec);
             res.statusCode = 200;
             res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -1811,7 +1814,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // Handle OpenAPI docs route
           if (openAPIManager && requestPathname === options.openapi?.route) {
             if (await runAppMiddlewareForContentRoute()) return;
-            const docsHandler = openAPIManager.getDocsRouteHandler();
+            const docsHandler = openAPIManager.getDocsRouteHandler(parsedRequestUrl.origin);
             return docsHandler(req, res);
           }
 

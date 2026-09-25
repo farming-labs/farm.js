@@ -998,7 +998,6 @@ export async function resolveConfig(
     title: "API Documentation",
     description: "Auto-generated API documentation",
     version: "1.0.0",
-    servers: [{ url: "http://localhost:3000", description: "Development server" }],
     ...userConfig.openapi,
   };
   if (openapi.route !== undefined) validateConfigRouteSource(openapi.route, "openapi.route");
