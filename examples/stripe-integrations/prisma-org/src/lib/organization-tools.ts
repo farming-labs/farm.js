@@ -1,6 +1,7 @@
 import { defineIntegration, integrationRoute } from "@farm.js/core";
 import { api as clientApi } from "@farm.js/core/client";
 import {
+  authorizeOrganizationBillingAdmin,
   getAuthSession,
   insertDemoProject,
   insertDemoTokenUsage,
@@ -162,19 +163,22 @@ export const organizationToolsIntegration = defineIntegration({
     >("/organization/demo/billing/seats/override", {
       responseFormat: "json",
       async handler(request) {
-        const session = await getAuthSession(request.headers);
-        const organizationId = session?.session.activeOrganizationId;
+        // Authenticating the caller is not enough here. Every member of the
+        // active organization has a valid session, but the seat override
+        // decides how many seats the organization is allowed to fill, so this
+        // route also requires an owner or admin role.
+        const authorization = await authorizeOrganizationBillingAdmin(request.headers, {
+          unauthenticatedError:
+            "Create or activate an organization before editing seat overrides.",
+          forbiddenError:
+            "Only an organization owner or admin can change the seat allowance override.",
+        });
 
-        if (!session?.user.id || !organizationId) {
-          return Response.json(
-            {
-              error: "Create or activate an organization before editing seat overrides.",
-            },
-            {
-              status: 401,
-            },
-          );
+        if (!authorization.ok) {
+          return authorization.response;
         }
+
+        const { organizationId } = authorization;
 
         const body = await request.json().catch(() => null);
         const rawValue =

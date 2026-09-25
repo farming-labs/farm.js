@@ -486,8 +486,18 @@ The org demo adds one helper route for the explicit app-owned override path:
 
 - `/organization/demo/billing/seats/override`
   - applies or clears `seatAllowanceOverride`
+  - requires an `owner` or `admin` member of the active organization
+  - returns `401` when there is no session or no active organization, and `403` when a signed-in
+    member of the org does not hold one of those roles
 
 This is a demo helper only. It is not part of the Stripe integration API itself.
+
+Authentication and authorization are separate checks in this demo. A valid Better Auth session only
+says who is calling, and every member of an organization has one, so the seat override also reads
+the caller's stored organization role before it writes. The other two demo writes,
+`/organization/demo/project` and `/organization/demo/tokens`, stay member-level on purpose: they
+record work inside the allowance the organization already has, and `/billing/check` is the control
+for those. The seat override changes the allowance itself.
 
 ## Pricing UI Behavior
 

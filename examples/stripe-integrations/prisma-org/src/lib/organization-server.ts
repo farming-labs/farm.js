@@ -173,6 +173,91 @@ export function listOrganizationMembers(
   return rows;
 }
 
+/**
+ * Roles that may change organization-level billing settings. better-auth's
+ * organization plugin ships `owner`, `admin`, and `member` by default and
+ * stores the member's role on the member row.
+ */
+export const ORGANIZATION_BILLING_ROLES: readonly string[] = ["owner", "admin"];
+
+export function canManageOrganizationBilling(role: string | null | undefined): boolean {
+  if (!role) {
+    return false;
+  }
+
+  // better-auth allows a member to hold several roles as a comma-separated
+  // string, so check every entry instead of comparing the whole value.
+  return role
+    .split(",")
+    .some((entry) => ORGANIZATION_BILLING_ROLES.includes(entry.trim().toLowerCase()));
+}
+
+export function findOrganizationMember(
+  organizationId: string,
+  userId: string,
+): DemoOrganizationMember | null {
+  const members = listOrganizationMembers(organizationId);
+
+  return members.find((member) => member.userId === userId) ?? null;
+}
+
+export type OrganizationBillingAuthorization =
+  | { ok: true; organizationId: string; role: string }
+  | { ok: false; response: Response };
+
+/**
+ * Authentication and authorization are two different questions.
+ * `getAuthSession` answers "who is calling", and every member of an
+ * organization has a valid session, so a session on its own is not permission
+ * to change what the organization is billed for. This also resolves the
+ * caller's stored organization role and answers "may this caller do it":
+ *
+ * - no session, or no active organization: 401, the caller is unknown
+ * - a member without an owner/admin role: 403, the caller is known and refused
+ */
+export async function authorizeOrganizationBillingAdmin(
+  headers: Headers,
+  messages: {
+    unauthenticatedError: string;
+    forbiddenError: string;
+  },
+): Promise<OrganizationBillingAuthorization> {
+  const session = await getAuthSession(headers);
+  const organizationId = session?.session.activeOrganizationId;
+
+  if (!session?.user.id || !organizationId) {
+    return {
+      ok: false,
+      response: Response.json(
+        {
+          error: messages.unauthenticatedError,
+        },
+        {
+          status: 401,
+        },
+      ),
+    };
+  }
+
+  const role = findOrganizationMember(organizationId, session.user.id)?.role ?? "";
+
+  if (!canManageOrganizationBilling(role)) {
+    return {
+      ok: false,
+      response: Response.json(
+        {
+          error: messages.forbiddenError,
+        },
+        {
+          status: 403,
+        },
+      ),
+    };
+  }
+
+  return { ok: true, organizationId, role };
+}
+
 export function listOrganizationInvitations(
   organizationId: string,
 ): DemoOrganizationInvitation[] {
