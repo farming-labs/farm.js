@@ -801,7 +801,10 @@ describe("compiled keyed-row runtime", () => {
 
   it("preserves compiler state and row identity across a compatible Fast Refresh", async () => {
     const hmrId = `keyed-rows-refresh-${Math.random()}`;
-    const definition = (prefix: string): CompiledComponentDefinition<Record<string, never>> => ({
+    const definition = (
+      prefix: string,
+      blockId = 0,
+    ): CompiledComponentDefinition<Record<string, never>> => ({
       displayName: "RefreshKeyedRows",
       hmrId,
       stateSignature: "1",
@@ -813,7 +816,7 @@ describe("compiled keyed-row runtime", () => {
           <section>
             <button onClick={() => state[0].set([{ id: "a", label: "Updated" }])}>Update</button>
             <KeyedRows
-              id={0}
+              id={blockId}
               render={() => (
                 <ul>
                   {items().map((item) => (
@@ -844,7 +847,7 @@ describe("compiled keyed-row runtime", () => {
           </section>
         );
       },
-      bindings: [{ kind: "block" as const, id: 0, dependencies: [0] }],
+      bindings: [{ kind: "block" as const, id: blockId, dependencies: [0] }],
     });
 
     const Initial = createCompiledComponent(definition("Before: "));
@@ -856,7 +859,7 @@ describe("compiled keyed-row runtime", () => {
     const row = container.querySelector("li")!;
 
     await act(async () => {
-      const Updated = createCompiledComponent(definition("After: "));
+      const Updated = createCompiledComponent(definition("After: ", 1));
       expect(Updated).toBe(Initial);
       await flushCompilerUpdates();
     });

@@ -792,7 +792,10 @@ describe("compiler-owned host conditional runtime", () => {
 
   it("preserves state and branch identity through a compatible Fast Refresh", async () => {
     const hmrId = `host-conditional-refresh-${Math.random()}`;
-    const definition = (prefix: string): CompiledComponentDefinition<Record<string, never>> => ({
+    const definition = (
+      prefix: string,
+      blockId = 0,
+    ): CompiledComponentDefinition<Record<string, never>> => ({
       displayName: "RefreshHostConditional",
       hmrId,
       stateSignature: "1",
@@ -803,7 +806,7 @@ describe("compiler-owned host conditional runtime", () => {
           <section>
             <button onClick={() => state[0].set("Updated")}>Update</button>
             <HostConditional
-              id={0}
+              id={blockId}
               render={() => (
                 <div>
                   <p>
@@ -827,7 +830,7 @@ describe("compiler-owned host conditional runtime", () => {
           </section>
         );
       },
-      bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+      bindings: [{ kind: "block", id: blockId, dependencies: [0] }],
     });
 
     const Initial = createCompiledComponent(definition("Before: "));
@@ -838,7 +841,7 @@ describe("compiler-owned host conditional runtime", () => {
     await act(async () => root.render(<Initial />));
     const branch = container.querySelector("p")!;
     await act(async () => {
-      const Updated = createCompiledComponent(definition("After: "));
+      const Updated = createCompiledComponent(definition("After: ", 1));
       expect(Updated).toBe(Initial);
       await flushCompilerUpdates();
     });
