@@ -1,6 +1,10 @@
 import type { OpenAPIConfig } from "../config";
 import type { APIRouteInfo } from "../type-generator";
-import type { EndpointOpenAPIMetadata, OpenAPISecurityMode } from "./types";
+import type {
+  EndpointOpenAPIMetadata,
+  EndpointOpenAPIResponseMetadata,
+  OpenAPISecurityMode,
+} from "./types";
 
 export interface OpenAPISpec {
   openapi: string;
@@ -199,7 +203,8 @@ export class OpenAPIGenerator {
     // Handle ZodLiteral: emit the concrete value(s) as an enum rather than
     // dropping the constraint and documenting a bare string.
     if (kind === "literal") {
-      const values = (definition.values as unknown[]) ??
+      const values =
+        (definition.values as unknown[]) ??
         (Object.prototype.hasOwnProperty.call(definition, "value") ? [definition.value] : []);
       return {
         type: openAPITypeForLiteralValues(values),
@@ -281,105 +286,50 @@ export class OpenAPIGenerator {
     return baseSchema;
   }
 
-  /**
-   * Generate standard error responses
-   */
-  private getStandardResponses(): Record<string, any> {
+  private getResponses(metadata: EndpointOpenAPIMetadata): Record<string, any> {
+    const responses = Object.entries(metadata.responses ?? {}).filter(
+      (entry): entry is [string, EndpointOpenAPIResponseMetadata] => entry[1] !== undefined,
+    );
+    if (responses.length === 0) {
+      return {
+        default: {
+          description: "Response metadata is unavailable.",
+        },
+      };
+    }
+
+    return Object.fromEntries(
+      responses.map(([status, response]) => [status, this.getResponse(response)]),
+    );
+  }
+
+  private getResponse(response: EndpointOpenAPIResponseMetadata): Record<string, any> {
+    if (response.body === "empty") {
+      return {
+        description: response.description ?? "Empty response",
+      };
+    }
+
+    if (response.body === "binary") {
+      return {
+        description: response.description ?? "Binary response",
+        content: {
+          [response.contentType ?? "application/octet-stream"]: {
+            schema: { type: "string", format: "binary" },
+          },
+        },
+      };
+    }
+
+    const contentType =
+      response.body === "json"
+        ? (response.contentType ?? "application/json")
+        : response.contentType;
     return {
-      "200": {
-        description: "Successful response",
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              description: "Response data",
-            },
-          },
-        },
-      },
-      "400": {
-        description: "Bad Request. Usually due to missing parameters, or invalid parameters.",
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                message: { type: "string" },
-                error: { type: "string" },
-              },
-              required: ["message"],
-            },
-          },
-        },
-      },
-      "401": {
-        description: "Unauthorized. Due to missing or invalid authentication.",
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                message: { type: "string" },
-              },
-              required: ["message"],
-            },
-          },
-        },
-      },
-      "403": {
-        description:
-          "Forbidden. You do not have permission to access this resource or to perform this action.",
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                message: { type: "string" },
-              },
-            },
-          },
-        },
-      },
-      "404": {
-        description: "Not Found. The requested resource was not found.",
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                message: { type: "string" },
-              },
-            },
-          },
-        },
-      },
-      "429": {
-        description: "Too Many Requests. You have exceeded the rate limit. Try again later.",
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                message: { type: "string" },
-              },
-            },
-          },
-        },
-      },
-      "500": {
-        description:
-          "Internal Server Error. This is a problem with the server that you cannot fix.",
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                message: { type: "string" },
-                error: { type: "string" },
-              },
-            },
-          },
-        },
+      description:
+        response.description ?? (response.body === "json" ? "JSON response" : "Streaming response"),
+      content: {
+        [contentType]: response.schema ? { schema: response.schema } : {},
       },
     };
   }
@@ -578,7 +528,7 @@ export class OpenAPIGenerator {
       operationId: this.generateOperationId(route.path, method),
       tags: this.generateTags(route.path),
       ...(security ? { security } : {}),
-      responses: this.getStandardResponses(),
+      responses: this.getResponses(metadata),
     };
 
     // Path parameters (from dynamic route segments) precede query parameters.

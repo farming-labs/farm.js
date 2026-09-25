@@ -105,10 +105,9 @@ export default defineConfig({
   openapi: { enabled: true, security: "cookie" },
 });
 
-export const GET = createEndpoint(
-  { method: "GET", openapi: { security: "public" } },
-  async () => ({ status: "ok" }),
-);
+export const GET = createEndpoint({ method: "GET", openapi: { security: "public" } }, async () => ({
+  status: "ok",
+}));
 
 export const POST = createEndpoint(
   { method: "POST", openapi: { security: "bearer" } },
@@ -118,6 +117,39 @@ export const POST = createEndpoint(
 
 Supported modes are `public`, `bearer`, `cookie`, and `either`. This metadata documents the
 contract; authentication middleware must still enforce it at runtime.
+
+## Describe responses
+
+Farm does not guess status codes or body formats from arbitrary handler code. Add response metadata
+to a typed endpoint when clients need an exact contract:
+
+```ts
+export const GET = createEndpoint(
+  {
+    method: "GET",
+    openapi: {
+      responses: {
+        200: {
+          body: "json",
+          description: "Current account",
+          schema: {
+            type: "object",
+            properties: { id: { type: "string" } },
+            required: ["id"],
+          },
+        },
+        404: { body: "empty", description: "Account not found" },
+      },
+    },
+  },
+  async () => Response.json(await getAccount()),
+);
+```
+
+Use `body: "empty"` for responses without content, `body: "stream"` with an explicit
+`contentType` for streams, and `body: "binary"` for files. JSON and binary responses default to
+`application/json` and `application/octet-stream`. When response metadata is absent, Farm emits an
+unspecified default response instead of claiming an unknown status code or JSON schema.
 
 **Terminal**
 
