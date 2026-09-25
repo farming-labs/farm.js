@@ -154,11 +154,15 @@ export function matchesRoutePattern(route: string, pattern: string): boolean {
   let source = "";
   for (let index = 0; index < parentPattern.length; index++) {
     const character = parentPattern[index]!;
-    if (character === "*" && parentPattern[index + 1] === "*") {
-      source += ".*";
-      index++;
-    } else if (character === "*") {
-      source += "[^/]*";
+    if (character === "*") {
+      // Collapse the whole run. Emitting one `.*` per adjacent pair turned
+      // `****` into `.*.*`, and each extra pair multiplied the ways a failing
+      // route could be split between them, so a pattern with a handful of
+      // consecutive stars hung the build instead of matching.
+      let run = 1;
+      while (parentPattern[index + run] === "*") run++;
+      source += run > 1 ? ".*" : "[^/]*";
+      index += run - 1;
     } else if (character === "?") {
       source += "[^/]";
     } else {
