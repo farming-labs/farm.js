@@ -5,6 +5,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCompiledComponent,
+  type CompiledComponentDefinition,
   type CompilerConditionalRange,
   type CompilerHostConditionalBranch,
   type CompilerStateUpdater,
@@ -621,6 +622,95 @@ describe("compiled conditional DOM ranges", () => {
     });
 
     expect(container.querySelector('[role="alert"]')?.textContent).toBe("conditional range failed");
+  });
+
+  it("preserves range identity and static markup through a compatible Fast Refresh", async () => {
+    const hmrId = `conditional-ranges-refresh-${Math.random()}`;
+    const definition = (
+      prefix: string,
+      blockId = 0,
+    ): CompiledComponentDefinition<Record<string, never>> => ({
+      displayName: "RefreshConditionalRanges",
+      hmrId,
+      stateSignature: "1",
+      initialize: () => ["Alpha"],
+      render(_props, state, blocks) {
+        const ConditionalRanges = blocks.ConditionalRanges;
+        const branch: CompilerHostConditionalBranch = {
+          create: () => ({
+            kind: "element",
+            tag: "p",
+            attributes: [],
+            styles: [],
+            children: [
+              {
+                kind: "element",
+                tag: "span",
+                attributes: [],
+                styles: [],
+                children: [prefix],
+              },
+              {
+                kind: "element",
+                tag: "strong",
+                attributes: [],
+                styles: [],
+                children: [state[0].get()],
+              },
+            ],
+          }),
+          bindings: [{ kind: "text", path: [1], read: () => [state[0].get()] }],
+        };
+        return (
+          <section>
+            <button onClick={() => state[0].set("Updated")}>Update</button>
+            <ConditionalRanges
+              id={blockId}
+              ranges={[{ before: 0, test: () => true, truthy: branch }]}
+              render={() => (
+                <article>
+                  <p>
+                    <span>{prefix}</span>
+                    <strong>{String(state[0].get())}</strong>
+                  </p>
+                </article>
+              )}
+              trailing={0}
+            />
+          </section>
+        );
+      },
+      bindings: [{ kind: "block", id: blockId, dependencies: [0] }],
+    });
+
+    const Initial = createCompiledComponent(definition("Before: "));
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.add(root);
+    await act(async () => root.render(<Initial />));
+    const rangeRoot = container.querySelector("article")!;
+    const branch = rangeRoot.querySelector("p")!;
+
+    await act(async () => {
+      const Updated = createCompiledComponent(definition("After: ", 1));
+      expect(Updated).toBe(Initial);
+      await flushCompilerUpdates();
+    });
+    await flushCompilerUpdates();
+
+    expect(container.querySelector("article")).toBe(rangeRoot);
+    expect(rangeRoot.querySelector("p")).toBe(branch);
+    expect(branch.querySelector("span")?.textContent).toBe("After: ");
+    expect(branch.querySelector("strong")?.textContent).toBe("Alpha");
+
+    await act(async () => {
+      container.querySelector("button")!.click();
+      await flushCompilerUpdates();
+    });
+    expect(container.querySelector("article")).toBe(rangeRoot);
+    expect(rangeRoot.querySelector("p")).toBe(branch);
+    expect(branch.querySelector("strong")?.textContent).toBe("Updated");
   });
 
   it.each([

@@ -5640,7 +5640,7 @@ function createHostConditionalBlockComponent(
 }
 
 function createConditionalRangesBlockComponent(
-  owner: Pick<ConditionalBlockOwner, "subscribe">,
+  owner: Pick<CompilerRuntimeFeatureOwner, "subscribe" | "getDefinitionVersion">,
 ): React.ComponentType<CompilerConditionalRangesBlockProps> {
   interface State {
     fallback: boolean;
@@ -5671,6 +5671,7 @@ function createConditionalRangesBlockComponent(
     private rangeInstances: Array<ConditionalRangeInstance | null> = [];
     private staticSegments: Element[][] = [];
     private readonly staticValues: unknown[] = [];
+    private definitionVersion = owner.getDefinitionVersion?.();
 
     private requestNestedFallback = () => {
       for (const instance of this.rangeInstances) instance?.host.scope?.cleanup();
@@ -5746,6 +5747,7 @@ function createConditionalRangesBlockComponent(
       const elements = [...this.root.children];
       const staticSegments: Element[][] = [];
       const instances: Array<ConditionalRangeInstance | null> = [];
+      const staticValues = this.staticValues.slice();
       const cleanupInstances = () => {
         for (const instance of instances) instance?.host.scope?.cleanup();
       };
@@ -5803,14 +5805,15 @@ function createConditionalRangesBlockComponent(
         return false;
       }
       staticSegments.push(elements.slice(cursor));
-      this.staticSegments = staticSegments;
-      this.rangeInstances = instances;
-      if (!applyStaticRangeBindings(props.bindings, this.staticSegments, this.staticValues)) {
+      if (!applyStaticRangeBindings(props.bindings, staticSegments, staticValues)) {
         cleanupInstances();
-        this.rangeInstances = [];
-        this.staticSegments = [];
         return false;
       }
+      for (const instance of this.rangeInstances) instance?.host.scope?.cleanup();
+      this.staticSegments = staticSegments;
+      this.rangeInstances = instances;
+      this.staticValues.length = 0;
+      this.staticValues.push(...staticValues);
       return true;
     }
 
@@ -5957,9 +5960,11 @@ function createConditionalRangesBlockComponent(
       nextProps: CompilerConditionalRangesBlockProps,
       nextState: State,
     ): boolean {
+      const definitionChanged = this.definitionVersion !== owner.getDefinitionVersion?.();
       this.currentProps = nextProps;
       if (this.state.fallback && nextState.fallback) this.prepareFallbackUpdate();
       if (nextState.fallback || this.state.fallback) return true;
+      if (definitionChanged) return true;
       this.schedulePropFallback();
       return false;
     }
@@ -5976,7 +5981,14 @@ function createConditionalRangesBlockComponent(
 
     componentDidUpdate(): void {
       this.listen();
-      if (this.state.fallback) this.subscribeFallbackDescendants();
+      const nextDefinitionVersion = owner.getDefinitionVersion?.();
+      const definitionChanged = this.definitionVersion !== nextDefinitionVersion;
+      this.definitionVersion = nextDefinitionVersion;
+      if (this.state.fallback) {
+        this.subscribeFallbackDescendants();
+      } else if (definitionChanged && !this.adopt()) {
+        this.activateFallback();
+      }
     }
 
     componentWillUnmount(): void {
