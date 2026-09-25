@@ -41,6 +41,26 @@ function waitlistRequest(body: unknown): Request {
 }
 
 describe("waitlist signup endpoint", () => {
+  describe("abuse protection", () => {
+    it("refuses a flood of submissions for the same address", async () => {
+      // Public, unauthenticated, and it writes to the database. The upsert is
+      // keyed on email, so a loop can also overwrite an existing entry's
+      // description, not just add rows.
+      const email = `flood-${Date.now()}@example.com`;
+      const statuses: number[] = [];
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const response = await invokeAPIRouteEndpoint(
+          POST,
+          waitlistRequest({ email, description: "hello world" }),
+        );
+        statuses.push(response.status);
+      }
+
+      expect(statuses[0]).not.toBe(429);
+      expect(statuses).toContain(429);
+    });
+  });
+
   describe("body validation (owned by the Farm runtime, not the handler)", () => {
     it("rejects an invalid email with the runtime 400 before the handler runs", async () => {
       const response = await invokeAPIRouteEndpoint(

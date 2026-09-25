@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { getPrisma } from "../../../../../lib/prisma";
+import { createRateLimiter } from "../../../../../lib/rate-limit";
 import { z } from "zod";
 import {
   FARM_CREATE_APP_TELEMETRY_COMMANDS,
@@ -11,10 +12,9 @@ import {
 } from "../../../../../../../packages/farm-cli/src/telemetry-contract";
 
 const MAX_BODY_BYTES = 8 * 1024;
-const RATE_LIMIT_WINDOW_MS = 60_000;
 const GLOBAL_RATE_LIMIT = 2_000;
 const IDENTITY_RATE_LIMIT = 120;
-const MAX_RATE_LIMIT_ENTRIES = 4_096;
+const takeRateLimit = createRateLimiter({ maxEntries: 4_096 });
 const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 const DEFAULT_RETENTION_DAYS = 90;
 
@@ -74,9 +74,7 @@ const telemetryEventSchema = z.union([
 ]);
 
 type TelemetryEvent = z.infer<typeof telemetryEventSchema>;
-type RateLimitBucket = { count: number; startedAt: number };
 
-const rateLimitBuckets = new Map<string, RateLimitBucket>();
 let lastPruneAt = 0;
 
 function json(body: Record<string, unknown>, status: number): Response {
@@ -87,22 +85,6 @@ function json(body: Record<string, unknown>, status: number): Response {
       "x-content-type-options": "nosniff",
     },
   });
-}
-
-function takeRateLimit(key: string, limit: number, now = Date.now()): boolean {
-  const current = rateLimitBuckets.get(key);
-  if (!current || now - current.startedAt >= RATE_LIMIT_WINDOW_MS) {
-    rateLimitBuckets.set(key, { count: 1, startedAt: now });
-    if (rateLimitBuckets.size > MAX_RATE_LIMIT_ENTRIES) {
-      for (const [bucketKey, bucket] of rateLimitBuckets) {
-        if (now - bucket.startedAt >= RATE_LIMIT_WINDOW_MS) rateLimitBuckets.delete(bucketKey);
-      }
-    }
-    return true;
-  }
-  if (current.count >= limit) return false;
-  current.count += 1;
-  return true;
 }
 
 function identityHash(anonymousId: string, salt: string): string {

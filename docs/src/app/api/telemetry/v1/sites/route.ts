@@ -6,6 +6,7 @@ import {
   normalizeFarmProductionSiteOrigin,
 } from "../../../../../../../packages/farm/src/product-telemetry";
 import { getPrisma } from "../../../../../lib/prisma";
+import { createRateLimiter } from "../../../../../lib/rate-limit";
 import {
   farmLegacyVercelPreviewSiteWhere,
   isFarmLegacyVercelPreviewSite,
@@ -14,10 +15,9 @@ import { verifyFarmProductionSiteAttestation } from "../../../../../lib/telemetr
 import { z } from "zod";
 
 const MAX_BODY_BYTES = 8 * 1024;
-const RATE_LIMIT_WINDOW_MS = 60_000;
 const GLOBAL_RATE_LIMIT = 1_000;
 const SITE_RATE_LIMIT = 30;
-const MAX_RATE_LIMIT_ENTRIES = 2_048;
+const takeRateLimit = createRateLimiter({ maxEntries: 2_048 });
 const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 const DEFAULT_RETENTION_DAYS = 90;
 const SAFE_DETAIL_PATTERN = /^[0-9A-Za-z._-]{1,64}$/;
@@ -38,9 +38,6 @@ const productionSiteSchema = z
   })
   .strict();
 
-type RateLimitBucket = { count: number; startedAt: number };
-
-const rateLimitBuckets = new Map<string, RateLimitBucket>();
 let lastPruneAt = 0;
 
 function json(body: Record<string, unknown>, status: number): Response {
@@ -51,22 +48,6 @@ function json(body: Record<string, unknown>, status: number): Response {
       "x-content-type-options": "nosniff",
     },
   });
-}
-
-function takeRateLimit(key: string, limit: number, now = Date.now()): boolean {
-  const current = rateLimitBuckets.get(key);
-  if (!current || now - current.startedAt >= RATE_LIMIT_WINDOW_MS) {
-    rateLimitBuckets.set(key, { count: 1, startedAt: now });
-    if (rateLimitBuckets.size > MAX_RATE_LIMIT_ENTRIES) {
-      for (const [bucketKey, bucket] of rateLimitBuckets) {
-        if (now - bucket.startedAt >= RATE_LIMIT_WINDOW_MS) rateLimitBuckets.delete(bucketKey);
-      }
-    }
-    return true;
-  }
-  if (current.count >= limit) return false;
-  current.count += 1;
-  return true;
 }
 
 function retentionDays(): number {
