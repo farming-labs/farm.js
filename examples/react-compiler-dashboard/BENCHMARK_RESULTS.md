@@ -1,6 +1,29 @@
 # Complex dashboard and 21,000-row peak result
 
-Latest run: 2026-09-12
+Latest run: 2026-09-24
+
+## Fallback subscription retention — 2026-09-24
+
+Permanent React fallbacks for host conditionals, conditional ranges, and mixed ranges now retain
+subscriptions whose compiler block IDs remain active across committed fallback renders. The runtime
+removes stale IDs, keeps matching listeners and callbacks, and subscribes only newly mounted IDs.
+Strict Mode replay and real unmounts still dispose every listener. This changes fallback
+bookkeeping only; compiler eligibility, descriptor discovery, DOM reconciliation, and compiled fast
+paths are unchanged.
+
+The unchanged complete production-browser benchmark passed every correctness, performance,
+optimization-persistence, scale, drift, and keyed hint/control gate in Chrome 154. No workload,
+control, threshold, or gate changed for this run.
+
+| Mode   | Table update vs React | 20,000-row update vs React |
+| ------ | --------------------: | -------------------------: |
+| Static |               20.691x |                    14.821x |
+| Hybrid |               20.691x |                    15.413x |
+
+Compiled dashboard and table owner execution counts remained zero. The corresponding React
+baseline counts remained 1,430 and 2,477. The focused runtime-size gate also passed: the core
+runtime remained 3,737 B gzip, keyed structural append remained 17,533 B, and the full optional
+runtime decreased from 25,477 B to 25,463 B.
 
 ## Safe local aliases in keyed maps — 2026-09-12
 
