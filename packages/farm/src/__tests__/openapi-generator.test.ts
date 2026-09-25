@@ -3,17 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as z from "zod";
+import * as z3 from "zod/v3";
 import { OpenAPIGenerator } from "../openapi/generator";
 
-/**
- * Schema conversion is private, and the public entry point loads route modules
- * through a bare dynamic import, which would resolve a second copy of Zod and
- * break the `instanceof` checks. Calling the method keeps the test and the
- * generator on one Zod instance.
- */
-function toSchema(zodType: z.ZodType<any>): any {
+function toSchema(schema: unknown): any {
   const generator = new OpenAPIGenerator(os.tmpdir(), { title: "Test API" });
-  return (generator as any).processZodType(zodType);
+  return (generator as any).processZodType(schema);
 }
 
 const tempDirs: string[] = [];
@@ -98,6 +93,38 @@ describe("OpenAPIGenerator dynamic paths", () => {
 });
 
 describe("OpenAPIGenerator schema conversion", () => {
+  it("reads schemas from a separate Zod constructor family", () => {
+    expect(
+      toSchema(
+        z3.object({
+          name: z3.string().min(2),
+          page: z3.number().min(1).optional(),
+        }),
+      ),
+    ).toMatchObject({
+      type: "object",
+      properties: {
+        name: { type: "string", minLength: 2 },
+        page: { type: "number", minimum: 1 },
+      },
+      required: ["name"],
+    });
+  });
+
+  it("uses an explicit metadata-unavailable fallback for Standard Schema validators", () => {
+    const validator = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        validate: (value: unknown) => ({ value }),
+      },
+    };
+
+    expect(toSchema(validator)).toEqual({
+      description: "Schema metadata is unavailable for this Standard Schema validator.",
+    });
+  });
+
   it("does not mark a defaulted field as required", () => {
     const schema = toSchema(
       z.object({

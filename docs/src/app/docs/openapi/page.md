@@ -108,4 +108,8 @@ farm build
 - Enable OpenAPI for APIs you want to document publicly or internally.
 - Keep private admin routes out of public docs unless the site is protected.
 - Use Zod schemas on API routes for better generated parameter and body details.
+- Farm recognizes Zod schemas structurally, including Zod 3/4 schemas loaded from another package
+  copy. Standard Schema validators without portable schema metadata remain valid at runtime, but
+  the generated document uses an explicit metadata-unavailable fallback instead of inventing a
+  shape.
 - Pair OpenAPI with typed callers so server/client code and published docs describe the same route surface.
