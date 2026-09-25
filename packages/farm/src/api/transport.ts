@@ -106,7 +106,11 @@ export function jsonStream<TItem>(
             controller.close();
             return;
           }
-          controller.enqueue(encoder.encode(`${JSON.stringify(next.value)}\n`));
+          const serialized = JSON.stringify(next.value);
+          if (serialized === undefined) {
+            throw new TypeError("Farm JSON stream chunks must be JSON-serializable values");
+          }
+          controller.enqueue(encoder.encode(`${serialized}\n`));
         } catch (error) {
           if (finished) return;
           finished = true;

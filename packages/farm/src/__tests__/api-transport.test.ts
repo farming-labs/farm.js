@@ -122,4 +122,25 @@ describe("API transports", () => {
 
     expect(finalized).toBe(true);
   });
+
+  it.each([undefined, () => undefined, Symbol("event")])(
+    "rejects a top-level chunk that JSON cannot represent",
+    async (value) => {
+      let finalized = false;
+      function* events() {
+        try {
+          yield value;
+        } finally {
+          finalized = true;
+        }
+      }
+
+      const response = jsonStream(events());
+
+      await expect(response.text()).rejects.toThrow(
+        "Farm JSON stream chunks must be JSON-serializable values",
+      );
+      expect(finalized).toBe(true);
+    },
+  );
 });
