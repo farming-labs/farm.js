@@ -737,7 +737,20 @@ describe("server cache primitives", () => {
     expect(normalizeRevalidatePath("HTTPS://example.com/docs?tab=api#intro")).toBe("/docs");
     expect(normalizeRevalidatePath("/docs#intro")).toBe("/docs");
     expect(normalizeRevalidatePath("docs///intro/")).toBe("/docs/intro");
+    expect(normalizeRevalidatePath("/a/./products")).toBe("/a/products");
+    expect(normalizeRevalidatePath("/a/../products")).toBe("/products");
+    expect(normalizeRevalidatePath("../../products")).toBe("/products");
+    expect(normalizeRevalidatePath("/a/%2E%2E/products")).toBe("/products");
+    expect(normalizeRevalidatePath("/a/%2F/products")).toBe("/a/%2F/products");
     expect(createFarmCacheKey([{ b: 1, a: 2 }])).toBe(createFarmCacheKey([{ a: 2, b: 1 }]));
+  });
+
+  it("uses the same canonical path tag for cache writes and invalidation", () => {
+    const cache = new FarmDataCache();
+    cache.set("products", { ok: true }, { paths: ["/catalog/../products"] });
+
+    expect(cache.revalidatePath("/products")).toBe(1);
+    expect(cache.get("products")).toBeUndefined();
   });
 });
 

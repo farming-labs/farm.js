@@ -1023,6 +1023,7 @@ export function normalizeRevalidatePath(routePath: string): string {
   normalized = normalized.split(/[?#]/, 1)[0] ?? normalized;
   normalized = normalized.startsWith("/") ? normalized : `/${normalized}`;
   normalized = normalized.replace(/\/{2,}/g, "/");
+  normalized = new URL(normalized, "http://farm.invalid").pathname;
   if (normalized.length > 1) {
     normalized = normalized.replace(/\/+$/, "");
   }
