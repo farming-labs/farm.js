@@ -5,6 +5,7 @@ import {
   conditionalRangesRuntimeFeature,
   hostConditionalRuntimeFeature,
   keyedRangesRuntimeFeature,
+  keyedRowsRuntimeFeature,
   mixedRangesRuntimeFeature,
   type CompilerHostElement,
   type CompilerRuntimeFeatureOwner,
@@ -25,6 +26,106 @@ afterEach(async () => {
 });
 
 describe("structural block lifecycle replay", () => {
+  it.each(["host", "conditional", "keyed", "rows"] as const)(
+    "moves the %s listener when a compatible definition changes its block id",
+    async (kind) => {
+      let value = "Initial";
+      const listeners = new Map<number, Parameters<CompilerRuntimeFeatureOwner["subscribe"]>[1]>();
+      const owner: CompilerRuntimeFeatureOwner = {
+        setRoot() {},
+        subscribe(id, refresh) {
+          listeners.set(id, refresh);
+          return () => {
+            if (listeners.get(id) === refresh) listeners.delete(id);
+          };
+        },
+      };
+      const descriptor = (): CompilerHostElement => ({
+        kind: "element",
+        tag: "span",
+        attributes: [],
+        styles: [],
+        children: [value],
+      });
+      const branch = {
+        create: descriptor,
+        bindings: [{ kind: "text" as const, path: [], read: () => value }],
+      };
+      const render = () => (
+        <section>
+          <span>{value}</span>
+        </section>
+      );
+      let renderBlock: (id: number) => React.ReactElement;
+      if (kind === "host") {
+        const Block = hostConditionalRuntimeFeature.create(owner).HostConditional!;
+        renderBlock = (id) => <Block id={id} render={render} test={() => true} truthy={branch} />;
+      } else if (kind === "conditional") {
+        const Block = conditionalRangesRuntimeFeature.create(owner).ConditionalRanges!;
+        renderBlock = (id) => (
+          <Block
+            id={id}
+            render={render}
+            ranges={[{ before: 0, test: () => true, truthy: branch }]}
+            trailing={0}
+          />
+        );
+      } else if (kind === "keyed") {
+        const Block = keyedRangesRuntimeFeature.create(owner).KeyedRanges!;
+        renderBlock = (id) => (
+          <Block
+            id={id}
+            render={render}
+            ranges={[
+              {
+                before: 0,
+                items: () => [value],
+                rowKey: () => "row",
+                create: descriptor,
+                bindings: branch.bindings,
+              },
+            ]}
+            trailing={0}
+          />
+        );
+      } else {
+        const Block = keyedRowsRuntimeFeature.create(owner).KeyedRows!;
+        renderBlock = (id) => (
+          <Block
+            id={id}
+            render={render}
+            items={() => [value]}
+            rowKey={() => "row"}
+            create={descriptor}
+            bindings={branch.bindings}
+          />
+        );
+      }
+
+      const target = document.createElement("div");
+      document.body.append(target);
+      const root = createRoot(target);
+      roots.add(root);
+      await act(async () => root.render(renderBlock(0)));
+      expect([...listeners.keys()]).toEqual([0]);
+
+      value = "Refreshed";
+      await act(async () => {
+        root.render(renderBlock(1));
+        await Promise.resolve();
+      });
+      expect([...listeners.keys()]).toEqual([1]);
+
+      value = "Updated";
+      await act(async () => listeners.get(1)!());
+      expect(target.querySelector("span")?.textContent).toBe("Updated");
+
+      await act(async () => root.unmount());
+      roots.delete(root);
+      expect(listeners.size).toBe(0);
+    },
+  );
+
   it.each(["host", "conditional", "keyed", "mixed"] as const)(
     "re-adopts %s roots without leaking subscriptions or detached references",
     async (kind) => {
