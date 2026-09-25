@@ -1,4 +1,5 @@
 import type { RetryAttemptContext, RetryOptions } from "./api/client";
+import { resolveClientRetryCount, resolveClientRetryDelay } from "./client-retry";
 
 /** Statuses that represent a transient condition worth another attempt. */
 const TRANSIENT_STATUSES = new Set([408, 425, 429]);
@@ -36,7 +37,8 @@ export async function invokeMutationWithRetry<T>(
   retry: RetryOptions | undefined,
   shouldContinue: () => boolean,
 ): Promise<T> {
-  const maxRetries = Math.max(0, retry?.count ?? 0);
+  const maxRetries = resolveClientRetryCount(retry?.count);
+  if (typeof retry?.delay !== "function") resolveClientRetryDelay(retry?.delay);
   const shouldRetryFailure = retry?.shouldRetry ?? isTransientMutationFailure;
   let attempt = 0;
 
@@ -59,7 +61,9 @@ export async function invokeMutationWithRetry<T>(
       }
 
       attempt += 1;
-      const delay = typeof retry?.delay === "function" ? retry.delay(attempt) : (retry?.delay ?? 0);
+      const delay = resolveClientRetryDelay(
+        typeof retry?.delay === "function" ? retry.delay(attempt) : retry?.delay,
+      );
       if (delay > 0) {
         await new Promise<void>((resolve) => setTimeout(resolve, delay));
         // The lifecycle may have been reset while this attempt waited.

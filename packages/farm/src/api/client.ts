@@ -26,6 +26,7 @@ import { _resolveCurrentRequest } from "../server/request-bridge";
 import { resolveClientHeaders, type ClientHeaders } from "../client-headers";
 import { createClientCancellation } from "../client-cancellation";
 import { notifyClientObserver, type ClientLifecycleHooks } from "../client-observers";
+import { resolveClientRetryCount, resolveClientRetryDelay } from "../client-retry";
 import { resolveAPIRequestRuntime, type APIRequestRuntime } from "./server-client-bridge";
 export type { APIRouteManifest } from "./client-routes";
 import {
@@ -787,6 +788,10 @@ function createAPIClientRuntime<
     input: any = {},
     clientOptions?: ClientOptions<any, any>,
   ): Promise<APIResult<any, Error>> => {
+    const maxRetries = resolveClientRetryCount(clientOptions?.retry?.count);
+    if (typeof clientOptions?.retry?.delay !== "function") {
+      resolveClientRetryDelay(clientOptions?.retry?.delay);
+    }
     const cancellation = createClientCancellation(
       clientOptions?.signal,
       clientOptions?.timeoutMs ?? options.timeoutMs,
@@ -1051,7 +1056,6 @@ function createAPIClientRuntime<
           });
 
           const promise = (async () => {
-            const maxRetries = Math.max(0, clientOptions?.retry?.count ?? 0);
             const shouldRetryFailure = clientOptions?.retry?.shouldRetry ?? isFarmRetryableFailure;
             let attempt = 0;
 
@@ -1161,10 +1165,11 @@ function createAPIClientRuntime<
               }
 
               attempt += 1;
-              const delay =
+              const delay = resolveClientRetryDelay(
                 typeof clientOptions?.retry?.delay === "function"
                   ? clientOptions.retry.delay(attempt)
-                  : (clientOptions?.retry?.delay ?? 0);
+                  : clientOptions?.retry?.delay,
+              );
 
               if (delay > 0) {
                 try {

@@ -617,7 +617,7 @@ callbacks under `request` still receive only API-client errors, not local mappin
 
 - cache: choose cache-first, network-only, or stale-while-revalidate; `persist` allows the
   configured [client cache adapter](#persist-the-client-cache) to store the read.
-- retry: retry transient failures with count and delay.
+- retry: retry transient failures with a non-negative integer count and a finite delay from 0 through 2,147,483,647 milliseconds.
 - invalidate: mark typed route keys stale after mutations.
 - optimistic: update cached query data before the server response returns.
 - onRequest, onResponse, onSuccess, onError, onSettled, and onStatus: observe the full client lifecycle.
