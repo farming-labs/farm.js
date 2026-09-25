@@ -52,6 +52,33 @@ describe("OpenAPIGenerator", () => {
       },
     });
   });
+
+  it("applies configurable security per endpoint", async () => {
+    const routeFile = realpathSync(
+      path.resolve("src/__tests__/fixtures/openapi-security-route.mjs"),
+    );
+
+    const generator = new OpenAPIGenerator(path.dirname(routeFile), {
+      title: "Security API",
+      security: "cookie",
+    });
+    const spec = await generator.generateSpec([
+      {
+        path: "/api/account",
+        methods: ["GET", "POST", "PUT"],
+        filePath: realpathSync(routeFile),
+        relativePath: "api/account/route.ts",
+      },
+    ]);
+
+    expect(spec.paths["/account"].get).not.toHaveProperty("security");
+    expect(spec.paths["/account"].post.security).toEqual([{ bearerAuth: [] }]);
+    expect(spec.paths["/account"].put.security).toEqual([{ apiKeyCookie: [] }]);
+    expect(spec.components?.securitySchemes).toMatchObject({
+      bearerAuth: expect.any(Object),
+      apiKeyCookie: expect.any(Object),
+    });
+  });
 });
 
 describe("OpenAPIGenerator dynamic paths", () => {

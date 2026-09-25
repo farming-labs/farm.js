@@ -2,6 +2,7 @@ import { createEndpoint as betterCallEndpoint } from "better-call";
 import { applyFarmCacheInvalidationTargets, type FarmCacheInvalidationTarget } from "../cache";
 import { isMultipartSchema, type MultipartSchema, type TypedFormData } from "./transport";
 import type { RouteSchema, RouteSchemaInput, RouteSchemaOutput } from "./route-schema";
+import type { EndpointOpenAPIMetadata } from "../openapi/types";
 
 // Share the route factory's Zod and Standard Schema contract.
 type AnySchema = RouteSchema;
@@ -236,6 +237,8 @@ export type EndpointOptions<
     InferHeadersOutput<THeaders>
   >;
   errors?: TErrors;
+  /** OpenAPI-only operation metadata. This does not enforce authentication at runtime. */
+  openapi?: EndpointOpenAPIMetadata;
   /** @deprecated Use plain functions in `middleware` for Farm endpoint middleware. */
   use?: any[];
 };
@@ -282,6 +285,7 @@ export type TypedEndpoint<
   };
   __path?: string;
   __method?: string;
+  __openapi?: EndpointOpenAPIMetadata;
 } & ((options?: {
   body?: TBodyInput;
   query?: TQueryInput;
@@ -455,6 +459,7 @@ export function createEndpoint(
     middleware: _middleware,
     errors: _errors,
     invalidates: _invalidates,
+    openapi: _openapi,
     ...betterCallOptions
   } = options;
 
@@ -478,6 +483,7 @@ export function createEndpoint(
   endpoint.__sourceHandler = handler;
   endpoint.__invalidates = options.invalidates;
   endpoint.__errors = errors;
+  endpoint.__openapi = options.openapi;
 
   // Store type information for inference
   endpoint.__types = {

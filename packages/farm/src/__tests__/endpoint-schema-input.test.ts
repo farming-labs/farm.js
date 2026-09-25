@@ -14,9 +14,11 @@ it("validates raw input once for both HTTP and local paired callers", async () =
       method: "POST",
       body: z.object({ count: z.string().transform(Number), label: z.string().default("default") }),
       query: z.object({ page: z.string().default("1").transform(Number) }),
+      openapi: { security: "bearer" },
     },
     ({ body, query }) => ({ ...body, page: query.page }),
   );
+  expect(endpoint.__openapi).toEqual({ security: "bearer" });
   const dispatch = (request: Request) => invokeAPIRouteEndpoint(endpoint, request);
   const { api, apiClient } = createApiClients<{ count: { post: typeof endpoint } }>({
     baseURL: "https://farm.test",

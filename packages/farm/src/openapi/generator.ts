@@ -1,5 +1,6 @@
 import type { OpenAPIConfig } from "../config";
 import type { APIRouteInfo } from "../type-generator";
+import type { EndpointOpenAPIMetadata, OpenAPISecurityMode } from "./types";
 
 export interface OpenAPISpec {
   openapi: string;
@@ -567,12 +568,16 @@ export class OpenAPIGenerator {
    * Generate OpenAPI operation from route info
    */
   private async generateOperation(route: APIRouteInfo, method: string): Promise<any> {
+    const metadata = await this.getEndpointOpenAPIMetadata(route, method);
+    const security = this.getSecurityRequirements(
+      metadata.security ?? this.config.security ?? "public",
+    );
     const operation: any = {
       summary: this.generateSummary(route.path, method),
       description: this.generateDescription(route.path, method),
       operationId: this.generateOperationId(route.path, method),
       tags: this.generateTags(route.path),
-      security: [{ bearerAuth: [] }, { apiKeyCookie: [] }],
+      ...(security ? { security } : {}),
       responses: this.getStandardResponses(),
     };
 
@@ -591,6 +596,25 @@ export class OpenAPIGenerator {
     }
 
     return operation;
+  }
+
+  private async getEndpointOpenAPIMetadata(
+    route: APIRouteInfo,
+    method: string,
+  ): Promise<EndpointOpenAPIMetadata> {
+    try {
+      const routeModule = await import(/* @vite-ignore */ route.filePath);
+      return routeModule[method]?.__openapi ?? {};
+    } catch {
+      return {};
+    }
+  }
+
+  private getSecurityRequirements(mode: OpenAPISecurityMode): any[] | undefined {
+    if (mode === "public") return undefined;
+    if (mode === "bearer") return [{ bearerAuth: [] }];
+    if (mode === "cookie") return [{ apiKeyCookie: [] }];
+    return [{ bearerAuth: [] }, { apiKeyCookie: [] }];
   }
 
   /**

@@ -90,6 +90,7 @@ import { isFarmRedirectStatus } from "./navigation-errors";
 import { resolveFarmThemeConfig } from "./theme/config";
 import { resolveFarmAgentConfig, type ResolvedFarmAgentConfig } from "./agent-config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
+import type { OpenAPISecurityMode } from "./openapi/types";
 import { isReactRenderer, resolveFarmRenderer } from "./renderer";
 import type { FarmRenderer } from "./renderer";
 import { applyFarmDocsFrameworkAutoDetection } from "./docs/framework-detect";
@@ -244,6 +245,8 @@ export interface OpenAPIConfig {
   title?: string;
   description?: string;
   version?: string;
+  /** Default authentication requirement for operations without an endpoint override. */
+  security?: OpenAPISecurityMode;
   servers?: Array<{
     url: string;
     description?: string;
