@@ -267,6 +267,10 @@ await apiClient.posts.get({ query: { tag: ["react", "vite"] } });
 ```
 
 This is the same array representation that API route query schemas receive.
+Query values must be strings, numbers, booleans, bigints, or arrays of those scalar values;
+`null` and `undefined` entries are omitted. Nested objects are rejected instead of being silently
+encoded as `[object Object]`. Untyped callers may also pass `URLSearchParams` directly when they
+need its native ordering, duplicate-key, and encoding semantics.
 
 ## Scoped dynamic routes
 

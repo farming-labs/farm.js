@@ -24,7 +24,7 @@ type APIRouter = {
     get: {
       __types: {
         body: never;
-        query: { term: string; page?: string };
+        query: { term: string; page?: string; nested?: { category: string } };
         response: { results: string[] };
       };
     };
@@ -113,6 +113,8 @@ describe("createAPIClient typing", () => {
     await api.hello.get({ query: { nope: "Farm" } });
     // @ts-expect-error required query fields stay required.
     await api.search.get();
+    // @ts-expect-error nested query objects are not serializable URL values.
+    await api.search.get({ query: { term: "routes", nested: { category: "tools" } } });
     // @ts-expect-error required body fields stay required.
     await api.users.post({ body: { name: "Ada" } });
     // @ts-expect-error QUERY preserves its required request body.
