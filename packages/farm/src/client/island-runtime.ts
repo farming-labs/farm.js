@@ -1,6 +1,11 @@
 "use client";
 
-import type { FarmIslandStrategy } from "../island";
+import {
+  FARM_ISLAND_ACTIVATION_EVENTS,
+  FARM_ISLAND_REPLAYABLE_SELECTOR,
+  type FarmIslandReplayKind,
+  type FarmIslandStrategy,
+} from "../island";
 
 export interface ScheduleFarmIslandHydrationOptions<T> {
   container: Element;
@@ -11,6 +16,17 @@ export interface ScheduleFarmIslandHydrationOptions<T> {
 
 interface FarmQueuedClick {
   target?: EventTarget | null;
+  /** Absent on entries written before kinds existed, which were all clicks. */
+  kind?: FarmIslandReplayKind | null;
+}
+
+interface FarmQueuedInteraction {
+  target: Element;
+  kind: FarmIslandReplayKind;
+}
+
+function toReplayKind(value: unknown): FarmIslandReplayKind {
+  return value === "submit" ? "submit" : "click";
 }
 
 function getPreHydrationClickQueue(): FarmQueuedClick[] | null {
@@ -22,27 +38,30 @@ function getPreHydrationClickQueue(): FarmQueuedClick[] | null {
     : null;
 }
 
-function findQueuedTarget(container: Element): Element | null {
+function findQueuedTarget(container: Element): FarmQueuedInteraction | null {
   const queue = getPreHydrationClickQueue();
   if (!queue) return null;
   for (const item of queue) {
-    if (item?.target instanceof Element && container.contains(item.target)) return item.target;
+    if (item?.target instanceof Element && container.contains(item.target)) {
+      return { target: item.target, kind: toReplayKind(item.kind) };
+    }
   }
   return null;
 }
 
-function takeQueuedTargets(container: Element): Element[] {
+function takeQueuedTargets(container: Element): FarmQueuedInteraction[] {
   const queue = getPreHydrationClickQueue();
   if (!queue) return [];
 
-  const targets: Element[] = [];
+  const interactions: FarmQueuedInteraction[] = [];
   for (let index = queue.length - 1; index >= 0; index--) {
-    const target = queue[index]?.target;
+    const item = queue[index];
+    const target = item?.target;
     if (!(target instanceof Element) || !container.contains(target)) continue;
     queue.splice(index, 1);
-    targets.unshift(target);
+    interactions.unshift({ target, kind: toReplayKind(item?.kind) });
   }
-  return targets;
+  return interactions;
 }
 
 function runWhenIdle(callback: () => void): () => void {
@@ -69,23 +88,51 @@ function replayClick(target: Element): void {
   target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 }
 
-function finishIslandHydration(container: Element, activatingTarget?: Element | null): void {
-  const targets = new Set<Element>();
-  if (activatingTarget?.isConnected) targets.add(activatingTarget);
-  for (const target of takeQueuedTargets(container)) if (target.isConnected) targets.add(target);
+/**
+ * Reproduce a held submit. requestSubmit() dispatches a real submit event, so a
+ * framework handler bound during hydration sees it and validation still runs.
+ * form.submit() would bypass both, so it is deliberately not used as a
+ * fallback; dispatching the event directly is closer to the original action.
+ */
+function replaySubmit(target: Element): void {
+  const form = target as Element & { requestSubmit?: () => void };
+  if (typeof form.requestSubmit === "function") {
+    form.requestSubmit();
+    return;
+  }
+  target.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+}
+
+function replayInteraction(interaction: FarmQueuedInteraction): void {
+  if (interaction.kind === "submit") {
+    replaySubmit(interaction.target);
+    return;
+  }
+  replayClick(interaction.target);
+}
+
+function finishIslandHydration(
+  container: Element,
+  activating?: FarmQueuedInteraction | null,
+): void {
+  const interactions = new Map<Element, FarmQueuedInteraction>();
+  if (activating?.target.isConnected) interactions.set(activating.target, activating);
+  for (const interaction of takeQueuedTargets(container)) {
+    if (interaction.target.isConnected) interactions.set(interaction.target, interaction);
+  }
 
   if (!container.isConnected) return;
   container.setAttribute("data-farm-island-hydrated", "true");
 
-  for (const target of targets) {
+  for (const interaction of interactions.values()) {
     window.setTimeout(() => {
       if (
         container.getAttribute("data-farm-island-hydrated") === "true" &&
         container.isConnected &&
-        target.isConnected &&
-        container.contains(target)
+        interaction.target.isConnected &&
+        container.contains(interaction.target)
       ) {
-        replayClick(target);
+        replayInteraction(interaction);
       }
     }, 0);
   }
@@ -117,16 +164,29 @@ export function scheduleFarmIslandHydration<T>({
   return new Promise<T | undefined>((resolve, reject) => {
     let started = false;
     let cancelled = false;
-    let queuedClickTarget: Element | null = null;
+    let queuedInteraction: FarmQueuedInteraction | null = null;
+    // One-shot triggers, dropped the moment hydration starts: an
+    // IntersectionObserver or an idle callback has no reason to fire twice.
     const triggerCleanups = new Set<() => void>();
+    // Interaction capture, kept until hydration finishes. A pointerdown or a
+    // focusin starts hydration, and in a real browser the click the user is
+    // actually making arrives a moment later, still before the chunk has
+    // loaded. Tearing these down at start() would drop that click on the floor
+    // with nothing left to hold or replay it.
+    const captureCleanups = new Set<() => void>();
     let removeAbortListener: (() => void) | null = null;
 
     const cleanupTriggers = () => {
       for (const dispose of triggerCleanups) dispose();
       triggerCleanups.clear();
     };
+    const cleanupCaptures = () => {
+      for (const dispose of captureCleanups) dispose();
+      captureCleanups.clear();
+    };
     const cleanup = () => {
       cleanupTriggers();
+      cleanupCaptures();
       removeAbortListener?.();
       removeAbortListener = null;
     };
@@ -141,9 +201,9 @@ export function scheduleFarmIslandHydration<T>({
           (value) => {
             cleanup();
             if (cancelled || signal?.aborted) return;
-            const target = queuedClickTarget;
-            queuedClickTarget = null;
-            finishIslandHydration(container, target);
+            const activating = queuedInteraction;
+            queuedInteraction = null;
+            finishIslandHydration(container, activating);
             resolve(value);
           },
           (error) => {
@@ -196,12 +256,17 @@ export function scheduleFarmIslandHydration<T>({
       return;
     }
 
+    const hold = (event: Event, target: Element, kind: FarmIslandReplayKind) => {
+      queuedInteraction ??= { target, kind };
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      start();
+    };
+
     const queueActivatingClick = (event: MouseEvent) => {
       const target =
         event.target instanceof Element
-          ? event.target.closest(
-              'button,[role="button"],input[type="button"],input[type="submit"],input[type="reset"]',
-            )
+          ? event.target.closest(FARM_ISLAND_REPLAYABLE_SELECTOR)
           : null;
       if (
         !target ||
@@ -215,29 +280,67 @@ export function scheduleFarmIslandHydration<T>({
       ) {
         return;
       }
-      queuedClickTarget ??= target;
-      event.preventDefault();
-      event.stopImmediatePropagation();
+      hold(event, target, "click");
+    };
+
+    // A form whose only control is a text field has no button to click, so
+    // pressing Enter used to leave the island unhydrated forever.
+    const queueActivatingSubmit = (event: Event) => {
+      const form = event.target;
+      if (!(form instanceof Element) || form.nodeName !== "FORM") return;
+      if (!container.contains(form) || event.defaultPrevented) return;
+      hold(event, form, "submit");
+    };
+
+    // Observed, not held. These start hydration early so a controlled input has
+    // its handlers attached before the value diverges, while letting the native
+    // interaction through: swallowing a keystroke or a toggle would be worse
+    // than hydrating late.
+    const observeActivation = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Element) || !container.contains(target)) return;
       start();
     };
-    const activateFromQueuedClick = (event: Event) => {
-      const target = (event as CustomEvent<{ target?: EventTarget | null }>).detail?.target;
+
+    const activateFromInteraction = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ target?: EventTarget | null; kind?: FarmIslandReplayKind | null }>
+      ).detail;
+      const target = detail?.target;
       if (!(target instanceof Element) || !container.contains(target)) return;
 
-      queuedClickTarget ??= target;
+      // A null kind means the inline script only observed the interaction and
+      // let it through, so there is nothing to reproduce afterwards.
+      if (detail?.kind) queuedInteraction ??= { target, kind: toReplayKind(detail.kind) };
       start();
     };
 
-    document.addEventListener("click", queueActivatingClick, true);
-    triggerCleanups.add(() => document.removeEventListener("click", queueActivatingClick, true));
-    document.addEventListener("farm:island-interaction", activateFromQueuedClick);
-    triggerCleanups.add(() =>
-      document.removeEventListener("farm:island-interaction", activateFromQueuedClick),
-    );
+    const listen = (type: string, handler: (event: Event) => void, capture: boolean) => {
+      document.addEventListener(type, handler, capture);
+      captureCleanups.add(() => document.removeEventListener(type, handler, capture));
+    };
 
-    const queuedTarget = findQueuedTarget(container);
-    if (queuedTarget) {
-      queuedClickTarget = queuedTarget;
+    // Keyed by the shared activation set, so adding an event there without
+    // handling it here fails to compile rather than silently listening to
+    // nothing on this side of the handoff.
+    const activationHandlers: Record<
+      (typeof FARM_ISLAND_ACTIVATION_EVENTS)[number],
+      (event: Event) => void
+    > = {
+      click: queueActivatingClick as (event: Event) => void,
+      submit: queueActivatingSubmit,
+      pointerdown: observeActivation,
+      focusin: observeActivation,
+    };
+
+    for (const type of FARM_ISLAND_ACTIVATION_EVENTS) {
+      listen(type, activationHandlers[type], true);
+    }
+    listen("farm:island-interaction", activateFromInteraction, false);
+
+    const queued = findQueuedTarget(container);
+    if (queued) {
+      queuedInteraction = queued;
       start();
     }
   });
