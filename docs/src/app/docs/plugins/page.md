@@ -362,6 +362,16 @@ encoded response body, adds `Vary: Accept-Encoding`, and removes the identity `C
 Responses that are already encoded, partial, marked `no-transform`, or sent as server-sent events
 are left unchanged.
 
+Compression applies to media types that actually shrink: every `text/*` type, `application/json`,
+`application/javascript`, `application/xml`, `application/wasm`, `application/x-ndjson`, any
+`+json` or `+xml` type such as `image/svg+xml` or `application/manifest+json`, and the
+uncompressed font formats (`font/ttf`, `font/otf`, `application/vnd.ms-fontobject`). Already
+compressed payloads are skipped, so images, video, audio, archives, PDFs, Office documents,
+`font/woff`, `font/woff2` and `application/octet-stream` are streamed through untouched with their
+identity `Content-Length` and strong `ETag` intact. A response with no `Content-Type` is also left
+alone, since its bytes may already be compressed. Set a `Content-Type` when a route returns text
+that should be compressed.
+
 ## Legacy hooks
 
 Existing flat hooks such as `beforeRequest`, `afterResponse`, `beforeApiHandler`, `afterRender`, `beforeBundle`, and `shutdown` remain supported. They are deprecated where a structured equivalent exists. New plugins should use the grouped interface; do not define both versions of the same phase in one plugin because Farm will run both.

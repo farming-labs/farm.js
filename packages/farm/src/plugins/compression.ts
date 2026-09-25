@@ -42,6 +42,54 @@ function selectEncoding(header: string): SupportedEncoding | undefined {
   return brotli >= gzip ? "br" : "gzip";
 }
 
+// Media types worth a compressor pass, listed the way nginx and CDN configs do
+// it: an allowlist. A denylist fails open, so a png, mp4, zip, xlsx or woff2
+// response was piped through brotli for a byte count it cannot improve, and any
+// newly minted binary type would keep doing that until someone remembered to
+// deny it. Everything here is either plain text or a container of uncompressed
+// bytes.
+const COMPRESSIBLE_MEDIA_TYPES = new Set([
+  "application/javascript",
+  "application/json",
+  "application/ndjson",
+  "application/wasm",
+  "application/x-ndjson",
+  "application/xml",
+  // Font formats that store raw glyph tables. `font/woff` and `font/woff2` are
+  // deliberately absent: their payloads are already deflate and brotli streams.
+  "application/vnd.ms-fontobject",
+  "font/otf",
+  "font/ttf",
+]);
+
+// Structured syntax suffixes (RFC 6839), so `image/svg+xml`,
+// `application/atom+xml`, `application/manifest+json`,
+// `application/problem+json` and friends compress without being enumerated.
+const COMPRESSIBLE_MEDIA_TYPE_SUFFIXES = ["+json", "+xml"];
+
+function isCompressibleMediaType(mediaType: string | undefined): boolean {
+  // A missing or empty content-type says nothing about the bytes, and an
+  // undeclared body is as likely to be an opaque download as it is to be text,
+  // so it stays untouched: guessing wrong spends a whole compressor pass on
+  // bytes that are already compressed. A route that wants its body compressed
+  // only has to declare what it returns.
+  if (!mediaType) return false;
+
+  // Kept as an explicit skip even though the allowlist already excludes it: an
+  // event stream is a long-lived pipe whose delivery unit is the event, not the
+  // chunk, so putting a compressor in front of it makes timely delivery depend
+  // on flush behavior for no size win. Leaving it out of the pipeline entirely
+  // is the honest contract, and naming it here keeps that reasoning attached to
+  // the decision if the allowlist ever grows a `text/*` exception.
+  if (mediaType === "text/event-stream") return false;
+
+  // text/html, text/css, text/plain, text/javascript, text/x-component, and the
+  // rest of text/* are all worth compressing.
+  if (mediaType.startsWith("text/")) return true;
+  if (COMPRESSIBLE_MEDIA_TYPES.has(mediaType)) return true;
+  return COMPRESSIBLE_MEDIA_TYPE_SUFFIXES.some((suffix) => mediaType.endsWith(suffix));
+}
+
 function isCompressionEligible(request: Request, response: Response): boolean {
   if (
     (request.method !== "HEAD" && !response.body) ||
@@ -56,7 +104,7 @@ function isCompressionEligible(request: Request, response: Response): boolean {
   }
 
   const mediaType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
-  return mediaType !== "text/event-stream";
+  return isCompressibleMediaType(mediaType);
 }
 
 function appendVary(headers: Headers, value: string): void {
