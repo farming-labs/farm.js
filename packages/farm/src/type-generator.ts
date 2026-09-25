@@ -216,7 +216,8 @@ export class APITypeGenerator {
     }
 
     // Build nested structure
-    const nestedStructure: any = {};
+    const createRouteTreeNode = () => Object.create(null) as Record<string, any>;
+    const nestedStructure = createRouteTreeNode();
     const usedRouteNames = new Map<string, number>();
 
     for (const [path, routeList] of routeGroups) {
@@ -260,7 +261,7 @@ export class APITypeGenerator {
           const part = typePath[i];
           if (i === typePath.length - 1) {
             // Last part - add methods
-            current[part] = {};
+            current[part] = createRouteTreeNode();
             for (const method of allMethods) {
               const importName = `${method}_${routeName}`;
               const methodName = method.toLowerCase();
@@ -268,8 +269,8 @@ export class APITypeGenerator {
             }
           } else {
             // Intermediate part - create nested object
-            if (!current[part]) {
-              current[part] = {};
+            if (!Object.prototype.hasOwnProperty.call(current, part)) {
+              current[part] = createRouteTreeNode();
             }
             current = current[part];
           }

@@ -45,6 +45,24 @@ describe("APITypeGenerator", () => {
     expect(content).toContain("post: typeof POST_storage_demo;");
   });
 
+  it("treats Object prototype names as ordinary static route segments", () => {
+    const generator = new APITypeGenerator("/tmp/app");
+    const names = ["constructor", "prototype", "toString", "__proto__"];
+    const content = generator.generateAPIRouter(
+      names.map((name) => ({
+        path: `/api/${name}/details`,
+        methods: ["GET"],
+        filePath: `/tmp/app/api/${name}/details/route.ts`,
+        relativePath: `api/${name}/details/route.ts`,
+      })),
+    );
+
+    for (const name of names) {
+      expect(content).toContain(`${name}: {`);
+      expect(content).toContain(`get: typeof GET_${name}_details;`);
+    }
+  });
+
   it("keeps import aliases unique for routes that normalize alike", () => {
     const generator = new APITypeGenerator("/tmp/app");
 
