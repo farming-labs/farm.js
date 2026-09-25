@@ -230,6 +230,33 @@ describe("createAPIClient", () => {
     );
   });
 
+  it("does not treat inherited Object properties as integration aliases", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ ok: true }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<{
+      constructor: {
+        get: { __types: { body: never; query: never; response: { ok: true } } };
+      };
+      toString: {
+        get: { __types: { body: never; query: never; response: { ok: true } } };
+      };
+    }>({ baseURL: "https://api.example.com" });
+
+    await api.constructor.get();
+    await api.toString.get();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://api.example.com/api/constructor",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.example.com/api/toString",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
   it("serializes array query inputs as repeated parameters", async () => {
     const fetchMock = vi.fn(async () => buildResponse({ posts: [] }));
     globalThis.fetch = fetchMock as any;
