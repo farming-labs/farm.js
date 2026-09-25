@@ -124,7 +124,8 @@ const queued = await api.jobs.countTokens.trigger({
 
 Reserved keys are `$`-prefixed (`$value`, `$input`, `$options`, `$schedule`), so an object input is free to use ordinary field names such as `value` or `input` without colliding with the envelope.
 
-The older `{ input, options }` body is still accepted, but the inline shape above is the canonical API.
+The older `{ input, options }` body is still accepted but is **deprecated**. The inline shape above,
+with `$input` for collision-prone object inputs, is the canonical API.
 
 If the task input itself has an `input` field, use the explicit `$input` envelope so Farm does not
 confuse the payload with that legacy trigger format:
@@ -138,7 +139,48 @@ await api.jobs.storeCount.trigger({
 ```
 
 The same explicit form works for `schedule` (alongside `$schedule`) and for each item in a batch.
-The legacy `{ input, options }` form remains available for existing callers.
+
+### The deprecated `{ input, options }` envelope
+
+The legacy envelope still works, and will keep working for the whole `0.x` line, but it cannot be
+made unambiguous. A body whose only keys are `input` and `options` is read as the envelope, so an
+object input that carries its own `input` field is unwrapped into that field's value instead of being
+delivered whole:
+
+```ts
+// Deprecated. Read as the envelope, so the task receives "digest", not { input: "digest" }.
+await api.jobs.sendDigest.trigger({ body: { input: "digest" } });
+
+// Canonical. The $ prefix is reserved, so this cannot collide with payload data.
+await api.jobs.sendDigest.trigger({ body: { $input: { input: "digest" } } });
+```
+
+A development build logs a one-time warning per operation when a request arrives in the legacy shape.
+The warning names the shape and the replacement and never includes any part of the body, because a job
+payload can carry user data. Production builds stay silent.
+
+`trigger`, `schedule`, and every item in a `batchTrigger` follow the same policy.
+
+### Migrating during a rolling deploy
+
+`$input` is understood only by consumers running this version or later. An older consumer does not
+treat `$input` as reserved, so it delivers `{ $input: ... }` to the task as an ordinary payload field
+and the task sees the wrapper instead of its input.
+
+**Update every consumer before any producer starts sending `$input`.**
+
+| Producer sends                           | Consumer before `$input`         | Consumer on this version                   |
+| ---------------------------------------- | -------------------------------- | ------------------------------------------ |
+| `{ input, options }`                     | Works                            | Works, logs a development warning          |
+| Inline object, no reserved keys          | Works                            | Works                                      |
+| Inline object with its own `input` field | Unwrapped as the envelope        | Unwrapped as the envelope, so use `$input` |
+| `{ $input, $options }`                   | **Delivered as a payload field** | Works                                      |
+
+The third row is the reason for the deprecation: it is wrong on both sides of the deploy, and `$input`
+is the only form that fixes it. The fourth row is the reason for the ordering rule.
+
+Removal is not scheduled within `0.x`. The earliest candidate is the first release after `1.0`, which
+will be announced before it lands.
 
 ## Batch trigger
 
