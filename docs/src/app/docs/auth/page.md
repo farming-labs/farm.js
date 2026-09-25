@@ -165,7 +165,14 @@ FARM_AUTH_SECRET=...
 FARM_AUTH_URL=https://example.com
 ```
 
-`AUTH_SECRET` and `BETTER_AUTH_SECRET` remain accepted as secret aliases. Vercel deployments infer the auth URL from `VERCEL_URL` when `FARM_AUTH_URL` is absent.
+`AUTH_SECRET` and `BETTER_AUTH_SECRET` remain accepted as secret aliases.
+
+On Vercel the auth URL is inferred when `FARM_AUTH_URL` is absent: a production
+deployment uses `VERCEL_PROJECT_PRODUCTION_URL`, the project's canonical domain, and a preview
+uses its own `VERCEL_URL`. The deployment and branch hostnames stay trusted alongside it, so a
+deployment URL still works for testing. Set `FARM_AUTH_URL` explicitly when the app is served
+from a domain Vercel does not report, such as a proxy in front of the deployment - the auth
+routes reject any origin that is neither the base URL nor a trusted host.
 
 Apply the production schema before serving traffic:
 

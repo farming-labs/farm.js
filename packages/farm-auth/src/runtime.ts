@@ -190,7 +190,8 @@ async function createBetterAuthOptions(
 
   return {
     appName: config.appName || "Farm app",
-    baseURL: resolveBaseURL(options.mode),
+    baseURL: resolveFarmAuthBaseURL(options.mode),
+    trustedOrigins: resolveFarmAuthTrustedOrigins(),
     basePath: config.basePath,
     secret: secret || "farm-auth-development-or-migration-secret",
     database: await createDatabase(config, options),
@@ -207,17 +208,50 @@ async function createBetterAuthOptions(
   };
 }
 
-function resolveBaseURL(mode: "development" | "production"): string | undefined {
-  const configured = process.env.FARM_AUTH_URL || process.env.BETTER_AUTH_URL;
+/**
+ * The origin Better Auth signs cookies and validates requests against.
+ *
+ * Better Auth trusts the baseURL's own origin and rejects everything else
+ * with INVALID_ORIGIN, so this has to resolve to the host users actually
+ * visit. Vercel exposes two: `VERCEL_URL` is unique per deployment
+ * (`my-app-a1b2c3.vercel.app`) while `VERCEL_PROJECT_PRODUCTION_URL` is the
+ * project's canonical domain. Pinning a production deployment to its
+ * per-deployment hostname rejects every request arriving on the real domain,
+ * so production prefers the canonical one and previews keep their own URL.
+ */
+export function resolveFarmAuthBaseURL(
+  mode: "development" | "production",
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const configured = env.FARM_AUTH_URL || env.BETTER_AUTH_URL;
   if (configured) return configured;
 
-  if (process.env.VERCEL_URL) {
-    return process.env.VERCEL_URL.startsWith("http")
-      ? process.env.VERCEL_URL
-      : `https://${process.env.VERCEL_URL}`;
-  }
+  const vercelHost =
+    env.VERCEL_ENV === "production"
+      ? env.VERCEL_PROJECT_PRODUCTION_URL || env.VERCEL_URL
+      : env.VERCEL_URL;
+  if (vercelHost) return toAbsoluteOrigin(vercelHost);
 
   return mode === "development" ? "http://localhost:3000" : undefined;
+}
+
+/**
+ * Hosts that stay valid alongside the base URL.
+ *
+ * A production deployment is still reachable at its own deployment hostname,
+ * and previews get a fresh one per build, so both are trusted explicitly
+ * rather than leaving direct deployment-URL access broken.
+ */
+export function resolveFarmAuthTrustedOrigins(env: NodeJS.ProcessEnv = process.env): string[] {
+  const origins = new Set<string>();
+  for (const host of [env.VERCEL_URL, env.VERCEL_PROJECT_PRODUCTION_URL, env.VERCEL_BRANCH_URL]) {
+    if (host) origins.add(toAbsoluteOrigin(host));
+  }
+  return [...origins];
+}
+
+function toAbsoluteOrigin(host: string): string {
+  return host.startsWith("http://") || host.startsWith("https://") ? host : `https://${host}`;
 }
 
 async function closeDatabase(database: unknown): Promise<void> {
