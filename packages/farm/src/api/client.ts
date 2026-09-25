@@ -1501,7 +1501,12 @@ function createNestedProxy(
         });
       }
 
-      if (path.length === 0 && typeof prop === "string" && rootAliases && prop in rootAliases) {
+      if (
+        path.length === 0 &&
+        typeof prop === "string" &&
+        rootAliases &&
+        Object.prototype.hasOwnProperty.call(rootAliases, prop)
+      ) {
         return rootAliases[prop];
       }
 
