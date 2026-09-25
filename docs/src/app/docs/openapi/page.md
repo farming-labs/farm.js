@@ -58,6 +58,11 @@ export const GET = createEndpoint(
 
 The route appears in the generated reference with a typed `limit` query parameter.
 
+Dynamic API segments use OpenAPI path parameters. Optional catch-all routes such as
+`/api/files/[[...slug]]` produce both `/files` and `/files/{slug}` operations because OpenAPI path
+parameters themselves must always be required. Required catch-all routes produce only the
+parameterized operation.
+
 `QUERY` routes include their request-body schema too. Farm currently emits OpenAPI 3.0.3, whose
 Path Item Object does not have a native `query` field. To keep the document valid, Farm places each
 `QUERY` Operation Object under the registered `x-oai-additionalOperations.QUERY` extension. This

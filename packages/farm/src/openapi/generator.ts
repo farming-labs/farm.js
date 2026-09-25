@@ -381,19 +381,25 @@ export class OpenAPIGenerator {
 
     // Generate paths
     for (const [path, routeList] of routeGroups) {
-      const openAPIPath = this.convertToOpenAPIPath(path);
-      spec.paths[openAPIPath] = {};
+      for (const variant of this.getOpenAPIPathVariants(path)) {
+        spec.paths[variant.path] ??= {};
 
-      for (const route of routeList) {
-        for (const method of route.methods) {
-          const operation = await this.generateOperation(route, method);
-          if (method === "QUERY") {
-            const additionalOperations =
-              spec.paths[openAPIPath]["x-oai-additionalOperations"] ?? {};
-            additionalOperations.QUERY = operation;
-            spec.paths[openAPIPath]["x-oai-additionalOperations"] = additionalOperations;
-          } else {
-            spec.paths[openAPIPath][method.toLowerCase()] = operation;
+        for (const route of routeList) {
+          for (const method of route.methods) {
+            const operation = await this.generateOperation(
+              route,
+              method,
+              variant.path,
+              variant.operationIdSuffix,
+            );
+            if (method === "QUERY") {
+              const additionalOperations =
+                spec.paths[variant.path]["x-oai-additionalOperations"] ?? {};
+              additionalOperations.QUERY = operation;
+              spec.paths[variant.path]["x-oai-additionalOperations"] = additionalOperations;
+            } else {
+              spec.paths[variant.path][method.toLowerCase()] = operation;
+            }
           }
         }
       }
@@ -411,11 +417,32 @@ export class OpenAPIGenerator {
    * is invalid OpenAPI, which breaks "try it" and any generated client.
    */
   private convertToOpenAPIPath(path: string): string {
-    return path
+    const converted = path
       .replace(/^\/api/, "")
       .replace(/\[\[\.\.\.([^\]]+)\]\]/g, "{$1}")
       .replace(/\[\.\.\.([^\]]+)\]/g, "{$1}")
       .replace(/\[([^\]]+)\]/g, "{$1}");
+    return converted || "/";
+  }
+
+  /**
+   * OpenAPI does not permit optional path parameters. An optional catch-all
+   * therefore becomes two concrete paths: the empty base path and the
+   * parameterized catch-all path.
+   */
+  private getOpenAPIPathVariants(path: string): Array<{
+    path: string;
+    operationIdSuffix?: string;
+  }> {
+    if (!/\/\[\[\.\.\.[^\]]+\]\]/.test(path)) {
+      return [{ path: this.convertToOpenAPIPath(path) }];
+    }
+
+    const basePath = path.replace(/\/\[\[\.\.\.[^\]]+\]\]/g, "") || "/api";
+    return [
+      { path: this.convertToOpenAPIPath(basePath), operationIdSuffix: "base" },
+      { path: this.convertToOpenAPIPath(path) },
+    ];
   }
 
   /**
@@ -423,8 +450,7 @@ export class OpenAPIGenerator {
    * path parameter is `required: true` per the OpenAPI spec (a path parameter
    * cannot be optional), including catch-all segments.
    */
-  private getPathParameters(path: string): any[] {
-    const openAPIPath = this.convertToOpenAPIPath(path);
+  private getPathParameters(openAPIPath: string): any[] {
     return [...openAPIPath.matchAll(/\{([^}]+)\}/g)].map((match) => ({
       name: match[1],
       in: "path",
@@ -517,7 +543,12 @@ export class OpenAPIGenerator {
   /**
    * Generate OpenAPI operation from route info
    */
-  private async generateOperation(route: APIRouteInfo, method: string): Promise<any> {
+  private async generateOperation(
+    route: APIRouteInfo,
+    method: string,
+    openAPIPath = this.convertToOpenAPIPath(route.path),
+    operationIdSuffix?: string,
+  ): Promise<any> {
     const metadata = await this.getEndpointOpenAPIMetadata(route, method);
     const security = this.getSecurityRequirements(
       metadata.security ?? this.config.security ?? "public",
@@ -525,7 +556,7 @@ export class OpenAPIGenerator {
     const operation: any = {
       summary: this.generateSummary(route.path, method),
       description: this.generateDescription(route.path, method),
-      operationId: this.generateOperationId(route.path, method),
+      operationId: this.generateOperationId(route.path, method, operationIdSuffix),
       tags: this.generateTags(route.path),
       ...(security ? { security } : {}),
       responses: this.getResponses(metadata),
@@ -533,7 +564,7 @@ export class OpenAPIGenerator {
 
     // Path parameters (from dynamic route segments) precede query parameters.
     const parameters = [
-      ...this.getPathParameters(route.path),
+      ...this.getPathParameters(openAPIPath),
       ...(await this.getParameters(route, method)),
     ];
     if (parameters.length > 0) {
@@ -604,9 +635,9 @@ export class OpenAPIGenerator {
   /**
    * Generate operation ID
    */
-  private generateOperationId(path: string, method: string): string {
+  private generateOperationId(path: string, method: string, suffix?: string): string {
     const cleanPath = path.replace(/^\/api\//, "").replace(/\//g, "_");
-    return `${method.toLowerCase()}_${cleanPath}`;
+    return `${method.toLowerCase()}_${cleanPath}${suffix ? `_${suffix}` : ""}`;
   }
 
   /**
