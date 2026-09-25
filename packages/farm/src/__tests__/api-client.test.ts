@@ -270,6 +270,35 @@ describe("createAPIClient", () => {
     );
   });
 
+  it("rejects nested query values instead of serializing them as object strings", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ users: [] }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+
+    const result = await (api.users.get as any)({ query: { filter: { active: true } } });
+
+    expect(result.error).toMatchObject({
+      message: expect.stringContaining('API query parameter "filter"'),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves URLSearchParams duplicates and encoding", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ posts: [] }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "https://api.example.com" });
+    const query = new URLSearchParams();
+    query.append("tag", "react & vite");
+    query.append("tag", "farm");
+
+    await (api.posts.get as any)({ query });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.com/api/posts?tag=react+%26+vite&tag=farm",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
   it("forwards configured credentials to fetch", async () => {
     const fetchMock = vi.fn(async () => buildResponse({ users: [], total: 0 }));
     globalThis.fetch = fetchMock as any;

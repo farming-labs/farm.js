@@ -338,16 +338,39 @@ type BodyInputProp<TValue> =
         ? { body?: TValue }
         : { body: TValue };
 
+export type APIQueryPrimitive = string | number | boolean | bigint;
+export type APIQueryValue =
+  | APIQueryPrimitive
+  | null
+  | undefined
+  | readonly (APIQueryPrimitive | null | undefined)[];
+
+type NormalizeAPIQueryValue<TValue> = TValue extends null | undefined
+  ? TValue
+  : TValue extends APIQueryPrimitive
+    ? TValue
+    : TValue extends readonly (infer TItem)[]
+      ? Exclude<TItem, null | undefined> extends APIQueryPrimitive
+        ? TValue
+        : never
+      : never;
+
+type NormalizeAPIQueryInput<TValue> = TValue extends URLSearchParams
+  ? TValue
+  : TValue extends object
+    ? { [TKey in keyof TValue]: NormalizeAPIQueryValue<TValue[TKey]> }
+    : never;
+
 type QueryInputProp<TValue> =
   IsNever<TValue> extends true
     ? {}
     : IsAny<TValue> extends true
       ? { query?: TValue }
       : undefined extends TValue
-        ? { query?: TValue }
+        ? { query?: NormalizeAPIQueryInput<TValue> }
         : RequiredKeys<TValue> extends never
-          ? { query?: TValue }
-          : { query: TValue };
+          ? { query?: NormalizeAPIQueryInput<TValue> }
+          : { query: NormalizeAPIQueryInput<TValue> };
 
 type HasRequiredKeys<T> = RequiredKeys<T> extends never ? false : true;
 
@@ -722,14 +745,7 @@ function createAPIClientRuntime<
 
     // Handle query parameters
     if (requestOptions.query) {
-      Object.entries(requestOptions.query).forEach(([key, value]) => {
-        if (value === undefined || value === null) return;
-        url.searchParams.delete(key);
-        const values = Array.isArray(value) ? value : [value];
-        for (const item of values) {
-          if (item !== undefined && item !== null) url.searchParams.append(key, String(item));
-        }
-      });
+      appendAPIQuery(url.searchParams, requestOptions.query);
     }
 
     // Prepare fetch options
@@ -2205,6 +2221,42 @@ function isFormData(value: unknown): value is FormData {
     ((typeof FormData !== "undefined" && value instanceof FormData) ||
       (Object.prototype.toString.call(value) === "[object FormData]" &&
         typeof (value as { entries?: unknown }).entries === "function"))
+  );
+}
+
+function appendAPIQuery(searchParams: URLSearchParams, query: unknown): void {
+  if (query instanceof URLSearchParams) {
+    const keys = new Set(query.keys());
+    for (const key of keys) searchParams.delete(key);
+    query.forEach((value, key) => searchParams.append(key, value));
+    return;
+  }
+  if (!query || typeof query !== "object" || Array.isArray(query)) {
+    throw new TypeError("API query input must be an object or URLSearchParams.");
+  }
+
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null) continue;
+    searchParams.delete(key);
+    const values = Array.isArray(value) ? value : [value];
+    for (const item of values) {
+      if (item === undefined || item === null) continue;
+      if (!isAPIQueryPrimitive(item)) {
+        throw new TypeError(
+          `API query parameter "${key}" must be a string, number, boolean, bigint, or an array of those values.`,
+        );
+      }
+      searchParams.append(key, String(item));
+    }
+  }
+}
+
+function isAPIQueryPrimitive(value: unknown): value is APIQueryPrimitive {
+  return (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint"
   );
 }
 
