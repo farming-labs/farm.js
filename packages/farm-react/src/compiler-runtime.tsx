@@ -5366,8 +5366,8 @@ function createHostConditionalBlockComponent(
     private fallbackVersion = 0;
     private propSyncQueued = false;
     private currentProps = this.props;
-    private unsubscribe: (() => void) | undefined;
-    private subscribedId: number | undefined;
+    declare private stop: (() => void) | undefined;
+    declare private id: number | undefined;
     private readonly fallbackUnsubscribers = new Map<number, () => void>();
     private fallbackKeysWereUnsafe = false;
     private activeBranch: "truthy" | "falsy" | null = null;
@@ -5536,12 +5536,13 @@ function createHostConditionalBlockComponent(
       this.reconcile(afterCommit);
     };
 
-    private subscribe(): void {
+    private listen(): void {
       const id = this.currentProps.id;
-      if (this.subscribedId === id) return;
-      this.unsubscribe?.();
-      this.unsubscribe = owner.subscribe(id, this.refresh);
-      this.subscribedId = id;
+      const stop = this.stop;
+      if (this.id === id) return;
+      stop?.();
+      this.stop = owner.subscribe(id, this.refresh);
+      this.id = id;
     }
 
     private schedulePropSync(): void {
@@ -5550,7 +5551,7 @@ function createHostConditionalBlockComponent(
       queueMicrotask(() => {
         this.propSyncQueued = false;
         if (this.mounted && !this.state.fallback) {
-          this.subscribe();
+          this.listen();
           this.reconcile();
         }
       });
@@ -5566,7 +5567,7 @@ function createHostConditionalBlockComponent(
 
     componentDidMount(): void {
       this.mounted = true;
-      this.subscribe();
+      this.listen();
       // Replay must restore nested listeners even before the fallback state update commits.
       if (this.state.fallback || this.fallbackRequested) {
         this.subscribeFallbackDescendants();
@@ -5575,14 +5576,15 @@ function createHostConditionalBlockComponent(
     }
 
     componentDidUpdate(): void {
-      this.subscribe();
+      this.listen();
       if (this.state.fallback) this.subscribeFallbackDescendants();
     }
 
     componentWillUnmount(): void {
       this.mounted = false;
-      this.unsubscribe?.();
-      this.subscribedId = undefined;
+      const stop = this.stop;
+      stop?.();
+      this.id = undefined;
       clearCompilerFallbackSubscriptions(this.fallbackUnsubscribers);
       this.fallbackKeysWereUnsafe = false;
       this.instance?.scope?.cleanup();
@@ -5633,8 +5635,8 @@ function createConditionalRangesBlockComponent(
     private fallbackVersion = 0;
     private propFallbackQueued = false;
     private currentProps = this.props;
-    private unsubscribe: (() => void) | undefined;
-    private subscribedId: number | undefined;
+    declare private stop: (() => void) | undefined;
+    declare private id: number | undefined;
     private readonly fallbackUnsubscribers = new Map<number, () => void>();
     private fallbackKeysWereUnsafe = false;
     private rangeInstances: Array<ConditionalRangeInstance | null> = [];
@@ -5889,12 +5891,13 @@ function createConditionalRangesBlockComponent(
       this.reconcile(afterCommit);
     };
 
-    private subscribe(): void {
+    private listen(): void {
       const id = this.currentProps.id;
-      if (this.subscribedId === id) return;
-      this.unsubscribe?.();
-      this.unsubscribe = owner.subscribe(id, this.refresh);
-      this.subscribedId = id;
+      const stop = this.stop;
+      if (this.id === id) return;
+      stop?.();
+      this.stop = owner.subscribe(id, this.refresh);
+      this.id = id;
     }
 
     private activateFallback(afterCommit?: () => void): void {
@@ -5915,7 +5918,7 @@ function createConditionalRangesBlockComponent(
       queueMicrotask(() => {
         this.propFallbackQueued = false;
         if (this.mounted && !this.state.fallback) {
-          this.subscribe();
+          this.listen();
           this.activateFallback();
         }
       });
@@ -5934,7 +5937,7 @@ function createConditionalRangesBlockComponent(
 
     componentDidMount(): void {
       this.mounted = true;
-      this.subscribe();
+      this.listen();
       // Replay must restore nested listeners even before the fallback state update commits.
       if (this.state.fallback || this.fallbackRequested) {
         this.subscribeFallbackDescendants();
@@ -5943,14 +5946,15 @@ function createConditionalRangesBlockComponent(
     }
 
     componentDidUpdate(): void {
-      this.subscribe();
+      this.listen();
       if (this.state.fallback) this.subscribeFallbackDescendants();
     }
 
     componentWillUnmount(): void {
       this.mounted = false;
-      this.unsubscribe?.();
-      this.subscribedId = undefined;
+      const stop = this.stop;
+      stop?.();
+      this.id = undefined;
       clearCompilerFallbackSubscriptions(this.fallbackUnsubscribers);
       this.fallbackKeysWereUnsafe = false;
       for (const instance of this.rangeInstances) instance?.host.scope?.cleanup();
@@ -8522,8 +8526,8 @@ function createKeyedRowsBlockComponent(
     private fallbackKeysWereUnsafe = false;
     private propSyncQueued = false;
     private currentProps = this.props;
-    private unsubscribe: (() => void) | undefined;
-    private subscribedId: number | undefined;
+    declare private stop: (() => void) | undefined;
+    declare private id: number | undefined;
     private instances = new Map<string, CompilerKeyedRowInstance>();
     private identityTargets = new Map<number, CompilerKeyedIdentityTargetSnapshot>();
     private membershipTargets = new Map<number, CompilerKeyedMembershipTargetSnapshot>();
@@ -9559,12 +9563,13 @@ function createKeyedRowsBlockComponent(
       this.reconcile(afterCommit, dirtyState);
     };
 
-    private subscribe(): void {
+    private listen(): void {
       const id = this.currentProps.id;
-      if (this.subscribedId === id) return;
-      this.unsubscribe?.();
-      this.unsubscribe = owner.subscribe(id, this.refresh);
-      this.subscribedId = id;
+      const stop = this.stop;
+      if (this.id === id) return;
+      stop?.();
+      this.stop = owner.subscribe(id, this.refresh);
+      this.id = id;
     }
 
     private schedulePropSync(): void {
@@ -9573,7 +9578,7 @@ function createKeyedRowsBlockComponent(
       queueMicrotask(() => {
         this.propSyncQueued = false;
         if (this.mounted && !this.state.fallback) {
-          this.subscribe();
+          this.listen();
           this.reconcile();
         }
       });
@@ -9601,7 +9606,7 @@ function createKeyedRowsBlockComponent(
     }
 
     componentDidUpdate(previousProps: CompilerKeyedRowsBlockProps): void {
-      this.subscribe();
+      this.listen();
       if (
         this.state.fallback ||
         previousProps === this.props ||
@@ -9615,14 +9620,15 @@ function createKeyedRowsBlockComponent(
 
     componentDidMount(): void {
       this.mounted = true;
-      this.subscribe();
+      this.listen();
       if (!this.adopt()) this.activateFallback();
     }
 
     componentWillUnmount(): void {
       this.mounted = false;
-      this.unsubscribe?.();
-      this.subscribedId = undefined;
+      const stop = this.stop;
+      stop?.();
+      this.id = undefined;
       // React 18 StrictMode replays mount lifecycles without detaching host refs.
       // captureRoot clears the element on a real unmount; retain it for replay adoption.
       this.cleanupHostScopes();
@@ -9677,8 +9683,8 @@ function createKeyedRangesBlockComponent(
     private fallbackKeysWereUnsafe = false;
     private propFallbackQueued = false;
     private currentProps = this.props;
-    private unsubscribe: (() => void) | undefined;
-    private subscribedId: number | undefined;
+    declare private stop: (() => void) | undefined;
+    declare private id: number | undefined;
     private rangeInstances: Array<Map<string, CompilerKeyedRowInstance>> = [];
     private staticSegments: Element[][] = [];
     private readonly staticValues: unknown[] = [];
@@ -9878,12 +9884,13 @@ function createKeyedRangesBlockComponent(
       this.reconcile(afterCommit);
     };
 
-    private subscribe(): void {
+    private listen(): void {
       const id = this.currentProps.id;
-      if (this.subscribedId === id) return;
-      this.unsubscribe?.();
-      this.unsubscribe = owner.subscribe(id, this.refresh);
-      this.subscribedId = id;
+      const stop = this.stop;
+      if (this.id === id) return;
+      stop?.();
+      this.stop = owner.subscribe(id, this.refresh);
+      this.id = id;
     }
 
     private activateFallback(afterCommit?: () => void): void {
@@ -9902,7 +9909,7 @@ function createKeyedRangesBlockComponent(
       queueMicrotask(() => {
         this.propFallbackQueued = false;
         if (this.mounted && !this.state.fallback) {
-          this.subscribe();
+          this.listen();
           this.activateFallback();
         }
       });
@@ -9925,18 +9932,19 @@ function createKeyedRangesBlockComponent(
 
     componentDidMount(): void {
       this.mounted = true;
-      this.subscribe();
+      this.listen();
       if (!this.adopt()) this.activateFallback();
     }
 
     componentDidUpdate(): void {
-      this.subscribe();
+      this.listen();
     }
 
     componentWillUnmount(): void {
       this.mounted = false;
-      this.unsubscribe?.();
-      this.subscribedId = undefined;
+      const stop = this.stop;
+      stop?.();
+      this.id = undefined;
       // Keep the attached root for React 18 replay; captureRoot clears real detachments.
       this.rangeInstances = [];
       this.staticSegments = [];
