@@ -269,8 +269,17 @@ export async function readDeferredDataResponse<T>(
           );
         }
       }
-      rejectPendingDeferred(controllers, "Deferred route data stream ended before completion");
-      notifyDeferredComplete(options);
+      // The loop ends the same way whether every deferred arrived or the
+      // connection was cut mid-stream, so completion is judged by what is
+      // still outstanding. Reporting completion for a truncated stream let
+      // the caller cache page data whose deferred fields are already
+      // rejected, and a later visit replayed those errors instead of
+      // refetching.
+      const outstanding = rejectPendingDeferred(
+        controllers,
+        "Deferred route data stream ended before completion",
+      );
+      if (outstanding === 0) notifyDeferredComplete(options);
     } catch {
       rejectPendingDeferred(controllers, "Deferred route data stream could not be read");
     } finally {
@@ -528,13 +537,17 @@ function parseDeferredMessage(line: string): any {
   }
 }
 
+/** Rejects every deferred still outstanding, and reports how many there were. */
 function rejectPendingDeferred(
   controllers: Map<string, ControlledDeferred>,
   message: string,
-): void {
+): number {
+  let rejected = 0;
   for (const controller of controllers.values()) {
     if (controller.promise.status === "pending") {
       controller.reject(new DeferredDataError(message));
+      rejected += 1;
     }
   }
+  return rejected;
 }
