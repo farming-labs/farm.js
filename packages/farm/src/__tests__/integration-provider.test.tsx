@@ -256,3 +256,71 @@ describe("integration providers", () => {
     expect(generated.runtime).not.toContain('name: "metadata"');
   });
 });
+
+describe("integration providers on a renderer that compiles its own components", () => {
+  // A renderer shaped like Svelte: it can host function components, and it
+  // compiles its own, so Farm marks the ones it wires up.
+  const COMPILING_RENDERER = {
+    name: "svelte",
+    componentExtensions: [".svelte"],
+    capabilities: { functionComponents: true },
+  } as any;
+
+  function createRenderer(component: unknown, runtimeExtras: Record<string, unknown> = {}) {
+    const marked: unknown[] = [];
+    const acme = defineIntegration({
+      category: "custom",
+      type: "acme",
+      instance: {},
+      providers: [{ name: "acme", type: "client", component: component as never }],
+    });
+    const renderer = new ServerRenderer(
+      {
+        root: process.cwd(),
+        outDir: ".farm-integration-provider-test",
+        integrations: { acme },
+        renderer: COMPILING_RENDERER,
+      } as any,
+      {} as any,
+    );
+    (renderer as any).rendererRuntime = {
+      createElement: (type: unknown, props: unknown, ...children: unknown[]) => ({
+        type,
+        props,
+        children,
+      }),
+      markFunctionComponent: (value: unknown) => {
+        marked.push(value);
+        return value;
+      },
+      ...runtimeExtras,
+    };
+    return { renderer, marked };
+  }
+
+  it("renders instead of throwing, and marks the plain function component", async () => {
+    // Production gates on the functionComponents capability; development used
+    // to gate on the renderer being React, so this threw on every dev render.
+    function AcmeProvider() {
+      return null;
+    }
+    const { renderer, marked } = createRenderer(AcmeProvider);
+
+    const wrapped = await (renderer as any).wrapWithIntegrationProviders({ leaf: true });
+
+    expect((wrapped as any).type).toBe(AcmeProvider);
+    expect(marked).toEqual([AcmeProvider]);
+  });
+
+  it("explains itself when the renderer cannot host function components", async () => {
+    const { renderer } = createRenderer(() => null);
+    (renderer as any).config.renderer = {
+      name: "legacy",
+      capabilities: { functionComponents: false },
+    };
+
+    await expect((renderer as any).wrapWithIntegrationProviders({ leaf: true })).rejects.toThrow(
+      /requires a renderer that can host function components/,
+    );
+  });
+});

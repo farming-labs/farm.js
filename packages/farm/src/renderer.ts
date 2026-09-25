@@ -153,6 +153,12 @@ export interface FarmServerRendererRuntime {
   /** Wraps a route-owned client tree so compiled leaf boundaries stay inside that React root. */
   wrapClientGraph?(element: unknown): unknown;
   /**
+   * Optional: tag a plain function component so a renderer that compiles its
+   * own components can tell the two apart. Renderers without the hook treat
+   * every component the same way and do not need it.
+   */
+  markFunctionComponent?<T>(component: T): T;
+  /**
    * Optional: locate where a streamed chunk stops being the static shell.
    *
    * Partial prerendering caches everything before the first dynamic boundary
