@@ -185,6 +185,49 @@ describe("OpenAPIGenerator dynamic paths", () => {
     expect(convert("/api/files/[[...slug]]")).toBe("/files/{slug}");
     expect(convert("/api/a/[x]/b/[y]")).toBe("/a/{x}/b/{y}");
   });
+
+  it("expands optional catch-all routes without making a path parameter optional", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-openapi-catch-all-"));
+    tempDirs.push(root);
+    const routeFile = path.join(root, "route.mjs");
+    writeFileSync(routeFile, "export const GET = async () => new Response();\n");
+
+    const generator = new OpenAPIGenerator(root, { title: "Files API" });
+    const spec = await generator.generateSpec([
+      {
+        path: "/api/files/[[...slug]]",
+        methods: ["GET"],
+        filePath: realpathSync(routeFile),
+        relativePath: "api/files/[[...slug]]/route.ts",
+      },
+      {
+        path: "/api/archive/[...slug]",
+        methods: ["GET"],
+        filePath: realpathSync(routeFile),
+        relativePath: "api/archive/[...slug]/route.ts",
+      },
+    ]);
+
+    expect(spec.paths["/files"].get).not.toHaveProperty("parameters");
+    expect(spec.paths["/files"].get.operationId).toBe("get_files_[[...slug]]_base");
+    expect(spec.paths["/files/{slug}"].get).toMatchObject({
+      operationId: "get_files_[[...slug]]",
+      parameters: [
+        {
+          name: "slug",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+        },
+      ],
+    });
+    expect(spec.paths["/archive"]).toBeUndefined();
+    expect(spec.paths["/archive/{slug}"].get.parameters[0]).toMatchObject({
+      name: "slug",
+      required: true,
+    });
+  });
 });
 
 describe("OpenAPIGenerator schema conversion", () => {
