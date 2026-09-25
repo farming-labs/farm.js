@@ -6,6 +6,7 @@ import {
   type Histogram,
   type Meter,
   type MeterProvider,
+  type Span,
 } from "@opentelemetry/api";
 import type { FarmEvent } from "@farm.js/core/observability";
 
@@ -175,14 +176,15 @@ function handleFarmEvent(
       const attributes: Attributes = { "farm.cache.result": result };
       if (stale) attributes["farm.cache.stale"] = true;
       instruments?.cacheLookups.add(1, attributes);
-      if (!recordSpanEvents) return;
+      const span = spanForEvent(event, recordSpanEvents);
+      if (!span) return;
       const spanAttributes: Attributes = { ...attributes };
       copyAttribute(spanAttributes, "farm.route", record.route);
       copyAttribute(spanAttributes, "farm.pathname", record.pathname);
       copyAttribute(spanAttributes, "farm.tags", record.tags);
       copyAttribute(spanAttributes, "farm.reason", record.reason);
       copyAttribute(spanAttributes, "farm.revalidate", record.revalidate);
-      addSpanEvent(event, spanAttributes);
+      span.addEvent(event.type, spanAttributes, event.timestamp);
       return;
     }
 
@@ -197,14 +199,15 @@ function handleFarmEvent(
       if (typeof count === "number" && Number.isFinite(count) && count > 0) {
         instruments?.cacheInvalidatedEntries.add(count, attributes);
       }
-      if (!recordSpanEvents) return;
+      const span = spanForEvent(event, recordSpanEvents);
+      if (!span) return;
       const spanAttributes: Attributes = { ...attributes };
       copyAttribute(spanAttributes, "farm.route", record.route);
       copyAttribute(spanAttributes, "farm.tag", record.tag);
       copyAttribute(spanAttributes, "farm.path", record.path);
       copyAttribute(spanAttributes, "farm.reason", record.reason);
       copyAttribute(spanAttributes, "farm.count", count);
-      addSpanEvent(event, spanAttributes);
+      span.addEvent(event.type, spanAttributes, event.timestamp);
       return;
     }
 
@@ -216,31 +219,34 @@ function handleFarmEvent(
       const result = PPR_SHELL_RESULTS[event.type];
       const attributes: Attributes = { "farm.ppr.result": result };
       instruments?.pprShellLookups.add(1, attributes);
-      if (!recordSpanEvents) return;
+      const span = spanForEvent(event, recordSpanEvents);
+      if (!span) return;
       const spanAttributes: Attributes = { ...attributes };
       copyAttribute(spanAttributes, "farm.route", record.route);
       copyAttribute(spanAttributes, "farm.reason", record.reason);
       copyAttribute(spanAttributes, "farm.revalidate", record.revalidate);
       copyAttribute(spanAttributes, "farm.count", record.count);
-      addSpanEvent(event, spanAttributes);
+      span.addEvent(event.type, spanAttributes, event.timestamp);
       return;
     }
 
     case "ppr.refresh.complete": {
       instruments?.pprRefreshDuration.record(event.durationMs);
-      if (!recordSpanEvents) return;
+      const span = spanForEvent(event, recordSpanEvents);
+      if (!span) return;
       const spanAttributes: Attributes = { "farm.durationMs": event.durationMs };
       copyAttribute(spanAttributes, "farm.route", record.route);
-      addSpanEvent(event, spanAttributes);
+      span.addEvent(event.type, spanAttributes, event.timestamp);
       return;
     }
 
     case "render.stream.shellReady": {
       instruments?.shellDuration.record(event.durationMs);
-      if (!recordSpanEvents) return;
+      const span = spanForEvent(event, recordSpanEvents);
+      if (!span) return;
       const spanAttributes: Attributes = { "farm.durationMs": event.durationMs };
       copyAttribute(spanAttributes, "farm.route", record.route);
-      addSpanEvent(event, spanAttributes);
+      span.addEvent(event.type, spanAttributes, event.timestamp);
       return;
     }
 
@@ -253,12 +259,13 @@ function handleFarmEvent(
       const statusClass = toStatusClass(event.status);
       if (statusClass) attributes["farm.http.status_class"] = statusClass;
       instruments?.middlewareShortCircuits.add(1, attributes);
-      if (!recordSpanEvents) return;
+      const span = spanForEvent(event, recordSpanEvents);
+      if (!span) return;
       const spanAttributes: Attributes = { ...attributes };
       copyAttribute(spanAttributes, "farm.pathname", record.pathname);
       copyAttribute(spanAttributes, "farm.name", record.name);
       copyAttribute(spanAttributes, "farm.status", event.status);
-      addSpanEvent(event, spanAttributes);
+      span.addEvent(event.type, spanAttributes, event.timestamp);
       return;
     }
 
@@ -267,14 +274,19 @@ function handleFarmEvent(
   }
 }
 
-function addSpanEvent(event: FarmEvent, attributes: Attributes): void {
+/**
+ * The span a mapped event should be recorded on, if any. Resolved before the
+ * attributes are collected so the common case, an event emitted with no
+ * recording span active, costs nothing.
+ */
+function spanForEvent(event: FarmEvent, recordSpanEvents: boolean): Span | undefined {
+  if (!recordSpanEvents) return undefined;
   // Farm's own tracing layer already writes every event onto the active span
   // when `observability.tracing` is enabled, and stamps the event with the span
   // it recorded against. Adding a second copy here would duplicate the trace.
-  if (event.spanId) return;
+  if (event.spanId) return undefined;
   const span = trace.getActiveSpan();
-  if (!span?.isRecording()) return;
-  span.addEvent(event.type, attributes, event.timestamp);
+  return span?.isRecording() ? span : undefined;
 }
 
 function copyAttribute(target: Attributes, name: string, value: unknown): void {

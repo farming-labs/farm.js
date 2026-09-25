@@ -61,7 +61,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=https://otel-collector.example.com
 OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20TOKEN"
 ```
 
-Use `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` when traces need a different endpoint. You can also pass a custom `traceExporter`, `spanProcessors`, sampler, resource, or instrumentation list to `registerOTel`.
+Use `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` when traces need a different endpoint. You can also pass a custom `traceExporter`, `spanProcessors`, sampler, resource, instrumentation list, or `metricReaders` to `registerOTel`.
 
 Both pieces are intentional: `instrumentation.ts` starts an SDK/exporter, while `observability.tracing` tells Farm to create framework spans. Without an SDK, the OpenTelemetry API remains a no-op.
 
@@ -113,11 +113,13 @@ Use `getFarmTraceContext()` when a log or provider call needs the current trace 
 
 Metric attributes are deliberately bounded. A cache `key` embeds the serialized arguments of the cached call, a tag is authored at runtime, and the `route` on cache, PPR, and streaming events is the request pathname rather than a route pattern, so none of them becomes a metric attribute. That detail is recorded as an event on the active span instead, where per-request cardinality is free and a stale serve stays attributable to the request that caused it. When `observability.tracing` is enabled Farm already writes those span events itself, so `@farm.js/otel` does not add a second copy.
 
-Metrics need a metric reader, which the Node SDK configures from the environment. By default they go to the same OTLP endpoint as traces; `OTEL_METRICS_EXPORTER` picks a different one, and `none` leaves the meter provider unregistered so the instruments stay no-ops.
+Metrics need a metric reader, and Farm registers one only when you ask for it. Name an exporter with `OTEL_METRICS_EXPORTER`, or pass `metricReaders` to `registerOTel`:
 
 ```bash
-OTEL_METRICS_EXPORTER=otlp # otlp (default), console, prometheus, or none
+OTEL_METRICS_EXPORTER=otlp # otlp, console, prometheus, or none
 ```
+
+Without it there is no meter provider, the instruments are no-ops, and the span events still work. That opt-in is deliberate: left to its own defaults the Node SDK exports metrics to `localhost:4318` whether or not an app configured metrics, and with nothing listening there every recorded metric turns graceful shutdown into the exporter's retry window, around eight seconds. Traces are unaffected and keep using the OTLP trace endpoint.
 
 Pass `farmEvents` to narrow or disable the mapping:
 
@@ -264,6 +266,7 @@ export default defineConfig({
 - Keep `@farm.js/otel` in `dependencies`, not `devDependencies`, so it is available in the deployed server bundle.
 - Set `OTEL_SERVICE_NAME` or pass `serviceName` explicitly; use deployment/version resource attributes for release comparisons.
 - Farm's production lifecycle waits for active requests and then shuts down instrumentation, allowing the batch processor to flush.
+- `forceFlushOTel()` flushes spans and, when a metrics pipeline is configured, recorded metrics. Call it from `after()` on hosts that freeze the process between requests, where the periodic metric reader never gets to export.
 - Filter high-volume events before shipping them to a log drain.
 - Use the emitted trace and span IDs to correlate Farm events with application logs.
 - Treat event payloads as operational metadata; do not put secrets in event fields.

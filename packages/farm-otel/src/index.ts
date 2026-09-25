@@ -1,4 +1,4 @@
-import type { Attributes } from "@opentelemetry/api";
+import { metrics, type Attributes } from "@opentelemetry/api";
 import {
   getNodeAutoInstrumentations,
   type InstrumentationConfigMap,
@@ -31,6 +31,12 @@ export interface FarmOTelOptions {
   autoInstrumentations?: boolean;
   instrumentationConfig?: InstrumentationConfigMap;
   instrumentations?: Array<Instrumentation | Instrumentation[]>;
+  /**
+   * Metric readers to export with. Farm registers a meter provider only when
+   * this is set or `OTEL_METRICS_EXPORTER` names an exporter, so an app that
+   * only asked for traces never gets a metrics pipeline it did not configure.
+   */
+  metricReaders?: NonNullable<ConstructorParameters<typeof NodeSDK>[0]>["metricReaders"];
   /**
    * Record Farm's own cache, PPR, streaming and middleware events as metrics
    * and span events. Enabled by default; auto-instrumentation only sees generic
@@ -92,11 +98,21 @@ export async function registerOTel(options: FarmOTelOptions = {}): Promise<FarmO
         (options.autoInstrumentations === false
           ? []
           : [getNodeAutoInstrumentations(options.instrumentationConfig)]);
+      // Left unset, the Node SDK reads `OTEL_METRICS_EXPORTER` and falls back to
+      // a periodic OTLP metrics pipeline pointed at localhost:4318. That is a
+      // pipeline nobody configured, and with nothing listening there every
+      // recorded metric turns graceful shutdown into the exporter's retry window
+      // (measured at ~8s, both for these events and for auto-instrumentation's
+      // own metrics). An empty reader list keeps the meter provider unregistered,
+      // so metrics stay off until an app asks for them.
+      const metricReaders =
+        options.metricReaders ?? (process.env.OTEL_METRICS_EXPORTER ? undefined : []);
       const sdk = new NodeSDK({
         resource,
         sampler: options.sampler,
         spanProcessors,
         instrumentations,
+        metricReaders,
       });
       sdk.start();
 
@@ -113,6 +129,20 @@ export async function registerOTel(options: FarmOTelOptions = {}): Promise<FarmO
         sdk,
         async forceFlush() {
           await Promise.all(spanProcessors.map((processor) => processor.forceFlush()));
+          // Serverless runtimes freeze the process between requests, so the
+          // periodic metric reader never gets to export on its own. The API type
+          // has no `forceFlush`, so reach for the SDK's when it is there.
+          const meterProvider = metrics.getMeterProvider() as {
+            forceFlush?: () => Promise<void>;
+          };
+          try {
+            await meterProvider.forceFlush?.();
+          } catch (error) {
+            // A metrics exporter must not fail the response it was flushed for.
+            console.warn(
+              `[farm:otel] metric flush failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
         },
         shutdown() {
           if (!shutdownPromise) {
