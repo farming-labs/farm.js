@@ -830,6 +830,14 @@ describe("APIRouteManager", () => {
                 return Response.json({ id: params.id });
               },
             }),
+            // A dynamic segment whose value carries a file extension, the shape
+            // farmjs.dev serves its shadcn registry at (`/r/button.json`).
+            api("/r/[item]", {
+              GET: async (_request: Request, context: { params: Promise<{ item: string }> }) => {
+                const params = await context.params;
+                return Response.json({ item: params.item });
+              },
+            }),
           ]),
         };
       },
@@ -839,7 +847,12 @@ describe("APIRouteManager", () => {
     const handler = manager.getHandler();
 
     expect(manager.isAPIRoute("/rss.xml")).toBe(true);
-    expect(Array.from(manager.getRoutes().keys()).sort()).toEqual(["/api/posts/[id]", "/rss.xml"]);
+    expect(manager.isAPIRoute("/r/button.json")).toBe(true);
+    expect(Array.from(manager.getRoutes().keys()).sort()).toEqual([
+      "/api/posts/[id]",
+      "/r/[item]",
+      "/rss.xml",
+    ]);
     expect(manager.getRoutes().get("/api/posts/[id]")?.filePath).toContain("?farm-route=api:");
 
     const rssResponse = await handler!(new Request("http://example.com/rss.xml"));
@@ -850,6 +863,10 @@ describe("APIRouteManager", () => {
     const postResponse = await handler!(new Request("http://example.com/api/posts/hello"));
     expect(postResponse.status).toBe(200);
     await expect(postResponse.json()).resolves.toEqual({ id: "hello" });
+
+    const registryResponse = await handler!(new Request("http://example.com/r/button.json"));
+    expect(registryResponse.status).toBe(200);
+    await expect(registryResponse.json()).resolves.toEqual({ item: "button.json" });
   });
 
   it("parses DELETE request bodies", async () => {

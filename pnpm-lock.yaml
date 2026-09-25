@@ -58,6 +58,9 @@ importers:
       '@databuddy/sdk':
         specifier: 2.6.0
         version: 2.6.0(react@19.2.8)
+      '@farm.js/cli':
+        specifier: workspace:*
+        version: link:../packages/farm-cli
       '@farm.js/core':
         specifier: workspace:*
         version: link:../packages/farm
@@ -101,9 +104,6 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
     devDependencies:
-      '@farm.js/cli':
-        specifier: workspace:*
-        version: link:../packages/farm-cli
       '@farm.js/devtools':
         specifier: workspace:*
         version: link:../packages/farm-devtools

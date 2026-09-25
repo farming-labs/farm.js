@@ -22,6 +22,33 @@
     "bin"
   ],
   "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./dev": {
+      "import": "./dist/dev.mjs",
+      "require": "./dist/dev.js"
+    },
+    "./build": {
+      "import": "./dist/build.mjs",
+      "require": "./dist/build.js"
+    },
+    "./add-integration": {
+      "import": "./dist/add-integration.mjs",
+      "require": "./dist/add-integration.js"
+    },
+    "./telemetry": {
+      "import": "./dist/telemetry.mjs",
+      "require": "./dist/telemetry.js"
+    },
+    "./ui-registry": {
+      "import": "./dist/ui-registry.mjs",
+      "require": "./dist/ui-registry.js"
+    },
+    "./package.json": "./package.json"
+  },
   "publishConfig": {
     "access": "public"
   },
