@@ -134,6 +134,154 @@ describe("compression plugin", () => {
     expect(await parameterizedEventStream.text()).toBe("data: still-ready\n\n");
   });
 
+  it.each([
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/avif",
+    "video/mp4",
+    "audio/mpeg",
+    "application/zip",
+    "application/pdf",
+    "application/gzip",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/octet-stream",
+    "font/woff",
+    "font/woff2",
+    "text/event-stream",
+  ])("does not compress a %s body", async (mediaType) => {
+    // High-entropy bytes, the way an already-compressed payload looks. A
+    // compressor pass here only costs CPU.
+    const body = new Uint8Array(2048);
+    for (let index = 0; index < body.length; index += 1) {
+      body[index] = (index * 37 + 11) % 256;
+    }
+    const manager = createManager();
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/asset", { headers: { "accept-encoding": "br, gzip" } }),
+      () =>
+        new Response(body, {
+          headers: {
+            "content-type": mediaType,
+            "content-length": String(body.byteLength),
+            etag: '"asset"',
+          },
+        }),
+    );
+
+    expect(response.headers.get("content-encoding")).toBeNull();
+    // An incompressible response is never encoded, so it does not need to be
+    // cached per Accept-Encoding and it keeps its identity length and etag.
+    expect(response.headers.get("vary")).toBeNull();
+    expect(response.headers.get("content-length")).toBe(String(body.byteLength));
+    expect(response.headers.get("etag")).toBe('"asset"');
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(body);
+  });
+
+  it.each([
+    "text/html",
+    "text/css",
+    "text/plain",
+    "text/javascript",
+    "text/x-component",
+    "application/json",
+    "application/javascript",
+    "application/xml",
+    "application/wasm",
+    "application/x-ndjson",
+    "application/problem+json",
+    "application/manifest+json",
+    "application/atom+xml",
+    "image/svg+xml",
+    "font/ttf",
+    "font/otf",
+    "application/vnd.ms-fontobject",
+  ])("compresses a %s body", async (mediaType) => {
+    const body = "farm-compressible-payload-".repeat(64);
+    const manager = createManager();
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/asset", { headers: { "accept-encoding": "gzip" } }),
+      () =>
+        new Response(body, {
+          headers: {
+            "content-type": `${mediaType}; charset=utf-8`,
+            "content-length": String(Buffer.byteLength(body)),
+          },
+        }),
+    );
+
+    expect(response.headers.get("content-encoding")).toBe("gzip");
+    expect(response.headers.get("content-length")).toBeNull();
+    expect(response.headers.get("vary")).toBe("Accept-Encoding");
+    expect(gunzipSync(Buffer.from(await response.arrayBuffer())).toString()).toBe(body);
+  });
+
+  it("leaves a response with an undeclared media type uncompressed", async () => {
+    const body = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const manager = createManager();
+    // No content-type at all. The bytes could be anything, including an
+    // already-compressed download, so the plugin does not guess.
+    const untyped = await manager.runRuntimeRequest(
+      new Request("https://farm.test/download", { headers: { "accept-encoding": "br, gzip" } }),
+      () => new Response(body),
+    );
+    const emptyType = await manager.runRuntimeRequest(
+      new Request("https://farm.test/download", { headers: { "accept-encoding": "br, gzip" } }),
+      () => new Response(body, { headers: { "content-type": "" } }),
+    );
+
+    expect(untyped.headers.get("content-type")).toBeNull();
+    expect(untyped.headers.get("content-encoding")).toBeNull();
+    expect(untyped.headers.get("vary")).toBeNull();
+    expect(new Uint8Array(await untyped.arrayBuffer())).toEqual(body);
+    expect(emptyType.headers.get("content-encoding")).toBeNull();
+    expect(emptyType.headers.get("vary")).toBeNull();
+    expect(new Uint8Array(await emptyType.arrayBuffer())).toEqual(body);
+  });
+
+  it("leaves an optimized image response exactly as the image pipeline built it", async () => {
+    const manager = createManager();
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/_farm/image?url=%2Fhero.png&w=640", {
+        headers: { "accept-encoding": "br, gzip" },
+      }),
+      () =>
+        new Response(new Uint8Array([0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70]), {
+          headers: {
+            "cache-control": "public, max-age=31536000, immutable",
+            "content-type": "image/avif",
+            "content-length": "8",
+            etag: '"farm-image"',
+            vary: "Accept",
+          },
+        }),
+    );
+
+    expect(response.headers.get("content-encoding")).toBeNull();
+    expect(response.headers.get("content-length")).toBe("8");
+    expect(response.headers.get("etag")).toBe('"farm-image"');
+    expect(response.headers.get("vary")).toBe("Accept");
+  });
+
+  it("does not vary an incompressible HEAD response by Accept-Encoding", async () => {
+    const manager = createManager();
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/hero.png", {
+        method: "HEAD",
+        headers: { "accept-encoding": "gzip" },
+      }),
+      () =>
+        new Response(null, {
+          headers: { "content-type": "image/png", "content-length": "4096" },
+        }),
+    );
+
+    expect(response.body).toBeNull();
+    expect(response.headers.get("content-encoding")).toBeNull();
+    expect(response.headers.get("vary")).toBeNull();
+    expect(response.headers.get("content-length")).toBe("4096");
+  });
+
   it.each(["br", "gzip"])("streams %s chunks before the source ends", async (encoding) => {
     const manager = createManager();
     let closeSource!: () => void;
