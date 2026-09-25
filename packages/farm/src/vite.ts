@@ -2692,7 +2692,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           const startTime = Date.now();
           const method = req.method || "GET";
           const urlPath = req.url || "/";
-          const pathname = resolveFarmRequestURL(req as FarmRequest, {
+          const requestedPathname = resolveFarmRequestURL(req as FarmRequest, {
             trustProxy: currentServerConfig.trustProxy,
           }).pathname;
           const routeManager = farmApp.getRouteManager();
@@ -2706,28 +2706,13 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           const hasRuntimeRequestHooks = pm?.hasRuntimeRequestHooks() ?? false;
           const hasRuntimeAfterHook = pm?.hasRuntimeHook("after") ?? false;
 
-          if (pm && hasBeforeRouteMatchHook) {
-            await pm.runHookParallel("beforeRouteMatch", {
-              pathname,
-              method,
-            });
-          }
-          const routeMatch = routeManager.matchRoute(pathname);
-          if (pm && hasAfterRouteMatchHook) {
-            await pm.runHookParallel("afterRouteMatch", {
-              pathname,
-              matched: !!routeMatch?.route,
-              routePattern: routeMatch?.route?.pattern || null,
-              params: routeMatch?.params || {},
-              layoutPatterns: (routeMatch?.layouts || []).map((l) => l.pattern),
-            });
-          }
-          const renderPayload = {
-            pathname,
-            method,
-            routePattern: routeMatch?.route?.pattern || null,
-            params: routeMatch?.params || {},
-          };
+          // `runtime.before` may return a replacement Request, and the page has
+          // to be routed on whatever the session yields: that is what
+          // `runRuntimeRequest` does in the production entry, where the routed
+          // request is the session's. So the session opens before the route is
+          // resolved. The session options still describe the requested route,
+          // because production computes them from the incoming request too.
+          const requestedMatch = routeManager.matchRoute(requestedPathname);
           let runtimeSession: FarmPluginRuntimeSession | undefined;
           if (pm && hasRuntimeRequestHooks) {
             try {
@@ -2736,9 +2721,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 {
                   kind: "page",
                   route: {
-                    pathname,
-                    pattern: renderPayload.routePattern,
-                    params: renderPayload.params,
+                    pathname: requestedPathname,
+                    pattern: requestedMatch?.route?.pattern || null,
+                    params: requestedMatch?.params || {},
                   },
                 },
               );
@@ -2754,13 +2739,44 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 return;
               }
             } catch (error) {
-              await emitPluginError("runtime-before", error, { pathname });
+              await emitPluginError("runtime-before", error, { pathname: requestedPathname });
               res.statusCode = 500;
               res.setHeader("Content-Type", "text/plain; charset=utf-8");
               res.end("Internal Server Error");
               return;
             }
           }
+
+          // A replacement request is matched on its own pathname, including when
+          // it matches nothing and has to 404 on the rewritten path. An ordinary
+          // request is not re-matched, so the common path still matches once.
+          const pathname = runtimeSession
+            ? new URL(runtimeSession.request.url).pathname
+            : requestedPathname;
+          const routeMatch =
+            pathname === requestedPathname ? requestedMatch : routeManager.matchRoute(pathname);
+
+          if (pm && hasBeforeRouteMatchHook) {
+            await pm.runHookParallel("beforeRouteMatch", {
+              pathname,
+              method,
+            });
+          }
+          if (pm && hasAfterRouteMatchHook) {
+            await pm.runHookParallel("afterRouteMatch", {
+              pathname,
+              matched: !!routeMatch?.route,
+              routePattern: routeMatch?.route?.pattern || null,
+              params: routeMatch?.params || {},
+              layoutPatterns: (routeMatch?.layouts || []).map((l) => l.pattern),
+            });
+          }
+          const renderPayload = {
+            pathname,
+            method,
+            routePattern: routeMatch?.route?.pattern || null,
+            params: routeMatch?.params || {},
+          };
 
           // Runtime response transforms need the complete byte stream, including
           // responses completed by middleware or beforeRequest hooks.
