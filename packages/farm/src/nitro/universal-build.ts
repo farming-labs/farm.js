@@ -4238,6 +4238,61 @@ export function generateNativeAuthIntegrationSource(auth: ResolvedFarmConfig["au
   };
 }
 
+/**
+ * Runtime source for the production entry's integration request dispatch.
+ *
+ * `matchLocalIntegrationRequest` stays route-only: it answers "does this URL
+ * belong to an emitted integration route", which is what configured-rewrite
+ * precedence needs. Request dispatch deliberately does not go through it.
+ * Integration middleware is not route scoped (it is how `protectedRoutes`
+ * guards and provider session refresh are mounted), so gating dispatch on a
+ * route match let anonymous requests reach protected pages. Every request is
+ * dispatched instead, exactly like the dev server runs the same middleware.
+ */
+export function generateIntegrationRequestRuntimeSource(options: {
+  hasServerRuntimeIntegrations: boolean;
+}): string {
+  return `
+function matchLocalIntegrationRequest(request) {
+  ${
+    options.hasServerRuntimeIntegrations
+      ? `return matchIntegrationRoute(serverRuntimeIntegrations, {
+    pathname: new URL(request.url).pathname,
+    method: request.method,
+  });`
+      : "return null;"
+  }
+}
+
+async function handleIntegrationRequest(request) {
+  ${
+    options.hasServerRuntimeIntegrations
+      ? `return dispatchIntegrationRequests(
+    serverRuntimeIntegrations,
+    {
+      config: integrationRuntimeConfig,
+      isDev: false,
+      isProd: true,
+    },
+    request,
+  );`
+      : `return { response: null, setCookies: [] };`
+  }
+}
+
+// Merge Set-Cookie values forwarded by a passthrough integration middleware
+// into the deferred header bag that every downstream response already applies.
+function withFarmIntegrationSetCookies(headers, cookies) {
+  if (!cookies || cookies.length === 0) return headers;
+  const merged = new Headers(headers || undefined);
+  for (const cookie of cookies) {
+    merged.append("set-cookie", cookie);
+  }
+  return merged;
+}
+`;
+}
+
 export function generateConfiguredResponseHeadersRuntimeSource(): string {
   return `
 function getConfiguredSetCookieHeaders(headers) {
@@ -4751,7 +4806,7 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
   const integrationRuntimeExports = Array.from(
     new Set([
       ...(hasServerRuntimeIntegrations
-        ? ["dispatchIntegrationRequest", "matchIntegrationRoute"]
+        ? ["dispatchIntegrationRequests", "matchIntegrationRoute"]
         : []),
       ...(hasRuntimeIntegrationConfig
         ? ["getRegisteredIntegrationAPIManifest", "resolveIntegrationPlugins"]
@@ -5972,38 +6027,7 @@ const farmMiddlewareRunner = ${
 
 ${apiHandlerCode}
 
-function matchLocalIntegrationRequest(request) {
-  ${
-    hasServerRuntimeIntegrations
-      ? `return matchIntegrationRoute(serverRuntimeIntegrations, {
-    pathname: new URL(request.url).pathname,
-    method: request.method,
-  });`
-      : "return null;"
-  }
-}
-
-async function handleIntegrationRequest(request) {
-  const matchedIntegrationRoute = matchLocalIntegrationRequest(request);
-  if (!matchedIntegrationRoute) {
-    return null;
-  }
-
-  ${
-    hasServerRuntimeIntegrations
-      ? `
-  return dispatchIntegrationRequest(
-    {
-      integration: matchedIntegrationRoute.integration,
-      config: integrationRuntimeConfig,
-      isDev: false,
-      isProd: true,
-    },
-    request,
-  );`
-      : "return null;"
-  }
-}
+${generateIntegrationRequestRuntimeSource({ hasServerRuntimeIntegrations })}
 
 /**
  * Match URL to page route pattern
@@ -6551,10 +6575,15 @@ async function handleFarmRequestInContext(
   ${
     hasServerRuntimeIntegrations
       ? `
-  const integrationResponse = await handleIntegrationRequest(request.clone());
-  if (integrationResponse) {
-    return integrationResponse;
+  const integrationDispatch = await handleIntegrationRequest(request.clone());
+  if (integrationDispatch.response) {
+    return integrationDispatch.response;
   }
+  // A middleware that refreshed a session and let the request continue handed
+  // its rotated Set-Cookie values back here. They belong on whatever response
+  // the page or API handler produces, so they ride the same deferred-header
+  // channel the file middleware runner already uses.
+  const farmIntegrationSetCookies = integrationDispatch.setCookies;
   `
       : ""
   }
@@ -6570,7 +6599,11 @@ async function handleFarmRequestInContext(
   request = middlewareResult.request;
   const middlewareData = middlewareResult.data;
   const middlewareContext = middlewareResult.context;
-  const middlewareHeaders = middlewareResult.headers;
+  const middlewareHeaders = ${
+    hasServerRuntimeIntegrations
+      ? "withFarmIntegrationSetCookies(middlewareResult.headers, farmIntegrationSetCookies)"
+      : "middlewareResult.headers"
+  };
   url = new URL(request.url);
   pathname = url.pathname;
   routePathname = getFarmRoutePathname(pathname);
@@ -6583,7 +6616,11 @@ async function handleFarmRequestInContext(
       : `
   const middlewareData = undefined;
   const middlewareContext = undefined;
-  const middlewareHeaders = undefined;
+  const middlewareHeaders = ${
+    hasServerRuntimeIntegrations
+      ? "withFarmIntegrationSetCookies(undefined, farmIntegrationSetCookies)"
+      : "undefined"
+  };
   `
   }
 
