@@ -810,8 +810,8 @@ describe("compiler-owned host conditional runtime", () => {
               render={() => (
                 <div>
                   <p>
-                    {prefix}
-                    {String(state[0].get())}
+                    <span>{prefix}</span>
+                    <strong>{String(state[0].get())}</strong>
                   </p>
                 </div>
               )}
@@ -822,9 +822,24 @@ describe("compiler-owned host conditional runtime", () => {
                   tag: "p",
                   attributes: [],
                   styles: [],
-                  children: [[prefix, state[0].get()]],
+                  children: [
+                    {
+                      kind: "element",
+                      tag: "span",
+                      attributes: [],
+                      styles: [],
+                      children: [prefix],
+                    },
+                    {
+                      kind: "element",
+                      tag: "strong",
+                      attributes: [],
+                      styles: [],
+                      children: [state[0].get()],
+                    },
+                  ],
                 }),
-                bindings: [{ kind: "text", path: [], read: () => [prefix, state[0].get()] }],
+                bindings: [{ kind: "text", path: [1], read: () => [state[0].get()] }],
               }}
             />
           </section>
@@ -847,14 +862,16 @@ describe("compiler-owned host conditional runtime", () => {
     });
     await flushCompilerUpdates();
     expect(container.querySelector("p")).toBe(branch);
-    expect(branch.textContent).toBe("After: Alpha");
+    expect(branch.querySelector("span")?.textContent).toBe("After: ");
+    expect(branch.querySelector("strong")?.textContent).toBe("Alpha");
 
     await act(async () => {
       container.querySelector("button")!.click();
       await flushCompilerUpdates();
     });
     expect(container.querySelector("p")).toBe(branch);
-    expect(branch.textContent).toBe("After: Updated");
+    expect(branch.querySelector("span")?.textContent).toBe("After: ");
+    expect(branch.querySelector("strong")?.textContent).toBe("Updated");
   });
 
   it("routes binding failures through the nearest React error boundary", async () => {

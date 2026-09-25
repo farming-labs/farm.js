@@ -5367,7 +5367,7 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
 }
 
 function createHostConditionalBlockComponent(
-  owner: Pick<ConditionalBlockOwner, "subscribe">,
+  owner: Pick<CompilerRuntimeFeatureOwner, "subscribe" | "getDefinitionVersion">,
 ): React.ComponentType<CompilerHostConditionalBlockProps> {
   interface State {
     fallback: boolean;
@@ -5389,6 +5389,7 @@ function createHostConditionalBlockComponent(
     private fallbackKeysWereUnsafe = false;
     private activeBranch: "truthy" | "falsy" | null = null;
     private instance: CompilerHostInstance | null = null;
+    private definitionVersion = owner.getDefinitionVersion?.();
 
     private requestNestedFallback = () => {
       this.instance?.scope?.cleanup();
@@ -5442,6 +5443,7 @@ function createHostConditionalBlockComponent(
       if (selection.kind === "fallback") return false;
       if (selection.kind === "empty") {
         if (this.root.childNodes.length !== 0) return false;
+        this.instance?.scope?.cleanup();
         this.activeBranch = null;
         this.instance = null;
         return true;
@@ -5464,6 +5466,7 @@ function createHostConditionalBlockComponent(
         this.requestNestedFallback,
       );
       if (!instance) return false;
+      this.instance?.scope?.cleanup();
       this.activeBranch = selection.key;
       this.instance = instance;
       return true;
@@ -5575,9 +5578,11 @@ function createHostConditionalBlockComponent(
     }
 
     shouldComponentUpdate(nextProps: CompilerHostConditionalBlockProps, nextState: State): boolean {
+      const definitionChanged = this.definitionVersion !== owner.getDefinitionVersion?.();
       this.currentProps = nextProps;
       if (this.state.fallback && nextState.fallback) this.prepareFallbackUpdate();
       if (nextState.fallback || this.state.fallback) return true;
+      if (definitionChanged) return true;
       this.schedulePropSync();
       return false;
     }
@@ -5594,7 +5599,14 @@ function createHostConditionalBlockComponent(
 
     componentDidUpdate(): void {
       this.listen();
-      if (this.state.fallback) this.subscribeFallbackDescendants();
+      const nextDefinitionVersion = owner.getDefinitionVersion?.();
+      const definitionChanged = this.definitionVersion !== nextDefinitionVersion;
+      this.definitionVersion = nextDefinitionVersion;
+      if (this.state.fallback) {
+        this.subscribeFallbackDescendants();
+      } else if (definitionChanged && !this.adopt()) {
+        this.activateFallback();
+      }
     }
 
     componentWillUnmount(): void {
