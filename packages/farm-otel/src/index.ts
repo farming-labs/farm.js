@@ -14,6 +14,10 @@ import {
   type SpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
+import { recordFarmEvents, type FarmEventMappingOptions } from "./farm-events.js";
+
+export { FARM_EVENTS_METER_NAME, recordFarmEvents } from "./farm-events.js";
+export type { FarmEventMappingOptions } from "./farm-events.js";
 
 export interface FarmOTelOptions {
   serviceName?: string;
@@ -27,6 +31,16 @@ export interface FarmOTelOptions {
   autoInstrumentations?: boolean;
   instrumentationConfig?: InstrumentationConfigMap;
   instrumentations?: Array<Instrumentation | Instrumentation[]>;
+  /**
+   * Record Farm's own cache, PPR, streaming and middleware events as metrics
+   * and span events. Enabled by default; auto-instrumentation only sees generic
+   * HTTP, filesystem and database work, so without this everything the
+   * framework knows about itself is dropped.
+   *
+   * Pass `false` to leave Farm's event bus unsubscribed, or an object to record
+   * only metrics or only span events.
+   */
+  farmEvents?: boolean | FarmEventMappingOptions;
 }
 
 export interface FarmOTelController {
@@ -49,13 +63,21 @@ function getGlobalState(): FarmOTelGlobalState {
   return (target[FARM_OTEL_STATE] ??= {});
 }
 
+function resolveFarmEventOptions(
+  option: FarmOTelOptions["farmEvents"],
+): FarmEventMappingOptions | undefined {
+  if (option === false) return undefined;
+  if (option === undefined || option === true) return {};
+  return option;
+}
+
 export async function registerOTel(options: FarmOTelOptions = {}): Promise<FarmOTelController> {
   const state = getGlobalState();
   if (state.controller) return state.controller;
   if (state.initializing) return state.initializing;
 
   state.initializing = Promise.resolve()
-    .then(() => {
+    .then(async () => {
       const defaultResource = resourceFromAttributes({
         [ATTR_SERVICE_NAME]: options.serviceName ?? process.env.OTEL_SERVICE_NAME ?? "farm-app",
         ...(options.serviceVersion ? { [ATTR_SERVICE_VERSION]: options.serviceVersion } : {}),
@@ -78,6 +100,14 @@ export async function registerOTel(options: FarmOTelOptions = {}): Promise<FarmO
       });
       sdk.start();
 
+      // After `start`, because the metrics API has no proxy provider: an
+      // instrument created before the SDK registers its meter provider stays a
+      // no-op for the life of the process.
+      const farmEventOptions = resolveFarmEventOptions(options.farmEvents);
+      const disposeFarmEvents = farmEventOptions
+        ? await recordFarmEvents(farmEventOptions)
+        : undefined;
+
       let shutdownPromise: Promise<void> | undefined;
       const controller: FarmOTelController = {
         sdk,
@@ -86,6 +116,9 @@ export async function registerOTel(options: FarmOTelOptions = {}): Promise<FarmO
         },
         shutdown() {
           if (!shutdownPromise) {
+            // Stop feeding instruments before the providers go away, and so a
+            // development restart does not stack bus subscribers.
+            disposeFarmEvents?.();
             shutdownPromise = sdk.shutdown().finally(() => {
               state.controller = undefined;
               state.initializing = undefined;

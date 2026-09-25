@@ -6,9 +6,10 @@ section: "Runtime"
 
 # Observability and tracing
 
-Farm has two complementary observability layers:
+Farm has three complementary observability layers:
 
 - OpenTelemetry traces show the request timeline and export to any OTLP-compatible backend.
+- OpenTelemetry metrics cover Farm's own cache, PPR, and streaming outcomes.
 - Farm events expose detailed framework lifecycle data for logs, alerts, and custom integrations.
 
 The same lifecycle events are attached to the active OpenTelemetry span, and delivered events include `traceId`, `spanId`, and `traceSampled` for correlation.
@@ -96,6 +97,48 @@ const result = await runWithFarmSpan(
 
 Use `getFarmTraceContext()` when a log or provider call needs the current trace and span IDs.
 
+## What Farm measures
+
+`@farm.js/otel` also subscribes to Farm's event bus and records the framework's own cache, PPR, streaming, and middleware outcomes. Auto-instrumentation only sees generic HTTP, filesystem, and database work, so this is the layer that makes cache hit rate, tag invalidation, and shell TTFB visible.
+
+| Instrument                          | Kind            | Attributes                                                                                          |
+| ----------------------------------- | --------------- | --------------------------------------------------------------------------------------------------- |
+| `farm.cache.lookups`                | Counter         | `farm.cache.result` (`hit`, `miss`, `stale`, `dedupe`, `bypass`), `farm.cache.stale` on a stale hit |
+| `farm.cache.invalidations`          | Counter         | `farm.cache.operation` (`revalidateTag`, `updateTag`, `revalidatePath`, `invalidated`)              |
+| `farm.cache.invalidated_entries`    | Counter         | `farm.cache.operation`, incremented by the number of entries the operation removed                  |
+| `farm.ppr.shell.lookups`            | Counter         | `farm.ppr.result` (`hit`, `miss`, `cached`, `bypass`, `invalidated`)                                |
+| `farm.ppr.refresh.duration`         | Histogram, `ms` | none                                                                                                |
+| `farm.render.stream.shell.duration` | Histogram, `ms` | none, this is shell TTFB                                                                            |
+| `farm.middleware.short_circuits`    | Counter         | `farm.route`, the configured matcher rather than the request path, and `farm.http.status_class`     |
+
+Metric attributes are deliberately bounded. A cache `key` embeds the serialized arguments of the cached call, a tag is authored at runtime, and the `route` on cache, PPR, and streaming events is the request pathname rather than a route pattern, so none of them becomes a metric attribute. That detail is recorded as an event on the active span instead, where per-request cardinality is free and a stale serve stays attributable to the request that caused it. When `observability.tracing` is enabled Farm already writes those span events itself, so `@farm.js/otel` does not add a second copy.
+
+Metrics need a metric reader, which the Node SDK configures from the environment. By default they go to the same OTLP endpoint as traces; `OTEL_METRICS_EXPORTER` picks a different one, and `none` leaves the meter provider unregistered so the instruments stay no-ops.
+
+```bash
+OTEL_METRICS_EXPORTER=otlp # otlp (default), console, prometheus, or none
+```
+
+Pass `farmEvents` to narrow or disable the mapping:
+
+```ts
+return registerOTel({
+  serviceName: "storefront",
+  // Leave Farm's event bus unsubscribed.
+  farmEvents: false,
+  // Or keep one half of it.
+  // farmEvents: { metrics: true, spanEvents: false },
+});
+```
+
+An app that starts its own SDK can map the bus without `registerOTel`. Call it after the SDK has started, because an instrument created before a meter provider is registered stays a no-op, and dispose it on shutdown so a development restart does not stack subscribers.
+
+```ts
+import { recordFarmEvents } from "@farm.js/otel";
+
+const disposeFarmEvents = await recordFarmEvents();
+```
+
 ## Instrumentation lifecycle
 
 Farm calls `register(context)` once before the development server or production request runtime starts. The context contains:
@@ -160,7 +203,7 @@ export default defineConfig({
 });
 ```
 
-`events` is optional. Leave it out to receive every emitted event. Filtering event delivery does not disable span creation or the events recorded on active spans.
+`events` is optional. Leave it out to receive every emitted event. Filtering event delivery does not disable span creation, the events recorded on active spans, or the `@farm.js/otel` metrics; use `farmEvents: false` for those.
 
 ## Runtime subscription
 

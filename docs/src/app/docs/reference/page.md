@@ -27,7 +27,7 @@ A compact map of the main package exports and where to learn more.
 | @farm.js/core/cron            | Cron route authorization, schedule types, manifests, and deployment adapter helpers. |
 | @farm.js/core/observability   | Farm events, request tracing, custom spans, and active trace context.                |
 | @farm.js/core/instrumentation | Startup and shutdown convention types for development and production runtimes.       |
-| @farm.js/otel                 | Optional Node OpenTelemetry SDK, OTLP exporter, and auto-instrumentation setup.      |
+| @farm.js/otel                 | Node OpenTelemetry SDK, OTLP exporter, auto-instrumentation, and Farm event metrics. |
 | @farm.js/react                | React renderer descriptor and experimental AOT local-state compiler.                 |
 | @farm.js/preact               | Preact renderer descriptor, streaming SSR, hydration, and Vite integration.          |
 | @farm.js/solid                | Solid renderer descriptor, SSR runtime, browser hydration, and Vite integration.     |

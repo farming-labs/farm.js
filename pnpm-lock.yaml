@@ -2504,6 +2504,9 @@ importers:
 
   packages/farm-otel:
     dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@opentelemetry/api':
         specifier: 1.9.1
         version: 1.9.1
