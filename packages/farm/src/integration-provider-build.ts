@@ -19,7 +19,7 @@ export type FarmIntegrationProviderClientCode = {
  * renderer a .svelte provider is a Svelte component while a .tsx provider is a
  * function component.
  */
-function isRendererCompiledComponent(
+export function isRendererCompiledComponent(
   moduleId: string,
   rendererComponentExtensions: readonly string[],
 ): boolean {

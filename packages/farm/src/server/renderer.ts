@@ -99,7 +99,9 @@ import {
   readFarmRendererWebStream,
   resolveFarmRendererModule,
   type FarmServerRendererRuntime,
+  resolveFarmComponentExtensions,
 } from "../renderer";
+import { isRendererCompiledComponent } from "../integration-provider-build";
 import { pathToFileURL } from "node:url";
 import type { FarmIslandStrategy } from "../island";
 import { createDefaultErrorDiagnostics } from "./error-diagnostics";
@@ -1767,13 +1769,28 @@ export class ServerRenderer {
     for (let i = providers.length - 1; i >= 0; i--) {
       const provider = providers[i];
       if (provider.component || provider.type === "clerk") {
-        if (!isReactRenderer(this.config.renderer)) {
+        // Production gates on the same capability (nitro/universal-build.ts).
+        // A renderer identity check here left every non-React renderer that
+        // can host function components throwing in development while its
+        // build worked, and named the provider kind rather than the
+        // integration in the message.
+        const rendererCapabilities = getFarmRendererCapabilities(this.config.renderer);
+        if (!rendererCapabilities.functionComponents) {
           throw new Error(
-            `Integration provider \`${provider.type}\` currently requires the React renderer.`,
+            `Integration provider \`${provider.name}\` requires a renderer that can host ` +
+              `function components; \`${this.config.renderer?.name ?? "the configured renderer"}\` cannot.`,
+          );
+        }
+        if (provider.type === "clerk" && !isReactRenderer(this.config.renderer)) {
+          throw new Error(
+            `Integration provider \`${provider.name}\` uses Clerk's React components, which ` +
+              "require the React renderer.",
           );
         }
         let ProviderComponent;
+        let providerSourceModule: string | undefined;
         if (isFarmIntegrationProviderComponentReference(provider.component)) {
+          providerSourceModule = provider.component.module;
           const providerModuleId = provider.component.module.startsWith(".")
             ? toViteModuleId(
                 path.resolve(this.config.root, provider.component.module),
@@ -1804,6 +1821,22 @@ export class ServerRenderer {
           throw new Error(
             `Integration provider \`${provider.name}\` did not export its configured component.`,
           );
+        }
+
+        // A renderer that compiles its own components cannot tell a plain
+        // function component from one of its own, so the build marks the ones
+        // Farm wires up (integration-provider-build.ts). Development resolves
+        // the module itself and must mark it the same way, or the compat root
+        // tries to instantiate a function as a compiled component.
+        if (
+          provider.type !== "clerk" &&
+          typeof this.rendererRuntime.markFunctionComponent === "function" &&
+          !isRendererCompiledComponent(
+            providerSourceModule ?? "",
+            resolveFarmComponentExtensions(this.config.renderer?.componentExtensions),
+          )
+        ) {
+          ProviderComponent = this.rendererRuntime.markFunctionComponent(ProviderComponent);
         }
 
         wrapped = this.rendererRuntime.createElement(
