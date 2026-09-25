@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const { addFarmIntegration, listFarmIntegrationProviders } = require("../dist/add-integration.js");
+const { handleUIRegistryRequest } = require("../dist/ui-registry.js");
 const ts = require("typescript");
 const execFileAsync = promisify(execFile);
 const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -210,6 +211,28 @@ test("adds a stripe integration with the shadcn UI feature pack", async () => {
     assert.equal(packageJson.dependencies.tailwindcss, "^4.1.18");
     assert.equal(componentsJson.aliases.ui, "@/components/ui");
     assert.equal(componentsJson.registries.farm.url, "https://farmjs.dev/r/{name}.json");
+    // Pinning the string alone passed while the endpoint 404'd, so ask the
+    // registry handler farmjs.dev mounts to answer the advertised url for every
+    // component this install wrote.
+    for (const component of result.ui.components) {
+      const registryResponse = handleUIRegistryRequest(
+        new Request(componentsJson.registries.farm.url.replace("{name}", component)),
+      );
+      assert.equal(registryResponse.status, 200, `${component} is not served by the registry`);
+      const registryItem = await registryResponse.json();
+      assert.equal(registryItem.name, component);
+      assert.equal(registryItem.type, "registry:ui");
+      const installed = await readFile(
+        path.join(root, "src/components/ui", `${component}.tsx`),
+        "utf8",
+      );
+      // The install resolves the `@/lib/utils` alias to a relative import; the
+      // registry item keeps the alias for the shadcn CLI to resolve.
+      assert.equal(
+        registryItem.files[0].content,
+        installed.replace(/from "(?:\.\.\/)+lib\/utils"/g, 'from "@/lib/utils"'),
+      );
+    }
     assert.deepEqual(tsconfig.compilerOptions.paths["@/*"], ["./src/*"]);
     assert.match(globals, /--color-background/);
     assert.match(globals, /^@import "tailwindcss";/);

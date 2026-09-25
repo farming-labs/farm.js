@@ -20,6 +20,33 @@ farm add integration better-auth --ui
 farm add integration jobs-trigger --ui
 ```
 
+## Registry endpoint
+
+`farm add integration --ui` writes a `components.json` that registers Farm as a shadcn registry:
+
+```json
+{
+  "registries": {
+    "farm": {
+      "url": "https://farmjs.dev/r/{name}.json"
+    }
+  }
+}
+```
+
+That url serves [shadcn registry items](https://ui.shadcn.com/schema/registry-item.json) for the base primitives Farm installs, so the shadcn CLI can pull one on its own:
+
+**Terminal**
+
+```bash
+npx shadcn@latest add @farm/button
+curl https://farmjs.dev/r/button.json
+```
+
+The registry serves `badge`, `button`, `card`, `input`, and `label`. Every item is the same component source `farm add integration --ui` writes into `src/components/ui`, and each keeps the `@/lib/utils` alias for the shadcn CLI to resolve against the consuming app's `components.json`. Any other name answers `404` with the list of items the registry does serve.
+
+Feature components such as the generated billing or auth panels are not served from the registry. They are installed by the CLI because they wire up a specific integration's typed API.
+
 ## Registry principles
 
 - Base components follow shadcn conventions.

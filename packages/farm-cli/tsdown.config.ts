@@ -7,6 +7,7 @@ export default defineConfig({
     build: "src/build.ts",
     "add-integration": "src/add-integration.ts",
     telemetry: "src/telemetry.ts",
+    "ui-registry": "src/ui-registry.ts",
   },
   format: ["cjs", "esm"],
   // DTS generation is disabled here due a rolldown dts runtime-symbol failure.
