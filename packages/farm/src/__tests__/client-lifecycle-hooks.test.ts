@@ -91,6 +91,47 @@ it("isolates throwing and rejecting shared observers without waiting on them", a
   expect((await never.apiClient.value.get()).data).toEqual({ value: 2 });
 });
 
+it("isolates every per-call lifecycle observer from request settlement", async () => {
+  const report = vi.fn();
+  vi.stubGlobal("reportError", report);
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ value: 1 }))
+    .mockResolvedValueOnce(Response.json({}, { status: 503 }));
+  const { apiClient } = createApiClients<Router>({ fetch });
+
+  const success = await apiClient.value.get(
+    {},
+    {
+      onStatus: () => {
+        throw new Error("status failed");
+      },
+      onRequest: async () => {
+        throw new Error("request failed");
+      },
+      onSuccess: () => {
+        throw new Error("success failed");
+      },
+      onSettled: async () => {
+        throw new Error("settled failed");
+      },
+    },
+  );
+  const failure = await apiClient.value.get(
+    {},
+    {
+      onError: () => {
+        throw new Error("error failed");
+      },
+    },
+  );
+
+  expect(success).toMatchObject({ data: { value: 1 }, error: null });
+  expect(failure.error).toMatchObject({ status: 503 });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  await vi.waitFor(() => expect(report).toHaveBeenCalledTimes(6));
+});
+
 it.each(["client", "server"] as const)(
   "composes integration %s hooks with response metadata",
   async (side) => {
