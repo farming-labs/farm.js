@@ -456,6 +456,49 @@ describe("server cache primitives", () => {
     });
   });
 
+  it("reports lease release failures without replacing a successful fill", async () => {
+    const events: FarmEvent[] = [];
+    configureFarmObservability({ onEvent: (event) => events.push(event) });
+    const adapter = new TestSharedCacheAdapter();
+    const releaseError = new Error("lease release failed");
+    vi.spyOn(adapter, "releaseLease").mockRejectedValue(releaseError);
+    const cache = new FarmDataCache({ adapter, namespace: "release-success" });
+
+    await expect(cache.getOrSet("products", async () => ({ ok: true }))).resolves.toEqual({
+      ok: true,
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "cache.error",
+        key: "products",
+        operation: "set",
+        error: releaseError,
+      }),
+    );
+  });
+
+  it("preserves the producer error when lease release also fails", async () => {
+    const events: FarmEvent[] = [];
+    configureFarmObservability({ onEvent: (event) => events.push(event) });
+    const adapter = new TestSharedCacheAdapter();
+    const producerError = new Error("producer failed");
+    const releaseError = new Error("lease release failed");
+    vi.spyOn(adapter, "releaseLease").mockRejectedValue(releaseError);
+    const cache = new FarmDataCache({ adapter, namespace: "release-error" });
+
+    await expect(
+      cache.getOrSet("products", async () => {
+        throw producerError;
+      }),
+    ).rejects.toBe(producerError);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "cache.error", error: releaseError }),
+        expect.objectContaining({ type: "cache.error", error: producerError }),
+      ]),
+    );
+  });
+
   it("does not return an entry from an adapter retired during lookup", async () => {
     const firstAdapter = new TestSharedCacheAdapter();
     const secondAdapter = new TestSharedCacheAdapter();
