@@ -92,6 +92,8 @@ export default defineConfig({
 
 The configured route serves a Scalar-powered reference page with the generated spec embedded in the page. The route can be visited during development and included in production docs.
 
+Farm pins the Scalar browser assets to the reviewed version shipped with the framework and verifies CDN responses with subresource integrity. Scalar upgrades therefore arrive with Farm releases instead of floating independently in production.
+
 **Terminal**
 
 ```bash

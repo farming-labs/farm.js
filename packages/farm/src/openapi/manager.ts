@@ -1,6 +1,7 @@
 import { OpenAPIGenerator, type OpenAPISpec } from "./generator";
 import { APITypeGenerator } from "../type-generator";
 import type { OpenAPIConfig } from "../config";
+import { SCALAR_API_REFERENCE_SCRIPT } from "./scalar-assets";
 
 function escapeHTML(value: string): string {
   return value
@@ -26,7 +27,11 @@ export function renderOpenAPIReferenceHTML(spec: OpenAPISpec, config: OpenAPICon
       id="api-reference"
       data-url="data:application/json;base64,${Buffer.from(JSON.stringify(spec)).toString("base64")}"
     ></script>
-    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+    <script
+      src="${SCALAR_API_REFERENCE_SCRIPT.url}"
+      integrity="${SCALAR_API_REFERENCE_SCRIPT.integrity}"
+      crossorigin="anonymous"
+    ></script>
   </body>
 </html>
     `;
