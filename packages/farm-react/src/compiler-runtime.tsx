@@ -3337,7 +3337,7 @@ function updateAttribute(element: Element, name: string, value: unknown): void {
 type CompilerBlockRefresh = (afterCommit?: () => void, dirtyState?: ReadonlySet<number>) => void;
 
 export interface CompilerRuntimeFeatureOwner {
-  setRoot(id: number, root: Element | null): void;
+  setRoot(id: number, root: Element | null, expectedRoot?: Element | null): void;
   subscribe(id: number, refresh: CompilerBlockRefresh): () => void;
 }
 
@@ -3348,7 +3348,7 @@ export interface CompilerRuntimeFeature {
 }
 
 interface ConditionalBlockOwner {
-  setRoot(id: number, root: Element | null): void;
+  setRoot(id: number, root: Element | null, expectedRoot?: Element | null): void;
   subscribe(id: number, refresh: CompilerBlockRefresh): () => void;
 }
 
@@ -3359,9 +3359,20 @@ function createConditionalBlockComponent(
     static displayName = "FarmCompiledConditionalBlock";
 
     private unsubscribe: (() => void) | undefined;
+    private root: Element | null = null;
+    private rootId: number | undefined;
 
     private captureRoot = (root: Element | null) => {
+      const previousRoot = this.root;
+      const previousId = this.rootId;
+      this.root = root;
+      if (!root) {
+        if (previousId !== undefined) owner.setRoot(previousId, null, previousRoot);
+        this.rootId = undefined;
+        return;
+      }
       owner.setRoot(this.props.id, root);
+      this.rootId = this.props.id;
     };
 
     private refresh = (afterCommit?: () => void) => {
@@ -3379,7 +3390,11 @@ function createConditionalBlockComponent(
     componentDidUpdate(previous: CompilerConditionalBlockProps): void {
       if (previous.id === this.props.id) return;
       this.unsubscribe?.();
-      owner.setRoot(previous.id, null);
+      if (this.root && this.rootId !== this.props.id) {
+        if (this.rootId !== undefined) owner.setRoot(this.rootId, null, this.root);
+        owner.setRoot(this.props.id, this.root);
+        this.rootId = this.props.id;
+      }
       this.subscribe();
     }
 
@@ -11051,7 +11066,7 @@ export function createCompiledComponentWithFeatures<Props>(
         };
       });
       const featureOwner: CompilerRuntimeFeatureOwner = {
-        setRoot: (id, root) => this.setBlockRoot(id, root),
+        setRoot: (id, root, expectedRoot) => this.setBlockRoot(id, root, expectedRoot),
         subscribe: (id, refresh) => this.subscribeToBlock(id, refresh),
       };
       const blockRuntime: Partial<CompilerBlockRuntime> = {
@@ -11246,8 +11261,9 @@ export function createCompiledComponentWithFeatures<Props>(
       snapshot.element.setSelectionRange(snapshot.start, snapshot.end, snapshot.direction);
     }
 
-    private setBlockRoot(id: number, root: Element | null): void {
+    private setBlockRoot(id: number, root: Element | null, expectedRoot?: Element | null): void {
       const previous = this.blockRoots.get(id);
+      if (!root && expectedRoot !== undefined && previous !== expectedRoot) return;
       if (previous) this.blockRootElements.delete(previous);
       if (root) {
         this.blockRoots.set(id, root);

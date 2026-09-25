@@ -23,22 +23,22 @@ is enforced on every pull request instead of serving only as a manually recorded
 
 | Fixture                                           | Compiler off gzip | Compiler on gzip | Compiler premium |
 | ------------------------------------------------- | ----------------: | ---------------: | ---------------: |
-| Direct text, attribute, style, and event bindings |          60,043 B |         63,697 B |          3,654 B |
-| Keyed rows, LIS, scalar, Set, and Map targeting   |          60,179 B |         71,554 B |         11,375 B |
-| Keyed rows with append hints                      |          60,085 B |         71,867 B |         11,782 B |
-| Keyed rows with prepend hints                     |          60,087 B |         72,220 B |         12,133 B |
-| Keyed rows with removal + prepend hints           |          60,114 B |         73,616 B |         13,502 B |
-| Keyed rows with filter hints                      |          60,088 B |         72,528 B |         12,440 B |
-| Keyed rows with slice hints                       |          60,075 B |         72,561 B |         12,486 B |
-| Keyed rows with known-position hints              |          60,076 B |         72,492 B |         12,416 B |
-| Keyed rows with batch-position hints              |          60,091 B |         72,669 B |         12,578 B |
-| Keyed rows with exact-window hints                |          60,124 B |         74,430 B |         14,306 B |
-| Keyed rows with reverse hints                     |          60,058 B |         72,272 B |         12,214 B |
-| Keyed rows with sort hints                        |          60,077 B |         72,315 B |         12,238 B |
-| Keyed rows with rolling-window hints              |          60,108 B |         73,468 B |         13,360 B |
+| Direct text, attribute, style, and event bindings |          60,043 B |         63,733 B |          3,690 B |
+| Keyed rows, LIS, scalar, Set, and Map targeting   |          60,179 B |         71,576 B |         11,397 B |
+| Keyed rows with append hints                      |          60,085 B |         71,885 B |         11,800 B |
+| Keyed rows with prepend hints                     |          60,087 B |         72,244 B |         12,157 B |
+| Keyed rows with removal + prepend hints           |          60,114 B |         73,634 B |         13,520 B |
+| Keyed rows with filter hints                      |          60,088 B |         72,547 B |         12,459 B |
+| Keyed rows with slice hints                       |          60,075 B |         72,578 B |         12,503 B |
+| Keyed rows with known-position hints              |          60,076 B |         72,511 B |         12,435 B |
+| Keyed rows with batch-position hints              |          60,091 B |         72,689 B |         12,598 B |
+| Keyed rows with exact-window hints                |          60,124 B |         74,448 B |         14,324 B |
+| Keyed rows with reverse hints                     |          60,058 B |         72,289 B |         12,231 B |
+| Keyed rows with sort hints                        |          60,077 B |         72,333 B |         12,256 B |
+| Keyed rows with rolling-window hints              |          60,108 B |         73,483 B |         13,375 B |
 
-The isolated compatibility runtime contributes 25,636 B gzip over the React control. The
-compiler-selected core contributes 3,750 B, an **85.4% reduction**. This comparison uses the same
+The isolated compatibility runtime contributes 25,718 B gzip over the React control. The
+compiler-selected core contributes 3,768 B, an **85.3% reduction**. This comparison uses the same
 hand-authored compiled definition and changes only the runtime entry used to create it.
 
 The keyed fixture retains `FarmCompiledKeyedRows` plus compiler-emitted `identityTarget`,
@@ -48,10 +48,10 @@ fixtures prove that recognized functional updates retain only the matching hinte
 removal-plus-prepend fixture retains its composed capability without changing the prepend-only or
 structural-append bundles. Slice reuses the filter removal capability. Position-only, batch-position, exact-window, and
 rolling-window modules select separate hint runtimes only when the compiler emits those update
-shapes. Reverse and sort share the optional reorder capability; the direct and isolated core
-results remain byte-for-byte unchanged. Over the ordinary keyed fixture, position pays 1,041 B
-gzip, batch-position pays 1,203 B, exact-window pays 2,931 B, reverse pays 839 B, sort pays 863 B,
-slice pays 1,111 B, and rolling-window pays 1,985 B. The exact-window figure includes fresh-key
+shapes. Reverse and sort share the optional reorder capability; the direct and isolated core still
+omit that optional code. Over the ordinary keyed fixture, position pays 1,038 B
+gzip, batch-position pays 1,201 B, exact-window pays 2,927 B, reverse pays 834 B, sort pays 859 B,
+slice pays 1,106 B, and rolling-window pays 1,978 B. The exact-window figure includes fresh-key
 replacement, atomic same-key binding refresh, fixed- and variable-length window-local keyed reuse
 with LIS movement, queued same-key window composition, disjoint queued fresh-key replacement, and
 queued disjoint variable-length local-key reuse.

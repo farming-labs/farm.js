@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createCompiledComponent } from "../compiler-runtime";
+import { createCompiledComponent, type CompiledComponentDefinition } from "../compiler-runtime";
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -255,6 +255,73 @@ describe("compiled React conditional block runtime", () => {
 
     expect(container.querySelector("[data-strict='ready']")?.textContent).toBe("Ready");
     expect(executions).toBe(initialExecutions);
+  });
+
+  it("keeps direct binding paths outside a retained block after Fast Refresh renumbers it", async () => {
+    const hmrId = `conditional-root-refresh-${Math.random()}`;
+    const definition = (
+      prefix: string,
+      blockId: number,
+    ): CompiledComponentDefinition<Record<string, never>> => ({
+      displayName: "ConditionalRootRefresh",
+      hmrId,
+      stateSignature: "2",
+      initialize: () => [true, "Initial"],
+      render(_props, state, blocks) {
+        const Conditional = blocks.Conditional;
+        return (
+          <main>
+            <Conditional
+              id={blockId}
+              render={() => (
+                <section>
+                  <span>Retained branch</span>
+                </section>
+              )}
+            />
+            <output>
+              {prefix}
+              {String(state[1].get())}
+            </output>
+            <button onClick={() => state[1].set("Updated")}>Update</button>
+          </main>
+        );
+      },
+      bindings: [
+        { kind: "block" as const, id: blockId, dependencies: [0] },
+        {
+          kind: "text" as const,
+          path: [0],
+          dependencies: [1],
+          read: (_props, state) => `${prefix}${String(state[1].get())}`,
+        },
+      ],
+    });
+
+    const Initial = createCompiledComponent(definition("Before: ", 0));
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Initial />));
+    const branch = container.querySelector("section")!;
+
+    await act(async () => {
+      const Updated = createCompiledComponent(definition("After: ", 1));
+      expect(Updated).toBe(Initial);
+      await Promise.resolve();
+    });
+    expect(container.querySelector("section")).toBe(branch);
+    expect(branch.textContent).toBe("Retained branch");
+    expect(container.querySelector("output")?.textContent).toBe("After: Initial");
+
+    await act(async () => {
+      click(container, "button");
+      await Promise.resolve();
+    });
+    expect(container.querySelector("section")).toBe(branch);
+    expect(branch.textContent).toBe("Retained branch");
+    expect(container.querySelector("output")?.textContent).toBe("After: Updated");
   });
 
   it("drops a queued conditional refresh after the component unmounts", async () => {
