@@ -833,15 +833,21 @@ function createAPIClientRuntime<
       const now = Date.now();
 
       const emitStatus = (phase: StatusPhase, payload?: Partial<StatusEvent>) => {
-        clientOptions?.onStatus?.({
-          phase,
-          requestId,
-          method: methodUpper,
-          key: cacheKey,
-          input,
-          timestamp: Date.now(),
-          ...payload,
-        });
+        notifyClientObserver(
+          clientOptions?.onStatus,
+          [
+            {
+              phase,
+              requestId,
+              method: methodUpper,
+              key: cacheKey,
+              input,
+              timestamp: Date.now(),
+              ...payload,
+            },
+          ],
+          "API client onStatus",
+        );
       };
 
       const policy = cacheOptions?.policy ?? (cacheOptions ? "cache-first" : "network-only");
@@ -1011,12 +1017,16 @@ function createAPIClientRuntime<
               emitStatus("error", { error: result.error, isBackground: opts?.isBackground });
               notifyClientObserver(options.onError, [result.error]);
               if (opts?.callCallbacks !== false) {
-                clientOptions?.onError?.(result.error);
+                notifyClientObserver(clientOptions?.onError, [result.error], "API client onError");
               }
             } else {
               emitStatus("success", { data: result.data, isBackground: opts?.isBackground });
               if (opts?.callCallbacks !== false) {
-                clientOptions?.onSuccess?.(result.data as any);
+                notifyClientObserver(
+                  clientOptions?.onSuccess,
+                  [result.data],
+                  "API client onSuccess",
+                );
               }
             }
 
@@ -1058,7 +1068,11 @@ function createAPIClientRuntime<
                   timestamp: Date.now(),
                 };
                 notifyClientObserver(options.onRequest, [requestEvent]);
-                clientOptions?.onRequest?.(requestEvent);
+                notifyClientObserver(
+                  clientOptions?.onRequest,
+                  [requestEvent],
+                  "API client onRequest",
+                );
               }
 
               try {
@@ -1206,12 +1220,16 @@ function createAPIClientRuntime<
               emitStatus("error", { error: result.error, isBackground: opts?.isBackground });
               notifyClientObserver(options.onError, [result.error]);
               if (opts?.callCallbacks !== false) {
-                clientOptions?.onError?.(result.error);
+                notifyClientObserver(clientOptions?.onError, [result.error], "API client onError");
               }
             } else {
               emitStatus("success", { data: result.data, isBackground: opts?.isBackground });
               if (opts?.callCallbacks !== false) {
-                clientOptions?.onSuccess?.(result.data as any);
+                notifyClientObserver(
+                  clientOptions?.onSuccess,
+                  [result.data],
+                  "API client onSuccess",
+                );
               }
             }
 
@@ -1288,15 +1306,23 @@ function createAPIClientRuntime<
       if (isCacheEnabled && !requestContextError && !cancellation.signal?.aborted) {
         if (entry && !isStale && policy !== "network-only") {
           emitStatus("success", { data: entry.data });
-          clientOptions?.onSuccess?.(entry.data);
-          clientOptions?.onSettled?.(entry.data, null);
+          notifyClientObserver(clientOptions?.onSuccess, [entry.data], "API client onSuccess");
+          notifyClientObserver(
+            clientOptions?.onSettled,
+            [entry.data, null],
+            "API client onSettled",
+          );
           return { data: entry.data, error: null, key: cacheKey };
         }
 
         if (entry && isStale && policy === "stale-while-revalidate") {
           emitStatus("success", { data: entry.data });
-          clientOptions?.onSuccess?.(entry.data);
-          clientOptions?.onSettled?.(entry.data, null);
+          notifyClientObserver(clientOptions?.onSuccess, [entry.data], "API client onSuccess");
+          notifyClientObserver(
+            clientOptions?.onSettled,
+            [entry.data, null],
+            "API client onSettled",
+          );
 
           void executeNetwork({ isBackground: true, callCallbacks: false });
           return { data: entry.data, error: null, key: cacheKey };
@@ -1315,7 +1341,11 @@ function createAPIClientRuntime<
         settleOptimisticUpdates(cacheState, optimisticState, optimisticSnapshots, "commit");
         await invalidateTargets();
       }
-      clientOptions?.onSettled?.(result.data, result.error);
+      notifyClientObserver(
+        clientOptions?.onSettled,
+        [result.data, result.error],
+        "API client onSettled",
+      );
       return result;
     } finally {
       cancellation.dispose();

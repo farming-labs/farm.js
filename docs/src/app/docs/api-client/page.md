@@ -622,6 +622,8 @@ callbacks under `request` still receive only API-client errors, not local mappin
 - optimistic: update cached query data before the server response returns.
 - onRequest, onResponse, onSuccess, onError, onSettled, and onStatus: observe the full client lifecycle.
 
+Lifecycle callbacks are non-awaited observers. Farm reports synchronous throws and rejected promises without changing the request result, retry decision, optimistic update, or settlement.
+
 `onResponse` is a transport observer. If it throws or returns a rejected promise, Farm reports that
 failure through the platform `reportError` hook (or the console fallback) without retrying or
 changing the completed API result.
