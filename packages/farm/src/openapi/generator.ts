@@ -1,6 +1,5 @@
 import type { OpenAPIConfig } from "../config";
 import type { APIRouteInfo } from "../type-generator";
-import * as z from "zod";
 
 export interface OpenAPISpec {
   openapi: string;
@@ -31,6 +30,46 @@ export interface OpenAPISpec {
 
 type AllowedType = "string" | "number" | "boolean" | "array" | "object";
 const allowedType = new Set(["string", "number", "boolean", "array", "object"]);
+const zodTypeNameKinds: Record<string, string> = {
+  ZodArray: "array",
+  ZodBoolean: "boolean",
+  ZodDefault: "default",
+  ZodEnum: "enum",
+  ZodLiteral: "literal",
+  ZodNullable: "nullable",
+  ZodNumber: "number",
+  ZodObject: "object",
+  ZodOptional: "optional",
+  ZodRecord: "record",
+  ZodString: "string",
+  ZodTuple: "tuple",
+  ZodUnion: "union",
+};
+
+function getZodKind(schema: unknown): string | undefined {
+  if (!schema || typeof schema !== "object") return undefined;
+  const definition = (schema as any)._def;
+  if (!definition || typeof definition !== "object") return undefined;
+  if (typeof definition.type === "string") return definition.type;
+  return typeof definition.typeName === "string"
+    ? zodTypeNameKinds[definition.typeName]
+    : undefined;
+}
+
+function getZodObjectShape(schema: unknown): Record<string, unknown> | undefined {
+  if (getZodKind(schema) !== "object") return undefined;
+  const candidate = (schema as any).shape ?? (schema as any)._def?.shape;
+  const shape = typeof candidate === "function" ? candidate() : candidate;
+  return shape && typeof shape === "object" ? shape : undefined;
+}
+
+function isStandardSchema(schema: unknown): boolean {
+  return (
+    !!schema &&
+    typeof schema === "object" &&
+    typeof (schema as any)["~standard"]?.validate === "function"
+  );
+}
 
 /**
  * OpenAPI `type` for a literal's value(s). A single-type literal keeps its JS
@@ -65,8 +104,8 @@ export class OpenAPIGenerator {
   /**
    * Get type from Zod type
    */
-  private getTypeFromZodType(zodType: z.ZodType<any>): AllowedType {
-    const tag = (zodType as any)._def?.type;
+  private getTypeFromZodType(zodType: unknown): AllowedType {
+    const tag = getZodKind(zodType);
     return typeof tag === "string" && allowedType.has(tag) ? (tag as AllowedType) : "string";
   }
 
@@ -76,17 +115,27 @@ export class OpenAPIGenerator {
    * optional field — it is not required. Only ZodOptional was excluded before,
    * which documented every `.default()` field as required.
    */
-  private isRequiredField(value: z.ZodType<any>): boolean {
-    return !(value instanceof z.ZodOptional) && !(value instanceof z.ZodDefault);
+  private isRequiredField(value: unknown): boolean {
+    const kind = getZodKind(value);
+    return kind !== "optional" && kind !== "default";
   }
 
   /**
    * Process Zod type to OpenAPI schema
    */
-  private processZodType(zodType: z.ZodType<any>): any {
+  private processZodType(zodType: unknown): any {
+    const kind = getZodKind(zodType);
+    const definition = (zodType as any)?._def;
+
+    if (!kind) {
+      return isStandardSchema(zodType)
+        ? { description: "Schema metadata is unavailable for this Standard Schema validator." }
+        : { description: "Schema metadata is unavailable." };
+    }
+
     // Handle ZodOptional and ZodNullable
-    if (zodType instanceof z.ZodOptional || zodType instanceof z.ZodNullable) {
-      const innerType = (zodType as any)._def.innerType;
+    if (kind === "optional" || kind === "nullable") {
+      const innerType = definition.innerType;
       const innerSchema = this.processZodType(innerType);
       return {
         ...innerSchema,
@@ -96,20 +145,20 @@ export class OpenAPIGenerator {
 
     // Handle ZodDefault. The value is always present after parsing, so the
     // documented type is the wrapped one.
-    if (zodType instanceof z.ZodDefault) {
-      return this.processZodType((zodType as any)._def.innerType);
+    if (kind === "default") {
+      return this.processZodType(definition.innerType);
     }
 
     // Handle ZodObject
-    if (zodType instanceof z.ZodObject) {
-      const shape = (zodType as any).shape;
+    if (kind === "object") {
+      const shape = getZodObjectShape(zodType);
       if (shape) {
         const properties: Record<string, any> = {};
         const required: string[] = [];
         Object.entries(shape).forEach(([key, value]) => {
-          if (value instanceof z.ZodType) {
-            properties[key] = this.processZodType(value as z.ZodType<any>);
-            if (this.isRequiredField(value as z.ZodType<any>)) {
+          if (getZodKind(value) || isStandardSchema(value)) {
+            properties[key] = this.processZodType(value);
+            if (this.isRequiredField(value)) {
               required.push(key);
             }
           }
@@ -124,27 +173,33 @@ export class OpenAPIGenerator {
     }
 
     // Handle ZodArray
-    if (zodType instanceof z.ZodArray) {
+    if (kind === "array") {
       return {
         type: "array",
-        items: this.processZodType((zodType as any)._def.element),
+        items: this.processZodType(
+          definition.element ?? (typeof definition.type === "object" ? definition.type : undefined),
+        ),
         description: (zodType as any).description,
       };
     }
 
     // Handle ZodEnum
-    if (zodType instanceof z.ZodEnum) {
+    if (kind === "enum") {
+      const options =
+        (zodType as any).options ??
+        (definition.entries ? Object.values(definition.entries) : definition.values);
       return {
         type: "string",
-        enum: (zodType as any).options,
+        enum: options,
         description: (zodType as any).description,
       };
     }
 
     // Handle ZodLiteral: emit the concrete value(s) as an enum rather than
     // dropping the constraint and documenting a bare string.
-    if (zodType instanceof z.ZodLiteral) {
-      const values = ((zodType as any)._def.values as unknown[]) ?? [];
+    if (kind === "literal") {
+      const values = (definition.values as unknown[]) ??
+        (Object.prototype.hasOwnProperty.call(definition, "value") ? [definition.value] : []);
       return {
         type: openAPITypeForLiteralValues(values),
         ...(values.length > 0 ? { enum: [...values] } : {}),
@@ -153,8 +208,8 @@ export class OpenAPIGenerator {
     }
 
     // Handle ZodUnion (including discriminated unions): oneOf over the members.
-    if (zodType instanceof z.ZodUnion) {
-      const options = ((zodType as any)._def.options as z.ZodType<any>[]) ?? [];
+    if (kind === "union") {
+      const options = (definition.options as unknown[]) ?? [];
       return {
         oneOf: options.map((option) => this.processZodType(option)),
         description: (zodType as any).description,
@@ -162,10 +217,10 @@ export class OpenAPIGenerator {
     }
 
     // Handle ZodRecord: an object whose values share a schema.
-    if (zodType instanceof z.ZodRecord) {
+    if (kind === "record") {
       return {
         type: "object",
-        additionalProperties: this.processZodType((zodType as any)._def.valueType),
+        additionalProperties: this.processZodType(definition.valueType),
         description: (zodType as any).description,
       };
     }
@@ -173,9 +228,9 @@ export class OpenAPIGenerator {
     // Handle ZodTuple: a fixed-length (unless variadic) array. OpenAPI 3.0 has no
     // positional items, so the element schemas are unioned; the length is pinned
     // when there is no rest element.
-    if (zodType instanceof z.ZodTuple) {
-      const items = ((zodType as any)._def.items as z.ZodType<any>[]) ?? [];
-      const rest = (zodType as any)._def.rest;
+    if (kind === "tuple") {
+      const items = (definition.items as unknown[]) ?? [];
+      const rest = definition.rest;
       const itemSchemas = items.map((item) => this.processZodType(item));
       const tupleSchema: any = {
         type: "array",
@@ -205,6 +260,13 @@ export class OpenAPIGenerator {
       ["minimum", (zodType as any).minValue],
       ["maximum", (zodType as any).maxValue],
     ];
+    for (const check of definition.checks ?? []) {
+      if (check?.kind === "min") {
+        constraints.push([kind === "string" ? "minLength" : "minimum", check.value]);
+      } else if (check?.kind === "max") {
+        constraints.push([kind === "string" ? "maxLength" : "maximum", check.value]);
+      }
+    }
     for (const [key, value] of constraints) {
       // Zod 4's .int() implies bounds of +/-Number.MAX_SAFE_INTEGER; those are
       // implementation details of the safe-integer range, not author-declared
@@ -436,73 +498,16 @@ export class OpenAPIGenerator {
       // Get the method handler (GET, POST, etc.)
       const handler = routeModule[method];
 
-      // Check for Farm.js endpoint format: handler.__types.body
-      if (handler && handler.__types && handler.__types.body) {
-        const bodySchema = handler.__types.body;
-
-        if (bodySchema instanceof z.ZodObject || bodySchema instanceof z.ZodOptional) {
-          const shape = (bodySchema as any).shape || (bodySchema as any)._def?.innerType?.shape;
-          if (shape) {
-            const properties: Record<string, any> = {};
-            const required: string[] = [];
-
-            Object.entries(shape).forEach(([key, value]) => {
-              if (value instanceof z.ZodType) {
-                properties[key] = this.processZodType(value as z.ZodType<any>);
-                if (this.isRequiredField(value as z.ZodType<any>)) {
-                  required.push(key);
-                }
-              }
-            });
-            return {
-              required: bodySchema instanceof z.ZodOptional ? false : true,
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    properties,
-                    ...(required.length > 0 ? { required } : {}),
-                  },
-                },
-              },
-            };
-          }
-        }
-      }
-
-      // Fallback: Check for better-call format: handler._type.body
-      if (handler && handler._type && handler._type.body) {
-        const bodySchema = handler._type.body;
-
-        if (bodySchema instanceof z.ZodObject || bodySchema instanceof z.ZodOptional) {
-          const shape = (bodySchema as any).shape || (bodySchema as any)._def?.innerType?.shape;
-          if (shape) {
-            const properties: Record<string, any> = {};
-            const required: string[] = [];
-
-            Object.entries(shape).forEach(([key, value]) => {
-              if (value instanceof z.ZodType) {
-                properties[key] = this.processZodType(value as z.ZodType<any>);
-                if (this.isRequiredField(value as z.ZodType<any>)) {
-                  required.push(key);
-                }
-              }
-            });
-
-            return {
-              required: bodySchema instanceof z.ZodOptional ? false : true,
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    properties,
-                    ...(required.length > 0 ? { required } : {}),
-                  },
-                },
-              },
-            };
-          }
-        }
+      const bodySchema = handler?.__types?.body ?? handler?._type?.body;
+      if (bodySchema) {
+        return {
+          required: this.isRequiredField(bodySchema),
+          content: {
+            "application/json": {
+              schema: this.processZodType(bodySchema),
+            },
+          },
+        };
       }
     } catch (error) {
       // If we can't load the module, return generic schema
@@ -537,40 +542,19 @@ export class OpenAPIGenerator {
       // Get the method handler
       const handler = routeModule[method];
 
-      // Check for Farm.js endpoint format: handler.__types.query
-      if (handler && handler.__types && handler.__types.query) {
-        const querySchema = handler.__types.query;
-
-        if (querySchema instanceof z.ZodObject) {
-          Object.entries((querySchema as any).shape).forEach(([key, value]) => {
-            if (value instanceof z.ZodType) {
-              parameters.push({
-                name: key,
-                in: "query",
-                required: this.isRequiredField(value as z.ZodType<any>),
-                schema: this.processZodType(value as z.ZodType<any>),
-              });
-            }
-          });
-        }
-      }
-
-      // Fallback: Check for better-call format: handler._type.query
-      if (handler && handler._type && handler._type.query) {
-        const querySchema = handler._type.query;
-
-        if (querySchema instanceof z.ZodObject) {
-          Object.entries((querySchema as any).shape).forEach(([key, value]) => {
-            if (value instanceof z.ZodType) {
-              parameters.push({
-                name: key,
-                in: "query",
-                required: this.isRequiredField(value as z.ZodType<any>),
-                schema: this.processZodType(value as z.ZodType<any>),
-              });
-            }
-          });
-        }
+      const querySchema = handler?.__types?.query ?? handler?._type?.query;
+      const shape = getZodObjectShape(querySchema);
+      if (shape) {
+        Object.entries(shape).forEach(([key, value]) => {
+          if (getZodKind(value) || isStandardSchema(value)) {
+            parameters.push({
+              name: key,
+              in: "query",
+              required: this.isRequiredField(value),
+              schema: this.processZodType(value),
+            });
+          }
+        });
       }
     } catch (error) {
       console.warn(`Could not extract query params from ${route.filePath}:`, error);
