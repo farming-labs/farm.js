@@ -1,4 +1,5 @@
 import React from "react";
+import { SCALAR_API_REFERENCE_SCRIPT, SCALAR_API_REFERENCE_STYLES } from "./scalar-assets";
 
 interface ScalarAPIDocumentationProps {
   spec: any;
@@ -13,38 +14,40 @@ interface ScalarAPIDocumentationProps {
 
 export function ScalarAPIDocumentation({ spec, config = {} }: ScalarAPIDocumentationProps) {
   const [isLoaded, setIsLoaded] = React.useState(false);
+  const scalar = React.useRef<{ destroy(): void } | null>(null);
 
   React.useEffect(() => {
-    // Dynamically import Scalar components
-    const loadScalar = async () => {
-      try {
-        // Load Scalar CSS
-        const cssLink = document.createElement("link");
-        cssLink.rel = "stylesheet";
-        cssLink.href = "https://cdn.jsdelivr.net/npm/@scalar/api-reference@latest/dist/style.css";
-        document.head.appendChild(cssLink);
+    const cssLink = document.createElement("link");
+    cssLink.rel = "stylesheet";
+    cssLink.href = SCALAR_API_REFERENCE_STYLES.url;
+    cssLink.integrity = SCALAR_API_REFERENCE_STYLES.integrity;
+    cssLink.crossOrigin = "anonymous";
+    document.head.appendChild(cssLink);
 
-        // Load Scalar JS
-        const script = document.createElement("script");
-        script.src =
-          "https://cdn.jsdelivr.net/npm/@scalar/api-reference@latest/dist/browser/standalone.js";
-        script.onload = () => setIsLoaded(true);
-        document.head.appendChild(script);
-      } catch (error) {
-        console.error("Failed to load Scalar:", error);
-      }
+    const script = document.createElement("script");
+    script.src = SCALAR_API_REFERENCE_SCRIPT.url;
+    script.integrity = SCALAR_API_REFERENCE_SCRIPT.integrity;
+    script.crossOrigin = "anonymous";
+    script.onload = () => setIsLoaded(true);
+    script.onerror = () => console.error("Failed to load Scalar API Reference");
+    document.head.appendChild(script);
+
+    return () => {
+      scalar.current?.destroy();
+      scalar.current = null;
+      script.remove();
+      cssLink.remove();
     };
-
-    loadScalar();
   }, []);
 
   React.useEffect(() => {
-    if (isLoaded && window.ScalarApiReference) {
+    if (isLoaded && window.Scalar) {
       // Initialize Scalar
       const container = document.getElementById("scalar-api-reference");
       if (container) {
-        window.ScalarApiReference({
-          spec,
+        scalar.current?.destroy();
+        scalar.current = window.Scalar.createApiReference(container, {
+          content: spec,
           theme: config.theme || "default",
           layout: config.layout || "modern",
           showSidebar: config.showSidebar !== false,
@@ -53,6 +56,11 @@ export function ScalarAPIDocumentation({ spec, config = {} }: ScalarAPIDocumenta
         });
       }
     }
+
+    return () => {
+      scalar.current?.destroy();
+      scalar.current = null;
+    };
   }, [isLoaded, spec, config]);
 
   return (
@@ -65,6 +73,8 @@ export function ScalarAPIDocumentation({ spec, config = {} }: ScalarAPIDocumenta
 // Extend window type for Scalar
 declare global {
   interface Window {
-    ScalarApiReference: (config: any) => void;
+    Scalar?: {
+      createApiReference(element: Element, config: Record<string, unknown>): { destroy(): void };
+    };
   }
 }

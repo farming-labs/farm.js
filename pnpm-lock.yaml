@@ -1920,7 +1920,7 @@ importers:
         specifier: 1.9.1
         version: 1.9.1
       '@scalar/api-reference':
-        specifier: ^1.38.1
+        specifier: 1.38.1
         version: 1.38.1(supports-color@10.2.2)(tailwindcss@4.1.18)(typescript@5.9.3)
       '@scalar/openapi-parser':
         specifier: ^0.22.3

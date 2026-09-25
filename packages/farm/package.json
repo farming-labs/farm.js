@@ -624,7 +624,7 @@
     "@jridgewell/trace-mapping": "0.3.31",
     "@mdx-js/mdx": "^3.1.1",
     "@opentelemetry/api": "1.9.1",
-    "@scalar/api-reference": "^1.38.1",
+    "@scalar/api-reference": "1.38.1",
     "@scalar/openapi-parser": "^0.22.3",
     "@tailwindcss/vite": "4.1.18",
     "@vercel/og": "0.11.1",
