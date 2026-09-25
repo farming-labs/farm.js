@@ -2,6 +2,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  conditionalRuntimeFeature,
   conditionalRangesRuntimeFeature,
   hostConditionalRuntimeFeature,
   keyedRangesRuntimeFeature,
@@ -26,6 +27,92 @@ afterEach(async () => {
 });
 
 describe("structural block lifecycle replay", () => {
+  it("moves retained conditional roots when a compatible definition shifts their block ids", async () => {
+    const rootsById = new Map<number, Element>();
+    const listeners = new Map<number, Parameters<CompilerRuntimeFeatureOwner["subscribe"]>[1]>();
+    const owner: CompilerRuntimeFeatureOwner = {
+      setRoot(id: number, root: Element | null, expectedRoot?: Element | null) {
+        if (!root && expectedRoot !== undefined && rootsById.get(id) !== expectedRoot) return;
+        if (root) rootsById.set(id, root);
+        else rootsById.delete(id);
+      },
+      subscribe(id, refresh) {
+        listeners.set(id, refresh);
+        return () => {
+          if (listeners.get(id) === refresh) listeners.delete(id);
+        };
+      },
+    };
+    const Block = conditionalRuntimeFeature.create(owner).Conditional!;
+    const renderBlocks = (offset: number, replaceRoots = false) => (
+      <main>
+        <Block
+          id={offset}
+          render={() =>
+            replaceRoots ? (
+              <article>
+                <span>First</span>
+              </article>
+            ) : (
+              <section>
+                <span>First</span>
+              </section>
+            )
+          }
+        />
+        <Block
+          id={offset + 1}
+          render={() =>
+            replaceRoots ? (
+              <div>
+                <span>Second</span>
+              </div>
+            ) : (
+              <aside>
+                <span>Second</span>
+              </aside>
+            )
+          }
+        />
+      </main>
+    );
+
+    const target = document.createElement("div");
+    document.body.append(target);
+    const root = createRoot(target);
+    roots.add(root);
+    await act(async () => root.render(renderBlocks(0)));
+    const firstRoot = target.querySelector("section")!;
+    const secondRoot = target.querySelector("aside")!;
+    expect([...rootsById]).toEqual([
+      [0, firstRoot],
+      [1, secondRoot],
+    ]);
+
+    await act(async () => root.render(renderBlocks(1)));
+    expect(target.querySelector("section")).toBe(firstRoot);
+    expect(target.querySelector("aside")).toBe(secondRoot);
+    expect([...rootsById]).toEqual([
+      [1, firstRoot],
+      [2, secondRoot],
+    ]);
+    expect([...listeners.keys()]).toEqual([1, 2]);
+
+    await act(async () => root.render(renderBlocks(2, true)));
+    const replacementFirstRoot = target.querySelector("article")!;
+    const replacementSecondRoot = target.querySelector("main > div")!;
+    expect([...rootsById]).toEqual([
+      [2, replacementFirstRoot],
+      [3, replacementSecondRoot],
+    ]);
+    expect([...listeners.keys()]).toEqual([2, 3]);
+
+    await act(async () => root.unmount());
+    roots.delete(root);
+    expect(rootsById.size).toBe(0);
+    expect(listeners.size).toBe(0);
+  });
+
   it.each(["host", "conditional", "keyed", "rows"] as const)(
     "moves the %s listener when a compatible definition changes its block id",
     async (kind) => {
