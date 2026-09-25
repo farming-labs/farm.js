@@ -344,3 +344,25 @@ async function createOutput() {
 function page(title: string, content: string): string {
   return `<!doctype html><html lang="en"><head><title>${title}</title></head><body><main><h1>${title}</h1><p>${content}</p></main></body></html>`;
 }
+
+describe("route pattern wildcard runs", () => {
+  it("compiles a run of wildcards without catastrophic backtracking", () => {
+    // Each adjacent pair used to emit its own `.*`, so the ways a failing
+    // route could be split between them multiplied and a config with a
+    // handful of consecutive stars hung `farm build` instead of matching.
+    const pattern = `/docs/${"*".repeat(12)}/edit`;
+    const route = `/docs/${"a".repeat(48)}`;
+
+    const started = Date.now();
+    expect(matchesRoutePattern(route, pattern)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it("keeps wildcard semantics: a run crosses separators, a single star does not", () => {
+    expect(matchesRoutePattern("/docs/a/b/edit", "/docs/***/edit")).toBe(true);
+    expect(matchesRoutePattern("/docs/a/b/edit", "/docs/**/edit")).toBe(true);
+    expect(matchesRoutePattern("/docs/a/b/edit", "/docs/*/edit")).toBe(false);
+    expect(matchesRoutePattern("/docs/a/edit", "/docs/*/edit")).toBe(true);
+    expect(matchesRoutePattern("/docs/guide", "/docs/**")).toBe(true);
+  });
+});
