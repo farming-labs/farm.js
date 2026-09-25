@@ -61,6 +61,14 @@ export default {
     // The test serves its generated source asset from an isolated loopback server.
     dangerouslyAllowLocalIP: true,
   },
+  routeRules: {
+    "/api/public/**": {
+      cors: {
+        origin: "https://client.example",
+        methods: ["GET"],
+      },
+    },
+  },
   redirects() {
     return [{ source: "/legacy", destination: "/dashboard", permanent: true }];
   },

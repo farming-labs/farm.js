@@ -95,7 +95,6 @@ describe("buildFarmVercelRoutes", () => {
     const routes = buildFarmVercelRoutes({
       presetRoutes: nitroPresetRoutes(),
       runtimeRoutes: [],
-      apiBasePath: "/",
     });
 
     expect(routes).toContainEqual({
@@ -119,7 +118,6 @@ describe("buildFarmVercelRoutes", () => {
     const routes = buildFarmVercelRoutes({
       presetRoutes: nitroPresetRoutes(),
       runtimeRoutes: [],
-      apiBasePath: "/",
     });
 
     // The preset's over-broad `continue` public-asset route is dropped...
@@ -132,14 +130,13 @@ describe("buildFarmVercelRoutes", () => {
     expect(routes).toContainEqual(createFarmVercelImmutableAssetRoute());
   });
 
-  it("routes runtime, API, and catch-all traffic to the __nitro function", () => {
+  it("routes runtime and catch-all traffic to the __nitro function", () => {
     const runtimeRoutes: FarmVercelRoute[] = [
       { src: "/reports/(.*)", dest: "/__nitro", headers: { "x-farm-route": "reports" } },
     ];
     const routes = buildFarmVercelRoutes({
       presetRoutes: nitroPresetRoutes(),
       runtimeRoutes,
-      apiBasePath: "/api",
     });
 
     // Runtime routes come after the filesystem handler and before the catch-all.
@@ -147,16 +144,10 @@ describe("buildFarmVercelRoutes", () => {
     const runtimeIndex = routes.findIndex((route) => route.src === "/reports/(.*)");
     expect(runtimeIndex).toBeGreaterThan(filesystemIndex);
 
-    // The API CORS route is emitted for a non-root API base path.
-    expect(routes).toContainEqual({
-      src: "/api/(.*)",
-      dest: "/__nitro",
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "*",
-        "Access-Control-Allow-Headers": "*",
-      },
-    });
+    // Same-origin APIs are handled by the catch-all without implicit CORS.
+    expect(routes.some((route) => route.headers?.["Access-Control-Allow-Origin"] === "*")).toBe(
+      false,
+    );
 
     // The last route is Farm's catch-all to its own function, never the preset's
     // /__fallback target.
@@ -164,23 +155,10 @@ describe("buildFarmVercelRoutes", () => {
     expect(routes.some((route) => route.dest === "/__fallback")).toBe(false);
   });
 
-  it("omits the API CORS route when the API is served from the root", () => {
-    const routes = buildFarmVercelRoutes({
-      presetRoutes: nitroPresetRoutes(),
-      runtimeRoutes: [],
-      apiBasePath: "/",
-    });
-
-    expect(routes.some((route) => route.headers?.["Access-Control-Allow-Origin"] === "*")).toBe(
-      false,
-    );
-  });
-
   it("still produces a valid route set when the preset has no filesystem handler", () => {
     const routes = buildFarmVercelRoutes({
       presetRoutes: [{ src: "/only/(.*)", status: 302, headers: { Location: "/elsewhere" } }],
       runtimeRoutes: [],
-      apiBasePath: "/",
     });
 
     // With no filesystem marker, no source routes are preserved (they cannot be

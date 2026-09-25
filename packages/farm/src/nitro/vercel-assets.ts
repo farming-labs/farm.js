@@ -69,9 +69,8 @@ export interface FarmVercelRoute {
 export function buildFarmVercelRoutes(options: {
   presetRoutes: FarmVercelRoute[];
   runtimeRoutes: FarmVercelRoute[];
-  apiBasePath: string;
 }): FarmVercelRoute[] {
-  const { presetRoutes, runtimeRoutes, apiBasePath } = options;
+  const { presetRoutes, runtimeRoutes } = options;
   const filesystemIndex = presetRoutes.findIndex((route) => route.handle === "filesystem");
   const sourceRoutes = filesystemIndex >= 0 ? presetRoutes.slice(0, filesystemIndex) : [];
   // Drop the preset's blanket immutable public-asset routes (the only
@@ -85,19 +84,6 @@ export function buildFarmVercelRoutes(options: {
     createFarmVercelImmutableAssetRoute(),
     { handle: "filesystem" },
     ...runtimeRoutes,
-    ...(apiBasePath === "/"
-      ? []
-      : [
-          {
-            src: `${apiBasePath}/(.*)`,
-            dest: "/__nitro",
-            headers: {
-              "Access-Control-Allow-Origin": "*",
-              "Access-Control-Allow-Methods": "*",
-              "Access-Control-Allow-Headers": "*",
-            },
-          },
-        ]),
     {
       src: "/(.*)",
       dest: "/__nitro",
