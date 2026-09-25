@@ -9709,7 +9709,7 @@ function createKeyedRowsBlockComponent(
 }
 
 function createKeyedRangesBlockComponent(
-  owner: Pick<ConditionalBlockOwner, "subscribe">,
+  owner: Pick<CompilerRuntimeFeatureOwner, "subscribe" | "getDefinitionVersion">,
 ): React.ComponentType<CompilerKeyedRangesBlockProps> {
   interface State {
     fallback: boolean;
@@ -9736,6 +9736,7 @@ function createKeyedRangesBlockComponent(
     private rangeInstances: Array<Map<string, CompilerKeyedRowInstance>> = [];
     private staticSegments: Element[][] = [];
     private readonly staticValues: unknown[] = [];
+    private definitionVersion = owner.getDefinitionVersion?.();
 
     private captureRoot = (root: Element | null) => {
       this.root = root;
@@ -9774,6 +9775,7 @@ function createKeyedRangesBlockComponent(
       const elements = [...this.root.children];
       const staticSegments: Element[][] = [];
       const instancesByRange: Array<Map<string, CompilerKeyedRowInstance>> = [];
+      const staticValues = this.staticValues.slice();
       let cursor = 0;
 
       for (let rangeIndex = 0; rangeIndex < props.ranges.length; rangeIndex += 1) {
@@ -9808,13 +9810,11 @@ function createKeyedRangesBlockComponent(
 
       if (cursor + props.trailing !== elements.length) return false;
       staticSegments.push(elements.slice(cursor));
+      if (!applyStaticRangeBindings(props.bindings, staticSegments, staticValues)) return false;
       this.staticSegments = staticSegments;
       this.rangeInstances = instancesByRange;
-      if (!applyStaticRangeBindings(props.bindings, this.staticSegments, this.staticValues)) {
-        this.rangeInstances = [];
-        this.staticSegments = [];
-        return false;
-      }
+      this.staticValues.length = 0;
+      this.staticValues.push(...staticValues);
       return true;
     }
 
@@ -9964,6 +9964,7 @@ function createKeyedRangesBlockComponent(
     }
 
     shouldComponentUpdate(nextProps: CompilerKeyedRangesBlockProps, nextState: State): boolean {
+      const definitionChanged = this.definitionVersion !== owner.getDefinitionVersion?.();
       this.currentProps = nextProps;
       if (this.state.fallback && nextState.fallback) {
         const unsafeKeys = this.hasUnsafeFallbackKeys();
@@ -9971,9 +9972,10 @@ function createKeyedRangesBlockComponent(
         this.fallbackKeysWereUnsafe = unsafeKeys;
       }
       if (nextState.fallback || this.state.fallback) return true;
-      // Parent props and compatible Fast Refresh definitions can change static
-      // siblings that are deliberately outside the range descriptors. Remount
-      // this one container through React instead of retaining stale markup.
+      if (definitionChanged) return true;
+      // Parent props can change static siblings that are deliberately outside
+      // the range descriptors. Remount this one container through React instead
+      // of retaining stale markup.
       this.schedulePropFallback();
       return false;
     }
@@ -9986,6 +9988,10 @@ function createKeyedRangesBlockComponent(
 
     componentDidUpdate(): void {
       this.listen();
+      const nextDefinitionVersion = owner.getDefinitionVersion?.();
+      const definitionChanged = this.definitionVersion !== nextDefinitionVersion;
+      this.definitionVersion = nextDefinitionVersion;
+      if (!this.state.fallback && definitionChanged && !this.adopt()) this.activateFallback();
     }
 
     componentWillUnmount(): void {
