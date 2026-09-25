@@ -1459,6 +1459,10 @@ function createNestedProxy(
   const proxy = new Proxy(target, {
     // When accessing a property (api.hello)
     get(_target, prop: string | symbol) {
+      // Promise resolution probes arbitrary values for a callable `then`.
+      // Route proxies are not promises; literal /then routes remain available
+      // through the leading-slash alias.
+      if (prop === "then") return undefined;
       if (prop === "$params") {
         return (params: unknown) => {
           if (!manifest)

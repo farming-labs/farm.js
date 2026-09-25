@@ -210,6 +210,26 @@ describe("createAPIClient", () => {
     );
   });
 
+  it("does not let Promise assimilation turn route proxies into /then requests", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ ok: true }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<{
+      users: { get: { __types: { body: never; query: never; response: { ok: true } } } };
+      "/then": { get: { __types: { body: never; query: never; response: { ok: true } } } };
+    }>({ baseURL: "https://api.example.com" });
+    const users = api.users;
+
+    await expect(Promise.resolve(users)).resolves.toBe(users);
+    await expect(Promise.resolve(api)).resolves.toBe(api);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await api["/then"].get();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.com/api/then",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
   it("serializes array query inputs as repeated parameters", async () => {
     const fetchMock = vi.fn(async () => buildResponse({ posts: [] }));
     globalThis.fetch = fetchMock as any;
