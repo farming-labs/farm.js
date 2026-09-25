@@ -34,6 +34,8 @@ type InferHeadersOutput<T> = [T] extends [never]
     ? InferOutput<T>
     : Record<string, string>;
 
+type InferHeadersInput<T> = [T] extends [never] ? never : InferInput<T>;
+
 export type EndpointErrorSchema = AnySchema & { parse: (data: unknown) => unknown };
 
 type EndpointErrorDefinitionBase<TStatus extends number> = {
@@ -266,6 +268,7 @@ export type TypedEndpoint<
   TErrors = never,
   TBodyInput = TBody,
   TQueryInput = TQuery,
+  THeadersInput = THeaders,
 > = {
   __types: {
     body: TBody;
@@ -273,12 +276,17 @@ export type TypedEndpoint<
     query: TQuery;
     inputQuery: TQueryInput;
     headers: THeaders;
+    inputHeaders: THeadersInput;
     response: TResponse;
     errors: TErrors;
   };
   __path?: string;
   __method?: string;
-} & ((options?: { body?: TBodyInput; query?: TQueryInput }) => Promise<TResponse>);
+} & ((options?: {
+  body?: TBodyInput;
+  query?: TQueryInput;
+  headers?: THeadersInput;
+}) => Promise<TResponse>);
 
 type CreatedEndpoint<
   TBody extends AnySchema,
@@ -293,7 +301,8 @@ type CreatedEndpoint<
   InferHeadersOutput<THeaders>,
   EndpointErrorContracts<TErrors>,
   InferBodyInput<TBody>,
-  InferInput<TQuery>
+  InferInput<TQuery>,
+  InferHeadersInput<THeaders>
 >;
 
 type AnyEndpointOptions = EndpointOptions<

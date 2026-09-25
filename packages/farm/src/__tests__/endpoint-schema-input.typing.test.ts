@@ -13,29 +13,35 @@ import { createEndpoint, POST, multipart, toFormData, type TypedEndpoint, create
 import { createApiClients } from "@farm.js/core/client";
 const body = z.object({ count: z.string().transform(Number), label: z.string().default("default") });
 const query = z.object({ page: z.string().default("1").transform(Number) });
-const endpoint = createEndpoint({ method: "POST", body, query }, ({ body, query }) => {
+const headers = z.object({ "x-count": z.string().transform(Number), "x-label": z.string().default("farm") });
+const endpoint = createEndpoint({ method: "POST", body, query, headers }, ({ body, query, headers }) => {
   const count: number = body.count;
   const page: number = query.page;
   const label: string = body.label;
-  return { count, page, label };
+  const headerCount: number = headers["x-count"];
+  return { count, page, label, headerCount };
 });
 const upload = POST({ body: multipart(z.object({ count: z.string().transform(Number) })) }, ({ body }) => body.count);
 const plain = POST({ body: z.object({ count: z.number() }) }, ({ body }) => body);
 type Router = { count: { post: typeof endpoint }; upload: { post: typeof upload }; plain: { post: typeof plain } };
 const { api, apiClient } = createApiClients<Router>();
 for (const caller of [api, apiClient]) {
-  caller.count.post({ body: { count: "2" }, query: { page: "3" } });
-  caller.count.post({ body: { count: "2" } });
+  caller.count.post({ body: { count: "2" }, query: { page: "3" }, headers: { "x-count": "4" } });
+  caller.count.post({ body: { count: "2" }, headers: { "x-count": "4" } });
   caller.upload.post({ body: toFormData({ count: "2" }) });
   caller.plain.post({ body: { count: 2 } });
   // @ts-expect-error handler output is not wire input
-  caller.count.post({ body: { count: 2 } });
+  caller.count.post({ body: { count: 2 }, headers: { "x-count": "4" } });
   // @ts-expect-error transformed query output is not input
-  caller.count.post({ body: { count: "2" }, query: { page: 3 } });
+  caller.count.post({ body: { count: "2" }, query: { page: 3 }, headers: { "x-count": "4" } });
+  // @ts-expect-error transformed header output is not wire input
+  caller.count.post({ body: { count: "2" }, headers: { "x-count": 4 } });
+  // @ts-expect-error required header input remains required
+  caller.count.post({ body: { count: "2" } });
   // @ts-expect-error multipart branding retains schema input
   caller.upload.post({ body: toFormData({ count: 2 }) });
 }
-endpoint({ body: { count: "2" }, query: { page: "3" } });
+endpoint({ body: { count: "2" }, query: { page: "3" }, headers: { "x-count": "4" } });
 type Legacy = TypedEndpoint<{ count: number }, never, number>;
 const legacy = createApiClients<{ old: { post: Legacy } }>().apiClient;
 legacy.old.post({ body: { count: 2 } });
