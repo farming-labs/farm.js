@@ -799,7 +799,7 @@ describe("compiled keyed-row runtime", () => {
     expect(errors).toEqual([]);
   });
 
-  it("preserves compiler state and row identity across a compatible Fast Refresh", async () => {
+  it("refreshes static row markup while preserving state and identity", async () => {
     const hmrId = `keyed-rows-refresh-${Math.random()}`;
     const definition = (
       prefix: string,
@@ -821,8 +821,8 @@ describe("compiled keyed-row runtime", () => {
                 <ul>
                   {items().map((item) => (
                     <li data-key={item.id} key={item.id}>
-                      {prefix}
-                      {item.label}
+                      <span>{prefix}</span>
+                      <strong>{item.label}</strong>
                     </li>
                   ))}
                 </ul>
@@ -834,13 +834,28 @@ describe("compiled keyed-row runtime", () => {
                 tag: "li",
                 attributes: [{ name: "data-key", value: (item as Item).id }],
                 styles: [],
-                children: [[prefix, (item as Item).label]],
+                children: [
+                  {
+                    kind: "element" as const,
+                    tag: "span",
+                    attributes: [],
+                    styles: [],
+                    children: [prefix],
+                  },
+                  {
+                    kind: "element" as const,
+                    tag: "strong",
+                    attributes: [],
+                    styles: [],
+                    children: [(item as Item).label],
+                  },
+                ],
               })}
               bindings={[
                 {
                   kind: "text" as const,
-                  path: [],
-                  read: (item: unknown) => [prefix, (item as Item).label],
+                  path: [1],
+                  read: (item: unknown) => [(item as Item).label],
                 },
               ]}
             />

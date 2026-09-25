@@ -2471,10 +2471,12 @@ event layout before Farm re-adopts it, and keyed proxies read the current defini
 handler cannot keep executing its older closure. Compiler-owned host conditionals, conditional
 ranges, keyed rows, and keyed ranges also move their update subscription when the refreshed
 definition assigns that mounted boundary a different internal block ID. Later local updates cannot
-remain routed to the previous definition. React-owned conditional boundaries move their retained
-root registration with the same ID change, so neighboring path-based bindings continue to skip the
-branch React preserved. If the compiler-owned state layout changes, the identity is not reused and
-React remounts it instead of preserving incompatible state.
+remain routed to the previous definition. A compiler-owned keyed row also passes through React once
+when its definition changes, then Farm re-adopts it. This refreshes static row markup even when its
+binding values are unchanged while preserving matching keyed DOM identity. React-owned conditional
+boundaries move their retained root registration with the same ID change, so neighboring path-based
+bindings continue to skip the branch React preserved. If the compiler-owned state layout changes,
+the identity is not reused and React remounts it instead of preserving incompatible state.
 
 If a direct binding evaluation throws, the runtime schedules a React update and rethrows from the
 component render. This lets the nearest React error boundary handle the failure through React's
