@@ -94,6 +94,31 @@ The configured route serves a Scalar-powered reference page with the generated s
 
 Farm pins the Scalar browser assets to the reviewed version shipped with the framework and verifies CDN responses with subresource integrity. Scalar upgrades therefore arrive with Farm releases instead of floating independently in production.
 
+## Describe authentication
+
+OpenAPI operations are public by default because Farm cannot infer authorization from arbitrary
+middleware. Set a document-wide default with `openapi.security`, then override individual typed
+endpoints when public and protected routes share one document:
+
+```ts
+export default defineConfig({
+  openapi: { enabled: true, security: "cookie" },
+});
+
+export const GET = createEndpoint(
+  { method: "GET", openapi: { security: "public" } },
+  async () => ({ status: "ok" }),
+);
+
+export const POST = createEndpoint(
+  { method: "POST", openapi: { security: "bearer" } },
+  async () => ({ created: true }),
+);
+```
+
+Supported modes are `public`, `bearer`, `cookie`, and `either`. This metadata documents the
+contract; authentication middleware must still enforce it at runtime.
+
 **Terminal**
 
 ```bash
