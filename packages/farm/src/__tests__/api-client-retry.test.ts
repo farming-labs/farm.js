@@ -74,3 +74,42 @@ it("lets an explicit shouldRetry opt a POST back in", async () => {
 
   expect(fetch).toHaveBeenCalledTimes(2);
 });
+
+it.each([-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY])(
+  "rejects invalid retry counts before dispatch: %s",
+  async (count) => {
+    const fetch = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetch);
+    const api = createAPIClient<Router>({});
+
+    await expect(api.orders.delete({}, { retry: { count } })).rejects.toThrow(
+      "retry.count must be a non-negative safe integer",
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  },
+);
+
+it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648])(
+  "rejects invalid retry delays before dispatch: %s",
+  async (delay) => {
+    const fetch = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetch);
+    const api = createAPIClient<Router>({});
+
+    await expect(api.orders.delete({}, { retry: { count: 1, delay } })).rejects.toThrow(
+      "retry.delay must be between 0 and 2147483647 milliseconds",
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  },
+);
+
+it("validates delays returned by retry callbacks", async () => {
+  const fetch = vi.fn(async () => Response.json({ message: "down" }, { status: 503 }));
+  vi.stubGlobal("fetch", fetch);
+  const api = createAPIClient<Router>({});
+
+  await expect(
+    api.orders.delete({}, { retry: { count: 1, delay: () => Number.POSITIVE_INFINITY } }),
+  ).rejects.toThrow("retry.delay must be between 0 and 2147483647 milliseconds");
+  expect(fetch).toHaveBeenCalledOnce();
+});
