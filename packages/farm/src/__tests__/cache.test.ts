@@ -345,6 +345,29 @@ describe("server cache primitives", () => {
     expect(calls).toBe(2);
   });
 
+  it("rejects invalid revalidate values without conflating them with no expiry", async () => {
+    const local = new FarmDataCache();
+    for (const revalidate of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => local.set("invalid", { ok: true }, { revalidate })).toThrow(
+        "Cache revalidate must be false or a finite, non-negative number.",
+      );
+    }
+
+    expect(local.set("forever", { ok: true }, { revalidate: false }).revalidate).toBe(false);
+    expect(local.set("immediate", { ok: true }, { revalidate: 0 }).revalidate).toBe(0);
+    expect(local.set("ttl", { ok: true }, { revalidate: 30 }).revalidate).toBe(30);
+    expect(local.set("default", { ok: true }).revalidate).toBeUndefined();
+
+    const adapter = new TestSharedCacheAdapter();
+    const distributed = new FarmDataCache({ adapter, namespace: "validation" });
+    const producer = vi.fn(async () => ({ ok: true }));
+    await expect(
+      distributed.getOrSet("invalid", producer, { revalidate: Number.NEGATIVE_INFINITY }),
+    ).rejects.toThrow("Cache revalidate must be false or a finite, non-negative number.");
+    expect(producer).not.toHaveBeenCalled();
+    await expect(adapter.get("validation:entry:invalid")).resolves.toBeNull();
+  });
+
   it("dedupes concurrent cache fills", async () => {
     let calls = 0;
     const getProfile = unstable_cache(async () => {

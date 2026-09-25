@@ -397,6 +397,7 @@ export class FarmDataCache {
   }
 
   set<T>(key: string, value: T, options: FarmCacheSetOptions = {}): FarmCacheEntry<T> {
+    const revalidate = normalizeRevalidate(options.revalidate);
     const tags = new Set<string>();
     for (const tag of options.tags ?? []) {
       tags.add(normalizeCacheTag(tag));
@@ -412,7 +413,7 @@ export class FarmDataCache {
       tagVersions: undefined,
       createdAt: options.createdAt ?? Date.now(),
       createdVersion: ++this.version,
-      revalidate: normalizeRevalidate(options.revalidate),
+      revalidate,
     };
 
     this.entries.set(key, entry);
@@ -441,6 +442,7 @@ export class FarmDataCache {
     tagVersions?: Readonly<Record<string, number>>,
     createdVersion?: number,
   ): Promise<FarmCacheEntry<T>> {
+    const revalidate = normalizeRevalidate(options.revalidate);
     const tags = normalizeCacheOptionsTags(options);
     const capturedVersions =
       tagVersions ?? (await this.getAdapterTagVersions(Array.from(tags.values())));
@@ -451,7 +453,7 @@ export class FarmDataCache {
       tagVersions: capturedVersions,
       createdAt: options.createdAt ?? Date.now(),
       createdVersion: createdVersion ?? ++this.version,
-      revalidate: normalizeRevalidate(options.revalidate),
+      revalidate,
     };
 
     if (this.local) {
@@ -603,6 +605,7 @@ export class FarmDataCache {
     producer: () => Promise<T> | T,
     options: FarmCacheOptions = {},
   ): Promise<T> {
+    normalizeRevalidate(options.revalidate);
     const cached = await this.getEntryAsync<T>(key);
     if (cached) {
       return cached.value;
@@ -1031,7 +1034,7 @@ function normalizeRevalidate(revalidate: number | false | undefined): number | f
     return revalidate;
   }
   if (!Number.isFinite(revalidate) || revalidate < 0) {
-    return undefined;
+    throw new TypeError("Cache revalidate must be false or a finite, non-negative number.");
   }
   // 0 is meaningful: the entry is stale immediately, i.e. always re-produced.
   return revalidate;

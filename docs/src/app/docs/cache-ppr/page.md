@@ -64,6 +64,10 @@ const products = await cache.getOrSet(key, () => fetchProducts(), {
 });
 ```
 
+`revalidate` is measured in seconds and must be a finite, non-negative number. `0` makes an entry
+immediately stale, while `false` explicitly disables time-based expiry. Invalid numeric values are
+rejected instead of being treated as an indefinite cache lifetime.
+
 `clear()` invalidates entries and any fills already in progress. Existing callers still receive
 their result, but an older fill cannot repopulate the cache after it has been cleared.
 
