@@ -36,6 +36,7 @@ import {
 } from "../app-markdown";
 import path from "path";
 import type { ViteDevServer } from "vite";
+import { toFileModuleUrl } from "../utils/file-module";
 import {
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
@@ -1141,8 +1142,7 @@ export class RouteManager {
       return await this.viteServer.ssrLoadModule(toViteModuleId(filePath, viteRoot));
     }
 
-    const fileUrl = `file://${filePath}`;
-    return await import(/* @vite-ignore */ fileUrl);
+    return await import(/* @vite-ignore */ toFileModuleUrl(filePath));
   }
 
   /**
