@@ -2478,8 +2478,11 @@ while preserving matching branch, range, and keyed DOM identity. React-owned con
 boundaries move their retained root registration with the same ID change, so neighboring path-based
 bindings continue to skip the branch React preserved. Interactive keyed rows validate the complete
 refreshed row set before Farm reapplies bindings; a later invalid row therefore returns the
-container to React without first patching an earlier row. If the compiler-owned state layout
-changes, the identity is not reused and React remounts it instead of preserving incompatible state.
+container to React without first patching an earlier row. Conditional, keyed, and mixed range
+owners likewise validate every static binding target before applying any binding update, so a
+later invalid target cannot partially change an earlier static sibling before React takes over. If
+the compiler-owned state layout changes, the identity is not reused and React remounts it instead
+of preserving incompatible state.
 
 If a direct binding evaluation throws, the runtime schedules a React update and rethrows from the
 component render. This lets the nearest React error boundary handle the failure through React's
