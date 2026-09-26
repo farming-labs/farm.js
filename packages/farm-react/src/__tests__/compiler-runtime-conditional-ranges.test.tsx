@@ -713,6 +713,96 @@ describe("compiled conditional DOM ranges", () => {
     expect(branch.querySelector("strong")?.textContent).toBe("Updated");
   });
 
+  it("validates every refreshed static binding before applying updates", async () => {
+    const hmrId = `conditional-ranges-atomic-static-refresh-${Math.random()}`;
+    const definePanel = (version: string) =>
+      createCompiledComponent({
+        displayName: "AtomicStaticRefreshConditionalRanges",
+        hmrId,
+        stateSignature: "stable",
+        initialize: () => [],
+        render(_props: Record<string, never>, _state, blocks) {
+          const ConditionalRanges = blocks.ConditionalRanges;
+          return (
+            <ConditionalRanges
+              id={0}
+              bindings={[
+                {
+                  kind: "text",
+                  segment: 0,
+                  sibling: 0,
+                  path: [],
+                  read: () => version,
+                },
+                {
+                  kind: "text",
+                  segment: 0,
+                  sibling: 1,
+                  path: [0],
+                  read: () => "Stable",
+                },
+              ]}
+              ranges={[
+                {
+                  before: 2,
+                  test: () => true,
+                  truthy: {
+                    create: () => ({
+                      kind: "element",
+                      tag: "strong",
+                      attributes: [],
+                      styles: [],
+                      children: ["Range"],
+                    }),
+                    bindings: [],
+                  },
+                },
+              ]}
+              render={() => (
+                <article>
+                  <h1>{version}</h1>
+                  <p>
+                    <span>Stable</span>
+                  </p>
+                  <strong>Range</strong>
+                </article>
+              )}
+              trailing={0}
+            />
+          );
+        },
+        bindings: [{ kind: "block" as const, id: 0, dependencies: [] }],
+      });
+
+    const InitialPanel = definePanel("v1");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.add(root);
+    await act(async () => root.render(<InitialPanel />));
+
+    const firstStaticTarget = container.querySelector("h1")!;
+    container.querySelector("p span")!.remove();
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(firstStaticTarget, { childList: true, characterData: true, subtree: true });
+
+    let RefreshedPanel = InitialPanel;
+    await act(async () => {
+      RefreshedPanel = definePanel("v2");
+      root.render(<RefreshedPanel />);
+      await flushCompilerUpdates();
+    });
+    mutations.push(...observer.takeRecords());
+    observer.disconnect();
+
+    expect(RefreshedPanel).toBe(InitialPanel);
+    expect(container.querySelector("h1")?.textContent).toBe("v2");
+    expect(container.querySelector("p span")?.textContent).toBe("Stable");
+    expect(firstStaticTarget.isConnected).toBe(false);
+    expect(mutations.filter((record) => record.type === "childList")).toEqual([]);
+  });
+
   it.each([
     ["nested container", false],
     ["component root", true],
