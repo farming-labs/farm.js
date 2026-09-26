@@ -36,7 +36,9 @@ export const integrations = {
 };
 ```
 
-`AUTUMN_WEBHOOK_SECRET` is read from the environment when webhook routes are configured.
+`AUTUMN_WEBHOOK_SECRET` is read from the environment when webhook routes are configured. Use the
+endpoint's signing secret exactly as Autumn provides it, including the `whsec_` prefix. Autumn
+delivers webhooks through Svix, and the prefix tells Farm to decode the key the way Svix signed it.
 
 ## Choose SDK ownership
 

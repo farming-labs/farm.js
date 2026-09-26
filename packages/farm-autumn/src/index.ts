@@ -1205,7 +1205,24 @@ function webhookHeadersToStandardHeaders(headers: Headers): Record<string, strin
   return result;
 }
 
+/**
+ * Build the verifier for an Autumn webhook secret.
+ *
+ * Autumn delivers webhooks through Svix, which issues Standard Webhooks secrets
+ * of the form `whsec_<base64 key>`. The library strips that prefix and decodes
+ * the key itself, so such a secret has to reach it unchanged. Base64-encoding
+ * it first turns the literal string into the HMAC key, and every genuine event
+ * then fails verification.
+ *
+ * A secret without the prefix is treated as raw key material and base64-encoded
+ * so the library decodes it back to the original bytes. That is how Polar's SDK
+ * handles Polar's raw secrets, and it keeps any existing raw-secret setup
+ * working.
+ */
 function createStandardWebhook(secret: string) {
+  if (secret.startsWith("whsec_")) {
+    return new StandardWebhook(secret);
+  }
   return new StandardWebhook(Buffer.from(secret, "utf-8").toString("base64"));
 }
 
