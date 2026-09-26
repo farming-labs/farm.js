@@ -34,6 +34,13 @@ describe("development build activity indicator", () => {
     expect(runtime).toContain('hot.on("vite:error", onError)');
     expect(runtime).toContain('hot.on("vite:beforeFullReload", onBeforeFullReload)');
     expect(runtime).toContain('window.sessionStorage.setItem(reloadMarker, "1")');
+    expect(runtime).toContain('brand.className = "farm-build-activity__brand"');
+    expect(runtime).toContain('wordmark.append("FARM", suffix)');
+    expect(runtime).toContain("indicator.append(loader, label, divider, brand, message)");
+    expect(runtime).toContain("farm-build-activity-pixel-on 650ms ease-in-out infinite");
+    expect(runtime).toContain('show("building", "Updating", "Farm.js updating")');
+    expect(runtime).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(runtime).not.toContain("farm-build-activity-spin");
   });
 
   it("emits no client runtime when disabled or in production", () => {
