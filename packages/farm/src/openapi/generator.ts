@@ -251,7 +251,9 @@ export class OpenAPIGenerator {
     if (kind === "tuple") {
       const items = (definition.items as unknown[]) ?? [];
       const rest = definition.rest;
-      const itemSchemas = items.map((item) => this.processZodType(item));
+      const itemSchemas = [...items, ...(rest ? [rest] : [])].map((item) =>
+        this.processZodType(item),
+      );
       const tupleSchema: any = {
         type: "array",
         items: itemSchemas.length === 1 ? itemSchemas[0] : { oneOf: itemSchemas },
