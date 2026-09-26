@@ -176,7 +176,8 @@ describe("Farm cron", () => {
     }
 
     const wrapper = await fs.readFile(prepared.tasks["farm:cron:dailyCleanup"].handler, "utf8");
-    expect(wrapper).toContain('import { defineTask, useNitroApp } from "nitro/runtime"');
+    expect(wrapper).toContain('import { useNitroApp } from "nitro/app"');
+    expect(wrapper).toContain('import { defineTask } from "nitro/task"');
     expect(wrapper).toContain('const path = "/api/maintenance/cleanup"');
     expect(wrapper).toContain('const secretEnv = "CRON_SECRET"');
     expect(wrapper).toContain('headers.set("authorization", "Bearer " + secret)');

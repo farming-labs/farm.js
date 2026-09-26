@@ -459,7 +459,7 @@ async function buildNitro(
 ) {
   const [{ createNitroConfig }, { createNitro, build: nitroBuild }] = await Promise.all([
     import("../nitro"),
-    import("nitro"),
+    import("nitro/builder"),
   ]);
   let nitroConfig = await createNitroConfig(
     config,

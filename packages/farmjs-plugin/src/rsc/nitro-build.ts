@@ -15,7 +15,7 @@ import {
   readdirSync,
   statSync,
 } from "fs";
-import type { NitroConfig } from "nitro/config";
+import type { NitroConfig } from "nitro/types";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
 
 const MANIFEST_FILENAME = "__vite_rsc_assets_manifest.js";
@@ -230,7 +230,8 @@ const handler = getFetchHandler(entryExports);
 
 function createRscRequest(event) {
   const node = event.node;
-  if (!node?.req || !node?.res) return event.req;
+  const request = event.req?._request || event.req;
+  if (!node?.req || !node?.res) return request;
 
   const controller = new AbortController();
   const cleanup = () => {
@@ -252,7 +253,7 @@ function createRscRequest(event) {
   node.res.once("finish", cleanup);
   if (node.req.aborted) abort();
 
-  return new Request(event.req, { signal: controller.signal });
+  return new Request(request, { signal: controller.signal });
 }
 
 export default defineEventHandler(async (event) => {
@@ -297,7 +298,7 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
     preset = "vercel",
   } = options;
 
-  const { build, copyPublicAssets, createNitro, prepare } = await import("nitro");
+  const { build, copyPublicAssets, createNitro, prepare } = await import("nitro/builder");
 
   console.log(`[FARM] Building RSC server with Nitro (preset: ${preset})...`);
 
@@ -325,22 +326,23 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
   const config: NitroConfig = {
     preset,
     rootDir: root,
-    srcDir: root,
+    serverDir: root,
     buildDir,
     dev: false,
+    alias: {
+      h3: runtimeRequire.resolve("h3"),
+    },
     output: {
       dir: outputDir,
       serverDir,
       publicDir: publicOutDir,
     },
     publicAssets,
-    renderer: { entry: entryPath },
+    renderer: { handler: entryPath },
     // The prebuilt RSC/SSR bundles are copied after Nitro finishes, so Nitro's
     // module graph cannot otherwise see their bare package imports. Trace both
     // entry points explicitly to keep node-server output self-contained.
-    externals: {
-      traceInclude: [rendererPath, ...(ssrPath ? [ssrPath] : [])],
-    },
+    traceDeps: [rendererPath, ...(ssrPath ? [ssrPath] : [])],
     // Externalize rsc/ssr so we don't bundle (they reference Vite-generated manifest). We copy dist into server output after build.
     rollupConfig: {
       external: (id: string) => {
@@ -397,7 +399,9 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
       else if (name === "rsc-entry.mjs") entryChunkPaths.push(candidate);
     }
   };
-  findEntryChunks(path.join(serverDir, "chunks"));
+  for (const chunksDir of ["chunks", "_chunks"]) {
+    findEntryChunks(path.join(serverDir, chunksDir));
+  }
   for (const entryChunkPath of entryChunkPaths) {
     let code = readFileSync(entryChunkPath, "utf-8");
     const relativeImport = (target: string) => {

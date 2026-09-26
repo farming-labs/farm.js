@@ -2,7 +2,7 @@ import type { ResolvedFarmServerConfig } from "../server-http";
 
 export interface FarmNodeServerEntryOptions {
   nitroEntryFile: string;
-  nodeHandlerModule: string;
+  nodeAdapterModule: string;
   server: ResolvedFarmServerConfig;
   websocketAdapterModule: string;
 }
@@ -13,28 +13,34 @@ export function createFarmNodeServerEntry(options: FarmNodeServerEntryOptions): 
   const nitroEntryImport = `./${options.nitroEntryFile.replace(/^\.\//, "")}`;
 
   return `
-import "#nitro-internal-pollyfills";
-import { Server as HttpServer } from "node:http";
-import { Server as HttpsServer } from "node:https";
+import "#nitro/virtual/polyfills";
+import { NodeRequest, serve } from ${JSON.stringify(options.nodeAdapterModule)};
 import wsAdapter from ${JSON.stringify(options.websocketAdapterModule)};
-import { toNodeHandler } from ${JSON.stringify(options.nodeHandlerModule)};
-import { useNitroApp, useRuntimeConfig } from "nitro/runtime";
-import {
-  getGracefulShutdownConfig,
-  setupGracefulShutdown,
-  startScheduleRunner,
-  trapUnhandledNodeErrors,
-} from "nitro/runtime/internal";
+import { useNitroApp, useNitroHooks } from "nitro/app";
+import { useRuntimeConfig } from "nitro/runtime-config";
+import { resolveWebsocketHooks } from "#nitro/runtime/app";
+import { trapUnhandledErrors } from "#nitro/runtime/error/hooks";
+import { setupCloseHooks } from "#nitro/runtime/shutdown";
+import { startScheduleRunner } from "#nitro/runtime/task";
+import { tracingSrvxPlugins } from "#nitro/virtual/tracing";
 import { farmProductionLifecycle } from ${JSON.stringify(nitroEntryImport)};
 
 const farmServerConfig = ${serverConfig};
 if (!process.env.NITRO_SHUTDOWN_TIMEOUT) {
   process.env.NITRO_SHUTDOWN_TIMEOUT = String(farmServerConfig.gracefulShutdownTimeout);
 }
-const shutdownConfig = getGracefulShutdownConfig();
+const shutdownConfig = {
+  disabled: Boolean(process.env.NITRO_SHUTDOWN_DISABLED),
+  signals: (process.env.NITRO_SHUTDOWN_SIGNALS || "SIGTERM SIGINT")
+    .split(" ")
+    .map((signal) => signal.trim())
+    .filter(Boolean),
+  timeout: Number.parseInt(process.env.NITRO_SHUTDOWN_TIMEOUT || "", 10) || 30000,
+  forceExit: !process.env.NITRO_SHUTDOWN_NO_FORCE_EXIT,
+};
 
 const nitroApp = useNitroApp();
-nitroApp.hooks.hook("close", async () => {
+useNitroHooks().hook("close", async () => {
   try {
     await farmProductionLifecycle.close("production-server-closed");
   } catch (error) {
@@ -129,55 +135,141 @@ if (startupSignal) {
 
 const cert = process.env.NITRO_SSL_CERT;
 const key = process.env.NITRO_SSL_KEY;
-const server = cert && key
-  ? new HttpsServer({ key, cert }, toNodeHandler(nitroApp.fetch))
-  : new HttpServer(toNodeHandler(nitroApp.fetch));
-
-server.headersTimeout = farmServerConfig.headersTimeout;
-server.requestTimeout = farmServerConfig.requestTimeout;
-server.keepAliveTimeout = farmServerConfig.keepAliveTimeout;
-
-if (!shutdownConfig.disabled) {
-  for (const signal of shutdownConfig.signals) {
-    process.once(signal, () => farmProductionLifecycle.beginDrain(signal));
-  }
-}
-
 const configuredPort = Number(process.env.NITRO_PORT || process.env.PORT);
 const port = Number.isFinite(configuredPort) && configuredPort > 0 ? configuredPort : 3000;
 const host = process.env.NITRO_HOST || process.env.HOST;
 const socketPath = process.env.NITRO_UNIX_SOCKET;
-const listener = server.listen(socketPath ? { path: socketPath } : { port, host }, () => {
-  const protocol = cert && key ? "https" : "http";
-  const addressInfo = listener.address();
-  if (typeof addressInfo === "string") {
-    console.log(\`Listening on unix socket \${addressInfo}\`);
-    return;
-  }
-  if (!addressInfo) return;
-  const configuredBaseURL = useRuntimeConfig().app.baseURL || "";
-  const baseURL = configuredBaseURL.endsWith("/") ? configuredBaseURL.slice(0, -1) : configuredBaseURL;
-  const address = addressInfo.family === "IPv6" ? \`[\${addressInfo.address}]\` : addressInfo.address;
-  console.log(\`Listening on \${protocol}://\${address}:\${addressInfo.port}\${baseURL}\`);
+const server = serve({
+  manual: true,
+  silent: true,
+  gracefulShutdown: false,
+  port,
+  hostname: host,
+  node: socketPath ? { path: socketPath } : undefined,
+  tls: cert && key ? { cert, key } : undefined,
+  fetch: nitroApp.fetch,
+  plugins: [...tracingSrvxPlugins],
+});
+const nodeServer = server.node?.server;
+if (!nodeServer) throw new Error("[Farm] Nitro did not create a Node server");
+
+nodeServer.headersTimeout = farmServerConfig.headersTimeout;
+nodeServer.requestTimeout = farmServerConfig.requestTimeout;
+nodeServer.keepAliveTimeout = farmServerConfig.keepAliveTimeout;
+
+let isShuttingDown = false;
+nodeServer.on("request", (_request, response) => {
+  response.once("finish", () => {
+    if (isShuttingDown) nodeServer.closeIdleConnections?.();
+  });
 });
 
-server.once("error", async (error) => {
+if (import.meta._websocket) {
+  const { handleUpgrade } = wsAdapter({ resolve: resolveWebsocketHooks });
+  nodeServer.on("upgrade", (request, socket, head) => {
+    handleUpgrade(
+      request,
+      socket,
+      head,
+      new NodeRequest({ req: request, upgrade: { socket, head } }),
+    );
+  });
+}
+
+setupCloseHooks(server);
+trapUnhandledErrors();
+
+let shutdownPromise;
+async function shutdown(signal) {
+  isShuttingDown = true;
+  farmProductionLifecycle.beginDrain(signal);
+
+  const gracefulClose = server.close().then(
+    () => true,
+    (error) => {
+      console.error("[Farm] Runtime shutdown failed:", error);
+      process.exitCode = 1;
+      return true;
+    },
+  );
+  nodeServer.closeIdleConnections?.();
+  let gracefulTimer;
+  const gracefullyClosed = await Promise.race([
+    gracefulClose,
+    new Promise((resolve) => {
+      gracefulTimer = setTimeout(() => resolve(false), shutdownConfig.timeout);
+    }),
+  ]);
+  clearTimeout(gracefulTimer);
+
+  if (!gracefullyClosed) {
+    console.warn("[Farm] Graceful shutdown timed out; forcing cleanup");
+    void server.close(true).catch((error) => {
+      console.error("[Farm] Forced server shutdown failed:", error);
+      process.exitCode = 1;
+    });
+
+    let forceTimer;
+    const forceClosed = await Promise.race([
+      Promise.resolve()
+        .then(() => farmProductionLifecycle.forceClose("production-server-closed"))
+        .then(
+          () => true,
+          (error) => {
+            console.error("[Farm] Forced runtime shutdown failed:", error);
+            process.exitCode = 1;
+            return true;
+          },
+        ),
+      new Promise((resolve) => {
+        forceTimer = setTimeout(() => resolve(false), shutdownConfig.timeout);
+      }),
+    ]);
+    clearTimeout(forceTimer);
+    if (!forceClosed) {
+      console.error("[Farm] Forced runtime shutdown timed out");
+      process.exitCode = 1;
+    }
+  }
+
+  if (shutdownConfig.forceExit) process.exit(process.exitCode || 0);
+}
+
+if (!shutdownConfig.disabled) {
+  for (const signal of shutdownConfig.signals) {
+    process.once(signal, (receivedSignal) => {
+      shutdownPromise ||= shutdown(receivedSignal);
+    });
+  }
+}
+
+try {
+  await server.serve();
+  const protocol = cert && key ? "https" : "http";
+  const addressInfo = nodeServer.address();
+  if (typeof addressInfo === "string") {
+    console.log(\`Listening on unix socket \${addressInfo}\`);
+  } else if (addressInfo) {
+    const configuredBaseURL = useRuntimeConfig().app.baseURL || "";
+    const baseURL = configuredBaseURL.endsWith("/")
+      ? configuredBaseURL.slice(0, -1)
+      : configuredBaseURL;
+    const address = addressInfo.family === "IPv6"
+      ? \`[\${addressInfo.address}]\`
+      : addressInfo.address;
+    console.log(\`Listening on \${protocol}://\${address}:\${addressInfo.port}\${baseURL}\`);
+  }
+} catch (error) {
   console.error(error);
   process.exitCode = 1;
   await farmProductionLifecycle.close("production-listen-error").catch((closeError) => {
     console.error("[Farm] Runtime cleanup after listen failure failed:", closeError);
   });
-});
-
-trapUnhandledNodeErrors();
-setupGracefulShutdown(listener, nitroApp);
-
-if (import.meta._websocket) {
-  const { handleUpgrade } = wsAdapter(nitroApp.h3App.websocket);
-  server.on("upgrade", handleUpgrade);
+  throw error;
 }
+
 if (import.meta._tasks) {
-  startScheduleRunner();
+  startScheduleRunner({ waitUntil: server.waitUntil });
 }
 
 export default {};

@@ -42,7 +42,7 @@ import {
 import type { FarmIsolatedClientHydrationMode } from "../types";
 import { isFarmMarkdownPageFile } from "../app-markdown";
 import type { ProgrammaticRedirectRoute } from "../routes";
-import type { NitroConfig } from "nitro/config";
+import type { NitroConfig } from "nitro/types";
 import {
   applyFarmWorkflowVercelCrons,
   prepareFarmWorkflowsForNitro,
@@ -104,8 +104,17 @@ import type { FarmRenderer } from "../renderer";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
-type NitroEsbuildOptions = NonNullable<NonNullable<NitroConfig["esbuild"]>["options"]>;
-type FarmNitroRuntime = typeof import("nitro");
+type FarmEsbuildOptions = TransformOptions & {
+  exclude?: unknown;
+  include?: unknown;
+  loaders?: unknown;
+  sourceMap?: unknown;
+};
+type NitroOutputPackage = {
+  dependencies?: Record<string, string>;
+  [key: string]: unknown;
+};
+type FarmNitroBuilder = typeof import("nitro/builder");
 type UniversalPageRoute = {
   pattern: string;
   modulePath: string;
@@ -156,8 +165,8 @@ type UniversalMiddlewareRoute = {
   filePath: string;
 };
 
-function preloadFarmNitroRuntime(): Promise<PromiseSettledResult<FarmNitroRuntime>> {
-  return import("nitro").then(
+function preloadFarmNitroBuilder(): Promise<PromiseSettledResult<FarmNitroBuilder>> {
+  return import("nitro/builder").then(
     (value) => ({ status: "fulfilled", value }),
     (reason) => ({ status: "rejected", reason }),
   );
@@ -196,6 +205,16 @@ const FARM_CLIENT_BUILD_TARGET = ["es2020", "edge88", "firefox78", "chrome87", "
 
 function resolveNitroRuntimeDependency(root: string, specifier: string): string {
   return createRequire(resolveNitroPackageEntry(root)).resolve(specifier).split(path.sep).join("/");
+}
+
+function resolveNitroInternalRuntimeAliases(root: string): Record<string, string> {
+  const runtimeDir = path.dirname(resolveNitroPackageEntry(root));
+  return Object.fromEntries(
+    ["app", "error/hooks", "shutdown", "task"].map((moduleName) => [
+      `#nitro/runtime/${moduleName}`,
+      path.join(runtimeDir, "internal", `${moduleName}.mjs`).split(path.sep).join("/"),
+    ]),
+  );
 }
 
 /**
@@ -280,22 +299,22 @@ function snapshotSSRRebundleOptions(config: NitroConfig) {
     alias: config.alias,
     commonJS: config.commonJS,
     entry: config.entry,
-    externals: config.externals,
     exportConditions: config.exportConditions,
-    imports: config.imports,
     inlineDynamicImports: config.inlineDynamicImports,
-    moduleSideEffects: config.moduleSideEffects,
     noExternals: config.noExternals,
     node: config.node,
-    nodeModulesDirs: config.nodeModulesDirs,
+    oxc: config.oxc,
     plugins: config.plugins,
     replace: config.replace,
+    rolldownConfig: config.rolldownConfig,
     serverEntry: config.serverEntry,
+    sourcemap: config.sourcemap,
+    traceDeps: config.traceDeps,
+    traceOpts: config.traceOpts,
     typescript: config.typescript,
     unenv: config.unenv,
     virtual: config.virtual,
-    wasm: config.experimental?.wasm,
-    bundleRuntimeDependencies: config.experimental?.bundleRuntimeDependencies,
+    wasm: config.wasm,
   });
 }
 
@@ -473,7 +492,7 @@ export function hasFarmRuntimeConfigModule(
 }
 
 function createEsbuildTransformOptions(
-  configuredEsbuildOptions: NitroEsbuildOptions,
+  configuredEsbuildOptions: FarmEsbuildOptions,
   minify: boolean,
   defaultTarget: string,
 ): TransformOptions {
@@ -515,7 +534,7 @@ function createEsbuildTransformOptions(
 }
 
 function createEsbuildChunkMinifyPlugin(
-  configuredEsbuildOptions: NitroEsbuildOptions,
+  configuredEsbuildOptions: FarmEsbuildOptions,
 ): Rollup.Plugin {
   const configuredTransformOptions = createEsbuildTransformOptions(
     configuredEsbuildOptions,
@@ -752,7 +771,7 @@ export async function buildUniversal(
   // Nitro is guaranteed to be needed for every universal production build.
   // Start resolving it while route metadata and the client/SSR bundles are
   // prepared, then consume the settled result at the adapter stage.
-  const nitroRuntimeResultPromise = preloadFarmNitroRuntime();
+  const nitroBuilderResultPromise = preloadFarmNitroBuilder();
 
   logger.info(`🚜 Building Farm.js application (universal) with preset: ${preset}...`);
 
@@ -981,7 +1000,7 @@ export async function buildUniversal(
       clientOutputDir,
       routeRuntimeManifest,
       configuredHeaderRoutes,
-      nitroRuntimeResultPromise,
+      nitroBuilderResultPromise,
       lifecyclePluginManager,
     );
 
@@ -8119,22 +8138,25 @@ async function buildNitroUniversal(
   clientOutputDir: string,
   routeRuntimeManifest: FarmRouteRuntimeManifest,
   configuredHeaderRoutes: UniversalConfiguredHeaderRoute[],
-  nitroRuntimeResultPromise: Promise<PromiseSettledResult<FarmNitroRuntime>>,
+  nitroBuilderResultPromise: Promise<PromiseSettledResult<FarmNitroBuilder>>,
   pluginManager?: PluginManager,
 ) {
   // Nitro is only needed while producing the deployment artifact. Keeping the
   // import lazy prevents this build-only dependency from leaking into an
   // application's standalone server bundle through @farm.js/core's root entry.
-  const [fs, nitroRuntimeResult] = await Promise.all([
+  const [fs, nitroBuilderResult] = await Promise.all([
     import("fs/promises"),
-    nitroRuntimeResultPromise,
+    nitroBuilderResultPromise,
   ]);
-  if (nitroRuntimeResult.status === "rejected") throw nitroRuntimeResult.reason;
-  const nitro = nitroRuntimeResult.value;
+  if (nitroBuilderResult.status === "rejected") throw nitroBuilderResult.reason;
+  const nitroBuilder = nitroBuilderResult.value;
 
   const isVercel = preset === "vercel" || preset === "vercel-edge";
   const isCloudflareWorker = preset === "cloudflare-module";
   const outputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
+  const runtimeServerOutputDir = isVercel
+    ? path.join(outputDir, "functions", "__nitro.func")
+    : path.join(outputDir, "server");
   const ssrOutputDir = path.join(root, distDir, "ssr");
   const imageRuntime = resolveImageRuntime(config, preset);
   const hasGeneratedMetadataImages = Array.from(routeManager.getMetadataImages().values()).some(
@@ -8260,15 +8282,19 @@ async function buildNitroUniversal(
 // Farm.js Nitro Entry
 // This file adapts Farm's Web fetch handler to Nitro's event handler contract.
 
-import { useNitroApp } from 'nitro/runtime'
+import { useNitroHooks } from 'nitro/app'
 import handler, { farmProductionLifecycle, createFarmNodeRequestAbortSignal } from './${ssrEntryFile}'
 
 export { farmProductionLifecycle }
 
-const farmNitroApp = useNitroApp()
-farmNitroApp.hooks.hook('close', () =>
-  farmProductionLifecycle.close('production-server-closed')
-)
+let farmCloseHookRegistered = false
+function registerFarmCloseHook() {
+  if (farmCloseHookRegistered) return
+  farmCloseHookRegistered = true
+  useNitroHooks().hook('close', () =>
+    farmProductionLifecycle.close('production-server-closed')
+  )
+}
 
 function mergeVaryHeaders(target, source) {
   const values = new Set(
@@ -8339,12 +8365,14 @@ function resolveTrustedLocalOrigin(event, request) {
 
 // Export the event handler for Nitro
 export default async function farmNitroEventHandler(event) {
+  registerFarmCloseHook()
   // Some Node adapters abort their Request on normal IncomingMessage close.
   // Use the same actual disconnect events as Farm's development server.
   const node = event.node
+  const webRequest = event.req?._request || event.req
   const request = node?.req && node?.res
-    ? new Request(event.req, { signal: createFarmNodeRequestAbortSignal(node.req, node.res) })
-    : event.req
+    ? new Request(webRequest, { signal: createFarmNodeRequestAbortSignal(node.req, node.res) })
+    : webRequest
   const response = await handler.fetch(request, {
     waitUntil: (promise) => event.waitUntil(promise),
     onResponseFinished: createResponseFinishedHook(event),
@@ -8367,7 +8395,7 @@ export default async function farmNitroEventHandler(event) {
       farmNodeServerEntryPath,
       createFarmNodeServerEntry({
         nitroEntryFile: path.basename(nitroEntryPath),
-        nodeHandlerModule: resolveNitroRuntimeDependency(root, "srvx/node"),
+        nodeAdapterModule: resolveNitroRuntimeDependency(root, "srvx/node"),
         server: config.server,
         websocketAdapterModule: resolveNitroRuntimeDependency(root, "crossws/adapters/node"),
       }),
@@ -8400,8 +8428,9 @@ export default async function farmNitroEventHandler(event) {
     preset,
     ...(farmNodeServerEntryPath ? { entry: farmNodeServerEntryPath } : {}),
     rootDir: root,
-    srcDir: root,
+    serverDir: root,
     buildDir: path.join(root, distDir, ".nitro"),
+    alias: resolveNitroInternalRuntimeAliases(root),
     compatibilityDate: "2024-12-01",
     output: resolveFarmNitroOutputConfig(preset, outputDir),
     publicAssets: [
@@ -8457,20 +8486,6 @@ export default async function farmNitroEventHandler(event) {
       // the headers and prerender marker generated for a safe physical page.
       ...prerenderNitroRouteRules,
     },
-    externals: {
-      external: [
-        "react",
-        "react-dom",
-        "@prisma/client",
-        "@prisma/client/default",
-        "@prisma/client/default.js",
-        ".prisma/client",
-        ".prisma/client/default",
-        "better-sqlite3",
-        "sharp",
-        ...(useExternalMetadataImageRuntime ? ["@vercel/og"] : []),
-      ],
-    },
     rollupConfig: {
       external: nitroRollupExternal,
       plugins:
@@ -8478,10 +8493,10 @@ export default async function farmNitroEventHandler(event) {
           ? [createMetadataImageWasmPlugin()]
           : [],
     },
-    // Keep the public Nitro boolean intact for build hooks. It is translated to
-    // Nitro's existing esbuild pass after hooks run, avoiding a second Terser pass.
+    // Keep the public Nitro boolean intact for build hooks. Farm replaces
+    // Nitro's minifier only when no custom OXC transform was requested.
     minify: true,
-    sourceMap: false, // Skip sourcemaps for faster build
+    sourcemap: false, // Skip sourcemaps for faster build
   };
   const initialSSRRebundleOptions = snapshotSSRRebundleOptions(nitroConfig);
 
@@ -8493,13 +8508,7 @@ export default async function farmNitroEventHandler(event) {
   const customRollupKeys = Object.keys(nitroConfig.rollupConfig || {}).filter(
     (key) => key !== "external" && key !== "plugins",
   );
-  const configuredEsbuild = nitroConfig.esbuild?.options;
-  const hasUnsupportedEsbuildOverrides = Boolean(
-    configuredEsbuild?.include !== undefined ||
-    configuredEsbuild?.exclude !== undefined ||
-    configuredEsbuild?.loaders !== undefined ||
-    configuredEsbuild?.sourceMap,
-  );
+  const hasCustomOxcOptions = Boolean(nitroConfig.oxc && Object.keys(nitroConfig.oxc).length > 0);
   const hasLateBuildMutationConfig = Boolean(
     Object.keys(nitroConfig.hooks || {}).length > 0 ||
     (Array.isArray(nitroConfig.modules) ? nitroConfig.modules.some(Boolean) : nitroConfig.modules),
@@ -8515,8 +8524,8 @@ export default async function farmNitroEventHandler(event) {
     (requestedBuilder === undefined ||
       requestedBuilder === "rollup" ||
       requestedBuilder === "rolldown") &&
-    nitroConfig.sourceMap === false &&
-    !hasUnsupportedEsbuildOverrides &&
+    nitroConfig.sourcemap === false &&
+    !hasCustomOxcOptions &&
     !hasLateBuildMutationConfig &&
     !hasUnsupportedSSRRebundleOverrides &&
     nitroConfig.rollupConfig?.external === nitroRollupExternal &&
@@ -8535,25 +8544,21 @@ export default async function farmNitroEventHandler(event) {
     canReusePrebuiltSSR && (nitroConfig.builder ?? process.env.NITRO_BUILDER) === "rolldown";
 
   const shouldMinify = nitroConfig.minify !== false;
-  const configuredEsbuildOptions = nitroConfig.esbuild?.options || {};
-  const resolvedEsbuildOptions = {
-    ...configuredEsbuildOptions,
+  const configuredEsbuildOptions: FarmEsbuildOptions = {};
+  const resolvedEsbuildOptions: FarmEsbuildOptions = {
     // Function-name helpers are unsafe for provider scripts that serialize a
     // function with toString(); the helper is outside the emitted script scope.
-    keepNames:
-      config.docs?.enabled && config.docs.adapter?.server
-        ? false
-        : (configuredEsbuildOptions.keepNames ?? true),
+    keepNames: !(config.docs?.enabled && config.docs.adapter?.server),
+    legalComments: "none",
   };
   const prebuiltSSREsbuildOptions =
     config.docs?.enabled && config.docs.adapter?.server
       ? resolvedEsbuildOptions
       : configuredEsbuildOptions;
-  const effectiveMinify = configuredEsbuildOptions.minify ?? shouldMinify;
   const useFarmEsbuildMinifier =
-    effectiveMinify &&
-    nitroConfig.sourceMap === false &&
-    !hasUnsupportedEsbuildOverrides &&
+    shouldMinify &&
+    nitroConfig.sourcemap === false &&
+    !hasCustomOxcOptions &&
     !hasLateBuildMutationConfig;
   const esbuildChunkMinifier = useFarmEsbuildMinifier
     ? createEsbuildChunkMinifyPlugin(resolvedEsbuildOptions)
@@ -8574,18 +8579,9 @@ export default async function farmNitroEventHandler(event) {
   }
 
   nitroConfig.minify = useFarmEsbuildMinifier ? false : shouldMinify;
-  nitroConfig.esbuild = {
-    ...nitroConfig.esbuild,
-    options: {
-      ...resolvedEsbuildOptions,
-      minify: useFarmEsbuildMinifier ? false : configuredEsbuildOptions.minify,
-      keepNames: resolvedEsbuildOptions.keepNames,
-      legalComments: configuredEsbuildOptions.legalComments ?? "none",
-    },
-  };
 
   // Build with Nitro
-  const nitroInstance = await nitro.createNitro(nitroConfig);
+  const nitroInstance = await nitroBuilder.createNitro(nitroConfig);
   if (farmNodeServerEntryPath) {
     // The custom entry is only for the final long-running Node server. Nitro
     // derives its prerenderer config from this config, so remove the override
@@ -8615,8 +8611,8 @@ export default async function farmNitroEventHandler(event) {
       ];
     });
   });
-  await nitro.prepare(nitroInstance);
-  await nitro.copyPublicAssets(nitroInstance);
+  await nitroBuilder.prepare(nitroInstance);
+  await nitroBuilder.copyPublicAssets(nitroInstance);
   if (prerenderRoutes.length > 0 && canReusePrebuiltSSR) {
     // The prerenderer builds and immediately imports a temporary server before
     // the final Node adapter exists. Materialize the same prebuilt SSR package
@@ -8675,14 +8671,14 @@ export default async function farmNitroEventHandler(event) {
   }
   if (prerenderRoutes.length > 0) {
     logger.info(`📄 Pre-rendering ${prerenderRoutes.length} SSG page(s)`);
-    await nitro.prerender(nitroInstance);
+    await nitroBuilder.prerender(nitroInstance);
   }
   const sharpRuntimeStagePromise =
     imageRuntime === "node"
       ? stageSharpRuntime(config, root, distDir, fs)
       : Promise.resolve<StagedSharpRuntime | null>(null);
   const [nitroBuildResult, sharpRuntimeStageResult] = await Promise.allSettled([
-    nitro.build(nitroInstance),
+    nitroBuilder.build(nitroInstance),
     sharpRuntimeStagePromise,
   ]);
   await nitroInstance.close();
@@ -8702,22 +8698,25 @@ export default async function farmNitroEventHandler(event) {
     sharpRuntimeStageResult.value ??
     (imageRuntime === "node" ? await stageSharpRuntime(config, root, distDir, fs) : null);
 
+  const runtimeCopyPromise = (async () => {
+    if (stagedSharpRuntime) {
+      await installStagedSharpRuntime(stagedSharpRuntime, runtimeServerOutputDir, fs);
+    }
+    if (useExternalMetadataImageRuntime) {
+      await copyMetadataImageRuntime(root, runtimeServerOutputDir, fs);
+    }
+  })();
   const copyResults = await Promise.allSettled([
     canReusePrebuiltSSR
       ? copyPrebuiltSSRBundle(
           ssrBundle,
           path.join(outputDir, "server", FARM_SSR_OUTPUT_DIR),
           prebuiltSSREsbuildOptions,
-          effectiveMinify,
+          shouldMinify,
           fs,
         )
       : Promise.resolve(),
-    stagedSharpRuntime
-      ? installStagedSharpRuntime(stagedSharpRuntime, path.join(outputDir, "server"), fs)
-      : Promise.resolve(),
-    useExternalMetadataImageRuntime
-      ? copyMetadataImageRuntime(root, path.join(outputDir, "server"), fs)
-      : Promise.resolve(),
+    runtimeCopyPromise,
   ]);
   const failedCopy = copyResults.find(
     (result): result is PromiseRejectedResult => result.status === "rejected",
@@ -8761,24 +8760,28 @@ export function resolveFarmNitroOutputConfig(
   preset: string,
   outputDir: string,
 ): NonNullable<NitroConfig["output"]> {
-  const farmOwnsOutputLayout =
-    preset === "node-server" || preset === "vercel" || preset === "vercel-edge";
+  const isVercel = preset === "vercel" || preset === "vercel-edge";
 
   return {
     dir: outputDir,
-    ...(farmOwnsOutputLayout
+    ...(preset === "node-server"
       ? {
           serverDir: path.join(outputDir, "server"),
           publicDir: path.join(outputDir, "public"),
         }
-      : {}),
+      : isVercel
+        ? {
+            serverDir: path.join(outputDir, "functions", "__nitro.func"),
+            publicDir: path.join(outputDir, "static"),
+          }
+        : {}),
   };
 }
 
 async function copyPrebuiltSSRBundle(
   ssrBundle: OutputBundle,
   targetDir: string,
-  configuredEsbuildOptions: NitroEsbuildOptions,
+  configuredEsbuildOptions: FarmEsbuildOptions,
   minify: boolean,
   fs: typeof import("fs/promises"),
 ): Promise<void> {
@@ -8891,19 +8894,17 @@ async function postProcessVercelOutput(
   const staticDir = path.join(outputDir, "static");
   const publicDir = path.join(outputDir, "public");
 
-  // Create functions directory
+  // Patched Nitro v3 Vercel presets already write the function in its Build
+  // Output API directory. Retain migration support for older preset output.
   await fs.mkdir(nitroFuncDir, { recursive: true });
-
-  // Move server contents to functions/__nitro.func/
-  const serverContents = await fs.readdir(serverDir);
+  const serverContents = await fs.readdir(serverDir).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
   for (const file of serverContents) {
-    const src = path.join(serverDir, file);
-    const dest = path.join(nitroFuncDir, file);
-    await moveVercelOutputPath(src, dest, fs);
+    await moveVercelOutputPath(path.join(serverDir, file), path.join(nitroFuncDir, file), fs);
   }
-
-  // Remove the emptied server directory
-  await fs.rm(serverDir, { recursive: true, force: true });
+  if (serverContents.length > 0) await fs.rm(serverDir, { recursive: true, force: true });
 
   // Rename public to static (Vercel expects static files in static/)
   try {
@@ -9078,13 +9079,12 @@ async function installStagedSharpRuntime(
   try {
     await mergeStagedDirectory(stagedNodeModules, targetNodeModules, fs);
 
-    const functionPackagePath = path.join(nitroFuncDir, "package.json");
-    const functionPackage = JSON.parse(await fs.readFile(functionPackagePath, "utf8"));
+    const functionPackage = await readNitroOutputPackage(nitroFuncDir, fs);
     functionPackage.dependencies = {
       ...functionPackage.dependencies,
       ...staged.dependencies,
     };
-    await fs.writeFile(functionPackagePath, JSON.stringify(functionPackage, null, 2));
+    await writeNitroOutputPackage(nitroFuncDir, functionPackage, fs);
   } finally {
     await fs.rm(staged.stageDir, { recursive: true, force: true });
   }
@@ -9168,14 +9168,39 @@ async function copyMetadataImageRuntime(
     mode: fsConstants.COPYFILE_FICLONE,
   });
 
-  const functionPackagePath = path.join(nitroFuncDir, "package.json");
-  const functionPackage = JSON.parse(await fs.readFile(functionPackagePath, "utf8"));
+  const functionPackage = await readNitroOutputPackage(nitroFuncDir, fs);
   functionPackage.dependencies = {
     ...functionPackage.dependencies,
     "@vercel/og": String(packageJson.version || "0.11.1"),
   };
-  await fs.writeFile(functionPackagePath, JSON.stringify(functionPackage, null, 2));
+  await writeNitroOutputPackage(nitroFuncDir, functionPackage, fs);
   logger.info("🖼️  Bundled generated metadata image runtime");
+}
+
+async function readNitroOutputPackage(
+  outputDir: string,
+  fs: typeof import("fs/promises"),
+): Promise<NitroOutputPackage> {
+  const packagePath = path.join(outputDir, "package.json");
+  return fs
+    .readFile(packagePath, "utf8")
+    .then((contents) => JSON.parse(contents))
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return {};
+      throw error;
+    });
+}
+
+async function writeNitroOutputPackage(
+  outputDir: string,
+  packageJson: NitroOutputPackage,
+  fs: typeof import("fs/promises"),
+): Promise<void> {
+  await fs.mkdir(outputDir, { recursive: true });
+  await fs.writeFile(
+    path.join(outputDir, "package.json"),
+    `${JSON.stringify(packageJson, null, 2)}\n`,
+  );
 }
 
 function resolvePackageJson(parentRequire: NodeJS.Require, packageName: string): string | null {
@@ -9226,13 +9251,11 @@ async function copyPrismaClientForVercel(
     force: true,
   });
 
-  const functionPackagePath = path.join(nitroFuncDir, "package.json");
   const clientPackagePath = path.join(prismaClientDir, "package.json");
-  const [functionPackageContent, clientPackageContent] = await Promise.all([
-    fs.readFile(functionPackagePath, "utf-8"),
+  const [functionPackage, clientPackageContent] = await Promise.all([
+    readNitroOutputPackage(nitroFuncDir, fs),
     fs.readFile(clientPackagePath, "utf-8"),
   ]);
-  const functionPackage = JSON.parse(functionPackageContent);
   const clientPackage = JSON.parse(clientPackageContent);
 
   functionPackage.dependencies = {
@@ -9240,5 +9263,5 @@ async function copyPrismaClientForVercel(
     "@prisma/client": clientPackage.version,
   };
 
-  await fs.writeFile(functionPackagePath, JSON.stringify(functionPackage, null, 2));
+  await writeNitroOutputPackage(nitroFuncDir, functionPackage, fs);
 }

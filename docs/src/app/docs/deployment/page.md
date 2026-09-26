@@ -216,6 +216,12 @@ farm build --preset my-company-preset
 
 For built-in Nitro presets, the generated output follows Nitro's provider shape. For custom presets, Farm passes the preset name through to Nitro, so the preset must be installed or otherwise resolvable by Nitro in the project.
 
+### Nitro version compatibility
+
+Farm pins the Nitro and H3 versions used by its production adapters. Do not override either package independently: Nitro beta releases can change builder exports, runtime entry points, event shapes, and provider output layouts together.
+
+The current Farm dependency uses a patched Nitro v3 beta newer than `3.0.260429-beta`, the first v3 release containing the wildcard-redirect and encoded proxy-traversal fixes. Applications upgrading from a Farm release that used the Nitro v3 alpha should remove any app-level Nitro override or alpha compatibility patch, reinstall dependencies to refresh the lockfile, and rerun type-checking plus a production build for every deployment target. Applications without those overrides need no configuration migration.
+
 ## Nitro coverage
 
 Nitro's official deploy docs list these runtime and provider families. Farm's first-class deploy commands cover the common Vercel, Cloudflare Pages, and Netlify path, while `deploy.preset` / `farm build --preset` lets advanced apps target the rest.

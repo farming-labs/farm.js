@@ -1,18 +1,26 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import { loadOptions } from "nitro";
+import { loadOptions } from "nitro/builder";
 import path from "node:path";
 import { resolveFarmNitroOutputConfig } from "../nitro/universal-build";
 
 describe("Farm Nitro output layout", () => {
-  it.each(["node-server", "vercel", "vercel-edge"])(
-    "keeps Farm's server/public layout for %s",
+  it("keeps Farm's server/public layout for node-server", () => {
+    expect(resolveFarmNitroOutputConfig("node-server", "/tmp/farm-output")).toEqual({
+      dir: "/tmp/farm-output",
+      serverDir: path.join("/tmp/farm-output", "server"),
+      publicDir: path.join("/tmp/farm-output", "public"),
+    });
+  });
+
+  it.each(["vercel", "vercel-edge"])(
+    "uses Vercel's native Build Output layout for %s",
     (preset) => {
       expect(resolveFarmNitroOutputConfig(preset, "/tmp/farm-output")).toEqual({
         dir: "/tmp/farm-output",
-        serverDir: path.join("/tmp/farm-output", "server"),
-        publicDir: path.join("/tmp/farm-output", "public"),
+        serverDir: path.join("/tmp/farm-output", "functions", "__nitro.func"),
+        publicDir: path.join("/tmp/farm-output", "static"),
       });
     },
   );
@@ -31,7 +39,7 @@ describe("Farm Nitro output layout", () => {
     const options = await loadOptions({
       preset: "cloudflare-pages",
       rootDir: process.cwd(),
-      srcDir: process.cwd(),
+      serverDir: process.cwd(),
       output: resolveFarmNitroOutputConfig("cloudflare-pages", outputDir),
     });
 

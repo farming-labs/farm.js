@@ -820,7 +820,9 @@ export const echo = createEndpoint("/api/echo", { method: "POST" }, async ({ bod
             expect(await page.text(), logs).toContain("RSC root runtime fixture");
             expect(page.headers.get("cache-control")).toBe("public, max-age=60");
             const fields = page.headers.get("vary")?.toLowerCase().split(/,\s*/);
-            expect(fields).toEqual(expect.arrayContaining(["accept", "origin", "accept-encoding"]));
+            // Nitro only adds Accept-Encoding when it actually negotiates a
+            // compressed representation; these are the app-owned variants.
+            expect(fields).toEqual(expect.arrayContaining(["accept", "origin"]));
             expect(fields?.filter((value) => value === "accept")).toHaveLength(1);
             const wildcard = await fetch(origin + "/?wildcard", {
               headers: { accept },

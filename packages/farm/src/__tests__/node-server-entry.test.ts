@@ -9,7 +9,7 @@ describe("Farm production Node entry", () => {
   it("configures timeouts, eager startup, draining, and shutdown disposal", async () => {
     const source = createFarmNodeServerEntry({
       nitroEntryFile: "nitro-entry.mjs",
-      nodeHandlerModule: "srvx/node",
+      nodeAdapterModule: "srvx/node",
       server: resolveFarmServerConfig({
         headersTimeout: "12s",
         requestTimeout: "2m",
@@ -20,17 +20,28 @@ describe("Farm production Node entry", () => {
     });
 
     await expect(transform(source, { loader: "js", format: "esm" })).resolves.toBeDefined();
-    expect(source).toContain("server.headersTimeout = farmServerConfig.headersTimeout");
-    expect(source).toContain("server.requestTimeout = farmServerConfig.requestTimeout");
-    expect(source).toContain("server.keepAliveTimeout = farmServerConfig.keepAliveTimeout");
+    expect(source).toContain('import "#nitro/virtual/polyfills"');
+    expect(source).toContain('from "nitro/app"');
+    expect(source).toContain('from "nitro/runtime-config"');
+    expect(source).toContain('from "#nitro/runtime/shutdown"');
+    expect(source).not.toContain('from "nitro/runtime"');
+    expect(source).toContain("nodeServer.headersTimeout = farmServerConfig.headersTimeout");
+    expect(source).toContain("nodeServer.requestTimeout = farmServerConfig.requestTimeout");
+    expect(source).toContain("nodeServer.keepAliveTimeout = farmServerConfig.keepAliveTimeout");
     expect(source).toContain("startupSignalPromise");
     expect(source).toContain("await Promise.race([");
     expect(source).toContain("() => farmProductionLifecycle.start()");
     expect(source).toContain("farmProductionLifecycle.forceClose(startupSignal)");
     expect(source).toContain("Forced runtime shutdown during startup timed out");
     expect(source).toContain("farmProductionLifecycle.beginDrain(signal)");
-    expect(source).toContain('nitroApp.hooks.hook("close"');
+    expect(source).toContain('useNitroHooks().hook("close"');
     expect(source).toContain("process.env.NITRO_SHUTDOWN_TIMEOUT = String");
+    expect(source).toContain("setupCloseHooks(server)");
+    expect(source).toContain("trapUnhandledErrors()");
+    expect(source).toContain("startScheduleRunner({ waitUntil: server.waitUntil })");
+    expect(source).toContain("wsAdapter({ resolve: resolveWebsocketHooks })");
+    expect(source).toContain("await server.serve()");
+    expect(source).toContain("void server.close(true)");
     expect(source).toContain('from "./nitro-entry.mjs"');
   });
 });

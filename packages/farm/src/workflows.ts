@@ -601,7 +601,7 @@ function createScheduledTasks(
 function createNitroTaskWrapper(workflow: FarmDiscoveredWorkflow): string {
   const normalizedPath = workflow.filePath.replace(/\\/g, "/");
   return `
-import { defineTask } from "nitro/runtime";
+import { defineTask } from "nitro/task";
 import { runFarmWorkflowModule } from "@farm.js/core/workflows";
 import * as workflowModule from ${JSON.stringify(normalizedPath)};
 
@@ -633,7 +633,7 @@ function createNitroWorkflowHTTPHandler(
 ): string {
   return `
 import { H3 } from "h3";
-import { runTask } from "nitro/runtime";
+import { runTask } from "nitro/task";
 import {
   createFarmRequestBodyErrorResponse,
   farmSecretsMatch,

@@ -454,7 +454,8 @@ function getFarmCronTaskName(name: string): string {
 
 function createNitroCronTaskWrapper(job: FarmCronJob, secretEnv: string): string {
   return `
-import { defineTask, useNitroApp } from "nitro/runtime";
+import { useNitroApp } from "nitro/app";
+import { defineTask } from "nitro/task";
 
 const name = ${JSON.stringify(job.name)};
 const path = ${JSON.stringify(job.path)};
