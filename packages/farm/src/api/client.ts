@@ -2049,9 +2049,13 @@ function isSameOriginAPIBaseURL(baseURL: string): boolean {
 function stableStringify(value: any): string {
   if (value === null || value === undefined) return String(value);
   if (value instanceof Date) return value.toISOString();
+  if (typeof value === "bigint") return `bigint:${value.toString()}`;
   if (typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) {
     return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  if (value instanceof URLSearchParams) {
+    return `urlsearchparams:${stableStringify(Array.from(value.entries()))}`;
   }
 
   const keys = Object.keys(value).sort();
