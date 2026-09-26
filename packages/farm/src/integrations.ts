@@ -2822,6 +2822,15 @@ export async function dispatchIntegrationRequest(
     currentRequest?: Request;
     data?: FarmIntegrationData;
     internal?: boolean;
+    /**
+     * Receives `Set-Cookie` values that a middleware forwarded via
+     * forwardIntegrationSetCookies while returning `void`, when this dispatch
+     * ends without a Response of its own. The request continues downstream, so
+     * the caller owns merging them onto whatever response it finally produces.
+     * Only called on the `null` return path: a Response returned from here has
+     * already had the forwarded cookies appended.
+     */
+    onForwardedCookies?: (cookies: string[]) => void;
   } = {},
 ): Promise<Response | null> {
   try {
@@ -3109,7 +3118,76 @@ export async function dispatchIntegrationRequest(
     }
   }
 
+  // Nothing here produced a Response, so the request continues downstream. A
+  // middleware that returned `void` may still have rotated auth cookies; hand
+  // them to the caller instead of dropping them, because the response they
+  // belong on is the one the page/API handler is about to produce.
+  if (forwardedSetCookies.length > 0) {
+    options.onForwardedCookies?.(forwardedSetCookies);
+  }
+
   return null;
+}
+
+/**
+ * Run every configured integration's middleware and routes for one request.
+ *
+ * Integration middleware is not route scoped: it is the mechanism behind
+ * `protectedRoutes` guards and provider session refresh, so it has to run for
+ * ordinary page and API requests that match no integration route at all. That
+ * makes this, not `matchIntegrationRoute`, the correct entry point for a
+ * runtime dispatching integrations for every request.
+ *
+ * The first integration that produces a Response short-circuits the rest.
+ * `Set-Cookie` values forwarded by middleware that returned `void` are
+ * collected: they ride the short-circuiting Response when there is one, and are
+ * otherwise handed back so the caller can merge them onto the downstream
+ * response.
+ */
+export async function dispatchIntegrationRequests(
+  integrations: FarmIntegrationsUserConfig | undefined,
+  runtime: Omit<RegisteredIntegrationRuntime, "integration">,
+  request: Request,
+  options: { currentRequest?: Request } = {},
+): Promise<{ response: Response | null; setCookies: string[] }> {
+  const setCookies: string[] = [];
+  if (!integrations) {
+    return { response: null, setCookies };
+  }
+
+  for (const integration of Object.values(integrations)) {
+    if (!integration || !isFarmIntegration(integration)) {
+      continue;
+    }
+
+    // Skip integrations that mount no request handlers at all so they do not
+    // pay for body buffering on every request.
+    const hasMiddleware = (integration.middleware || []).length > 0;
+    const hasRoutes = normalizeIntegrationRoutes(integration.routes || []).length > 0;
+    if (!hasMiddleware && !hasRoutes) {
+      continue;
+    }
+
+    const response = await dispatchIntegrationRequest(
+      { ...runtime, integration },
+      // Each dispatch buffers the body it is given, so hand every integration
+      // its own clone rather than a Request another dispatch already read.
+      request.clone(),
+      {
+        currentRequest: options.currentRequest,
+        onForwardedCookies: (cookies) => setCookies.push(...cookies),
+      },
+    );
+
+    if (response) {
+      return {
+        response: appendIntegrationForwardedCookies(response, setCookies),
+        setCookies: [],
+      };
+    }
+  }
+
+  return { response: null, setCookies };
 }
 
 (globalThis as GlobalWithIntegrationRuntimeRegistry)[INTEGRATION_REQUEST_DISPATCHER_KEY] =
