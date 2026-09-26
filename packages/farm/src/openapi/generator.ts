@@ -146,8 +146,14 @@ export class OpenAPIGenerator {
         : { description: "Schema metadata is unavailable." };
     }
 
-    // Handle ZodOptional and ZodNullable
-    if (kind === "optional" || kind === "nullable") {
+    // Optionality controls whether a value must be supplied; it does not make
+    // JSON null valid for the wrapped schema.
+    if (kind === "optional") {
+      return this.processZodType(definition.innerType);
+    }
+
+    // Nullable schemas explicitly accept JSON null.
+    if (kind === "nullable") {
       const innerType = definition.innerType;
       const innerSchema = this.processZodType(innerType);
       return {

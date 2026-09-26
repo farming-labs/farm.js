@@ -295,14 +295,13 @@ describe("OpenAPIGenerator dynamic paths", () => {
 
 describe("OpenAPIGenerator schema conversion", () => {
   it("reads schemas from a separate Zod constructor family", () => {
-    expect(
-      toSchema(
-        z3.object({
-          name: z3.string().min(2),
-          page: z3.number().min(1).optional(),
-        }),
-      ),
-    ).toMatchObject({
+    const schema = toSchema(
+      z3.object({
+        name: z3.string().min(2),
+        page: z3.number().min(1).optional(),
+      }),
+    );
+    expect(schema).toMatchObject({
       type: "object",
       properties: {
         name: { type: "string", minLength: 2 },
@@ -310,6 +309,7 @@ describe("OpenAPIGenerator schema conversion", () => {
       },
       required: ["name"],
     });
+    expect(schema.properties.page).not.toHaveProperty("nullable");
   });
 
   it("uses an explicit metadata-unavailable fallback for Standard Schema validators", () => {
@@ -435,11 +435,26 @@ describe("OpenAPIGenerator schema conversion", () => {
   });
 
   it("unwraps optional, nullable, and defaulted schemas", () => {
-    expect(toSchema(z.number().optional())).toMatchObject({ type: "number", nullable: true });
+    const optional = toSchema(z.number().optional());
+    expect(optional).toMatchObject({ type: "number" });
+    expect(optional).not.toHaveProperty("nullable");
     expect(toSchema(z.number().nullable())).toMatchObject({ type: "number", nullable: true });
     // The query example in docs/src/app/docs/openapi/page.md.
     expect(toSchema(z.coerce.number().int().positive().default(20))).toMatchObject({
       type: "number",
     });
+  });
+
+  it("keeps optional object properties non-nullable", () => {
+    const schema = toSchema(
+      z.object({
+        optionalValue: z.string().optional(),
+        nullableValue: z.string().nullable(),
+      }),
+    );
+
+    expect(schema.properties.optionalValue).not.toHaveProperty("nullable");
+    expect(schema.properties.nullableValue).toMatchObject({ type: "string", nullable: true });
+    expect(schema.required).toEqual(["nullableValue"]);
   });
 });
