@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { imageSize } from "image-size";
+import { JSDOM } from "jsdom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ServerRenderer } from "../server/renderer";
 import type { FarmConfig, FarmRequest, FarmResponse, LoadingProps, ErrorProps } from "../types";
@@ -786,6 +787,11 @@ describe("custom not-found rendering", () => {
     expect(response.body).toContain("Internal Server Error");
     expect(response.body).not.toContain("Custom not found");
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("root layout import failed"));
+
+    const document = new JSDOM(response.body).window.document;
+    expect(document.title).toBe("500 - Internal Server Error");
+    expect(document.body.firstElementChild?.id).toBe("root");
+    expect(document.body.textContent?.trimStart()).not.toMatch(/^500 - Internal Server Error/);
   });
 });
 

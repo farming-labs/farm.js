@@ -2911,7 +2911,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
       content,
       false,
       requestUrl.pathname,
-      `${statusCode} - ${statusText}`,
+      `<link rel="icon" href="data:,">\n  <title>${statusCode} - ${statusText}</title>`,
     );
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
