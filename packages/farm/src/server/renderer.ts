@@ -103,6 +103,7 @@ import {
 } from "../renderer";
 import { isRendererCompiledComponent } from "../integration-provider-build";
 import { pathToFileURL } from "node:url";
+import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
 import type { FarmIslandStrategy } from "../island";
 import { createDefaultErrorDiagnostics } from "./error-diagnostics";
 
@@ -334,8 +335,18 @@ function createPPRRefreshScript(): string {
   return `<script>(function(){if(window.__FARM_PPR_REFRESHING__)return;window.__FARM_PPR_REFRESHING__=true;function replaceRoot(html){var doc=new DOMParser().parseFromString(html,"text/html");var next=doc.getElementById("root");var current=document.getElementById("root");if(!next||!current)return;current.innerHTML=next.innerHTML;}fetch(window.location.href,{credentials:"same-origin",headers:{"x-farm-ppr-refresh":"1"}}).then(function(response){return response.ok?response.text():null;}).then(function(html){if(html)replaceRoot(html);}).catch(function(){});})();</script>`;
 }
 
-function createPreHydrationClickQueueScript(): string {
-  return `<script>(function(){if(window.__FARM_PREHYDRATION_CLICK_QUEUE__)return;var queue=[];window.__FARM_PREHYDRATION_CLICK_QUEUE__=queue;window.__FARM_HYDRATED__=false;document.documentElement.dataset.farmHydrated="false";function isModified(event){return !!(event.metaKey||event.altKey||event.ctrlKey||event.shiftKey)}function closestQueuedTarget(target){while(target&&target!==document.documentElement){if(target.matches&&target.matches('button,[role="button"],input[type="button"],input[type="submit"],input[type="reset"]'))return target;target=target.parentElement}return null}document.addEventListener("click",function(event){if(window.__FARM_HYDRATED__)return;if(event.defaultPrevented||event.button!==0||isModified(event))return;var target=closestQueuedTarget(event.target);if(!target||target.closest&&target.closest("a[href]")||target.closest&&target.closest('[data-farm-island-hydrated="true"]'))return;if(queue.some(function(item){return item.target===target}))return;queue.push({target:target,createdAt:Date.now()});document.dispatchEvent(new CustomEvent("farm:island-interaction",{detail:{target:target}}));event.preventDefault();event.stopImmediatePropagation()},true);})();</script>`;
+export function createPreHydrationClickQueueScript(): string {
+  // Inlined into every document, so this stays hand-minified rather than
+  // importing from the island runtime, which has not loaded yet at this point.
+  //
+  // Two kinds of interaction are handled. A click or a submit is HELD: the
+  // event is prevented and queued so the island can hydrate and the action can
+  // be reproduced against the same target. A pointerdown or a focusin is only
+  // OBSERVED: it starts hydration early and native behavior proceeds, so
+  // typing into a field or toggling a checkbox is never swallowed. The event
+  // set here must match FARM_ISLAND_ACTIVATION_EVENTS.
+  const selector = JSON.stringify(FARM_ISLAND_REPLAYABLE_SELECTOR);
+  return `<script>(function(){if(window.__FARM_PREHYDRATION_CLICK_QUEUE__)return;var queue=[];window.__FARM_PREHYDRATION_CLICK_QUEUE__=queue;window.__FARM_HYDRATED__=false;document.documentElement.dataset.farmHydrated="false";function isModified(event){return !!(event.metaKey||event.altKey||event.ctrlKey||event.shiftKey)}function inHydrated(node){return !!(node&&node.closest&&node.closest('[data-farm-island-hydrated="true"]'))}function closestQueuedTarget(target){while(target&&target!==document.documentElement){if(target.matches&&target.matches(${selector}))return target;target=target.parentElement}return null}function announce(target,kind){document.dispatchEvent(new CustomEvent("farm:island-interaction",{detail:{target:target,kind:kind||null}}))}function hold(event,target,kind){if(queue.some(function(item){return item.target===target}))return;queue.push({target:target,kind:kind,createdAt:Date.now()});announce(target,kind);event.preventDefault();event.stopImmediatePropagation()}document.addEventListener("click",function(event){if(window.__FARM_HYDRATED__)return;if(event.defaultPrevented||event.button!==0||isModified(event))return;var target=closestQueuedTarget(event.target);if(!target||target.closest&&target.closest("a[href]")||inHydrated(target))return;hold(event,target,"click")},true);document.addEventListener("submit",function(event){if(window.__FARM_HYDRATED__)return;if(event.defaultPrevented)return;var form=event.target;if(!form||form.nodeName!=="FORM"||inHydrated(form))return;hold(event,form,"submit")},true);function observe(event){if(window.__FARM_HYDRATED__)return;var target=event.target;if(!(target&&target.closest)||inHydrated(target))return;announce(target,null)}document.addEventListener("pointerdown",observe,true);document.addEventListener("focusin",observe,true);})();</script>`;
 }
 
 function createDocumentFooter(options: {
