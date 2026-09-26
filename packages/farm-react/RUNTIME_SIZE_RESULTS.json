@@ -315,18 +315,18 @@
         "brotli": 51666
       },
       "full": {
-        "raw": 307436,
-        "gzip": 85851,
-        "brotli": 72990
+        "raw": 307794,
+        "gzip": 85966,
+        "brotli": 72981
       },
       "coreOnly": {
         "raw": 204890,
         "gzip": 63697,
         "brotli": 54890
       },
-      "fullRuntimePremiumGzip": 25932,
+      "fullRuntimePremiumGzip": 26047,
       "coreRuntimePremiumGzip": 3778,
-      "gzipReductionPercent": 85.4
+      "gzipReductionPercent": 85.5
     }
   }
 }

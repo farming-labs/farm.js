@@ -37,8 +37,8 @@ is enforced on every pull request instead of serving only as a manually recorded
 | Keyed rows with sort hints                        |          60,077 B |         72,393 B |         12,316 B |
 | Keyed rows with rolling-window hints              |          60,108 B |         73,560 B |         13,452 B |
 
-The isolated compatibility runtime contributes 25,932 B gzip over the React control. The
-compiler-selected core contributes 3,778 B, an **85.4% reduction**. This comparison uses the same
+The isolated compatibility runtime contributes 26,047 B gzip over the React control. The
+compiler-selected core contributes 3,778 B, an **85.5% reduction**. This comparison uses the same
 hand-authored compiled definition and changes only the runtime entry used to create it.
 
 The keyed fixture retains `FarmCompiledKeyedRows` plus compiler-emitted `identityTarget`,

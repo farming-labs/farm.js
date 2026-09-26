@@ -5,6 +5,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCompiledComponent,
+  type CompiledComponentDefinition,
   type CompilerKeyedRange,
   type CompilerStateUpdater,
 } from "../compiler-runtime";
@@ -846,6 +847,119 @@ describe("compiled keyed DOM ranges", () => {
     });
 
     expect(container.querySelector('[role="alert"]')?.textContent).toBe("root keyed range failed");
+  });
+
+  it("preserves range and keyed row identity through a compatible Fast Refresh", async () => {
+    const hmrId = `keyed-ranges-refresh-${Math.random()}`;
+    const definition = (
+      prefix: string,
+      blockId = 0,
+    ): CompiledComponentDefinition<Record<string, never>> => ({
+      displayName: "RefreshKeyedRanges",
+      hmrId,
+      stateSignature: "1",
+      initialize: () => [
+        [
+          { id: "a", label: "Alpha" },
+          { id: "b", label: "Beta" },
+        ],
+      ],
+      render(_props, state, blocks) {
+        const items = () => state[0].get() as RangeItem[];
+        const KeyedRanges = blocks.KeyedRanges;
+        const range: CompilerKeyedRange = {
+          before: 1,
+          items,
+          rowKey: (item) => (item as RangeItem).id,
+          create: (item) => ({
+            kind: "element",
+            tag: "li",
+            attributes: [{ name: "data-key", value: (item as RangeItem).id }],
+            styles: [],
+            children: [(item as RangeItem).label],
+          }),
+          bindings: [
+            {
+              kind: "text",
+              path: [],
+              read: (item) => (item as RangeItem).label,
+            },
+          ],
+        };
+        return (
+          <main>
+            <button
+              onClick={() =>
+                state[0].set((current) =>
+                  (current as RangeItem[]).map((item) =>
+                    item.id === "a" ? { ...item, label: "Alpha updated" } : item,
+                  ),
+                )
+              }
+            >
+              Update
+            </button>
+            <KeyedRanges
+              id={blockId}
+              bindings={[
+                {
+                  kind: "text",
+                  segment: 0,
+                  sibling: 0,
+                  path: [],
+                  read: () => prefix,
+                },
+              ]}
+              ranges={[range]}
+              render={() => (
+                <ul>
+                  <li data-static="header">{prefix}</li>
+                  {items().map((item) => (
+                    <li data-key={item.id} key={item.id}>
+                      {item.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              trailing={0}
+            />
+          </main>
+        );
+      },
+      bindings: [{ kind: "block", id: blockId, dependencies: [0] }],
+    });
+
+    const Initial = createCompiledComponent(definition("Before"));
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.add(root);
+    await act(async () => root.render(<Initial />));
+    const list = container.querySelector("ul")!;
+    const header = list.querySelector('[data-static="header"]')!;
+    const alpha = list.querySelector('[data-key="a"]')!;
+    const beta = list.querySelector('[data-key="b"]')!;
+
+    await act(async () => {
+      const Updated = createCompiledComponent(definition("After", 1));
+      expect(Updated).toBe(Initial);
+      await flushCompilerUpdates();
+    });
+    await flushCompilerUpdates();
+
+    expect(container.querySelector("ul")).toBe(list);
+    expect(list.querySelector('[data-static="header"]')).toBe(header);
+    expect(list.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(list.querySelector('[data-key="b"]')).toBe(beta);
+    expect(header.textContent).toBe("After");
+
+    await act(async () => {
+      container.querySelector("button")!.click();
+      await flushCompilerUpdates();
+    });
+    expect(container.querySelector("ul")).toBe(list);
+    expect(list.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(alpha.textContent).toBe("Alpha updated");
   });
 
   it.each([

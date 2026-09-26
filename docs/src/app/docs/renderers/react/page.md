@@ -2471,9 +2471,9 @@ event layout before Farm re-adopts it, and keyed proxies read the current defini
 handler cannot keep executing its older closure. Compiler-owned host conditionals, conditional
 ranges, keyed rows, and keyed ranges also move their update subscription when the refreshed
 definition assigns that mounted boundary a different internal block ID. Later local updates cannot
-remain routed to the previous definition. Compiler-owned host conditionals, conditional ranges, and
-keyed rows also pass through React once when their definition changes, then Farm re-adopts them. This
-refreshes static branch, range, and row markup even when binding values are unchanged while
+remain routed to the previous definition. Compiler-owned host conditionals, conditional ranges,
+keyed rows, and keyed ranges also pass through React once when their definition changes, then Farm
+re-adopts them. This refreshes their static markup even when binding values are unchanged while
 preserving matching branch, range, and keyed DOM identity. React-owned conditional boundaries move
 their retained root registration with the same ID change, so neighboring path-based bindings
 continue to skip the branch React preserved. If the compiler-owned state layout changes, the
