@@ -7,6 +7,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { ViteDevServer } from "vite";
+import { toFileModuleUrl } from "../utils/file-module";
 import { decodeRouteSegment } from "../utils/decode";
 import type { IncomingMessage, ServerResponse } from "http";
 import type {
@@ -179,8 +180,7 @@ export class MiddlewareManager {
       if (this.viteServer) {
         module = await this.viteServer.ssrLoadModule(filePath);
       } else {
-        const fileUrl = `file://${filePath}`;
-        module = await import(/* @vite-ignore */ fileUrl);
+        module = await import(/* @vite-ignore */ toFileModuleUrl(filePath));
       }
 
       const normalized = normalizeMiddlewareModule(module, routePath);

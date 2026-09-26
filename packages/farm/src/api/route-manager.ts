@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { ViteDevServer } from "vite";
 import { logger } from "../utils";
+import { toFileModuleUrl } from "../utils/file-module";
 import type { ProgrammaticApiRoute } from "../routes";
 import { createProgrammaticRouteModuleId } from "../routes-shared";
 import { findProgrammaticRouteFilesInDir } from "../routes.server";
@@ -322,8 +323,7 @@ export class APIRouteManager {
       return await this.viteServer.ssrLoadModule(filePath);
     }
 
-    const fileUrl = `file://${filePath}`;
-    return await import(/* @vite-ignore */ fileUrl);
+    return await import(/* @vite-ignore */ toFileModuleUrl(filePath));
   }
 
   private addEndpoint(
