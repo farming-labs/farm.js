@@ -223,6 +223,14 @@ const persistentRelay = createPersistentPreviewRelay({
   healthPath: "/api/tunnel/health",
   fallbackHandler: pollingGateway,
   coordinator,
+  // This handler is the public entry point for the whole gateway domain, so an
+  // unauthenticated /agent registration would let anyone claim a preview
+  // hostname. Without FARM_PREVIEW_RELAY_TOKEN set the relay accepts no
+  // registrations and the CLI uses the authenticated polling gateway.
+  registrationToken: process.env.FARM_PREVIEW_RELAY_TOKEN,
+  // A relay route wins over the polling fallback, so a name a live polling
+  // session owns must not be claimable over the WebSocket transport.
+  isPreviewNameClaimed: pollingGateway.isPreviewNameClaimed,
 });
 
 export default persistentRelay.server;

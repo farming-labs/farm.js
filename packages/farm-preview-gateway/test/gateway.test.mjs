@@ -426,6 +426,34 @@ test("keeps a taken-over name routable after the stale session is deleted", asyn
   }
 });
 
+test("reports an online session name as claimed for the other preview transport", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store, { clientHeartbeatTimeoutMs: 20 });
+
+  try {
+    const created = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "demo", localUrl: "http://localhost:4321" }),
+    });
+    assert.equal(created.status, 200);
+
+    // The persistent relay serves the same hostnames from its own namespace and
+    // its route wins, so it asks this before accepting a name claim.
+    assert.equal(await gateway.handler.isPreviewNameClaimed("demo"), true);
+    assert.equal(await gateway.handler.isPreviewNameClaimed("Demo"), true);
+    assert.equal(await gateway.handler.isPreviewNameClaimed("other"), false);
+    assert.equal(await gateway.handler.isPreviewNameClaimed(""), false);
+
+    // A session that stopped heartbeating no longer holds its name, matching
+    // how public routing and session creation treat it.
+    await delay(50);
+    assert.equal(await gateway.handler.isPreviewNameClaimed("demo"), false);
+  } finally {
+    await gateway.close();
+  }
+});
+
 async function createGatewayServer(store, options = {}) {
   const handler = createNodePreviewGatewayHandler({
     store,
@@ -447,6 +475,7 @@ async function createGatewayServer(store, options = {}) {
 
   return {
     url: `http://localhost:${address.port}`,
+    handler,
     close: () =>
       new Promise((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));

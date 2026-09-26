@@ -114,7 +114,24 @@ function getHopByHopHeaderNames(headers: Headers | Record<string, string | strin
   return names;
 }
 
-export function createPreviewGatewayHandler(options: PreviewGatewayOptions = {}) {
+/**
+ * A gateway request handler, plus the name-ownership probe another preview
+ * transport needs before it claims the same public hostname.
+ */
+export type PreviewGatewayHandler = ((request: Request) => Promise<Response>) & {
+  isPreviewNameClaimed(name: string): Promise<boolean>;
+};
+
+export type NodePreviewGatewayHandler = ((
+  req: IncomingMessage,
+  res: ServerResponse,
+) => Promise<void>) & {
+  isPreviewNameClaimed(name: string): Promise<boolean>;
+};
+
+export function createPreviewGatewayHandler(
+  options: PreviewGatewayOptions = {},
+): PreviewGatewayHandler {
   const store = options.store || createPreviewGatewayStoreFromEnv();
   const config = {
     domain: normalizeDomain(options.domain || process.env.FARM_PREVIEW_DOMAIN || DEFAULT_DOMAIN),
@@ -129,7 +146,9 @@ export function createPreviewGatewayHandler(options: PreviewGatewayOptions = {})
     maxResponseBodyBytes: options.maxResponseBodyBytes ?? DEFAULT_MAX_RESPONSE_BODY_BYTES,
   };
 
-  return async function handlePreviewGatewayRequest(request: Request): Promise<Response> {
+  const handlePreviewGatewayRequest = async function handlePreviewGatewayRequest(
+    request: Request,
+  ): Promise<Response> {
     try {
       const url = new URL(request.url);
 
@@ -174,12 +193,30 @@ export function createPreviewGatewayHandler(options: PreviewGatewayOptions = {})
       );
     }
   };
+
+  // The persistent relay serves the same public hostnames from a separate name
+  // namespace, and its route wins over this handler, so it has to be able to
+  // ask whether a live polling session already owns a name before accepting a
+  // claim for it.
+  return Object.assign(handlePreviewGatewayRequest, {
+    async isPreviewNameClaimed(name: string) {
+      const claimed = sanitizePreviewName(name);
+      if (!claimed) return false;
+      const session = await store.getSessionByName(claimed);
+      return Boolean(session && isPreviewClientOnline(session, config));
+    },
+  });
 }
 
-export function createNodePreviewGatewayHandler(options: PreviewGatewayOptions = {}) {
+export function createNodePreviewGatewayHandler(
+  options: PreviewGatewayOptions = {},
+): NodePreviewGatewayHandler {
   const handler = createPreviewGatewayHandler(options);
 
-  return async function nodePreviewGatewayHandler(req: IncomingMessage, res: ServerResponse) {
+  const nodePreviewGatewayHandler = async function nodePreviewGatewayHandler(
+    req: IncomingMessage,
+    res: ServerResponse,
+  ) {
     const controller = new AbortController();
     const abort = () => controller.abort();
     const abortOnClose = () => {
@@ -211,6 +248,10 @@ export function createNodePreviewGatewayHandler(options: PreviewGatewayOptions =
       res.off("close", abortOnClose);
     }
   };
+
+  return Object.assign(nodePreviewGatewayHandler, {
+    isPreviewNameClaimed: handler.isPreviewNameClaimed,
+  });
 }
 
 export function createPreviewGatewayStoreFromEnv(): PreviewGatewayStore {

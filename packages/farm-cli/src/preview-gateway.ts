@@ -6,6 +6,11 @@ export interface PreviewGatewayPlan {
   provider: "farm-gateway";
   gatewayUrl: string;
   relayUrl: string;
+  /**
+   * Credential for the native relay, when one is configured. Kept off
+   * `relayUrl` so the displayed and logged relay endpoint stays clean.
+   */
+  relayToken?: string;
   target: PreviewTarget;
   requestedName: string;
   requestedHostname: string;
@@ -108,6 +113,9 @@ export function createPreviewGatewayPlan(
     provider: "farm-gateway",
     gatewayUrl,
     relayUrl,
+    ...(process.env.FARM_PREVIEW_RELAY_TOKEN
+      ? { relayToken: process.env.FARM_PREVIEW_RELAY_TOKEN }
+      : {}),
     target,
     requestedName,
     requestedHostname,

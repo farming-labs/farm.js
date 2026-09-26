@@ -22,7 +22,7 @@ export async function runNativePreviewTunnel(
 ): Promise<PreviewAgentSession> {
   const runtime = options.runtime || (await loadNativeTunnel());
   const session = await runtime.startPreviewAgent(
-    plan.relayUrl,
+    createNativeRelayUrl(plan.relayUrl, plan.relayToken),
     plan.requestedName,
     plan.target.localUrl,
   );
@@ -52,6 +52,18 @@ export async function runNativePreviewTunnel(
     process.removeListener("SIGTERM", stop);
     await runtime.stopPreviewAgent(session.sessionId).catch(() => false);
   }
+}
+
+/**
+ * The native agent takes only a relay URL, so a configured relay credential
+ * travels as a query parameter. `plan.relayUrl` stays clean because the CLI
+ * prints it.
+ */
+function createNativeRelayUrl(relayUrl: string, relayToken: string | undefined) {
+  if (!relayToken) return relayUrl;
+  const url = new URL(relayUrl);
+  url.searchParams.set("token", relayToken);
+  return url.toString();
 }
 
 async function loadNativeTunnel(): Promise<NativeTunnelRuntime> {
