@@ -522,6 +522,190 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
     expect(container.innerHTML).toBe("");
   });
 
+  it("preserves mixed range identity and static markup through a compatible Fast Refresh", async () => {
+    interface RefreshModel {
+      loading: boolean;
+      items: Array<{ id: string; label: string }>;
+    }
+
+    const hmrId = `mixed-ranges-refresh-${Math.random()}`;
+    const definition = (
+      prefix: string,
+      blockId = 0,
+    ): CompiledComponentDefinition<Record<string, never>> => ({
+      displayName: "RefreshMixedRanges",
+      hmrId,
+      stateSignature: "1",
+      initialize: () => [
+        {
+          loading: true,
+          items: [
+            { id: "a", label: "Alpha" },
+            { id: "b", label: "Beta" },
+          ],
+        } satisfies RefreshModel,
+      ],
+      render(_props, state, blocks) {
+        const model = () => state[0].get() as RefreshModel;
+        const MixedRanges = blocks.MixedRanges;
+        const conditionalBranch = branch(() =>
+          host("p", [host("span", [prefix]), host("strong", ["Loading"])]),
+        );
+        const createRow = (item: RefreshModel["items"][number]) =>
+          host(
+            "article",
+            [host("span", [prefix]), host("strong", [item.label])],
+            [{ name: "data-key", value: item.id }],
+          );
+        const create = (): CompilerHostElement => {
+          const value = model();
+          return {
+            ...host(
+              "section",
+              [
+                host("header", [prefix], [{ name: "data-static", value: "header" }]),
+                ...(value.loading ? [conditionalBranch.create()] : []),
+                host("i", ["Items"], [{ name: "data-static", value: "divider" }]),
+                ...value.items.map(createRow),
+                host("footer", [`${prefix} footer`]),
+              ],
+              [{ name: "data-mixed-refresh", value: true }],
+            ),
+            block: {
+              kind: "mixed-ranges",
+              id: blockId,
+              ranges: [
+                {
+                  kind: "conditional",
+                  before: 1,
+                  test: () => model().loading,
+                  logical: true,
+                  truthy: conditionalBranch,
+                },
+                {
+                  kind: "keyed",
+                  before: 1,
+                  items: () => model().items,
+                  rowKey: (item) => (item as RefreshModel["items"][number]).id,
+                  create: (item) => createRow(item as RefreshModel["items"][number]),
+                  bindings: [
+                    {
+                      kind: "text",
+                      path: [1],
+                      read: (item) => (item as RefreshModel["items"][number]).label,
+                    },
+                  ],
+                },
+              ],
+              trailing: 1,
+              bindings: [
+                {
+                  kind: "text",
+                  segment: 0,
+                  sibling: 0,
+                  path: [],
+                  read: () => prefix,
+                },
+                {
+                  kind: "text",
+                  segment: 2,
+                  sibling: 0,
+                  path: [],
+                  read: () => `${prefix} footer`,
+                },
+              ],
+            },
+          };
+        };
+        return (
+          <main>
+            <button
+              onClick={() =>
+                state[0].set((current) => ({
+                  ...(current as RefreshModel),
+                  loading: false,
+                  items: (current as RefreshModel).items.map((item) =>
+                    item.id === "a" ? { ...item, label: "Alpha updated" } : item,
+                  ),
+                }))
+              }
+            >
+              Update
+            </button>
+            <MixedRanges
+              id={blockId}
+              create={create}
+              render={() => {
+                const value = model();
+                return (
+                  <section data-mixed-refresh>
+                    <header data-static="header">{prefix}</header>
+                    {value.loading && (
+                      <p>
+                        <span>{prefix}</span>
+                        <strong>Loading</strong>
+                      </p>
+                    )}
+                    <i data-static="divider">Items</i>
+                    {value.items.map((item) => (
+                      <article data-key={item.id} key={item.id}>
+                        <span>{prefix}</span>
+                        <strong>{item.label}</strong>
+                      </article>
+                    ))}
+                    <footer>{prefix} footer</footer>
+                  </section>
+                );
+              }}
+            />
+          </main>
+        );
+      },
+      bindings: [{ kind: "block", id: blockId, dependencies: [0] }],
+    });
+
+    const Initial = createCompiledComponent(definition("Before"));
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Initial />));
+    const surface = container.querySelector("[data-mixed-refresh]")!;
+    const header = surface.querySelector("header")!;
+    const loading = surface.querySelector("p")!;
+    const alpha = surface.querySelector('[data-key="a"]')!;
+    const beta = surface.querySelector('[data-key="b"]')!;
+    const footer = surface.querySelector("footer")!;
+
+    await act(async () => {
+      const Updated = createCompiledComponent(definition("After", 1));
+      expect(Updated).toBe(Initial);
+      await flushCompilerUpdates();
+    });
+    await flushCompilerUpdates();
+
+    expect(container.querySelector("[data-mixed-refresh]")).toBe(surface);
+    expect(surface.querySelector("header")).toBe(header);
+    expect(surface.querySelector("p")).toBe(loading);
+    expect(surface.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(surface.querySelector('[data-key="b"]')).toBe(beta);
+    expect(surface.querySelector("footer")).toBe(footer);
+    expect(header.textContent).toBe("After");
+    expect(loading.querySelector("span")?.textContent).toBe("After");
+    expect(alpha.querySelector("span")?.textContent).toBe("After");
+    expect(footer.textContent).toBe("After footer");
+
+    await act(async () => {
+      container.querySelector("button")!.click();
+      await flushCompilerUpdates();
+    });
+    expect(container.querySelector("[data-mixed-refresh]")).toBe(surface);
+    expect(surface.querySelector("p")).toBeNull();
+    expect(surface.querySelector('[data-key="a"]')).toBe(alpha);
+    expect(alpha.querySelector("strong")?.textContent).toBe("Alpha updated");
+    expect(surface.querySelector('[data-key="b"]')).toBe(beta);
+  });
+
   it("converges a parent prop commit with local conditional and keyed updates", async () => {
     const fixture = createMixedFixture();
     function Parent() {

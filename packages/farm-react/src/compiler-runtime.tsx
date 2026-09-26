@@ -10023,7 +10023,7 @@ function createKeyedRangesBlockComponent(
 }
 
 function createMixedRangesBlockComponent(
-  owner: Pick<ConditionalBlockOwner, "subscribe">,
+  owner: Pick<CompilerRuntimeFeatureOwner, "subscribe" | "getDefinitionVersion">,
 ): React.ComponentType<CompilerMixedRangesBlockProps> {
   interface State {
     fallback: boolean;
@@ -10042,6 +10042,7 @@ function createMixedRangesBlockComponent(
     private currentProps = this.props;
     private controller: CompilerNestedMixedRanges | null = null;
     private readonly fallbackUnsubscribers = new Map<number, () => void>();
+    private definitionVersion = owner.getDefinitionVersion?.();
 
     private captureRoot = (root: Element | null) => {
       this.root = root;
@@ -10106,7 +10107,9 @@ function createMixedRangesBlockComponent(
         controller.cleanup();
         throw error;
       }
+      const previous = this.controller;
       this.controller = controller;
+      previous?.cleanup();
       return true;
     }
 
@@ -10136,11 +10139,13 @@ function createMixedRangesBlockComponent(
     }
 
     shouldComponentUpdate(nextProps: CompilerMixedRangesBlockProps, nextState: State): boolean {
+      const definitionChanged = this.definitionVersion !== owner.getDefinitionVersion?.();
       this.currentProps = nextProps;
       if (this.state.fallback && nextState.fallback) {
         this.prepareFallbackUpdate(this.currentProps.create());
       }
       if (nextState.fallback || this.state.fallback) return true;
+      if (definitionChanged) return true;
       this.schedulePropFallback();
       return false;
     }
@@ -10154,7 +10159,14 @@ function createMixedRangesBlockComponent(
     }
 
     componentDidUpdate(): void {
-      if (this.state.fallback) this.subscribeFallbackBlocks();
+      const nextDefinitionVersion = owner.getDefinitionVersion?.();
+      const definitionChanged = this.definitionVersion !== nextDefinitionVersion;
+      this.definitionVersion = nextDefinitionVersion;
+      if (this.state.fallback) {
+        this.subscribeFallbackBlocks();
+      } else if (definitionChanged && !this.adopt()) {
+        this.activateFallback();
+      }
     }
 
     componentWillUnmount(): void {
