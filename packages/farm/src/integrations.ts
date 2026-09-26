@@ -51,7 +51,7 @@ import type {
 } from "./integration-api";
 import type { InferFarmIntegrationOrmClient } from "./integration-orm";
 import { setFarmPluginIntegrationContext } from "./plugin-integration-context";
-import { decodeRouteSegment } from "./utils/decode";
+import { canonicalizeRequestPathname, canonicalizeRequestPathSegments } from "./utils/decode";
 import {
   assertTerminalCatchAll,
   assertUniqueRouteParameters,
@@ -3309,18 +3309,28 @@ function resolveMatcherParams(
   }
 
   const list = Array.isArray(matcher) ? matcher : [matcher];
+  // An integration matcher is a guard (`protectedRoutes` compiles straight into
+  // one), so it has to see the same pathname the route matchers do. Comparing
+  // the raw pathname let `/%64ashboard` miss a `/dashboard` matcher while the
+  // page router still served the protected page. Resolved on first use so a
+  // match-everything matcher stays allocation free.
+  let canonicalPathname: string | undefined;
+  let canonicalSegments: string[] | undefined;
+
   for (const item of list) {
     if (item === "/(.*)" || item === "*") {
       return {};
     }
     if (item.endsWith("(.*)")) {
+      canonicalPathname ??= canonicalizeRequestPathname(pathname);
       const prefix = item.slice(0, -4);
-      if (pathname === prefix || pathname.startsWith(`${prefix}/`)) {
+      if (canonicalPathname === prefix || canonicalPathname.startsWith(`${prefix}/`)) {
         return {};
       }
       continue;
     }
-    const params = extractPathParams(item, pathname);
+    canonicalSegments ??= canonicalizeRequestPathSegments(pathname);
+    const params = matchPathSegments(splitPath(item), canonicalSegments);
     if (params) {
       return params;
     }
@@ -3334,8 +3344,20 @@ function matchesPath(pattern: string, pathname: string): boolean {
 }
 
 function extractPathParams(pattern: string, pathname: string): FarmIntegrationRouteParams | null {
-  const routeSegments = splitPath(pattern);
-  const pathSegments = splitPath(pathname);
+  return matchPathSegments(splitPath(pattern), canonicalizeRequestPathSegments(pathname));
+}
+
+/**
+ * Walk an integration route pattern against already-canonical request segments.
+ *
+ * `pathSegments` arrive decoded exactly once, so nothing here decodes again: a
+ * second pass would turn a literal `%2541BC` segment into `ABC` and resolve a
+ * record the request never asked for.
+ */
+function matchPathSegments(
+  routeSegments: string[],
+  pathSegments: string[],
+): FarmIntegrationRouteParams | null {
   const params: FarmIntegrationRouteParams = {};
 
   let routeIndex = 0;
@@ -3346,14 +3368,12 @@ function extractPathParams(pattern: string, pathname: string): FarmIntegrationRo
     const pathSegment = pathSegments[pathIndex];
 
     if (isCatchAllSegment(routeSegment)) {
-      params[getSegmentParamName(routeSegment)] = pathSegments
-        .slice(pathIndex)
-        .map((segment) => decodeRouteSegment(segment));
+      params[getSegmentParamName(routeSegment)] = pathSegments.slice(pathIndex);
       return params;
     }
 
     if (isDynamicSegment(routeSegment)) {
-      params[getSegmentParamName(routeSegment)] = decodeRouteSegment(pathSegment);
+      params[getSegmentParamName(routeSegment)] = pathSegment;
       routeIndex += 1;
       pathIndex += 1;
       continue;
