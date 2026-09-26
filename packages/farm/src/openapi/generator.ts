@@ -400,6 +400,14 @@ export class OpenAPIGenerator {
 
         for (const route of routeList) {
           for (const method of route.methods) {
+            if (variant.operationIdSuffix === "base") {
+              const existingOperation =
+                method === "QUERY"
+                  ? spec.paths[variant.path]["x-oai-additionalOperations"]?.QUERY
+                  : spec.paths[variant.path][method.toLowerCase()];
+              if (existingOperation) continue;
+            }
+
             const operation = await this.generateOperation(
               route,
               method,

@@ -291,6 +291,51 @@ describe("OpenAPIGenerator dynamic paths", () => {
       required: true,
     });
   });
+
+  it("preserves explicit operations beside optional catch-all fallbacks", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-openapi-catch-all-precedence-"));
+    tempDirs.push(root);
+    const routeFile = path.join(root, "route.mjs");
+    writeFileSync(
+      routeFile,
+      [
+        "export const GET = async () => new Response();",
+        "export const QUERY = async () => new Response();",
+        "",
+      ].join("\n"),
+    );
+
+    const optionalCatchAll = {
+      path: "/api/files/[[...slug]]",
+      methods: ["GET", "QUERY"],
+      filePath: realpathSync(routeFile),
+      relativePath: "api/files/[[...slug]]/route.ts",
+    };
+    const explicit = {
+      path: "/api/files",
+      methods: ["GET", "QUERY"],
+      filePath: realpathSync(routeFile),
+      relativePath: "api/files/route.ts",
+    };
+
+    for (const routes of [
+      [optionalCatchAll, explicit],
+      [explicit, optionalCatchAll],
+    ]) {
+      const generator = new OpenAPIGenerator(root, { title: "Files API" });
+      const spec = await generator.generateSpec(routes);
+
+      expect(spec.paths["/files"].get.operationId).toBe("get_files");
+      expect(spec.paths["/files"]["x-oai-additionalOperations"].QUERY.operationId).toBe(
+        "query_files",
+      );
+      expect(spec.paths["/files/{slug}"].get.operationId).toBe("get_files_[[...slug]]");
+      expect(spec.paths["/files/{slug}"]["x-oai-additionalOperations"].QUERY.operationId).toBe(
+        "query_files_[[...slug]]",
+      );
+    }
+  });
 });
 
 describe("OpenAPIGenerator schema conversion", () => {
