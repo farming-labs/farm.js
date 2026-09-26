@@ -1,6 +1,7 @@
 import { localizeFarmHref, resolveFarmLocalePath } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { assertBrowserStableRoutePath } from "../routing/specificity";
+import { canonicalizeRequestPathname } from "../utils/decode";
 
 type ConfigRoutePatternToken =
   | { kind: "param"; name: string; captureIndex: number; catchAll: boolean }
@@ -43,32 +44,9 @@ export function resolveConfigRoutePathname(
 ): { pathname: string; locale?: string } {
   const localizedPathname = i18n?.enabled ? resolveFarmLocalePath(pathname, i18n) : { pathname };
   return {
-    pathname: normalizeConfigRoutePathname(decodeConfigRoutePathname(localizedPathname.pathname)),
+    pathname: normalizeConfigRoutePathname(canonicalizeRequestPathname(localizedPathname.pathname)),
     ...(i18n?.enabled && "locale" in localizedPathname ? { locale: localizedPathname.locale } : {}),
   };
-}
-
-/**
- * Decode request segments without turning an encoded slash into a new segment.
- * The production matcher performs the same operation after splitting the URL,
- * so config rules must see identical values in development and production.
- * Malformed escape sequences remain untouched and are rejected by the pattern
- * comparison instead of making the dev server throw while handling a request.
- */
-function decodeConfigRoutePathname(pathname: string): string {
-  return pathname
-    .split("/")
-    .map((segment) => {
-      try {
-        // Keep an encoded slash inside its original segment. Decoding it here
-        // would make a catch-all capture grow an extra path segment and would
-        // lose the encoding when a redirect or rewrite reuses that capture.
-        return decodeURIComponent(segment).replace(/\//g, "%2F");
-      } catch {
-        return segment;
-      }
-    })
-    .join("/");
 }
 
 /**

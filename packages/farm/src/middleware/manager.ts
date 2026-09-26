@@ -7,7 +7,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { ViteDevServer } from "vite";
-import { decodeRouteSegment } from "../utils/decode";
+import { canonicalizeRequestPathname } from "../utils/decode";
 import type { IncomingMessage, ServerResponse } from "http";
 import type {
   FarmMiddlewareConfig,
@@ -408,9 +408,14 @@ export class MiddlewareManager {
     pattern: string | RegExp,
     pathname: string,
   ): { matched: boolean; params?: Record<string, string> } {
+    // Same canonical pathname the production runner and the route matchers
+    // compare against, so a percent-encoded path cannot slip past a guard in
+    // development either.
+    const canonicalPathname = canonicalizeRequestPathname(pathname);
+
     if (pattern instanceof RegExp) {
       pattern.lastIndex = 0;
-      const match = pattern.exec(pathname);
+      const match = pattern.exec(canonicalPathname);
       return {
         matched: !!match,
         params: match?.groups ? { ...match.groups } : undefined,
@@ -427,18 +432,21 @@ export class MiddlewareManager {
       // its slash and the check becomes startsWith("/admin//"), which no path
       // satisfies, so the matcher silently matches nothing.
       const prefix = pattern.slice(0, -4).replace(/\/$/, "");
-      return { matched: pathname === prefix || pathname.startsWith(`${prefix}/`) };
+      return {
+        matched: canonicalPathname === prefix || canonicalPathname.startsWith(`${prefix}/`),
+      };
     }
 
     const { regex, params } = this.compilePathPattern(pattern);
-    const match = regex.exec(pathname);
+    const match = regex.exec(canonicalPathname);
     if (!match) {
       return { matched: false };
     }
 
     const values: Record<string, string> = {};
     params.forEach((param, index) => {
-      values[param] = decodeRouteSegment(match[index + 1] || "");
+      // Already decoded once by the canonicalization above.
+      values[param] = match[index + 1] || "";
     });
 
     return {
