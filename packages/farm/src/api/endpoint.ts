@@ -4,6 +4,12 @@ import { isMultipartSchema, type MultipartSchema, type TypedFormData } from "./t
 import type { RouteSchema, RouteSchemaInput, RouteSchemaOutput } from "./route-schema";
 import type { EndpointOpenAPIMetadata } from "../openapi/types";
 
+// Part of every endpoint's public shape (`openapi` and `__openapi` below). An
+// interface cannot be inlined into a consumer's declarations, so it has to be
+// nameable from the entry a consumer imports. `export *` in api/index.ts exposes
+// it as @farm.js/core/api; plugin.ts re-exports it for plugin authors.
+export type { EndpointOpenAPIMetadata };
+
 // Share the route factory's Zod and Standard Schema contract.
 type AnySchema = RouteSchema;
 
