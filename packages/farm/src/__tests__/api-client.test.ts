@@ -89,6 +89,57 @@ beforeEach(() => {
 });
 
 describe("createAPIClient", () => {
+  it("keeps URLSearchParams contents distinct in default cache keys", async () => {
+    type SearchRouter = {
+      items: {
+        get: {
+          __types: {
+            body: never;
+            query: URLSearchParams;
+            response: { url: string };
+          };
+        };
+      };
+    };
+    const fetchMock = vi.fn(async (url: string) => buildResponse({ url }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<SearchRouter>({
+      baseURL: "http://example.com",
+      credentials: "omit",
+    });
+    const cache = { policy: "cache-first" as const, staleTime: 10_000 };
+
+    const apples = await api.items.get({ query: new URLSearchParams("q=apples") }, { cache });
+    const oranges = await api.items.get({ query: new URLSearchParams("q=oranges") }, { cache });
+
+    expect(apples.data).toEqual({ url: "http://example.com/api/items?q=apples" });
+    expect(oranges.data).toEqual({ url: "http://example.com/api/items?q=oranges" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends bigint query primitives without failing cache-key construction", async () => {
+    type BigIntRouter = {
+      items: {
+        get: {
+          __types: {
+            body: never;
+            query: { id: bigint };
+            response: { url: string };
+          };
+        };
+      };
+    };
+    const fetchMock = vi.fn(async (url: string) => buildResponse({ url }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<BigIntRouter>({ baseURL: "http://example.com" });
+
+    const result = await api.items.get({ query: { id: 1n } });
+
+    expect(result.error).toBeNull();
+    expect(result.data).toEqual({ url: "http://example.com/api/items?id=1" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("sends typed QUERY bodies and caches each representation separately", async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
