@@ -542,23 +542,23 @@ export class OpenAPIGenerator {
           },
         };
       }
-    } catch (error) {
-      // If we can't load the module, return generic schema
-      console.warn(`Could not extract schema from ${route.filePath}:`, error);
-    }
 
-    // Fallback to generic schema
-    return {
-      required: true,
-      content: {
-        "application/json": {
-          schema: {
-            type: "object",
-            description: "Request body",
+      return undefined;
+    } catch (error) {
+      // Missing metadata must not make the runtime contract stricter.
+      console.warn(`Could not extract schema from ${route.filePath}:`, error);
+      return {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              description: "Request body",
+            },
           },
         },
-      },
-    };
+      };
+    }
   }
 
   /**
@@ -629,7 +629,10 @@ export class OpenAPIGenerator {
 
     // QUERY and mutation methods can carry typed request content.
     if (["QUERY", "POST", "PUT", "PATCH", "DELETE"].includes(method)) {
-      operation.requestBody = await this.getRequestBody(route, method);
+      const requestBody = await this.getRequestBody(route, method);
+      if (requestBody) {
+        operation.requestBody = requestBody;
+      }
     }
 
     return operation;

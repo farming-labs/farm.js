@@ -85,13 +85,11 @@ describe("OpenAPIGenerator", () => {
   });
 
   it("represents QUERY with a request body in a valid OpenAPI 3.0 document", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    const root = mkdtempSync(path.join(os.tmpdir(), "farm-openapi-query-"));
-    tempDirs.push(root);
-    const routeFile = path.join(root, "route.mjs");
-    writeFileSync(routeFile, "export const QUERY = async () => Response.json({ ok: true });\n");
+    const routeFile = realpathSync(
+      path.resolve("src/__tests__/fixtures/openapi-request-bodies-route.mjs"),
+    );
 
-    const generator = new OpenAPIGenerator(root, { title: "Search API" });
+    const generator = new OpenAPIGenerator(path.dirname(routeFile), { title: "Search API" });
     const spec = await generator.generateSpec([
       {
         path: "/api/search",
@@ -109,8 +107,79 @@ describe("OpenAPIGenerator", () => {
         required: true,
         content: {
           "application/json": {
-            schema: { type: "object" },
+            schema: {
+              type: "object",
+              properties: { term: { type: "string" } },
+              required: ["term"],
+            },
           },
+        },
+      },
+    });
+  });
+
+  it("only requires request bodies declared by endpoint schemas", async () => {
+    const routeFile = realpathSync(
+      path.resolve("src/__tests__/fixtures/openapi-request-bodies-route.mjs"),
+    );
+    const generator = new OpenAPIGenerator(path.dirname(routeFile), { title: "Bodies API" });
+    const spec = await generator.generateSpec([
+      {
+        path: "/api/resources",
+        methods: ["POST", "PUT", "PATCH", "DELETE"],
+        filePath: routeFile,
+        relativePath: "api/resources/route.ts",
+      },
+    ]);
+
+    expect(spec.paths["/resources"].post).not.toHaveProperty("requestBody");
+    expect(spec.paths["/resources"].put).not.toHaveProperty("requestBody");
+    expect(spec.paths["/resources"].patch.requestBody).toMatchObject({
+      required: true,
+      content: {
+        "application/json": {
+          schema: {
+            type: "object",
+            properties: { name: { type: "string" } },
+            required: ["name"],
+          },
+        },
+      },
+    });
+    expect(spec.paths["/resources"].delete.requestBody).toMatchObject({
+      required: false,
+      content: {
+        "application/json": {
+          schema: {
+            type: "object",
+            properties: { force: { type: "boolean" } },
+            required: ["force"],
+          },
+        },
+      },
+    });
+  });
+
+  it("keeps request bodies optional when route metadata cannot be loaded", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const missingRoute = path.resolve("src/__tests__/fixtures/missing-openapi-route.mjs");
+    const generator = new OpenAPIGenerator(path.dirname(missingRoute), {
+      title: "Fallback API",
+    });
+    const spec = await generator.generateSpec([
+      {
+        path: "/api/unavailable",
+        methods: ["POST"],
+        filePath: missingRoute,
+        relativePath: "api/unavailable/route.ts",
+      },
+    ]);
+
+    expect(spec.paths["/unavailable"].post.requestBody).toMatchObject({
+      required: false,
+      content: {
+        "application/json": {
+          schema: { type: "object", description: "Request body" },
         },
       },
     });
