@@ -8885,6 +8885,7 @@ function createKeyedRowsBlockComponent(
       const rows = this.readRows(this.currentProps);
       const elements = [...this.root.children];
       if (!rows || rows.items.length !== elements.length) return false;
+      const reactOwnedRows = this.hasReactOwnedRows();
       const opaqueConditionalPaths = new Set(
         (this.currentProps.conditionals || []).map((conditional) => conditional.path.join(".")),
       );
@@ -8892,7 +8893,7 @@ function createKeyedRowsBlockComponent(
       for (let index = 0; index < rows.items.length; index += 1) {
         const descriptor = this.currentProps.create(rows.items[index], index);
         if (
-          this.hasReactOwnedRows() &&
+          reactOwnedRows &&
           !matchesCompilerHostElement(elements[index], descriptor, opaqueConditionalPaths)
         ) {
           this.cleanupHostScopes(instances);
@@ -8907,7 +8908,7 @@ function createKeyedRowsBlockComponent(
           key: rows.keys[index],
           element: elements[index],
           scope: scope || undefined,
-          values: this.hasReactOwnedRows()
+          values: reactOwnedRows
             ? this.currentProps.bindings.map(() => UNSET_KEYED_ROW_BINDING)
             : readKeyedRowBindingValues(this.currentProps, rows.items[index], index),
           item: rows.items[index],
@@ -8918,14 +8919,16 @@ function createKeyedRowsBlockComponent(
             index,
           ),
         };
-        if (this.hasReactOwnedRows()) {
+        instances.set(rows.keys[index], instance);
+      }
+      if (reactOwnedRows) {
+        for (const instance of instances.values()) {
           // React compares the next row against its previous virtual props, not
           // against DOM values patched by Farm between commits. Reapply every
-          // binding after a structural React commit so both views converge
-          // before direct same-key patches resume.
-          applyKeyedRowBindings(this.currentProps, instance, rows.items[index], index);
+          // binding only after every row passes structural validation so a
+          // failed adoption cannot mutate an earlier row before React fallback.
+          applyKeyedRowBindings(this.currentProps, instance, instance.item, instance.index);
         }
-        instances.set(rows.keys[index], instance);
       }
       this.cleanupHostScopes();
       this.instances = instances;

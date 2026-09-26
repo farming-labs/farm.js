@@ -815,6 +815,91 @@ describe("interactive compiled keyed-row runtime", () => {
     expect(observed).toEqual(["v1:Alpha", "v2:Alpha!"]);
   });
 
+  it("validates every refreshed row before applying interactive bindings", async () => {
+    const hmrId = `interactive-keyed-rows-atomic-refresh-${Math.random()}`;
+    const defineTasks = (version: string) =>
+      createCompiledComponent({
+        displayName: "AtomicRefreshInteractiveTasks",
+        hmrId,
+        stateSignature: "items",
+        initialize: () => [
+          [
+            { id: "a", label: "Alpha" },
+            { id: "b", label: "Beta" },
+          ],
+        ],
+        render(_props: Record<string, never>, state, blocks) {
+          const items = () => state[0].get() as Item[];
+          const KeyedRows = blocks.KeyedRows;
+          return (
+            <section>
+              <h1>{version}</h1>
+              <KeyedRows
+                bindings={[
+                  {
+                    kind: "text",
+                    path: [0],
+                    read: (item) => [(item as Item).label],
+                  },
+                ]}
+                create={(item, index) => interactiveRowDescriptor(item as Item, index)}
+                events={[{ name: "onClick", invoke: () => undefined }]}
+                id={0}
+                items={items}
+                render={(rowEvent) => (
+                  <ul>
+                    {items().map((item, index) => (
+                      <li data-done={false} data-key={item.id} key={item.id}>
+                        <span>{item.label}</span>
+                        <button data-index={index} onClick={rowEvent(item, index, 0)} type="button">
+                          Select
+                        </button>
+                        <button type="button">Stop</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                rowKey={(item) => (item as Item).id}
+              />
+            </section>
+          );
+        },
+        bindings: [{ kind: "block" as const, id: 0, dependencies: [0] }],
+      });
+
+    const InitialTasks = defineTasks("v1");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<InitialTasks />));
+
+    const rows = container.querySelectorAll("li");
+    const firstLabel = rows[0].querySelector("span")!;
+    const invalidLabel = document.createElement("em");
+    invalidLabel.textContent = "Beta";
+    rows[1].querySelector("span")!.replaceWith(invalidLabel);
+
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(firstLabel, { childList: true, characterData: true, subtree: true });
+
+    let RefreshedTasks = InitialTasks;
+    await act(async () => {
+      RefreshedTasks = defineTasks("v2");
+      root.render(<RefreshedTasks />);
+      await flushCompilerUpdates();
+    });
+    mutations.push(...observer.takeRecords());
+    observer.disconnect();
+
+    expect(RefreshedTasks).toBe(InitialTasks);
+    expect(container.querySelector("h1")?.textContent).toBe("v2");
+    expect(container.querySelectorAll("li span")).toHaveLength(2);
+    expect(firstLabel.isConnected).toBe(false);
+    expect(mutations).toEqual([]);
+  });
+
   it("routes an interactive row binding failure through the nearest React error boundary", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
