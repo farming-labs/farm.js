@@ -44,7 +44,11 @@ const target = createServer(async (request, response) => {
 await listen(target);
 const targetAddress = target.address();
 const targetUrl = `http://127.0.0.1:${targetAddress.port}`;
-const relay = createPersistentPreviewRelay({ requestTimeoutMs: 10_000 });
+const RELAY_TOKEN = "benchmark-relay-token";
+const relay = createPersistentPreviewRelay({
+  registrationToken: RELAY_TOKEN,
+  requestTimeoutMs: 10_000,
+});
 const relayAddress = await relay.listen();
 reportStage(`Target ${targetUrl} and relay ${relayAddress.websocketUrl} are ready.`);
 
@@ -60,6 +64,7 @@ try {
 
   typescriptAgent = await startTypeScriptPreviewAgent({
     relayUrl: relayAddress.websocketUrl,
+    token: RELAY_TOKEN,
     name: "benchmark-typescript",
     targetUrl,
   });
@@ -71,7 +76,12 @@ try {
   await expectInactive(`${relayAddress.httpUrl}/preview/benchmark-typescript`);
   reportStage("TypeScript forwarding and shutdown verified.");
 
-  rustSession = await startPreviewAgent(relayAddress.websocketUrl, "benchmark-rust", targetUrl);
+  // The native agent takes only a relay URL, so its credential rides the query.
+  rustSession = await startPreviewAgent(
+    `${relayAddress.websocketUrl}?token=${encodeURIComponent(RELAY_TOKEN)}`,
+    "benchmark-rust",
+    targetUrl,
+  );
   reportStage(`Rust agent registered at ${rustSession.publicUrl}.`);
   assert.equal(activePreviewAgentCount(), 1);
   await verifyEndpoint(rustSession.publicUrl);

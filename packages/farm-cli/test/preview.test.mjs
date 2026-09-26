@@ -159,10 +159,52 @@ test("creates a managed gateway preview plan by default", () => {
     assert.equal(plan.provider, "farm-gateway");
     assert.equal(plan.gatewayUrl, "https://preview.farming-labs.dev");
     assert.equal(plan.relayUrl, "wss://preview.farming-labs.dev/agent");
+    assert.equal(plan.relayToken, undefined);
     assert.equal(plan.requestedPublicUrl, "https://stripe-webhook.preview.farming-labs.dev");
   } finally {
     restoreEnv("FARM_PREVIEW_GATEWAY_URL", previousGateway);
     restoreEnv("FARM_PREVIEW_DOMAIN", previousDomain);
+  }
+});
+
+test("carries a configured relay credential without putting it in the relay URL", async () => {
+  const previousToken = process.env.FARM_PREVIEW_RELAY_TOKEN;
+  process.env.FARM_PREVIEW_RELAY_TOKEN = "relay-secret";
+
+  const target = {
+    localUrl: "http://localhost:3000",
+    host: "localhost",
+    port: 3000,
+    source: "port",
+  };
+  const calls = [];
+  const runtime = {
+    async startPreviewAgent(...args) {
+      calls.push(args);
+      return { sessionId: "native-session", publicUrl: "https://native.preview.example.com" };
+    },
+    async stopPreviewAgent() {
+      return true;
+    },
+    async waitPreviewAgent() {
+      return true;
+    },
+  };
+
+  try {
+    const plan = createPreviewGatewayPlan(target, { name: "credentialed" });
+    assert.equal(plan.relayToken, "relay-secret");
+    // The CLI prints plan.relayUrl, so the credential must not be on it.
+    assert.ok(!plan.relayUrl.includes("relay-secret"));
+
+    await runNativePreviewTunnel(plan, { runtime });
+    assert.equal(
+      calls[0][0],
+      `${plan.relayUrl}?token=relay-secret`,
+      "expected the native agent to receive the relay credential",
+    );
+  } finally {
+    restoreEnv("FARM_PREVIEW_RELAY_TOKEN", previousToken);
   }
 });
 

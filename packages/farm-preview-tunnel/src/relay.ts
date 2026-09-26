@@ -12,6 +12,56 @@ import {
 } from "./protocol.js";
 import { getHopByHopHeaderNames, getRecordHeader } from "./headers.js";
 
+/**
+ * Compare a presented credential without leaking its length or content through
+ * timing. `node:crypto`'s timingSafeEqual needs equal-length buffers, so the
+ * length is folded in instead of being an early return.
+ */
+function secretsMatch(presented: string, expected: string): boolean {
+  if (!expected) return false;
+  let mismatch = presented.length === expected.length ? 0 : 1;
+  const length = Math.max(presented.length, expected.length);
+  for (let index = 0; index < length; index += 1) {
+    mismatch |= presented.charCodeAt(index) ^ expected.charCodeAt(index);
+  }
+  return mismatch === 0;
+}
+
+/** A request header as a single value; a repeated header takes its first. */
+function readSingleHeader(request: IncomingMessage, name: string): string {
+  const value = getRecordHeader(request.headers as Record<string, string | string[]>, name);
+  if (Array.isArray(value)) return value[0] ?? "";
+  return value ?? "";
+}
+
+/**
+ * The agent credential, read from the `token` query parameter or an
+ * `authorization: Bearer` header. The native agent is configured with a URL
+ * and nothing else, which is why the query parameter is accepted.
+ */
+function readPresentedToken(url: URL, request: IncomingMessage): string {
+  const header = readSingleHeader(request, "authorization");
+  if (/^Bearer /i.test(header)) return header.slice(7).trim();
+  return url.searchParams.get("token") || "";
+}
+
+function isAllowedAgentOrigin(
+  request: IncomingMessage,
+  allowedAgentOrigins: readonly string[] | undefined,
+): boolean {
+  const origin = readSingleHeader(request, "origin");
+  // A non-browser agent sends no Origin at all, which is the normal case here.
+  if (!origin) return true;
+  if (allowedAgentOrigins?.includes(origin)) return true;
+  const host = readSingleHeader(request, "host");
+  if (!host) return false;
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}
+
 export interface PersistentPreviewRelayOptions {
   host?: string;
   port?: number;
@@ -25,6 +75,23 @@ export interface PersistentPreviewRelayOptions {
   requestTimeoutMs?: number;
   maxBodyBytes?: number;
   maxResponseBodyBytes?: number;
+  /**
+   * Credential an agent must present to register a preview name.
+   *
+   * A relay route wins over the polling fallback for any name it holds a
+   * session for, so an unauthenticated registration is a takeover of that
+   * public hostname. With no token configured the relay accepts no
+   * registrations at all rather than accepting anonymous ones.
+   */
+  registrationToken?: string;
+  /**
+   * Whether another preview transport already owns this name. The relay and
+   * the polling gateway serve the same hostnames from separate namespaces, so
+   * a claim has to be refused when the other side is live.
+   */
+  isPreviewNameClaimed?: (name: string) => boolean | Promise<boolean>;
+  /** Origins allowed to open the agent socket. Defaults to same-origin only. */
+  allowedAgentOrigins?: readonly string[];
 }
 
 export type PersistentPreviewRelayFallbackHandler = (
@@ -149,12 +216,22 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
       socket.destroy();
       return;
     }
+    // A WebSocket upgrade is not subject to CORS, so without this check a
+    // drive-by page could open the agent socket from any visitor's browser.
+    if (!isAllowedAgentOrigin(request, options.allowedAgentOrigins)) {
+      socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    // The shipped native agent takes only a URL, so a credential presented in
+    // the query is carried to the register step alongside the message field.
+    const upgradeToken = readPresentedToken(url, request);
     websocketServer.handleUpgrade(request, socket, head, (websocket) => {
-      websocketServer.emit("connection", websocket, request);
+      websocketServer.emit("connection", websocket, request, upgradeToken);
     });
   });
 
-  websocketServer.on("connection", (socket) => {
+  websocketServer.on("connection", (socket, _request, upgradeToken?: string) => {
     let session: AgentSession | undefined;
     let registering = false;
 
@@ -180,6 +257,22 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
           }
           registering = true;
           try {
+            // Authenticate before anything else: a relay route wins over the
+            // polling gateway for any name it holds, so an unauthenticated
+            // registration is a takeover of that public hostname.
+            if (!options.registrationToken) {
+              rejectAgentCredential(
+                socket,
+                "This relay has no registrationToken configured, so it accepts no agent registrations.",
+              );
+              return;
+            }
+            const presented = message.token || upgradeToken || "";
+            if (!secretsMatch(presented, options.registrationToken)) {
+              rejectAgentCredential(socket, "The relay rejected the agent credential.");
+              return;
+            }
+
             const name = normalizePreviewName(message.name);
             if (!name) {
               socket.send(
@@ -191,6 +284,14 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
 
             const existing = agents.get(name);
             if (existing && existing.socket.readyState === existing.socket.OPEN) {
+              rejectPreviewName(socket, name);
+              return;
+            }
+
+            // The polling gateway keeps its own name namespace and this route
+            // takes precedence over it, so claiming a name it already serves
+            // would silently replace an authenticated session.
+            if (await options.isPreviewNameClaimed?.(name)) {
               rejectPreviewName(socket, name);
               return;
             }
@@ -696,6 +797,12 @@ function rejectSocketMessage(socket: WebSocket, message: string) {
   socket.send(JSON.stringify({ type: "error", message }), () => {
     socket.close(1008, "Invalid tunnel message");
   });
+}
+
+function rejectAgentCredential(socket: WebSocket, message: string) {
+  if (socket.readyState !== socket.OPEN) return;
+  socket.send(JSON.stringify({ type: "error", message }));
+  socket.close(1008, "Agent credential rejected");
 }
 
 function rejectPreviewName(socket: WebSocket, name: string) {
