@@ -364,6 +364,27 @@ describe("OpenAPIGenerator schema conversion", () => {
     });
   });
 
+  it("includes variadic tuple rest schemas in the item union", () => {
+    expect(toSchema(z.tuple([z.string()]).rest(z.number()))).toMatchObject({
+      type: "array",
+      items: { oneOf: [{ type: "string" }, { type: "number" }] },
+    });
+    expect(toSchema(z.tuple([z.string(), z.number()]).rest(z.boolean()))).toMatchObject({
+      type: "array",
+      items: {
+        oneOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }],
+      },
+    });
+    expect(toSchema(z.tuple([]).rest(z.boolean()))).toMatchObject({
+      type: "array",
+      items: { type: "boolean" },
+    });
+    expect(toSchema(z3.tuple([z3.string()]).rest(z3.number()))).toMatchObject({
+      type: "array",
+      items: { oneOf: [{ type: "string" }, { type: "number" }] },
+    });
+  });
+
   it("keeps the declared type for primitives", () => {
     expect(toSchema(z.string())).toMatchObject({ type: "string" });
     expect(toSchema(z.number())).toMatchObject({ type: "number" });
