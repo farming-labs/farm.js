@@ -196,6 +196,12 @@ Matchers can be strings, regular expressions, or functions. String matchers supp
 | `/api/*`               | One segment below `/api`                                         |
 | `/auth(.*)`            | `/auth` and nested auth paths                                    |
 
+Matchers are compared against the same pathname the router resolves the request
+to: each segment is decoded once, so `/%64ashboard` meets a `/dashboard` matcher
+exactly like `/dashboard` does. This is what makes a matcher safe to gate access
+with. An encoded slash stays inside its own segment, so `%2F` never splits one
+segment into two and reaches `ctx.params` still encoded.
+
 When a matcher has params, the handler can read them from `ctx.params`.
 
 ```ts

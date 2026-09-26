@@ -120,6 +120,8 @@ auth0({
 
 When a signed-out request matches, the provider integration redirects it to the configured sign-in route and keeps the current path as a return target. A session or profile endpoint can still return `401` when called directly.
 
+`protectedRoutes` uses the same [matcher syntax](/docs/middleware#matcher-syntax) as Farm middleware and is compared against the pathname the router resolves the request to, so an encoded spelling such as `/%64ashboard` is gated exactly like `/dashboard`.
+
 Auth.js and Better Auth only mount their provider handlers. Protect application pages with the provider's server helper or with your own [Farm middleware](/docs/middleware).
 
 ## Callback and return URLs

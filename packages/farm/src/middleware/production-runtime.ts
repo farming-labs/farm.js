@@ -10,7 +10,7 @@ import type {
   MiddlewareResult,
 } from "./types";
 import { emitFarmEvent } from "../observability";
-import { decodeRouteSegment } from "../utils/decode";
+import { canonicalizeRequestPathname } from "../utils/decode";
 import { normalizeMiddlewareModule } from "./module";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
@@ -538,9 +538,15 @@ function matchPattern(
   pattern: string | RegExp,
   pathname: string,
 ): { matched: boolean; params?: Record<string, string> } {
+  // A middleware matcher is a guard, so it has to be compared against the same
+  // pathname the route matchers resolve the request to. They decode each
+  // segment once; comparing the raw pathname here let `/%64ashboard` miss a
+  // `/dashboard` matcher while still rendering the protected page.
+  const canonicalPathname = canonicalizeRequestPathname(pathname);
+
   if (pattern instanceof RegExp) {
     pattern.lastIndex = 0;
-    const match = pattern.exec(pathname);
+    const match = pattern.exec(canonicalPathname);
     return {
       matched: !!match,
       params: match?.groups ? { ...match.groups } : undefined,
@@ -558,18 +564,21 @@ function matchPattern(
     // satisfies, so the matcher silently matches nothing — an auth gate written
     // that way would never run.
     const prefix = pattern.slice(0, -4).replace(/\/$/, "");
-    return { matched: pathname === prefix || pathname.startsWith(`${prefix}/`) };
+    return { matched: canonicalPathname === prefix || canonicalPathname.startsWith(`${prefix}/`) };
   }
 
   const { regex, params } = compilePathPattern(pattern);
-  const match = regex.exec(pathname);
+  const match = regex.exec(canonicalPathname);
   if (!match) {
     return { matched: false };
   }
 
   const values: Record<string, string> = {};
   params.forEach((param, index) => {
-    values[param] = decodeRouteSegment(match[index + 1] || "");
+    // The captured text came out of the canonical pathname, so it is already
+    // decoded once. Decoding it again would turn a literal "%2541BC" segment
+    // into "ABC".
+    values[param] = match[index + 1] || "";
   });
 
   return {
