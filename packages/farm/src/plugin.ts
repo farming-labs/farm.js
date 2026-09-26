@@ -2,6 +2,11 @@ import type { PluginRoutes, PluginRoutesFactory } from "./api/route";
 // Plugin factories must emit declarations through public exports, never bundled
 // declaration chunk paths, even when they only import @farm.js/core/plugin.
 export type { PluginRoutes, PluginRoutesFactory, RouteDefinition } from "./api/route";
+// Reachable from every route a plugin declares (each endpoint carries its
+// OpenAPI metadata), so it must be nameable from this entry the same way
+// RouteDefinition is. Otherwise a plugin package's declaration emit falls back to
+// a private dist chunk path.
+export type { EndpointOpenAPIMetadata } from "./openapi/types";
 import type { FarmConfig, FarmRequest, FarmResponse } from "./types";
 import type { ViteDevServer } from "vite";
 import type { FarmClientPlugin } from "./client/plugin";
