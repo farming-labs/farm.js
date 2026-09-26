@@ -12,6 +12,8 @@ import { getHopByHopHeaderNames, getRecordHeader } from "./headers.js";
 export interface TypeScriptPreviewAgentOptions {
   relayUrl: string;
   name: string;
+  /** Credential the relay requires before it will claim the preview name. */
+  token?: string;
   targetUrl: string;
   connectTimeoutMs?: number;
   localProbeIntervalMs?: number;
@@ -139,7 +141,13 @@ function waitForReady(socket: WebSocket, options: TypeScriptPreviewAgentOptions)
     }, options.connectTimeoutMs ?? 10_000);
 
     const onOpen = () => {
-      socket.send(JSON.stringify({ type: "register", name: options.name }));
+      socket.send(
+        JSON.stringify({
+          type: "register",
+          name: options.name,
+          ...(options.token ? { token: options.token } : {}),
+        }),
+      );
     };
     const onMessage = (data: WebSocket.RawData) => {
       const message = parseRelayMessage(data);

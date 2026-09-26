@@ -1,6 +1,12 @@
 export interface RegisterMessage {
   type: "register";
   name: string;
+  /**
+   * Credential the relay requires before it will claim a preview name. The
+   * native agent presents it in the relay URL query instead, since it cannot
+   * add fields to this message.
+   */
+  token?: string;
 }
 
 export interface ReadyMessage {
@@ -47,7 +53,12 @@ export type RelayToAgentMessage =
 
 export function isAgentToRelayMessage(value: unknown): value is AgentToRelayMessage {
   if (!isRecord(value)) return false;
-  if (value.type === "register") return typeof value.name === "string";
+  if (value.type === "register") {
+    return (
+      typeof value.name === "string" &&
+      (value.token === undefined || typeof value.token === "string")
+    );
+  }
   return value.type === "response" && isTunnelResponseMessage(value);
 }
 
