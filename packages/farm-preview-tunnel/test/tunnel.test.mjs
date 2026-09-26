@@ -210,7 +210,10 @@ test("stops buffering local responses that exceed the relay limit", async () => 
   });
   await listen(target);
   const targetAddress = target.address();
-  const relay = createPersistentPreviewRelay({ registrationToken: RELAY_TOKEN, maxResponseBodyBytes: 8 });
+  const relay = createPersistentPreviewRelay({
+    registrationToken: RELAY_TOKEN,
+    maxResponseBodyBytes: 8,
+  });
   const relayAddress = await relay.listen();
   const agent = await startTypeScriptPreviewAgent({
     relayUrl: relayAddress.websocketUrl,
@@ -380,7 +383,10 @@ test("aborts the local request when the public visitor disconnects", async () =>
   });
   await listen(target);
   const targetAddress = target.address();
-  const relay = createPersistentPreviewRelay({ registrationToken: RELAY_TOKEN, requestTimeoutMs: 2_000 });
+  const relay = createPersistentPreviewRelay({
+    registrationToken: RELAY_TOKEN,
+    requestTimeoutMs: 2_000,
+  });
   const relayAddress = await relay.listen();
   const agent = await startTypeScriptPreviewAgent({
     relayUrl: relayAddress.websocketUrl,
@@ -528,7 +534,10 @@ test("applies the relay deadline while a request body is still uploading", async
   const target = createServer((_request, response) => response.end("target"));
   await listen(target);
   const targetAddress = target.address();
-  const relay = createPersistentPreviewRelay({ registrationToken: RELAY_TOKEN, requestTimeoutMs: 50 });
+  const relay = createPersistentPreviewRelay({
+    registrationToken: RELAY_TOKEN,
+    requestTimeoutMs: 50,
+  });
   const address = await relay.listen();
   const agent = await startTypeScriptPreviewAgent({
     relayUrl: address.websocketUrl,
@@ -558,7 +567,10 @@ test("cancels stalled local requests at the agent deadline", async () => {
   });
   await listen(target);
   const targetAddress = target.address();
-  const relay = createPersistentPreviewRelay({ registrationToken: RELAY_TOKEN, requestTimeoutMs: 1_000 });
+  const relay = createPersistentPreviewRelay({
+    registrationToken: RELAY_TOKEN,
+    requestTimeoutMs: 1_000,
+  });
   const address = await relay.listen();
   const agent = await startTypeScriptPreviewAgent({
     relayUrl: address.websocketUrl,
