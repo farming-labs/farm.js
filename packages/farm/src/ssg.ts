@@ -189,7 +189,7 @@ export function analyzeStaticRouteCandidate(
   };
 }
 
-function findRequestBoundSourceBlockers(source: string): string[] {
+export function findRequestBoundSourceBlockers(source: string): string[] {
   const blockers = new Set<string>();
   const code = stripCommentsAndLiteralContents(source);
 

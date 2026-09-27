@@ -26,7 +26,7 @@ import type { Rollup } from "vite";
 import os from "os";
 import path from "path";
 import { constants as fsConstants, existsSync, readFileSync } from "fs";
-import { parseRouteRenderingDirective } from "../ssg";
+import { findRequestBoundSourceBlockers, parseRouteRenderingDirective } from "../ssg";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
 import { isDeepStrictEqual } from "node:util";
@@ -4364,7 +4364,14 @@ function applyConfiguredResponseHeaders(response, pathname) {
 
 function parseRouteRenderingDirectiveFromDisk(modulePath: string) {
   try {
-    return parseRouteRenderingDirective(readFileSync(modulePath, "utf8"));
+    const source = readFileSync(modulePath, "utf8");
+    const directive = parseRouteRenderingDirective(source);
+    // The runtime only sees module exports, so whether this route reads request
+    // state has to be decided here and ride the registration. Without it the
+    // runtime merge happily resolves ssg for a route the build already demoted
+    // to per-request rendering, and stamps a shared cache-control on it.
+    if (findRequestBoundSourceBlockers(source).length === 0) return directive;
+    return { ...(directive ?? { ssg: false, ppr: false, directive: "" }), requestBound: true };
   } catch {
     return undefined;
   }

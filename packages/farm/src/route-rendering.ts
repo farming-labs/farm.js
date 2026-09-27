@@ -34,6 +34,13 @@ export interface DirectiveRenderingConfig {
   revalidate?: number;
   dynamic?: RouteRenderingDynamic;
   directive: string;
+  /**
+   * The route's source reads request state (headers, cookies, search params),
+   * so its HTML is per request and must never enter a shared artifact or a
+   * shared cache. Determined from source at build time, because the runtime
+   * only ever sees module exports.
+   */
+  requestBound?: boolean;
 }
 
 export function normalizeDynamicMode(value: unknown): RouteRenderingDynamic | undefined {
@@ -97,6 +104,16 @@ export function mergeRouteRenderingDirectiveConfig(
   } else if (moduleDynamic === "force-dynamic") {
     ssg = false;
     requestedPPR = false;
+    revalidate = undefined;
+  }
+
+  // A request-bound route cannot be static however it asked to be: the
+  // directive, an `ssg` export, a positive `revalidate`, and `force-static` all
+  // reach this point as ssg, and each of them would publish one visitor's HTML
+  // under a shared cache-control. This mirrors resolveRouteRenderingConfig, so
+  // the build, the prerender pass and the production runtime agree.
+  if (directiveConfig?.requestBound && ssg) {
+    ssg = false;
     revalidate = undefined;
   }
 
