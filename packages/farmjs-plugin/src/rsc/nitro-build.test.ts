@@ -14,7 +14,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildRscNitro } from "./nitro-build";
+import { buildRscNitro, rewriteRscEntryImports } from "./nitro-build";
 
 const delay = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -49,6 +49,35 @@ async function stopProcess(child: ChildProcess): Promise<void> {
 }
 
 describe("RSC Nitro production build", () => {
+  it("rewrites Rolldown entry imports to the copied server bundles", () => {
+    const outputRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-rolldown-"));
+
+    try {
+      const serverDir = path.join(outputRoot, "server");
+      const serverDistDir = path.join(serverDir, "dist");
+      const entryDir = path.join(serverDir, "_build");
+      mkdirSync(path.join(serverDistDir, "rsc"), { recursive: true });
+      mkdirSync(path.join(serverDistDir, "ssr"), { recursive: true });
+      mkdirSync(entryDir, { recursive: true });
+
+      const entryPath = path.join(entryDir, "rsc-entry.mjs");
+      writeFileSync(
+        entryPath,
+        `import rsc from "/project/.nitro/vite/dist/rsc/index.js";
+globalThis.__VITE_RSC_LOAD_SSR__ = () => import("/project/.nitro/vite/dist/ssr/index.js");`,
+      );
+
+      rewriteRscEntryImports(serverDir, serverDistDir);
+
+      const entry = readFileSync(entryPath, "utf-8");
+      expect(entry).toContain('from "../dist/rsc/index.js"');
+      expect(entry).toContain('import("../dist/ssr/index.js")');
+      expect(entry).not.toContain(".nitro/vite");
+    } finally {
+      rmSync(outputRoot, { recursive: true, force: true });
+    }
+  });
+
   it("boots node-server output after the project and workspace dependencies are removed", async () => {
     const fixtureRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-build-"));
     const isolatedRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-output-"));

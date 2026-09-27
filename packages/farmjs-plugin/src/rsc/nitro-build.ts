@@ -53,6 +53,39 @@ function copyDir(src: string, dest: string, ignoredNames = new Set<string>()): v
   }
 }
 
+/** @internal */
+export function rewriteRscEntryImports(serverDir: string, serverDistDir: string): void {
+  const entryChunkPaths: string[] = [];
+  const findEntryChunks = (dir: string) => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir)) {
+      const candidate = path.join(dir, name);
+      if (statSync(candidate).isDirectory()) findEntryChunks(candidate);
+      else if (name === "rsc-entry.mjs") entryChunkPaths.push(candidate);
+    }
+  };
+  for (const chunksDir of ["chunks", "_chunks", "_build"]) {
+    findEntryChunks(path.join(serverDir, chunksDir));
+  }
+  for (const entryChunkPath of entryChunkPaths) {
+    let code = readFileSync(entryChunkPath, "utf-8");
+    const relativeImport = (target: string) => {
+      const relative = path.relative(path.dirname(entryChunkPath), target).replace(/\\/g, "/");
+      return relative.startsWith(".") ? relative : `./${relative}`;
+    };
+    // Match any path that ends with dist/rsc/index.js or dist/ssr/index.js (minified, no spaces)
+    code = code.replace(
+      /(["'`])[^"'`]*?dist\/rsc\/index\.js\1/g,
+      JSON.stringify(relativeImport(path.join(serverDistDir, "rsc", "index.js"))),
+    );
+    code = code.replace(
+      /(["'`])[^"'`]*?dist\/ssr\/index\.js\1/g,
+      JSON.stringify(relativeImport(path.join(serverDistDir, "ssr", "index.js"))),
+    );
+    writeFileSync(entryChunkPath, code, "utf-8");
+  }
+}
+
 function detectBundledRscRuntimes(rendererPath: string): Map<string, string> {
   const packages = new Map<string, string>();
   const rendererDir = path.dirname(path.resolve(rendererPath));
@@ -391,38 +424,9 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
     );
   }
 
-  // Nitro may group the entry under chunks/build or chunks/_ depending on the
-  // selected builder. Find it by name and make copied-dist imports relative to
-  // the emitted chunk so the output survives being moved away from the project.
-  const entryChunkPaths: string[] = [];
-  const findEntryChunks = (dir: string) => {
-    if (!existsSync(dir)) return;
-    for (const name of readdirSync(dir)) {
-      const candidate = path.join(dir, name);
-      if (statSync(candidate).isDirectory()) findEntryChunks(candidate);
-      else if (name === "rsc-entry.mjs") entryChunkPaths.push(candidate);
-    }
-  };
-  for (const chunksDir of ["chunks", "_chunks"]) {
-    findEntryChunks(path.join(serverDir, chunksDir));
-  }
-  for (const entryChunkPath of entryChunkPaths) {
-    let code = readFileSync(entryChunkPath, "utf-8");
-    const relativeImport = (target: string) => {
-      const relative = path.relative(path.dirname(entryChunkPath), target).replace(/\\/g, "/");
-      return relative.startsWith(".") ? relative : `./${relative}`;
-    };
-    // Match any path that ends with dist/rsc/index.js or dist/ssr/index.js (minified, no spaces)
-    code = code.replace(
-      /(["'`])[^"'`]*?dist\/rsc\/index\.js\1/g,
-      JSON.stringify(relativeImport(path.join(serverDistDir, "rsc", "index.js"))),
-    );
-    code = code.replace(
-      /(["'`])[^"'`]*?dist\/ssr\/index\.js\1/g,
-      JSON.stringify(relativeImport(path.join(serverDistDir, "ssr", "index.js"))),
-    );
-    writeFileSync(entryChunkPath, code, "utf-8");
-  }
+  // Nitro may group the entry differently by builder. Make copied-dist imports
+  // relative to the emitted chunk so output survives moving away from the project.
+  rewriteRscEntryImports(serverDir, serverDistDir);
 
   // Patch SSR bundle: inject production client CSS href and bootstrap script so HTML has styles and hydration works
   const ssrIndexPath = path.join(serverDistDir, "ssr", "index.js");
