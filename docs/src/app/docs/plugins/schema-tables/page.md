@@ -179,15 +179,23 @@ before it runs:
 | `constraints: [...]`             | `CREATE [UNIQUE] INDEX "<table>_<columns>_<type>"`         |
 | `default`                        | a literal, for strings, numbers, and booleans              |
 | `default: "now"` on a `datetime` | `DEFAULT CURRENT_TIMESTAMP`                                |
-| `reference`                      | `REFERENCES <table> (<column>)`, with `ON DELETE` when set |
+| `reference`                      | Relationship metadata; database enforcement is the default |
+| `reference.enforced: "db"`       | `REFERENCES <table> (<column>)`, with `ON DELETE` when set |
+| `reference.enforced: "app"`      | Keeps relationship metadata without a database foreign key |
+| `reference.enforced: "none"`     | Keeps the declaration without a database foreign key       |
 
 Postgres, SQLite, and MySQL are supported. A `reference` to a model outside this
 owner's schema is left as a comment rather than a foreign key, since the other
-table may not exist yet. Internal references are dependency ordered so parent
-tables are created before their dependents, and a table can reference itself.
-Farm rejects cross-table reference cycles before emitting SQL because inline
-foreign keys cannot create either table first; manage one constraint separately
-when a schema needs that shape.
+table may not exist yet. Omitting `enforced` is equivalent to `enforced: "db"`.
+Application and unenforced references stay available in schema metadata, but SQL
+generation and the runtime ORM do not create a database constraint for them.
+
+Database-enforced internal references are dependency ordered so parent tables
+are created before their dependents, and a table can reference itself. Farm
+rejects cross-table cycles of database-enforced references before emitting SQL
+because inline foreign keys cannot create either table first; mark one edge
+`enforced: "app"` or manage that constraint separately when a schema needs that
+shape.
 
 ### Two things worth knowing
 

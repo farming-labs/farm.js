@@ -545,6 +545,79 @@ describe("sql generation", () => {
     expect(() => renderSqlSchemaFile(collected, "postgres")).toThrow(message);
   });
 
+  it.each(["app", "none"] as const)(
+    "allows a cycle closed by an enforced: %s reference",
+    (enforced) => {
+      const cycle = defineSchema({
+        models: {
+          authors: {
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              profileId: {
+                type: "uuid",
+                reference: { model: "profiles", field: "id", enforced },
+              },
+            },
+          },
+          profiles: {
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              authorId: {
+                type: "uuid",
+                reference: { model: "authors", field: "id" },
+              },
+            },
+          },
+        },
+      });
+      const statements = generateSqlStatements(
+        collectSchemaModels([["accounts", cycle]]),
+        "postgres",
+      ).map((statement) => statement.sql);
+
+      expect(statements[0]).toContain('CREATE TABLE IF NOT EXISTS "authors"');
+      expect(statements[0]).not.toContain("REFERENCES");
+      expect(statements[1]).toContain('REFERENCES "authors" ("id")');
+    },
+  );
+
+  it.each([
+    ["the default", undefined, true],
+    ['enforced: "db"', "db", true],
+    ['enforced: "app"', "app", false],
+    ['enforced: "none"', "none", false],
+  ] as const)("uses database references for %s", (_label, enforced, expected) => {
+    const reference = defineSchema({
+      models: {
+        parents: {
+          fields: { id: { type: "uuid", primaryKey: true } },
+        },
+        children: {
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            parentId: {
+              type: "uuid",
+              reference: {
+                model: "parents",
+                field: "id",
+                ...(enforced ? { enforced } : {}),
+              },
+            },
+          },
+        },
+      },
+    });
+    const table = generateSqlStatements(
+      collectSchemaModels([["references", reference]]),
+      "postgres",
+    ).find((statement) => statement.target === "children")!;
+
+    expect(table.sql.includes('REFERENCES "parents" ("id")')).toBe(expected);
+    if (!expected) {
+      expect(table.sql).toContain("/* references parents.id */");
+    }
+  });
+
   it.each([
     ["postgres", "TIMESTAMPTZ", '"todo_items"'],
     ["sqlite", "TEXT", '"todo_items"'],

@@ -118,6 +118,44 @@ describe("integration ORM storage", () => {
     );
   });
 
+  it("only creates ORM references when database enforcement is selected", async () => {
+    const schema = await farmIntegrationSchemaToOrmSchema(
+      defineIntegrationSchema({
+        models: {
+          parents: {
+            fields: { id: { type: "uuid", primaryKey: true } },
+          },
+          children: {
+            fields: {
+              defaultParentId: {
+                type: "uuid",
+                reference: { model: "parents", field: "id" },
+              },
+              databaseParentId: {
+                type: "uuid",
+                reference: { model: "parents", field: "id", enforced: "db" },
+              },
+              applicationParentId: {
+                type: "uuid",
+                reference: { model: "parents", field: "id", enforced: "app" },
+              },
+              unenforcedParentId: {
+                type: "uuid",
+                reference: { model: "parents", field: "id", enforced: "none" },
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    const fields = schema.models.children.fields;
+    expect(fields.defaultParentId.config.references).toBe("parents.id");
+    expect(fields.databaseParentId.config.references).toBe("parents.id");
+    expect(fields.applicationParentId.config.references).toBeUndefined();
+    expect(fields.unenforcedParentId.config.references).toBeUndefined();
+  });
+
   it.skipIf(!supportsNodeSqlite)(
     "uses storage.client as the unified ORM runtime client with real sqlite data",
     async () => {

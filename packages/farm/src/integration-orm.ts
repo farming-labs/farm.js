@@ -14,6 +14,7 @@ import type {
   FarmIntegrationSchemaModel,
 } from "./integrations";
 import { assertNoSchemaListField } from "./schema-capabilities";
+import { isDatabaseEnforcedReference } from "./schema-reference";
 import { resolveStorageRuntimeClient } from "./storage";
 import type { FarmStorageUserConfig } from "./storage/types";
 import type { FarmConfig } from "./types";
@@ -198,7 +199,7 @@ function createOrmField(
         : builder.default(field.default as never);
   }
 
-  if (field.reference) {
+  if (field.reference && isDatabaseEnforcedReference(field.reference)) {
     builder = builder.references(`${field.reference.model}.${field.reference.field}`);
   }
 

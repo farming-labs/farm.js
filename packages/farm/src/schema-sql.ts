@@ -1,5 +1,6 @@
 import type { FarmSchema, FarmSchemaField, FarmSchemaModel, FarmSchemaReference } from "./schema";
 import { assertNoSchemaListField } from "./schema-capabilities";
+import { isDatabaseEnforcedReference } from "./schema-reference";
 
 export { assertNoSchemaListField } from "./schema-capabilities";
 
@@ -420,7 +421,7 @@ function createInternalReferenceLookup(
   const lookup = new Map<string, string>();
 
   for (const [fieldKey, field] of Object.entries(model.model.fields)) {
-    if (!field.reference) {
+    if (!field.reference || !isDatabaseEnforcedReference(field.reference)) {
       continue;
     }
 
@@ -553,7 +554,7 @@ function orderSchemaModelsByReferences(
 
     const dependencies = new Set<string>();
     for (const field of Object.values(model.model.fields)) {
-      if (field.reference) {
+      if (field.reference && isDatabaseEnforcedReference(field.reference)) {
         dependencies.add(`${model.ownerKey}.${field.reference.model}`);
       }
     }
