@@ -1,3 +1,4 @@
+import { canonicalizeRequestPathSegments } from "@farm.js/core/middleware";
 import type { CookieOptions } from "./index.js";
 
 /**
@@ -40,11 +41,19 @@ function decodeCookieValue(value: string): string {
  * Matching is by path segment, not raw string prefix: middleware at `/admin`
  * covers `/admin` and everything under `/admin/`, but not sibling routes like
  * `/administrator` or `/admin-public` that merely share a textual prefix.
+ *
+ * The request is compared as the router sees it: each segment decoded once and
+ * empty segments dropped. Comparing the raw pathname let `/api/%61dmin/users`,
+ * `/api//admin/users` and `//api/admin/users` skip middleware at `/api/admin`
+ * while the API router, which decodes segments and ignores empty ones, still
+ * served `/api/admin/users`.
  */
 export function middlewareMatchesPath(pathname: string, middlewarePath: string): boolean {
-  if (middlewarePath === "/") return true;
-  if (pathname === middlewarePath) return true;
-  return pathname.startsWith(`${middlewarePath}/`);
+  const middlewareSegments = middlewarePath.split("/").filter(Boolean);
+  if (middlewareSegments.length === 0) return true;
+  const requestSegments = canonicalizeRequestPathSegments(pathname);
+  if (requestSegments.length < middlewareSegments.length) return false;
+  return middlewareSegments.every((segment, index) => requestSegments[index] === segment);
 }
 
 /**

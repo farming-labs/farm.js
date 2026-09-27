@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { matchAPIRouteAtBasePath } from "@farm.js/core/api/runtime";
 import { middlewareMatchesPath, parseCookies, serializeCookie } from "./matching.js";
 
 describe("parseCookies", () => {
@@ -44,6 +45,55 @@ describe("middlewareMatchesPath", () => {
     expect(middlewareMatchesPath("/administrator", "/admin")).toBe(false);
     expect(middlewareMatchesPath("/admin-public", "/admin")).toBe(false);
     expect(middlewareMatchesPath("/adminery/x", "/admin")).toBe(false);
+  });
+
+  // Regression: matching the raw pathname let these skip middleware at
+  // /api/admin while the API router still served /api/admin/users.
+  it.each(["/api/%61dmin/users", "/api//admin/users", "//api/admin/users", "/api/admin//users"])(
+    "applies to %s, an alternate spelling of /api/admin/users",
+    (pathname) => {
+      expect(middlewareMatchesPath(pathname, "/api/admin")).toBe(true);
+    },
+  );
+
+  it("keeps an encoded slash inside its segment instead of splitting on it", () => {
+    // `%2F` decodes to `/` within one segment, so `api%2Fadmin` is a single
+    // segment that is neither `api` nor `admin`, exactly as the router reads it.
+    expect(middlewareMatchesPath("/api%2Fadmin/users", "/api/admin")).toBe(false);
+  });
+
+  it("does not throw on a malformed escape, which would skip every middleware", () => {
+    // The runner catches a throw and calls next(), so a throw here would be a bypass.
+    expect(() => middlewareMatchesPath("/api/%E0%A4%A/users", "/api/admin")).not.toThrow();
+    expect(middlewareMatchesPath("/api/%ZZ", "/api/admin")).toBe(false);
+  });
+});
+
+describe("middleware and API routing agree on which requests are guarded", () => {
+  // The invariant that matters: middleware at a directory applies to exactly the
+  // requests the API router sends into that directory. Comparing against the real
+  // router catches any spelling where the two disagree, not only the ones above.
+  const routes = new Map([
+    ["/api/admin/users", { path: "/api/admin/users" }],
+    ["/api/public/health", { path: "/api/public/health" }],
+  ]);
+
+  it.each([
+    "/api/admin/users",
+    "/api/%61dmin/users",
+    "/api/%61%64%6d%69%6e/users",
+    "/api//admin/users",
+    "//api/admin/users",
+    "/api/admin//users",
+    "/api/admin/users/",
+    "/api/public/health",
+    "/api%2Fadmin/users",
+    "/api/ADMIN/users",
+  ])("%s", (pathname) => {
+    const routedIntoAdmin = matchAPIRouteAtBasePath(routes, pathname)?.route.path.startsWith(
+      "/api/admin/",
+    );
+    expect(middlewareMatchesPath(pathname, "/api/admin")).toBe(Boolean(routedIntoAdmin));
   });
 });
 
