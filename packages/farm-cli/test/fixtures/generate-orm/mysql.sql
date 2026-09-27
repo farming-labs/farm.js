@@ -22,6 +22,12 @@ CREATE TABLE IF NOT EXISTS `members` (
   UNIQUE KEY `members_org_id_role_unique` (`org_id`, `role`)
 );
 
+-- Owner "beta" model "tickets"
+CREATE TABLE IF NOT EXISTS `tickets` (
+  `id` VARCHAR(255) PRIMARY KEY,
+  `ticketBody` TEXT
+);
+
 -- Owner "beta" model "projects"
 CREATE TABLE IF NOT EXISTS `projects` (
   `id` VARCHAR(255) PRIMARY KEY,
@@ -29,12 +35,6 @@ CREATE TABLE IF NOT EXISTS `projects` (
   `ownerId` VARCHAR(255) NOT NULL REFERENCES `tickets` (`id`),
   `createdAt` DATETIME NOT NULL,
   KEY `projects_ownerId_idx` (`ownerId`)
-);
-
--- Owner "beta" model "tickets"
-CREATE TABLE IF NOT EXISTS `tickets` (
-  `id` VARCHAR(255) PRIMARY KEY,
-  `ticketBody` TEXT
 );
 
 -- Owner "widgets" model "widgets"
