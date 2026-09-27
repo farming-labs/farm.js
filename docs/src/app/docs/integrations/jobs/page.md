@@ -248,7 +248,21 @@ await api.jobs.sendWelcomeEmail.cancel({
 });
 ```
 
-These callers exist in the shared API for both runtimes, but the current Inngest adapter rejects one-off scheduling with `400` and cancellation with `501`. Trigger.dev supports both.
+These callers exist in the shared API for both runtimes. Trigger.dev supports one-off scheduling and cancellation. Inngest supports one-off scheduling by mapping the requested time to the event `ts`, but cancellation remains unsupported and returns `501`.
+
+For Inngest, `at` must be an ISO timestamp with an explicit `Z` or UTC offset. `after` accepts a positive number of milliseconds or a duration ending in `ms`, `s`, `m`, `h`, or `d`. The same formats apply to `$options.delay`: an ISO timestamp is absolute and a number or duration is relative. Farm rejects invalid or past absolute times before contacting Inngest.
+
+Inngest uses `idempotencyKey` as the event `id`. Per-call debounce cannot be represented by an event send; configure [debounce on the Inngest function](https://www.inngest.com/docs/guides/debounce) instead. Farm tags are also unsupported by Inngest event sends. Check `task.capabilities` or use the typed guard before exposing provider-dependent controls:
+
+```ts
+import { supportsJobsRuntimeCapability } from "@farm.js/jobs";
+
+if (supportsJobsRuntimeCapability(task.capabilities, "schedule")) {
+  // Show or call provider-backed scheduling controls.
+}
+```
+
+Inngest documents future event timestamps as scheduling new matching function runs. A function already waiting for that event resumes immediately rather than waiting for the future timestamp. See the [event send reference](https://www.inngest.com/docs/reference/typescript/v3/events/send) for that provider behavior.
 
 The `schedule` field on `task({...})`, including cron and timezone, is exposed as metadata only. It does not create a provider schedule.
 
@@ -279,7 +293,7 @@ task({
 });
 ```
 
-Trigger.dev maps all of these defaults into launch options. Inngest currently accepts only `idempotencyKey`; defining Trigger-only defaults causes integration setup to fail.
+Trigger.dev maps all of these defaults into launch options. Inngest accepts `idempotencyKey`; one-off timing is supplied per call through `schedule` or `$options.delay`. Defining Trigger-only task defaults causes integration setup to fail.
 
 ## Runtime capabilities
 
@@ -289,7 +303,7 @@ Trigger.dev maps all of these defaults into launch options. Inngest currently ac
 | Batch trigger                     | Yes           | Yes                       |
 | Status polling                    | Yes           | Yes                       |
 | Idempotency key                   | Yes           | Yes, sent as the event ID |
-| Delay and one-off schedule        | Yes           | No                        |
+| Delay and one-off schedule        | Yes           | Yes, via the event `ts`   |
 | Debounce and tags                 | Yes           | No                        |
 | Queue and retry defaults          | Yes           | No                        |
 | TTL and concurrency key           | Yes           | No                        |

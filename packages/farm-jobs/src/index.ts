@@ -35,6 +35,16 @@ export interface JobsRuntimeCapabilities {
   readonly idempotencyKey: boolean;
 }
 
+export type JobsRuntimeCapability = keyof JobsRuntimeCapabilities;
+
+/** Narrows runtime metadata after checking a provider-dependent capability. */
+export function supportsJobsRuntimeCapability<TCapability extends JobsRuntimeCapability>(
+  capabilities: JobsRuntimeCapabilities,
+  capability: TCapability,
+): capabilities is JobsRuntimeCapabilities & Record<TCapability, true> {
+  return capabilities[capability];
+}
+
 export interface JobsTaskQueueDefinition {
   name: string;
   concurrencyLimit?: number;
@@ -399,6 +409,7 @@ type JobsResolvedLaunchOptions = {
   idempotencyKey?: string;
   tags?: string[];
   delay?: string | number;
+  delayMode?: "at" | "after";
   debounce?: {
     key: string;
     delay: string | number;
@@ -461,8 +472,8 @@ const TRIGGER_CAPABILITIES: JobsRuntimeCapabilities = {
 };
 
 const INNGEST_CAPABILITIES: JobsRuntimeCapabilities = {
-  delay: false,
-  schedule: false,
+  delay: true,
+  schedule: true,
   debounce: false,
   tags: false,
   cancel: false,
@@ -751,14 +762,17 @@ function resolveScheduleLaunchOptions(
     throw new JobsRuntimeError("Schedule requests must include exactly one of at or after.", 400);
   }
 
+  const launch = resolveLaunchOptions(task, payload, {
+    delay: scheduledFor,
+    debounce: body.options?.debounce,
+    idempotencyKey: body.options?.idempotencyKey,
+    tags: body.options?.tags,
+  });
+  launch.delayMode = hasAt ? "at" : "after";
+
   return {
     scheduledFor,
-    launch: resolveLaunchOptions(task, payload, {
-      delay: scheduledFor,
-      debounce: body.options?.debounce,
-      idempotencyKey: body.options?.idempotencyKey,
-      tags: body.options?.tags,
-    }),
+    launch,
   };
 }
 
@@ -885,6 +899,126 @@ async function requestJSON(url: string, init: RequestInit) {
   }
 
   return data;
+}
+
+const INNGEST_DURATION_UNITS = {
+  ms: 1,
+  s: 1_000,
+  m: 60_000,
+  h: 3_600_000,
+  d: 86_400_000,
+} as const;
+const INNGEST_MAX_TIMESTAMP = 8_640_000_000_000_000;
+
+function inngestScheduleError(message: string, value: string | number) {
+  return new JobsRuntimeError(message, 400, {
+    code: "JOBS_INVALID_SCHEDULE",
+    runtime: "inngest",
+    value,
+  });
+}
+
+function inngestCapabilityError(
+  capability: JobsRuntimeCapability,
+  message: string,
+): JobsRuntimeError {
+  return new JobsRuntimeError(message, 400, {
+    code: "JOBS_RUNTIME_CAPABILITY_UNSUPPORTED",
+    runtime: "inngest",
+    capability,
+  });
+}
+
+function parseInngestDuration(value: string | number): number | undefined {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value > 0 ? Math.ceil(value) : undefined;
+  }
+
+  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/i.exec(value);
+  if (!match) return undefined;
+  const amount = Number(match[1]);
+  const unit = match[2].toLowerCase() as keyof typeof INNGEST_DURATION_UNITS;
+  const duration = Math.ceil(amount * INNGEST_DURATION_UNITS[unit]);
+  return Number.isFinite(duration) && duration > 0 ? duration : undefined;
+}
+
+function parseInngestAbsoluteTime(value: string | number): number | undefined {
+  if (typeof value !== "string") return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)) return undefined;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+function resolveInngestEventTimestamp(
+  options: JobsResolvedLaunchOptions,
+  now = Date.now(),
+): number | undefined {
+  if (options.delay == null) return undefined;
+
+  const absolute =
+    options.delayMode === "after" ? undefined : parseInngestAbsoluteTime(options.delay);
+  if (absolute != null) {
+    if (absolute <= now) {
+      throw inngestScheduleError(
+        "Inngest at/delay timestamps must be in the future.",
+        options.delay,
+      );
+    }
+    return absolute;
+  }
+
+  if (options.delayMode === "at") {
+    throw inngestScheduleError(
+      "Inngest at must be an ISO timestamp with an explicit Z or UTC offset.",
+      options.delay,
+    );
+  }
+
+  const duration = parseInngestDuration(options.delay);
+  if (duration == null) {
+    throw inngestScheduleError(
+      "Inngest after/delay must be positive milliseconds or a duration ending in ms, s, m, h, or d.",
+      options.delay,
+    );
+  }
+
+  const timestamp = now + duration;
+  if (!Number.isSafeInteger(timestamp) || timestamp > INNGEST_MAX_TIMESTAMP) {
+    throw inngestScheduleError(
+      "Inngest after/delay exceeds the supported date range.",
+      options.delay,
+    );
+  }
+  return timestamp;
+}
+
+function createInngestEvent(
+  task: JobsNormalizedTask,
+  input: unknown,
+  options: JobsResolvedLaunchOptions,
+  now = Date.now(),
+) {
+  if (options.debounce) {
+    throw inngestCapabilityError(
+      "debounce",
+      "Inngest does not support per-call debounce; configure debounce on the Inngest function and check task metadata capabilities before sending.",
+    );
+  }
+  if (options.tags?.length) {
+    throw inngestCapabilityError(
+      "tags",
+      "Inngest event sends do not support Farm tags; check task metadata capabilities before sending.",
+    );
+  }
+
+  const event: Record<string, unknown> = {
+    name: task.remoteId,
+    data: input ?? {},
+  };
+  if (options.idempotencyKey) event.id = options.idempotencyKey;
+  const timestamp = resolveInngestEventTimestamp(options, now);
+  if (timestamp != null) event.ts = timestamp;
+  return event;
 }
 
 function createTriggerRuntime(config: TriggerJobsRuntimeConfig): JobsRuntimeAdapter {
@@ -1130,27 +1264,12 @@ function createInngestRuntime(config: InngestJobsRuntimeConfig): JobsRuntimeAdap
     },
     async trigger(task, input, options) {
       const resolved = resolve();
+      const body = createInngestEvent(task, input, options);
       if (!resolved.eventKey) {
         throw new JobsRuntimeError(
           "Inngest runtime requires INNGEST_EVENT_KEY or inngest.eventKey.",
           500,
         );
-      }
-
-      if (options.delay != null || (options.tags && options.tags.length > 0) || options.debounce) {
-        throw new JobsRuntimeError(
-          "Inngest runtime does not support delay, debounce, or tags through this integration yet.",
-          400,
-        );
-      }
-
-      const body: Record<string, unknown> = {
-        name: task.remoteId,
-        data: input ?? {},
-      };
-
-      if (options.idempotencyKey) {
-        body.id = options.idempotencyKey;
       }
 
       const data = await requestJSON(
@@ -1181,36 +1300,14 @@ function createInngestRuntime(config: InngestJobsRuntimeConfig): JobsRuntimeAdap
     },
     async batchTrigger(task, items) {
       const resolved = resolve();
+      const now = Date.now();
+      const body = items.map((item) => createInngestEvent(task, item.input, item.options, now));
       if (!resolved.eventKey) {
         throw new JobsRuntimeError(
           "Inngest runtime requires INNGEST_EVENT_KEY or inngest.eventKey.",
           500,
         );
       }
-
-      const body = items.map((item) => {
-        if (
-          item.options.delay != null ||
-          (item.options.tags && item.options.tags.length > 0) ||
-          item.options.debounce
-        ) {
-          throw new JobsRuntimeError(
-            "Inngest runtime does not support delay, debounce, or tags through this integration yet.",
-            400,
-          );
-        }
-
-        const event: Record<string, unknown> = {
-          name: task.remoteId,
-          data: item.input ?? {},
-        };
-
-        if (item.options.idempotencyKey) {
-          event.id = item.options.idempotencyKey;
-        }
-
-        return event;
-      });
 
       const data = await requestJSON(
         `${resolved.eventBaseUrl}/e/${encodeURIComponent(resolved.eventKey)}`,

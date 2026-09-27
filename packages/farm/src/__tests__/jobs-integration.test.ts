@@ -5,10 +5,12 @@ import {
   defineTasks,
   inngest,
   jobs,
+  supportsJobsRuntimeCapability,
   task,
   trigger,
   type InferJobsTaskInput,
   type InferJobsTaskOutput,
+  type JobsRuntimeCapabilities,
 } from "../../../farm-integrations/src/jobs/index";
 
 function jsonResponse(value: unknown, status = 200) {
@@ -22,6 +24,7 @@ function jsonResponse(value: unknown, status = 200) {
 
 describe("jobs integration", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -749,6 +752,123 @@ describe("jobs integration", () => {
     );
   });
 
+  it("schedules idempotent Inngest events with absolute and relative timing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-15T08:00:00.000Z"));
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ ids: ["evt_at"] }))
+      .mockResolvedValueOnce(jsonResponse({ ids: ["evt_after"] }))
+      .mockResolvedValueOnce(jsonResponse({ ids: ["evt_delayed"] }));
+    const integration = jobs({
+      runtime: inngest({
+        eventKey: "evt_test_key",
+        signingKey: "sign_test_key",
+      }),
+      tasks: defineTasks({
+        importCsv: task({
+          async run(input: { fileId: string }) {
+            return {
+              processed: input.fileId.length,
+            };
+          },
+        }),
+      }),
+    });
+    const api = createIntegrationServerClient(
+      {
+        integrations: {
+          jobs: integration,
+        },
+      },
+      {
+        request: new Request("https://farmjs.dev/jobs"),
+      },
+    );
+
+    const capabilities = integration.instance.tasks[0]!.capabilities;
+    expect(supportsJobsRuntimeCapability(capabilities, "schedule")).toBe(true);
+    expect(supportsJobsRuntimeCapability(capabilities, "debounce")).toBe(false);
+    if (supportsJobsRuntimeCapability(capabilities, "schedule")) {
+      expectTypeOf(capabilities).toMatchTypeOf<JobsRuntimeCapabilities & { schedule: true }>();
+    }
+
+    const at = await api.jobs.importCsv.schedule({
+      body: {
+        fileId: "file_at",
+        $schedule: {
+          at: "2026-04-15T10:00:00-04:00",
+          idempotencyKey: "import:file_at",
+        },
+      },
+    });
+    const after = await api.jobs.importCsv.schedule({
+      body: {
+        fileId: "file_after",
+        $schedule: {
+          after: "5m",
+          idempotencyKey: "import:file_after",
+        },
+      },
+    });
+    const delayed = await api.jobs.importCsv.trigger({
+      body: {
+        fileId: "file_delayed",
+        $options: {
+          delay: "30s",
+          idempotencyKey: "import:file_delayed",
+        },
+      },
+    });
+
+    expect(at.error).toBeNull();
+    expect(at.data).toMatchObject({
+      handleId: "evt_at",
+      runtime: "inngest",
+      scheduledFor: "2026-04-15T10:00:00-04:00",
+    });
+    expect(after.error).toBeNull();
+    expect(after.data).toMatchObject({
+      handleId: "evt_after",
+      runtime: "inngest",
+      scheduledFor: "5m",
+    });
+    expect(delayed.data).toMatchObject({
+      handleId: "evt_delayed",
+      runtime: "inngest",
+    });
+    expect(
+      fetchSpy.mock.calls.map((call) =>
+        JSON.parse(String(call[1] && (call[1] as RequestInit).body)),
+      ),
+    ).toEqual([
+      {
+        name: "farm/import-csv",
+        data: {
+          fileId: "file_at",
+        },
+        id: "import:file_at",
+        ts: Date.parse("2026-04-15T10:00:00-04:00"),
+      },
+      {
+        name: "farm/import-csv",
+        data: {
+          fileId: "file_after",
+        },
+        id: "import:file_after",
+        ts: Date.parse("2026-04-15T08:05:00.000Z"),
+      },
+      {
+        name: "farm/import-csv",
+        data: {
+          fileId: "file_delayed",
+        },
+        id: "import:file_delayed",
+        ts: Date.parse("2026-04-15T08:00:30.000Z"),
+      },
+    ]);
+  });
+
   it("batch triggers Inngest events for fan-out imports", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       jsonResponse({
@@ -864,7 +984,9 @@ describe("jobs integration", () => {
     ]);
   });
 
-  it("rejects Trigger-only launch options when using the Inngest runtime", async () => {
+  it("rejects unsupported and invalid Inngest schedules before a provider request", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-15T08:00:00.000Z"));
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const integration = jobs({
       runtime: inngest({
@@ -905,23 +1027,47 @@ describe("jobs integration", () => {
     });
 
     expect(result.data).toBeNull();
-    expect(result.error?.message).toContain(
-      "Inngest runtime does not support delay, debounce, or tags through this integration yet.",
-    );
-
-    const scheduled = await api.jobs.importCsv.schedule({
-      body: {
-        fileId: "file_1",
-        $schedule: {
-          after: "5m",
+    expect(result.error?.message).toContain("Inngest does not support per-call debounce");
+    expect(result.error).toMatchObject({
+      status: 400,
+      data: {
+        details: {
+          code: "JOBS_RUNTIME_CAPABILITY_UNSUPPORTED",
+          runtime: "inngest",
+          capability: "debounce",
         },
       },
     });
 
-    expect(scheduled.data).toBeNull();
-    expect(scheduled.error?.message).toContain(
-      "Inngest runtime does not support delay, debounce, or tags through this integration yet.",
-    );
+    const tagged = await api.jobs.importCsv.trigger({
+      body: {
+        fileId: "file_1",
+        $options: {
+          tags: ["import"],
+        },
+      },
+    });
+
+    expect(tagged.data).toBeNull();
+    expect(tagged.error?.message).toContain("Inngest event sends do not support Farm tags");
+
+    for (const schedule of [
+      { at: "2026-04-15T10:00:00" },
+      { at: "2020-04-15T10:00:00Z" },
+      { after: "next week" },
+      { after: 0 },
+      { after: "100000000d" },
+    ]) {
+      const scheduled = await api.jobs.importCsv.schedule({
+        body: {
+          fileId: "file_1",
+          $schedule: schedule,
+        },
+      });
+
+      expect(scheduled.data).toBeNull();
+      expect(scheduled.error?.message).toMatch(/^Inngest (?:at|after)/);
+    }
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
