@@ -242,6 +242,7 @@ program
   .option("--host <host>", "Host of a running local app")
   .option("--url <url>", "Base URL of a running Farm app")
   .option("--offline", "Inspect project files without probing a running app")
+  .option("--registry", "Verify Farm beta dist-tags against the npm registry")
   .option("--fix", "Apply safe additive corrections without overwriting application files")
   .option("--timeout <ms>", "Live runtime probe timeout in milliseconds", "1200")
   .option("--json", "Print machine-readable JSON")
@@ -259,6 +260,7 @@ program
         host: options.host,
         url: options.url,
         offline: options.offline,
+        registry: options.registry,
         fix: options.fix,
         timeoutMs,
       });
