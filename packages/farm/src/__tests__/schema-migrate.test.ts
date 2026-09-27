@@ -70,6 +70,86 @@ describe("schema name resolution", () => {
     expect(resolved.tasks!.fields.listId!.name).toBe("list_id");
   });
 
+  it("rejects internal references to missing target field keys", () => {
+    expect(() =>
+      resolveSchemaModels("billing", {
+        models: {
+          accounts: {
+            fields: { id: { type: "uuid", primaryKey: true } },
+          },
+          invoices: {
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              accountId: {
+                type: "uuid",
+                reference: { model: "accounts", field: "missing" },
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow(
+      'Schema reference "billing.invoices.accountId" targets missing field "billing.accounts.missing".',
+    );
+  });
+
+  it("resolves extension and override target fields before validating references", () => {
+    const extended = defineSchema({
+      models: {
+        accounts: {
+          fields: { id: { type: "uuid", primaryKey: true } },
+        },
+        invoices: {
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            accountId: {
+              type: "uuid",
+              reference: { model: "accounts", field: "externalId" },
+            },
+          },
+        },
+      },
+      extend: {
+        accounts: {
+          fields: { externalId: { type: "uuid" } },
+        },
+      },
+      override: {
+        accounts: {
+          fields: { externalId: { name: "external_id" } },
+        },
+      },
+    });
+    const resolved = resolveSchemaModels("billing", extended);
+    const sql = generateSqlStatements(collectSchemaModels([["billing", extended]]), "postgres")
+      .map((statement) => statement.sql)
+      .join("\n");
+
+    expect(resolved.accounts!.fields.externalId!.name).toBe("external_id");
+    expect(sql).toContain('REFERENCES "accounts" ("external_id")');
+  });
+
+  it("allows references to models managed outside the schema owner", () => {
+    const external = defineSchema({
+      models: {
+        invoices: {
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            customerId: {
+              type: "uuid",
+              reference: { model: "customers", field: "externalId" },
+            },
+          },
+        },
+      },
+    });
+
+    const sql = generateSqlStatements(collectSchemaModels([["billing", external]]), "postgres")[0]!
+      .sql;
+
+    expect(sql).toContain("/* references customers.externalId */");
+  });
+
   it("rejects constraints that reference missing field keys", () => {
     expect(() =>
       resolveSchemaModels("billing", {

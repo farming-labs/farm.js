@@ -143,6 +143,22 @@ export function resolveSchemaModels(
     };
   }
 
+  for (const [modelKey, model] of Object.entries(resolvedModels)) {
+    for (const [fieldKey, field] of Object.entries(model.fields)) {
+      const reference = field.reference;
+      if (!reference || !Object.prototype.hasOwnProperty.call(resolvedModels, reference.model)) {
+        continue;
+      }
+
+      const referencedModel = resolvedModels[reference.model]!;
+      if (!Object.prototype.hasOwnProperty.call(referencedModel.fields, reference.field)) {
+        throw new Error(
+          `Schema reference "${ownerKey}.${modelKey}.${fieldKey}" targets missing field "${ownerKey}.${reference.model}.${reference.field}".`,
+        );
+      }
+    }
+  }
+
   return resolvedModels;
 }
 
