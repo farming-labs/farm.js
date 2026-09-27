@@ -69,6 +69,11 @@ function createTestRateLimitStorage(
 // Helper to create mock request/response
 function createMockRequest(url: string, method = "GET"): IncomingMessage {
   const socket = new Socket();
+  // A connected Node socket always reports a peer address, and the default
+  // rate-limit bucket is derived from it. An unconnected mock socket has none,
+  // which is the one case the limiter now refuses rather than bucketing every
+  // caller together.
+  Object.defineProperty(socket, "remoteAddress", { value: "203.0.113.5" });
   const req = new IncomingMessage(socket);
   req.url = url;
   req.method = method;

@@ -314,9 +314,12 @@ function withNodeRequestShape(request: Request, trustProxy: boolean): Request {
       ? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
       : undefined;
     try {
-      requestWithShape.socket = {
-        remoteAddress: forwardedFor || "127.0.0.1",
-      };
+      // A web Request carries no socket, and there is no client address to
+      // report unless a trusted proxy supplied one. Reporting `127.0.0.1`
+      // instead used to make every visitor look like the same client, which
+      // silently collapsed per-client rate limiting into one shared bucket.
+      // Leave it undefined so a consumer can tell that it does not know.
+      requestWithShape.socket = { remoteAddress: forwardedFor };
     } catch {
       // Some Request implementations may not be extensible.
     }
