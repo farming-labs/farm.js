@@ -32,7 +32,7 @@ export function search(options: SearchOptions = {}) {
     ...(resolved.highlightParam ? { highlightParam: resolved.highlightParam } : {}),
   };
 
-  return definePlugin({
+  return definePlugin<undefined, Record<string, never>, void, FarmSearchPublicConfig>({
     name: "farm:search",
     enforce: "post",
 
