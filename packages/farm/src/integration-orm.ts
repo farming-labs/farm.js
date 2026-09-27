@@ -14,8 +14,9 @@ import type {
   FarmIntegrationSchemaModel,
 } from "./integrations";
 import { assertNoSchemaListField } from "./schema-capabilities";
-import { isDatabaseEnforcedReference } from "./schema-reference";
 import { assertSupportedPrimaryKeyField } from "./schema-primary-key";
+import { isDatabaseEnforcedReference } from "./schema-reference";
+import { resolveSchemaModels } from "./schema-resolve";
 import { resolveStorageRuntimeClient } from "./storage";
 import type { FarmStorageUserConfig } from "./storage/types";
 import type { FarmConfig } from "./types";
@@ -75,17 +76,76 @@ export type InferFarmIntegrationOrmField<TField extends FarmIntegrationSchemaFie
   FarmIntegrationOrmFieldValue<TField>
 >;
 
-export type InferFarmIntegrationOrmFields<TModel extends FarmIntegrationSchemaModel> = {
+type FarmIntegrationOrmModelShape = {
+  fields: Record<string, unknown>;
+};
+
+export type InferFarmIntegrationOrmFields<TModel extends FarmIntegrationOrmModelShape> = {
   [TFieldKey in keyof TModel["fields"] & string]: InferFarmIntegrationOrmField<
     Extract<TModel["fields"][TFieldKey], FarmIntegrationSchemaField>
   >;
 };
 
+type ReplaceRecord<TBase, TReplacement> = Omit<TBase, keyof TReplacement> & TReplacement;
+
+type SchemaExtensions<TSchema extends FarmIntegrationSchema> = NonNullable<TSchema["extend"]>;
+
+type SchemaOverrides<TSchema extends FarmIntegrationSchema> = NonNullable<TSchema["override"]>;
+
+type SchemaModelFields<TModel> = TModel extends { fields: infer TFields }
+  ? TFields
+  : TModel extends { fields?: infer TFields }
+    ? NonNullable<TFields>
+    : {};
+
+type ExtendedSchemaModelFields<
+  TSchema extends FarmIntegrationSchema,
+  TModelKey extends PropertyKey,
+> = ReplaceRecord<
+  TModelKey extends keyof TSchema["models"] ? SchemaModelFields<TSchema["models"][TModelKey]> : {},
+  TModelKey extends keyof SchemaExtensions<TSchema>
+    ? SchemaModelFields<SchemaExtensions<TSchema>[TModelKey]>
+    : {}
+>;
+
+type OverrideSchemaModelFields<
+  TSchema extends FarmIntegrationSchema,
+  TModelKey extends PropertyKey,
+> = TModelKey extends keyof SchemaOverrides<TSchema>
+  ? SchemaModelFields<SchemaOverrides<TSchema>[TModelKey]>
+  : {};
+
+type ResolvedSchemaModelFields<
+  TSchema extends FarmIntegrationSchema,
+  TModelKey extends PropertyKey,
+  TExtendedFields = ExtendedSchemaModelFields<TSchema, TModelKey>,
+  TOverrideFields = OverrideSchemaModelFields<TSchema, TModelKey>,
+> = {
+  [TFieldKey in
+    | keyof TExtendedFields
+    | keyof TOverrideFields]: TFieldKey extends keyof TOverrideFields
+    ? TFieldKey extends keyof TExtendedFields
+      ? ReplaceRecord<TExtendedFields[TFieldKey], TOverrideFields[TFieldKey]>
+      : TOverrideFields[TFieldKey]
+    : TFieldKey extends keyof TExtendedFields
+      ? TExtendedFields[TFieldKey]
+      : never;
+};
+
+type ResolvedFarmIntegrationSchemaModels<TSchema extends FarmIntegrationSchema> = {
+  [TModelKey in (keyof TSchema["models"] | keyof SchemaExtensions<TSchema>) & string]: {
+    fields: ResolvedSchemaModelFields<TSchema, TModelKey>;
+  };
+};
+
 export type InferFarmIntegrationOrmSchema<TSchema extends FarmIntegrationSchema> =
   SchemaDefinition<{
-    [TModelKey in keyof TSchema["models"] & string]: ModelDefinition<
+    [TModelKey in keyof ResolvedFarmIntegrationSchemaModels<TSchema> & string]: ModelDefinition<
       InferFarmIntegrationOrmFields<
-        Extract<TSchema["models"][TModelKey], FarmIntegrationSchemaModel>
+        Extract<
+          ResolvedFarmIntegrationSchemaModels<TSchema>[TModelKey],
+          FarmIntegrationOrmModelShape
+        >
       >,
       {}
     >;
@@ -155,8 +215,9 @@ export async function farmIntegrationSchemaToOrmSchema(
 
   const orm = await import("@farming-labs/orm");
   const models: Record<string, AnyModelDefinition> = {};
+  const resolvedModels = resolveSchemaModels("integration", schema);
 
-  for (const [modelKey, modelSchema] of Object.entries(schema.models)) {
+  for (const [modelKey, modelSchema] of Object.entries(resolvedModels)) {
     models[modelKey] = orm.model({
       table: modelSchema.name ?? modelKey,
       fields: createOrmModelFields(orm, modelKey, modelSchema),

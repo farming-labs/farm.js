@@ -162,6 +162,12 @@ export const billingSchema = defineSchema({
 keeps working without changes; new code should use `defineSchema` and the
 `FarmSchema*` types.
 
+Farm resolves `extend` and `override` before it generates tables or creates the
+integration ORM. Models and fields added through `extend` appear on
+`ctx.args.db`, while overridden table names, column names, field properties, and
+constraints are used by both the generated artifacts and runtime queries. The
+inferred ORM type follows that same resolved shape.
+
 ### List fields and storage targets
 
 `list: true` is preserved as an array by generated Sync declarations and Prisma

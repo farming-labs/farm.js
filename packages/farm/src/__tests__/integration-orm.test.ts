@@ -226,6 +226,102 @@ describe("integration ORM storage", () => {
   });
 
   it.skipIf(!supportsNodeSqlite)(
+    "uses extensions and overrides in generated tables and the runtime ORM",
+    async () => {
+      const customizedSchema = defineIntegrationSchema({
+        models: {
+          accounts: {
+            name: "legacy_accounts",
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              displayName: { type: "string", name: "legacy_display_name" },
+            },
+          },
+        },
+        extend: {
+          accounts: {
+            fields: {
+              handle: { type: "string", required: true },
+              createdAt: { type: "datetime", default: "now" },
+            },
+            constraints: [{ type: "unique", fields: ["handle"] }],
+          },
+          profiles: {
+            name: "legacy_profiles",
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              accountId: {
+                type: "uuid",
+                reference: { model: "accounts", field: "id" },
+              },
+              bio: { type: "text", nullable: true },
+            },
+          },
+        },
+        override: {
+          accounts: {
+            name: "accounts",
+            fields: {
+              displayName: { name: "display_name" },
+              handle: { name: "user_handle" },
+            },
+          },
+          profiles: {
+            name: "user_profiles",
+          },
+        },
+      });
+      const dir = await createTempDir("farm-integration-orm-resolved-");
+      const db = await createSqliteDatabase(path.join(dir, "integration.sqlite"));
+
+      try {
+        const statements = generateSqlStatements(
+          collectSchemaModels([["custom", customizedSchema]]),
+          "sqlite",
+        );
+        db.exec(statements.map((statement) => statement.sql).join("\n"));
+
+        const runtimeSchema = await farmIntegrationSchemaToOrmSchema(customizedSchema);
+        expect(Object.keys(runtimeSchema.models)).toEqual(["accounts", "profiles"]);
+        expect(runtimeSchema.models.accounts.table).toBe("accounts");
+        expect(runtimeSchema.models.accounts.fields.displayName.config.mappedName).toBe(
+          "display_name",
+        );
+        expect(runtimeSchema.models.accounts.fields.handle.config.mappedName).toBe("user_handle");
+        expect(runtimeSchema.models.accounts.constraints.unique).toEqual([["handle"]]);
+        expect(runtimeSchema.models.profiles.table).toBe("user_profiles");
+
+        const orm = await createIntegrationOrm({ schema: customizedSchema, client: db });
+        await orm.accounts.create({
+          data: {
+            id: "account_1",
+            displayName: "Ada",
+            handle: "ada",
+          },
+        });
+        await orm.profiles.create({
+          data: {
+            id: "profile_1",
+            accountId: "account_1",
+            bio: "First programmer",
+          },
+        });
+
+        const account = await orm.accounts.findFirst({ where: { handle: "ada" } });
+        const profile = await orm.profiles.findFirst({ where: { accountId: "account_1" } });
+
+        expectTypeOf(account?.handle).toEqualTypeOf<string | undefined>();
+        expectTypeOf(profile?.bio).toEqualTypeOf<string | null | undefined>();
+        expect(account).toMatchObject({ displayName: "Ada", handle: "ada" });
+        expect(account?.createdAt).toBeInstanceOf(Date);
+        expect(profile).toMatchObject({ accountId: "account_1", bio: "First programmer" });
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it.skipIf(!supportsNodeSqlite)(
     "uses storage.client as the unified ORM runtime client with real sqlite data",
     async () => {
       const dir = await createTempDir("farm-integration-orm-");
