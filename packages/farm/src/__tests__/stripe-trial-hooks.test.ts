@@ -1210,7 +1210,7 @@ describe("stripe trial hooks", () => {
     expect(storedSnapshot.seatQuantity).toBe(8);
   });
 
-  it("fetches checkout session data directly from Stripe on /billing/session and persists it", async () => {
+  it("persists a checkout session once and does not replay billing hooks", async () => {
     const owner: StripeBillingOwner = {
       kind: "organization",
       id: "org_session_lookup",
@@ -1218,6 +1218,10 @@ describe("stripe trial hooks", () => {
     };
     let retrievedSessionId: string | null = null;
     let storedSnapshot: StripeBillingSnapshot | null = null;
+    let saveCount = 0;
+    let billingSyncCount = 0;
+    let paymentSucceededCount = 0;
+    const claimedSessions = new Set<string>();
     const hookCalls: Array<{ status: string; sessionId: string }> = [];
 
     const integration = stripe({
@@ -1265,9 +1269,17 @@ describe("stripe trial hooks", () => {
             ],
           };
         },
-        async constructWebhookEvent() {
-          throw new Error("not needed");
+        async constructWebhookEvent(input) {
+          return JSON.parse(input.payload) as {
+            id: string;
+            type: string;
+            data: Record<string, unknown>;
+          };
         },
+      },
+      webhooks: {
+        path: "/billing/webhook",
+        secret: "whsec_session_lookup",
       },
       billing: {
         async resolveOwner() {
@@ -1304,8 +1316,25 @@ describe("stripe trial hooks", () => {
           mode: "subscription_quantity",
         },
         hooks: {
+          async claimCheckoutSession(claim) {
+            if (claimedSessions.has(claim.sessionId)) {
+              return false;
+            }
+            claimedSessions.add(claim.sessionId);
+            return true;
+          },
+          async getBillingAccountByStripeCustomerId(customerId) {
+            return storedSnapshot?.stripeCustomerId === customerId ? storedSnapshot : null;
+          },
           async saveBillingSnapshot(snapshot) {
+            saveCount += 1;
             storedSnapshot = snapshot;
+          },
+          async onBillingSync() {
+            billingSyncCount += 1;
+          },
+          async onPaymentSucceeded() {
+            paymentSucceededCount += 1;
           },
           async onCheckoutCompleted(snapshot) {
             hookCalls.push({
@@ -1325,17 +1354,40 @@ describe("stripe trial hooks", () => {
       throw new Error("Session route not found.");
     }
 
-    const request = new Request("http://example.com/billing/session?sessionId=cs_session_lookup", {
-      method: "GET",
-    });
-
-    const response = await route.handler(
-      request,
-      createContext(request, "GET", "/billing/session", integration.instance),
+    const webhookRoute = integration.routes.find(
+      (entry) => entry.path === "/billing/webhook" && String(entry.method).toUpperCase() === "POST",
     );
-    const payload = JSON.parse(await response.text()) as Record<string, unknown>;
+
+    if (!webhookRoute) {
+      throw new Error("Webhook route not found.");
+    }
+
+    const callSessionRoute = async () => {
+      const request = new Request(
+        "http://example.com/billing/session?sessionId=cs_session_lookup",
+        {
+          method: "GET",
+        },
+      );
+      const response = await route.handler(
+        request,
+        createContext(request, "GET", "/billing/session", integration.instance),
+      );
+      return {
+        response,
+        payload: JSON.parse(await response.text()) as Record<string, unknown>,
+      };
+    };
+
+    const [{ response, payload }, replay] = await Promise.all([
+      callSessionRoute(),
+      callSessionRoute(),
+    ]);
+    const sequentialReplay = await callSessionRoute();
 
     expect(response.status).toBe(200);
+    expect(replay.response.status).toBe(200);
+    expect(sequentialReplay.response.status).toBe(200);
     expect(retrievedSessionId).toBe("cs_session_lookup");
     expect(payload.id).toBe("cs_session_lookup");
     expect(payload.subscriptionStatus).toBe("active");
@@ -1343,11 +1395,54 @@ describe("stripe trial hooks", () => {
     expect(storedSnapshot?.productId).toBe("proMonthly");
     expect(storedSnapshot?.status).toBe("active");
     expect(storedSnapshot?.seatQuantity).toBe(5);
+    expect(saveCount).toBe(1);
+    expect(billingSyncCount).toBe(1);
+    expect(paymentSucceededCount).toBe(1);
     expect(hookCalls).toEqual([
       {
         status: "active",
         sessionId: "cs_session_lookup",
       },
     ]);
+
+    const webhookRequest = new Request("http://example.com/billing/webhook", {
+      method: "POST",
+      headers: { "stripe-signature": "test" },
+      body: JSON.stringify({
+        id: "evt_session_lookup",
+        type: "checkout.session.completed",
+        data: { id: "cs_session_lookup" },
+      }),
+    });
+    const webhookReplay = await webhookRoute.handler(
+      webhookRequest,
+      createContext(webhookRequest, "POST", "/billing/webhook", integration.instance),
+    );
+
+    expect(webhookReplay.status).toBe(200);
+    expect(saveCount).toBe(1);
+    expect(billingSyncCount).toBe(1);
+    expect(paymentSucceededCount).toBe(1);
+    expect(hookCalls).toHaveLength(1);
+
+    const distinctCheckout = await (async () => {
+      const request = new Request(
+        "http://example.com/billing/session?sessionId=cs_session_lookup_2",
+        { method: "GET" },
+      );
+      return route.handler(
+        request,
+        createContext(request, "GET", "/billing/session", integration.instance),
+      );
+    })();
+
+    expect(distinctCheckout.status).toBe(200);
+    expect(saveCount).toBe(2);
+    expect(billingSyncCount).toBe(2);
+    expect(paymentSucceededCount).toBe(2);
+    expect(hookCalls.at(-1)).toEqual({
+      status: "active",
+      sessionId: "cs_session_lookup_2",
+    });
   });
 });

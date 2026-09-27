@@ -35,7 +35,10 @@ describe("stripe declares its billing tables", () => {
     const owner = findSchemaTableOwners({ integrations: { billing: billing() } })[0]!;
     // stripeSchema sets `name` on every model, so the table is the mapped name
     // rather than the model key.
-    expect(collectOwnerModels(owner).map((model) => model.modelName)).toContain("billing_account");
+    expect(collectOwnerModels(owner).map((model) => model.modelName)).toEqual([
+      "billing_account",
+      "billing_checkout_session",
+    ]);
   });
 
   it("resolves nothing when the app configured no storage client", async () => {
@@ -56,6 +59,7 @@ describe("migrating a stripe app", () => {
     });
 
     expect(result.applied).toContain("billing_account");
+    expect(result.applied).toContain("billing_checkout_session");
 
     const columns = (
       database.prepare("pragma table_info('billing_account')").all() as { name: string }[]
@@ -63,6 +67,13 @@ describe("migrating a stripe app", () => {
     // Mapped column names, not the schema keys.
     expect(columns).toContain("owner_id");
     expect(columns).not.toContain("ownerId");
+
+    const sessionColumns = (
+      database.prepare("pragma table_info('billing_checkout_session')").all() as {
+        name: string;
+      }[]
+    ).map((row) => row.name);
+    expect(sessionColumns).toContain("session_id");
   });
 
   it("reports it is up to date on a second run", async () => {

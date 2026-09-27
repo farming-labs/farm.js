@@ -174,5 +174,11 @@ The same `ctx` includes `ctx.args.db`, `ctx.data`, request params, the raw reque
 - Keep product IDs stable because they become the app-facing contract.
 - Verify webhook signatures before mutating billing state.
 - Store billing snapshots through the integration schema when the app needs fast entitlement reads.
+- Run `farm stripe migrate --apply` after upgrading so the additive
+  `billing_checkout_session` table can persistently deduplicate success-page and webhook delivery.
+- Checkout completion, billing sync, and payment hooks are claimed by Stripe session ID before they
+  run. Custom persistence should implement `claimCheckoutSession`; without it, Farm falls back to
+  comparing the stored billing snapshot, so its billing-account reader must accompany
+  `saveBillingSnapshot`.
 - Use server callers for admin-only operations and browser callers for checkout/portal redirects.
 - Test checkout success, cancel, webhook replay, portal return, subscription update, and trial edge cases.

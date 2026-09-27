@@ -61,6 +61,7 @@ import {
   prismaStorageAdapter,
   sqliteStorageAdapter,
   type StripeBillingArgs,
+  type StripeBillingCheckoutSessionClaim,
   type StripeBillingFeatures,
   type StripeBillingHookTools,
   type StripeBillingHooks,
@@ -129,6 +130,7 @@ export {
 } from "./storage.js";
 export type {
   StripeBillingArgs,
+  StripeBillingCheckoutSessionClaim,
   StripeBillingFeatures,
   StripeBillingHookTools,
   StripeBillingHooks,
@@ -776,6 +778,42 @@ export const stripeSchema = {
           name: "billing_account_owner_unique",
         },
       ],
+    },
+    billingCheckoutSession: {
+      name: "billing_checkout_session",
+      description: "Processed Stripe checkout sessions used to deduplicate billing hooks.",
+      fields: {
+        sessionId: {
+          type: "string",
+          name: "session_id",
+          primaryKey: true,
+        },
+        ownerId: {
+          type: "string",
+          name: "owner_id",
+          required: true,
+          index: true,
+        },
+        ownerKind: {
+          type: "enum",
+          name: "owner_kind",
+          required: true,
+          values: ["user", "organization"],
+          index: true,
+        },
+        stripeCustomerId: {
+          type: "string",
+          name: "stripe_customer_id",
+          nullable: true,
+          index: true,
+        },
+        processedAt: {
+          type: "datetime",
+          name: "processed_at",
+          required: true,
+          default: "now",
+        },
+      },
     },
   },
   meta: {
@@ -2963,6 +3001,12 @@ function resolveBillingPersistence(
       : storage?.clearBillingSnapshot
         ? (owner: StripeBillingOwner) => storage.clearBillingSnapshot(owner)
         : undefined,
+    claimCheckoutSession: billing?.hooks?.claimCheckoutSession
+      ? (claim: StripeBillingCheckoutSessionClaim) =>
+          billing.hooks!.claimCheckoutSession!(claim, tools)
+      : storage?.claimCheckoutSession
+        ? (claim: StripeBillingCheckoutSessionClaim) => storage.claimCheckoutSession!(claim)
+        : undefined,
   };
 }
 
@@ -3278,7 +3322,10 @@ async function resolveBillingSnapshotForSession(
   billing: StripeBillingOptions | undefined,
   persistence: ReturnType<typeof resolveBillingPersistence>,
   context: FarmIntegrationHandlerContext,
-): Promise<StripeBillingSnapshot | null> {
+): Promise<{
+  snapshot: StripeBillingSnapshot;
+  previousSnapshot: StripeBillingSnapshot | null;
+} | null> {
   if (!billing) {
     return null;
   }
@@ -3303,6 +3350,10 @@ async function resolveBillingSnapshotForSession(
     return null;
   }
 
+  if (!existingSnapshot && persistence.getBillingAccount) {
+    existingSnapshot = await persistence.getBillingAccount(owner);
+  }
+
   // A signed-in caller must not be able to bind someone else's checkout to
   // themselves by presenting its session id. Checkout stamps ownerId into the
   // session metadata, and an already-persisted snapshot names the customer's
@@ -3322,14 +3373,107 @@ async function resolveBillingSnapshotForSession(
     return null;
   }
 
-  return createBillingSnapshot(
-    owner,
-    session,
-    billing,
-    products,
-    existingSnapshot?.planId ?? "free",
-    existingSnapshot,
+  return {
+    snapshot: createBillingSnapshot(
+      owner,
+      session,
+      billing,
+      products,
+      existingSnapshot?.planId ?? "free",
+      existingSnapshot,
+    ),
+    previousSnapshot: existingSnapshot,
+  };
+}
+
+function billingSnapshotStateEquals(
+  left: StripeBillingSnapshot,
+  right: StripeBillingSnapshot | null,
+): boolean {
+  if (!right) {
+    return false;
+  }
+
+  const sameDate = (a: Date | null, b: Date | null) => a?.getTime() === b?.getTime();
+
+  return (
+    left.owner.id === right.owner.id &&
+    left.owner.kind === right.owner.kind &&
+    left.planId === right.planId &&
+    left.productId === right.productId &&
+    left.status === right.status &&
+    left.stripeCustomerId === right.stripeCustomerId &&
+    left.stripeSubscriptionId === right.stripeSubscriptionId &&
+    sameDate(left.currentPeriodEnd, right.currentPeriodEnd) &&
+    left.cancelAtPeriodEnd === right.cancelAtPeriodEnd &&
+    sameDate(left.trialEndsAt, right.trialEndsAt) &&
+    sameDate(left.trialUsedAt, right.trialUsedAt) &&
+    left.seatQuantity === right.seatQuantity &&
+    left.seatAllowanceOverride === right.seatAllowanceOverride
   );
+}
+
+async function syncBillingCheckoutSession(
+  session: StripeSessionResult,
+  products: readonly ResolvedStripeProduct[],
+  billing: StripeBillingOptions,
+  persistence: ReturnType<typeof resolveBillingPersistence>,
+  context: FarmIntegrationHandlerContext,
+) {
+  const resolved = await resolveBillingSnapshotForSession(
+    session,
+    products,
+    billing,
+    persistence,
+    context,
+  );
+
+  if (!resolved) {
+    return;
+  }
+
+  const claimResult = persistence.claimCheckoutSession
+    ? await persistence.claimCheckoutSession({
+        sessionId: session.id,
+        owner: resolved.snapshot.owner,
+        stripeCustomerId: resolved.snapshot.stripeCustomerId,
+      })
+    : null;
+
+  if (
+    claimResult === false ||
+    (claimResult === null &&
+      billingSnapshotStateEquals(resolved.snapshot, resolved.previousSnapshot))
+  ) {
+    return;
+  }
+
+  await persistBillingSnapshot(resolved.snapshot, billing, persistence, resolved.previousSnapshot);
+  await billing.hooks?.onCheckoutCompleted?.(
+    {
+      ...resolved.snapshot,
+      sessionId: session.id,
+    },
+    persistence.tools,
+  );
+}
+
+async function serializeBillingCheckoutSession(
+  inflight: Map<string, Promise<void>>,
+  sessionId: string,
+  task: () => Promise<void>,
+) {
+  const previous = inflight.get(sessionId);
+  const current = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(task);
+  inflight.set(sessionId, current);
+
+  try {
+    await current;
+  } finally {
+    if (inflight.get(sessionId) === current) {
+      inflight.delete(sessionId);
+    }
+  }
 }
 
 async function persistBillingSnapshot(
@@ -3455,6 +3599,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
   >;
   const webhookPath = input.webhookPath ?? "/billing/webhook";
   const webhookDefinitions = resolveStripeWebhooks(input, env, webhookPath);
+  const billingCheckoutSessionSyncs = new Map<string, Promise<void>>();
   const successPath = resolvePath(input.successPath, "Stripe integration successPath", "/success");
   const cancelPath = resolvePath(input.cancelPath, "Stripe integration cancelPath", "/cancel");
   const webhookRoutes = webhookDefinitions.map((definition) =>
@@ -3504,33 +3649,15 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               typeof event.data.id === "string"
             ) {
               const session = await instance.retrieveCheckoutSession(event.data.id);
-              const snapshot = await resolveBillingSnapshotForSession(
-                session,
-                configuredProducts,
-                input.billing,
-                persistence,
-                context,
-              );
-
-              if (snapshot) {
-                const previousSnapshot =
-                  session.customerId && persistence.getBillingAccountByStripeCustomerId
-                    ? await persistence.getBillingAccountByStripeCustomerId(session.customerId)
-                    : null;
-                await persistBillingSnapshot(
-                  snapshot,
-                  input.billing,
+              await serializeBillingCheckoutSession(billingCheckoutSessionSyncs, session.id, () =>
+                syncBillingCheckoutSession(
+                  session,
+                  configuredProducts,
+                  input.billing!,
                   persistence,
-                  previousSnapshot,
-                );
-                await input.billing.hooks?.onCheckoutCompleted?.(
-                  {
-                    ...snapshot,
-                    sessionId: session.id,
-                  },
-                  persistence.tools,
-                );
-              }
+                  context,
+                ),
+              );
             } else if (
               event.data &&
               typeof event.data === "object" &&
@@ -5412,33 +5539,15 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
                   stripeSdk,
                   integrationSchema,
                 );
-                const snapshot = await resolveBillingSnapshotForSession(
-                  session,
-                  configuredProducts,
-                  input.billing,
-                  persistence,
-                  context,
-                );
-
-                if (snapshot) {
-                  const previousSnapshot =
-                    session.customerId && persistence.getBillingAccountByStripeCustomerId
-                      ? await persistence.getBillingAccountByStripeCustomerId(session.customerId)
-                      : null;
-                  await persistBillingSnapshot(
-                    snapshot,
-                    input.billing,
+                await serializeBillingCheckoutSession(billingCheckoutSessionSyncs, session.id, () =>
+                  syncBillingCheckoutSession(
+                    session,
+                    configuredProducts,
+                    input.billing!,
                     persistence,
-                    previousSnapshot,
-                  );
-                  await input.billing.hooks?.onCheckoutCompleted?.(
-                    {
-                      ...snapshot,
-                      sessionId: session.id,
-                    },
-                    persistence.tools,
-                  );
-                }
+                    context,
+                  ),
+                );
               }
 
               return Response.json(session);
