@@ -71,8 +71,15 @@ A table that exists but no longer matches the schema is reported, not altered:
   tasks
     missing in the database: priority
     not in the schema: legacy_note
+    changed column status: default expected "open", found none
+    missing indexes: tasks_list_id_idx (list_id)
 ⚠️  Tables that differ from the schema were left unchanged.
 ```
+
+Farm compares the parts of the table contract it can declare: column types,
+nullability, defaults, primary and unique constraints, indexes, and internal
+foreign keys. Matching column names alone are not treated as proof that a table
+is up to date.
 
 A create is derivable from the schema alone. A change is not: a rename and a
 drop-plus-add look identical from here, and one of them destroys data. That call

@@ -1,8 +1,11 @@
 import {
   generateSqlStatements,
+  getSqlColumnType,
+  isNullableField,
   type CollectedSchemaModel,
   type FarmSqlDialect,
   type FarmSqlStatement,
+  type ResolvedSchemaField,
 } from "./schema-sql";
 
 /** The subset of a database client this needs: run a statement, read a result. */
@@ -19,6 +22,58 @@ export type FarmSchemaDrift = {
   missingColumns: string[];
   /** Present in the table but not declared. Reported, never dropped. */
   extraColumns: string[];
+  /** Columns whose stored definition differs from the schema. */
+  changedColumns: FarmSchemaColumnDrift[];
+  /** Declared indexes that are absent from the table. */
+  missingIndexes: FarmSchemaIndexDefinition[];
+  /** Stored indexes that are not declared by the schema. */
+  extraIndexes: FarmSchemaIndexDefinition[];
+  /** Declared foreign keys that are absent from the table. */
+  missingReferences: FarmSchemaReferenceDefinition[];
+  /** Stored foreign keys that are not declared by the schema. */
+  extraReferences: FarmSchemaReferenceDefinition[];
+};
+
+export type FarmSchemaColumnDefinition = {
+  type: string;
+  nullable: boolean;
+  default: string | null;
+  primaryKey: boolean;
+};
+
+export type FarmSchemaColumnDrift = {
+  column: string;
+  differences: Array<"type" | "nullability" | "default" | "primaryKey">;
+  expected: FarmSchemaColumnDefinition;
+  actual: FarmSchemaColumnDefinition;
+};
+
+export type FarmSchemaIndexDefinition = {
+  name: string;
+  columns: string[];
+  unique: boolean;
+};
+
+export type FarmSchemaReferenceDefinition = {
+  column: string;
+  referencedTable: string;
+  referencedColumn: string;
+  onDelete: "cascade" | "restrict" | "setNull" | "noAction";
+};
+
+type DescribedColumn = Omit<FarmSchemaColumnDefinition, "default"> & {
+  name: string;
+  rawDefault: string | null;
+};
+
+type DescribedIndex = FarmSchemaIndexDefinition & {
+  primary: boolean;
+};
+
+type DescribedTable = {
+  columns: DescribedColumn[];
+  indexes: DescribedIndex[];
+  references: FarmSchemaReferenceDefinition[];
 };
 
 export type FarmSchemaMigratePlan = {
@@ -46,6 +101,9 @@ export async function planSchemaMigration(
   const statements: FarmSqlStatement[] = [];
   const upToDate: string[] = [];
   const drift: FarmSchemaDrift[] = [];
+  const modelLookup = new Map(
+    models.map((model) => [`${model.ownerKey}.${model.modelKey}`, model]),
+  );
 
   // Emitted once over the whole set so cross-model references resolve, then
   // grouped: a table statement opens a group and its indexes follow it.
@@ -67,29 +125,96 @@ export async function planSchemaMigration(
       continue;
     }
 
-    const declared = Object.values(model.model.fields).map((field) => field.name);
-    const missingColumns = declared.filter((column) => !existing.has(column.toLowerCase()));
-    const extraColumns = [...existing].filter(
-      (column) => !declared.some((declaredColumn) => declaredColumn.toLowerCase() === column),
+    const expectedColumns = new Map(
+      Object.values(model.model.fields).map((field) => [field.name.toLowerCase(), field]),
+    );
+    const actualColumns = new Map(
+      existing.columns.map((column) => [column.name.toLowerCase(), column]),
+    );
+    const missingColumns = [...expectedColumns.values()]
+      .filter((field) => !actualColumns.has(field.name.toLowerCase()))
+      .map((field) => field.name);
+    const extraColumns = existing.columns
+      .filter((column) => !expectedColumns.has(column.name.toLowerCase()))
+      .map((column) => column.name);
+    const changedColumns: FarmSchemaColumnDrift[] = [];
+
+    for (const [columnKey, field] of expectedColumns) {
+      const actualColumn = actualColumns.get(columnKey);
+      if (!actualColumn) continue;
+
+      const expectedDefinition = expectedColumnDefinition(field, dialect);
+      const actualDefinition = actualColumnDefinition(actualColumn, field, dialect);
+      const differences: FarmSchemaColumnDrift["differences"] = [];
+      if (expectedDefinition.type !== actualDefinition.type) differences.push("type");
+      if (expectedDefinition.nullable !== actualDefinition.nullable) {
+        differences.push("nullability");
+      }
+      if (expectedDefinition.default !== actualDefinition.default) differences.push("default");
+      if (expectedDefinition.primaryKey !== actualDefinition.primaryKey) {
+        differences.push("primaryKey");
+      }
+      if (differences.length > 0) {
+        changedColumns.push({
+          column: field.name,
+          differences,
+          expected: expectedDefinition,
+          actual: actualDefinition,
+        });
+      }
+    }
+
+    const expectedIndexes = collectExpectedIndexes(model);
+    const actualIndexes = existing.indexes.filter((index) => !index.primary);
+    const { missing: missingIndexes, extra: unmatchedIndexes } = compareDefinitions(
+      expectedIndexes,
+      actualIndexes,
+      indexSignature,
+    );
+    const expectedReferences = collectExpectedReferences(model, modelLookup);
+    const { missing: missingReferences, extra: extraReferences } = compareDefinitions(
+      expectedReferences,
+      existing.references,
+      referenceSignature,
+    );
+    const referenceColumns = new Set(
+      existing.references.map((reference) => reference.column.toLowerCase()),
+    );
+    const extraIndexes = unmatchedIndexes.filter(
+      (index) =>
+        !(
+          dialect === "mysql" &&
+          !index.unique &&
+          index.columns.length === 1 &&
+          referenceColumns.has(index.columns[0]!.toLowerCase())
+        ),
     );
 
-    if (missingColumns.length === 0 && extraColumns.length === 0) upToDate.push(model.modelName);
-    else drift.push({ table: model.modelName, missingColumns, extraColumns });
+    const entry = {
+      table: model.modelName,
+      missingColumns,
+      extraColumns,
+      changedColumns,
+      missingIndexes,
+      extraIndexes: extraIndexes.map(({ name, columns, unique }) => ({ name, columns, unique })),
+      missingReferences,
+      extraReferences,
+    };
+    if (hasSchemaDrift(entry)) drift.push(entry);
+    else upToDate.push(model.modelName);
   }
 
   return { dialect, statements, upToDate, drift };
 }
 
-/** Column names of a table, lowercased, or undefined when it does not exist. */
+/** A normalized table definition, or undefined when the table does not exist. */
 async function describeTable(
   executor: FarmSchemaExecutor,
   dialect: FarmSqlDialect,
   table: string,
-): Promise<Set<string> | undefined> {
+): Promise<DescribedTable | undefined> {
   if (dialect === "sqlite") {
-    const rows = await executor.query(`pragma table_info('${table.split("'").join("''")}')`);
-    if (rows.length === 0) return undefined;
-    return new Set(rows.map((row) => String(row.name).toLowerCase()));
+    return describeSqliteTable(executor, table);
   }
 
   // Postgres binds $1 while MySQL binds ?, and the lookup is scoped to the
@@ -100,16 +225,458 @@ async function describeTable(
   const [sql, params]: [string, unknown[]] =
     dialect === "mysql"
       ? [
-          "select column_name from information_schema.columns where table_name = ? and table_schema = database()",
+          "select column_name, data_type, column_type, is_nullable, column_default from information_schema.columns where table_name = ? and table_schema = database() order by ordinal_position",
           [table],
         ]
       : [
-          "select column_name from information_schema.columns where table_name = $1 and table_schema = current_schema()",
+          "select column_name, data_type, udt_name, is_nullable, column_default from information_schema.columns where table_name = $1 and table_schema = current_schema() order by ordinal_position",
           [table],
         ];
   const rows = await executor.query(sql, params);
   if (rows.length === 0) return undefined;
-  return new Set(rows.map((row) => String(row.column_name ?? row.COLUMN_NAME).toLowerCase()));
+
+  const columns: DescribedColumn[] = rows.map((row) => ({
+    name: String(readRowValue(row, "column_name")),
+    type: normalizeColumnType(
+      dialect,
+      String(
+        readRowValue(row, dialect === "mysql" ? "column_type" : "data_type") ??
+          readRowValue(row, "data_type"),
+      ),
+    ),
+    nullable: String(readRowValue(row, "is_nullable")).toUpperCase() === "YES",
+    rawDefault: nullableString(readRowValue(row, "column_default")),
+    primaryKey: false,
+  }));
+  const indexes = await describeServerIndexes(executor, dialect, table);
+  const primaryColumns = new Set(
+    indexes
+      .filter((index) => index.primary)
+      .flatMap((index) => index.columns.map((column) => column.toLowerCase())),
+  );
+  for (const column of columns) {
+    if (primaryColumns.has(column.name.toLowerCase())) {
+      column.primaryKey = true;
+      column.nullable = false;
+    }
+  }
+
+  return {
+    columns,
+    indexes,
+    references: await describeServerReferences(executor, dialect, table),
+  };
+}
+
+async function describeSqliteTable(
+  executor: FarmSchemaExecutor,
+  table: string,
+): Promise<DescribedTable | undefined> {
+  const escapedTable = escapeSqlitePragmaValue(table);
+  const rows = await executor.query(`pragma table_info('${escapedTable}')`);
+  if (rows.length === 0) return undefined;
+
+  const columns: DescribedColumn[] = rows.map((row) => {
+    const primaryKey = Number(readRowValue(row, "pk") ?? 0) > 0;
+    return {
+      name: String(readRowValue(row, "name")),
+      type: normalizeColumnType("sqlite", String(readRowValue(row, "type") ?? "")),
+      nullable: !primaryKey && Number(readRowValue(row, "notnull") ?? 0) === 0,
+      rawDefault: nullableString(readRowValue(row, "dflt_value")),
+      primaryKey,
+    };
+  });
+  const indexRows = await executor.query(`pragma index_list('${escapedTable}')`);
+  const indexes: DescribedIndex[] = [];
+
+  for (const row of indexRows) {
+    const name = String(readRowValue(row, "name"));
+    const columnRows = await executor.query(
+      `pragma index_info('${escapeSqlitePragmaValue(name)}')`,
+    );
+    indexes.push({
+      name,
+      columns: columnRows
+        .sort(
+          (left, right) =>
+            Number(readRowValue(left, "seqno") ?? 0) - Number(readRowValue(right, "seqno") ?? 0),
+        )
+        .map((column) => String(readRowValue(column, "name"))),
+      unique: asBoolean(readRowValue(row, "unique")),
+      primary: String(readRowValue(row, "origin") ?? "").toLowerCase() === "pk",
+    });
+  }
+
+  const referenceRows = await executor.query(`pragma foreign_key_list('${escapedTable}')`);
+  return {
+    columns,
+    indexes,
+    references: referenceRows.map((row) => ({
+      column: String(readRowValue(row, "from")),
+      referencedTable: String(readRowValue(row, "table")),
+      referencedColumn: String(readRowValue(row, "to")),
+      onDelete: normalizeDeleteAction(readRowValue(row, "on_delete")),
+    })),
+  };
+}
+
+async function describeServerIndexes(
+  executor: FarmSchemaExecutor,
+  dialect: Exclude<FarmSqlDialect, "sqlite">,
+  table: string,
+): Promise<DescribedIndex[]> {
+  const [sql, params]: [string, unknown[]] =
+    dialect === "mysql"
+      ? [
+          "select index_name, non_unique, column_name, seq_in_index from information_schema.statistics where table_name = ? and table_schema = database() order by index_name, seq_in_index",
+          [table],
+        ]
+      : [
+          `select index_class.relname as index_name,
+                  index_info.indisunique as is_unique,
+                  index_info.indisprimary as is_primary,
+                  attribute.attname as column_name,
+                  index_key.column_position
+             from pg_catalog.pg_class table_class
+             join pg_catalog.pg_namespace namespace on namespace.oid = table_class.relnamespace
+             join pg_catalog.pg_index index_info on index_info.indrelid = table_class.oid
+             join pg_catalog.pg_class index_class on index_class.oid = index_info.indexrelid
+             join lateral unnest(index_info.indkey) with ordinality as index_key(attnum, column_position) on true
+             left join pg_catalog.pg_attribute attribute
+               on attribute.attrelid = table_class.oid and attribute.attnum = index_key.attnum
+            where table_class.relname = $1
+              and namespace.nspname = current_schema()
+              and index_key.column_position <= index_info.indnkeyatts
+            order by index_class.relname, index_key.column_position`,
+          [table],
+        ];
+  const rows = await executor.query(sql, params);
+  const grouped = new Map<
+    string,
+    DescribedIndex & { orderedColumns: Array<{ position: number; name: string }> }
+  >();
+
+  for (const row of rows) {
+    const name = String(readRowValue(row, "index_name"));
+    const index = grouped.get(name) ?? {
+      name,
+      columns: [],
+      unique:
+        dialect === "mysql"
+          ? Number(readRowValue(row, "non_unique") ?? 1) === 0
+          : asBoolean(readRowValue(row, "is_unique")),
+      primary:
+        dialect === "mysql"
+          ? name.toUpperCase() === "PRIMARY"
+          : asBoolean(readRowValue(row, "is_primary")),
+      orderedColumns: [],
+    };
+    const column = readRowValue(row, "column_name");
+    if (column !== undefined && column !== null) {
+      index.orderedColumns.push({
+        position: Number(
+          readRowValue(row, dialect === "mysql" ? "seq_in_index" : "column_position") ?? 0,
+        ),
+        name: String(column),
+      });
+    }
+    grouped.set(name, index);
+  }
+
+  return [...grouped.values()].map(({ orderedColumns, ...index }) => ({
+    ...index,
+    columns: orderedColumns
+      .sort((left, right) => left.position - right.position)
+      .map((column) => column.name),
+  }));
+}
+
+async function describeServerReferences(
+  executor: FarmSchemaExecutor,
+  dialect: Exclude<FarmSqlDialect, "sqlite">,
+  table: string,
+): Promise<FarmSchemaReferenceDefinition[]> {
+  const [sql, params]: [string, unknown[]] =
+    dialect === "mysql"
+      ? [
+          `select key_columns.column_name,
+                  key_columns.referenced_table_name as referenced_table,
+                  key_columns.referenced_column_name as referenced_column,
+                  referential.delete_rule
+             from information_schema.key_column_usage key_columns
+             join information_schema.referential_constraints referential
+               on referential.constraint_schema = key_columns.constraint_schema
+              and referential.constraint_name = key_columns.constraint_name
+              and referential.table_name = key_columns.table_name
+            where key_columns.table_schema = database()
+              and key_columns.table_name = ?
+              and key_columns.referenced_table_name is not null
+            order by key_columns.constraint_name, key_columns.ordinal_position`,
+          [table],
+        ]
+      : [
+          `select key_columns.column_name,
+                  referenced_columns.table_name as referenced_table,
+                  referenced_columns.column_name as referenced_column,
+                  referential.delete_rule
+             from information_schema.table_constraints constraints
+             join information_schema.key_column_usage key_columns
+               on key_columns.constraint_catalog = constraints.constraint_catalog
+              and key_columns.constraint_schema = constraints.constraint_schema
+              and key_columns.constraint_name = constraints.constraint_name
+             join information_schema.referential_constraints referential
+               on referential.constraint_catalog = constraints.constraint_catalog
+              and referential.constraint_schema = constraints.constraint_schema
+              and referential.constraint_name = constraints.constraint_name
+             join information_schema.constraint_column_usage referenced_columns
+               on referenced_columns.constraint_catalog = referential.unique_constraint_catalog
+              and referenced_columns.constraint_schema = referential.unique_constraint_schema
+              and referenced_columns.constraint_name = referential.unique_constraint_name
+            where constraints.constraint_type = 'FOREIGN KEY'
+              and constraints.table_schema = current_schema()
+              and constraints.table_name = $1
+            order by constraints.constraint_name, key_columns.ordinal_position`,
+          [table],
+        ];
+  const rows = await executor.query(sql, params);
+  return rows.map((row) => ({
+    column: String(readRowValue(row, "column_name")),
+    referencedTable: String(readRowValue(row, "referenced_table")),
+    referencedColumn: String(readRowValue(row, "referenced_column")),
+    onDelete: normalizeDeleteAction(readRowValue(row, "delete_rule")),
+  }));
+}
+
+function expectedColumnDefinition(
+  field: ResolvedSchemaField,
+  dialect: FarmSqlDialect,
+): FarmSchemaColumnDefinition {
+  return {
+    type: normalizeColumnType(dialect, getSqlColumnType(field, dialect)),
+    nullable: !field.primaryKey && isNullableField(field),
+    default: expectedDefault(field),
+    primaryKey: field.primaryKey === true,
+  };
+}
+
+function actualColumnDefinition(
+  column: DescribedColumn,
+  field: ResolvedSchemaField,
+  dialect: FarmSqlDialect,
+): FarmSchemaColumnDefinition {
+  return {
+    type: column.type,
+    nullable: column.nullable,
+    default: normalizeDatabaseDefault(column.rawDefault, field, dialect),
+    primaryKey: column.primaryKey,
+  };
+}
+
+function expectedDefault(field: ResolvedSchemaField): string | null {
+  if (field.default === undefined) return null;
+  if (field.type === "datetime" && field.default === "now") return "CURRENT_TIMESTAMP";
+  if (typeof field.default === "string") return JSON.stringify(field.default);
+  if (typeof field.default === "number" || typeof field.default === "boolean") {
+    return String(field.default);
+  }
+  return null;
+}
+
+function normalizeDatabaseDefault(
+  value: string | null,
+  field: ResolvedSchemaField,
+  dialect: FarmSqlDialect,
+): string | null {
+  if (value === null) return null;
+  let normalized = stripWrappingParentheses(value.trim());
+  if (dialect === "postgres") {
+    normalized = normalized.replace(/::[\w\s"]+$/u, "");
+  }
+  if (
+    field.type === "datetime" &&
+    /^(?:current_timestamp(?:\(\d+\))?|now\(\))$/iu.test(normalized)
+  ) {
+    return "CURRENT_TIMESTAMP";
+  }
+  if (field.type === "boolean") {
+    const booleanValue = stripSqlQuotes(normalized).toLowerCase();
+    if (["1", "true", "t", "b'1'"].includes(booleanValue)) return "true";
+    if (["0", "false", "f", "b'0'"].includes(booleanValue)) return "false";
+  }
+  if (field.type === "integer" || field.type === "number") {
+    return stripSqlQuotes(normalized);
+  }
+  if (["id", "uuid", "string", "text", "enum", "datetime"].includes(field.type)) {
+    return JSON.stringify(stripSqlQuotes(normalized).replace(/''/gu, "'"));
+  }
+  return normalized.toUpperCase();
+}
+
+function normalizeColumnType(dialect: FarmSqlDialect, value: string): string {
+  const type = value.trim().toLowerCase().replace(/\s+/gu, " ");
+  if (dialect === "sqlite") {
+    if (/int/u.test(type)) return "integer";
+    if (/(?:char|clob|text)/u.test(type)) return "text";
+    if (/(?:real|floa|doub)/u.test(type)) return "real";
+    if (/blob/u.test(type) || type === "") return "blob";
+    return "numeric";
+  }
+  if (dialect === "mysql") {
+    if (/^(?:bool|boolean|tinyint\(1\))/u.test(type)) return "boolean";
+    if (/^(?:int|integer)(?:\(\d+\))?/u.test(type)) return "integer";
+    if (/^(?:double|double precision)/u.test(type)) return "double";
+    return type;
+  }
+  if (["int4", "integer"].includes(type)) return "integer";
+  if (["float8", "double precision"].includes(type)) return "double precision";
+  if (["timestamptz", "timestamp with time zone"].includes(type)) return "timestamptz";
+  return type;
+}
+
+function collectExpectedIndexes(model: CollectedSchemaModel): FarmSchemaIndexDefinition[] {
+  const indexes: FarmSchemaIndexDefinition[] = [];
+  for (const field of Object.values(model.model.fields)) {
+    if (field.index) {
+      indexes.push({
+        name: `${model.modelName}_${field.name}_idx`,
+        columns: [field.name],
+        unique: false,
+      });
+    }
+    if (!field.primaryKey && field.unique) {
+      indexes.push({
+        name: `${model.modelName}_${field.name}_unique`,
+        columns: [field.name],
+        unique: true,
+      });
+    }
+  }
+  for (const constraint of model.model.constraints ?? []) {
+    indexes.push({
+      name:
+        constraint.name ??
+        `${model.modelName}_${constraint.fields.map((fieldKey) => model.model.fields[fieldKey]?.name ?? fieldKey).join("_")}_${constraint.type}`,
+      columns: constraint.fields.map((fieldKey) => model.model.fields[fieldKey]?.name ?? fieldKey),
+      unique: constraint.type === "unique",
+    });
+  }
+  return indexes;
+}
+
+function collectExpectedReferences(
+  model: CollectedSchemaModel,
+  modelLookup: ReadonlyMap<string, CollectedSchemaModel>,
+): FarmSchemaReferenceDefinition[] {
+  const references: FarmSchemaReferenceDefinition[] = [];
+  for (const field of Object.values(model.model.fields)) {
+    if (!field.reference) continue;
+    const target = modelLookup.get(`${model.ownerKey}.${field.reference.model}`);
+    if (!target) continue;
+    references.push({
+      column: field.name,
+      referencedTable: target.modelName,
+      referencedColumn: target.model.fields[field.reference.field]?.name ?? field.reference.field,
+      onDelete: field.reference.onDelete ?? "noAction",
+    });
+  }
+  return references;
+}
+
+function compareDefinitions<T>(
+  expected: readonly T[],
+  actual: readonly T[],
+  signature: (value: T) => string,
+): { missing: T[]; extra: T[] } {
+  const remaining = [...actual];
+  const missing: T[] = [];
+  for (const expectedValue of expected) {
+    const expectedSignature = signature(expectedValue);
+    const actualIndex = remaining.findIndex(
+      (actualValue) => signature(actualValue) === expectedSignature,
+    );
+    if (actualIndex === -1) missing.push(expectedValue);
+    else remaining.splice(actualIndex, 1);
+  }
+  return { missing, extra: remaining };
+}
+
+function indexSignature(index: FarmSchemaIndexDefinition): string {
+  return `${index.unique ? "unique" : "index"}:${index.columns.map((column) => column.toLowerCase()).join(",")}`;
+}
+
+function referenceSignature(reference: FarmSchemaReferenceDefinition): string {
+  return [
+    reference.column,
+    reference.referencedTable,
+    reference.referencedColumn,
+    reference.onDelete,
+  ]
+    .map((value) => value.toLowerCase())
+    .join(":");
+}
+
+function hasSchemaDrift(drift: FarmSchemaDrift): boolean {
+  return (
+    drift.missingColumns.length > 0 ||
+    drift.extraColumns.length > 0 ||
+    drift.changedColumns.length > 0 ||
+    drift.missingIndexes.length > 0 ||
+    drift.extraIndexes.length > 0 ||
+    drift.missingReferences.length > 0 ||
+    drift.extraReferences.length > 0
+  );
+}
+
+function readRowValue(row: Record<string, unknown>, name: string): unknown {
+  return row[name] ?? row[name.toUpperCase()];
+}
+
+function nullableString(value: unknown): string | null {
+  return value === undefined || value === null ? null : String(value);
+}
+
+function asBoolean(value: unknown): boolean {
+  return value === true || value === 1 || value === "1" || String(value).toLowerCase() === "true";
+}
+
+function normalizeDeleteAction(value: unknown): FarmSchemaReferenceDefinition["onDelete"] {
+  switch (
+    String(value ?? "NO ACTION")
+      .toUpperCase()
+      .replace(/[_\s]+/gu, "")
+  ) {
+    case "CASCADE":
+      return "cascade";
+    case "RESTRICT":
+      return "restrict";
+    case "SETNULL":
+      return "setNull";
+    default:
+      return "noAction";
+  }
+}
+
+function stripWrappingParentheses(value: string): string {
+  let result = value;
+  while (result.startsWith("(") && result.endsWith(")")) {
+    result = result.slice(1, -1).trim();
+  }
+  return result;
+}
+
+function stripSqlQuotes(value: string): string {
+  if (
+    value.length >= 2 &&
+    ((value.startsWith("'") && value.endsWith("'")) ||
+      (value.startsWith('"') && value.endsWith('"')))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function escapeSqlitePragmaValue(value: string): string {
+  return value.replace(/'/gu, "''");
 }
 
 export type FarmSchemaMigrateResult = {
@@ -160,9 +727,52 @@ export function describeSchemaDrift(drift: readonly FarmSchemaDrift[]): string {
       if (entry.extraColumns.length > 0) {
         lines.push(`    not in the schema: ${entry.extraColumns.join(", ")}`);
       }
+      for (const column of entry.changedColumns) {
+        const differences = column.differences.map((difference) => {
+          if (difference === "type") {
+            return `type expected ${column.expected.type}, found ${column.actual.type}`;
+          }
+          if (difference === "nullability") {
+            return `nullability expected ${column.expected.nullable ? "nullable" : "required"}, found ${column.actual.nullable ? "nullable" : "required"}`;
+          }
+          if (difference === "default") {
+            return `default expected ${column.expected.default ?? "none"}, found ${column.actual.default ?? "none"}`;
+          }
+          return `primary key expected ${column.expected.primaryKey ? "yes" : "no"}, found ${column.actual.primaryKey ? "yes" : "no"}`;
+        });
+        lines.push(`    changed column ${column.column}: ${differences.join("; ")}`);
+      }
+      if (entry.missingIndexes.length > 0) {
+        lines.push(
+          `    missing indexes: ${entry.missingIndexes.map(formatIndexDefinition).join(", ")}`,
+        );
+      }
+      if (entry.extraIndexes.length > 0) {
+        lines.push(
+          `    not in the schema indexes: ${entry.extraIndexes.map(formatIndexDefinition).join(", ")}`,
+        );
+      }
+      if (entry.missingReferences.length > 0) {
+        lines.push(
+          `    missing references: ${entry.missingReferences.map(formatReferenceDefinition).join(", ")}`,
+        );
+      }
+      if (entry.extraReferences.length > 0) {
+        lines.push(
+          `    not in the schema references: ${entry.extraReferences.map(formatReferenceDefinition).join(", ")}`,
+        );
+      }
       return lines.join("\n");
     })
     .join("\n");
+}
+
+function formatIndexDefinition(index: FarmSchemaIndexDefinition): string {
+  return `${index.name} (${index.unique ? "unique: " : ""}${index.columns.join(", ")})`;
+}
+
+function formatReferenceDefinition(reference: FarmSchemaReferenceDefinition): string {
+  return `${reference.column} -> ${reference.referencedTable}.${reference.referencedColumn} on delete ${reference.onDelete}`;
 }
 
 /**

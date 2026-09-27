@@ -6,6 +6,7 @@ import { defineSchema } from "../schema";
 import {
   applySchemaMigration,
   createSchemaExecutor,
+  describeSchemaDrift,
   formatSchemaMigration,
   planSchemaMigration,
   type FarmSchemaExecutor,
@@ -700,6 +701,147 @@ describe("migration planning", () => {
     expect(columns.map((row) => row.name)).toContain("legacy_note");
   });
 
+  it("reports definition and index drift even when every column name matches", async () => {
+    const { database, executor } = await sqliteExecutor();
+    database.exec(`
+      create table todo_items (
+        id INTEGER,
+        title INTEGER,
+        status TEXT NOT NULL,
+        priority INTEGER NOT NULL DEFAULT 0,
+        list_id TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+
+    const plan = await planSchemaMigration(models(), "sqlite", executor);
+
+    expect(plan.statements).toEqual([]);
+    expect(plan.upToDate).toEqual([]);
+    expect(plan.drift).toHaveLength(1);
+    expect(plan.drift[0]).toMatchObject({
+      missingColumns: [],
+      extraColumns: [],
+      changedColumns: [
+        {
+          column: "id",
+          differences: expect.arrayContaining(["type", "nullability", "primaryKey"]),
+        },
+        {
+          column: "title",
+          differences: ["type", "nullability"],
+        },
+        {
+          column: "status",
+          differences: ["default"],
+        },
+      ],
+      missingIndexes: expect.arrayContaining([
+        expect.objectContaining({ columns: ["list_id"], unique: false }),
+        expect.objectContaining({ columns: ["slug"], unique: true }),
+        expect.objectContaining({ columns: ["list_id", "status"], unique: false }),
+      ]),
+    });
+
+    expect(describeSchemaDrift(plan.drift)).toContain(
+      'changed column status: default expected "open", found none',
+    );
+    expect(describeSchemaDrift(plan.drift)).toContain("missing indexes:");
+  });
+
+  it("reports an index removed from an otherwise matching table", async () => {
+    const { database, executor } = await sqliteExecutor();
+    await applySchemaMigration(await planSchemaMigration(models(), "sqlite", executor), executor);
+    database.exec(`drop index "todo_items_list_id_idx"`);
+    database.exec(`create index "legacy_title_idx" on "todo_items" ("title")`);
+
+    const plan = await planSchemaMigration(models(), "sqlite", executor);
+
+    expect(plan.upToDate).toEqual([]);
+    expect(plan.drift).toHaveLength(1);
+    expect(plan.drift[0]!.changedColumns).toEqual([]);
+    expect(plan.drift[0]!.missingIndexes).toEqual([
+      {
+        name: "todo_items_list_id_idx",
+        columns: ["list_id"],
+        unique: false,
+      },
+    ]);
+    expect(plan.drift[0]!.extraIndexes).toEqual([
+      {
+        name: "legacy_title_idx",
+        columns: ["title"],
+        unique: false,
+      },
+    ]);
+  });
+
+  it("reports changed foreign-key actions without altering the table", async () => {
+    const references = collectSchemaModels([
+      [
+        "app",
+        defineSchema({
+          models: {
+            parents: { fields: { id: { type: "uuid", primaryKey: true } } },
+            children: {
+              fields: {
+                id: { type: "uuid", primaryKey: true },
+                parentId: {
+                  type: "uuid",
+                  name: "parent_id",
+                  reference: { model: "parents", field: "id", onDelete: "cascade" },
+                },
+              },
+            },
+          },
+        }),
+      ],
+    ]);
+    const { database, executor } = await sqliteExecutor();
+    const generated = await sqliteExecutor();
+    await applySchemaMigration(
+      await planSchemaMigration(references, "sqlite", generated.executor),
+      generated.executor,
+    );
+
+    const matching = await planSchemaMigration(references, "sqlite", generated.executor);
+    expect(matching.upToDate).toEqual(["parents", "children"]);
+    expect(matching.drift).toEqual([]);
+
+    database.exec(`
+      create table parents (id TEXT primary key);
+      create table children (
+        id TEXT primary key,
+        parent_id TEXT NOT NULL references parents (id) on delete restrict
+      );
+    `);
+
+    const plan = await planSchemaMigration(references, "sqlite", executor);
+
+    expect(plan.upToDate).toEqual(["parents"]);
+    expect(plan.drift).toHaveLength(1);
+    expect(plan.drift[0]).toMatchObject({
+      table: "children",
+      missingReferences: [
+        {
+          column: "parent_id",
+          referencedTable: "parents",
+          referencedColumn: "id",
+          onDelete: "cascade",
+        },
+      ],
+      extraReferences: [
+        {
+          column: "parent_id",
+          referencedTable: "parents",
+          referencedColumn: "id",
+          onDelete: "restrict",
+        },
+      ],
+    });
+  });
+
   it("only creates the tables that are missing, leaving the rest alone", async () => {
     const { database, executor } = await sqliteExecutor();
     const two = collectSchemaModels([
@@ -933,17 +1075,27 @@ describe("a third-party plugin", () => {
 });
 
 describe("dialect-specific introspection", () => {
-  function recordingExecutor(rows: Record<string, unknown>[] = []) {
+  function recordingExecutor(resolveRows: (sql: string) => Record<string, unknown>[] = () => []) {
     const queries: Array<{ sql: string; params?: unknown[] }> = [];
     const executor: FarmSchemaExecutor = {
       async execute() {},
       async query(sql, params) {
         queries.push({ sql, params });
-        return rows;
+        return resolveRows(sql);
       },
     };
     return { executor, queries };
   }
+
+  const primaryKeyModels = () =>
+    collectSchemaModels([
+      [
+        "app",
+        defineSchema({
+          models: { records: { fields: { id: { type: "uuid", primaryKey: true } } } },
+        }),
+      ],
+    ]);
 
   it("binds $1 and scopes to the current schema on Postgres", async () => {
     // pg rejects `?` outright, so introspection threw and migrate could not
@@ -964,6 +1116,73 @@ describe("dialect-specific introspection", () => {
     const lookup = queries.find((entry) => entry.sql.includes("information_schema.columns"));
     expect(lookup?.sql).toContain("table_name = ?");
     expect(lookup?.sql).toContain("table_schema = database()");
+  });
+
+  it("normalizes Postgres column and primary-key metadata", async () => {
+    const { executor, queries } = recordingExecutor((sql) => {
+      if (sql.includes("information_schema.columns")) {
+        return [
+          {
+            column_name: "id",
+            data_type: "text",
+            udt_name: "text",
+            is_nullable: "NO",
+            column_default: null,
+          },
+        ];
+      }
+      if (sql.includes("pg_catalog.pg_index")) {
+        return [
+          {
+            index_name: "records_pkey",
+            is_unique: true,
+            is_primary: true,
+            column_name: "id",
+            column_position: 1,
+          },
+        ];
+      }
+      return [];
+    });
+
+    const plan = await planSchemaMigration(primaryKeyModels(), "postgres", executor);
+
+    expect(plan.upToDate).toEqual(["records"]);
+    expect(plan.drift).toEqual([]);
+    expect(queries.some((entry) => entry.sql.includes("referential_constraints"))).toBe(true);
+  });
+
+  it("normalizes MySQL column and primary-key metadata", async () => {
+    const { executor, queries } = recordingExecutor((sql) => {
+      if (sql.includes("information_schema.columns")) {
+        return [
+          {
+            column_name: "id",
+            data_type: "varchar",
+            column_type: "varchar(255)",
+            is_nullable: "NO",
+            column_default: null,
+          },
+        ];
+      }
+      if (sql.includes("information_schema.statistics")) {
+        return [
+          {
+            index_name: "PRIMARY",
+            non_unique: 0,
+            column_name: "id",
+            seq_in_index: 1,
+          },
+        ];
+      }
+      return [];
+    });
+
+    const plan = await planSchemaMigration(primaryKeyModels(), "mysql", executor);
+
+    expect(plan.upToDate).toEqual(["records"]);
+    expect(plan.drift).toEqual([]);
+    expect(queries.some((entry) => entry.sql.includes("referential_constraints"))).toBe(true);
   });
 
   it("escapes backslashes in MySQL string literals, and only there", () => {
