@@ -305,6 +305,12 @@ export default defineConfig({
 
 `farm migrate` orchestrates the configured command; it does not replace Prisma, Drizzle, SQL, Better Auth, or provider-specific migration tools. Run the migration process owned by each schema owner.
 
+Prisma and Drizzle artifacts use schema model and field keys as generated code
+identifiers. Keep those keys valid for the selected target. Farm rejects empty,
+punctuated, leading-digit, reserved, or colliding generated identifiers before
+writing an artifact. Use a model or field's `name` property when its physical
+table or column name needs characters that are not valid in generated code.
+
 ## Failure modes
 
 - If an integration does not define `schema`, `ctx.args.db` throws. Use the integration's native API or raw runtime client instead.

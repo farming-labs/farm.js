@@ -129,6 +129,57 @@ export default {
   return root;
 }
 
+async function identifierFixtureApp(schemas) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-generate-orm-identifier-"));
+  const integrations = Object.fromEntries(
+    Object.entries(schemas).map(([owner, schema]) => [
+      owner,
+      { kind: "farm-integration", category: "test", type: "test", instance: {}, schema },
+    ]),
+  );
+  await writeFile(
+    path.join(root, "farm.config.mjs"),
+    `export default { integrations: ${JSON.stringify(integrations)} };\n`,
+  );
+  return root;
+}
+
+async function assertIdentifierGenerationRejects({ schemas, orm, pattern }) {
+  const root = await identifierFixtureApp(schemas);
+  const output =
+    orm === "prisma"
+      ? path.join(root, "prisma", "schema.prisma")
+      : path.join(root, `invalid-${orm}.ts`);
+  const initialPrismaSchema =
+    'datasource db {\n  provider = "postgresql"\n  url = "postgres://localhost/test"\n}\n';
+
+  try {
+    if (orm === "prisma") {
+      await mkdir(path.dirname(output), { recursive: true });
+      await writeFile(output, initialPrismaSchema);
+    }
+
+    await assert.rejects(
+      () =>
+        generateFarmArtifacts({
+          root,
+          orm,
+          output,
+          ...(orm === "drizzle" ? { dialect: "postgres" } : {}),
+        }),
+      pattern,
+    );
+
+    if (orm === "prisma") {
+      assert.equal(await readFile(output, "utf8"), initialPrismaSchema);
+    } else {
+      await assert.rejects(() => readFile(output, "utf8"), { code: "ENOENT" });
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function listFieldFixtureApp() {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-generate-orm-list-"));
   await writeFile(
@@ -192,6 +243,110 @@ for (const dialect of ["postgres", "mysql", "sqlite"]) {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+}
+
+for (const fieldKey of ["display-name", "123field", ""]) {
+  for (const orm of ["prisma", "drizzle"]) {
+    test(`rejects ${JSON.stringify(fieldKey)} as a ${orm} field identifier`, async () => {
+      await assertIdentifierGenerationRejects({
+        schemas: {
+          sync: {
+            models: {
+              tasks: {
+                fields: {
+                  id: { type: "uuid", primaryKey: true },
+                  [fieldKey]: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        orm,
+        pattern: new RegExp(`Schema field "sync\\.tasks\\.${fieldKey}".*valid`, "s"),
+      });
+    });
+  }
+}
+
+test("rejects a leading underscore in a Prisma field identifier", async () => {
+  await assertIdentifierGenerationRejects({
+    schemas: {
+      sync: {
+        models: {
+          tasks: {
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              _private: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+    orm: "prisma",
+    pattern: /Schema field "sync\.tasks\._private" is not a valid Prisma identifier/,
+  });
+});
+
+test("keeps punctuated MongoDB field keys because they are emitted as strings", async () => {
+  const root = await identifierFixtureApp({
+    sync: {
+      models: {
+        tasks: {
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            "display-name": { type: "string", index: true },
+          },
+        },
+      },
+    },
+  });
+  const output = path.join(root, "mongo-identifiers.ts");
+
+  try {
+    await generateFarmArtifacts({ root, orm: "mongodb", output });
+    assert.match(await readFile(output, "utf8"), /createIndex\(\{ "display-name": 1 \}/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+for (const orm of ["prisma", "drizzle", "mongodb"]) {
+  test(`rejects a leading digit in a generated ${orm} model identifier`, async () => {
+    await assertIdentifierGenerationRejects({
+      schemas: {
+        123: {
+          models: { tasks: { fields: { id: { type: "uuid", primaryKey: true } } } },
+        },
+      },
+      orm,
+      pattern: /Schema model "123\.tasks" generates invalid .* identifier "123Tasks"/,
+    });
+  });
+
+  test(`rejects colliding normalized ${orm} model identifiers`, async () => {
+    await assertIdentifierGenerationRejects({
+      schemas: {
+        "a-b": { models: { c: { fields: { id: { type: "uuid", primaryKey: true } } } } },
+        a: { models: { "b-c": { fields: { id: { type: "uuid", primaryKey: true } } } } },
+      },
+      orm,
+      pattern: new RegExp(
+        `Schema models "a-b\\.c" and "a\\.b-c" both generate .* identifier "${orm === "prisma" ? "ABC" : "aBC"}"`,
+      ),
+    });
+  });
+}
+
+for (const orm of ["drizzle", "mongodb"]) {
+  test(`rejects a reserved ${orm} export identifier`, async () => {
+    await assertIdentifierGenerationRejects({
+      schemas: {
+        "": { models: { class: { fields: { id: { type: "uuid", primaryKey: true } } } } },
+      },
+      orm,
+      pattern: /Schema model "\.class" generates invalid .* identifier "class"/,
+    });
   });
 }
 
