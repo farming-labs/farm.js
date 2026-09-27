@@ -26,11 +26,39 @@ storage, integrations, observability, and deployment output.
 
 ## Feature support
 
+The first two tables are checked against the renderer descriptors and their server/client exports,
+so entry-point or capability changes cannot silently leave the documentation stale.
+
+<!-- renderer-capability-matrix:start -->
+
+| Renderer | Vite entry                          | Server entry                          | Client entry                          | Route module extensions                 |
+| -------- | ----------------------------------- | ------------------------------------- | ------------------------------------- | --------------------------------------- |
+| React    | `@farm.js/core/renderer/react/vite` | `@farm.js/core/renderer/react/server` | `@farm.js/core/renderer/react/client` | `.ts`, `.tsx`, `.js`, `.jsx`            |
+| Preact   | `@farm.js/preact/vite`              | `@farm.js/preact/server`              | `@farm.js/preact/client`              | `.ts`, `.tsx`, `.js`, `.jsx`            |
+| Solid    | `@farm.js/solid/vite`               | `@farm.js/solid/server`               | `@farm.js/solid/client`               | `.ts`, `.tsx`, `.js`, `.jsx`            |
+| Vue      | `@farm.js/vue/vite`                 | `@farm.js/vue/server`                 | `@farm.js/vue/client`                 | `.ts`, `.tsx`, `.js`, `.jsx`, `.vue`    |
+| Svelte   | `@farm.js/svelte/vite`              | `@farm.js/svelte/server`              | `@farm.js/svelte/client`              | `.ts`, `.tsx`, `.js`, `.jsx`, `.svelte` |
+
+| Renderer | SSR | Streaming                                                                                                                | Hydration | Component head output | Route updates                         | Plain functions |
+| -------- | --- | ------------------------------------------------------------------------------------------------------------------------ | --------- | --------------------- | ------------------------------------- | --------------- |
+| React    | Yes | Node                                                                                                                     | Yes       | Framework metadata    | Reconciles                            | Yes             |
+| Preact   | Yes | Node + Web                                                                                                               | Yes       | Framework metadata    | Reconciles                            | Yes             |
+| Solid    | Yes | Node + Web                                                                                                               | Yes       | Framework metadata    | Remounts ([why](#re-render-behavior)) | Yes             |
+| Vue      | Yes | Node + Web                                                                                                               | Yes       | Framework metadata    | Reconciles                            | Yes             |
+| Svelte   | Yes | Buffered ([test](https://github.com/farming-labs/farm.js/blob/main/packages/farm-svelte/src/__tests__/renderer.test.ts)) | Yes       | Native + framework    | Remounts ([why](#re-render-behavior)) | Yes             |
+
+<!-- renderer-capability-matrix:end -->
+
+“Component head output” means markup emitted from inside the renderer's component model. All five
+renderers support FARMJS static metadata; Svelte additionally carries `<svelte:head>` output through
+its server adapter. “Route updates” describes what happens when FARMJS hands an existing browser
+root a freshly materialized route tree, not ordinary reactive updates inside a mounted component.
+
+The higher-level framework features below use those adapter primitives:
+
 | Capability                                       | React                    | Preact                          | Solid                | Vue                  | Svelte               |
 | ------------------------------------------------ | ------------------------ | ------------------------------- | -------------------- | -------------------- | -------------------- |
 | File pages and nested layouts                    | Available                | Available                       | Available            | Available            | Available            |
-| Server rendering and browser hydration           | Available                | Available                       | Available            | Available            | Available            |
-| Streaming SSR                                    | Node                     | Node and Web                    | Node and Web         | Node and Web         | Buffered today       |
 | Loading, error, not-found, and slot files        | Available                | Available                       | Available            | Available            | Available            |
 | Static metadata and favicon configuration        | Available                | Available                       | Available            | Available            | Available            |
 | API routes and generated typed API clients       | Available                | Available                       | Available            | Available            | Available            |
@@ -47,6 +75,11 @@ storage, integrations, observability, and deployment output.
 | Generated JSX metadata images                    | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
 | React Server Components and optimized boundaries | Available experimentally | Not applicable                  | Not applicable       | Not applicable       | Not applicable       |
 | Other integration UI providers and starters      | Available                | Provider-specific compatibility | React-oriented today | React-oriented today | React-oriented today |
+
+Follow the focused compatibility notes for [Preact](/docs/renderers/preact#react-compatibility),
+[Solid](/docs/renderers/solid#current-boundaries), [Vue](/docs/renderers/vue#current-boundaries), and
+[Svelte](/docs/renderers/svelte#current-boundaries) before choosing a non-React renderer for a
+React-oriented UI surface.
 
 In experimental React Server Components, synchronous page and layout components are rendered through React, including supported server hooks such as `useId()`. A string or variable containing `async` does not make a component asynchronous. Stateful hooks and effects still belong in Client Components.
 
