@@ -93,6 +93,58 @@ export interface FarmRendererCapabilitiesInput {
   functionComponents?: boolean;
 }
 
+/** A client layout participating in a renderer-owned route update. */
+export interface FarmRendererRouteLayout {
+  /** Stable route pattern used to decide whether the mounted layout chain changed. */
+  pattern: string;
+  /** Renderer-native layout component. */
+  Component: unknown;
+}
+
+/**
+ * Renderer-neutral route state supplied during hydration and client navigation.
+ *
+ * Virtual-DOM renderers can ignore this and keep rendering `element`. A
+ * fine-grained renderer can implement `renderRoute()` and keep the matching
+ * layout chain mounted while it updates the page slot and route params through
+ * its native reactive primitives.
+ */
+export interface FarmRendererRouteState {
+  /** Fully composed fallback tree for renderers that only implement render(). */
+  element: unknown;
+  /** Applicable layouts in outermost-to-innermost order. */
+  layouts: readonly FarmRendererRouteLayout[];
+  /** Page boundary or page element placed in the innermost layout slot. */
+  page: unknown;
+  /** Current dynamic route params. */
+  params: Readonly<Record<string, string>>;
+  /** Framework wrappers, such as integration providers, applied outside layouts. */
+  wrap?: (element: unknown) => unknown;
+}
+
+/** Browser root contract implemented by renderer client adapters. */
+export interface FarmRendererClientRoot {
+  render(element: unknown): void;
+  /** Optional renderer-native route update that preserves matching layouts. */
+  renderRoute?(state: FarmRendererRouteState): void;
+  unmount(): void;
+}
+
+/** Browser entry exported by a renderer client module. */
+export interface FarmRendererClientRuntime {
+  createRoot(container: Element): FarmRendererClientRoot;
+  /**
+   * Non-React renderers receive route state as the optional third argument so
+   * a renderer-owned root can establish its native reactive route bindings
+   * during initial hydration.
+   */
+  hydrateRoot(
+    container: Element,
+    element: unknown,
+    routeState?: FarmRendererRouteState,
+  ): FarmRendererClientRoot;
+}
+
 const DEFAULT_RENDERER_CAPABILITIES: Readonly<FarmRendererCapabilities> = Object.freeze({
   streaming: Object.freeze({ node: false, web: false }),
   // Conservative default: assume a re-render rebuilds until a renderer states

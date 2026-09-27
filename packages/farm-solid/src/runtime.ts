@@ -125,7 +125,13 @@ function farmStyleObjectToCss(style: Record<string, unknown>): string {
 }
 
 function normalizeProps(element: FarmSolidElement): Record<string, unknown> {
-  const props = { ...element.props };
+  // Preserve accessors used by renderer-owned route state. Object spread
+  // eagerly evaluates Solid props and would flatten page/param signals before
+  // a compiled layout can subscribe to them.
+  const props = Object.defineProperties(
+    {},
+    Object.getOwnPropertyDescriptors(element.props || {}),
+  ) as Record<string, unknown>;
 
   if ("className" in props && !("class" in props)) {
     props.class = props.className;
@@ -179,12 +185,11 @@ function normalizeProps(element: FarmSolidElement): Record<string, unknown> {
     // route slots pass their element through a prop too. The spread copied the
     // raw Farm element(s), which Solid would escape to the string "undefined",
     // so materialize them the same way as positional children.
-    const rawChildren = props.children;
     Object.defineProperty(props, "children", {
       configurable: true,
       enumerable: true,
       get() {
-        return materializeSolidElement(rawChildren);
+        return materializeSolidElement(element.props?.children);
       },
     });
   }

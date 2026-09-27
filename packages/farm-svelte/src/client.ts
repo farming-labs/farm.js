@@ -17,12 +17,16 @@ export interface FarmSvelteRoot {
   unmount(): void;
 }
 
+interface FarmSvelteRootInstance extends Record<string, unknown> {
+  render?(element: unknown): void;
+}
+
 function createManagedRoot(
   container: Element,
   initialElement?: unknown,
   hydration = false,
 ): FarmSvelteRoot {
-  let instance: Record<string, unknown> | undefined;
+  let instance: FarmSvelteRootInstance | undefined;
   const Root = CompatRoot as Component<{ element: unknown }>;
 
   const renderElement = (element: unknown, hydrate: boolean) => {
@@ -40,7 +44,11 @@ function createManagedRoot(
 
   return {
     render(element) {
-      renderElement(element, false);
+      if (instance?.render) {
+        instance.render(element);
+      } else {
+        renderElement(element, false);
+      }
     },
     unmount() {
       if (instance) void unmount(instance);

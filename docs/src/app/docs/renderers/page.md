@@ -30,6 +30,7 @@ storage, integrations, observability, and deployment output.
 | ------------------------------------------------ | ------------------------ | ------------------------------- | -------------------- | -------------------- | -------------------- |
 | File pages and nested layouts                    | Available                | Available                       | Available            | Available            | Available            |
 | Server rendering and browser hydration           | Available                | Available                       | Available            | Available            | Available            |
+| Shared layout state across client navigation     | Available                | Available                       | Native route update  | Available            | Available            |
 | Streaming SSR                                    | Node                     | Node and Web                    | Node and Web         | Node and Web         | Buffered today       |
 | Loading, error, not-found, and slot files        | Available                | Available                       | Available            | Available            | Available            |
 | Static metadata and favicon configuration        | Available                | Available                       | Available            | Available            | Available            |
@@ -109,19 +110,44 @@ export const customRenderer = defineRenderer({
 `reconcilesRerenders` states whether re-rendering an existing root diffs the new tree against the
 live DOM or rebuilds it.
 
-Virtual-DOM renderers (React, Preact, Vue) compare the incoming tree with what is mounted, so a
-client navigation that re-renders a shared layout keeps the matching DOM nodes along with their
-focus and component state.
+Virtual-DOM renderers (React, Preact, Vue) compare the incoming tree with what is mounted. Svelte's
+FARMJS compatibility root likewise applies a new element description through one mounted reactive
+root. In both cases, a client navigation keeps matching DOM nodes, focus, and component state.
 
-Compile-time fine-grained renderers (Solid, Svelte) have no virtual DOM to diff against. Their
-updates flow through bindings created when the elements were constructed, so a freshly materialized
-tree replaces the nodes. That is a property of those runtimes rather than a gap in their adapters.
-On those renderers, client state that must survive a navigation belongs in a root the navigation
-does not re-render, not in a shared layout.
+Solid remains a compile-time fine-grained renderer: handing `root.render()` a freshly materialized
+tree replaces its nodes because there is no virtual DOM to diff. FARMJS therefore does not use
+ordinary root re-rendering for a shared Solid layout. The client runtime supplies route state to the
+adapter's optional `renderRoute()` method instead; the Solid adapter keeps the matching layout chain
+mounted and updates its page slot and params through signals. Changing the layout chain still mounts
+the new chain, as it does in the other renderers.
 
 Renderers that do not declare the field are treated as rebuilding, so nothing silently depends on
 reconciliation it will not get. The shared renderer conformance suite asserts the behavior each
 renderer declares, so the flag cannot drift away from what the adapter actually does.
+
+Custom fine-grained renderers can implement the same optional route-update contract:
+
+```ts
+import type { FarmRendererClientRoot, FarmRendererRouteState } from "@farm.js/core/renderer";
+
+interface CustomRoot extends FarmRendererClientRoot {
+  renderRoute(state: FarmRendererRouteState): void;
+}
+
+export function hydrateRoot(
+  container: Element,
+  element: unknown,
+  initialRoute?: FarmRendererRouteState,
+): CustomRoot {
+  // Establish native reactive bindings from initialRoute during hydration.
+  // Later navigations call root.renderRoute(nextRoute).
+}
+```
+
+`layouts` arrive outermost first with stable route patterns, `page` is the innermost route slot, and
+`params` is the current route-param snapshot. `element` is the fully composed fallback tree, while
+`wrap()` reapplies framework-owned outer wrappers such as integration providers. Renderers that omit
+`renderRoute()` continue through `render(element)` unchanged.
 
 ### Function components
 

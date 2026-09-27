@@ -2890,7 +2890,7 @@ async function loadRouteComponent(route) {
   return route.Component;
 }
 
-async function createMatchedHydrationElement(matched, pathname, searchParams, serverHtml) {
+async function createMatchedHydrationRoute(matched, pathname, searchParams, serverHtml) {
   const hydrateLayouts = hasHydratableLayout(pathname);
   const params = matched.params;
   let pageElement = null;
@@ -2917,15 +2917,40 @@ async function createMatchedHydrationElement(matched, pathname, searchParams, se
   }
 
   if (!pageElement) return null;
-  if (!hydrateLayouts) {
-    return wrapFarmRouteClientGraph(wrapWithIntegrationProviders(pageElement));
-  }
+  if (!hydrateLayouts) return createFarmRouteState(pageElement, pathname, params, false);
   if (matched.route.pageShouldHydrate) {
     pageElement = createLayoutPageBoundary(matched.route, pageElement);
   }
-  return wrapFarmRouteClientGraph(
-    wrapWithIntegrationProviders(wrapWithLayouts(pageElement, pathname, params)),
-  );
+  return createFarmRouteState(pageElement, pathname, params, true);
+}
+
+function createFarmRouteState(page, pathname, params, includeLayouts) {
+  const layouts = includeLayouts ? getApplicableLayouts(pathname).filter(function(layout) {
+    return Boolean(layout.Component);
+  }) : [];
+  const wrap = function(element) {
+    return wrapFarmRouteClientGraph(wrapWithIntegrationProviders(element));
+  };
+  return {
+    element: wrap(includeLayouts ? wrapWithLayouts(page, pathname, params) : page),
+    layouts,
+    page,
+    params,
+    wrap,
+  };
+}
+
+function hydrateFarmRoute(container, route) {
+  ${
+    isReactRenderer(renderer)
+      ? "return hydrateRoot(container, route.element);"
+      : "return route.layouts.length > 0 ? hydrateRoot(container, route.element, route) : hydrateRoot(container, route.element);"
+  }
+}
+
+function renderFarmRoute(root, route) {
+  if (route.layouts.length > 0 && typeof root.renderRoute === "function") root.renderRoute(route);
+  else root.render(route.element);
 }
 
 function matchesRoutePrefix(pathname, pattern) {
@@ -3149,12 +3174,12 @@ async function hydrate() {
           return;
         }
         const searchParams = searchParamsToObject(new URLSearchParams(window.location.search));
-        const wrappedElement = await createMatchedHydrationElement(
+        const routeState = await createMatchedHydrationRoute(
           matched,
           pathname,
           searchParams,
         );
-        if (!wrappedElement) return;
+        if (!routeState) return;
         const shouldHydrate = !isHydrated && Boolean(container.innerHTML.trim());
         const hydrationSession = await farmClientRuntime.beginHydration({
           container,
@@ -3170,7 +3195,7 @@ async function hydrate() {
             return;
           }
           if (shouldHydrate) {
-            reactRoot = hydrateRoot(container, wrappedElement);
+            reactRoot = hydrateFarmRoute(container, routeState);
             reactRootContainer = container;
             isHydrated = true;
           } else {
@@ -3178,7 +3203,7 @@ async function hydrate() {
               reactRoot = createRoot(container);
               reactRootContainer = container;
             }
-            reactRoot.render(wrappedElement);
+            renderFarmRoute(reactRoot, routeState);
           }
           currentPathname = pathname;
           await farmClientRuntime.completeHydration(hydrationSession);
@@ -3398,8 +3423,11 @@ ${generateUniversalRouterStateProperties()}
         if (hasHydratableLayout(pathname)) {
           pageElement = createLayoutPageBoundary(matched.route, pageElement);
         }
-        const wrappedElement = wrapFarmRouteClientGraph(
-          wrapWithIntegrationProviders(wrapWithLayouts(pageElement, pathname, params)),
+        const routeState = createFarmRouteState(
+          pageElement,
+          pathname,
+          params,
+          hasHydratableLayout(pathname),
         );
 
         await farmClientRuntime.markNavigationLoaded(clientNavigation, {
@@ -3419,7 +3447,7 @@ ${generateUniversalRouterStateProperties()}
               reactRoot = createRoot(container);
               reactRootContainer = container;
             }
-            reactRoot.render(wrappedElement);
+            renderFarmRoute(reactRoot, routeState);
             currentPathname = pathname;
           }
           this.currentPath = to;
@@ -3539,15 +3567,15 @@ ${generateUniversalRouterStateProperties()}
     // matching layout component instances and their state mounted.
     if (matched && hydrateLayouts && reactRoot && reactRootContainer === currentRoot) {
       const searchParams = searchParamsToObject(targetUrl.searchParams);
-      const wrappedElement = await createMatchedHydrationElement(
+      const routeState = await createMatchedHydrationRoute(
         matched,
         newPathname,
         searchParams,
         nextPage ? nextPage.innerHTML : "",
       );
       if (!isNavigationCurrent()) return false;
-      if (wrappedElement) {
-        reactRoot.render(wrappedElement);
+      if (routeState) {
+        renderFarmRoute(reactRoot, routeState);
         window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
         isHydrated = true;
         return true;
@@ -3575,14 +3603,14 @@ ${generateUniversalRouterStateProperties()}
       const searchParams = searchParamsToObject(targetUrl.searchParams);
       const pageContainer =
         hydrateLayouts ? currentRoot : document.getElementById("__farm_page__") || currentRoot;
-      const wrappedElement = await createMatchedHydrationElement(
+      const routeState = await createMatchedHydrationRoute(
         matched,
         newPathname,
         searchParams,
       );
       if (!isNavigationCurrent()) return false;
-      if (wrappedElement) {
-        reactRoot = hydrateRoot(pageContainer, wrappedElement);
+      if (routeState) {
+        reactRoot = hydrateFarmRoute(pageContainer, routeState);
         reactRootContainer = pageContainer;
         isHydrated = true;
       }

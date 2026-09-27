@@ -970,12 +970,10 @@ function warnClientBoundaryOnce(
  * `"use client"` module.
  *
  * Re-rendering the whole root on every edit only makes sense for a renderer
- * that diffs the result against the live DOM. On Solid and Svelte `render()`
- * tears the tree down and rebuilds it, so a one character change in any client
- * component would wipe the page's state. Those renderers ship their own HMR
- * integration (solid-refresh, svelte's hot API) which preserves component
- * state, and appending an `import.meta.hot.accept` here would swallow the
- * update before theirs could run.
+ * that diffs the result against the live DOM. Rebuilding renderers such as
+ * Solid would otherwise wipe the page's state for a one-character edit. They
+ * ship their own HMR integration, which can only preserve component state if
+ * Farm leaves the module unaccepted.
  */
 export function shouldEmitFarmClientRootHmr(renderer?: FarmRenderer): boolean {
   return getFarmRendererCapabilities(resolveFarmRenderer(renderer)).reconcilesRerenders;
@@ -4045,6 +4043,11 @@ ${providerClientCode.runtime}
 window.__FARM_WRAP_PROVIDERS__ = wrapWithIntegrationProviders;
 ${isolatedHydrationEnabled ? "window.__FARM_WRAP_CLIENT_GRAPH__ = (element) => wrapFarmIsolatedClientGraph(React, element);" : ""}
 
+function wrapFarmClientRouteGraph(element) {
+  const wrapped = wrapWithIntegrationProviders(element);
+  ${isolatedHydrationEnabled ? "return wrapFarmIsolatedClientGraph(React, wrapped);" : "return wrapped;"}
+}
+
 // Get manifest from window (inlined by server in HTML)
 // Fallback to empty manifest if not available yet
 const getManifest = () => window.__FARM_MANIFEST__ || { routes: {}, layouts: {}, slots: [], clientEntry: '', sharedAssets: [] };
@@ -4733,7 +4736,23 @@ async function buildWrappedHydrationElement(PageComponent, pageProps, layouts = 
     loadedLayouts,
     pageProps?.params || {},
   );
-  return wrapWithIntegrationProviders(wrappedTree);
+  return wrapFarmClientRouteGraph(wrappedTree);
+}
+
+function hydrateFarmRoute(container, route) {
+  ${
+    isReactRenderer(renderer)
+      ? "return hydrateRoot(container, route.element);"
+      : "return route.layouts.length > 0 ? hydrateRoot(container, route.element, route) : hydrateRoot(container, route.element);"
+  }
+}
+
+function renderFarmRoute(root, route) {
+  if (route?.layouts?.length > 0 && typeof root.renderRoute === 'function') {
+    root.renderRoute(route);
+  } else {
+    root.render(route.element);
+  }
 }
 
 function createLayoutPageBoundary(
@@ -4829,15 +4848,23 @@ async function tryHydrateImportedPage(
   if (signal?.aborted || !container?.isConnected || !pageElement) return false;
 
   let wrappedElement;
+  let routeState = null;
   if (layoutShouldHydrate) {
     const loadedLayouts = await loadLayoutComponents(layouts);
     if (pageShouldHydrate) {
       pageElement = createLayoutPageBoundary(true, islandStrategy, pageElement);
     }
     const wrappedTree = wrapWithLoadedLayouts(pageElement, loadedLayouts, params);
-    wrappedElement = wrapWithIntegrationProviders(wrappedTree);
+    wrappedElement = wrapFarmClientRouteGraph(wrappedTree);
+    routeState = {
+      element: wrappedElement,
+      layouts: loadedLayouts,
+      page: pageElement,
+      params,
+      wrap: wrapFarmClientRouteGraph,
+    };
   } else if (useHydrate && container?.id === '__farm_page__') {
-    wrappedElement = wrapWithIntegrationProviders(pageElement);
+    wrappedElement = wrapFarmClientRouteGraph(pageElement);
   } else {
     wrappedElement = await buildWrappedHydrationElement(
       currentPageComponent,
@@ -4847,16 +4874,19 @@ async function tryHydrateImportedPage(
   }
   if (signal?.aborted || !container?.isConnected) return false;
 
-  ${isolatedHydrationEnabled ? "wrappedElement = wrapFarmIsolatedClientGraph(React, wrappedElement);" : ""}
+  if (routeState) routeState.element = wrappedElement;
 
   if (useHydrate) {
     try {
-      reactRoot = hydrateRoot(container, wrappedElement);
+      reactRoot = routeState
+        ? hydrateFarmRoute(container, routeState)
+        : hydrateRoot(container, wrappedElement);
       window.__FARM_REACT_ROOT__ = reactRoot;
       return true;
     } catch (error) {
       appRoot = createRoot(container);
-      appRoot.render(wrappedElement);
+      if (routeState) renderFarmRoute(appRoot, routeState);
+      else appRoot.render(wrappedElement);
       window.__FARM_REACT_ROOT__ = appRoot;
       hasClientTakenOver = true;
       return true;
@@ -4866,7 +4896,7 @@ async function tryHydrateImportedPage(
   hasClientTakenOver = true;
   const existingRoot = appRoot || reactRoot;
   if (existingRoot && layoutShouldHydrate) {
-    existingRoot.render(wrappedElement);
+    renderFarmRoute(existingRoot, routeState);
     appRoot = existingRoot;
     reactRoot = null;
     window.__FARM_REACT_ROOT__ = appRoot;
@@ -4876,7 +4906,8 @@ async function tryHydrateImportedPage(
   if (appRoot) { try { appRoot.unmount(); } catch (e) {} appRoot = null; }
   appRoot = createRoot(container);
   window.__FARM_REACT_ROOT__ = appRoot;
-  appRoot.render(wrappedElement);
+  if (routeState) renderFarmRoute(appRoot, routeState);
+  else appRoot.render(wrappedElement);
   return true;
 }
 

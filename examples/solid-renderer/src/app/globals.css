@@ -38,6 +38,29 @@ a {
   text-decoration: none;
 }
 
+.layout-state {
+  position: fixed;
+  z-index: 1;
+  inset: 1rem 1rem auto;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-family: "Geist Mono Variable", ui-monospace, monospace;
+  font-size: 0.72rem;
+}
+
+.layout-state button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.layout-state nav {
+  display: flex;
+  gap: 1rem;
+}
+
 .page-shell {
   min-height: 100vh;
   display: grid;
@@ -137,6 +160,11 @@ h1 span {
 }
 
 @media (max-width: 620px) {
+  .layout-state {
+    position: static;
+    padding: 1rem 1.25rem 0;
+  }
+
   .page-shell {
     padding: 2rem 1.25rem;
   }
