@@ -101,6 +101,23 @@ describe("integration ORM storage", () => {
     expect(schema.models.billingAccount.constraints.unique).toEqual([["ownerId"]]);
   });
 
+  it("rejects list fields instead of exposing a scalar runtime field", async () => {
+    await expect(
+      farmIntegrationSchemaToOrmSchema({
+        models: {
+          tasks: {
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              tags: { type: "string", list: true },
+            },
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      'Schema field "tasks.tags" declares list: true, but the Farm integration runtime ORM does not support list fields. Use type: "json" for an array value or model the values in a related table.',
+    );
+  });
+
   it.skipIf(!supportsNodeSqlite)(
     "uses storage.client as the unified ORM runtime client with real sqlite data",
     async () => {

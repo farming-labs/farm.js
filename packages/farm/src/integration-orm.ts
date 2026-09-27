@@ -13,6 +13,7 @@ import type {
   FarmIntegrationSchemaField,
   FarmIntegrationSchemaModel,
 } from "./integrations";
+import { assertNoSchemaListField } from "./schema-capabilities";
 import { resolveStorageRuntimeClient } from "./storage";
 import type { FarmStorageUserConfig } from "./storage/types";
 import type { FarmConfig } from "./types";
@@ -138,6 +139,16 @@ export async function resolveIntegrationOrmRuntimeClient<TClient = unknown>(
 export async function farmIntegrationSchemaToOrmSchema(
   schema: FarmIntegrationSchema,
 ): Promise<FarmIntegrationOrmSchema> {
+  for (const [modelKey, modelSchema] of Object.entries(schema.models)) {
+    for (const [fieldKey, fieldSchema] of Object.entries(modelSchema.fields)) {
+      assertNoSchemaListField(
+        fieldSchema,
+        `${modelKey}.${fieldKey}`,
+        "the Farm integration runtime ORM",
+      );
+    }
+  }
+
   const orm = await import("@farming-labs/orm");
   const models: Record<string, AnyModelDefinition> = {};
 

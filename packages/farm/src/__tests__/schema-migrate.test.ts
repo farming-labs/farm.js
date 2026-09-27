@@ -264,6 +264,28 @@ describe("schema name resolution", () => {
 });
 
 describe("sql generation", () => {
+  it.each(["postgres", "sqlite", "mysql"] as FarmSqlDialect[])(
+    "rejects list fields instead of emitting a scalar column for %s",
+    (dialect) => {
+      const listSchema = defineSchema({
+        models: {
+          tasks: {
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              tags: { type: "string", list: true },
+            },
+          },
+        },
+      });
+
+      expect(() =>
+        generateSqlStatements(collectSchemaModels([["sync", listSchema]]), dialect),
+      ).toThrow(
+        `Schema field "sync.tasks.tags" declares list: true, but ${dialect} SQL generation does not support list fields. Use type: "json" for an array value or model the values in a related table.`,
+      );
+    },
+  );
+
   it("uses the mapped table and column names, not the model keys", () => {
     const sql = generateSqlStatements(models(), "postgres")
       .map((statement) => statement.sql)

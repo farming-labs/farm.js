@@ -129,6 +129,30 @@ export default {
   return root;
 }
 
+async function listFieldFixtureApp() {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-generate-orm-list-"));
+  await writeFile(
+    path.join(root, "farm.config.mjs"),
+    `const schema = {
+  models: {
+    tasks: {
+      fields: {
+        id: { type: "uuid", primaryKey: true },
+        tags: { type: "string", list: true },
+      },
+    },
+  },
+};
+export default {
+  integrations: {
+    sync: { kind: "farm-integration", category: "test", type: "test", instance: {}, schema },
+  },
+};
+`,
+  );
+  return root;
+}
+
 /**
  * Compare against the committed fixture, or write it when UPDATE_FIXTURES is
  * set. A diff in review then shows exactly what an emitter change does.
@@ -170,6 +194,45 @@ for (const dialect of ["postgres", "mysql", "sqlite"]) {
     }
   });
 }
+
+for (const orm of ["postgres", "mysql", "sqlite", "drizzle"]) {
+  test(`rejects list fields before writing ${orm} scalar output`, async () => {
+    const root = await listFieldFixtureApp();
+    const output = path.join(root, `list-${orm}.${orm === "drizzle" ? "ts" : "sql"}`);
+    try {
+      await assert.rejects(
+        () =>
+          generateFarmArtifacts({
+            root,
+            orm,
+            output,
+            ...(orm === "drizzle" ? { dialect: "postgres" } : {}),
+          }),
+        /Schema field "sync\.tasks\.tags" declares list: true.*does not support list fields.*type: "json"/,
+      );
+      await assert.rejects(() => readFile(output, "utf8"), { code: "ENOENT" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("preserves list fields in Prisma output", async () => {
+  const root = await listFieldFixtureApp();
+  const schemaPath = path.join(root, "prisma", "schema.prisma");
+  try {
+    await mkdir(path.dirname(schemaPath), { recursive: true });
+    await writeFile(
+      schemaPath,
+      'datasource db {\n  provider = "postgresql"\n  url = "postgres://localhost/test"\n}\n',
+    );
+
+    await generateFarmArtifacts({ root, orm: "prisma" });
+    assert.match(await readFile(schemaPath, "utf8"), /tags String\[\]/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("emits a stable prisma schema", async () => {
   const root = await fixtureApp();

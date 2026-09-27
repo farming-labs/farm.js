@@ -1,4 +1,5 @@
 import {
+  assertNoSchemaListField,
   collectSchemaModels,
   escapeSqlString,
   findSchemaTableOwners,
@@ -515,6 +516,16 @@ function generateDrizzleSchema(
   models: readonly CollectedSchemaModel[],
   dialect: GenerateFarmSqlDialect,
 ) {
+  for (const model of models) {
+    for (const [fieldKey, field] of Object.entries(model.model.fields)) {
+      assertNoSchemaListField(
+        field,
+        `${model.ownerKey}.${model.modelKey}.${fieldKey}`,
+        `Drizzle ${dialect} generation`,
+      );
+    }
+  }
+
   const tableFactoryName =
     dialect === "postgres" ? "pgTable" : dialect === "mysql" ? "mysqlTable" : "sqliteTable";
   const importSource =

@@ -1,4 +1,7 @@
 import type { FarmSchema, FarmSchemaField, FarmSchemaModel, FarmSchemaReference } from "./schema";
+import { assertNoSchemaListField } from "./schema-capabilities";
+
+export { assertNoSchemaListField } from "./schema-capabilities";
 
 export type FarmSqlDialect = "postgres" | "mysql" | "sqlite";
 
@@ -296,6 +299,12 @@ function renderSqlTable(
   const internalReferences = createInternalReferenceLookup(model, dialect, modelLookup);
 
   for (const [fieldKey, field] of Object.entries(model.model.fields)) {
+    assertNoSchemaListField(
+      field,
+      `${model.ownerKey}.${model.modelKey}.${fieldKey}`,
+      `${dialect} SQL generation`,
+    );
+
     const parts = [
       `  ${quoteSqlIdentifier(dialect, field.name)}`,
       getSqlColumnType(field, dialect),

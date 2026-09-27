@@ -162,6 +162,16 @@ export const billingSchema = defineSchema({
 keeps working without changes; new code should use `defineSchema` and the
 `FarmSchema*` types.
 
+### List fields and storage targets
+
+`list: true` is preserved as an array by generated Sync declarations and Prisma
+schema output. MongoDB documents can also store arrays without a separate column
+shape. Farm's portable runtime ORM, SQL generators, and Drizzle generators do
+not have one list representation that works across their supported clients and
+dialects, so they reject a list field instead of silently creating a scalar
+column. Use a `json` field for an array value or model the values in a related
+table when the schema must work through those targets.
+
 ### Query through `ctx.args.db`
 
 **src/integrations/billing.ts**
