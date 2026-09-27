@@ -133,6 +133,49 @@ describe("createFarmCacheKey with URLSearchParams and Headers", () => {
   });
 });
 
+describe("unsupported opaque Web cache key values", () => {
+  it.each([
+    ["Blob", () => new Blob(["one"])],
+    ["FormData", () => new FormData()],
+    ["Request", () => new Request("https://farm.test/items")],
+    ["Response", () => new Response("one")],
+  ])("rejects %s instead of collapsing it to an empty object", (type, createValue) => {
+    expect(() => createFarmCacheKey([createValue()])).toThrow(
+      `Cache keys do not support ${type} values. Convert the value to an explicit stable string or structured key before caching.`,
+    );
+  });
+
+  it("rejects opaque values nested inside otherwise supported structures", () => {
+    expect(() => createFarmCacheKey([{ upload: new Blob(["one"]) }])).toThrow(
+      "Cache keys do not support Blob values",
+    );
+    expect(() => createFarmCacheKey([new Map([["upload", new FormData()]])])).toThrow(
+      "Cache keys do not support FormData values",
+    );
+  });
+
+  it("keeps plain and null-prototype object keys supported", () => {
+    const nullPrototype = Object.create(null) as Record<string, unknown>;
+    nullPrototype.scope = "products";
+
+    expect(createFarmCacheKey([{ scope: "products" }])).toBe('[{"scope":"products"}]');
+    expect(createFarmCacheKey([nullPrototype])).toBe('[{"scope":"products"}]');
+  });
+
+  it("rejects unsupported unstable_cache arguments before running the loader", async () => {
+    let calls = 0;
+    const readBlob = unstable_cache(async (blob: Blob) => {
+      calls++;
+      return blob.text();
+    });
+
+    await expect(readBlob(new Blob(["one"]))).rejects.toThrow(
+      "Cache keys do not support Blob values",
+    );
+    expect(calls).toBe(0);
+  });
+});
+
 describe("cross-adapter behavior with URLSearchParams and Headers", () => {
   function makeSharedStorage() {
     const store = new Map<string, unknown>();
@@ -216,5 +259,24 @@ describe("cross-adapter behavior with URLSearchParams and Headers", () => {
     expect(a).toBe("result-for-q=apples");
     expect(b).toBe("result-for-q=apples");
     expect(calls).toBe(1);
+  });
+
+  it("does not write opaque argument collisions to shared storage", async () => {
+    const { storage, store } = makeSharedStorage();
+    configureFarmCache({ adapter: storageCacheAdapter(storage), namespace: "app" });
+    let calls = 0;
+    const readBlob = unstable_cache(async (blob: Blob) => {
+      calls++;
+      return blob.text();
+    });
+
+    await expect(readBlob(new Blob(["one"]))).rejects.toThrow(
+      "Cache keys do not support Blob values",
+    );
+    await expect(readBlob(new Blob(["two"]))).rejects.toThrow(
+      "Cache keys do not support Blob values",
+    );
+    expect(calls).toBe(0);
+    expect(store.size).toBe(0);
   });
 });

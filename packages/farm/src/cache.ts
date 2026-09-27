@@ -1182,6 +1182,30 @@ function serializeCanonicalStringEntries(
     .join(",");
 }
 
+function isPlainCacheKeyObject(value: object): value is Record<string, unknown> {
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype === null) return true;
+
+  const constructor = Object.getOwnPropertyDescriptor(prototype, "constructor")?.value;
+  return (
+    Object.getPrototypeOf(prototype) === null &&
+    typeof constructor === "function" &&
+    constructor.name === "Object"
+  );
+}
+
+function getCacheKeyValueType(value: object): string {
+  const prototype = Object.getPrototypeOf(value);
+  const constructor = prototype
+    ? Object.getOwnPropertyDescriptor(prototype, "constructor")?.value
+    : undefined;
+  if (typeof constructor === "function" && constructor.name) {
+    return constructor.name;
+  }
+
+  return Object.prototype.toString.call(value).slice(8, -1) || "object";
+}
+
 function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
   if (value === null) return "null";
   if (value === undefined) return "undefined";
@@ -1271,6 +1295,12 @@ function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
       const serialized = serializeCanonicalStringEntries(value, seen);
       seen.delete(value);
       return `headers:[${serialized}]`;
+    }
+
+    if (!isPlainCacheKeyObject(value)) {
+      throw new TypeError(
+        `Cache keys do not support ${getCacheKeyValueType(value)} values. Convert the value to an explicit stable string or structured key before caching.`,
+      );
     }
 
     // Codepoint comparison, not localeCompare: the host locale must not
