@@ -110,9 +110,20 @@ pwa({
 3. The worker fetches a newer response in the background.
 4. The next request receives the refreshed image.
 
-Image requests with an `Authorization` header and responses marked `Cache-Control: private`,
-`no-store`, or `no-cache` are never stored. Only use this option for public images because Cache
-Storage survives sign-out in the same browser profile.
+Cache Storage is shared by every account that signs in on the same browser profile and survives
+sign-out, so the worker only stores an image it can safely show to anyone:
+
+- The response is marked shareable with `Cache-Control: public` or a positive `max-age`, or has a
+  future `Expires`.
+- Or it looks like a static file: no `Cache-Control` freshness, but a `Last-Modified` header. Static
+  files in `public/` are served this way.
+
+An image is never stored when its request has an `Authorization` header, when its response is
+marked `private`, `no-store`, `no-cache`, or `max-age=0`, or when it varies on `Cookie`,
+`Authorization`, or `*`. A response with no caching headers at all is not stored either, which is
+what an API route returning a per-account image usually sends. To have a dynamic image cached, send
+an explicit policy such as `Cache-Control: public, max-age=3600`, and only for images that are the
+same for every visitor.
 
 Runtime image caching is best-effort. If browser storage is unavailable or full, a successful
 network response still loads normally. If the network fails, an available cached image remains the

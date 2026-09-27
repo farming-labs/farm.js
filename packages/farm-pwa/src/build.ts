@@ -315,10 +315,45 @@ async function fetchAndCacheImage(request, cache) {
   return response;
 }
 
+// Cache Storage is shared by every account that signs in on this browser, and a
+// service worker cannot see the request's cookies to tell those accounts apart.
+// So an image is kept only when the server marked it shareable or it looks like a
+// static file, the same responses the browser's own HTTP cache would reuse.
 function isPublicCacheableImage(response) {
   if (!response.ok || response.type === "opaque") return false;
-  const policy = (response.headers.get("cache-control") || "").toLowerCase();
-  return !policy.includes("private") && !policy.includes("no-store") && !policy.includes("no-cache");
+  const directives = parseCacheControl(response.headers.get("cache-control"));
+  if (directives.has("private") || directives.has("no-store") || directives.has("no-cache")) {
+    return false;
+  }
+  const vary = (response.headers.get("vary") || "")
+    .toLowerCase()
+    .split(",")
+    .map((value) => value.trim());
+  // A response that varies on the caller's identity cannot be keyed here.
+  if (vary.includes("*") || vary.includes("cookie") || vary.includes("authorization")) {
+    return false;
+  }
+  if (directives.has("max-age")) return Number(directives.get("max-age")) > 0;
+  if (directives.has("public")) return true;
+  const expires = Date.parse(response.headers.get("expires") || "");
+  if (Number.isFinite(expires)) return expires > Date.now();
+  // Heuristic freshness (RFC 9111 section 4.2.2) needs a Last-Modified validator.
+  // Static files carry one. A dynamic response with no caching headers at all, such
+  // as an API route returning the signed-in account's avatar, does not, and keeping
+  // it would show that image to whoever uses this browser next.
+  return response.headers.has("last-modified");
+}
+
+function parseCacheControl(value) {
+  const directives = new Map();
+  for (const part of (value || "").toLowerCase().split(",")) {
+    const separator = part.indexOf("=");
+    const name = (separator === -1 ? part : part.slice(0, separator)).trim();
+    if (!name) continue;
+    const raw = separator === -1 ? "" : part.slice(separator + 1).trim();
+    directives.set(name, raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1, -1) : raw);
+  }
+  return directives;
 }
 
 async function trimImageCache(cache, limit) {
