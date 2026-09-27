@@ -126,6 +126,16 @@ export function resolveSchemaModels(
       };
     }
 
+    for (const constraint of model.constraints || []) {
+      for (const fieldKey of constraint.fields) {
+        if (!Object.prototype.hasOwnProperty.call(resolvedFields, fieldKey)) {
+          throw new Error(
+            `Schema ${constraint.type} constraint on "${ownerKey}.${modelKey}" references missing field "${fieldKey}".`,
+          );
+        }
+      }
+    }
+
     resolvedModels[modelKey] = {
       ...model,
       name: modelName,

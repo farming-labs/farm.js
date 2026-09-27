@@ -70,6 +70,53 @@ describe("schema name resolution", () => {
     expect(resolved.tasks!.fields.listId!.name).toBe("list_id");
   });
 
+  it("rejects constraints that reference missing field keys", () => {
+    expect(() =>
+      resolveSchemaModels("billing", {
+        models: {
+          invoices: {
+            fields: { id: { type: "uuid", primaryKey: true } },
+            constraints: [{ type: "index", fields: ["missing"] }],
+          },
+        },
+      }),
+    ).toThrow('Schema index constraint on "billing.invoices" references missing field "missing".');
+  });
+
+  it("validates extension and override constraints against resolved field keys", () => {
+    const extended = resolveSchemaModels("billing", {
+      models: {
+        invoices: {
+          fields: { id: { type: "uuid", primaryKey: true } },
+        },
+      },
+      extend: {
+        invoices: {
+          fields: { accountId: { type: "uuid", name: "account_id" } },
+          constraints: [{ type: "index", fields: ["accountId"] }],
+        },
+      },
+    });
+
+    expect(extended.invoices!.constraints).toEqual([{ type: "index", fields: ["accountId"] }]);
+    expect(extended.invoices!.fields.accountId!.name).toBe("account_id");
+
+    expect(() =>
+      resolveSchemaModels("billing", {
+        models: {
+          invoices: {
+            fields: { id: { type: "uuid", primaryKey: true } },
+          },
+        },
+        override: {
+          invoices: {
+            constraints: [{ type: "unique", fields: ["missing"] }],
+          },
+        },
+      }),
+    ).toThrow('Schema unique constraint on "billing.invoices" references missing field "missing".');
+  });
+
   it("rejects two models that would claim the same table", () => {
     expect(() =>
       collectSchemaModels([
