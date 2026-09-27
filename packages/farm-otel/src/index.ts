@@ -98,15 +98,27 @@ export async function registerOTel(options: FarmOTelOptions = {}): Promise<FarmO
         (options.autoInstrumentations === false
           ? []
           : [getNodeAutoInstrumentations(options.instrumentationConfig)]);
-      // Left unset, the Node SDK reads `OTEL_METRICS_EXPORTER` and falls back to
-      // a periodic OTLP metrics pipeline pointed at localhost:4318. That is a
-      // pipeline nobody configured, and with nothing listening there every
+      // Left unset, the Node SDK falls back to a periodic OTLP metrics pipeline
+      // pointed at localhost:4318. With nothing listening there, the first
       // recorded metric turns graceful shutdown into the exporter's retry window
-      // (measured at ~8s, both for these events and for auto-instrumentation's
-      // own metrics). An empty reader list keeps the meter provider unregistered,
-      // so metrics stay off until an app asks for them.
+      // (measured at ~8s), and farm's production lifecycle waits on
+      // instrumentation shutdown, so that is a stalled deploy.
+      //
+      // An empty reader list keeps the meter provider unregistered, which turns
+      // metrics off entirely, so it may only be the default when the app has
+      // pointed nothing at a collector. `OTEL_METRICS_EXPORTER` alone is not that
+      // signal: the spec already defaults it to `otlp`, so the ordinary
+      // production posture is to set an endpoint and leave the exporter variable
+      // alone. Treat any configured OTLP metrics destination as the opt-in, and
+      // leave `OTEL_METRICS_EXPORTER=none` as the documented way to turn metrics
+      // off.
+      const metricsDestinationConfigured = Boolean(
+        process.env.OTEL_METRICS_EXPORTER ||
+        process.env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT ||
+        process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+      );
       const metricReaders =
-        options.metricReaders ?? (process.env.OTEL_METRICS_EXPORTER ? undefined : []);
+        options.metricReaders ?? (metricsDestinationConfigured ? undefined : []);
       const sdk = new NodeSDK({
         resource,
         sampler: options.sampler,
