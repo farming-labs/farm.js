@@ -129,9 +129,10 @@ renderer declares, so the flag cannot drift away from what the adapter actually 
 takes props and returns an element tree rather than a component built by the renderer's own
 compiler. FARMJS gates integration provider components on this capability.
 
-React-shaped renderers do this natively. A compile-time renderer needs its adapter to recognize such
-a component and call it, because its own components are functions too and the two are otherwise
-indistinguishable at runtime.
+All official renderers support synchronous plain function components. React and Preact handle them
+through their native element model, while Vue and Solid materialize their returned element tree in
+the adapter. A compile-time renderer such as Svelte also needs its adapter to distinguish a plain
+function from one of its own compiled components, because both are functions at runtime.
 
 FARMJS resolves the ambiguity at build time rather than guessing. A provider component in a
 production build must be an importable module reference, so the module's extension answers the
@@ -140,6 +141,10 @@ a function component. The check uses the extensions the renderer itself declares
 `componentExtensions`, not the resolved set, which always includes `.ts`, `.tsx`, `.js`, and `.jsx`.
 Components that are not renderer-compiled are marked so the adapter calls them instead of
 instantiating them.
+
+Async plain function components are not part of this contract. Official adapters reject them with
+an actionable error instead of rendering a promise, an empty string, or `[object Object]`. Resolve
+the data before creating the element tree or use the renderer's native asynchronous primitives.
 
 The field defaults to `false`, so a renderer whose adapter has not been taught to handle function
 components fails with a clear error naming the renderer rather than rendering something broken.

@@ -62,6 +62,19 @@ export function isValidElement(value: unknown): boolean {
   return value !== null && value !== undefined && value !== false;
 }
 
+function rejectAsyncComponentResult(value: unknown): unknown {
+  if (
+    value !== null &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof (value as { then?: unknown }).then === "function"
+  ) {
+    throw new TypeError(
+      "FARMJS Solid renderer does not support async function components. Resolve async data before rendering the component.",
+    );
+  }
+  return value;
+}
+
 // CSS properties whose numeric values are unitless in React's style objects.
 const UNITLESS_STYLE_PROPERTIES = new Set([
   "animation-iteration-count",
@@ -213,7 +226,7 @@ export function materializeSolidElement(value: unknown): unknown {
   }
 
   const Component = value.type as any;
-  return materializeSolidElement(createComponent(Component, props));
+  return materializeSolidElement(rejectAsyncComponentResult(createComponent(Component, props)));
 }
 
 /**
@@ -227,7 +240,7 @@ export function materializeSolidRoot(value: unknown): unknown {
   }
 
   const Component = value.type as any;
-  return materializeSolidElement(Component(normalizeProps(value)));
+  return materializeSolidElement(rejectAsyncComponentResult(Component(normalizeProps(value))));
 }
 
 const SolidCompat = {

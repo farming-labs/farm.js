@@ -23,7 +23,10 @@ defineRendererDescriptorConformance({
     server: "@farm.js/preact/server",
     client: "@farm.js/preact/client",
     jsxImportSource: "preact",
-    capabilities: { streaming: { node: true, web: true } },
+    capabilities: {
+      streaming: { node: true, web: true },
+      functionComponents: true,
+    },
   },
 });
 
