@@ -29,20 +29,21 @@ function decodeCookieValue(value: string): string {
 }
 
 export function parseCookieHeaderMap(header: string | null): Record<string, string> {
+  const cookies = Object.create(null) as Record<string, string>;
+
   if (!header) {
-    return {};
+    return cookies;
   }
 
-  return Object.fromEntries(
-    header
-      .split(";")
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const [key, ...rest] = part.split("=");
-        return [key, decodeCookieValue(rest.join("="))];
-      }),
-  );
+  for (const part of header.split(";")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+
+    const [key, ...rest] = trimmed.split("=");
+    cookies[key] = decodeCookieValue(rest.join("="));
+  }
+
+  return cookies;
 }
 
 export function parseCookieHeaderList(header: string | null): ParsedCookie[] {

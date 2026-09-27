@@ -66,3 +66,30 @@ describe("cookie parsing tolerates malformed percent-encoding", () => {
     expect(getCookieValue(headers, "keep")).toBe("value");
   });
 });
+
+describe("cookie parsing ignores object prototype properties", () => {
+  it("returns null for absent prototype-named cookies", () => {
+    const headers = new Headers({ cookie: "session=abc123" });
+
+    expect(getCookieValue(headers, "constructor")).toBeNull();
+    expect(getCookieValue(headers, "toString")).toBeNull();
+    expect(getCookieValue(headers, "hasOwnProperty")).toBeNull();
+  });
+
+  it("preserves explicitly provided prototype-named cookies", () => {
+    const headers = new Headers({
+      cookie: "constructor=ctor; toString=string; hasOwnProperty=own",
+    });
+
+    expect(getCookieValue(headers, "constructor")).toBe("ctor");
+    expect(getCookieValue(headers, "toString")).toBe("string");
+    expect(getCookieValue(headers, "hasOwnProperty")).toBe("own");
+  });
+
+  it("creates parsed maps without inherited entries", () => {
+    const cookies = parseCookieHeaderMap("session=abc123");
+
+    expect(Object.getPrototypeOf(cookies)).toBeNull();
+    expect(cookies["constructor"]).toBeUndefined();
+  });
+});
