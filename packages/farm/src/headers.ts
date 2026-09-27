@@ -1,4 +1,5 @@
 import { getCurrentRequest } from "./server/request";
+import { parseRequestCookieHeader } from "./request-cookies";
 
 export interface RequestCookie {
   name: string;
@@ -27,7 +28,7 @@ export function headers(): ReadonlyHeaders {
 
 export function cookies(): ReadonlyRequestCookies {
   const cookieHeader = getCurrentRequest().headers.get("cookie") || "";
-  const parsed = parseCookieHeader(cookieHeader);
+  const parsed = parseRequestCookieHeader(cookieHeader);
 
   return {
     get(name) {
@@ -46,36 +47,4 @@ export function cookies(): ReadonlyRequestCookies {
       return parsed[Symbol.iterator]();
     },
   };
-}
-
-function parseCookieHeader(header: string): RequestCookie[] {
-  if (!header.trim()) return [];
-
-  return header
-    .split(";")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      const separatorIndex = part.indexOf("=");
-      if (separatorIndex === -1) {
-        return {
-          name: decodeCookiePart(part),
-          value: "",
-        };
-      }
-
-      return {
-        name: decodeCookiePart(part.slice(0, separatorIndex).trim()),
-        value: decodeCookiePart(part.slice(separatorIndex + 1).trim()),
-      };
-    })
-    .filter((cookie) => cookie.name.length > 0);
-}
-
-function decodeCookiePart(value: string) {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
 }

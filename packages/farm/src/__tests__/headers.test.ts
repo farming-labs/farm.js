@@ -35,4 +35,26 @@ describe("Next-compatible header helpers", () => {
       expect(requestCookies.toString()).toBe("session=abc123; theme=dark");
     });
   });
+
+  it("preserves duplicate cookies in wire order and gets the first value", async () => {
+    const request = new Request("https://farmjs.dev/dashboard", {
+      headers: {
+        cookie: "sid=path-specific; theme=dark; sid=domain-wide",
+      },
+    });
+
+    await _runWithCurrentRequest(request, () => {
+      const requestCookies = cookies();
+      expect(requestCookies.get("sid")).toEqual({ name: "sid", value: "path-specific" });
+      expect(requestCookies.getAll("sid")).toEqual([
+        { name: "sid", value: "path-specific" },
+        { name: "sid", value: "domain-wide" },
+      ]);
+      expect([...requestCookies]).toEqual([
+        { name: "sid", value: "path-specific" },
+        { name: "theme", value: "dark" },
+        { name: "sid", value: "domain-wide" },
+      ]);
+    });
+  });
 });

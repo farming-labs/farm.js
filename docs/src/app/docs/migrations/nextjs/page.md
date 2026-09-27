@@ -94,6 +94,10 @@ Farm provides a deliberately small compatibility surface for common App Router b
 | `headers()`           | Reads the current request headers on the server.                 |
 | `cookies()`           | Reads the current request cookies on the server.                 |
 
+If a request carries duplicate cookie names, `cookies().get(name)` returns the first value in
+header order and `cookies().getAll(name)` preserves every value in that order. This matches browser
+cookie path precedence and the cookie behavior used by Farm's integrations.
+
 ## Manual review
 
 The migration report calls out code that Farm cannot convert safely:

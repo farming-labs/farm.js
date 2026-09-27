@@ -71,6 +71,7 @@ export const farmPackageBuildOptions = {
     "internal/build-runtime": "src/nitro/build-runtime.ts",
     "internal/config-runtime": "src/config-runtime.ts",
     "internal/production-node-env": "src/build/production-node-env.ts",
+    "internal/request-cookies": "src/request-cookies.ts",
     config: "src/config-entry.ts",
     renderer: "src/renderer.ts",
     "renderer/react/server": "src/renderer/react/server.ts",

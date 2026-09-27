@@ -1,3 +1,5 @@
+import { parseRequestCookieHeader } from "@farm.js/core/internal/request-cookies";
+
 export interface ParsedCookie {
   name: string;
   value: string;
@@ -13,48 +15,28 @@ export interface RequestCookieOptions {
   expires?: Date;
 }
 
-/**
- * Decode a cookie value, tolerating malformed percent-encoding. A request can
- * carry a cookie whose value is not valid UTF-8 percent-encoding (a latin-1
- * value from an old link, a crawler, or an attacker-planted sibling-domain
- * cookie); `decodeURIComponent` throws `URIError` on those. Falling back to the
- * raw value keeps a single bad cookie from turning every auth route into a 500.
- */
-function decodeCookieValue(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
-
+/** Collapse duplicate names using the first value in request-header order. */
 export function parseCookieHeaderMap(header: string | null): Record<string, string> {
   const cookies = Object.create(null) as Record<string, string>;
 
-  if (!header) {
-    return cookies;
-  }
-
-  for (const part of header.split(";")) {
-    const trimmed = part.trim();
-    if (!trimmed) continue;
-
-    const [key, ...rest] = trimmed.split("=");
-    cookies[key] = decodeCookieValue(rest.join("="));
+  for (const cookie of parseCookieHeaderList(header)) {
+    if (Object.prototype.hasOwnProperty.call(cookies, cookie.name)) continue;
+    cookies[cookie.name] = cookie.value;
   }
 
   return cookies;
 }
 
 export function parseCookieHeaderList(header: string | null): ParsedCookie[] {
-  return Object.entries(parseCookieHeaderMap(header)).map(([name, value]) => ({
-    name,
-    value,
-  }));
+  return parseRequestCookieHeader(header);
 }
 
+/** Read the first matching value, consistent with core `cookies().get(name)`. */
 export function getCookieValue(headers: Headers, name: string): string | null {
-  return parseCookieHeaderMap(headers.get("cookie"))[name] ?? null;
+  return (
+    parseCookieHeaderList(headers.get("cookie")).find((cookie) => cookie.name === name)?.value ??
+    null
+  );
 }
 
 export function createRequestCookie(

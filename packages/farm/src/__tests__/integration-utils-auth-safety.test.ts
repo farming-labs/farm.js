@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { getCookieValue, parseCookieHeaderMap } from "../../../farm-integration-utils/src/cookies";
+import {
+  getCookieValue,
+  parseCookieHeaderList,
+  parseCookieHeaderMap,
+} from "../../../farm-integration-utils/src/cookies";
 import {
   getReturnTo,
   resolveAppPath,
@@ -106,5 +110,25 @@ describe("cookie parsing ignores object prototype properties", () => {
 
     expect(Object.getPrototypeOf(cookies)).toBeNull();
     expect(cookies["constructor"]).toBeUndefined();
+  });
+});
+
+describe("integration request-cookie duplicate handling", () => {
+  const header = "sid=path-specific; theme=dark; sid=domain-wide";
+
+  it("preserves every cookie in wire order for Supabase getAll", () => {
+    expect(parseCookieHeaderList(header)).toEqual([
+      { name: "sid", value: "path-specific" },
+      { name: "theme", value: "dark" },
+      { name: "sid", value: "domain-wide" },
+    ]);
+  });
+
+  it("uses the first value for Auth0 map lookup", () => {
+    expect(parseCookieHeaderMap(header).sid).toBe("path-specific");
+  });
+
+  it("uses the first value for WorkOS single-cookie lookup", () => {
+    expect(getCookieValue(new Headers({ cookie: header }), "sid")).toBe("path-specific");
   });
 });

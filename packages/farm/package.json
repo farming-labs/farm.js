@@ -181,6 +181,9 @@
       "internal/production-node-env": [
         "./dist/internal/production-node-env.d.ts"
       ],
+      "internal/request-cookies": [
+        "./dist/internal/request-cookies.d.ts"
+      ],
       "config": [
         "./dist/config.d.ts"
       ],
@@ -604,6 +607,11 @@
       "types": "./dist/internal/production-node-env.d.ts",
       "import": "./dist/internal/production-node-env.mjs",
       "require": "./dist/internal/production-node-env.cjs"
+    },
+    "./internal/request-cookies": {
+      "types": "./dist/internal/request-cookies.d.ts",
+      "import": "./dist/internal/request-cookies.mjs",
+      "require": "./dist/internal/request-cookies.cjs"
     }
   },
   "publishConfig": {
