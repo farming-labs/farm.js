@@ -93,6 +93,7 @@ import { createFarmSourceAlias } from "../server/vite-config";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import { createFarmThemeCssPlugin } from "../theme/vite";
 import { resolveFarmInstrumentationFile } from "../instrumentation";
+import { resolveFarmInstrumentationRuntime } from "../instrumentation-runtime";
 import {
   getFarmRendererCapabilities,
   isReactRenderer,
@@ -210,7 +211,7 @@ function resolveNitroRuntimeDependency(root: string, specifier: string): string 
 function resolveNitroInternalRuntimeAliases(root: string): Record<string, string> {
   const runtimeDir = path.dirname(resolveNitroPackageEntry(root));
   return Object.fromEntries(
-    ["app", "error/hooks", "shutdown", "task"].map((moduleName) => [
+    ["app", "error/hooks", "runtime-config", "shutdown", "task"].map((moduleName) => [
       `#nitro/runtime/${moduleName}`,
       path.join(runtimeDir, "internal", `${moduleName}.mjs`).split(path.sep).join("/"),
     ]),
@@ -3518,9 +3519,12 @@ ${generateUniversalRouterStateProperties()}
     
     reconcileFarmDocumentHead(doc);
     
-    // Swap root content
-    const newRoot = doc.getElementById("root");
-    const currentRoot = document.getElementById("root");
+    // A full-document app owns <html>/<body> directly and therefore has no
+    // synthetic #root container. Treat each body as the navigation root so
+    // shared layout boundaries can still be reconciled without replacing the
+    // whole document (and remounting every isolated client boundary).
+    const newRoot = doc.getElementById("root") || doc.body;
+    const currentRoot = document.getElementById("root") || document.body;
     if (!newRoot || !currentRoot) {
       if (!isNavigationCurrent()) return false;
       return this.swapDocument(doc);
@@ -4336,6 +4340,8 @@ function generateVirtualEntryCode(
   isolatedClientBoundaryModules: ReadonlySet<string>,
   hydrationPlanCache: Map<string, ClientModuleHydrationPlan>,
 ): string {
+  const hasCompressionRuntime =
+    config.compress && resolveFarmInstrumentationRuntime(preset) === "nodejs";
   const hasPluginRuntime = hasRuntimeIntegrationConfig || hasConfiguredRuntimePlugins;
   const adapterOwnsDocsRuntime = Boolean(
     isReactRenderer(config.renderer) &&
@@ -4720,6 +4726,9 @@ function generateVirtualEntryCode(
   const pluginRuntimeImport = hasPluginRuntime
     ? `import { PluginManager } from "@farm.js/core/plugin";`
     : "";
+  const compressionRuntimeImport = hasCompressionRuntime
+    ? `import { compressFarmResponse${hasPluginRuntime ? ", createCompressionPlugin" : ""} } from "@farm.js/core/internal/compression-runtime";`
+    : "";
   const i18nServerImport = config.i18n.enabled
     ? `import { _runWithFarmI18nRequest, _setDefaultFarmI18nRuntime, createFarmI18nRuntime, getFarmI18nClientSnapshot } from "@farm.js/core/i18n/server";`
     : "";
@@ -4917,6 +4926,7 @@ ${productionRuntimeImport}
 ${productionSiteTelemetryImport}
 ${metadataImageRuntimeImport}
 ${pluginRuntimeImport}
+${compressionRuntimeImport}
 ${i18nServerImport}
 ${docsHandlerImport}
 ${docsFontImport}
@@ -5009,6 +5019,7 @@ const integrationRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs, {
   integrations: configuredIntegrations,
 });
 const configuredPlugins = [
+  ${hasCompressionRuntime && hasPluginRuntime ? "createCompressionPlugin()," : ""}
   ${hasRuntimeIntegrationConfig ? "...resolveIntegrationPlugins(serverRuntimeIntegrations)," : ""}
   ${
     hasConfiguredRuntimePlugins
@@ -7878,12 +7889,24 @@ async function handleFarmFetch(request, context) {
     () =>
       runWithFarmRequestSpan(request, async () => {
         const runtimeOptions = farmPluginRuntime ? getFarmPluginRequestOptions(request) : null;
+        const prepareResponse = async (runtimeRequest, responsePromise) => {
+          const response = await responsePromise;
+          const pathname = new URL(runtimeRequest.url).pathname;
+          const routePathname = getFarmRoutePathname(pathname);
+          return applyFarmPreloadBudget(
+            applyConfiguredResponseHeaders(response, routePathname),
+            routePathname,
+          );
+        };
         const runRequest = () => farmPluginRuntime
           ? farmPluginRuntime.runRuntimeRequest(
               request,
               (runtimeRequest) =>
                 _runWithCurrentRequest(runtimeRequest, () =>
-                  handleFarmPluginRequest(runtimeRequest, runtimeOptions, context)
+                  prepareResponse(
+                    runtimeRequest,
+                    handleFarmPluginRequest(runtimeRequest, runtimeOptions, context),
+                  )
                 ),
               {
                 ...runtimeOptions,
@@ -7892,17 +7915,12 @@ async function handleFarmFetch(request, context) {
                   : undefined,
               },
             )
-          : handleFarmRequest(request, context);
+          : prepareResponse(request, handleFarmRequest(request, context));
 
         const response = await _runWithCurrentRequest(request, () =>
           _runWithAfterRequest(request, runRequest, context),
         );
-        const pathname = new URL(request.url).pathname;
-        const routePathname = getFarmRoutePathname(pathname);
-        return applyFarmPreloadBudget(
-          applyConfiguredResponseHeaders(response, routePathname),
-          routePathname,
-        );
+        return ${hasCompressionRuntime && !hasPluginRuntime ? "compressFarmResponse(request, response)" : "response"};
       }),
     {
       onResponseFinished: typeof context?.onResponseFinished === "function"
@@ -8282,7 +8300,7 @@ async function buildNitroUniversal(
 // Farm.js Nitro Entry
 // This file adapts Farm's Web fetch handler to Nitro's event handler contract.
 
-import { useNitroHooks } from 'nitro/app'
+import { useNitroHooks } from '#nitro/runtime/app'
 import handler, { farmProductionLifecycle, createFarmNodeRequestAbortSignal } from './${ssrEntryFile}'
 
 export { farmProductionLifecycle }

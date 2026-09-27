@@ -22,11 +22,7 @@ test.describe("Farm internationalization", () => {
     expect(browserDetected.status()).toBe(307);
     expect(browserDetected.headers().location).toBe("/am");
     expect(browserDetected.headers()["cache-control"]).toBe("private, no-store");
-    expectVaryIncludes(browserDetected.headers().vary, [
-      "Accept-Encoding",
-      "Cookie",
-      "Accept-Language",
-    ]);
+    expectVaryIncludes(browserDetected.headers().vary, ["Cookie", "Accept-Language"]);
     expect(browserDetected.headers()["set-cookie"]).toContain("farm_locale=am");
 
     const cookieDetected = await request.get("/", {

@@ -575,6 +575,11 @@
       "import": "./dist/internal/metadata-image-runtime.mjs",
       "require": "./dist/internal/metadata-image-runtime.cjs"
     },
+    "./internal/compression-runtime": {
+      "types": "./dist/internal/compression-runtime.d.ts",
+      "import": "./dist/internal/compression-runtime.mjs",
+      "require": "./dist/internal/compression-runtime.cjs"
+    },
     "./internal/client-runtime": {
       "types": "./dist/internal/client-runtime.d.ts",
       "import": "./dist/internal/client-runtime.mjs",

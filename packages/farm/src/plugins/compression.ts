@@ -167,6 +167,16 @@ function varyIdentityResponse(response: Response): Response {
   });
 }
 
+/** @internal Applies Farm's production response compression contract. */
+export function compressFarmResponse(request: Request, response: Response): Response {
+  if (!isCompressionEligible(request, response)) return response;
+  if (request.method === "HEAD") return varyIdentityResponse(response);
+
+  const encoding = selectEncoding(request.headers.get("accept-encoding") ?? "");
+  if (!encoding) return varyIdentityResponse(response);
+  return compressResponse(response, encoding);
+}
+
 export function createCompressionPlugin({
   beforeRequest: overrideBeforeRequest,
   afterResponse: overrideAfterResponse,
@@ -188,13 +198,8 @@ export function createCompressionPlugin({
 
     runtime: {
       after({ request, response, isProd }) {
-        if (!isProd || !isCompressionEligible(request, response)) return;
-
-        if (request.method === "HEAD") return varyIdentityResponse(response);
-
-        const encoding = selectEncoding(request.headers.get("accept-encoding") ?? "");
-        if (!encoding) return varyIdentityResponse(response);
-        return compressResponse(response, encoding);
+        if (!isProd) return;
+        return compressFarmResponse(request, response);
       },
     },
 

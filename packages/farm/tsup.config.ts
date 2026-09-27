@@ -67,6 +67,7 @@ export const farmPackageBuildOptions = {
     "internal/production-runtime": "src/nitro/production-runtime.ts",
     "internal/product-telemetry-runtime": "src/product-telemetry.ts",
     "internal/metadata-image-runtime": "src/metadata-image.ts",
+    "internal/compression-runtime": "src/plugins/compression.ts",
     "internal/build-runtime": "src/nitro/build-runtime.ts",
     "internal/config-runtime": "src/config-runtime.ts",
     "internal/production-node-env": "src/build/production-node-env.ts",

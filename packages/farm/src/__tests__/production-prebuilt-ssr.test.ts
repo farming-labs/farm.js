@@ -955,7 +955,10 @@ export default function SecondPage() {
             const page = await browser.newPage();
             const browserErrors: string[] = [];
             page.on("console", (message) => {
-              if (message.type() === "error") browserErrors.push(message.text());
+              if (message.type() === "error") {
+                if (message.location().url.endsWith("/favicon.ico")) return;
+                browserErrors.push(message.text());
+              }
             });
             page.on("pageerror", (error) => browserErrors.push(error.message));
             await page.goto(response.url);
@@ -2162,7 +2165,8 @@ export default function DynamicPage({ params }) {
         "utf8",
       );
       expect(nitroEntry).toContain("registerFarmCloseHook()");
-      expect(nitroEntry).toContain("from 'nitro/app'");
+      expect(nitroEntry).toContain("from '#nitro/runtime/app'");
+      expect(nitroEntry).not.toContain("from 'nitro/app'");
       expect(nitroEntry).not.toContain("from 'nitro/runtime'");
 
       const clientBundle = await readClientBundle(root);

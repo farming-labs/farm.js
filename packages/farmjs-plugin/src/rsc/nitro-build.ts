@@ -325,6 +325,10 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
 
   const config: NitroConfig = {
     preset,
+    // The RSC plugin supports Vite 6+, while Nitro's beta Vite builder follows
+    // its own Vite 8 peer range. The prebuilt renderer works with Rolldown and
+    // keeps the app's Vite version out of Nitro's production build contract.
+    builder: "rolldown",
     rootDir: root,
     serverDir: root,
     buildDir,

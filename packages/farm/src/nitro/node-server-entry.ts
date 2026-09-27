@@ -16,9 +16,8 @@ export function createFarmNodeServerEntry(options: FarmNodeServerEntryOptions): 
 import "#nitro/virtual/polyfills";
 import { NodeRequest, serve } from ${JSON.stringify(options.nodeAdapterModule)};
 import wsAdapter from ${JSON.stringify(options.websocketAdapterModule)};
-import { useNitroApp, useNitroHooks } from "nitro/app";
-import { useRuntimeConfig } from "nitro/runtime-config";
-import { resolveWebsocketHooks } from "#nitro/runtime/app";
+import { resolveWebsocketHooks, useNitroApp, useNitroHooks } from "#nitro/runtime/app";
+import { useRuntimeConfig } from "#nitro/runtime/runtime-config";
 import { trapUnhandledErrors } from "#nitro/runtime/error/hooks";
 import { setupCloseHooks } from "#nitro/runtime/shutdown";
 import { startScheduleRunner } from "#nitro/runtime/task";

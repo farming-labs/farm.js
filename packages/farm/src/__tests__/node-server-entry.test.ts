@@ -21,8 +21,10 @@ describe("Farm production Node entry", () => {
 
     await expect(transform(source, { loader: "js", format: "esm" })).resolves.toBeDefined();
     expect(source).toContain('import "#nitro/virtual/polyfills"');
-    expect(source).toContain('from "nitro/app"');
-    expect(source).toContain('from "nitro/runtime-config"');
+    expect(source).toContain('from "#nitro/runtime/app"');
+    expect(source).toContain('from "#nitro/runtime/runtime-config"');
+    expect(source).not.toContain('from "nitro/app"');
+    expect(source).not.toContain('from "nitro/runtime-config"');
     expect(source).toContain('from "#nitro/runtime/shutdown"');
     expect(source).not.toContain('from "nitro/runtime"');
     expect(source).toContain("nodeServer.headersTimeout = farmServerConfig.headersTimeout");
