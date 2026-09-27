@@ -11,8 +11,7 @@ export const alphaOrgs = pgTable("orgs", {
 // Farm.js generated from "alpha" model "members"
 export const alphaMembers = pgTable("members", {
   id: text("id").primaryKey(),
-  // orgId references orgs.id (onDelete: cascade)
-  orgId: text("org_id").notNull(),
+  orgId: text("org_id").references(() => alphaOrgs.id, { onDelete: "cascade" }).notNull(),
   role: text("role").notNull().default("member"),
   seatCount: integer("seat_count").notNull().default(1),
   spendCap: real("spend_cap"),
@@ -31,8 +30,7 @@ export const alphaMembers = pgTable("members", {
 export const betaProjects = pgTable("projects", {
   id: text("id").primaryKey(),
   projectTitle: text("projectTitle").notNull(),
-  // ownerId references tickets.id
-  ownerId: text("ownerId").notNull(),
+  ownerId: text("ownerId").references(() => betaTickets.id).notNull(),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull(),
 }, (table) => ({
   ownerIdIdx: index("projects_ownerId_idx").on(table.ownerId),

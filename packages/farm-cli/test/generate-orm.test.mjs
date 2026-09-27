@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
+import { promisify } from "node:util";
+import { getTableConfig } from "drizzle-orm/pg-core";
 
 const require = createRequire(import.meta.url);
 const { generateFarmArtifacts } = require("../dist/index.js");
+const execFileAsync = promisify(execFile);
+const prismaCliPath = require.resolve("prisma/build/index.js");
 
 const fixturesDirectory = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -401,6 +406,10 @@ test("emits a stable prisma schema", async () => {
 
     await generateFarmArtifacts({ root, orm: "prisma" });
     await assertMatchesFixture("schema.prisma", await readFile(schemaPath, "utf8"));
+    await execFileAsync(process.execPath, [prismaCliPath, "validate", "--schema", schemaPath], {
+      cwd: root,
+      env: { ...process.env, PRISMA_HIDE_UPDATE_MESSAGE: "1" },
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -408,12 +417,94 @@ test("emits a stable prisma schema", async () => {
 
 test("emits a stable drizzle schema", async () => {
   const root = await fixtureApp();
+  let executableDirectory;
   try {
     await generateFarmArtifacts({ root, orm: "drizzle", dialect: "postgres" });
     const generated = await readFile(path.join(root, "farm-integrations.generated.ts"), "utf8");
     await assertMatchesFixture("drizzle.ts", generated);
+
+    executableDirectory = await mkdtemp(path.join(fixturesDirectory, ".generated-drizzle-"));
+    const executablePath = path.join(executableDirectory, "schema.mjs");
+    await writeFile(executablePath, generated, "utf8");
+    const generatedSchema = await import(pathToFileURL(executablePath).href);
+    const table = getTableConfig(generatedSchema.alphaMembers);
+
+    assert.equal(table.foreignKeys.length, 1);
+    assert.equal(table.foreignKeys[0].onDelete, "cascade");
+    const reference = table.foreignKeys[0].reference();
+    assert.equal(reference.foreignTable, generatedSchema.alphaOrgs);
+    assert.deepEqual(
+      reference.columns.map((column) => column.name),
+      ["org_id"],
+    );
+    assert.deepEqual(
+      reference.foreignColumns.map((column) => column.name),
+      ["id"],
+    );
+
+    const forwardReference = getTableConfig(generatedSchema.betaProjects).foreignKeys[0];
+    assert.equal(forwardReference.reference().foreignTable, generatedSchema.betaTickets);
+    assert.equal(forwardReference.onDelete, "no action");
   } finally {
+    if (executableDirectory) {
+      await rm(executableDirectory, { recursive: true, force: true });
+    }
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects ORM references whose target is not unique", async () => {
+  const schema = {
+    models: {
+      parents: {
+        fields: {
+          id: { type: "uuid", primaryKey: true },
+          label: { type: "string" },
+        },
+      },
+      children: {
+        fields: {
+          id: { type: "uuid", primaryKey: true },
+          parentLabel: {
+            type: "string",
+            reference: { model: "parents", field: "label" },
+          },
+        },
+      },
+    },
+  };
+
+  for (const orm of ["prisma", "drizzle"]) {
+    const root = await mkdtemp(path.join(os.tmpdir(), `farm-cli-generate-${orm}-reference-`));
+    try {
+      await writeFile(
+        path.join(root, "farm.config.mjs"),
+        `const integration = { kind: "farm-integration", category: "test", type: "test", instance: {}, schema: ${JSON.stringify(schema)} };
+export default { integrations: { test: integration } };
+`,
+      );
+      if (orm === "prisma") {
+        await mkdir(path.join(root, "prisma"), { recursive: true });
+        await writeFile(
+          path.join(root, "prisma", "schema.prisma"),
+          'datasource db {\n  provider = "postgresql"\n  url = "postgres://localhost/test"\n}\n',
+        );
+      }
+
+      await assert.rejects(
+        () =>
+          generateFarmArtifacts({
+            root,
+            orm,
+            ...(orm === "drizzle" ? { dialect: "postgres" } : {}),
+          }),
+        new RegExp(
+          `${orm === "prisma" ? "Prisma" : "Drizzle"} cannot generate reference .* target field "parents.label" is not a primary or unique field`,
+        ),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   }
 });
 
