@@ -245,6 +245,20 @@ describe("schema name resolution", () => {
     ).toThrow('Schema unique constraint on "billing.invoices" references missing field "missing".');
   });
 
+  it("rejects primary-key field types the runtime ORM cannot represent", () => {
+    expect(() =>
+      resolveSchemaModels("config", {
+        models: {
+          flags: {
+            fields: { enabled: { type: "boolean", primaryKey: true } },
+          },
+        },
+      }),
+    ).toThrow(
+      'Schema primary-key field "config.flags.enabled" uses unsupported type "boolean". Supported types are id, uuid, string, and integer.',
+    );
+  });
+
   it("rejects two models that would claim the same table", () => {
     expect(() =>
       collectSchemaModels([

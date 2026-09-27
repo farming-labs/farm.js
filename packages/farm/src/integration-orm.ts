@@ -15,6 +15,7 @@ import type {
 } from "./integrations";
 import { assertNoSchemaListField } from "./schema-capabilities";
 import { isDatabaseEnforcedReference } from "./schema-reference";
+import { assertSupportedPrimaryKeyField } from "./schema-primary-key";
 import { resolveStorageRuntimeClient } from "./storage";
 import type { FarmStorageUserConfig } from "./storage/types";
 import type { FarmConfig } from "./types";
@@ -25,11 +26,13 @@ export type FarmIntegrationOrmSchema = SchemaDefinition<Record<string, AnyModelD
 
 export type FarmIntegrationOrmClient<TSchema extends FarmIntegrationOrmSchema> = OrmClient<TSchema>;
 
-type FarmIntegrationOrmFieldKind<TField extends FarmIntegrationSchemaField> = TField["type"] extends
-  | "id"
-  | "uuid"
-  ? "id"
-  : TField["type"] extends "text"
+type FarmIntegrationOrmFieldKind<TField extends FarmIntegrationSchemaField> = TField extends {
+  primaryKey: true;
+}
+  ? TField["type"] extends "id" | "uuid" | "string" | "integer"
+    ? "id"
+    : never
+  : TField["type"] extends "id" | "uuid" | "text"
     ? "string"
     : TField["type"] extends "number"
       ? "decimal"
@@ -156,7 +159,7 @@ export async function farmIntegrationSchemaToOrmSchema(
   for (const [modelKey, modelSchema] of Object.entries(schema.models)) {
     models[modelKey] = orm.model({
       table: modelSchema.name ?? modelKey,
-      fields: createOrmModelFields(orm, modelSchema),
+      fields: createOrmModelFields(orm, modelKey, modelSchema),
       constraints: createOrmModelConstraints(modelSchema),
       description: modelSchema.description,
     }) as AnyModelDefinition;
@@ -167,28 +170,31 @@ export async function farmIntegrationSchemaToOrmSchema(
 
 function createOrmModelFields(
   orm: typeof import("@farming-labs/orm"),
+  modelKey: string,
   modelSchema: FarmIntegrationSchemaModel,
 ): Record<string, AnyFieldBuilder> {
   return Object.fromEntries(
     Object.entries(modelSchema.fields).map(([fieldKey, fieldSchema]) => [
       fieldKey,
-      createOrmField(orm, fieldKey, fieldSchema),
+      createOrmField(orm, modelKey, fieldKey, fieldSchema),
     ]),
   );
 }
 
 function createOrmField(
   orm: typeof import("@farming-labs/orm"),
+  modelKey: string,
   fieldKey: string,
   field: FarmIntegrationSchemaField,
 ): AnyFieldBuilder {
+  assertSupportedPrimaryKeyField(`integration.${modelKey}.${fieldKey}`, field);
   let builder = createOrmFieldBuilder(orm, fieldKey, field) as AnyFieldBuilder;
 
-  if (field.unique) {
+  if (!field.primaryKey && field.unique) {
     builder = builder.unique();
   }
 
-  if (field.nullable || field.required === false) {
+  if (!field.primaryKey && (field.nullable || field.required === false)) {
     builder = builder.nullable();
   }
 
@@ -219,10 +225,25 @@ function createOrmFieldBuilder(
   fieldKey: string,
   field: FarmIntegrationSchemaField,
 ): AnyFieldBuilder {
+  if (field.primaryKey) {
+    if (field.type === "integer") {
+      return orm.id({ type: "integer" });
+    }
+    if (field.type === "string") {
+      return new orm.FieldBuilder({
+        kind: "id",
+        nullable: false,
+        unique: true,
+        idType: "string",
+      });
+    }
+    return orm.id();
+  }
+
   switch (field.type) {
     case "id":
     case "uuid":
-      return orm.id();
+      return orm.string();
     case "string":
     case "text":
       return orm.string();

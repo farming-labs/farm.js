@@ -1,5 +1,6 @@
 import type { FarmSchema, FarmSchemaField, FarmSchemaModel, FarmSchemaReference } from "./schema";
 import { assertNoSchemaListField } from "./schema-capabilities";
+import { assertSupportedPrimaryKeyField } from "./schema-primary-key";
 import { isDatabaseEnforcedReference } from "./schema-reference";
 
 export { assertNoSchemaListField } from "./schema-capabilities";
@@ -116,6 +117,7 @@ export function resolveSchemaModels(
 
     for (const [fieldKey, field] of Object.entries(model.fields)) {
       const fieldName = field.name || fieldKey;
+      assertSupportedPrimaryKeyField(`${ownerKey}.${modelKey}.${fieldKey}`, field);
 
       if (fieldNames.has(fieldName)) {
         throw new Error(

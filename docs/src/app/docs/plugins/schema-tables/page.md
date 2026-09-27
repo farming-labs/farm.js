@@ -218,3 +218,8 @@ updatedAt: { type: "datetime", required: false } // nullable
 reads, so the tables this creates are the tables your queries find. A model
 `tasks` with a field `listId` becomes `tasks("listId")`, not `tasks("list_id")`.
 Set `name` on a model or field to point at a different one.
+
+**Primary keys follow `primaryKey`, not the field type.** `id` and `uuid` fields
+without `primaryKey: true` remain ordinary string fields. Farm supports primary
+keys on `id`, `uuid`, `string`, and `integer` fields; other field types fail
+during schema resolution before SQL or ORM artifacts are generated.

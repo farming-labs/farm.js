@@ -13,6 +13,7 @@ import {
   resolveIntegrationPlugins,
 } from "../integrations";
 import { PluginManager } from "../plugin";
+import { collectSchemaModels, generateSqlStatements } from "../schema-sql";
 
 type SqliteDatabase = {
   exec(sql: string): unknown;
@@ -97,6 +98,13 @@ describe("integration ORM storage", () => {
 
     expect(schema._tag).toBe("schema");
     expect(schema.models.billingAccount.table).toBe("billing_account");
+    expect(schema.models.billingAccount.fields.id.config).toMatchObject({
+      kind: "id",
+      idType: "string",
+      generated: "id",
+      unique: true,
+      nullable: false,
+    });
     expect(schema.models.billingAccount.fields.ownerId.config.mappedName).toBe("owner_id");
     expect(schema.models.billingAccount.constraints.unique).toEqual([["ownerId"]]);
   });
@@ -154,6 +162,67 @@ describe("integration ORM storage", () => {
     expect(fields.databaseParentId.config.references).toBe("parents.id");
     expect(fields.applicationParentId.config.references).toBeUndefined();
     expect(fields.unenforcedParentId.config.references).toBeUndefined();
+  });
+
+  it("keeps runtime primary keys aligned with generated SQL", async () => {
+    const customKeys = defineIntegrationSchema({
+      models: {
+        sessions: {
+          fields: {
+            legacyId: { type: "uuid" },
+            token: { type: "string", primaryKey: true },
+          },
+        },
+        counters: {
+          fields: {
+            sequence: { type: "integer", primaryKey: true },
+          },
+        },
+      },
+    });
+    const runtimeSchema = await farmIntegrationSchemaToOrmSchema(customKeys);
+    const { createManifest } = await import("@farming-labs/orm");
+    const manifest = createManifest(runtimeSchema);
+    const sql = generateSqlStatements(collectSchemaModels([["auth", customKeys]]), "sqlite")
+      .map((statement) => statement.sql)
+      .join("\n");
+
+    expect(manifest.models.sessions.fields.legacyId).toMatchObject({
+      kind: "string",
+      unique: false,
+      generated: undefined,
+    });
+    expect(manifest.models.sessions.fields.token).toMatchObject({
+      kind: "id",
+      idType: "string",
+      unique: true,
+      generated: undefined,
+    });
+    expect(manifest.models.counters.fields.sequence).toMatchObject({
+      kind: "id",
+      idType: "integer",
+      unique: true,
+      generated: undefined,
+    });
+    expect(sql).toContain('"legacyId" TEXT NOT NULL');
+    expect(sql).toContain('"token" TEXT PRIMARY KEY');
+    expect(sql).toContain('"sequence" INTEGER PRIMARY KEY');
+  });
+
+  it("rejects unsupported runtime primary-key field types", async () => {
+    await expect(
+      farmIntegrationSchemaToOrmSchema(
+        defineIntegrationSchema({
+          models: {
+            flags: {
+              fields: { enabled: { type: "boolean", primaryKey: true } },
+            },
+          },
+        }),
+      ),
+    ).rejects.toThrow(
+      'Schema primary-key field "integration.flags.enabled" uses unsupported type "boolean".',
+    );
   });
 
   it.skipIf(!supportsNodeSqlite)(
