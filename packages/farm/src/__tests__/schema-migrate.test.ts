@@ -163,6 +163,51 @@ describe("sql generation", () => {
     }
   });
 
+  it.each(["postgres", "sqlite", "mysql"] as FarmSqlDialect[])(
+    "renders valid multi-word on delete actions for %s",
+    (dialect) => {
+      const references = defineSchema({
+        models: {
+          parents: {
+            fields: { id: { type: "uuid", primaryKey: true } },
+          },
+          children: {
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              cascadeParentId: {
+                type: "uuid",
+                reference: { model: "parents", field: "id", onDelete: "cascade" },
+              },
+              restrictParentId: {
+                type: "uuid",
+                reference: { model: "parents", field: "id", onDelete: "restrict" },
+              },
+              nullableParentId: {
+                type: "uuid",
+                nullable: true,
+                reference: { model: "parents", field: "id", onDelete: "setNull" },
+              },
+              retainedParentId: {
+                type: "uuid",
+                reference: { model: "parents", field: "id", onDelete: "noAction" },
+              },
+            },
+          },
+        },
+      });
+      const sql = generateSqlStatements(collectSchemaModels([["references", references]]), dialect)
+        .map((statement) => statement.sql)
+        .join("\n");
+
+      expect(sql).toContain("ON DELETE CASCADE");
+      expect(sql).toContain("ON DELETE RESTRICT");
+      expect(sql).toContain("ON DELETE SET NULL");
+      expect(sql).toContain("ON DELETE NO ACTION");
+      expect(sql).not.toContain("ON DELETE SETNULL");
+      expect(sql).not.toContain("ON DELETE NOACTION");
+    },
+  );
+
   it.each([
     ["postgres", "TIMESTAMPTZ", '"todo_items"'],
     ["sqlite", "TEXT", '"todo_items"'],

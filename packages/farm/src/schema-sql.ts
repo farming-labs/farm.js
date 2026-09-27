@@ -1,4 +1,4 @@
-import type { FarmSchema, FarmSchemaField, FarmSchemaModel } from "./schema";
+import type { FarmSchema, FarmSchemaField, FarmSchemaModel, FarmSchemaReference } from "./schema";
 
 export type FarmSqlDialect = "postgres" | "mysql" | "sqlite";
 
@@ -20,6 +20,13 @@ export type CollectedSchemaModel = {
   prismaModelName: string;
   model: ResolvedSchemaModel;
 };
+
+const SQL_ON_DELETE_ACTIONS = {
+  cascade: "CASCADE",
+  restrict: "RESTRICT",
+  setNull: "SET NULL",
+  noAction: "NO ACTION",
+} satisfies Record<NonNullable<FarmSchemaReference["onDelete"]>, string>;
 
 /**
  * Resolve a schema's extensions, overrides, and name mappings.
@@ -379,7 +386,7 @@ function createInternalReferenceLookup(
       ];
 
       if (field.reference.onDelete) {
-        pieces.push(`ON DELETE ${field.reference.onDelete.toUpperCase()}`);
+        pieces.push(`ON DELETE ${SQL_ON_DELETE_ACTIONS[field.reference.onDelete]}`);
       }
 
       lookup.set(fieldKey, pieces.join(" "));
