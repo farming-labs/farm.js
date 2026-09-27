@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import { createIntegrationOrm } from "../integration-orm";
 import { defineSchema } from "../schema";
@@ -43,6 +44,9 @@ const schema = defineSchema({
 });
 
 const models = (only?: readonly string[]) => collectSchemaModels([["sync", schema, only]]);
+const requireModule = createRequire(import.meta.url);
+const postgresTestUrl = process.env.FARM_TEST_POSTGRES_URL;
+const itWithPostgres = postgresTestUrl ? it : it.skip;
 
 describe("schema name resolution", () => {
   /**
@@ -399,6 +403,147 @@ describe("sql generation", () => {
       expect(sql).not.toContain("ON DELETE NOACTION");
     },
   );
+
+  it.each(["postgres", "sqlite", "mysql"] as FarmSqlDialect[])(
+    "creates referenced tables before dependents for %s",
+    (dialect) => {
+      const forwardReference = defineSchema({
+        models: {
+          children: {
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              parentId: {
+                type: "uuid",
+                reference: { model: "parents", field: "id" },
+              },
+            },
+          },
+          parents: {
+            fields: { id: { type: "uuid", primaryKey: true } },
+          },
+        },
+      });
+      const collected = collectSchemaModels([["references", forwardReference]]);
+
+      expect(
+        generateSqlStatements(collected, dialect)
+          .filter((statement) => statement.kind === "table")
+          .map((statement) => statement.target),
+      ).toEqual(["parents", "children"]);
+
+      const file = renderSqlSchemaFile(collected, dialect);
+      expect(file.indexOf('model "parents"')).toBeLessThan(file.indexOf('model "children"'));
+    },
+  );
+
+  itWithPostgres(
+    "applies a forward-reference schema against Postgres",
+    async () => {
+      type PostgresTestClient = {
+        connect(): Promise<void>;
+        end(): Promise<void>;
+        query(sql: string): Promise<unknown>;
+      };
+      const { Client } = requireModule("pg") as {
+        Client: new (options: { connectionString: string }) => PostgresTestClient;
+      };
+      const suffix = `${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
+      const parentTable = `farm_schema_parent_${suffix}`;
+      const childTable = `farm_schema_child_${suffix}`;
+      const client = new Client({ connectionString: postgresTestUrl! });
+      const forwardReference = defineSchema({
+        models: {
+          children: {
+            name: childTable,
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              parentId: {
+                type: "uuid",
+                reference: { model: "parents", field: "id" },
+              },
+            },
+          },
+          parents: {
+            name: parentTable,
+            fields: { id: { type: "uuid", primaryKey: true } },
+          },
+        },
+      });
+
+      await client.connect();
+      try {
+        for (const statement of generateSqlStatements(
+          collectSchemaModels([["references", forwardReference]]),
+          "postgres",
+        )) {
+          await client.query(statement.sql);
+        }
+
+        await client.query(`INSERT INTO "${parentTable}" ("id") VALUES ('parent_1')`);
+        await client.query(
+          `INSERT INTO "${childTable}" ("id", "parentId") VALUES ('child_1', 'parent_1')`,
+        );
+      } finally {
+        await client.query(`DROP TABLE IF EXISTS "${childTable}"`);
+        await client.query(`DROP TABLE IF EXISTS "${parentTable}"`);
+        await client.end();
+      }
+    },
+    30_000,
+  );
+
+  it("allows a table to reference itself", () => {
+    const selfReference = defineSchema({
+      models: {
+        categories: {
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            parentId: {
+              type: "uuid",
+              nullable: true,
+              reference: { model: "categories", field: "id" },
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      generateSqlStatements(collectSchemaModels([["references", selfReference]]), "postgres")[0]!
+        .sql,
+    ).toContain('REFERENCES "categories" ("id")');
+  });
+
+  it("rejects cross-table reference cycles before emitting SQL", () => {
+    const cycle = defineSchema({
+      models: {
+        authors: {
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            profileId: {
+              type: "uuid",
+              reference: { model: "profiles", field: "id" },
+            },
+          },
+        },
+        profiles: {
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            authorId: {
+              type: "uuid",
+              reference: { model: "authors", field: "id" },
+            },
+          },
+        },
+      },
+    });
+    const collected = collectSchemaModels([["accounts", cycle]]);
+    const message =
+      'Schema table references contain a cycle: "accounts.authors" -> "accounts.profiles" -> "accounts.authors".';
+
+    expect(() => generateSqlStatements(collected, "postgres")).toThrow(message);
+    expect(() => renderSqlSchemaFile(collected, "postgres")).toThrow(message);
+  });
 
   it.each([
     ["postgres", "TIMESTAMPTZ", '"todo_items"'],

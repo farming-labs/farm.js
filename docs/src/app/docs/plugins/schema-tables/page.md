@@ -183,7 +183,11 @@ before it runs:
 
 Postgres, SQLite, and MySQL are supported. A `reference` to a model outside this
 owner's schema is left as a comment rather than a foreign key, since the other
-table may not exist yet.
+table may not exist yet. Internal references are dependency ordered so parent
+tables are created before their dependents, and a table can reference itself.
+Farm rejects cross-table reference cycles before emitting SQL because inline
+foreign keys cannot create either table first; manage one constraint separately
+when a schema needs that shape.
 
 ### Two things worth knowing
 

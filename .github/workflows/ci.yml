@@ -114,8 +114,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run Postgres storage tests
-        run: pnpm --dir packages/farm exec vitest run src/__tests__/storage.test.ts
+      - name: Run Postgres storage and schema tests
+        run: pnpm --dir packages/farm exec vitest run src/__tests__/storage.test.ts src/__tests__/schema-migrate.test.ts
         env:
           FARM_REQUIRE_TEST_POSTGRES: "1"
           FARM_TEST_POSTGRES_URL: postgresql://farm:farm@127.0.0.1:5432/farm_test
