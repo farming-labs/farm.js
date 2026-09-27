@@ -126,6 +126,16 @@ export function resolveSchemaModels(
       };
     }
 
+    const primaryKeyFields = Object.entries(resolvedFields)
+      .filter(([, field]) => field.primaryKey)
+      .map(([fieldKey]) => fieldKey);
+
+    if (primaryKeyFields.length > 1) {
+      throw new Error(
+        `Schema model "${ownerKey}.${modelKey}" defines multiple primary-key fields: ${primaryKeyFields.map((fieldKey) => `"${fieldKey}"`).join(", ")}. Composite primary keys are not supported.`,
+      );
+    }
+
     for (const constraint of model.constraints || []) {
       for (const fieldKey of constraint.fields) {
         if (!Object.prototype.hasOwnProperty.call(resolvedFields, fieldKey)) {

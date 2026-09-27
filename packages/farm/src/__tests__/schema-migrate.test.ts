@@ -70,6 +70,49 @@ describe("schema name resolution", () => {
     expect(resolved.tasks!.fields.listId!.name).toBe("list_id");
   });
 
+  it("rejects models with multiple field-level primary keys", () => {
+    expect(() =>
+      collectSchemaModels([
+        [
+          "organizations",
+          {
+            models: {
+              memberships: {
+                fields: {
+                  organizationId: { type: "uuid", primaryKey: true },
+                  userId: { type: "uuid", primaryKey: true },
+                },
+              },
+            },
+          },
+        ],
+      ]),
+    ).toThrow(
+      'Schema model "organizations.memberships" defines multiple primary-key fields: "organizationId", "userId". Composite primary keys are not supported.',
+    );
+  });
+
+  it("validates primary keys after applying field overrides", () => {
+    const resolved = resolveSchemaModels("organizations", {
+      models: {
+        memberships: {
+          fields: {
+            organizationId: { type: "uuid", primaryKey: true },
+            userId: { type: "uuid", primaryKey: true },
+          },
+        },
+      },
+      override: {
+        memberships: {
+          fields: { userId: { primaryKey: false } },
+        },
+      },
+    });
+
+    expect(resolved.memberships!.fields.organizationId!.primaryKey).toBe(true);
+    expect(resolved.memberships!.fields.userId!.primaryKey).toBe(false);
+  });
+
   it("rejects internal references to missing target field keys", () => {
     expect(() =>
       resolveSchemaModels("billing", {
