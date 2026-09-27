@@ -15,12 +15,7 @@ export function getReturnTo(rawValue: string | null | undefined, fallback = "/")
   // and the URL parser treat "\" as "/") both begin with "/" yet resolve to a
   // foreign origin when passed to `new URL(returnTo, origin)`, giving an open
   // redirect after a legitimate login.
-  if (!rawValue || !rawValue.startsWith("/")) {
-    return fallback;
-  }
-
-  const second = rawValue[1];
-  if (second === "/" || second === "\\") {
+  if (!rawValue || !isSameOriginRootRelativePath(rawValue)) {
     return fallback;
   }
 
@@ -65,8 +60,17 @@ export function resolveAppPath(path: string | undefined, label: string): string 
 
 function isSameOriginRootRelativePath(value: string): boolean {
   if (!value.startsWith("/")) return false;
-  const second = value[1];
-  return second !== "/" && second !== "\\";
+  // The URL parser removes ASCII tab, carriage return, and line feed before
+  // parsing. Reject them before resolution so `/\n/evil.example` cannot turn
+  // into the protocol-relative URL `//evil.example`.
+  if (/[\t\n\r]/.test(value)) return false;
+
+  const trustedOrigin = "https://farm.invalid";
+  try {
+    return new URL(value, trustedOrigin).origin === trustedOrigin;
+  } catch {
+    return false;
+  }
 }
 
 export function resolveCallbackSettings(

@@ -15,7 +15,15 @@ describe("getReturnTo open-redirect hardening", () => {
   });
 
   it("rejects protocol-relative and backslash targets that resolve off-origin", () => {
-    for (const evil of ["//evil.com", "/\\evil.com", "/\\/evil.com", "//evil.com/path"]) {
+    for (const evil of [
+      "//evil.com",
+      "/\\evil.com",
+      "/\\/evil.com",
+      "//evil.com/path",
+      "/\t/evil.com",
+      "/\r/evil.com",
+      "/\n/evil.com",
+    ]) {
       expect(getReturnTo(evil, "/dashboard")).toBe("/dashboard");
       // The whole point: the rejected value must not resolve to a foreign origin.
       const resolved = new URL(getReturnTo(evil, "/dashboard"), "https://app.example.com");
@@ -42,7 +50,14 @@ describe("resolveAppPath open-redirect hardening", () => {
   });
 
   it("rejects path forms that browsers resolve to another origin", () => {
-    for (const value of ["//evil.example", "/\\evil.example", "/\\/evil.example"]) {
+    for (const value of [
+      "//evil.example",
+      "/\\evil.example",
+      "/\\/evil.example",
+      "/\t/evil.example",
+      "/\r/evil.example",
+      "/\n/evil.example",
+    ]) {
       expect(() => resolveAppPath(value, "Checkout successPath")).toThrow(
         "same-origin root-relative path",
       );
