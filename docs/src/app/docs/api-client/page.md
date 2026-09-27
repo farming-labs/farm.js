@@ -791,6 +791,57 @@ The call is idempotent, safe during server rendering, and a no-op in environment
 `BroadcastChannel`. Pass `channelName` to isolate multiple Farm apps served from one origin;
 enabling two different channel names in the same tab is an error.
 
+## Live invalidation across clients
+
+Cross-tab propagation stays inside one browser. To make a write in one user's session invalidate
+mounted reads in other connected sessions, expose an app-owned server-sent event route. Authenticate
+the request before creating the stream, and filter every key to the tenant or user allowed to
+observe it:
+
+```ts title="src/app/api/cache-events/route.ts"
+import { createFarmCacheInvalidationStream } from "@farm.js/core/cache";
+import { requireSession } from "../../../auth/server";
+
+export async function GET(request: Request) {
+  const session = await requireSession(request);
+
+  return createFarmCacheInvalidationStream({
+    signal: request.signal,
+    filter: (key) => key.startsWith(`org:${session.orgId}:`),
+  });
+}
+```
+
+Connect once during browser startup:
+
+```ts
+"use client";
+
+import { enableLiveCacheInvalidation } from "@farm.js/core/client";
+
+const dispose = enableLiveCacheInvalidation({
+  url: "/api/cache-events",
+});
+```
+
+Farm batches invalidations emitted in the same microtask, sends only encoded cache keys, and applies
+them through the ordinary client invalidation path. Mounted stale queries therefore refetch using
+their existing inputs, cache policy, and current browser credentials. Native `EventSource`
+reconnection handles transient disconnects; Farm's existing focus and reconnect revalidation covers
+events missed while the browser was offline.
+
+The stream forwards events from the current server process. A multi-instance deployment needs a
+shared pub/sub backplane feeding each instance's invalidation bus. That is intentionally outside the
+first version of this API. The selected deployment target must also support a long-lived streaming
+response. Do not expose a broad stream or put sensitive tenant data in unscoped cache keys: event
+payloads contain keys, not cached values, but key names can still reveal information.
+
+`enableLiveCacheInvalidation` shares one `EventSource` for repeated calls with the same URL and
+credentials and closes it after the final disposer. Live events are not echoed through the optional
+cross-tab bridge, because every connected tab receives the server event directly. Set
+`withCredentials: true` only for a cross-origin endpoint that accepts credentialed EventSource
+requests.
+
 ## Persist the client cache
 
 The browser cache is in memory: a reload starts cold. Opt into persistence by pointing

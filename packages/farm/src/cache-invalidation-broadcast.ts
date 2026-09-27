@@ -96,8 +96,8 @@ function createBridge(channelName: string): ActiveBridge {
     if (encoded !== null) channel.postMessage(encoded);
   };
 
-  const unsubscribe = subscribeFarmCacheInvalidation((key) => {
-    if (applyingRemote || closed) return;
+  const unsubscribe = subscribeFarmCacheInvalidation((key, source) => {
+    if (applyingRemote || source !== "local" || closed) return;
     // A mutation can invalidate several keys back to back; batch them into
     // one message per microtask instead of one post per key.
     pending.push(key);
@@ -114,7 +114,7 @@ function createBridge(channelName: string): ActiveBridge {
     if (keys.length === 0) return;
     applyingRemote = true;
     try {
-      for (const key of keys) notifyFarmCacheInvalidation(key);
+      for (const key of keys) notifyFarmCacheInvalidation(key, "broadcast");
     } finally {
       applyingRemote = false;
     }

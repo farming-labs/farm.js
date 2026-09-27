@@ -3,6 +3,8 @@ import { notifyFarmCacheInvalidation, notifyFarmCacheTask } from "./cache-invali
 import { getActiveFarmI18nSnapshot } from "./i18n/bridge";
 
 export { applyFarmCacheInvalidations } from "./cache-invalidation";
+export { createFarmCacheInvalidationStream } from "./cache-invalidation-stream";
+export type { FarmCacheInvalidationStreamOptions } from "./cache-invalidation-stream";
 
 export type RevalidateTagProfile =
   | "max"

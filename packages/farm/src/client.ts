@@ -64,6 +64,8 @@ export {
   FARM_CACHE_INVALIDATION_CHANNEL,
 } from "./cache-invalidation-broadcast";
 export type { CrossTabCacheInvalidationOptions } from "./cache-invalidation-broadcast";
+export { enableLiveCacheInvalidation } from "./cache-invalidation-event-source";
+export type { LiveCacheInvalidationOptions } from "./cache-invalidation-event-source";
 export {
   clearPersistedCache,
   defineClientCacheAdapter,
