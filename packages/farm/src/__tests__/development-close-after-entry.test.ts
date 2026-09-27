@@ -65,7 +65,7 @@ export default function Layout({ children }) {
 }
 
 describe("development server close after the client entry transform", () => {
-  it("close() resolves and farm teardown completes even when Vite's close wedges (#1263)", async () => {
+  it("drains Vite's pending transforms before closing the transformed client entry", async () => {
     const logPath = path.join(os.tmpdir(), `farm-close-after-entry-${process.pid}.log`);
     await fs.rm(logPath, { force: true });
     const root = await createProject(logPath);
@@ -73,6 +73,7 @@ describe("development server close after the client entry transform", () => {
     // Default configuration: transforming the entry starts dependency
     // discovery, the exact state in which Vite 5.4's close() deadlocks.
     const server = await createServer({ root, images: { provider: "none" } });
+    expect(server.config.server.preTransformRequests).not.toBe(false);
     await server.listen(await getAvailablePort());
     const address = server.httpServer?.address();
     if (!address || typeof address === "string") throw new Error("Missing dev server address");
@@ -82,9 +83,9 @@ describe("development server close after the client entry transform", () => {
     await server.close();
     const elapsed = Date.now() - startedAt;
 
-    // Bounded: the Vite hang is abandoned at the timeout instead of hanging
-    // the caller forever.
-    expect(elapsed).toBeLessThan(20_000);
+    // Pending optimized-dependency loads settle before Vite cancels its
+    // optimizer, so shutdown does not wait for Farm's 10-second fallback.
+    expect(elapsed).toBeLessThan(5_000);
     // Farm's own teardown still ran to completion.
     await expect(fs.readFile(logPath, "utf8")).resolves.toBe("disposed");
     // Nothing is still serving.

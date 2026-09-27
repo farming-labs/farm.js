@@ -40,6 +40,26 @@ export const DEFAULT_FARM_DEV_SERVER_PORT = 3000;
  */
 const VITE_CLOSE_TIMEOUT_MS = 10_000;
 
+type VitePendingRequest = {
+  request: Promise<unknown>;
+};
+
+async function drainVitePendingRequests(server: ViteDevServer): Promise<void> {
+  // Vite waits for this registry after closing its plugin container and
+  // dependency optimizer. That order can strand optimized-dependency loads:
+  // the optimizer is gone, but the plugin hook still awaits its processing
+  // promise. Drain the same registry first while the optimizer can finish.
+  const pendingRequests = (
+    server as ViteDevServer & {
+      _pendingRequests?: Map<string, VitePendingRequest>;
+    }
+  )._pendingRequests;
+
+  while (pendingRequests?.size) {
+    await Promise.allSettled([...pendingRequests.values()].map(({ request }) => request));
+  }
+}
+
 // Farm.js branding plugin for createServer
 function createBrandingPlugin() {
   let serverStarted = false;
@@ -320,17 +340,18 @@ export async function createServer(config: FarmConfig = {}) {
           }
         };
 
-        // Stop serving first, then release what the plugins hold, then flush
-        // telemetry last so shutdown problems are still reported.
+        // Finish Vite's active transforms, stop serving, release what the
+        // plugins hold, then flush telemetry last so shutdown problems are
+        // still reported.
         // Vite 5.4's close() can deadlock after the client entry has been
         // transformed: background pre-transforms of its bare imports wait in
         // the optimized-deps load hook for a dependency run that
         // depsOptimizer.close() cancels without settling, and the plugin
-        // container then awaits those promises forever (#1263). Bound the wait
-        // so farm's own teardown — plugin disposers, instrumentation — still
-        // runs, and report loudly instead of hanging the caller. The listen
-        // sockets and watchers have already settled by this point; only the
-        // container's internal await is stuck.
+        // container then awaits those promises forever (#1263). Draining
+        // Vite's pending transform registry before close preserves its normal
+        // optimizer and pre-transform behavior without triggering that order.
+        // Bound the whole operation so farm's own teardown — plugin disposers,
+        // instrumentation — still runs if Vite finds another shutdown failure.
         await step("Vite server close", async () => {
           let timer: ReturnType<typeof setTimeout> | undefined;
           const timedOut = new Promise<"timeout">((resolve) => {
@@ -339,7 +360,11 @@ export async function createServer(config: FarmConfig = {}) {
           });
           try {
             const outcome = await Promise.race([
-              closeViteServer().then(() => "closed" as const),
+              (async () => {
+                await drainVitePendingRequests(server);
+                await closeViteServer();
+                return "closed" as const;
+              })(),
               timedOut,
             ]);
             if (outcome === "timeout") {
