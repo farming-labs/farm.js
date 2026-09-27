@@ -226,7 +226,22 @@ export function normalizeRouteResponse(result: unknown): Response {
     return new Response(null, { status: 204 });
   }
 
-  return new Response(JSON.stringify(result), {
+  let body: string | undefined;
+  try {
+    body = JSON.stringify(result);
+  } catch (error) {
+    const serializationError = new TypeError(
+      "API route result must be a JSON-serializable value or a Response.",
+    );
+    (serializationError as TypeError & { cause?: unknown }).cause = error;
+    throw serializationError;
+  }
+
+  if (body === undefined) {
+    throw new TypeError("API route result must be a JSON-serializable value or a Response.");
+  }
+
+  return new Response(body, {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
