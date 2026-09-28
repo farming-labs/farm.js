@@ -288,6 +288,55 @@ describe.sequential("writeSearchIndex", () => {
 
     await expect(access(externalDir)).rejects.toThrow();
   });
+
+  it("refuses to replace an index directory holding prerendered pages", async () => {
+    const { outputDir, publicDir } = await createOutput();
+    await writeFile(path.join(publicDir, "index.html"), page("Home", "Farm home"));
+
+    // `output: "search"` on a site that also prerenders /search pointed the
+    // wipe at the app's own pages: the crawler skipped them and the wipe then
+    // deleted them from the deploy output, with a success log and exit 0.
+    const collision = path.join(publicDir, "search");
+    await mkdir(path.join(collision, "help"), { recursive: true });
+    await writeFile(path.join(collision, "index.html"), page("Search", "Search this site"));
+    await writeFile(path.join(collision, "help", "index.html"), page("Help", "How to search"));
+
+    await expect(
+      writeSearchIndex({
+        outputDir,
+        publicDir,
+        preset: "node-server",
+        basePath: "/",
+        options: resolveSearchOptions({ output: "search" }),
+      }),
+    ).rejects.toThrow(/contains a prerendered page/);
+
+    // The pages survive, which is the whole point.
+    await expect(access(path.join(collision, "index.html"))).resolves.toBeUndefined();
+    await expect(access(path.join(collision, "help", "index.html"))).resolves.toBeUndefined();
+  });
+
+  it("still clears non-page leftovers from a previous bundle", async () => {
+    const { outputDir, publicDir } = await createOutput();
+    await writeFile(path.join(publicDir, "index.html"), page("Home", "Farm home"));
+
+    // A previous bundle leaves non-HTML files behind, and clearing those is the
+    // normal job of the wipe this guard sits in front of.
+    const bundle = path.join(publicDir, "_farm", "search");
+    await mkdir(bundle, { recursive: true });
+    await writeFile(path.join(bundle, "stale.txt"), "stale");
+
+    const result = await writeSearchIndex({
+      outputDir,
+      publicDir,
+      preset: "node-server",
+      basePath: "/",
+      options: resolveSearchOptions({}),
+    });
+
+    expect(result.indexedRoutes).toContain("/");
+    await expect(access(path.join(bundle, "stale.txt"))).rejects.toThrow();
+  });
 });
 
 describe("search route matching", () => {
