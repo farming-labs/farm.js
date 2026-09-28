@@ -406,9 +406,10 @@ test("emits a stable prisma schema", async () => {
 
     await generateFarmArtifacts({ root, orm: "prisma" });
     await assertMatchesFixture("schema.prisma", await readFile(schemaPath, "utf8"));
+    // Prisma's update check forks a detached child that outlives `validate`;
+    // with the temp app as its cwd it keeps the directory locked on Windows.
     await execFileAsync(process.execPath, [prismaCliPath, "validate", "--schema", schemaPath], {
-      cwd: root,
-      env: { ...process.env, PRISMA_HIDE_UPDATE_MESSAGE: "1" },
+      env: { ...process.env, CHECKPOINT_DISABLE: "1", PRISMA_HIDE_UPDATE_MESSAGE: "1" },
     });
   } finally {
     await rm(root, { recursive: true, force: true });
