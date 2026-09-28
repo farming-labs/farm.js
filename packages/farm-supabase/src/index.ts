@@ -809,12 +809,32 @@ function createSupabaseHandler(
   };
 }
 
+async function readSupabaseJsonObject(
+  request: Request,
+): Promise<Record<string, unknown> | Response> {
+  try {
+    const body = await request.json();
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      return body as Record<string, unknown>;
+    }
+  } catch {
+    // Report malformed input below without leaking the parser error.
+  }
+
+  return Response.json(
+    { error: "Supabase auth request body must be a valid JSON object." },
+    { status: 400 },
+  );
+}
+
 async function parseEmailPasswordRequest(request: Request) {
   const contentType = request.headers.get("content-type") || "";
   let payload: Record<string, unknown> = {};
 
   if (contentType.includes("application/json")) {
-    payload = ((await request.json()) as Record<string, unknown>) || {};
+    const parsedBody = await readSupabaseJsonObject(request);
+    if (parsedBody instanceof Response) return parsedBody;
+    payload = parsedBody;
   } else {
     const formData = await request.formData();
     formData.forEach((value, key) => {
@@ -965,6 +985,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
             }
 
             const parsedRequest = await parseEmailPasswordRequest(request);
+            if (parsedRequest instanceof Response) return parsedRequest;
             if (!parsedRequest.ok) {
               if (clientRequest) {
                 return jsonError(parsedRequest.message, 400);
@@ -1153,6 +1174,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
           }
 
           const parsedRequest = await parseEmailPasswordRequest(context.request);
+          if (parsedRequest instanceof Response) return parsedRequest;
           if (!parsedRequest.ok) {
             if (clientRequest) {
               return jsonError(parsedRequest.message, 400);
@@ -1332,7 +1354,9 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
           if (request.method === "POST") {
             const contentType = context.request.headers.get("content-type") || "";
             if (contentType.includes("application/json")) {
-              const payload = ((await context.request.json()) as SupabaseLogoutInput) || {};
+              const parsedBody = await readSupabaseJsonObject(context.request);
+              if (parsedBody instanceof Response) return parsedBody;
+              const payload = parsedBody as SupabaseLogoutInput;
               returnTo = getReturnTo(payload.returnTo, returnTo);
             }
           }
