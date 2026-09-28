@@ -20,6 +20,9 @@ export {
   getFarmDataCache,
   normalizeRevalidatePath,
 } from "../cache";
+// Server-only, unlike `@farm.js/core/i18n`: `../i18n/config` imports `node:path`
+// and the generated client hydration entry imports that public entry.
+export { resolveFarmI18nConfig } from "../i18n/config";
 export { createFarmLocaleCookie, getFarmLocaleVaryHeaders } from "../i18n/resolver";
 export {
   localizeFarmHref,

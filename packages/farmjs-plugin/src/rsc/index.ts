@@ -79,6 +79,7 @@ const {
   searchParamsToObject,
   readNodeRequestBody,
   resolveFarmServerConfig,
+  resolveFarmI18nConfig,
   createFarmRequestBodyErrorResponse,
 } = require_(
   "@farm.js/core/internal/production-runtime",
@@ -90,9 +91,6 @@ const { resolveFarmAPIConfig, resolveFarmAPIServerBasePath } = require_(
   "@farm.js/core/api",
 ) as typeof import("@farm.js/core/api");
 const { getResolvedEnv } = require_("@farm.js/core/env") as typeof import("@farm.js/core/env");
-const { resolveFarmI18nConfig } = require_(
-  "@farm.js/core/i18n",
-) as typeof import("@farm.js/core/i18n");
 
 export type { FarmRscPluginOptions, EntryContext };
 export { buildRscNitro, waitForRscManifest, waitForRscOutputs } from "./nitro-build.js";
