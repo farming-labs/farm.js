@@ -17,6 +17,7 @@ export type {
   FarmTranslator,
   ResolvedFarmI18nConfig,
 } from "./types";
+export { resolveFarmI18nConfig } from "./config";
 export {
   localizeFarmHref,
   localizeFarmPathname,

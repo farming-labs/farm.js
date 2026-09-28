@@ -12,6 +12,11 @@ Run request behavior before routes, pass request-scoped data to pages, and short
 
 Farm runs middleware in development and production builds. For every request, Farm finds matching `farm.config.ts` middleware entries first, then matching `src/app/**/middleware.ts` files from the root segment down to the route segment.
 
+Apps with `experimental.serverComponents` run `src/app/**/middleware.ts` files, but not
+`farm.config.ts` middleware entries or the global `middleware: { matcher }` gate. Config entries
+carry handler and matcher functions, and the React Server Components entry does not load
+`farm.config.ts` at runtime. Put middleware an RSC app needs in `src/app/**/middleware.ts`.
+
 In development, a middleware edit is activated only after the complete middleware tree loads
 successfully. A syntax or import error is reported through Vite while the last valid tree remains
 active, so a broken hot update cannot silently remove authentication or other request guards.

@@ -37,6 +37,7 @@ import type { FarmServerConfig } from "@farm.js/core/internal/production-runtime
 import type { FarmLayerEntry, ResolvedFarmLayer } from "@farm.js/core/server";
 import { farmEnvironmentFunctionsPlugin } from "@farm.js/core/environment/vite";
 import type { FarmCacheUserConfig } from "@farm.js/core/cache";
+import type { FarmI18nUserConfig } from "@farm.js/core/i18n";
 import {
   generateClientCachePersistenceCode,
   resolveFarmClientCacheAdapterEntry,
@@ -89,6 +90,9 @@ const { resolveFarmAPIConfig, resolveFarmAPIServerBasePath } = require_(
   "@farm.js/core/api",
 ) as typeof import("@farm.js/core/api");
 const { getResolvedEnv } = require_("@farm.js/core/env") as typeof import("@farm.js/core/env");
+const { resolveFarmI18nConfig } = require_(
+  "@farm.js/core/i18n",
+) as typeof import("@farm.js/core/i18n");
 
 export type { FarmRscPluginOptions, EntryContext };
 export { buildRscNitro, waitForRscManifest, waitForRscOutputs } from "./nitro-build.js";
@@ -699,6 +703,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           deploymentId?: string;
           generateBuildId?: () => string | Promise<string>;
           cache?: FarmCacheUserConfig;
+          i18n?: FarmI18nUserConfig | false;
         };
         // Check if user enabled RSC in their config
         rscEnabled = c.experimental?.serverComponents === true;
@@ -798,6 +803,14 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
               options.serverActions?.allowedOrigins ?? c.serverActions?.allowedOrigins,
           }),
           deploymentId,
+          // Resolved the same way core resolves it for the config, so RSC and
+          // non-RSC apps match middleware against the same pathname.
+          i18n: resolveFarmI18nConfig(c.i18n, {
+            root,
+            mode: env.command === "serve" ? "development" : "production",
+            basePath: c.basePath ?? "/",
+          }),
+          server: { trustProxy: resolveFarmServerConfig(c.server).trustProxy },
           debug,
           development: env.command === "serve",
           clientCachePersistence: generateClientCachePersistenceCode(

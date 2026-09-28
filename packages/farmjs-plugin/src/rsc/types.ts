@@ -1,3 +1,4 @@
+import type { ResolvedFarmI18nConfig } from "@farm.js/core/i18n";
 import type {
   FarmServerActionsConfig,
   ResolvedFarmServerActionsConfig,
@@ -92,6 +93,19 @@ export interface EntryContext {
 
   /** Resolved build identifier embedded into the server and browser entries. */
   deploymentId: string;
+
+  /**
+   * Resolved i18n configuration. Middleware path matching runs against the
+   * locale-stripped pathname, so without this a `/de/dashboard` request never
+   * matches a `/dashboard` middleware.
+   */
+  i18n?: ResolvedFarmI18nConfig;
+
+  /**
+   * Server settings the request path needs. `trustProxy` decides whether
+   * forwarded headers are believed when middleware reads the client address.
+   */
+  server?: { trustProxy: boolean };
 
   /** Whether debug mode is enabled */
   debug: boolean;
