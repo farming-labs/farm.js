@@ -842,6 +842,42 @@ describe("migration planning", () => {
     });
   });
 
+  it.each(["app", "none"] as const)(
+    "does not expect a foreign key for an enforced: %s reference",
+    async (enforced) => {
+      const references = collectSchemaModels([
+        [
+          "app",
+          defineSchema({
+            models: {
+              parents: { fields: { id: { type: "uuid", primaryKey: true } } },
+              children: {
+                fields: {
+                  id: { type: "uuid", primaryKey: true },
+                  parentId: {
+                    type: "uuid",
+                    name: "parent_id",
+                    reference: { model: "parents", field: "id", enforced },
+                  },
+                },
+              },
+            },
+          }),
+        ],
+      ]);
+      const { executor } = await sqliteExecutor();
+      await applySchemaMigration(
+        await planSchemaMigration(references, "sqlite", executor),
+        executor,
+      );
+
+      const plan = await planSchemaMigration(references, "sqlite", executor);
+
+      expect(plan.upToDate).toEqual(["parents", "children"]);
+      expect(plan.drift).toEqual([]);
+    },
+  );
+
   it("only creates the tables that are missing, leaving the rest alone", async () => {
     const { database, executor } = await sqliteExecutor();
     const two = collectSchemaModels([

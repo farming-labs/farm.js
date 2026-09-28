@@ -7,6 +7,7 @@ import {
   type FarmSqlStatement,
   type ResolvedSchemaField,
 } from "./schema-sql";
+import { isDatabaseEnforcedReference } from "./schema-reference";
 
 /** The subset of a database client this needs: run a statement, read a result. */
 export type FarmSchemaExecutor = {
@@ -569,7 +570,7 @@ function collectExpectedReferences(
 ): FarmSchemaReferenceDefinition[] {
   const references: FarmSchemaReferenceDefinition[] = [];
   for (const field of Object.values(model.model.fields)) {
-    if (!field.reference) continue;
+    if (!field.reference || !isDatabaseEnforcedReference(field.reference)) continue;
     const target = modelLookup.get(`${model.ownerKey}.${field.reference.model}`);
     if (!target) continue;
     references.push({
