@@ -196,7 +196,9 @@ export type {
   FarmRenderer,
   FarmRendererCapabilities,
   FarmRendererCapabilitiesInput,
+  FarmRendererRuntime,
   FarmRendererStreamingCapabilities,
+  FarmRendererStreamingPrimitives,
 } from "./renderer";
 export { defineRenderer } from "./renderer";
 export type {

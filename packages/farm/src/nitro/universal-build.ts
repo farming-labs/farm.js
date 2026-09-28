@@ -97,6 +97,7 @@ import { getFarmPresetRuntime } from "../deployment";
 import { resolveFarmInstrumentationRuntime } from "../instrumentation-runtime";
 import {
   getFarmRendererCapabilities,
+  getFarmRendererStreamingCapabilitiesForRuntime,
   isReactRenderer,
   loadFarmRendererVitePlugins,
   REACT_RENDERER,
@@ -4494,6 +4495,10 @@ function generateVirtualEntryCode(
   );
   const hasIsolatedClientGraphRuntime =
     isReactRenderer(config.renderer) && isolatedClientBoundaryModules.size > 0;
+  const rendererStreamingCapabilities = getFarmRendererStreamingCapabilitiesForRuntime(
+    config.renderer,
+    getFarmPresetRuntime(preset),
+  );
   const rendererServerImports = isReactRenderer(config.renderer)
     ? `import * as React from "react";\nimport * as ReactDOMServer from "react-dom/server";${
         hasIsolatedClientGraphRuntime
@@ -5089,6 +5094,37 @@ ${rendererServerImports}
 
 ${routeClientGraphServerRuntime}
 
+const farmRendererStreamingCapabilities = ${JSON.stringify(rendererStreamingCapabilities)};
+const farmRendererName = ${JSON.stringify(config.renderer.name)};
+const farmRendererRuntime = ${JSON.stringify(getFarmPresetRuntime(preset))};
+const farmRendererRuntimeStreamingCapabilities = ReactDOMServer.capabilities &&
+  ReactDOMServer.capabilities.streaming;
+if (farmRendererRuntimeStreamingCapabilities &&
+    ((farmRendererStreamingCapabilities.node && !farmRendererRuntimeStreamingCapabilities.node) ||
+     (farmRendererStreamingCapabilities.web && !farmRendererRuntimeStreamingCapabilities.web))) {
+  throw new Error(
+    "Renderer " + farmRendererName +
+    " server module streaming capabilities do not satisfy the descriptor for the " +
+    farmRendererRuntime + " runtime."
+  );
+}
+if (farmRendererStreamingCapabilities.node &&
+    typeof ReactDOMServer.renderToPipeableStream !== "function") {
+  throw new Error(
+    "Renderer " + farmRendererName + " advertises Node streaming for the " +
+    farmRendererRuntime + " runtime but its server module does not export " +
+    "renderToPipeableStream()."
+  );
+}
+if (farmRendererStreamingCapabilities.web &&
+    typeof ReactDOMServer.renderToReadableStream !== "function") {
+  throw new Error(
+    "Renderer " + farmRendererName + " advertises Web streaming for the " +
+    farmRendererRuntime + " runtime but its server module does not export " +
+    "renderToReadableStream()."
+  );
+}
+
 const farmPreloadConfig = ${JSON.stringify(config.performance.preload)};
 const farmProductionSiteTelemetry = ${
     config.telemetry
@@ -5459,7 +5495,8 @@ async function renderFarmElement(ReactDOMServer, element) {
     if (streamErrors.length > 0) throw streamErrors[0];
   };
 
-  if (typeof ReactDOMServer.renderToReadableStream === "function") {
+  if (farmRendererStreamingCapabilities.web &&
+      typeof ReactDOMServer.renderToReadableStream === "function") {
     const stream = await ReactDOMServer.renderToReadableStream(element, {
       onError(error) {
         // redirect()/notFound() are control flow, not render failures: the
@@ -5534,7 +5571,8 @@ async function renderFarmElement(ReactDOMServer, element) {
     };
   }
 
-  if (typeof ReactDOMServer.renderToPipeableStream === "function") {
+  if (farmRendererStreamingCapabilities.node &&
+      typeof ReactDOMServer.renderToPipeableStream === "function") {
     let pipeableStream;
     let streamController;
     let streamClosed = false;

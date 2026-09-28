@@ -16,6 +16,14 @@ describe("React renderer capabilities", () => {
     expect(react().capabilities?.functionComponents).toBe(true);
     expect(react({ experimental: { compiler: true } }).capabilities?.functionComponents).toBe(true);
   });
+
+  it("keeps the edge streaming override on cloned descriptors", () => {
+    expect(react().capabilities?.streaming).toEqual({
+      node: true,
+      web: false,
+      runtimes: { edge: { node: false, web: true } },
+    });
+  });
 });
 
 describe("React renderer compiler options", () => {

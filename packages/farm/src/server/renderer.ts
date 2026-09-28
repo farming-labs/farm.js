@@ -93,8 +93,10 @@ import { getTheme as getFarmTheme } from "../theme/server";
 import { FARM_VERSION } from "../version";
 import type { ViteDevServer } from "vite";
 import {
+  assertFarmRendererStreamingRuntime,
   getFarmRendererCapabilities,
   getFarmRendererComponentExtensions,
+  getFarmRendererStreamingCapabilitiesForRuntime,
   isReactRenderer,
   readFarmRendererWebStream,
   resolveFarmRendererModule,
@@ -522,17 +524,12 @@ export class ServerRenderer {
       }
     }
 
-    const capabilities = getFarmRendererCapabilities(this.config.renderer);
-    if (capabilities.streaming.node && typeof runtime.renderToPipeableStream !== "function") {
-      throw new Error(
-        `Renderer \`${this.config.renderer.name}\` advertises Node streaming but its server module does not export renderToPipeableStream().`,
-      );
-    }
-    if (capabilities.streaming.web && typeof runtime.renderToReadableStream !== "function") {
-      throw new Error(
-        `Renderer \`${this.config.renderer.name}\` advertises Web streaming but its server module does not export renderToReadableStream().`,
-      );
-    }
+    assertFarmRendererStreamingRuntime(
+      this.config.renderer.name,
+      this.config.renderer,
+      runtime,
+      "node",
+    );
 
     this.rendererRuntime = runtime as FarmServerRendererRuntime;
     this.routeManager.setRendererRuntime?.(this.rendererRuntime);
@@ -599,8 +596,8 @@ export class ServerRenderer {
   }
 
   private async renderElementToCompleteHTML(element: unknown): Promise<string> {
-    const capabilities = getFarmRendererCapabilities(this.config.renderer);
-    const renderToPipeableStream = capabilities.streaming.node
+    const streaming = getFarmRendererStreamingCapabilitiesForRuntime(this.config.renderer, "node");
+    const renderToPipeableStream = streaming.node
       ? this.rendererRuntime.renderToPipeableStream
       : undefined;
 
@@ -632,7 +629,7 @@ export class ServerRenderer {
       });
     }
 
-    if (capabilities.streaming.web && this.rendererRuntime.renderToReadableStream) {
+    if (streaming.web && this.rendererRuntime.renderToReadableStream) {
       const stream = await this.rendererRuntime.renderToReadableStream(element);
       return await readFarmRendererWebStream(stream);
     }

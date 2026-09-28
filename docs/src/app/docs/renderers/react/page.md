@@ -2823,9 +2823,11 @@ deployment use the same contracts described in the renderer overview.
 
 ## Production rendering
 
-The React adapter supports string rendering and streaming when the active production runtime can
-use `renderToPipeableStream`. Static generation, ISR, PPR, and ordinary dynamic rendering continue
-to follow route configuration rather than the component extension.
+The React adapter uses `renderToPipeableStream` on Node deployment targets and
+`renderToReadableStream` on edge targets. FARMJS resolves the matching React DOM server entry while
+building the target and validates that the promised primitive is present. Static generation, ISR,
+PPR, and ordinary dynamic rendering continue to follow route configuration rather than the
+component extension.
 
 See [Rendering Model](/docs/server-rendering) for rendering modes and
 [Renderers](/docs/renderers) for the cross-renderer support matrix.

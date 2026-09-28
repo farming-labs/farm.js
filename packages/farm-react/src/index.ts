@@ -113,7 +113,11 @@ const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   ],
   capabilities: {
     reconcilesRerenders: true,
-    streaming: { node: true, web: false },
+    streaming: {
+      node: true,
+      web: false,
+      runtimes: { edge: { node: false, web: true } },
+    },
     functionComponents: true,
   },
 });
@@ -129,7 +133,12 @@ export function react(options: ReactRendererOptions = {}): FarmRenderer {
     optimizeDeps: [...(REACT_RENDERER.optimizeDeps || [])],
     capabilities: {
       reconcilesRerenders: true,
-      streaming: { ...REACT_RENDERER.capabilities?.streaming },
+      streaming: {
+        ...REACT_RENDERER.capabilities?.streaming,
+        runtimes: {
+          edge: { ...REACT_RENDERER.capabilities?.streaming?.runtimes?.edge },
+        },
+      },
       functionComponents: true,
     },
     options: {

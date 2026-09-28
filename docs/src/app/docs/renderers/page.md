@@ -96,14 +96,31 @@ export const customRenderer = defineRenderer({
   client: "@example/renderer/client",
   capabilities: {
     streaming: {
-      node: false,
-      web: true,
+      node: true,
+      web: false,
+      runtimes: {
+        edge: { node: false, web: true },
+      },
     },
     reconcilesRerenders: false,
     functionComponents: false,
   },
 });
 ```
+
+The top-level streaming values are the fallback when no runtime override exists and for presets
+whose runtime is unknown. Local development resolves as `node`; production resolves from the
+deployment preset. A `runtimes.node` or `runtimes.edge` entry overrides the pair once FARMJS knows
+the runtime. Existing renderers that support the same primitives everywhere can keep using only
+the two booleans.
+
+| Renderer | Node target        | Edge target        |
+| -------- | ------------------ | ------------------ |
+| React    | Node stream        | Web stream         |
+| Preact   | Node + Web streams | Node + Web streams |
+| Solid    | Node + Web streams | Node + Web streams |
+| Vue      | Node + Web streams | Node + Web streams |
+| Svelte   | Buffered           | Buffered           |
 
 ### Re-render behavior
 
@@ -180,11 +197,15 @@ plugin uses process-global mutable caches, set `buildConcurrency: "serial"` on i
 official Vue renderer does this because `@vitejs/plugin-vue` shares SFC descriptor and script caches
 between plugin instances.
 
-A renderer advertising `node` streaming must export `renderToPipeableStream()` from its server
-entry. A renderer advertising `web` streaming must export `renderToReadableStream()` returning a
-WHATWG `ReadableStream`. FARMJS validates those declarations when the server renderer starts and
-uses buffered `renderToString()` when neither capability is enabled. Descriptors without a
-`capabilities` field remain buffered for compatibility.
+A renderer advertising `node` streaming for the active runtime must export
+`renderToPipeableStream()` from its server entry. A renderer advertising `web` streaming must
+export `renderToReadableStream()` returning a WHATWG `ReadableStream`. FARMJS validates those
+declarations when the development server renderer starts and again in the generated production
+runtime. Production still checks the function before calling it, but only a primitive enabled by
+the resolved descriptor can be selected. This keeps the declaration and runtime export in
+agreement instead of treating an accidental export as support. FARMJS uses buffered
+`renderToString()` when neither capability is enabled. Descriptors without a `capabilities` field
+remain buffered for compatibility.
 
 ## Renderer-neutral server code
 

@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import type { FarmPresetRuntime } from "./deployment";
 
 /**
  * A rendering-library integration used by Farm's compiler, server renderer,
@@ -47,11 +48,24 @@ export interface FarmRenderer {
   options?: Readonly<Record<string, unknown>>;
 }
 
-export interface FarmRendererStreamingCapabilities {
+export type FarmRendererRuntime = Exclude<FarmPresetRuntime, "unknown">;
+
+export interface FarmRendererStreamingPrimitives {
   /** Supports Node.js writable streams through renderToPipeableStream(). */
   node: boolean;
   /** Supports WHATWG ReadableStream output through renderToReadableStream(). */
   web: boolean;
+}
+
+export interface FarmRendererStreamingCapabilities extends FarmRendererStreamingPrimitives {
+  /**
+   * Overrides the default stream primitives for a deployment runtime.
+   *
+   * The top-level values remain the fallback for development and unknown
+   * presets. Runtime overrides let a renderer describe packages whose exports
+   * change with bundler conditions, such as React DOM's Node and edge builds.
+   */
+  runtimes?: Partial<Record<FarmRendererRuntime, FarmRendererStreamingPrimitives>>;
 }
 
 export interface FarmRendererCapabilities {
@@ -88,7 +102,9 @@ export interface FarmRendererCapabilities {
 }
 
 export interface FarmRendererCapabilitiesInput {
-  streaming?: Partial<FarmRendererStreamingCapabilities>;
+  streaming?: Partial<FarmRendererStreamingPrimitives> & {
+    runtimes?: Partial<Record<FarmRendererRuntime, Partial<FarmRendererStreamingPrimitives>>>;
+  };
   reconcilesRerenders?: boolean;
   functionComponents?: boolean;
 }
@@ -156,10 +172,30 @@ const DEFAULT_RENDERER_CAPABILITIES: Readonly<FarmRendererCapabilities> = Object
 export function getFarmRendererCapabilities(
   renderer?: Pick<FarmRenderer, "capabilities">,
 ): FarmRendererCapabilities {
+  const defaultStreaming = {
+    node: renderer?.capabilities?.streaming?.node ?? DEFAULT_RENDERER_CAPABILITIES.streaming.node,
+    web: renderer?.capabilities?.streaming?.web ?? DEFAULT_RENDERER_CAPABILITIES.streaming.web,
+  };
+  const runtimes = Object.fromEntries(
+    (["node", "edge"] as const).flatMap((runtime) => {
+      const override = renderer?.capabilities?.streaming?.runtimes?.[runtime];
+      if (!override) return [];
+      return [
+        [
+          runtime,
+          {
+            node: override.node ?? defaultStreaming.node,
+            web: override.web ?? defaultStreaming.web,
+          },
+        ],
+      ];
+    }),
+  ) as Partial<Record<FarmRendererRuntime, FarmRendererStreamingPrimitives>>;
+
   return {
     streaming: {
-      node: renderer?.capabilities?.streaming?.node ?? DEFAULT_RENDERER_CAPABILITIES.streaming.node,
-      web: renderer?.capabilities?.streaming?.web ?? DEFAULT_RENDERER_CAPABILITIES.streaming.web,
+      ...defaultStreaming,
+      ...(Object.keys(runtimes).length > 0 ? { runtimes } : {}),
     },
     reconcilesRerenders:
       renderer?.capabilities?.reconcilesRerenders ??
@@ -168,6 +204,53 @@ export function getFarmRendererCapabilities(
       renderer?.capabilities?.functionComponents ??
       DEFAULT_RENDERER_CAPABILITIES.functionComponents,
   };
+}
+
+export function getFarmRendererStreamingCapabilitiesForRuntime(
+  renderer: Pick<FarmRenderer, "capabilities"> | undefined,
+  runtime: FarmRendererRuntime | "unknown",
+): FarmRendererStreamingPrimitives {
+  const streaming = getFarmRendererCapabilities(renderer).streaming;
+  if (runtime === "unknown") return { node: streaming.node, web: streaming.web };
+  return streaming.runtimes?.[runtime] ?? { node: streaming.node, web: streaming.web };
+}
+
+export function assertFarmRendererStreamingRuntime(
+  name: string,
+  renderer: Pick<FarmRenderer, "capabilities"> | undefined,
+  runtimeModule: Pick<
+    Partial<FarmServerRendererRuntime>,
+    "capabilities" | "renderToPipeableStream" | "renderToReadableStream"
+  >,
+  runtime: FarmRendererRuntime | "unknown",
+): FarmRendererStreamingPrimitives {
+  const declared = getFarmRendererStreamingCapabilitiesForRuntime(renderer, runtime);
+  const runtimeDeclaration = runtimeModule.capabilities?.streaming;
+
+  if (runtimeDeclaration) {
+    const advertised = getFarmRendererStreamingCapabilitiesForRuntime(
+      { capabilities: { streaming: runtimeDeclaration } },
+      runtime,
+    );
+    if ((declared.node && !advertised.node) || (declared.web && !advertised.web)) {
+      throw new Error(
+        `Renderer \`${name}\` server module advertises ${JSON.stringify(advertised)} streaming for the ${runtime} runtime, which does not satisfy its descriptor ${JSON.stringify(declared)}.`,
+      );
+    }
+  }
+
+  if (declared.node && typeof runtimeModule.renderToPipeableStream !== "function") {
+    throw new Error(
+      `Renderer \`${name}\` advertises Node streaming for the ${runtime} runtime but its server module does not export renderToPipeableStream().`,
+    );
+  }
+  if (declared.web && typeof runtimeModule.renderToReadableStream !== "function") {
+    throw new Error(
+      `Renderer \`${name}\` advertises Web streaming for the ${runtime} runtime but its server module does not export renderToReadableStream().`,
+    );
+  }
+
+  return declared;
 }
 
 export const FARM_COMPONENT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx"] as const;
@@ -236,7 +319,7 @@ export interface FarmServerRendererRuntime {
     element: unknown,
   ): { html: string; head: string } | Promise<{ html: string; head: string }>;
   /** Optional runtime copy of the descriptor capabilities for diagnostics. */
-  readonly capabilities?: FarmRendererCapabilities;
+  readonly capabilities?: FarmRendererCapabilitiesInput;
   /** Optional bootstrap required before this renderer hydrates server markup. */
   generateHydrationScript?: () => string;
   /** Optional component used to render route-level failures. */
@@ -271,7 +354,11 @@ export const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
     "react/jsx-dev-runtime",
   ],
   capabilities: {
-    streaming: { node: true, web: false },
+    streaming: {
+      node: true,
+      web: false,
+      runtimes: { edge: { node: false, web: true } },
+    },
     reconcilesRerenders: true,
     functionComponents: true,
   },
