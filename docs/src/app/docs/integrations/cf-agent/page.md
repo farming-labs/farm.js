@@ -86,6 +86,23 @@ Wrangler remains the source of truth for Agent bindings, compatibility flags, mi
 
 Create a new migration entry when adding, renaming, or deleting a Durable Object class. Never reuse a deployed migration tag.
 
+If you deploy with `environment`, declare `durable_objects` inside that environment too. Wrangler
+does not inherit `durable_objects` into an environment, so an environment that declares none
+deploys a Worker with no Agent bindings - Wrangler only warns, and every Agent request then fails
+at runtime. Farm refuses the build in that case and prints the bindings to copy. `migrations` and
+`compatibility_flags` are inherited and do not need repeating.
+
+```json
+{
+  "durable_objects": { "bindings": [{ "name": "CounterAgent", "class_name": "CounterAgent" }] },
+  "env": {
+    "staging": {
+      "durable_objects": { "bindings": [{ "name": "CounterAgent", "class_name": "CounterAgent" }] }
+    }
+  }
+}
+```
+
 ## Register the runtime
 
 **farm.config.ts**
@@ -195,17 +212,17 @@ managed startup. The application still owns the Agent class and bindings in both
 
 ## Options
 
-| Option          | Purpose                                                                     |
-| --------------- | --------------------------------------------------------------------------- |
-| `config`        | Wrangler config relative to `farm.config.ts`. Defaults to `wrangler.jsonc`. |
-| `routePrefix`   | Same-origin Agent route. Defaults to `/agents`.                             |
-| `origin`        | Existing Cloudflare Worker origin.                                          |
-| `environment`   | Wrangler environment used by development and deployment.                    |
-| `dev: false`    | Disable the managed Wrangler development process.                           |
-| `dev.port`      | Fixed local Wrangler port. Farm selects an available port by default.       |
-| `dev.remote`    | Use Wrangler remote development.                                            |
-| `dev.logs`      | Forward Wrangler output through the Farm logger. Defaults to `true`.        |
-| `dev.timeoutMs` | Maximum startup wait. Defaults to 60 seconds.                               |
+| Option          | Purpose                                                                                   |
+| --------------- | ----------------------------------------------------------------------------------------- |
+| `config`        | Wrangler config relative to `farm.config.ts`. Defaults to `wrangler.jsonc`.               |
+| `routePrefix`   | Same-origin Agent route. Defaults to `/agents`.                                           |
+| `origin`        | Existing Cloudflare Worker origin.                                                        |
+| `environment`   | Wrangler environment used by development and deployment. Needs its own `durable_objects`. |
+| `dev: false`    | Disable the managed Wrangler development process.                                         |
+| `dev.port`      | Fixed local Wrangler port. Farm selects an available port by default.                     |
+| `dev.remote`    | Use Wrangler remote development.                                                          |
+| `dev.logs`      | Forward Wrangler output through the Farm logger. Defaults to `true`.                      |
+| `dev.timeoutMs` | Maximum startup wait. Defaults to 60 seconds.                                             |
 
 ## Secure Agent routes
 

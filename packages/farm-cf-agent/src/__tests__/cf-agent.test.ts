@@ -203,6 +203,97 @@ export default { fetch() { return new Response("agent"); } };
     expect(generated.env.staging.main).toBe("./.farm/cf-agent/worker.mjs");
   });
 
+  describe("environment bindings", () => {
+    // Wrangler does not inherit `durable_objects` into an environment, so these
+    // cases are about what the selected env resolves to on its own.
+    const scaffold = async (config: string) => {
+      const root = await mkdtemp(join(tmpdir(), "farm-cf-agent-bindings-"));
+      const outputDir = join(root, ".output");
+      await mkdir(join(root, "src"), { recursive: true });
+      await mkdir(join(outputDir, "server"), { recursive: true });
+      await mkdir(join(outputDir, "public"), { recursive: true });
+      await writeFile(join(root, "wrangler.jsonc"), config);
+      await writeFile(
+        join(root, "src", "agent.mjs"),
+        `export class CounterAgent {}
+export default { fetch() { return new Response("agent"); } };
+`,
+      );
+      await writeFile(
+        join(outputDir, "server", "index.mjs"),
+        `export default { fetch() { return new Response("farm"); } };\n`,
+      );
+      return { root, outputDir };
+    };
+
+    const write = (project: { root: string; outputDir: string }, environment?: string) =>
+      writeCloudflareAgentOutput({
+        root: project.root,
+        outputDir: project.outputDir,
+        config: "wrangler.jsonc",
+        routePrefix: "/agents",
+        ...(environment ? { environment } : {}),
+      });
+
+    it("refuses an environment that would deploy with no Durable Object bindings", async () => {
+      const project = await scaffold(
+        `{
+          "name": "farm-agent",
+          "main": "src/agent.mjs",
+          "compatibility_date": "2026-07-16",
+          "durable_objects": { "bindings": [{ "name": "CounterAgent", "class_name": "CounterAgent" }] },
+          "env": { "staging": { "vars": { "TIER": "staging" } } }
+        }\n`,
+      );
+
+      // Wrangler resolves env.staging.durable_objects to `{ bindings: [] }` and
+      // only warns, so the deploy would succeed and every agent request fail.
+      await expect(write(project, "staging")).rejects.toThrow(
+        /env\.staging declares no Durable Object bindings/,
+      );
+      // The message must carry the bindings to copy, not just the diagnosis.
+      await expect(write(project, "staging")).rejects.toThrow(/"class_name":"CounterAgent"/);
+    });
+
+    it("accepts an environment that declares its own bindings", async () => {
+      const project = await scaffold(
+        `{
+          "name": "farm-agent",
+          "main": "src/agent.mjs",
+          "compatibility_date": "2026-07-16",
+          "durable_objects": { "bindings": [{ "name": "CounterAgent", "class_name": "CounterAgent" }] },
+          "env": {
+            "staging": {
+              "durable_objects": { "bindings": [{ "name": "CounterAgent", "class_name": "StagingCounter" }] }
+            }
+          }
+        }\n`,
+      );
+
+      const result = await write(project, "staging");
+      const generated = parse(await readFile(result.configPath, "utf8"));
+      // The environment's own topology is the user's call and stays untouched.
+      expect(generated.env.staging.durable_objects.bindings[0].class_name).toBe("StagingCounter");
+      expect(generated.durable_objects.bindings[0].class_name).toBe("CounterAgent");
+    });
+
+    it("leaves a project that declares no bindings anywhere alone", async () => {
+      const project = await scaffold(
+        `{
+          "name": "farm-agent",
+          "main": "src/agent.mjs",
+          "compatibility_date": "2026-07-16",
+          "env": { "staging": {} }
+        }\n`,
+      );
+
+      // Nothing is being dropped here, so this is not the failure to report.
+      await expect(write(project, "staging")).resolves.toMatchObject({
+        configPath: expect.any(String),
+      });
+    });
+  });
+
   it("rejects unbundled Workers because they cannot compose Farm", async () => {
     const root = await mkdtemp(join(tmpdir(), "farm-cf-agent-unbundled-"));
     await writeFile(join(root, "wrangler.jsonc"), '{"main":"agent.mjs","no_bundle":true}\n');
