@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ViteDevServer } from "vite";
 import { createServer } from "../server/create-server";
+import { getAvailablePort } from "./dev-server-port";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const temporaryRoots = new Set<string>();
@@ -65,7 +66,7 @@ describe("development client entry HMR teardown", () => {
       vite: { optimizeDeps: { noDiscovery: true, include: [] } },
     } as never);
     servers.add(server);
-    await server.listen(0);
+    await server.listen(await getAvailablePort());
     const address = server.httpServer?.address();
     if (!address || typeof address === "string") throw new Error("Missing dev server address");
 

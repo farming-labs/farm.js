@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer } from "../server/create-server";
+import { getAvailablePort } from "./dev-server-port";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const temporaryRoots = new Set<string>();
@@ -72,7 +73,7 @@ describe("development server close after the client entry transform", () => {
     // Default configuration: transforming the entry starts dependency
     // discovery, the exact state in which Vite 5.4's close() deadlocks.
     const server = await createServer({ root, images: { provider: "none" } });
-    await server.listen(0);
+    await server.listen(await getAvailablePort());
     const address = server.httpServer?.address();
     if (!address || typeof address === "string") throw new Error("Missing dev server address");
     await fetch(`http://localhost:${address.port}/@farm/client`).then((r) => r.text());
