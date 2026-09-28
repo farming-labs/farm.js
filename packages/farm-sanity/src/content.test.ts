@@ -82,11 +82,16 @@ describe("sanitySource writes", () => {
     const patch = vi.fn(() => ({ set }));
     const lookups: Array<{ query: string; params: unknown }> = [];
     const client = {
-      // Answers GROQ lookups; tests override `resolveTo` to steer resolution.
-      resolveTo: "d1" as string | null,
+      // The write path resolves a target by running the collection's own read
+      // query, so the stub answers with documents. Tests override `documents`
+      // to steer what the collection is considered to contain.
+      documents: [{ _id: "d1", _type: "post", slug: { current: "hello" } }] as Record<
+        string,
+        unknown
+      >[],
       fetch: vi.fn(async function (this: void, query: string, params: unknown) {
         lookups.push({ query, params });
-        return raw.resolveTo;
+        return raw.documents;
       }),
       withConfig: vi.fn(function (this: unknown) {
         return client;
@@ -121,31 +126,110 @@ describe("sanitySource writes", () => {
     const { client, raw, set } = writeStub();
     const source = sanitySource({ client, query: "q", writeToken: "wt" });
 
-    raw.resolveTo = "d1";
     await source.update!("hello", { data: { title: "Patched" } });
     expect(raw.patch).toHaveBeenCalledWith("d1");
     expect(set).toHaveBeenCalledWith({ title: "Patched" });
 
     // An editor reassigns the slug between writes: the next write must follow
     // the live mapping, not anything remembered from before.
-    raw.resolveTo = "d2";
+    raw.documents = [{ _id: "d2", _type: "post", slug: { current: "hello" } }];
     await source.update!("hello", { data: { title: "Again" } });
     expect(raw.patch).toHaveBeenLastCalledWith("d2");
   });
 
-  it("constrains the slug lookup to createType when configured", async () => {
+  it("resolves writes through the collection's own read query", async () => {
     const { client, lookups } = writeStub();
-    const source = sanitySource({ client, query: "q", writeToken: "wt", createType: "post" });
-    await source.update!("hello", { data: { title: "x" } });
-    expect(lookups[0]).toMatchObject({
-      query: expect.stringContaining("_type == $type"),
-      params: { id: "hello", type: "post" },
+    const source = sanitySource({
+      client,
+      query: '*[_type == "post"]',
+      params: { locale: "en" },
+      writeToken: "wt",
+      createType: "post",
     });
+
+    await source.update!("hello", { data: { title: "x" } });
+
+    // The write is addressed from the same query and params the read path uses,
+    // so a write can only ever target a document this collection reads.
+    expect(lookups[0]).toMatchObject({
+      query: '*[_type == "post"]',
+      params: { locale: "en" },
+    });
+  });
+
+  it("refuses a slug that belongs to a document the collection does not read", async () => {
+    const { client, raw } = writeStub();
+    // A `page` and a `post` share the slug "about". The collection reads posts,
+    // so deleting "about" must not destroy the page. An unconstrained slug
+    // lookup used to resolve whichever document Sanity returned first.
+    raw.documents = [{ _id: "post-about", _type: "post", slug: { current: "about" } }];
+    const source = sanitySource({ client, query: '*[_type == "post"]', writeToken: "wt" });
+
+    await source.delete!("about");
+    expect(raw.delete).toHaveBeenCalledWith("post-about");
+
+    // The same collection cannot reach a document outside its query at all.
+    raw.documents = [];
+    await expect(source.delete!("about")).rejects.toThrow(/could not resolve "about"/);
+    expect(raw.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the short projection when the query omits _id", async () => {
+    const { client, raw } = writeStub();
+    // Reads derive an id from the slug alone, so this collection loads fine;
+    // the write is the first thing that needs `_id`.
+    raw.documents = [{ slug: { current: "hello" } }];
+    const source = sanitySource({
+      client,
+      query: '*[_type == "post"]{ title, slug }',
+      writeToken: "wt",
+    });
+
+    await expect(source.update!("hello", { data: {} })).rejects.toThrow(
+      /without an `_id`.*Add `_id` to the collection query/s,
+    );
+    expect(raw.patch).not.toHaveBeenCalled();
+  });
+
+  it("still addresses a document by its own _id", async () => {
+    const { client, raw } = writeStub();
+    // With a custom `id` option the entry id need not be the slug, and callers
+    // may address a document by `_id` directly.
+    raw.documents = [{ _id: "doc-1", _type: "post", title: "Untitled" }];
+    const source = sanitySource({
+      client,
+      query: "q",
+      writeToken: "wt",
+      id: (doc) => String(doc.title),
+    });
+
+    await source.update!("doc-1", { data: { title: "Named" } });
+    expect(raw.patch).toHaveBeenCalledWith("doc-1");
+  });
+
+  it("keeps every readable entry writable in a multi-type collection", async () => {
+    const { client, raw } = writeStub();
+    // createType is only used for `create`. Constraining resolution to it made
+    // an entry of any other type in the collection unresolvable, so ordinary
+    // updates threw instead of writing.
+    raw.documents = [
+      { _id: "post-1", _type: "post", slug: { current: "a-post" } },
+      { _id: "page-1", _type: "page", slug: { current: "a-page" } },
+    ];
+    const source = sanitySource({
+      client,
+      query: '*[_type in ["post", "page"]]',
+      writeToken: "wt",
+      createType: "post",
+    });
+
+    await source.update!("a-page", { data: { title: "Edited" } });
+    expect(raw.patch).toHaveBeenCalledWith("page-1");
   });
 
   it("throws instead of mutating when the id cannot be resolved", async () => {
     const { client, raw } = writeStub();
-    raw.resolveTo = null;
+    raw.documents = [];
     const source = sanitySource({ client, query: "q", writeToken: "wt" });
 
     await expect(source.update!("ghost", { data: { title: "x" } })).rejects.toThrow(
