@@ -229,7 +229,10 @@ describe("production middleware HTTP behavior", () => {
       });
 
     const direct = await createRunner(false)(request());
-    expect(direct.headers.get("x-client-address")).toBe("127.0.0.1");
+    // No trusted proxy means there is no client address to report, and the
+    // runtime says so rather than inventing `127.0.0.1`. The property under
+    // test is unchanged and stronger: the forwarded 203.0.113.8 is not used.
+    expect(direct.headers.get("x-client-address")).toBe("missing");
 
     const proxied = await createRunner(true)(request());
     expect(proxied.headers.get("x-client-address")).toBe("203.0.113.8");
