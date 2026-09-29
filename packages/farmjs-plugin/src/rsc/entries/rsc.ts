@@ -27,9 +27,22 @@ export function generateRscEntry(ctx: EntryContext): string {
   });
 
   const debugLog = `// Debug disabled`;
+  const middlewareConfigImports = (ctx.middlewareConfigPaths ?? [])
+    .map(
+      (configPath, index) =>
+        `import * as FarmMiddlewareConfigModule${index} from ${JSON.stringify(
+          configPath.replace(/\\/g, "/"),
+        )};`,
+    )
+    .join("\n");
+  const middlewareConfigValues = (ctx.middlewareConfigPaths ?? []).map(
+    (_configPath, index) =>
+      `(FarmMiddlewareConfigModule${index}.default || FarmMiddlewareConfigModule${index})`,
+  );
   let code = `
 import React from 'react';
 import ServerErrorFallback from '/.farm/rsc-entries/error-fallback.tsx';
+${middlewareConfigImports}
 import { registerAPIRouteShape } from '@farm.js/core/api/runtime';
 import {
   renderToReadableStream,
@@ -307,7 +320,14 @@ async function handleAPIRequest(request) {
     });
   }
 }
+const farmRuntimeConfigs = [${middlewareConfigValues.join(", ")}].filter(Boolean);
+const farmConfigMiddleware = farmRuntimeConfigs.flatMap((config) => {
+  const middleware = config.middleware;
+  if (!middleware) return [];
+  return Array.isArray(middleware) ? middleware : [middleware];
+});
 const farmMiddlewareRunner = createProductionMiddlewareRunner({
+  config: farmConfigMiddleware,
   modules: Object.entries(middlewares).map(([filePath, module]) => ({
     path: middlewarePathToRoute(filePath),
     filePath,

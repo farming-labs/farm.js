@@ -33,6 +33,7 @@ import { init as initModuleLexer, parse as parseModuleImports } from "es-module-
 import type { FarmRscPluginOptions, EntryContext } from "./types.js";
 import type { FarmServerActionsConfig } from "@farm.js/core/server-action-security";
 import type { FarmAPIConfig } from "@farm.js/core/api";
+import type { FarmMiddlewareConfig } from "@farm.js/core/middleware";
 import type { FarmServerConfig } from "@farm.js/core/internal/production-runtime";
 import type { FarmLayerEntry, ResolvedFarmLayer } from "@farm.js/core/server";
 import { farmEnvironmentFunctionsPlugin } from "@farm.js/core/environment/vite";
@@ -52,6 +53,7 @@ import { transformAutomaticOptimizedBoundaries } from "./automatic-optimized-bou
 import { resolveRscBuildOutputPath } from "./build-paths.js";
 import { assertRscPackageCompatibility } from "./compatibility.js";
 import { sendRscDevelopmentResponse } from "./dev-response.js";
+import { loadRscMiddlewareConfigModule } from "./middleware-config-module.js";
 import fs from "fs/promises";
 import path from "path";
 import { devServableFileExists } from "../dev-static.js";
@@ -108,6 +110,7 @@ export interface FarmRscConfig {
   basePath?: string;
   api?: FarmAPIConfig;
   server?: FarmServerConfig;
+  middleware?: FarmMiddlewareConfig;
   port?: number;
   experimental?: {
     /**
@@ -275,7 +278,64 @@ const VIRTUAL_CLIENT_ENTRY = "virtual:@farm.js/rsc/entry-client";
 const VIRTUAL_HYDRATE_ENTRY = "virtual:@farm.js/rsc/hydrate";
 const OPTIMIZED_BOUNDARY_ADAPTER = "@farm.js/plugin/rsc/optimized-boundary";
 const STRATA_PACKAGE = "@farming-labs/strata";
+const RSC_MIDDLEWARE_CONFIG_QUERY = "?farm-rsc-middleware";
 const FARM_CORE_PACKAGE_ROOT = path.resolve(path.dirname(require_.resolve("@farm.js/core")), "..");
+const FARM_CONFIG_FILENAMES = [
+  "farm.config.ts",
+  "farm.config.tsx",
+  "farm.config.mts",
+  "farm.config.cts",
+  "farm.config.js",
+  "farm.config.jsx",
+  "farm.config.mjs",
+  "farm.config.cjs",
+  "config.ts",
+  "config.tsx",
+  "config.mts",
+  "config.cts",
+  "config.js",
+  "config.jsx",
+  "config.mjs",
+  "config.cjs",
+] as const;
+
+function hasFarmMiddlewareConfig(config: FarmMiddlewareConfig | undefined): boolean {
+  if (!config) return false;
+  if (Array.isArray(config)) return config.length > 0;
+
+  const entry = config as Record<string, unknown>;
+  return Boolean(
+    entry.matcher ||
+    entry.exclude ||
+    entry.runtime ||
+    entry.handler ||
+    (Array.isArray(entry.handlers) && entry.handlers.length > 0),
+  );
+}
+
+async function findFarmConfigPath(root: string): Promise<string | null> {
+  for (const fileName of FARM_CONFIG_FILENAMES) {
+    const candidate = path.join(root, fileName);
+    try {
+      if ((await fs.stat(candidate)).isFile()) return candidate;
+    } catch {
+      // Continue checking supported config names.
+    }
+  }
+  return null;
+}
+
+async function resolveMiddlewareConfigPaths(
+  root: string,
+  layers: readonly ResolvedFarmLayer[] | undefined,
+): Promise<string[]> {
+  const paths = (layers ?? []).flatMap((layer) =>
+    layer.configFile ? [path.resolve(layer.configFile)] : [],
+  );
+  const projectConfigPath = await findFarmConfigPath(root);
+  if (projectConfigPath) paths.push(projectConfigPath);
+  return [...new Set(paths)];
+}
 
 function isOptimizedBoundaryModule(id: string): boolean {
   return (
@@ -537,6 +597,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   // Context passed to entry generators
   let entryContext: EntryContext;
   let rscBuildRoot: string | undefined;
+  const middlewareConfigModules = new Map<string, string>();
 
   // Store for debugging
   const debug = options.debug ?? false;
@@ -646,6 +707,19 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   return [
     farmEnvironmentFunctionsPlugin() as unknown as Plugin,
     {
+      name: "@farm.js/plugin/rsc:middleware-config",
+      enforce: "pre",
+
+      resolveId(id) {
+        if (!id.endsWith(RSC_MIDDLEWARE_CONFIG_QUERY)) return null;
+        return id.replace(/\\/g, "/");
+      },
+
+      load(id) {
+        return middlewareConfigModules.get(id.replace(/\\/g, "/")) ?? null;
+      },
+    },
+    {
       name: "@farm.js/plugin/rsc:core-runtime",
       // Run after Vite/esbuild has lowered TS/JSX. es-module-lexer deliberately
       // parses JavaScript module syntax and rejects raw JSX expression text.
@@ -702,6 +776,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           generateBuildId?: () => string | Promise<string>;
           cache?: FarmCacheUserConfig;
           i18n?: FarmI18nUserConfig | false;
+          middleware?: FarmMiddlewareConfig;
         };
         // Check if user enabled RSC in their config
         rscEnabled = c.experimental?.serverComponents === true;
@@ -739,6 +814,37 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
             mode: process.env.NODE_ENV === "production" ? "production" : "development",
           });
           Object.assign(c, layerResolution.config);
+        }
+
+        middlewareConfigModules.clear();
+        const middlewareConfigPaths: string[] = [];
+        if (hasFarmMiddlewareConfig(c.middleware)) {
+          const configPaths = await resolveMiddlewareConfigPaths(root, c.layers);
+          if (configPaths.length === 0) {
+            throw new Error(
+              "[Farm.js] RSC config middleware requires an importable farm.config file. " +
+                "Move the middleware to farm.config.ts or src/app/middleware.ts.",
+            );
+          }
+          for (const configPath of configPaths) {
+            const extracted = await loadRscMiddlewareConfigModule(configPath);
+            if (extracted.kind === "unsupported") {
+              throw new Error(
+                `[Farm.js] Cannot extract RSC config middleware from ${configPath}: ${extracted.reason}. ` +
+                  "Declare middleware directly in defineConfig({ middleware: ... }) or move it to src/app/middleware.ts.",
+              );
+            }
+            if (extracted.kind === "absent") continue;
+            const moduleId = `${configPath.replace(/\\/g, "/")}${RSC_MIDDLEWARE_CONFIG_QUERY}`;
+            middlewareConfigModules.set(moduleId, extracted.code);
+            middlewareConfigPaths.push(moduleId);
+          }
+          if (middlewareConfigPaths.length === 0) {
+            throw new Error(
+              "[Farm.js] RSC config middleware could not be traced to an explicit middleware property. " +
+                "Declare middleware directly in defineConfig({ middleware: ... }) or move it to src/app/middleware.ts.",
+            );
+          }
         }
 
         // Read user's directory configuration
@@ -809,6 +915,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
             basePath: c.basePath ?? "/",
           }),
           server: { trustProxy: resolveFarmServerConfig(c.server).trustProxy },
+          middlewareConfigPaths,
           debug,
           development: env.command === "serve",
           clientCachePersistence: generateClientCachePersistenceCode(

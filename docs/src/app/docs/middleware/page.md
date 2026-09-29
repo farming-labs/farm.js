@@ -12,10 +12,13 @@ Run request behavior before routes, pass request-scoped data to pages, and short
 
 Farm runs middleware in development and production builds. For every request, Farm finds matching `farm.config.ts` middleware entries first, then matching `src/app/**/middleware.ts` files from the root segment down to the route segment.
 
-Apps with `experimental.serverComponents` run `src/app/**/middleware.ts` files, but not
-`farm.config.ts` middleware entries or the global `middleware: { matcher }` gate. Config entries
-carry handler and matcher functions, and the React Server Components entry does not load
-`farm.config.ts` at runtime. Put middleware an RSC app needs in `src/app/**/middleware.ts`.
+Apps with `experimental.serverComponents` run both middleware forms through the same request
+pipeline. Farm extracts an explicit `middleware` property and the imports and local bindings it
+references into a server-only RSC module. This preserves handler closures, regular-expression
+matchers, and function matchers without shipping unrelated build plugins or integrations. Config
+middleware still runs before matching `src/app/**/middleware.ts` files. Farm reports an error for a
+dynamic config shape or a spread that makes the middleware value ambiguous; declare the property
+directly or move that middleware to `src/app/**/middleware.ts`.
 
 In development, a middleware edit is activated only after the complete middleware tree loads
 successfully. A syntax or import error is reported through Vite while the last valid tree remains

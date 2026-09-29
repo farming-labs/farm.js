@@ -57,4 +57,20 @@ describe("generated middleware runner options", () => {
     expect(entry).toContain("i18n: undefined");
     expect(entry).toContain("server: undefined");
   });
+
+  it("imports live middleware configs in layer-to-project order", () => {
+    const entry = generateRscEntry({
+      ...context,
+      middlewareConfigPaths: ["C:\\layers\\base\\farm.config.ts", "/app/farm.config.ts"],
+    });
+
+    expect(entry).toContain(
+      'import * as FarmMiddlewareConfigModule0 from "C:/layers/base/farm.config.ts";',
+    );
+    expect(entry).toContain('import * as FarmMiddlewareConfigModule1 from "/app/farm.config.ts";');
+    expect(entry).toContain(
+      "const farmRuntimeConfigs = [(FarmMiddlewareConfigModule0.default || FarmMiddlewareConfigModule0), (FarmMiddlewareConfigModule1.default || FarmMiddlewareConfigModule1)].filter(Boolean);",
+    );
+    expect(entry).toContain("config: farmConfigMiddleware");
+  });
 });

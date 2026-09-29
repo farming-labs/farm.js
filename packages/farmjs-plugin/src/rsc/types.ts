@@ -107,6 +107,13 @@ export interface EntryContext {
    */
   server?: { trustProxy: boolean };
 
+  /**
+   * Ordered config modules that can contribute live middleware handlers.
+   * Layer configs come first and the application config comes last, matching
+   * Farm's normal config merge order.
+   */
+  middlewareConfigPaths?: string[];
+
   /** Whether debug mode is enabled */
   debug: boolean;
 
