@@ -18,8 +18,11 @@ type StreamRenderer = {
 
 // The production stream renderer only exists inside the generated-entry
 // template, so extract it from the source and instantiate it with the same
-// helpers the generated module imports from the production runtime.
-function instantiateStreamRenderer(): StreamRenderer {
+// helpers the generated module imports from the production runtime, plus the
+// streaming primitives the generated entry resolves for the target runtime.
+function instantiateStreamRenderer(
+  streamingCapabilities = { node: true, web: true },
+): StreamRenderer {
   const source = fs.readFileSync(
     path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
     "utf-8",
@@ -31,9 +34,10 @@ function instantiateStreamRenderer(): StreamRenderer {
   const factory = new Function(
     "isFarmRedirectError",
     "isFarmNotFoundError",
+    "farmRendererStreamingCapabilities",
     `${source.slice(start, end)}\nreturn { renderFarmElement, renderFarmElementToString };`,
   );
-  return factory(isFarmRedirectError, isFarmNotFoundError) as StreamRenderer;
+  return factory(isFarmRedirectError, isFarmNotFoundError, streamingCapabilities) as StreamRenderer;
 }
 
 function captureThrown(throwing: () => never): unknown {
@@ -160,5 +164,50 @@ describe("generated production stream renderer control-flow errors", () => {
       "boom",
     );
     expect(consoleError).toHaveBeenCalledWith("[Farm SSR stream]", expect.any(Error));
+  });
+
+  it("takes only the stream primitive the resolved runtime declares", async () => {
+    const calls: string[] = [];
+    const encoder = new TextEncoder();
+    // React 19's Node server build exports both primitives.
+    const bothPrimitives = {
+      renderToReadableStream: async () => {
+        calls.push("web");
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode("<div>web</div>"));
+            controller.close();
+          },
+        });
+        return Object.assign(stream, { allReady: Promise.resolve() });
+      },
+      renderToPipeableStream: (
+        _element: unknown,
+        options: { onShellReady: () => void; onAllReady: () => void },
+      ) => {
+        calls.push("node");
+        options.onAllReady();
+        queueMicrotask(() => options.onShellReady());
+        return {
+          pipe(destination: { write: (chunk: unknown) => boolean; end: () => void }) {
+            destination.write("<div>node</div>");
+            destination.end();
+            return destination;
+          },
+        };
+      },
+    };
+
+    const nodeTarget = await instantiateStreamRenderer({
+      node: true,
+      web: false,
+    }).renderFarmElement(bothPrimitives, null);
+    const edgeTarget = await instantiateStreamRenderer({
+      node: false,
+      web: true,
+    }).renderFarmElement(bothPrimitives, null);
+    expect(calls).toEqual(["node", "web"]);
+    expect(nodeTarget.html).toBe("<div>node</div>");
+    expect(edgeTarget.html).toBe("<div>web</div>");
   });
 });
