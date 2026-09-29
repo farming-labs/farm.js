@@ -111,10 +111,18 @@ function exportedNames(relativePath) {
   return names;
 }
 
+function primitivesLabel(primitives = {}) {
+  if (primitives.node && primitives.web) return "Node + Web";
+  if (primitives.node) return "Node";
+  if (primitives.web) return "Web";
+  return undefined;
+}
+
 function streamingLabel(renderer, streaming = {}) {
-  if (streaming.node && streaming.web) return "Node + Web";
-  if (streaming.node) return "Node";
-  if (streaming.web) return "Web";
+  const label = primitivesLabel(streaming);
+  const edge = streaming.runtimes?.edge && primitivesLabel(streaming.runtimes.edge);
+  if (label && edge && edge !== label) return `${label} (${edge} on edge targets)`;
+  if (label) return label;
   const serverTestPath = renderer.serverPath.replace(
     "/src/server.ts",
     "/src/__tests__/renderer.test.ts",

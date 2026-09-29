@@ -41,11 +41,11 @@ so entry-point or capability changes cannot silently leave the documentation sta
 
 | Renderer | SSR | Streaming                                                                                                                | Hydration | Component head output | Route updates                         | Plain functions |
 | -------- | --- | ------------------------------------------------------------------------------------------------------------------------ | --------- | --------------------- | ------------------------------------- | --------------- |
-| React    | Yes | Node                                                                                                                     | Yes       | Framework metadata    | Reconciles                            | Yes             |
+| React    | Yes | Node (Web on edge targets)                                                                                               | Yes       | Framework metadata    | Reconciles                            | Yes             |
 | Preact   | Yes | Node + Web                                                                                                               | Yes       | Framework metadata    | Reconciles                            | Yes             |
 | Solid    | Yes | Node + Web                                                                                                               | Yes       | Framework metadata    | Remounts ([why](#re-render-behavior)) | Yes             |
 | Vue      | Yes | Node + Web                                                                                                               | Yes       | Framework metadata    | Reconciles                            | Yes             |
-| Svelte   | Yes | Buffered ([test](https://github.com/farming-labs/farm.js/blob/main/packages/farm-svelte/src/__tests__/renderer.test.ts)) | Yes       | Native + framework    | Remounts ([why](#re-render-behavior)) | Yes             |
+| Svelte   | Yes | Buffered ([test](https://github.com/farming-labs/farm.js/blob/main/packages/farm-svelte/src/__tests__/renderer.test.ts)) | Yes       | Native + framework    | Reconciles                            | Yes             |
 
 <!-- renderer-capability-matrix:end -->
 
