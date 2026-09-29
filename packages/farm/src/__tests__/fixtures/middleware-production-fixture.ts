@@ -37,10 +37,27 @@ export async function createMiddlewareProductionFixture(): Promise<string> {
     recursive: true,
   });
   await fs.writeFile(path.join(root, "package.json"), JSON.stringify({ type: "module" }, null, 2));
+  // A layer that ships config middleware. Layers append their middleware ahead
+  // of the project's, in development and in the built app alike.
+  await fs.mkdir(path.join(root, "layers", "guard"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "layers", "guard", "farm.config.ts"),
+    `
+export default {
+  middleware: {
+    matcher: "/dashboard/settings",
+    handler(ctx) {
+      ctx.headers.set("x-layer-middleware", "yes");
+    },
+  },
+};
+`.trim(),
+  );
   await fs.writeFile(
     path.join(root, "farm.config.ts"),
     `
 export default {
+  extends: ["./layers/guard"],
   srcDir: "src",
   experimental: {
     ppr: true,

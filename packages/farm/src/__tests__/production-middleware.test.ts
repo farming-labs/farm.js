@@ -188,6 +188,8 @@ describe("production middleware runtime", () => {
 
       expect(response.status).toBe(200);
       expect(response.headers.get("x-farm-middleware")).toBe("yes");
+      // Config middleware from a layer runs in the built app as it does in dev.
+      expect(response.headers.get("x-layer-middleware")).toBe("yes");
       expect(response.headers.get("cache-control")).toBe("private, no-store");
       // Agent JSON-LD from the resolved agent config is baked into the document head.
       expect(html).toContain('<script type="application/ld+json">');
@@ -240,7 +242,11 @@ describe("production middleware runtime", () => {
       expect(html).toContain('<meta property="og:image:width" content="2">');
       expect(html).toContain('<meta property="og:image:height" content="1">');
       expect(html).toContain('<meta property="og:image:alt" content="Dashboard preview">');
+      // The guard layer's config middleware, the project's config middleware,
+      // then the dashboard file middleware.
       expect((globalThis as any).__farmMiddlewareEvents.map((event: any) => event.type)).toEqual([
+        "middleware.start",
+        "middleware.complete",
         "middleware.start",
         "middleware.complete",
         "middleware.start",

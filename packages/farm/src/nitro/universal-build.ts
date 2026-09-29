@@ -5054,6 +5054,16 @@ const farmUserConfig = ${
   };
 const farmRuntimeConfigs = [${[...layerConfigValues, "farmUserConfig"].join(", ")}].filter(Boolean);
 const farmResolvedRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs);
+// Config middleware from layers is appended in layer order ahead of the
+// project's, the same merge development applies (mergeFarmLayerConfig).
+// Object.assign above would keep only the last config's middleware.
+const farmMiddlewareConfig = farmRuntimeConfigs.reduce((merged, runtimeConfig) => {
+  const value = runtimeConfig?.middleware;
+  if (value === undefined) return merged;
+  if (merged === undefined) return value;
+  const toList = (entry) => (entry == null ? [] : Array.isArray(entry) ? entry : [entry]);
+  return [...toList(merged), ...toList(value)];
+}, undefined);
 setFarmBasePath(${JSON.stringify(config.basePath)});
 setFarmTrailingSlashPreference(${JSON.stringify(config.trailingSlash)});
 const hasConfiguredRouteContext = typeof farmResolvedRuntimeConfig.context === "function";
@@ -6085,7 +6095,7 @@ const fileMiddlewareModules = [${middlewareRegistrations.join(",")}
 const farmMiddlewareRunner = ${
     hasMiddlewareRuntime
       ? `createProductionMiddlewareRunner({
-  config: farmUserConfig?.middleware,
+  config: farmMiddlewareConfig,
   modules: fileMiddlewareModules,
   i18n: farmI18nConfig,
   server: farmServerConfig,
