@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  Farm.js combines Vite's instant development experience with typed app-directory routing, secure Server Actions, streaming SSR, and production-ready deployment output. React is the default renderer, with first-class Preact, Solid, Vue, and Svelte support behind the same routing and server contracts.
+  Farm.js combines Vite's instant development experience with typed app-directory routing, secure Server Actions, streaming SSR, and production-ready deployment output. React is the default renderer, and beta Preact, Solid, Vue, and Svelte adapters use the same routing and server contracts. See <a href="https://farmjs.dev/docs/stability">Stability and Support</a> for what 0.1 covers.
 </p>
 
 <p align="center">
