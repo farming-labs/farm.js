@@ -55,7 +55,12 @@ function collectNodeImports(entry: string): { file: string; specifier: string }[
 
     for (const specifier of valueSpecifiers(readFileSync(file, "utf8"))) {
       if (specifier.startsWith("node:")) {
-        offenders.push({ file: path.relative(SRC, file), specifier });
+        // Posix separators so the assertion reads the same on Windows, where
+        // `path.relative` returns `i18n\\config.ts`.
+        offenders.push({
+          file: path.relative(SRC, file).split(path.sep).join("/"),
+          specifier,
+        });
         continue;
       }
       if (!specifier.startsWith(".")) continue;
