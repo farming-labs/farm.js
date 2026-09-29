@@ -289,9 +289,22 @@ function createRscRequest(event) {
   return new Request(request, { signal: controller.signal });
 }
 
+// The peer address the server adapter already knows; the rebuilt Request has
+// no socket. Mirrors h3's getRequestIP without the forwarded header, which only
+// trustProxy may honor.
+function resolveClientAddress(event) {
+  try {
+    return event.req?.context?.clientAddress || event.req?.ip ||
+      event.node?.req?.socket?.remoteAddress || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export default defineEventHandler(async (event) => {
   const response = await handler(createRscRequest(event), {
     waitUntil: (promise) => event.waitUntil(promise),
+    clientAddress: resolveClientAddress(event),
   });
   // H3's prepared headers override Response headers. Keep both the runtime's
   // fields (e.g. Accept-Encoding from static middleware) and the app's fields.

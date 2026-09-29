@@ -359,8 +359,10 @@ function middlewarePathToRoute(filePath) {
 /**
  * Execute middleware chain for a request
  */
-async function executeMiddleware(request) {
-  return farmMiddlewareRunner(request);
+async function executeMiddleware(request, context) {
+  // The Request was rebuilt by the Nitro handler and has no socket; the
+  // handler passes the connection's address alongside it.
+  return farmMiddlewareRunner(request, { clientAddress: context?.clientAddress });
 }
 
 /**
@@ -495,7 +497,7 @@ function getMatchingBoundary(pageFilePath, modules, kind) {
  * Main request handler - entry point for both dev and production (Nitro).
  * Exported as { fetch: handler } for the RSC/Nitro contract (see vite-plugin-rsc-deploy-example).
  */
-async function handleFarmRequest(request) {
+async function handleFarmRequest(request, context) {
   let url = new URL(request.url);
   let matchedPage = null;
   let errorData = new Map();
@@ -535,7 +537,7 @@ async function handleFarmRequest(request) {
   }
 
   // Execute middleware first
-  const middlewareResult = await executeMiddleware(request);
+  const middlewareResult = await executeMiddleware(request, context);
   
   // If middleware handled the request (e.g., redirect, auth), return the response
   if (middlewareResult.response) {
@@ -981,7 +983,7 @@ async function handler(request, context) {
     dispatch: async (localRequest) =>
       (await handleAPIRequest(localRequest)) ?? Response.json({ error: 'Not Found' }, { status: 404 }),
   }, () => _runWithCurrentRequest(request, () =>
-    _runWithAfterRequest(request, () => handleFarmRequest(request), context)
+    _runWithAfterRequest(request, () => handleFarmRequest(request, context), context)
   ));
 }
 

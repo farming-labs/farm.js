@@ -57,6 +57,17 @@ describe("middleware options reach the generated RSC entry", () => {
     expect(entry).toContain('server: {"trustProxy":true}');
   });
 
+  it("hands the connection's client address to middleware", async () => {
+    const entry = await generateEntry({});
+    // The Nitro handler passes it in the fetch context; the Request it rebuilt
+    // has no socket, so without this the default rate-limit key has nothing.
+    expect(entry).toContain("handleFarmRequest(request, context)");
+    expect(entry).toContain(
+      "farmMiddlewareRunner(request, { clientAddress: context?.clientAddress })",
+    );
+    expect(entry).toContain("await executeMiddleware(request, context)");
+  });
+
   it("does not invent trustProxy for an app that never set it", async () => {
     const entry = await generateEntry({});
     expect(entry).toContain('server: {"trustProxy":false}');

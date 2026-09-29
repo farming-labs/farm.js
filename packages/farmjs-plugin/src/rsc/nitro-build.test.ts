@@ -96,13 +96,15 @@ globalThis.__VITE_RSC_LOAD_SSR__ = () => import("/project/.nitro/vite/dist/ssr/i
         `import colors from "picocolors";
 import { render } from "@farming-labs/strata";
 export default {
-  async fetch() {
+  async fetch(request, context) {
     const ssr = await globalThis.__VITE_RSC_LOAD_SSR__();
     const fragment = render({
       type: "document",
       children: [{ type: "element", tag: "strong", children: [{ type: "text", value: "native" }] }],
     });
-    return new Response(colors.green(ssr.render()) + ":" + fragment.html);
+    return new Response(
+      colors.green(ssr.render()) + ":" + fragment.html + ":" + (context?.clientAddress ?? "missing"),
+    );
   },
 };`,
       );
@@ -181,7 +183,11 @@ export function render() {
       expect(response, logs).toBeDefined();
       expect(response?.status, logs).toBe(200);
       const body = await response?.text();
-      expect(body?.replace(/\u001b\[[0-9;]*m/g, "")).toBe("standalone-rsc:<strong>native</strong>");
+      // The handler rebuilds the Request, which has no socket, so it hands the
+      // connection's address to the entry for middleware to key on.
+      expect(body?.replace(/\u001b\[[0-9;]*m/g, "")).toMatch(
+        /^standalone-rsc:<strong>native<\/strong>:(::ffff:)?127\.0\.0\.1$/,
+      );
     } finally {
       if (child) await stopProcess(child);
       rmSync(fixtureRoot, { recursive: true, force: true });
