@@ -67,6 +67,10 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.node-version == '22.13'
         run: pnpm test:packed-integrations
 
+      - name: Smoke-test the default app from packed artifacts
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '22.13'
+        run: pnpm test:packed-app
+
       - name: Check committed generated types
         if: matrix.os == 'ubuntu-latest' && matrix.node-version == '22.13'
         run: pnpm --dir docs exec farm generate --check
