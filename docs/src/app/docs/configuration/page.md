@@ -539,7 +539,16 @@ security: {
 
 You can also pass an already serialized policy as `csp: "default-src 'self'; object-src 'none'"`. The longer `contentSecurityPolicy` config name is intentionally unsupported; use `csp`.
 
-Farm currently emits small inline hydration and route-state bootstraps, so the compatible example allows inline scripts and styles. A stricter policy must supply correct hashes or renderer-generated nonces for every trusted inline bootstrap. Start with `reportOnly`, inspect violations, and enforce only after the deployed HTML and every third-party integration satisfy the policy.
+Farm currently emits small inline hydration, theme, and route-state bootstraps, so the compatible example allows inline scripts and styles. Keep `reportOnly` on while auditing, inspect violations, and enforce only after the deployed HTML and every third-party integration satisfy the policy.
+
+### Strict script policies are not supported yet
+
+Farm's inline scripts carry no nonce, and their content changes per page, so neither a nonce nor a hash can allow them. The directive that governs script elements (`script-src-elem`, then `script-src`, then `default-src`) must therefore:
+
+- include `'unsafe-inline'`, and
+- list no `'nonce-…'`, `'sha256-…'`/`'sha384-…'`/`'sha512-…'`, or `'strict-dynamic'` source. Browsers ignore `'unsafe-inline'` as soon as any of those is present, which blocks Farm's scripts and stops hydration.
+
+Farm checks the resolved policy at startup and warns when it would block these scripts. Per-request nonce support is tracked in [#1275](https://github.com/farming-labs/farm.js/issues/1275). You can still restrict script origins, `object-src`, `base-uri`, `frame-ancestors`, `form-action`, and the other directives above.
 
 ## Server HTTP policy
 

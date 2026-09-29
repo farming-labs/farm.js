@@ -144,33 +144,34 @@ export function getFarmSecurityHeader(
  * Whether a resolved CSP would block the inline scripts the framework injects
  * into SSR documents (theme bootstrap, hydration bootstraps).
  *
- * The scripts carry no nonce or hash yet (see the CSP-nonce RFC), so they run
- * only when the governing directive — `script-src`, falling back to
- * `default-src` — permits inline script either via `'unsafe-inline'` or by
- * listing a nonce/hash source. A policy with no script-governing directive at
- * all does not restrict inline scripts, so it is not flagged. When a nonce or
- * hash is already present the app is assumed to be managing inline sources
- * deliberately and is left alone, to avoid nagging a correct-by-construction
- * setup.
+ * Those scripts carry no nonce, and their content varies per page, so a hash
+ * cannot allow them either (see the CSP-nonce RFC). They run only when the
+ * governing directive (`script-src-elem`, then `script-src`, then
+ * `default-src`) allows `'unsafe-inline'` and lists no nonce, hash, or
+ * `'strict-dynamic'` source: browsers ignore `'unsafe-inline'` as soon as any
+ * of those is present. A policy with no script-governing directive does not
+ * restrict inline scripts, so it is not flagged.
  */
 export function farmCspBlocksFrameworkInlineScripts(security: ResolvedFarmSecurityConfig): boolean {
   if (!security.csp) return false;
 
   const directives = parseCspDirectives(security.csp.value);
-  const governing = directives.get("script-src") ?? directives.get("default-src");
+  const governing =
+    directives.get("script-src-elem") ??
+    directives.get("script-src") ??
+    directives.get("default-src");
   if (!governing) return false;
 
-  const allowsInline = governing.some((source) => {
-    const value = source.toLowerCase();
-    return (
-      value === "'unsafe-inline'" ||
+  const sources = governing.map((source) => source.toLowerCase());
+  const disablesUnsafeInline = sources.some(
+    (value) =>
+      value === "'strict-dynamic'" ||
       value.startsWith("'nonce-") ||
       value.startsWith("'sha256-") ||
       value.startsWith("'sha384-") ||
-      value.startsWith("'sha512-")
-    );
-  });
-  return !allowsInline;
+      value.startsWith("'sha512-"),
+  );
+  return !sources.includes("'unsafe-inline'") || disablesUnsafeInline;
 }
 
 function parseCspDirectives(value: string): Map<string, string[]> {

@@ -114,9 +114,20 @@ describe("farmCspBlocksFrameworkInlineScripts", () => {
     expect(blocks("script-src 'self' 'unsafe-inline'")).toBe(false);
   });
 
-  it("does not flag a nonce or hash source", () => {
-    expect(blocks("script-src 'self' 'nonce-abc123'")).toBe(false);
-    expect(blocks("script-src 'self' 'sha256-abcd'")).toBe(false);
+  it("flags nonce, hash, and strict-dynamic sources because Farm's scripts carry none", () => {
+    expect(blocks("script-src 'self' 'nonce-abc123'")).toBe(true);
+    expect(blocks("script-src 'self' 'sha256-abcd'")).toBe(true);
+    expect(blocks("script-src 'strict-dynamic' 'unsafe-inline'")).toBe(true);
+  });
+
+  it("flags 'unsafe-inline' when a nonce or hash makes browsers ignore it", () => {
+    expect(blocks("script-src 'self' 'unsafe-inline' 'nonce-abc123'")).toBe(true);
+    expect(blocks("default-src 'self' 'unsafe-inline' 'sha384-abcd'")).toBe(true);
+  });
+
+  it("prefers script-src-elem for script elements", () => {
+    expect(blocks("script-src 'self' 'unsafe-inline'; script-src-elem 'self'")).toBe(true);
+    expect(blocks("script-src 'self'; script-src-elem 'self' 'unsafe-inline'")).toBe(false);
   });
 
   it("prefers script-src over default-src", () => {
