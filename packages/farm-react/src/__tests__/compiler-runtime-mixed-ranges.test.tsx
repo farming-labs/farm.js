@@ -706,6 +706,94 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
     expect(surface.querySelector('[data-key="b"]')).toBe(beta);
   });
 
+  it("validates every refreshed mixed range before applying conditional bindings", async () => {
+    const hmrId = `mixed-ranges-atomic-conditional-refresh-${Math.random()}`;
+    const definePanel = (version: string) =>
+      createCompiledComponent({
+        displayName: "AtomicConditionalRefreshMixedRanges",
+        hmrId,
+        stateSignature: "stable",
+        initialize: () => [],
+        render(_props: Record<string, never>, _state, blocks) {
+          const MixedRanges = blocks.MixedRanges;
+          const firstBranch: CompilerHostConditionalBranch = {
+            create: () => host("p", [host("span", [version])]),
+            bindings: [{ kind: "text", path: [0], read: () => version }],
+          };
+          const secondBranch = branch(() => host("aside", [host("span", ["Stable"])]));
+          const create = (): CompilerHostElement => ({
+            ...host("section", [firstBranch.create(), secondBranch.create()]),
+            block: {
+              kind: "mixed-ranges",
+              id: 0,
+              ranges: [
+                {
+                  kind: "conditional",
+                  before: 0,
+                  test: () => true,
+                  truthy: firstBranch,
+                },
+                {
+                  kind: "conditional",
+                  before: 0,
+                  test: () => true,
+                  truthy: secondBranch,
+                },
+              ],
+              trailing: 0,
+            },
+          });
+          return (
+            <MixedRanges
+              id={0}
+              create={create}
+              render={() => (
+                <section>
+                  <p>
+                    <span>{version}</span>
+                  </p>
+                  <aside>
+                    <span>Stable</span>
+                  </aside>
+                </section>
+              )}
+            />
+          );
+        },
+        bindings: [{ kind: "block" as const, id: 0, dependencies: [] }],
+      });
+
+    const InitialPanel = definePanel("v1");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<InitialPanel />));
+
+    const firstBranchTarget = container.querySelector("p span")!;
+    const invalidTarget = document.createElement("em");
+    invalidTarget.textContent = "Stable";
+    container.querySelector("aside span")!.replaceWith(invalidTarget);
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(firstBranchTarget, { childList: true, characterData: true, subtree: true });
+
+    let RefreshedPanel = InitialPanel;
+    await act(async () => {
+      RefreshedPanel = definePanel("v2");
+      root.render(<RefreshedPanel />);
+      await flushCompilerUpdates();
+    });
+    mutations.push(...observer.takeRecords());
+    observer.disconnect();
+
+    expect(RefreshedPanel).toBe(InitialPanel);
+    expect(container.querySelector("p span")?.textContent).toBe("v2");
+    expect(container.querySelector("aside span")?.textContent).toBe("Stable");
+    expect(firstBranchTarget.isConnected).toBe(false);
+    expect(mutations.filter((record) => record.type === "childList")).toEqual([]);
+  });
+
   it("converges a parent prop commit with local conditional and keyed updates", async () => {
     const fixture = createMixedFixture();
     function Parent() {

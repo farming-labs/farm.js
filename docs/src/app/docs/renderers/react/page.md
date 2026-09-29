@@ -2480,9 +2480,12 @@ bindings continue to skip the branch React preserved. Interactive keyed rows val
 refreshed row set before Farm reapplies bindings; a later invalid row therefore returns the
 container to React without first patching an earlier row. Conditional, keyed, and mixed range
 owners likewise validate every static binding target before applying any binding update, so a
-later invalid target cannot partially change an earlier static sibling before React takes over. If
-the compiler-owned state layout changes, the identity is not reused and React remounts it instead
-of preserving incompatible state.
+later invalid target cannot partially change an earlier static sibling before React takes over.
+Conditional branch bindings are also read and prepared without DOM writes until every sibling
+range has passed adoption, including conditional branches inside mixed ranges. A later invalid
+range therefore cannot partially patch an earlier branch before React takes over. If the
+compiler-owned state layout changes, the identity is not reused and React remounts it instead of
+preserving incompatible state.
 
 If a direct binding evaluation throws, the runtime schedules a React update and rethrows from the
 component render. This lets the nearest React error boundary handle the failure through React's

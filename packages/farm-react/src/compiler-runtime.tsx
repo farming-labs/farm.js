@@ -4283,6 +4283,47 @@ function applyHostConditionalBindings(
   }
 }
 
+function prepareHostConditionalBindings(
+  branch: CompilerHostConditionalBranch,
+  instance: CompilerHostInstance,
+): boolean {
+  for (let bindingIndex = 0; bindingIndex < branch.bindings.length; bindingIndex += 1) {
+    const binding = branch.bindings[bindingIndex];
+    const rawValue = binding.read();
+    const target = findCompilerHostTarget(instance.element, binding.path);
+    if (
+      !target ||
+      (binding.kind !== "text" &&
+        ((binding.kind !== "style" && binding.kind !== "attribute") || !binding.name))
+    ) {
+      return false;
+    }
+    instance.values[bindingIndex] = [
+      target,
+      normalizedHostConditionalBindingValue(binding, rawValue),
+    ];
+  }
+  return true;
+}
+
+function applyPreparedHostConditionalBindings(
+  branch: CompilerHostConditionalBranch,
+  instance: CompilerHostInstance,
+): void {
+  for (let bindingIndex = 0; bindingIndex < branch.bindings.length; bindingIndex += 1) {
+    const binding = branch.bindings[bindingIndex];
+    const [target, value] = instance.values[bindingIndex] as readonly [Element, unknown];
+    instance.values[bindingIndex] = value;
+    if (binding.kind === "text") {
+      target.textContent = value as string;
+    } else if (binding.kind === "style") {
+      updateStyle(target, binding.name!, value);
+    } else {
+      updateAttribute(target, binding.name!, value);
+    }
+  }
+}
+
 interface CompilerHostTreeScope {
   cleanup(): void;
   update(descriptor: CompilerHostElement): boolean;
@@ -4389,6 +4430,7 @@ function mountCompilerHostInstance(
   descriptor: CompilerHostElement,
   branch: Pick<CompilerHostConditionalBranch, "bindings">,
   onFallback: () => void,
+  applyBindingsImmediately = true,
 ): CompilerHostInstance | null {
   const scope = mountCompilerHostTree(owner, element, descriptor, onFallback);
   if (!scope) return null;
@@ -4397,6 +4439,7 @@ function mountCompilerHostInstance(
     scope,
     values: branch.bindings.map(() => UNSET_HOST_CONDITIONAL_BINDING),
   };
+  if (!applyBindingsImmediately) return instance;
   try {
     applyHostConditionalBindings(branch as CompilerHostConditionalBranch, instance);
   } catch (error) {
@@ -4498,12 +4541,17 @@ class CompilerNestedConditionalRanges implements CompilerHostTreeScope {
         descriptor,
         selection.branch,
         this.onFallback,
+        false, // Commit only after every sibling range validates.
       );
       if (!host) {
         this.cleanup();
         return false;
       }
       this.instances.push({ key: selection.key, host });
+      if (!prepareHostConditionalBindings(selection.branch, host)) {
+        this.cleanup();
+        return false;
+      }
       cursor += 1;
     }
 
@@ -4519,6 +4567,13 @@ class CompilerNestedConditionalRanges implements CompilerHostTreeScope {
     if (!applyStaticRangeBindings(this.block.bindings, this.staticSegments, this.staticValues)) {
       this.cleanup();
       return false;
+    }
+    for (let index = 0; index < selections.length; index += 1) {
+      const selection = selections[index];
+      const instance = this.instances[index];
+      if (selection.kind === "branch" && instance) {
+        applyPreparedHostConditionalBindings(selection.branch, instance.host);
+      }
     }
     this.unsubscribe = this.owner.subscribe(this.block.id, this.refresh);
     return true;
@@ -5061,6 +5116,7 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
           descriptor,
           snapshot.selection.branch,
           this.onFallback,
+          false, // Commit only after every sibling range validates.
         );
         if (!host) {
           this.cleanup();
@@ -5070,6 +5126,10 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
           kind: "conditional",
           value: { key: snapshot.selection.key, host },
         });
+        if (!prepareHostConditionalBindings(snapshot.selection.branch, host)) {
+          this.cleanup();
+          return false;
+        }
         cursor += 1;
         continue;
       }
@@ -5124,6 +5184,18 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
     if (!applyStaticRangeBindings(this.block.bindings, this.staticSegments, this.staticValues)) {
       this.cleanup();
       return false;
+    }
+    for (let index = 0; index < snapshots.length; index += 1) {
+      const snapshot = snapshots[index];
+      const instance = this.instances[index];
+      if (
+        snapshot.kind === "conditional" &&
+        snapshot.selection.kind === "branch" &&
+        instance?.kind === "conditional" &&
+        instance.value
+      ) {
+        applyPreparedHostConditionalBindings(snapshot.selection.branch, instance.value.host);
+      }
     }
     this.unsubscribe = this.owner.subscribe(this.block.id, this.refresh);
     return true;
@@ -5799,6 +5871,7 @@ function createConditionalRangesBlockComponent(
           descriptor,
           selection.branch,
           this.requestNestedFallback,
+          false, // Commit only after every sibling range validates.
         );
         if (!host) {
           cleanupInstances();
@@ -5808,6 +5881,15 @@ function createConditionalRangesBlockComponent(
           key: selection.key,
           host,
         });
+        try {
+          if (!prepareHostConditionalBindings(selection.branch, host)) {
+            cleanupInstances();
+            return false;
+          }
+        } catch (error) {
+          cleanupInstances();
+          throw error;
+        }
         cursor += 1;
       }
 
@@ -5816,9 +5898,21 @@ function createConditionalRangesBlockComponent(
         return false;
       }
       staticSegments.push(elements.slice(cursor));
-      if (!applyStaticRangeBindings(props.bindings, staticSegments, staticValues)) {
+      try {
+        if (!applyStaticRangeBindings(props.bindings, staticSegments, staticValues)) {
+          cleanupInstances();
+          return false;
+        }
+        for (let index = 0; index < selections.length; index += 1) {
+          const selection = selections[index];
+          const instance = instances[index];
+          if (selection.kind === "branch" && instance) {
+            applyPreparedHostConditionalBindings(selection.branch, instance.host);
+          }
+        }
+      } catch (error) {
         cleanupInstances();
-        return false;
+        throw error;
       }
       for (const instance of this.rangeInstances) instance?.host.scope?.cleanup();
       this.staticSegments = staticSegments;
