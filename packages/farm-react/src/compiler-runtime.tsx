@@ -4777,6 +4777,7 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
     const elements = [...this.root.children];
     const descriptors = flattenCompilerHostElements(materializeCompilerHostChildren(this.host));
     if (elements.length !== descriptors.length) return false;
+    const preparedBindings: CompilerPreparedKeyedRowBindingUpdate[][][] = [];
     let cursor = 0;
 
     for (let rangeIndex = 0; rangeIndex < this.block.ranges.length; rangeIndex += 1) {
@@ -4798,6 +4799,8 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
       cursor = staticEnd;
 
       const instances = new Map<string, CompilerKeyedRowInstance>();
+      this.instances.push(instances);
+      const rangeBindingUpdates: CompilerPreparedKeyedRowBindingUpdate[][] = [];
       for (let index = 0; index < rows.items.length; index += 1) {
         const element = elements[cursor + index];
         if (!element) {
@@ -4810,7 +4813,7 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
           this.cleanup();
           return false;
         }
-        instances.set(rows.keys[index], {
+        const instance: CompilerKeyedRowInstance = {
           key: rows.keys[index],
           element,
           scope,
@@ -4818,10 +4821,23 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
           item: rows.items[index],
           index,
           conditionalValues: new Map(),
-        });
-        applyKeyedRowBindings(range, instances.get(rows.keys[index])!, rows.items[index], index);
+        };
+        let bindingUpdates: CompilerPreparedKeyedRowBindingUpdate[] | undefined;
+        try {
+          bindingUpdates = prepareKeyedRowBindingUpdates(range, instance, rows.items[index], index);
+        } catch (error) {
+          scope.cleanup();
+          throw error;
+        }
+        if (!bindingUpdates) {
+          scope.cleanup();
+          this.cleanup();
+          return false;
+        }
+        instances.set(rows.keys[index], instance);
+        rangeBindingUpdates.push(bindingUpdates);
       }
-      this.instances.push(instances);
+      preparedBindings.push(rangeBindingUpdates);
       cursor += rows.items.length;
     }
 
@@ -4837,6 +4853,18 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
     if (!applyStaticRangeBindings(this.block.bindings, this.staticSegments, this.staticValues)) {
       this.cleanup();
       return false;
+    }
+    for (let rangeIndex = 0; rangeIndex < this.block.ranges.length; rangeIndex += 1) {
+      const range = this.block.ranges[rangeIndex];
+      let rowIndex = 0;
+      for (const instance of this.instances[rangeIndex].values()) {
+        applyPreparedKeyedRowBindingUpdates(
+          range,
+          instance,
+          preparedBindings[rangeIndex][rowIndex],
+        );
+        rowIndex += 1;
+      }
     }
     this.unsubscribe = this.owner.subscribe(this.block.id, this.refresh);
     return true;
