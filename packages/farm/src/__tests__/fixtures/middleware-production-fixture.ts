@@ -358,6 +358,23 @@ export default function ExplicitImagePage() {
 }
 `.trim(),
   );
+  await fs.mkdir(path.join(root, "src", "app", "dashboard", "projects", "[id]"), {
+    recursive: true,
+  });
+  await fs.writeFile(
+    path.join(root, "src", "app", "dashboard", "projects", "[id]", "page.tsx"),
+    `
+import React from "react";
+
+export default function ProjectPage(props: any) {
+  return React.createElement(
+    "main",
+    null,
+    \`project: \${props.params.id} / \${props.middleware?.data.get("config.area") || "unguarded"}\`
+  );
+}
+`.trim(),
+  );
   await fs.writeFile(
     path.join(root, "src", "app", "dashboard", "dashboard-identity.tsx"),
     `

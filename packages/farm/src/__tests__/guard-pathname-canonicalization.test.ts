@@ -7,6 +7,7 @@ import { MiddlewareManager } from "../middleware/manager";
 import { createProductionMiddlewareRunner } from "../middleware/production-runtime";
 import type { MiddlewareMatcher } from "../middleware/types";
 import { generateRuntimePathMatcherSource } from "../nitro/universal-build";
+import { resolveFarmRequestURL } from "../server/request";
 import type { RouteSegment } from "../types";
 import { matchRoute } from "../utils";
 
@@ -179,6 +180,40 @@ describe("route guards match the canonical request pathname", () => {
     });
   }
 
+  // Repeated slashes are the same bypass spelled differently: every page
+  // matcher drops empty segments, so a built app renders `//dashboard` as
+  // `/dashboard` and a guard that compared the raw pathname never ran.
+  for (const [pattern, pathname] of [
+    ["/dashboard", "//dashboard"],
+    ["/dashboard", "///dashboard"],
+    ["/dashboard", "//%64ashboard"],
+    ["/dashboard/settings", "//dashboard/settings"],
+    ["/dashboard/settings", "/dashboard//settings"],
+  ] as const) {
+    it(`guards ${pathname} exactly when the page router serves it`, async () => {
+      expect(prodPageMatches(pattern, pathname)).toBe(true);
+      // The dev server resolves a leading `//` as a protocol-relative URL and
+      // renders a different page altogether. What has to hold there is that
+      // its guard and its page router agree about the pathname.
+      const devPathname = resolveFarmRequestURL(createRequest(pathname)).pathname;
+      const devServed = devPageMatches(pattern, devPathname);
+
+      for (const matcher of [pattern, "/dashboard(.*)"]) {
+        expect({
+          matcher,
+          devMiddleware: (await runDevGuard(matcher, pathname)).ran,
+          productionMiddleware: (await runProductionGuard(matcher, pathname)).ran,
+          integration: (await runIntegrationGuard(matcher, pathname)).ran,
+        }).toEqual({
+          matcher,
+          devMiddleware: devServed,
+          productionMiddleware: true,
+          integration: true,
+        });
+      }
+    });
+  }
+
   it("still refuses paths the page router does not serve", async () => {
     // Canonicalizing must not widen a matcher. `/dashboardx` is a different
     // page and `/Dashboard` is a different, case-sensitive segment, including
@@ -279,7 +314,7 @@ describe("route guards match the canonical request pathname", () => {
     });
   });
 
-  it("leaves trailing slashes and empty segments alone", async () => {
+  it("leaves trailing slashes alone", async () => {
     // Pinned, not endorsed: the guard matchers compile `/dashboard` to an
     // exact regex, so a trailing slash misses them while the page matchers
     // normalize it away. That divergence predates this change and is a

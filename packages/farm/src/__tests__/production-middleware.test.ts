@@ -481,6 +481,25 @@ describe("production middleware runtime", () => {
         await expect(pprResponse.text()).resolves.toContain("configured context PPR route");
       }
 
+      // The pattern page router drops empty segments, so a repeated slash
+      // still renders this dynamic page and must pass the same config matcher.
+      // The runtime keeps a leading `//` in the pathname rather than reading
+      // it as a host.
+      for (const spelling of [
+        "/dashboard/projects/7",
+        "//dashboard/projects/7",
+        "/dashboard//projects/7",
+      ]) {
+        const projectResponse = await serverModule.default.fetch(
+          new Request(`https://example.test${spelling}`),
+        );
+        expect({
+          spelling,
+          status: projectResponse.status,
+          body: (await projectResponse.text()).includes("project: 7 / dashboard"),
+        }).toEqual({ spelling, status: 200, body: true });
+      }
+
       // Raw markdown-source routes serve page content, so app middleware must
       // run first: a guard on the route blocks the .md representation too.
       const guardedMarkdownResponse = await serverModule.default.fetch(
