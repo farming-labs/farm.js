@@ -167,6 +167,7 @@ const sidebar = [
       { label: "Why?", slug: "", icon: "sparkles" },
       { label: "Getting Started", slug: "getting-started", icon: "rocket" },
       { label: "Stability and Support", slug: "stability", icon: "shield" },
+      { label: "Upgrading to 0.1", slug: "upgrading", icon: "rocket" },
       { label: "Project Structure", slug: "project-structure", icon: "folder" },
       { label: "Configuration", slug: "configuration", icon: "settings" },
       { label: "Layers", slug: "layers", icon: "box" },
