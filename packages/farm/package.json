@@ -659,7 +659,7 @@
     "sugar-high": "^0.9.5",
     "supports-color": "^10.2.2",
     "tailwindcss": "4.1.18",
-    "unstorage": "^2.0.0-alpha.3",
+    "unstorage": "2.0.0-alpha.10",
     "vite": "^5.0.10",
     "zod": "^4.1.12"
   },

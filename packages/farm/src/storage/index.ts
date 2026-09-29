@@ -231,12 +231,11 @@ async function loadDatabaseDriver(config: FarmStorageDatabaseConfig): Promise<Dr
     tableName: config.tableName,
   });
 
-  // The db0 driver has no dispose, so this connection is Farm's to close. Databases
-  // handed to `databaseStorage` stay owned by the caller and are left open.
+  // Farm created this connection, so it is Farm's to close, exactly once. Newer db0
+  // drivers dispose the database themselves; older ones have no dispose at all.
   return {
     ...driver,
     async dispose() {
-      await driver.dispose?.();
       await database.dispose();
     },
   };
@@ -368,10 +367,13 @@ export function databaseStorage(
   return defineStorageClient(async () => {
     const db0DriverModule =
       await loadModule<typeof import("unstorage/drivers/db0")>("unstorage/drivers/db0");
-    return db0DriverModule.default({
+    // The caller owns this database. Newer db0 drivers close their database on
+    // dispose, so drop that hook and leave the connection open.
+    const { dispose: _dispose, ...driver } = db0DriverModule.default({
       database,
       tableName: options.tableName,
     });
+    return driver;
   });
 }
 
