@@ -589,7 +589,10 @@ export function observabilityPlugin(options: ObservabilityPluginOptions = {}): O
     },
 
     beforeRequest(req) {
-      const pathname = req.url || "/";
+      // `req.url` carries the query string, and a pathname feeds incident
+      // titles and dedupe fingerprints: a reset `?token=` would reach every
+      // pipeline action, and each distinct query would open a new incident.
+      const pathname = (req.url || "/").split("?", 1)[0] || "/";
       const method = req.method || "GET";
       const requestId = `req_${now()}_${(signalCounter++).toString(36)}`;
       requestStarts.set(req, {
@@ -632,8 +635,10 @@ export function observabilityPlugin(options: ObservabilityPluginOptions = {}): O
     afterRender(html, render) {
       if (!annotateHtml) return html;
       const marker = `<!-- observability:path=${render.pathname} route=${render.routePattern ?? "unmatched"} -->`;
+      // A replacer function: as a replacement string, $` and $' in the request
+      // path would expand into copies of the page's own HTML.
       return html.includes("</body>")
-        ? html.replace("</body>", `${marker}\n</body>`)
+        ? html.replace("</body>", () => `${marker}\n</body>`)
         : `${html}\n${marker}`;
     },
 
