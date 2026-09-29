@@ -352,8 +352,14 @@ reaches disk. Set `persist: false` to disable it, or replace the store:
 import { setSyncPersistence, clearSyncedRows } from "@farm.js/sync/client";
 
 setSyncPersistence(myIndexedDbStore);
-await clearSyncedRows(); // on logout, so a shared device stays clean
+clearSyncedRows(); // whenever the session changes
 ```
+
+Call `clearSyncedRows()` whenever the session changes without a page reload:
+sign-out, signing in as someone else, or switching organization. It clears
+what is on disk and in memory, including the incremental cursor, and drops any
+load or write still in flight for the previous session. Each model then
+reloads in full on its next use, scoped to whoever is signed in at that point.
 
 ## Server-ruled transitions
 

@@ -54,6 +54,12 @@ export class SyncModelStore {
   /** Rolled-back writes awaiting the user. Replaced, never mutated, so a
    *  useSyncExternalStore snapshot of it stays referentially stable. */
   failures: readonly SyncWriteFailure[] = [];
+  /**
+   * Bumped by reset(). A load or write that started before a reset compares
+   * against it and drops its result, so a response for the previous session
+   * cannot land in the store after it was cleared.
+   */
+  generation = 0;
   private nextFailureId = 1;
 
   constructor(
@@ -137,6 +143,22 @@ export class SyncModelStore {
   mergeRow(key: unknown, changes: SyncRow): SyncRow {
     const current = this.get(key) ?? { [this.descriptor.key]: key };
     return { ...current, ...changes };
+  }
+
+  /**
+   * Forget everything this store holds for a session change: confirmed rows,
+   * optimistic layers, recorded failures, and the incremental cursor. The next
+   * load is a full one, scoped to whoever is signed in by then.
+   */
+  reset(): void {
+    this.generation += 1;
+    this.confirmed.clear();
+    this.layers = [];
+    this.failures = [];
+    this.cursor = null;
+    this.status = "idle";
+    this.error = null;
+    this.invalidate();
   }
 
   /** Rows worth persisting: confirmed only, never optimistic guesses. */
