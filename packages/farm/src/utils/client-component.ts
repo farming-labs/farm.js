@@ -1181,14 +1181,6 @@ function collectIsolatedClientBoundaries(
   };
 }
 
-export function isClientComponentModule(modulePath: string, root?: string): boolean {
-  return getClientModuleMetadata(modulePath, root).isClientComponent;
-}
-
-export function shouldHydrateModule(modulePath: string, root?: string): boolean {
-  return getClientModuleMetadata(modulePath, root).shouldHydrate;
-}
-
 function inspectClientModuleMetadata(
   resolvedPath: string | null,
   root: string | undefined,

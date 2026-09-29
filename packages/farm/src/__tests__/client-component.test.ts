@@ -9,10 +9,8 @@ import {
   getIslandStrategyExport,
   hasHydrateExport,
   hasUseClientDirective,
-  isClientComponentModule,
   resolveFarmIsolatedClientHydrationMode,
   resolveModuleSourcePath,
-  shouldHydrateModule,
   stripUseClientDirective,
 } from "../utils/client-component";
 
@@ -119,7 +117,6 @@ describe("client component path resolution", () => {
     );
 
     expect(resolveModuleSourcePath("/src/app/demo/page.tsx", root)).toBe(sourceFile);
-    expect(isClientComponentModule("/src/app/demo/page.tsx", root)).toBe(true);
   });
 
   it("supports absolute module paths directly", () => {
@@ -133,7 +130,6 @@ describe("client component path resolution", () => {
     );
 
     expect(resolveModuleSourcePath(sourceFile, root)).toBe(sourceFile);
-    expect(isClientComponentModule(sourceFile, root)).toBe(true);
   });
 
   it("supports file urls and Vite /@fs/ module ids", () => {
@@ -151,9 +147,7 @@ describe("client component path resolution", () => {
     const fsId = `/@fs/${sourceFile.split(path.sep).join("/").replace(/^\/+/, "")}`;
 
     expect(resolveModuleSourcePath(fileUrl, root)).toBe(sourceFile);
-    expect(isClientComponentModule(fileUrl, root)).toBe(true);
     expect(resolveModuleSourcePath(fsId, root)).toBe(sourceFile);
-    expect(isClientComponentModule(fsId, root)).toBe(true);
   });
 
   it("supports hydratable server pages through export const hydrate = true", () => {
@@ -172,8 +166,6 @@ describe("client component path resolution", () => {
       shouldHydrate: true,
       islandStrategy: "load",
     });
-    expect(isClientComponentModule(sourceFile, root)).toBe(false);
-    expect(shouldHydrateModule(sourceFile, root)).toBe(true);
   });
 
   it("detects hydrate exports in Svelte route modules", () => {
@@ -213,8 +205,6 @@ describe("client component path resolution", () => {
       shouldHydrate: true,
       islandStrategy: "load",
     });
-    expect(isClientComponentModule(pageFile, root)).toBe(false);
-    expect(shouldHydrateModule(pageFile, root)).toBe(true);
   });
 
   it("isolates a supported client leaf only in enabled mode", () => {
@@ -758,40 +748,6 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
       islandStrategy: null,
       suppressedAsyncHydration: true,
     });
-    expect(shouldHydrateModule(pageFile, root)).toBe(false);
-  });
-
-  it("detects async arrow and indirect async default exports", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-async-variants-"));
-    tempDirs.push(root);
-
-    const appDir = path.join(root, "src", "app", "demo");
-    fs.mkdirSync(appDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(appDir, "widget.tsx"),
-      '"use client";\nexport function Widget() { return null; }\n',
-    );
-
-    const arrowPage = path.join(appDir, "arrow.tsx");
-    fs.writeFileSync(
-      arrowPage,
-      'import { Widget } from "./widget";\nexport default async () => { await Promise.resolve(); return <Widget />; };\n',
-    );
-    expect(shouldHydrateModule(arrowPage, root)).toBe(false);
-
-    const indirectPage = path.join(appDir, "indirect.tsx");
-    fs.writeFileSync(
-      indirectPage,
-      'import { Widget } from "./widget";\nasync function Page() { return <Widget />; }\nexport default Page;\n',
-    );
-    expect(shouldHydrateModule(indirectPage, root)).toBe(false);
-
-    const constPage = path.join(appDir, "const.tsx");
-    fs.writeFileSync(
-      constPage,
-      'import { Widget } from "./widget";\nconst Page = async () => <Widget />;\nexport default Page;\n',
-    );
-    expect(shouldHydrateModule(constPage, root)).toBe(false);
   });
 
   it("suppresses an explicit hydrate export on async server pages", () => {
