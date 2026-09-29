@@ -31,6 +31,7 @@ import {
   resolveFarmServerConfig,
 } from "@farm.js/core/internal/production-runtime";
 import {
+  API_ROUTE_METHODS,
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
   matchAPIRouteAtBasePath,
@@ -253,11 +254,10 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
               "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
 
             const routeModule = await server.ssrLoadModule(filePath);
-            const methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
             const endpoints: Record<string, any> = {};
             const availableMethods: string[] = [];
 
-            for (const method of methods) {
+            for (const method of API_ROUTE_METHODS) {
               if (routeModule[method]) {
                 availableMethods.push(method);
                 endpoints[method] = routeModule[method];
@@ -529,11 +529,10 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
           try {
             // Reload the module
             const routeModule = await server.ssrLoadModule(file);
-            const methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
             const endpoints: Record<string, any> = {};
             const availableMethods: string[] = [];
 
-            for (const method of methods) {
+            for (const method of API_ROUTE_METHODS) {
               if (routeModule[method]) {
                 availableMethods.push(method);
                 endpoints[method] = routeModule[method];
@@ -566,11 +565,10 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
               "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
 
             const routeModule = await server.ssrLoadModule(file);
-            const methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
             const endpoints: Record<string, any> = {};
             const availableMethods: string[] = [];
 
-            for (const method of methods) {
+            for (const method of API_ROUTE_METHODS) {
               if (routeModule[method]) {
                 availableMethods.push(method);
                 endpoints[method] = routeModule[method];

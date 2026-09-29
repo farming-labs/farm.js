@@ -25,6 +25,22 @@ export {
   type APIRouteMatch,
 } from "./route-pattern";
 import { matchAPIRoute, type APIRouteParams, type APIRouteMatch } from "./route-pattern";
+/**
+ * Every method an API route module can export. Route discovery in core and in
+ * the plain-Vite plugin reads this list, so a handler exported under any of
+ * these names is served wherever the route is.
+ */
+export const API_ROUTE_METHODS = [
+  "GET",
+  "HEAD",
+  "QUERY",
+  "POST",
+  "PUT",
+  "DELETE",
+  "PATCH",
+  "OPTIONS",
+] as const;
+
 interface APIRouteMethodTable {
   methods: string[];
   endpoints: Record<string, any>;

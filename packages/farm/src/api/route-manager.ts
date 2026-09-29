@@ -15,6 +15,7 @@ import {
 } from "../route-runtime";
 import { _runWithFarmI18nRequest, type FarmI18nRuntime } from "../i18n/server";
 import {
+  API_ROUTE_METHODS,
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
   registerAPIRouteShape,
@@ -58,16 +59,7 @@ export class APIRouteConflictError extends Error {
   }
 }
 
-export const API_ROUTE_METHODS = [
-  "GET",
-  "HEAD",
-  "QUERY",
-  "POST",
-  "PUT",
-  "DELETE",
-  "PATCH",
-  "OPTIONS",
-] as const;
+export { API_ROUTE_METHODS };
 
 export class APIRouteManager {
   private plugins: readonly FarmPlugin[];
