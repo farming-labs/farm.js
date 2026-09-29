@@ -337,16 +337,32 @@ async function canUseRolldownBuilder(): Promise<boolean> {
 }
 
 /**
- * Alias that points React's server entry at its Web-stream build.
+ * Alias that points React's server entry at a Web-stream build.
  *
  * React splits `react-dom/server` by export condition: the Node build exports
- * renderToPipeableStream, and only the browser/edge build exports
- * renderToReadableStream. `./server.browser` exists in both React 18 and 19.
+ * renderToPipeableStream, and only the Web builds export renderToReadableStream.
+ * React 19 ships `./server.edge` for Workers and edge runtimes. Its
+ * `./server.browser` build schedules work through a global MessageChannel,
+ * which a Cloudflare Worker only exposes on recent compatibility dates, so it
+ * can fail at module load. React 18 has no edge build, and its browser build
+ * does not need MessageChannel.
  */
-export const FARM_REACT_WEB_SERVER_ALIAS = {
-  find: /^react-dom\/server$/,
-  replacement: "react-dom/server.browser",
-} as const;
+export function createFarmReactWebServerAlias(hasEdgeBuild: boolean) {
+  return {
+    find: /^react-dom\/server$/,
+    replacement: hasEdgeBuild ? "react-dom/server.edge" : "react-dom/server.browser",
+  };
+}
+
+/** Whether the app's installed React DOM exports the dedicated edge server build. */
+export function hasReactDomEdgeServerBuild(root: string): boolean {
+  try {
+    createRequire(path.join(root, "package.json")).resolve("react-dom/server.edge");
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Whether the SSR graph must resolve React's server entry to the Web-stream
@@ -354,9 +370,9 @@ export const FARM_REACT_WEB_SERVER_ALIAS = {
  *
  * Vite resolves the SSR graph with Node conditions, and React applications
  * bundle react-dom rather than externalizing it, so without this an edge
- * preset inlines the Node build. `renderToReadableStream` is then missing and
- * the production renderer silently falls back off its Web streaming path, even
- * though the target has no Node streams to fall back to.
+ * preset inlines the Node build. React 18's Node build has no
+ * `renderToReadableStream`, so the edge renderer cannot stream at all; React
+ * 19's Node build streams only through Node built-in polyfills.
  */
 export function shouldAliasReactServerToWebBuild(
   renderer: Pick<FarmRenderer, "name"> | undefined,
@@ -4231,7 +4247,7 @@ async function buildSSRInMemory(
       resolve: {
         alias: [
           ...(shouldAliasReactServerToWebBuild(config.renderer, preset)
-            ? [FARM_REACT_WEB_SERVER_ALIAS]
+            ? [createFarmReactWebServerAlias(hasReactDomEdgeServerBuild(root))]
             : []),
           ...Object.entries(createFarmSourceAlias(root, config.srcDir)).map(
             ([find, replacement]) => ({ find, replacement }),

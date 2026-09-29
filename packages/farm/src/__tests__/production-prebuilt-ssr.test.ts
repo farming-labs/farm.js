@@ -3551,7 +3551,7 @@ export default function OpenGraphImage() {
     }
   }, 120_000);
 
-  it("bundles React DOM's Web server build for the Cloudflare Pages worker", async () => {
+  it("bundles React DOM's edge server build for the Cloudflare Pages worker", async () => {
     const root = await createProductionFixture();
 
     try {
@@ -3576,6 +3576,10 @@ export default function OpenGraphImage() {
       // Only React DOM's Node server build exports these.
       expect(workerOutput).not.toContain("prerenderToNodeStream");
       expect(workerOutput).not.toContain("resumeToPipeableStream");
+      // React 19's browser server build creates a MessageChannel at module
+      // load, which fails in Workers on older compatibility dates. The edge
+      // build does not.
+      expect(workerOutput).not.toContain("MessageChannel");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
