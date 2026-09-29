@@ -5079,6 +5079,9 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
     const elements = [...this.root.children];
     const descriptors = flattenCompilerHostElements(this.host.children);
     if (elements.length !== descriptors.length) return false;
+    const preparedKeyedBindings: Array<
+      readonly (readonly CompilerPreparedKeyedRowBindingUpdate[])[] | undefined
+    > = [];
     let cursor = 0;
 
     for (let rangeIndex = 0; rangeIndex < this.block.ranges.length; rangeIndex += 1) {
@@ -5139,6 +5142,8 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
         return false;
       }
       const keyedInstances = new Map<string, CompilerKeyedRowInstance>();
+      this.instances.push({ kind: "keyed", value: keyedInstances });
+      const keyedBindingUpdates: CompilerPreparedKeyedRowBindingUpdate[][] = [];
       for (let index = 0; index < snapshot.rows.items.length; index += 1) {
         const element = elements[cursor + index];
         if (!element) {
@@ -5160,15 +5165,27 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
           index,
           conditionalValues: new Map(),
         };
+        let bindingUpdates: CompilerPreparedKeyedRowBindingUpdate[] | undefined;
         try {
-          applyKeyedRowBindings(range, instance, snapshot.rows.items[index], index);
+          bindingUpdates = prepareKeyedRowBindingUpdates(
+            range,
+            instance,
+            snapshot.rows.items[index],
+            index,
+          );
         } catch (error) {
           scope.cleanup();
           throw error;
         }
+        if (!bindingUpdates) {
+          scope.cleanup();
+          this.cleanup();
+          return false;
+        }
         keyedInstances.set(snapshot.rows.keys[index], instance);
+        keyedBindingUpdates.push(bindingUpdates);
       }
-      this.instances.push({ kind: "keyed", value: keyedInstances });
+      preparedKeyedBindings[rangeIndex] = keyedBindingUpdates;
       cursor += snapshot.rows.items.length;
     }
 
@@ -5195,6 +5212,15 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
         instance.value
       ) {
         applyPreparedHostConditionalBindings(snapshot.selection.branch, instance.value.host);
+      } else if (snapshot.kind === "keyed" && instance?.kind === "keyed") {
+        const range = this.block.ranges[index];
+        const bindingUpdates = preparedKeyedBindings[index]!;
+        if (range.kind !== "keyed") continue;
+        let rowIndex = 0;
+        for (const row of instance.value.values()) {
+          applyPreparedKeyedRowBindingUpdates(range, row, bindingUpdates[rowIndex]);
+          rowIndex += 1;
+        }
       }
     }
     this.unsubscribe = this.owner.subscribe(this.block.id, this.refresh);
