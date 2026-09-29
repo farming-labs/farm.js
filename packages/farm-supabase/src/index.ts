@@ -836,7 +836,15 @@ async function parseEmailPasswordRequest(request: Request) {
     if (parsedBody instanceof Response) return parsedBody;
     payload = parsedBody;
   } else {
-    const formData = await request.formData();
+    let formData: FormData;
+    try {
+      formData = await request.formData();
+    } catch {
+      return Response.json(
+        { error: "Supabase auth request body must be form data or a JSON object." },
+        { status: 400 },
+      );
+    }
     formData.forEach((value, key) => {
       payload[key] = value;
     });
