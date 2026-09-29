@@ -2483,6 +2483,9 @@ owners likewise validate every static binding target before applying any binding
 later invalid target cannot partially change an earlier static sibling before React takes over.
 They also evaluate and normalize every static binding value before the first DOM write, so a later
 throwing reader reaches the nearest React error boundary without exposing an earlier sibling update.
+An ordinary surviving keyed row likewise evaluates and normalizes every binding in that row before
+updating its binding cache or the DOM. A later throwing reader therefore leaves that row untouched;
+rows with one binding retain the direct single-binding path.
 Conditional branch bindings and keyed-row bindings inside nested keyed or mixed ranges are also
 read and prepared without DOM writes until every sibling range has passed adoption. A later invalid
 range therefore cannot partially patch an earlier branch or keyed row before React takes over. If

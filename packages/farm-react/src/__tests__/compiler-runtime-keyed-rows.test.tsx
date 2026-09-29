@@ -889,7 +889,7 @@ describe("compiled keyed-row runtime", () => {
     expect(row.textContent).toBe("After: Updated");
   });
 
-  it("routes keyed-row binding failures through the nearest error boundary", async () => {
+  it("routes keyed-row binding failures atomically through the nearest error boundary", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     class Boundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
@@ -920,7 +920,9 @@ describe("compiled keyed-row runtime", () => {
               render={() => (
                 <ul>
                   {items().map((item) => (
-                    <li key={item.id}>{item.label}</li>
+                    <li aria-selected={Boolean(item.selected)} key={item.id}>
+                      {item.label}
+                    </li>
                   ))}
                 </ul>
               )}
@@ -928,6 +930,12 @@ describe("compiled keyed-row runtime", () => {
               rowKey={(item) => (item as Item).id}
               create={(item) => rowDescriptor(item as Item)}
               bindings={[
+                {
+                  kind: "attribute",
+                  path: [],
+                  name: "aria-selected",
+                  read: (item) => Boolean((item as Item).selected),
+                },
                 {
                   kind: "text",
                   path: [],
@@ -955,12 +963,21 @@ describe("compiled keyed-row runtime", () => {
         </Boundary>,
       ),
     );
+    const row = container.querySelector("li")!;
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(row, { attributes: true });
 
     await act(async () => {
       container.querySelector("button")!.click();
       await flushCompilerUpdates();
     });
+    mutations.push(...observer.takeRecords());
+    observer.disconnect();
+
     expect(container.textContent).toBe("Recovered by boundary");
+    expect(row.isConnected).toBe(false);
+    expect(mutations).toEqual([]);
   });
 
   it("matches React across 1,000 deterministic keyed operations", async () => {

@@ -4110,8 +4110,31 @@ function applyKeyedRowBindings(
   item: unknown,
   index: number,
 ): void {
+  if (props.bindings.length < 2) {
+    if (props.bindings.length === 1) applyKeyedRowBinding(props, instance, item, index, 0);
+    return;
+  }
+  const nextValues = readKeyedRowBindingValues(props, item, index);
+  let targets: Array<Element | null> | undefined;
   for (let bindingIndex = 0; bindingIndex < props.bindings.length; bindingIndex += 1) {
-    applyKeyedRowBinding(props, instance, item, index, bindingIndex);
+    if (Object.is(instance.values[bindingIndex], nextValues[bindingIndex])) continue;
+    targets ||= [];
+    targets[bindingIndex] = findCompilerHostTarget(
+      instance.element,
+      props.bindings[bindingIndex].path,
+    );
+  }
+  if (!targets) return;
+  for (let bindingIndex = 0; bindingIndex < props.bindings.length; bindingIndex += 1) {
+    const value = nextValues[bindingIndex];
+    if (Object.is(instance.values[bindingIndex], value)) continue;
+    commitKeyedRowBinding(
+      props.bindings[bindingIndex],
+      instance,
+      bindingIndex,
+      value,
+      targets[bindingIndex],
+    );
   }
 }
 
@@ -4123,24 +4146,32 @@ function applyKeyedRowBinding(
   bindingIndex: number,
 ): void {
   const binding = props.bindings[bindingIndex];
-  const rawValue = binding.read(item, index);
-  const value = normalizedKeyedRowBindingValue(binding, rawValue);
+  const value = normalizedKeyedRowBindingValue(binding, binding.read(item, index));
   if (Object.is(instance.values[bindingIndex], value)) return;
-  instance.values[bindingIndex] = value;
   const target = findCompilerHostTarget(instance.element, binding.path);
+  commitKeyedRowBinding(binding, instance, bindingIndex, value, target);
+}
+
+function commitKeyedRowBinding(
+  binding: CompilerKeyedRowBinding,
+  instance: CompilerKeyedRowInstance,
+  bindingIndex: number,
+  value: unknown,
+  target: Element | null | undefined,
+): void {
+  instance.values[bindingIndex] = value;
   if (!target) return;
   if (binding.kind === "text") {
     target.textContent = value as string;
   } else if (binding.kind === "style" && binding.name) {
-    updateStyle(target, binding.name, rawValue);
+    updateStyle(target, binding.name, value);
   } else if (binding.kind === "attribute" && binding.name) {
-    updateAttribute(target, binding.name, rawValue);
+    updateAttribute(target, binding.name, value);
   }
 }
 
 type CompilerPreparedKeyedRowBindingUpdate = readonly [
   bindingIndex: number,
-  rawValue: unknown,
   target: Element,
   value: unknown,
 ];
@@ -4159,7 +4190,7 @@ function prepareKeyedRowBindingUpdates(
     if (Object.is(instance.values[bindingIndex], value)) continue;
     const target = findCompilerHostTarget(instance.element, binding.path);
     if (!target || (binding.kind !== "text" && !binding.name)) return undefined;
-    updates.push([bindingIndex, rawValue, target, value]);
+    updates.push([bindingIndex, target, value]);
   }
   return updates;
 }
@@ -4169,16 +4200,8 @@ function applyPreparedKeyedRowBindingUpdates(
   instance: CompilerKeyedRowInstance,
   updates: readonly CompilerPreparedKeyedRowBindingUpdate[],
 ): void {
-  for (const [bindingIndex, rawValue, target, value] of updates) {
-    const binding = props.bindings[bindingIndex];
-    instance.values[bindingIndex] = value;
-    if (binding.kind === "text") {
-      target.textContent = value as string;
-    } else if (binding.kind === "style") {
-      updateStyle(target, binding.name!, rawValue);
-    } else {
-      updateAttribute(target, binding.name!, rawValue);
-    }
+  for (const [bindingIndex, target, value] of updates) {
+    commitKeyedRowBinding(props.bindings[bindingIndex], instance, bindingIndex, value, target);
   }
 }
 
