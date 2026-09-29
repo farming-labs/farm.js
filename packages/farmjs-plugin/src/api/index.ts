@@ -388,8 +388,11 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
               }
             }
 
-            // Convert Node request to Web Request
-            const fullUrl = `http://${req.headers.host || "localhost:3000"}${url}`;
+            // Convert Node request to Web Request. ctx.rewrite() updates
+            // req.url, so dispatch from the current value, not the one
+            // captured before middleware ran.
+            const currentUrl = req.url || url;
+            const fullUrl = `http://${req.headers.host || "localhost:3000"}${currentUrl}`;
             const headers = new Headers();
             for (const [key, value] of Object.entries(req.headers)) {
               if (value) {

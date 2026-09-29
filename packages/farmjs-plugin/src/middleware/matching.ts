@@ -7,9 +7,8 @@ import type { CookieOptions } from "./index.js";
  * A single request cookie whose value is not valid UTF-8 percent-encoding
  * (a latin-1 value from an old link, a crawler, or a bare `%`) must not take
  * the whole map down: an unguarded `decodeURIComponent` throws `URIError`,
- * which — because the middleware runner swallows the throw and calls `next()` —
- * would silently skip every middleware for that request (a dev-time auth
- * bypass). Decoding falls back to the raw value per entry instead.
+ * which fails the request before any middleware runs. Decoding falls back to
+ * the raw value per entry instead.
  */
 export function parseCookies(cookieHeader?: string): Record<string, string> {
   if (!cookieHeader) return {};

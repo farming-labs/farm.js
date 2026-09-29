@@ -532,6 +532,13 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
               return next();
             }
 
+            // @farm.js/plugin/api runs middleware itself for the requests it
+            // serves, because it may be registered ahead of this hook. Running
+            // it here as well executed every middleware twice per API request.
+            if ((server as any).__farmApi__ && pathname.startsWith("/api/")) {
+              return next();
+            }
+
             try {
               // Execute middleware
               const middlewareData = new Map<string, any>();
@@ -545,7 +552,10 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
                 return;
               }
             } catch (e) {
+              // Fail the request, as core's dev server does. Carrying on would
+              // render the page a throwing auth check was meant to protect.
               console.error("[FARM] Middleware error:", e);
+              return next(e);
             }
 
             next();
