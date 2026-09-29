@@ -201,6 +201,9 @@ const NITRO_EXTERNAL_MODULES = new Set([
   "nitropack",
   "sharp",
 ]);
+// Node presets trace these into the output's node_modules. A Cloudflare
+// module Worker has no node_modules, so it must bundle them instead.
+const NITRO_REACT_RUNTIME_MODULES = new Set(["react", "react-dom", "react-dom/server"]);
 const FARM_SSR_PACKAGE_IMPORT = "#farm-ssr-entry";
 const FARM_SSR_OUTPUT_DIR = "farm-ssr";
 const FARM_CLIENT_BUILD_TARGET = ["es2020", "edge88", "firefox78", "chrome87", "safari14"];
@@ -8322,7 +8325,8 @@ async function buildNitroUniversal(
     hasGeneratedMetadataImages,
   );
   const nitroRollupExternal = (id: string) =>
-    (useExternalMetadataImageRuntime && id === "@vercel/og") || isNitroRollupExternal(id);
+    (useExternalMetadataImageRuntime && id === "@vercel/og") ||
+    (isNitroRollupExternal(id) && !(isCloudflareWorker && NITRO_REACT_RUNTIME_MODULES.has(id)));
   const ssrExternalPackages = collectSSRExternalPackages(ssrBundle);
   const copiedRuntimePackages = new Set([
     ...(imageRuntime === "node" ? ["sharp"] : []),

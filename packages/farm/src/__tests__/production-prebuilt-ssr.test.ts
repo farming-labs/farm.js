@@ -3585,6 +3585,36 @@ export default function OpenGraphImage() {
     }
   }, 120_000);
 
+  it("bundles React into the Cloudflare module worker", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "react-cloudflare-module-test",
+          deploy: { target: "cloudflare", preset: "cloudflare-module" },
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "cloudflare-module" });
+
+      // A Worker has no node_modules, so a bare React import fails at startup
+      // with `No such module "react"`.
+      const serverOutput = await readJavaScriptOutput(
+        path.join(root, config.deploy.outputDir, "server"),
+      );
+      expect(serverOutput).toContain("renderToReadableStream");
+      expect(serverOutput).not.toMatch(/\bfrom\s*["']react(?:-dom(?:\/server)?)?["']/);
+      expect(serverOutput).not.toMatch(/\bimport\s*\(?\s*["']react(?:-dom(?:\/server)?)?["']/);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("serves a React.lazy opengraph-image as a PNG from a built universal node-server", async () => {
     const root = await createProductionFixture();
 
