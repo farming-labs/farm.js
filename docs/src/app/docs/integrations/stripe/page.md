@@ -173,6 +173,10 @@ The same `ctx` includes `ctx.args.db`, `ctx.data`, request params, the raw reque
 - Set `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and `APP_BASE_URL`.
 - Keep product IDs stable because they become the app-facing contract.
 - Verify webhook signatures before mutating billing state.
+- A checkout grants its plan only once the session is `complete` and its payment is `paid` (or
+  needed none). Subscribe the webhook endpoint to `checkout.session.completed` and
+  `checkout.session.async_payment_succeeded` so delayed payment methods are fulfilled when the
+  money arrives.
 - Store billing snapshots through the integration schema when the app needs fast entitlement reads.
 - Run `farm stripe migrate --apply` after upgrading so the additive
   `billing_checkout_session` table can persistently deduplicate success-page and webhook delivery.

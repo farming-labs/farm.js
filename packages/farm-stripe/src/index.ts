@@ -3413,6 +3413,20 @@ function billingSnapshotStateEquals(
   );
 }
 
+/**
+ * Stripe's fulfilment rule: a Checkout Session grants what it sold only once it
+ * is complete and its payment has cleared, or needed none. A session exists and
+ * carries the plan in its metadata as soon as checkout starts, and a delayed
+ * payment method completes the session before the money arrives, which Stripe
+ * reports later as `checkout.session.async_payment_succeeded`.
+ */
+function isFulfilledCheckoutSession(session: StripeSessionResult): boolean {
+  return (
+    session.status === "complete" &&
+    (session.paymentStatus === "paid" || session.paymentStatus === "no_payment_required")
+  );
+}
+
 async function syncBillingCheckoutSession(
   session: StripeSessionResult,
   products: readonly ResolvedStripeProduct[],
@@ -3420,6 +3434,13 @@ async function syncBillingCheckoutSession(
   persistence: ReturnType<typeof resolveBillingPersistence>,
   context: FarmIntegrationHandlerContext,
 ) {
+  // The success page can present the id of a session that is still open, so
+  // without this a caller could start checkout for a paid plan, never pay, and
+  // look the session up to be granted it.
+  if (!isFulfilledCheckoutSession(session)) {
+    return;
+  }
+
   const resolved = await resolveBillingSnapshotForSession(
     session,
     products,
@@ -3642,7 +3663,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             );
 
             if (
-              event.type === "checkout.session.completed" &&
+              (event.type === "checkout.session.completed" ||
+                event.type === "checkout.session.async_payment_succeeded") &&
               event.data &&
               typeof event.data === "object" &&
               "id" in event.data &&
