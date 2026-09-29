@@ -111,6 +111,15 @@ function replayInteraction(interaction: FarmQueuedInteraction): void {
   replayClick(interaction.target);
 }
 
+/**
+ * Reproduce one entry of the pre-hydration queue as the kind of interaction it
+ * was. Every path that drains the queue has to use this: a held submit
+ * replayed as a click does nothing, because click() on a form is a no-op.
+ */
+export function replayFarmQueuedInteraction(target: Element, kind: unknown): void {
+  replayInteraction({ target, kind: toReplayKind(kind) });
+}
+
 function finishIslandHydration(
   container: Element,
   activating?: FarmQueuedInteraction | null,

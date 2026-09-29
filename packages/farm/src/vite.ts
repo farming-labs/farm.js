@@ -3994,7 +3994,7 @@ ${isolatedHydrationImport}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
 import { isFarmRouteActive } from '@farm.js/core/router'
-import { scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
+import { replayFarmQueuedInteraction, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -4581,9 +4581,9 @@ function replayPreHydrationClicks(container = null) {
   queue.splice(0, queue.length, ...remainingClicks);
   for (const queuedClick of queuedClicks) {
     const target = queuedClick?.target;
-    if (!target || typeof target.click !== 'function') continue;
-    if (target.isConnected === false) continue;
-    setTimeout(() => target.click(), 0);
+    if (!(target instanceof Element) || target.isConnected === false) continue;
+    // A held submit is replayed as a submit; click() on a form does nothing.
+    setTimeout(() => replayFarmQueuedInteraction(target, queuedClick.kind), 0);
   }
 }
 

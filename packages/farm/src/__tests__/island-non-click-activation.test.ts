@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { scheduleFarmIslandHydration } from "../client/island-runtime";
+import fs from "node:fs";
+import path from "node:path";
+import { replayFarmQueuedInteraction, scheduleFarmIslandHydration } from "../client/island-runtime";
 import { FARM_ISLAND_ACTIVATION_EVENTS } from "../island";
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -271,6 +273,49 @@ describe("real browser event ordering", () => {
     release?.();
     await expect(scheduled).resolves.toBe("hydrated");
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(clicked).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays a held submit as a submit after route-slot hydration", async () => {
+    // Route slots and slot-only pages drain the queue through the generated
+    // client entry's replayPreHydrationClicks, not the island scheduler. It
+    // replayed every entry with click(), which does nothing on a form.
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+    const start = source.indexOf("function replayPreHydrationClicks(");
+    const end = source.indexOf("\n}\n", start) + 2;
+    const markStart = source.indexOf("function markFarmHydrated(");
+    const markEnd = source.indexOf("\n}\n", markStart) + 2;
+    const replay = new Function(
+      "replayFarmQueuedInteraction",
+      `${source.slice(markStart, markEnd)}\n${source.slice(start, end)}\nreturn replayPreHydrationClicks;`,
+    )(replayFarmQueuedInteraction) as (container?: Element | null) => void;
+
+    document.body.innerHTML =
+      '<div id="slot"><form id="slot-form"><input name="q" type="text" /></form></div>';
+    const container = document.getElementById("slot")!;
+    const form = document.getElementById("slot-form") as HTMLFormElement;
+    const submitted = vi.fn();
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitted();
+    });
+    const button = document.createElement("button");
+    button.type = "button";
+    const clicked = vi.fn();
+    button.addEventListener("click", clicked);
+    container.append(button);
+
+    (
+      window as typeof window & { __FARM_PREHYDRATION_CLICK_QUEUE__?: unknown }
+    ).__FARM_PREHYDRATION_CLICK_QUEUE__ = [
+      { target: form, kind: "submit", createdAt: Date.now() },
+      { target: button, kind: "click", createdAt: Date.now() },
+    ];
+
+    replay(container);
+    await flush();
+
+    expect(submitted).toHaveBeenCalledTimes(1);
     expect(clicked).toHaveBeenCalledTimes(1);
   });
 });
