@@ -49,26 +49,26 @@ const commands: readonly CommandOption[] = [
   },
   {
     label: "npm",
-    command: "npx @farm.js/create-app@beta my-app",
+    command: "npx @farm.js/create-app my-app",
     brand: npmIconUrl,
     kind: "install",
   },
   {
     label: "Yarn",
-    command: "yarn dlx @farm.js/create-app@beta my-app",
+    command: "yarn dlx @farm.js/create-app my-app",
     brand: yarnIconUrl,
     kind: "install",
   },
   {
     label: "pnpm",
     command:
-      "PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='[\"@farm.js/*\"]' pnpm create @farm.js/app@beta my-app",
+      "PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='[\"@farm.js/*\"]' pnpm create @farm.js/app my-app",
     brand: pnpmIconUrl,
     kind: "install",
   },
   {
     label: "Bun",
-    command: "bunx @farm.js/create-app@beta my-app",
+    command: "bunx @farm.js/create-app my-app",
     brand: bunIconUrl,
     kind: "install",
   },

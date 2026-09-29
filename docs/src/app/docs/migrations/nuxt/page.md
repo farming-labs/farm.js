@@ -21,7 +21,7 @@ server contracts while replacing Nuxt-specific macros, composables, modules, and
 Add FARMJS and the Vue renderer without removing Nuxt first:
 
 ```bash
-pnpm add @farm.js/core @farm.js/vue@beta vue
+pnpm add @farm.js/core @farm.js/vue vue
 pnpm add -D @farm.js/cli
 ```
 

@@ -2,10 +2,10 @@
 
 Farm.js preview gateway for Vercel-hosted instant preview URLs
 
-Farm.js is currently in beta.
+See [Stability and Support](https://farmjs.dev/docs/stability) for what this package guarantees.
 
 ```bash
-npm install @farm.js/preview-gateway@beta
+npm install @farm.js/preview-gateway
 ```
 
 See the [Farm.js repository](https://github.com/farming-labs/farm.js) for documentation, examples, and support.

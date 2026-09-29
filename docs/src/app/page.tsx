@@ -825,7 +825,7 @@ function ButtonLink({
 function AnnouncementBar() {
   return (
     <a
-      aria-label={`Farm.js ${FARM_VERSION} is open source and in beta. View on GitHub.`}
+      aria-label={`Farm.js ${FARM_VERSION} is open source${FARM_VERSION.includes("-") ? " and in beta" : ""}. View on GitHub.`}
       className="farm-announcement flex h-5 items-center justify-center gap-2 border-b border-white/12 px-4 font-mono text-[10px] font-normal uppercase tracking-normal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
       href="https://github.com/farming-labs/farm.js"
     >

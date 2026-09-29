@@ -4,7 +4,7 @@ Installable, offline-aware Progressive Web Apps for Farm.js. The plugin generate
 service worker or copies a custom one during the production build, then registers it through Farm's
 browser plugin lifecycle.
 
-Farm.js is currently in beta.
+This package is in beta. See [Stability and Support](https://farmjs.dev/docs/stability).
 
 ## Install
 

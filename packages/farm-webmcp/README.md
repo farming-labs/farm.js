@@ -2,7 +2,7 @@
 
 Explicit, typed browser tools for Farm applications using the experimental WebMCP API.
 
-Farm.js and WebMCP are currently in beta. WebMCP is a Community Group draft, not a W3C Standard.
+This package is experimental. WebMCP is a Community Group draft, not a W3C Standard.
 
 ## Install
 

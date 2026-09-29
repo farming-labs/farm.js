@@ -71,7 +71,7 @@ dedicated [React](/docs/renderers/react), [Preact](/docs/renderers/preact),
 Install Preact and its FARMJS renderer adapter:
 
 ```bash
-pnpm add @farm.js/preact@beta preact
+pnpm add @farm.js/preact preact
 ```
 
 ```ts
@@ -90,7 +90,7 @@ aliases, server rendering and streaming, and browser hydration. See the
 Create a ready-to-run Preact application from the CLI:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-preact-app --template basic --renderer preact --typescript
 ```
 
 ### Svelte
@@ -98,7 +98,7 @@ PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm
 Install the Svelte adapter and runtime:
 
 ```bash
-pnpm add @farm.js/svelte@beta svelte
+pnpm add @farm.js/svelte svelte
 ```
 
 ```ts
@@ -124,7 +124,7 @@ typed server calls, and current compatibility boundaries.
 Create a ready-to-run Svelte application from the CLI:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-svelte-app --template basic --renderer svelte --typescript
 ```
 
 ### Vue
@@ -132,7 +132,7 @@ PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm
 Install Vue and its FARMJS renderer adapter:
 
 ```bash
-pnpm add @farm.js/vue@beta vue
+pnpm add @farm.js/vue vue
 ```
 
 ```ts
@@ -163,7 +163,7 @@ current compatibility boundaries.
 Create a ready-to-run Vue application from the CLI:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-vue-app --template basic --renderer vue --typescript
 ```
 
 ### Solid
@@ -171,7 +171,7 @@ PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm
 Install the Solid adapter and runtime:
 
 ```bash
-pnpm add @farm.js/solid@beta solid-js
+pnpm add @farm.js/solid solid-js
 ```
 
 ```ts
@@ -194,7 +194,7 @@ calls, and current compatibility boundaries.
 Create a ready-to-run Solid application directly from the CLI:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-solid-app --template basic --renderer solid --typescript
 ```
 
 Omitting `renderer` selects React. The renderer option is currently available for the Basic starter;
