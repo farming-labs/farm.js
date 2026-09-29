@@ -380,36 +380,6 @@ export const apiRoutes = ${manifestSource} as const;
     return /^[$A-Z_][0-9A-Z_$]*$/i.test(key) ? key : JSON.stringify(key);
   }
 
-  private getBaseExportName(path: string): string {
-    const cleanPath = path.replace(/^\/api\//, "");
-
-    if (cleanPath === "") {
-      return "api";
-    }
-
-    // Convert path to nested structure
-    // /api/auth/login -> ['auth', 'login']
-    return cleanPath;
-  }
-
-  private getExportName(path: string, method: string): string {
-    const cleanPath = path.replace(/^\/api\//, "");
-
-    if (cleanPath === "") {
-      return method.toLowerCase();
-    }
-
-    const parts = cleanPath.split("/");
-    if (parts.length === 1) {
-      // For single-level paths like /api/hello, just use the path name
-      return parts[0];
-    }
-
-    // For nested paths like /api/auth/login, create nested structure
-    // This matches the expected API client usage: api.auth.login()
-    return parts.join(".");
-  }
-
   /**
    * Generate the API index file
    */
