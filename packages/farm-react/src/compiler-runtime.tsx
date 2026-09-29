@@ -3687,24 +3687,28 @@ function applyStaticRangeBindings(
     targets[index] = target;
   }
 
-  if (values.length === 0 && activeBindings.length > 0) {
-    values.push(...activeBindings.map(() => UNSET_STATIC_RANGE_BINDING));
+  const initializesValues = values.length === 0 && activeBindings.length > 0;
+  if (!initializesValues && values.length !== activeBindings.length) return false;
+
+  const nextValues: unknown[] = [];
+  for (let index = 0; index < activeBindings.length; index += 1) {
+    const binding = activeBindings[index];
+    nextValues[index] = normalizedStaticRangeBindingValue(binding, binding.read());
   }
-  if (values.length !== activeBindings.length) return false;
 
   for (let index = 0; index < activeBindings.length; index += 1) {
     const binding = activeBindings[index];
-    const target = targets[index];
-    const rawValue = binding.read();
-    const value = normalizedStaticRangeBindingValue(binding, rawValue);
-    if (Object.is(values[index], value)) continue;
+    const value = nextValues[index];
+    const previous = initializesValues ? UNSET_STATIC_RANGE_BINDING : values[index];
+    if (Object.is(previous, value)) continue;
     values[index] = value;
+    const target = targets[index];
     if (binding.kind === "text") {
       target.textContent = value as string;
     } else if (binding.kind === "style") {
-      updateStyle(target, binding.name!, rawValue);
+      updateStyle(target, binding.name!, value);
     } else {
-      updateAttribute(target, binding.name!, rawValue);
+      updateAttribute(target, binding.name!, value);
     }
   }
   return true;

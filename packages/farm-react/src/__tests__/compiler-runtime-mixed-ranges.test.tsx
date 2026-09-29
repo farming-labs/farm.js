@@ -33,6 +33,7 @@ interface Model {
   title: string;
   accent: boolean;
   staticFail?: boolean;
+  lateStaticFail?: boolean;
   loading: boolean;
   error: boolean;
   items: Item[];
@@ -321,7 +322,12 @@ function mixedDescriptor(readModel: () => Model, prefix = ""): CompilerHostEleme
           sibling: 0,
           path: [],
           name: "width",
-          read: () => (readModel().accent ? 24 : 12),
+          read: () => {
+            if (readModel().lateStaticFail) {
+              throw new Error("late static sibling binding failed");
+            }
+            return readModel().accent ? 24 : 12;
+          },
         },
       ],
     },
@@ -1289,6 +1295,50 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
     expect(container.querySelector("[data-error]")?.textContent).toBe(
       "static sibling binding failed",
     );
+  });
+
+  it("evaluates every static-sibling binding before applying updates", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fixture = createMixedFixture();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () =>
+      root.render(
+        <Boundary>
+          <fixture.View />
+        </Boundary>,
+      ),
+    );
+
+    const header = container.querySelector("header")!;
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(header, {
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+
+    await act(async () => {
+      fixture.setModel((value) => ({
+        ...(value as Model),
+        title: "Inventory updated",
+        accent: true,
+        lateStaticFail: true,
+      }));
+      await flushCompilerUpdates();
+    });
+    mutations.push(...observer.takeRecords());
+    observer.disconnect();
+
+    expect(container.querySelector("[data-error]")?.textContent).toBe(
+      "late static sibling binding failed",
+    );
+    expect(header.isConnected).toBe(false);
+    expect(mutations).toEqual([]);
   });
 
   it("matches normal React through 3,000 deterministic mixed updates", async () => {

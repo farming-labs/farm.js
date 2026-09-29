@@ -2481,6 +2481,8 @@ refreshed row set before Farm reapplies bindings; a later invalid row therefore 
 container to React without first patching an earlier row. Conditional, keyed, and mixed range
 owners likewise validate every static binding target before applying any binding update, so a
 later invalid target cannot partially change an earlier static sibling before React takes over.
+They also evaluate and normalize every static binding value before the first DOM write, so a later
+throwing reader reaches the nearest React error boundary without exposing an earlier sibling update.
 Conditional branch bindings and keyed-row bindings inside nested keyed or mixed ranges are also
 read and prepared without DOM writes until every sibling range has passed adoption. A later invalid
 range therefore cannot partially patch an earlier branch or keyed row before React takes over. If
