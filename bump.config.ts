@@ -18,6 +18,7 @@ export default defineConfig({
     "packages/farm-clerk/package.json",
     "packages/farm-contentful/package.json",
     "packages/farm-cli/package.json",
+    "packages/farm-devtools/package.json",
     "packages/farm-email/package.json",
     "packages/farm-eve/package.json",
     "packages/farm-integration-utils/package.json",

@@ -1,7 +1,13 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 
-const { parsePublishBetaArgs, isRetryableStagedPublishError } = require("./publish-beta");
+const {
+  distTagForVersion,
+  groupPackagesByDistTag,
+  isRetryableStagedPublishError,
+  parsePublishBetaArgs,
+  publishArgs,
+} = require("./publish-beta");
 
 test("publishes and verifies by default", () => {
   assert.deepEqual(parsePublishBetaArgs([]), { help: false, verifyOnly: false, dryRun: false });
@@ -56,5 +62,41 @@ test("does not retry unrelated publish failures", () => {
   assert.equal(
     isRetryableStagedPublishError("npm error 404 Not Found - PUT https://registry.npmjs.org/x"),
     false,
+  );
+});
+
+test("derives each package's dist-tag from its version", () => {
+  assert.equal(distTagForVersion("0.1.0"), "latest");
+  assert.equal(distTagForVersion("1.2.3"), "latest");
+  assert.equal(distTagForVersion("0.1.0-beta.108"), "beta");
+  assert.equal(distTagForVersion("0.1.1-beta.0"), "beta");
+  assert.equal(distTagForVersion("0.2.0-canary.4"), "canary");
+});
+
+test("publishes a stable shared group next to independent betas", () => {
+  const groups = groupPackagesByDistTag([
+    { name: "@farm.js/core", version: "0.1.0", dir: "/w/packages/farm" },
+    { name: "@farm.js/vue", version: "0.1.0-beta.29", dir: "/w/packages/farm-vue" },
+    { name: "@farm.js/cli", version: "0.1.0", dir: "/w/packages/farm-cli" },
+  ]);
+  assert.deepEqual([...groups.keys()], ["latest", "beta"]);
+  assert.deepEqual(publishArgs(groups.get("latest"), "latest", ["--dry-run"]), [
+    "-r",
+    "--filter",
+    "@farm.js/core",
+    "--filter",
+    "@farm.js/cli",
+    "publish",
+    "--access",
+    "public",
+    "--tag",
+    "latest",
+    "--publish-branch",
+    "main",
+    "--dry-run",
+  ]);
+  assert.deepEqual(
+    groups.get("beta").map((pkg) => pkg.name),
+    ["@farm.js/vue"],
   );
 });

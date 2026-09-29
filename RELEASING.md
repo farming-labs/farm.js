@@ -14,9 +14,14 @@ pnpm release
 ```
 
 `pnpm release` is an alias for `pnpm release:latest`. Choose the next version in the Bumpp
-prompt. After the build and Git release steps pass, newly versioned shared packages are published
-with npm's `latest` tag. An independently versioned package is not bumped by this command; pnpm
-publishes it only when its current version is not already present on npm.
+prompt. After the build and Git release steps pass, `pnpm publish:latest` publishes every public
+package that is not on npm yet under the dist-tag its own version implies: a stable version such as
+`0.1.0` goes to `latest`, and an independently versioned package that is still `0.1.0-beta.N` goes
+to `beta`. It then verifies registry visibility and promotes betas exactly like a beta release.
+An independently versioned package is not bumped by this command.
+
+The first stable release moves the shared group from `0.1.0-beta.N` to `0.1.0`. Packages outside
+`bump.config.ts` stay on their own beta line until they are deliberately promoted.
 
 ## Beta release
 
@@ -26,12 +31,12 @@ pnpm release:beta
 
 Bumpp uses `beta` as the prerelease identifier for the shared release group, then pnpm publishes
 the new shared versions with the `beta` tag while leaving independently versioned packages at
-their current versions. Before starting, confirm that every public package's current manifest
-version, including every independently versioned package, is a beta. The promotion step rejects a
-stable current version instead of skipping that package, which aborts the release after publishing.
-After every current beta is visible, the release promotes it to npm's `latest` tag so unqualified
-installs receive the newest beta. If a package already has a stable `latest` version, that stable tag
-is preserved.
+their current versions. Every package is published under the tag its version implies, so stable
+packages that were not bumped are simply skipped. After every current beta is visible, the release
+promotes it to npm's `latest` tag so unqualified installs receive the newest beta, unless the
+package already has a stable `latest` version, which is always preserved. Promotion checks that a
+stable package's `latest` tag points at its current version and rejects prerelease identifiers
+other than `beta`.
 
 To build and publish a beta without running the test suite, pass `--no-test`:
 

@@ -13,7 +13,7 @@
   "scripts": {
     "build": "pnpm -r --filter \"./packages/*\" build",
     "dev": "turbo --filter \"./packages/*\" dev",
-    "test": "node --test scripts/pack-public-packages.test.js scripts/release-beta.test.js scripts/publish-beta.test.js scripts/run-prisma-generate.test.js scripts/pnpm-script-shell.test.js scripts/sync-release-versions.test.js scripts/core-shim-exports.test.js scripts/smoke-packed-integrations.test.js scripts/smoke-packed-app.test.js scripts/test-packages.test.js && node scripts/test-packages.js",
+    "test": "node --test scripts/pack-public-packages.test.js scripts/release-beta.test.js scripts/publish-beta.test.js scripts/promote-betas.test.js scripts/run-prisma-generate.test.js scripts/pnpm-script-shell.test.js scripts/sync-release-versions.test.js scripts/core-shim-exports.test.js scripts/smoke-packed-integrations.test.js scripts/smoke-packed-app.test.js scripts/test-packages.test.js && node scripts/test-packages.js",
     "test:farm": "pnpm --filter @farm.js/core test",
     "test:renderers": "node scripts/test-renderers.mjs",
     "test:packed-integrations": "node scripts/smoke-packed-integrations.js",
@@ -62,7 +62,7 @@
     "release:beta": "node scripts/release-beta.js",
     "release:canary": "bumpp --preid canary && pnpm run publish:canary",
     "publish:dry-run": "node scripts/pack-public-packages.js",
-    "publish:latest": "pnpm -r --filter \"./packages/*\" publish --access public --tag latest --publish-branch main",
+    "publish:latest": "node scripts/publish-beta.js",
     "publish:beta": "node scripts/publish-beta.js",
     "publish:canary": "pnpm -r --filter \"./packages/*\" publish --access public --tag canary --publish-branch main",
     "dist-tags:promote-betas": "node scripts/promote-betas.js"
