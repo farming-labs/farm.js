@@ -3007,6 +3007,14 @@ function resolveBillingPersistence(
       : storage?.claimCheckoutSession
         ? (claim: StripeBillingCheckoutSessionClaim) => storage.claimCheckoutSession!(claim)
         : undefined,
+    // Released by whichever side made the claim.
+    releaseCheckoutSession: billing?.hooks?.claimCheckoutSession
+      ? billing.hooks.releaseCheckoutSession
+        ? (sessionId: string) => billing.hooks!.releaseCheckoutSession!(sessionId, tools)
+        : undefined
+      : storage?.releaseCheckoutSession
+        ? (sessionId: string) => storage.releaseCheckoutSession!(sessionId)
+        : undefined,
   };
 }
 
@@ -3448,14 +3456,36 @@ async function syncBillingCheckoutSession(
     return;
   }
 
-  await persistBillingSnapshot(resolved.snapshot, billing, persistence, resolved.previousSnapshot);
-  await billing.hooks?.onCheckoutCompleted?.(
-    {
-      ...resolved.snapshot,
-      sessionId: session.id,
-    },
-    persistence.tools,
-  );
+  try {
+    await persistBillingSnapshot(
+      resolved.snapshot,
+      billing,
+      persistence,
+      resolved.previousSnapshot,
+    );
+    await billing.hooks?.onCheckoutCompleted?.(
+      {
+        ...resolved.snapshot,
+        sessionId: session.id,
+      },
+      persistence.tools,
+    );
+  } catch (error) {
+    // The claim went in first so duplicate deliveries skip the hooks. If the
+    // work it guarded failed, keep it and Stripe's retry finds the session
+    // already claimed and does nothing, so the customer never gets the plan.
+    if (claimResult === true && persistence.releaseCheckoutSession) {
+      try {
+        await persistence.releaseCheckoutSession(session.id);
+      } catch (releaseError) {
+        console.warn(
+          `[farm:stripe] Could not release checkout session ${session.id} after a failure:`,
+          releaseError,
+        );
+      }
+    }
+    throw error;
+  }
 }
 
 async function serializeBillingCheckoutSession(

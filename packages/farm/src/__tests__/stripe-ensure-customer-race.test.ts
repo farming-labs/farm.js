@@ -53,6 +53,13 @@ function createFakeOrm() {
         async update() {
           return null;
         },
+        async deleteMany({ where }: { where: Record<string, unknown> }) {
+          const before = checkoutSessionRows.length;
+          for (let index = checkoutSessionRows.length - 1; index >= 0; index -= 1) {
+            if (matches(checkoutSessionRows[index]!, where)) checkoutSessionRows.splice(index, 1);
+          }
+          return before - checkoutSessionRows.length;
+        },
       },
     },
   };
@@ -155,5 +162,20 @@ describe("stripe ensureCustomer race", () => {
       "cs_once",
       "cs_distinct",
     ]);
+  });
+
+  it("releases a checkout session claim so a retry can claim it again", async () => {
+    const fakeOrm = createFakeOrm();
+    const adapter = ormStorageAdapter({ orm: fakeOrm.orm });
+    const claim = {
+      sessionId: "cs_retry",
+      owner: { kind: "user" as const, id: "user_4" },
+      stripeCustomerId: "cus_4",
+    };
+
+    await expect(adapter.claimCheckoutSession?.(claim)).resolves.toBe(true);
+    await adapter.releaseCheckoutSession?.("cs_retry");
+    expect(fakeOrm.checkoutSessionRows).toHaveLength(0);
+    await expect(adapter.claimCheckoutSession?.(claim)).resolves.toBe(true);
   });
 });

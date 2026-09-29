@@ -159,6 +159,11 @@ export interface StripeBillingStorageAdapter {
   clearBillingSnapshot(owner: StripeBillingOwner): Promise<void>;
   /** Returns true for the first claim, false for a replay, or null when unsupported. */
   claimCheckoutSession?(claim: StripeBillingCheckoutSessionClaim): Promise<boolean | null>;
+  /**
+   * Undo a claim whose work failed, so Stripe's retry of the same session runs
+   * it again instead of finding it already claimed.
+   */
+  releaseCheckoutSession?(sessionId: string): Promise<void>;
 }
 
 export interface StripeBillingStorageTools {
@@ -202,6 +207,12 @@ export interface StripeBillingHooks {
     claim: StripeBillingCheckoutSessionClaim,
     args: StripeBillingArgs,
   ): Promise<boolean | null>;
+  /**
+   * Remove a claim made by `claimCheckoutSession` when saving the snapshot or a
+   * checkout hook failed. Without it a failed checkout stays claimed and
+   * Stripe's retry is skipped.
+   */
+  releaseCheckoutSession?(sessionId: string, args: StripeBillingArgs): Promise<void>;
   onCheckoutCreated?(
     payload: {
       owner: StripeBillingOwner;
@@ -268,6 +279,7 @@ export interface StripeBillingOptions {
 type PrismaDelegate = {
   findFirst(args: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
   create(args: { data: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  deleteMany?(args: { where: Record<string, unknown> }): Promise<unknown>;
   update(args: {
     where: Record<string, unknown>;
     data: Record<string, unknown>;
@@ -283,6 +295,7 @@ type PrismaStorageOptions = {
 type StripeOrmModelClient = {
   findFirst(args: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
   create(args: { data: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  deleteMany?(args: { where: Record<string, unknown> }): Promise<unknown>;
   update(args: {
     where: Record<string, unknown>;
     data: Record<string, unknown>;
@@ -633,6 +646,10 @@ export function prismaStorageAdapter(options: PrismaStorageOptions): StripeBilli
   }
 
   return withSerializedEnsureCustomer({
+    async releaseCheckoutSession(sessionId) {
+      await checkoutSessionDelegate?.deleteMany?.({ where: { sessionId } });
+    },
+
     async claimCheckoutSession(claim) {
       if (!checkoutSessionDelegate) {
         return null;
@@ -852,6 +869,11 @@ export function ormStorageAdapter(options: StripeOrmStorageOptions): StripeBilli
   }
 
   return withSerializedEnsureCustomer({
+    async releaseCheckoutSession(sessionId) {
+      const model = await getCheckoutSessionModel();
+      await model?.deleteMany?.({ where: { sessionId } });
+    },
+
     async claimCheckoutSession(claim) {
       const model = await getCheckoutSessionModel();
       if (!model) {
@@ -1099,6 +1121,7 @@ export function sqliteStorageAdapter(options: SqliteStorageOptions): StripeBilli
     WHERE owner_kind = ? AND owner_id = ?`,
   );
   let insertCheckoutSession: ReturnType<SqliteDatabase["prepare"]> | null = null;
+  let deleteCheckoutSession: ReturnType<SqliteDatabase["prepare"]> | null = null;
   if (checkoutSessionTableName) {
     try {
       insertCheckoutSession = db.prepare(
@@ -1109,6 +1132,9 @@ export function sqliteStorageAdapter(options: SqliteStorageOptions): StripeBilli
           stripe_customer_id,
           processed_at
         ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      );
+      deleteCheckoutSession = db.prepare(
+        `DELETE FROM "${checkoutSessionTableName}" WHERE session_id = ?`,
       );
     } catch {
       // Older schemas have no checkout-session table. The caller falls back to
@@ -1121,6 +1147,10 @@ export function sqliteStorageAdapter(options: SqliteStorageOptions): StripeBilli
   }
 
   return withSerializedEnsureCustomer({
+    async releaseCheckoutSession(sessionId) {
+      deleteCheckoutSession?.run(sessionId);
+    },
+
     async claimCheckoutSession(claim) {
       if (!insertCheckoutSession) {
         return null;
@@ -1265,6 +1295,9 @@ type DrizzleStorageOptions = {
         where(condition: unknown): Promise<unknown> | unknown;
       };
     };
+    delete?(table: unknown): {
+      where(condition: unknown): Promise<unknown> | unknown;
+    };
   };
   table: Record<string, unknown>;
   checkoutSessionTable?: Record<string, unknown>;
@@ -1298,6 +1331,11 @@ export function drizzleStorageAdapter(options: DrizzleStorageOptions): StripeBil
   }
 
   return withSerializedEnsureCustomer({
+    async releaseCheckoutSession(sessionId) {
+      if (!checkoutSessionTable || !db.delete) return;
+      await db.delete(checkoutSessionTable).where(eq(checkoutSessionTable.sessionId, sessionId));
+    },
+
     async claimCheckoutSession(claim) {
       if (!checkoutSessionTable) {
         return null;
