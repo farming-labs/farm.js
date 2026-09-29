@@ -335,13 +335,15 @@ async function runProductionRequest(
   }
 }
 
-async function readJavaScriptOutput(dir: string): Promise<string> {
+async function readJavaScriptOutput(dir: string, extensions = [".mjs"]): Promise<string> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   const contents = await Promise.all(
     entries.map(async (entry) => {
       const entryPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) return readJavaScriptOutput(entryPath);
-      return entry.name.endsWith(".mjs") ? fs.readFile(entryPath, "utf8") : "";
+      if (entry.isDirectory()) return readJavaScriptOutput(entryPath, extensions);
+      return extensions.some((extension) => entry.name.endsWith(extension))
+        ? fs.readFile(entryPath, "utf8")
+        : "";
     }),
   );
   return contents.join("\n");
@@ -3544,6 +3546,36 @@ export default function OpenGraphImage() {
       );
       expect(serverOutput).not.toContain(".wasm?module");
       expect(serverOutput).toContain("Cloudflare metadata image");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("bundles React DOM's Web server build for the Cloudflare Pages worker", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "react-edge-server-build-test",
+          deploy: { target: "cloudflare" },
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "cloudflare-pages" });
+
+      const workerOutput = await readJavaScriptOutput(
+        path.join(root, config.deploy.outputDir, "_worker.js"),
+        [".js", ".mjs"],
+      );
+      expect(workerOutput).toContain("renderToReadableStream");
+      // Only React DOM's Node server build exports these.
+      expect(workerOutput).not.toContain("prerenderToNodeStream");
+      expect(workerOutput).not.toContain("resumeToPipeableStream");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

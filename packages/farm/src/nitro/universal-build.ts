@@ -4154,9 +4154,6 @@ async function buildSSRInMemory(
               ]
             : true,
       },
-      ...(shouldAliasReactServerToWebBuild(config.renderer, preset)
-        ? { resolve: { alias: [FARM_REACT_WEB_SERVER_ALIAS] } }
-        : {}),
       define: {
         __FARM_API_BASE_URL__: JSON.stringify(config.api.baseURL),
         __FARM_ENV__: JSON.stringify(config.env || { server: {}, public: {} }),
@@ -4232,7 +4229,14 @@ async function buildSSRInMemory(
           }
         : undefined,
       resolve: {
-        alias: createFarmSourceAlias(root, config.srcDir),
+        alias: [
+          ...(shouldAliasReactServerToWebBuild(config.renderer, preset)
+            ? [FARM_REACT_WEB_SERVER_ALIAS]
+            : []),
+          ...Object.entries(createFarmSourceAlias(root, config.srcDir)).map(
+            ([find, replacement]) => ({ find, replacement }),
+          ),
+        ],
         // Route modules and the renderer adapter must share one runtime instance.
         dedupe: [...(config.renderer.dedupe || [])],
       },
