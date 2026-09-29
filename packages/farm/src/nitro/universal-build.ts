@@ -6642,7 +6642,9 @@ async function handleFarmRequestInContext(
     hasMiddlewareRuntime
       ? `
   const requestBeforeMiddleware = request;
-  const middlewareResult = await farmMiddlewareRunner(request);
+  const middlewareResult = await farmMiddlewareRunner(request, {
+    clientAddress: adapterContext?.clientAddress,
+  });
   if (middlewareResult.response) {
     return middlewareResult.response;
   }
@@ -8393,6 +8395,19 @@ function createResponseFinishedHook(event) {
   }
 }
 
+// The peer address the server adapter already knows. The Request handed to
+// Farm is rebuilt below and has no socket, so without this a built app cannot
+// tell its visitors apart even though its development server can. Mirrors h3's
+// getRequestIP without the forwarded header, which only trustProxy may honor.
+function resolveFarmClientAddress(event) {
+  try {
+    return event.req?.context?.clientAddress || event.req?.ip ||
+      event.node?.req?.socket?.remoteAddress || undefined
+  } catch {
+    return undefined
+  }
+}
+
 function resolveTrustedLocalOrigin(event, request) {
   const socket = event.node?.req?.socket
   const port = socket?.localPort
@@ -8439,6 +8454,7 @@ export default async function farmNitroEventHandler(event) {
     waitUntil: (promise) => event.waitUntil(promise),
     onResponseFinished: createResponseFinishedHook(event),
     trustedLocalOrigin: resolveTrustedLocalOrigin(event, request),
+    clientAddress: resolveFarmClientAddress(event),
   })
 
   // Nitro records asset compression negotiation on the event response. Merge

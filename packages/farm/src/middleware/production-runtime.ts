@@ -34,6 +34,16 @@ export interface ProductionMiddlewareRunnerOptions {
   server?: Pick<ResolvedFarmServerConfig, "trustProxy">;
 }
 
+export interface ProductionMiddlewareRequestOptions {
+  /**
+   * The address of the peer that opened the connection, as the server adapter
+   * reports it. A web Request carries no socket, so this is the only way a
+   * built app's middleware learns the client address it already has in
+   * development. A trusted proxy's `x-forwarded-for` still takes precedence.
+   */
+  clientAddress?: string;
+}
+
 export interface ProductionMiddlewareResult {
   request: Request;
   response: Response | null;
@@ -304,7 +314,11 @@ function createResponseShim(headers: WebResponseHeaderMap): WebResponseShimState
   };
 }
 
-function withNodeRequestShape(request: Request, trustProxy: boolean): Request {
+function withNodeRequestShape(
+  request: Request,
+  trustProxy: boolean,
+  clientAddress: string | undefined,
+): Request {
   const requestWithShape = request as Request & {
     socket?: { remoteAddress?: string };
   };
@@ -314,12 +328,12 @@ function withNodeRequestShape(request: Request, trustProxy: boolean): Request {
       ? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
       : undefined;
     try {
-      // A web Request carries no socket, and there is no client address to
-      // report unless a trusted proxy supplied one. Reporting `127.0.0.1`
-      // instead used to make every visitor look like the same client, which
-      // silently collapsed per-client rate limiting into one shared bucket.
-      // Leave it undefined so a consumer can tell that it does not know.
-      requestWithShape.socket = { remoteAddress: forwardedFor };
+      // A web Request carries no socket, so the address comes from a trusted
+      // proxy or from the server adapter's own connection. Never invent one:
+      // reporting `127.0.0.1` used to make every visitor look like the same
+      // client, which collapsed per-client rate limiting into one shared
+      // bucket. Leave it undefined so a consumer can tell that it does not know.
+      requestWithShape.socket = { remoteAddress: forwardedFor || clientAddress || undefined };
     } catch {
       // Some Request implementations may not be extensible.
     }
@@ -351,8 +365,9 @@ function createWebMiddlewareContext(
   request: Request,
   parent?: MiddlewareContext["parent"],
   trustProxy = false,
+  clientAddress?: string,
 ): WebMiddlewareContextState {
-  let currentRequest = withNodeRequestShape(request, trustProxy);
+  let currentRequest = withNodeRequestShape(request, trustProxy, clientAddress);
   let handledResponse: Response | null = null;
   const url = new URL(currentRequest.url);
   const data = parent?.data ? new Map(parent.data) : new Map<string, any>();
@@ -410,7 +425,11 @@ function createWebMiddlewareContext(
     rewrite(rewriteUrl: string): void {
       ctx._rewriteUrl = rewriteUrl;
       const nextUrl = new URL(rewriteUrl, currentRequest.url);
-      currentRequest = withNodeRequestShape(new Request(nextUrl, currentRequest), trustProxy);
+      currentRequest = withNodeRequestShape(
+        new Request(nextUrl, currentRequest),
+        trustProxy,
+        clientAddress,
+      );
       ctx.request = currentRequest as any;
       ctx.url = nextUrl;
       ctx.pathname = nextUrl.pathname;
@@ -773,6 +792,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
 
   return async function runProductionMiddleware(
     request: Request,
+    requestOptions: ProductionMiddlewareRequestOptions = {},
   ): Promise<ProductionMiddlewareResult> {
     if (!globalConfig && entries.length === 0) {
       return emptyResult(request);
@@ -782,6 +802,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       request,
       undefined,
       options.server?.trustProxy === true,
+      requestOptions.clientAddress,
     );
     let ctx = contextState.ctx;
     let currentRequest = contextState.getRequest();
@@ -835,6 +856,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
           currentRequest,
           parentData,
           options.server?.trustProxy === true,
+          requestOptions.clientAddress,
         );
         ctx = contextState.ctx;
       }

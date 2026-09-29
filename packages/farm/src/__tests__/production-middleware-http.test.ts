@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
+import { middleware } from "../middleware/chain";
 import {
   applyProductionMiddlewareHeaders,
   createProductionMiddlewareRunner,
@@ -236,5 +237,69 @@ describe("production middleware HTTP behavior", () => {
 
     const proxied = await createRunner(true)(request());
     expect(proxied.headers.get("x-client-address")).toBe("203.0.113.8");
+  });
+
+  it("reports the server adapter's client address, before and after a rewrite", async () => {
+    // A web Request has no socket, so the built entry hands over the address
+    // its server adapter already has. Development reads the same thing from
+    // the real socket.
+    const createRunner = (trustProxy: boolean) =>
+      createProductionMiddlewareRunner({
+        server: { trustProxy },
+        config: [
+          {
+            matcher: "/old",
+            async handler(ctx, next) {
+              ctx.headers.set("x-before-rewrite", ctx.request.socket.remoteAddress || "missing");
+              ctx.rewrite("/new");
+              await next();
+            },
+          },
+          {
+            handler(ctx) {
+              ctx.headers.set("x-client-address", ctx.request.socket.remoteAddress || "missing");
+            },
+          },
+        ],
+      });
+    const request = () =>
+      new Request("https://example.com/old", {
+        headers: { "x-forwarded-for": "203.0.113.8" },
+      });
+
+    const direct = await createRunner(false)(request(), { clientAddress: "198.51.100.4" });
+    expect({
+      before: direct.headers.get("x-before-rewrite"),
+      after: direct.headers.get("x-client-address"),
+    }).toEqual({ before: "198.51.100.4", after: "198.51.100.4" });
+
+    // A trusted proxy's header still names the client ahead of the proxy's
+    // own connection.
+    const proxied = await createRunner(true)(request(), { clientAddress: "10.0.0.1" });
+    expect(proxied.headers.get("x-client-address")).toBe("203.0.113.8");
+  });
+
+  it("buckets the default rate limit per client address in a built app", async () => {
+    // The documented setup: a file middleware exporting a rate-limit chain,
+    // with no keyGenerator and no trustProxy on a directly exposed server.
+    const runner = createProductionMiddlewareRunner({
+      modules: [
+        {
+          path: "/api",
+          module: { default: middleware().rateLimit({ requests: 1, window: "1m" }) },
+        },
+      ],
+    });
+    const call = (clientAddress: string) =>
+      runner(new Request("https://example.com/api/login", { method: "POST" }), { clientAddress });
+
+    const first = await call("203.0.113.10");
+    expect(first.response).toBeNull();
+    // A different client is not limited by the first one's spent request.
+    const other = await call("198.51.100.77");
+    expect(other.response).toBeNull();
+    // The same client is.
+    const repeat = await call("203.0.113.10");
+    expect(repeat.response?.status).toBe(429);
   });
 });

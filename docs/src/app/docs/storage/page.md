@@ -186,14 +186,15 @@ export default middleware().rateLimit({
 });
 ```
 
-The default bucket is the caller's address and the request path, and outside a
-Node server that address is only known when `server.trustProxy` is set so a
-proxy's `x-forwarded-for` is trusted. Without it there is no client address to
-bucket on and the limiter refuses rather than putting every caller in one
-bucket, so set `trustProxy` or supply a `keyGenerator` that uses an identity you
-do have. Do not fall back to a constant such as `"unknown"`: that is the shared
-bucket the limiter refuses, and one caller then exhausts the window for
-everyone.
+The default bucket is the caller's address and the request path. A built app
+takes that address from the server's own connection, as the development server
+does. Behind a reverse proxy or a platform load balancer that connection belongs
+to the proxy, so set `server.trustProxy` to key on the proxy's `x-forwarded-for`
+instead. When the runtime reports no address at all, the limiter refuses rather
+than putting every caller in one bucket, so set `trustProxy` or supply a
+`keyGenerator` that uses an identity you do have. Do not fall back to a constant
+such as `"unknown"`: that is the shared bucket the limiter refuses, and one
+caller then exhausts the window for everyone.
 
 The Redis adapter uses one Lua operation to increment the counter and establish its expiry. A generic `get()` followed by `set()` adapter is rejected because concurrent requests can read the same count and overwrite each other. Limited responses include `Retry-After`; all responses include the [`RateLimit` and `RateLimit-Policy` fields from the current IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/).
 
