@@ -153,6 +153,8 @@ export interface FarmCacheUserConfig {
   adapter?: FarmCacheAdapter;
   /** Prefix isolating applications and deployments sharing one adapter. */
   namespace?: string;
+  /** Maximum process-local entries retained in memory. @default 1024 */
+  maxEntries?: number;
   /** Browser cache persistence; see the client cache adapter documentation. */
   client?: FarmClientCacheUserConfig;
   /**
@@ -249,11 +251,13 @@ export class FarmDataCache {
   private entries = new Map<string, InternalFarmCacheEntry>();
   private inflight = new Map<string, Promise<unknown>>();
   private invalidatedTagVersions = new Map<string, number>();
+  private activeGenerations = new Set<{ tags: ReadonlySet<string>; createdVersion: number }>();
   private version = 0;
   private generation = 0;
   private adapter?: FarmCacheAdapter;
   private namespace = "farm";
   private local = true;
+  private maxEntries = 1_024;
   private lease = {
     enabled: true,
     ttlMs: 10_000,
@@ -270,10 +274,12 @@ export class FarmDataCache {
     this.entries.clear();
     this.inflight.clear();
     this.invalidatedTagVersions.clear();
+    this.activeGenerations.clear();
     this.version = 0;
     this.adapter = config.adapter;
     this.namespace = normalizeCacheNamespace(config.namespace || "farm");
     this.local = !config.adapter;
+    this.maxEntries = normalizePositiveInteger(config.maxEntries, 1_024, "cache.maxEntries");
     this.lease =
       config.lease === false
         ? { ...this.lease, enabled: false }
@@ -333,6 +339,8 @@ export class FarmDataCache {
       emitFarmEvent({ type: "cache.miss", key, reason: "stale" });
       return undefined;
     }
+
+    this.touchEntry(key, entry);
 
     emitFarmEvent({
       type: "cache.hit",
@@ -418,7 +426,7 @@ export class FarmDataCache {
       revalidate,
     };
 
-    this.entries.set(key, entry);
+    this.storeLocalEntry(entry);
     emitFarmEvent({
       type: "cache.set",
       key,
@@ -476,12 +484,14 @@ export class FarmDataCache {
 
   delete(key: string): boolean {
     const deleted = this.entries.delete(key);
+    if (deleted) this.pruneInvalidatedTagVersions();
     emitFarmEvent({ type: "cache.delete", key, deleted });
     return deleted;
   }
 
   async deleteAsync(key: string): Promise<boolean> {
     const deleted = this.entries.delete(key);
+    if (deleted) this.pruneInvalidatedTagVersions();
     if (this.adapter) {
       await this.adapter.delete(this.createAdapterKey(key));
     }
@@ -495,6 +505,7 @@ export class FarmDataCache {
     this.entries.clear();
     this.inflight.clear();
     this.invalidatedTagVersions.clear();
+    this.activeGenerations.clear();
     this.version = 0;
     emitFarmEvent({ type: "cache.clear", count });
   }
@@ -669,8 +680,14 @@ export class FarmDataCache {
       }
     }
 
+    const initialCreatedVersion = this.version;
+    const activeGeneration = {
+      tags: new Set(tags),
+      createdVersion: initialCreatedVersion,
+    };
+    this.activeGenerations.add(activeGeneration);
+
     try {
-      const initialCreatedVersion = this.version;
       const initialTagVersions = await this.getAdapterTagVersions(tags, adapter, namespace);
       const value = await producer();
       if (generation === this.generation) {
@@ -678,6 +695,8 @@ export class FarmDataCache {
       }
       return value;
     } finally {
+      this.activeGenerations.delete(activeGeneration);
+      this.pruneInvalidatedTagVersions();
       if (leaseToken && adapter?.releaseLease) {
         try {
           await adapter.releaseLease(leaseKey, leaseToken);
@@ -751,8 +770,11 @@ export class FarmDataCache {
   }
 
   private invalidateTag(normalizedTag: string): number {
+    const count = this.countEntriesForTag(normalizedTag);
+    this.invalidatedTagVersions.delete(normalizedTag);
     this.invalidatedTagVersions.set(normalizedTag, ++this.version);
-    return this.countEntriesForTag(normalizedTag);
+    this.pruneInvalidatedTagVersions();
+    return count;
   }
 
   private toPublicEntry<T>(entry: InternalFarmCacheEntry<T>): FarmCacheEntry<T> {
@@ -768,7 +790,7 @@ export class FarmDataCache {
   }
 
   private hydrateLocalEntry<T>(entry: FarmCacheEntry<T>): void {
-    this.entries.set(entry.key, {
+    this.storeLocalEntry({
       key: entry.key,
       value: entry.value,
       tags: new Set(entry.tags.map(normalizeCacheTag)),
@@ -777,6 +799,39 @@ export class FarmDataCache {
       createdVersion: entry.createdVersion ?? ++this.version,
       revalidate: normalizeRevalidate(entry.revalidate),
     });
+  }
+
+  private touchEntry(key: string, entry: InternalFarmCacheEntry): void {
+    this.entries.delete(key);
+    this.entries.set(key, entry);
+  }
+
+  private storeLocalEntry(entry: InternalFarmCacheEntry): void {
+    this.entries.delete(entry.key);
+    this.entries.set(entry.key, entry);
+
+    while (this.entries.size > this.maxEntries) {
+      const oldestKey = this.entries.keys().next().value as string | undefined;
+      if (oldestKey === undefined) break;
+      this.entries.delete(oldestKey);
+    }
+    this.pruneInvalidatedTagVersions();
+  }
+
+  private pruneInvalidatedTagVersions(): void {
+    for (const [tag, invalidatedVersion] of this.invalidatedTagVersions) {
+      const staleEntryNeedsVersion = Array.from(this.entries.values()).some(
+        (entry) => entry.tags.has(tag) && entry.createdVersion < invalidatedVersion,
+      );
+      if (staleEntryNeedsVersion) continue;
+
+      const activeGenerationNeedsVersion = Array.from(this.activeGenerations).some(
+        (generation) => generation.tags.has(tag) && generation.createdVersion < invalidatedVersion,
+      );
+      if (!activeGenerationNeedsVersion) {
+        this.invalidatedTagVersions.delete(tag);
+      }
+    }
   }
 
   private createAdapterKey(key: string): string {
@@ -1083,6 +1138,18 @@ function normalizePositiveDuration(
     throw new TypeError(`${name} must be a positive number of milliseconds.`);
   }
   return Math.floor(value);
+}
+
+function normalizePositiveInteger(
+  value: number | undefined,
+  fallback: number,
+  name: string,
+): number {
+  if (value === undefined) return fallback;
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(`${name} must be a positive integer.`);
+  }
+  return value;
 }
 
 function delay(ms: number): Promise<void> {

@@ -91,6 +91,7 @@ describe("config helpers", () => {
         cache: {
           adapter,
           namespace: "catalog",
+          maxEntries: 2_048,
         },
       },
       "production",
@@ -99,6 +100,7 @@ describe("config helpers", () => {
     expect(config.cache).toEqual({
       adapter,
       namespace: "catalog",
+      maxEntries: 2_048,
     });
   });
 

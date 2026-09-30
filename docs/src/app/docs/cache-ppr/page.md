@@ -13,6 +13,20 @@ Use shared runtime cache helpers, tag/path invalidation, ISR-style revalidation,
 Farm uses its process-local memory cache when `cache.adapter` is not configured. For multiple
 servers or ephemeral deployments, configure one shared adapter in `farm.config.ts`:
 
+The memory cache retains at most 1,024 entries by default and evicts the least recently used entry
+when it reaches that limit. Set `cache.maxEntries` to a larger positive integer when one process
+must keep a larger working set:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  cache: {
+    maxEntries: 4_096,
+  },
+});
+```
+
 ```bash
 pnpm add @farm.js/cache-redis ioredis
 ```

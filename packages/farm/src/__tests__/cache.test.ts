@@ -368,6 +368,74 @@ describe("server cache primitives", () => {
     await expect(adapter.get("validation:entry:invalid")).resolves.toBeNull();
   });
 
+  it("bounds the default memory cache instead of retaining expired entries forever", () => {
+    const cache = new FarmDataCache();
+    const expiredAt = Date.now() - 60_000;
+
+    for (let index = 0; index < 10_000; index++) {
+      cache.set(`expired-${index}`, index, { createdAt: expiredAt, revalidate: 1 });
+    }
+
+    expect(cache.size).toBe(1_024);
+    expect(cache.get("expired-0")).toBeUndefined();
+    expect(cache.get("expired-9999", { allowStale: true })).toBe(9_999);
+  });
+
+  it("evicts the least recently used entry at a configured memory limit", () => {
+    const cache = new FarmDataCache({ maxEntries: 2 });
+    cache.set("first", 1);
+    cache.set("second", 2);
+
+    expect(cache.get("first")).toBe(1);
+    cache.set("third", 3);
+
+    expect(cache.get("first")).toBe(1);
+    expect(cache.get("second")).toBeUndefined();
+    expect(cache.get("third")).toBe(3);
+  });
+
+  it("compacts tag invalidation versions when no entry or fill needs them", async () => {
+    const cache = new FarmDataCache({ maxEntries: 2 });
+
+    for (let index = 0; index < 10_000; index++) {
+      cache.revalidateTag(`unused-${index}`);
+    }
+    expect((cache as any).invalidatedTagVersions.size).toBe(0);
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const pending = cache.getOrSet(
+      "active",
+      async () => {
+        await gate;
+        return "old";
+      },
+      { tags: ["products"] },
+    );
+    await vi.waitFor(() => expect((cache as any).activeGenerations.size).toBe(1));
+
+    cache.revalidateTag("products");
+    expect((cache as any).invalidatedTagVersions.size).toBe(1);
+    release();
+    await expect(pending).resolves.toBe("old");
+    expect(cache.get("active")).toBeUndefined();
+
+    await expect(
+      cache.getOrSet("active", async () => "fresh", { tags: ["products"] }),
+    ).resolves.toBe("fresh");
+    expect((cache as any).invalidatedTagVersions.size).toBe(0);
+  });
+
+  it("rejects invalid memory cache limits", () => {
+    for (const maxEntries of [0, -1, 1.5, Number.POSITIVE_INFINITY]) {
+      expect(() => new FarmDataCache({ maxEntries })).toThrow(
+        "cache.maxEntries must be a positive integer.",
+      );
+    }
+  });
+
   it("dedupes concurrent cache fills", async () => {
     let calls = 0;
     const getProfile = unstable_cache(async () => {
