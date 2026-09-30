@@ -5212,6 +5212,7 @@ async function renderPage(pageData) {
 spaRouter.setNavigationHandler(renderPage);
 
 async function hydrate() {
+  await window.__FARM_PPR_REFRESH_PROMISE__;
   await farmClientRuntime.start();
 
   if (isFarmDocsSearchPage()) {

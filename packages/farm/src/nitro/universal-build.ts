@@ -3197,6 +3197,7 @@ function resetReactRoot() {
 
 // Hydrate client components
 async function hydrate() {
+  await window.__FARM_PPR_REFRESH_PROMISE__;
   await farmClientRuntime.start();
 
   if (await hydrateFarmDocsAdapterRuntime()) {
