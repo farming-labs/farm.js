@@ -169,6 +169,9 @@
       "internal/metadata-image-runtime": [
         "./dist/internal/metadata-image-runtime.d.ts"
       ],
+      "internal/docs-precompiled-runtime": [
+        "./dist/internal/docs-precompiled-runtime.d.ts"
+      ],
       "internal/client-runtime": [
         "./dist/internal/client-runtime.d.ts"
       ],
@@ -585,6 +588,11 @@
       "types": "./dist/internal/app-markdown-runtime.d.ts",
       "import": "./dist/internal/app-markdown-runtime.mjs",
       "require": "./dist/internal/app-markdown-runtime.cjs"
+    },
+    "./internal/docs-precompiled-runtime": {
+      "types": "./dist/internal/docs-precompiled-runtime.d.ts",
+      "import": "./dist/internal/docs-precompiled-runtime.mjs",
+      "require": "./dist/internal/docs-precompiled-runtime.cjs"
     },
     "./internal/compression-runtime": {
       "types": "./dist/internal/compression-runtime.d.ts",

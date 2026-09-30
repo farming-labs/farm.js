@@ -8,7 +8,9 @@ section: "Content"
 
 Serve a @farming-labs/docs-powered docs runtime from Farm config, including human pages and agent-readable API routes.
 
-The docs runtime needs a Node.js deployment target (`node`, `vercel`, or `netlify`). Builds for edge presets such as Cloudflare fail with an explanation, because the runtime cannot start in a Worker. See [Stability and Support](/docs/stability#known-limits-in-01).
+Farm supports the built-in docs renderer on Node.js and edge deployment targets. Edge production builds
+compile the docs tree into a runtime-neutral content snapshot, so Workers serve the same HTML,
+Markdown, search, sitemap, robots, and agent-discovery routes without filesystem access.
 
 ## Enable docs
 
@@ -203,5 +205,8 @@ path-style machine routes. Most applications do not need either wrapper.
 - Keep docs content in markdown so human pages and agent-readable pages stay in sync.
 - Keep the canonical docs configuration in the `docs` property of `farm.config.ts`.
 - Use an external docs config only when a large navigation or theme definition is easier to maintain separately.
+- Edge output snapshots docs content during `farm build`; rebuild the app after changing a page or docs configuration. `farm dev` continues to read source files live.
+- Edge output currently supports Farm's built-in renderer (`docs.adapter: false`). A framework-specific external docs adapter still requires a Node target until that adapter declares an edge runtime contract.
+- Built-in and serializable hosted search providers run on edge targets. A function-backed custom search adapter requires a Node target because functions cannot be embedded in the content snapshot.
 - Keep generated docs routes public unless product docs require auth.
 - Verify docs build output before publishing package docs.

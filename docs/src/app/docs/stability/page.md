@@ -86,7 +86,7 @@ These are off by default and outside the stability promise:
 ## Known limits in 0.1
 
 - **Static strict script Content Security Policy.** Dynamic responses support per-request nonces through `security.csp.nonce`. Fully static output does not yet emit per-page script hashes, so strict script CSP needs a request runtime. See [Content Security Policy](/docs/configuration#content-security-policy).
-- **The docs engine needs a Node.js runtime.** With `docs: { enabled: true }`, deploy to a Node target (`node`, `vercel`, or `netlify`). Builds for edge presets such as `cloudflare` fail with an explanation, because the docs runtime cannot start in a Worker.
+- **External docs adapters on edge.** Farm's built-in docs renderer is precompiled for edge targets. A framework-specific external adapter still needs a Node target until it declares an edge runtime contract.
 - **Node.js 22.13 or newer** is required for development and for Node deployment targets.
 
 ## Reporting problems
