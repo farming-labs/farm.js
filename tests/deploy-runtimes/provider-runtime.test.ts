@@ -12,7 +12,10 @@ const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 const corePackageRoot = path.join(workspaceRoot, "packages", "farm");
 const fixtureRoots: string[] = [];
 
-async function createProviderFixture(target: "cloudflare" | "netlify"): Promise<{
+async function createProviderFixture(
+  target: "cloudflare" | "netlify",
+  options: { docs?: boolean } = {},
+): Promise<{
   root: string;
   outputDir: string;
 }> {
@@ -37,6 +40,17 @@ async function createProviderFixture(target: "cloudflare" | "netlify"): Promise<
   );
   await fs.mkdir(path.join(root, "src", "app", "api", "runtime"), { recursive: true });
   await fs.mkdir(path.join(root, "public"), { recursive: true });
+  if (options.docs) {
+    await fs.mkdir(path.join(root, "src", "app", "docs", "edge-guide"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "src", "app", "docs", "page.md"),
+      `---\ntitle: Edge Docs\ndescription: Docs rendered inside workerd.\n---\n\n# Edge Docs\n\nFarm docs on Cloudflare.\n`,
+    );
+    await fs.writeFile(
+      path.join(root, "src", "app", "docs", "edge-guide", "page.md"),
+      `---\ntitle: Worker Guide\ndescription: Searchable Worker documentation.\n---\n\n# Worker Guide\n\nThis content is precompiled for the Worker runtime.\n`,
+    );
+  }
   await fs.writeFile(
     path.join(root, "package.json"),
     JSON.stringify({ private: true, type: "module" }, null, 2),
@@ -99,6 +113,19 @@ export function GET(request: Request) {
       telemetry: false,
       generateBuildId: () => `${target}-provider-runtime-test`,
       deploy: { target },
+      ...(options.docs
+        ? {
+            docs: {
+              adapter: false,
+              entry: "/docs",
+              nav: { title: "Edge Runtime Docs" },
+              search: { provider: "simple", enabled: true, maxResults: 10 },
+              llmsTxt: true,
+              sitemap: true,
+              robots: true,
+            },
+          }
+        : {}),
     },
     "production",
   );
@@ -108,6 +135,48 @@ export function GET(request: Request) {
     root,
     outputDir: path.resolve(root, config.deploy.outputDir),
   };
+}
+
+async function expectEdgeDocsRuntime(request: (path: string) => Promise<Response>): Promise<void> {
+  const page = await request("/docs");
+  expect(page.status).toBe(200);
+  expect(page.headers.get("content-type")).toContain("text/html");
+  const html = await page.text();
+  expect(html).toContain("Edge Docs");
+  expect(html).not.toContain("farm-docs-build.invalid");
+
+  const markdown = await request("/docs/edge-guide.md");
+  expect(markdown.status).toBe(200);
+  expect(markdown.headers.get("content-type")).toContain("text/markdown");
+  const markdownBody = await markdown.text();
+  expect(markdownBody).toContain("This content is precompiled for the Worker runtime.");
+  expect(markdownBody).toContain('canonical_url: "https://farm-runtime.test/docs/edge-guide"');
+
+  const search = await request("/api/docs?query=worker");
+  expect(search.status).toBe(200);
+  expect(await search.json()).toEqual(
+    expect.arrayContaining([expect.objectContaining({ href: "/docs/edge-guide" })]),
+  );
+
+  const llms = await request("/llms.txt");
+  expect(llms.status).toBe(200);
+  expect(await llms.text()).toContain("Worker Guide");
+
+  const sitemap = await request("/sitemap.xml");
+  expect(sitemap.status).toBe(200);
+  expect(await sitemap.text()).toContain("https://farm-runtime.test/docs/edge-guide");
+
+  const robots = await request("/robots.txt");
+  expect(robots.status).toBe(200);
+  expect(await robots.text()).toContain("Sitemap: https://farm-runtime.test/sitemap.xml");
+
+  const agent = await request("/.well-known/agent.json");
+  expect(agent.status).toBe(200);
+  await expect(agent.json()).resolves.toMatchObject({
+    name: "Edge Runtime Docs",
+    baseUrl: "https://farm-runtime.test",
+    api: { docs: "/api/docs" },
+  });
 }
 
 async function expectProviderRuntime(
@@ -142,7 +211,7 @@ afterAll(async () => {
 
 describe("first-class provider runtime output", () => {
   it("runs the Cloudflare Pages output in workerd", async () => {
-    const { outputDir } = await createProviderFixture("cloudflare");
+    const { root, outputDir } = await createProviderFixture("cloudflare", { docs: true });
     const workerDirectory = path.join(outputDir, "_worker.js");
     const runtime = new Miniflare({
       compatibilityDate: "2026-07-01",
@@ -162,6 +231,16 @@ describe("first-class provider runtime output", () => {
       await expectProviderRuntime("cloudflare", (requestPath) =>
         runtime.dispatchFetch(new URL(requestPath, "https://farm-runtime.test")),
       );
+      await expectEdgeDocsRuntime((requestPath) =>
+        runtime.dispatchFetch(new URL(requestPath, "https://farm-runtime.test")),
+      );
+
+      const serverEntry = await fs.readFile(
+        path.join(workerDirectory, "_virtual_farm-ssr-entry.mjs"),
+        "utf8",
+      );
+      expect(serverEntry).toContain("farm-docs:edge-guide");
+      expect(serverEntry).not.toContain(path.join(root, "src", "app", "docs"));
     } finally {
       await runtime.dispose();
     }
