@@ -9376,6 +9376,35 @@ function createKeyedRowsBlockComponent(
         index += 1;
       }
 
+      let stableInstances: CompilerKeyedRowInstance[] | undefined;
+      let preparedBindingUpdates: CompilerPreparedKeyedRowBindingUpdate[][] | undefined;
+      // Host scopes can replace binding targets during their update, so only
+      // static row structures can safely resolve the whole row set up front.
+      if (
+        rows.items.length > 1 &&
+        this.currentProps.bindings.length > 0 &&
+        !this.currentProps.hostBlocks
+      ) {
+        stableInstances = [];
+        preparedBindingUpdates = [];
+        for (index = 0; index < rows.items.length; index += 1) {
+          const existing = this.instances.get(rows.keys[index]);
+          if (!existing) return false;
+          const updates = prepareKeyedRowBindingUpdates(
+            this.currentProps,
+            existing,
+            rows.items[index],
+            index,
+          );
+          if (!updates) {
+            this.activateFallback(afterCommit);
+            return true;
+          }
+          stableInstances.push(existing);
+          preparedBindingUpdates.push(updates);
+        }
+      }
+
       const conditionalChanges: Array<{
         key: string;
         id: number;
@@ -9384,7 +9413,7 @@ function createKeyedRowsBlockComponent(
       }> = [];
       for (index = 0; index < rows.items.length; index += 1) {
         const key = rows.keys[index];
-        const existing = this.instances.get(key);
+        const existing = stableInstances?.[index] || this.instances.get(key);
         if (!existing) return false;
         if (this.currentProps.hostBlocks) {
           const descriptor = this.currentProps.create(rows.items[index], index);
@@ -9393,7 +9422,12 @@ function createKeyedRowsBlockComponent(
             return true;
           }
         }
-        applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
+        const bindingUpdates = preparedBindingUpdates?.[index];
+        if (bindingUpdates) {
+          applyPreparedKeyedRowBindingUpdates(this.currentProps, existing, bindingUpdates);
+        } else {
+          applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
+        }
         const conditionalValues = this.readConditionalValues(
           this.currentProps,
           rows.items[index],
