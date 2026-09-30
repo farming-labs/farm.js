@@ -163,6 +163,10 @@ Farm's own `export const ppr = true` and a top-of-file `"use ppr"` (or `"use ppr
 directive are equivalent opt-ins; `experimental_ppr` matches the Next.js export name.
 `farm explain <path>` reports whether a route's PPR declaration is active or ignored.
 
+When Farm serves a cached shell with dynamic holes, the browser refresh request bypasses browser and
+shared HTTP caches. The completed response is private and is not stored, so the refresh cannot
+receive the same cached shell again.
+
 ## Cache keys and tags
 
 Use stable keys for data and broad tags for invalidation. Keys identify one cached value, while tags let multiple values be refreshed together.
