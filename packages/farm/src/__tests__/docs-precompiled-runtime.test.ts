@@ -146,6 +146,52 @@ describe("precompiled docs runtime", () => {
     }
   });
 
+  it("serves adapter navigation payloads and a custom API route", async () => {
+    const { root, docs } = await createFixture();
+    const manifest = await compileFarmDocsManifest(docs, {
+      root,
+      srcDir: "src",
+      clientEntry: "/farm-client.js",
+      fontAssets: [],
+    });
+    manifest.apiPath = "/internal/docs";
+    manifest.navigation = {
+      "/docs": {
+        status: 200,
+        statusText: "OK",
+        headers: [["content-type", "application/json"]],
+        body: JSON.stringify({ data: { title: "Home", url: "/docs" } }),
+      },
+    };
+    const compiled = createFarmDocsPrecompiledRuntime(manifest);
+
+    const navigation = await compiled.handleDocsRequest(
+      new Request("https://edge.example/docs", {
+        headers: { "x-farm-docs-navigation": "1" },
+      }),
+    );
+    await expect(navigation?.json()).resolves.toEqual({
+      data: { title: "Home", url: "/docs" },
+    });
+
+    await expect(
+      compiled.handleAPIRequest(new Request("https://edge.example/api/docs?query=guide")),
+    ).resolves.toBeNull();
+    const search = await compiled.handleAPIRequest(
+      new Request("https://edge.example/internal/docs?query=guide"),
+    );
+    expect(search?.status).toBe(200);
+    await expect(search?.json()).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ title: "Guide" })]),
+    );
+
+    const markdown = await compiled.handleAPIRequest(
+      new Request("https://edge.example/internal/docs/guide.md"),
+    );
+    expect(markdown?.status).toBe(200);
+    await expect(markdown?.text()).resolves.toContain("# Guide");
+  });
+
   it("rejects function-backed custom search adapters instead of silently changing providers", async () => {
     const { root, docs } = await createFixture();
     docs.config.search = {

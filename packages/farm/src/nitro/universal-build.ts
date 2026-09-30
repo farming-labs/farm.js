@@ -69,6 +69,7 @@ import {
 } from "../docs/search-client";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "../docs/fonts";
 import { compileFarmDocsManifest } from "../docs/compiler";
+import { compileFarmDocsAdapterEdgeManifest } from "../docs/adapter";
 import type { FarmDocsCompiledManifest } from "../docs/precompiled-runtime";
 import {
   createFarmRouteRuntimeManifest,
@@ -802,9 +803,8 @@ export async function discoverMiddlewareRoutes(
  * - Uses virtual bundle plugin to expose to Nitro
  * - Creates virtual entry wrapping Web Standard handler
  */
-/** External docs adapters have their own runtime contract. The embedded docs
- * renderer is precompiled for edge targets, but adapters must opt into edge
- * support through a future versioned capability before Farm can assume it. */
+/** External docs adapters must explicitly publish the versioned compiler Farm
+ * uses to turn their Node-backed build runtime into an edge-safe snapshot. */
 export function assertFarmDocsRuntimeSupported(
   config: Pick<ResolvedFarmConfig, "docs">,
   preset: string,
@@ -812,13 +812,14 @@ export function assertFarmDocsRuntimeSupported(
   if (
     !config.docs?.enabled ||
     !config.docs.adapter?.server ||
-    getFarmPresetRuntime(preset) !== "edge"
+    getFarmPresetRuntime(preset) !== "edge" ||
+    Boolean(config.docs.adapter.edgeCompiler)
   ) {
     return;
   }
   throw new Error(
-    `The configured docs adapter (${config.docs.adapter.id}) has not declared an edge runtime ` +
-      `contract, but the "${preset}" preset deploys to an edge runtime. Set docs.adapter = false ` +
+    `The configured docs adapter (${config.docs.adapter.id}) has not declared an edge compiler, ` +
+      `but the "${preset}" preset deploys to an edge runtime. Set docs.adapter = false ` +
       "to use Farm's precompiled embedded renderer, choose a Node target, or disable docs for " +
       "this deployment.",
   );
@@ -4070,15 +4071,23 @@ async function buildSSRInMemory(
     hasRuntimeConfigModule && (config.plugins || []).length > 0,
   );
   const farmDocsPrecompiledManifest =
-    config.docs?.enabled && !config.docs.adapter?.server && getFarmPresetRuntime(preset) === "edge"
-      ? await compileFarmDocsManifest(config.docs, {
-          root,
-          srcDir: config.srcDir,
-          clientEntry: FARM_CLIENT_JS_SRC_PLACEHOLDER,
-          fontAssets: toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(root)),
-          fontStylesheetHref: "/farm-fonts.css",
-          globalStylesheetHref: "/assets/globals.css",
-        })
+    config.docs?.enabled && getFarmPresetRuntime(preset) === "edge"
+      ? config.docs.adapter?.server
+        ? await compileFarmDocsAdapterEdgeManifest(config.docs, {
+            root,
+            srcDir: config.srcDir,
+            clientEntry: FARM_CLIENT_JS_SRC_PLACEHOLDER,
+            fontStylesheetHref: "/farm-fonts.css",
+            globalStylesheetHref: "/assets/globals.css",
+          })
+        : await compileFarmDocsManifest(config.docs, {
+            root,
+            srcDir: config.srcDir,
+            clientEntry: FARM_CLIENT_JS_SRC_PLACEHOLDER,
+            fontAssets: toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(root)),
+            fontStylesheetHref: "/farm-fonts.css",
+            globalStylesheetHref: "/assets/globals.css",
+          })
       : null;
 
   // Generate virtual entry code that imports and bundles all routes
@@ -5003,7 +5012,8 @@ const isFarmDocsAPIRequest = (requestOrPathname) => {
   const pathname = typeof requestOrPathname === "string"
     ? requestOrPathname
     : new URL(requestOrPathname.url).pathname;
-  return pathname === "/api/docs" || pathname.startsWith("/api/docs/");
+  const apiPath = ${JSON.stringify(farmDocsPrecompiledManifest?.apiPath || "/api/docs")};
+  return pathname === apiPath || pathname.startsWith(apiPath + "/");
 };`
       : adapterOwnsDocsRuntime
         ? `import { isFarmDocsAPIRequest } from "@farm.js/core/docs";

@@ -20,6 +20,18 @@ const withAdapter = {
     },
   },
 } as Parameters<typeof assertFarmDocsRuntimeSupported>[0];
+const withEdgeAdapter = {
+  docs: {
+    enabled: true,
+    adapter: {
+      id: "test-docs-adapter",
+      protocol: 1,
+      server: "test-docs-adapter/server",
+      react: "test-docs-adapter/react",
+      edgeCompiler: "test-docs-adapter/edge-compiler",
+    },
+  },
+} as Parameters<typeof assertFarmDocsRuntimeSupported>[0];
 
 describe("docs engine deployment runtime", () => {
   it("allows the embedded renderer on edge presets", () => {
@@ -33,6 +45,12 @@ describe("docs engine deployment runtime", () => {
       expect(() => assertFarmDocsRuntimeSupported(withAdapter, preset)).toThrow(
         new RegExp(`docs adapter .* "${preset}" preset deploys to an edge runtime`),
       );
+    }
+  });
+
+  it("allows adapters with an edge compiler on edge presets", () => {
+    for (const preset of ["cloudflare-pages", "cloudflare-module", "vercel-edge", "netlify-edge"]) {
+      expect(() => assertFarmDocsRuntimeSupported(withEdgeAdapter, preset)).not.toThrow();
     }
   });
 

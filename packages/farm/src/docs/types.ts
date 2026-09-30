@@ -6,6 +6,11 @@ export interface FarmDocsAdapterDescriptor {
   server: string;
   react?: string;
   vite?: string;
+  /**
+   * Build-time entry that compiles the adapter's docs runtime into Farm's
+   * serializable edge manifest. Older Farm releases safely ignore it.
+   */
+  edgeCompiler?: string;
 }
 
 export interface FarmDocsSidebarItem {

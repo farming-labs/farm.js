@@ -52,6 +52,7 @@ async function installFramework(
   server: "@farming-labs/farmjs/server",
   react: "@farming-labs/farmjs/react",
   vite: "@farming-labs/farmjs/vite",
+  edgeCompiler: "@farming-labs/farmjs/edge-compiler",
 };
 export function withDocs(farmConfig, options = {}) {
   const existing =
@@ -99,6 +100,7 @@ describe("docs framework auto-detection", () => {
       protocol: 1,
       server: "@farming-labs/farmjs/server",
       react: "@farming-labs/farmjs/react",
+      edgeCompiler: "@farming-labs/farmjs/edge-compiler",
     });
     // Existing docs options and vite plugins survive, MDX plugin is prepended.
     expect(applied.docs.entry).toBe("/handbook");
@@ -201,6 +203,7 @@ describe("resolveConfig docs delegation (#483 phase 1)", () => {
       protocol: 1,
       server: "@farming-labs/farmjs/server",
       react: "@farming-labs/farmjs/react",
+      edgeCompiler: "@farming-labs/farmjs/edge-compiler",
     });
     expect((resolved.vite as any).plugins?.[0]?.name).toBe("farmjs-docs-mdx");
   });

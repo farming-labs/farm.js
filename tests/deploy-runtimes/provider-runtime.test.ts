@@ -13,9 +13,106 @@ const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 const corePackageRoot = path.join(workspaceRoot, "packages", "farm");
 const fixtureRoots: string[] = [];
 
+async function installEdgeDocsAdapterFixture(root: string): Promise<void> {
+  const adapterRoot = path.join(root, "node_modules", "test-edge-docs-adapter");
+  await fs.mkdir(adapterRoot, { recursive: true });
+  await fs.writeFile(
+    path.join(adapterRoot, "package.json"),
+    JSON.stringify(
+      {
+        name: "test-edge-docs-adapter",
+        type: "module",
+        exports: {
+          "./server": "./server.js",
+          "./react": "./react.js",
+          "./edge-compiler": "./edge-compiler.js",
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  await fs.writeFile(
+    path.join(adapterRoot, "server.js"),
+    `import "node:fs";
+export const TEST_DOCS_NODE_SERVER_SENTINEL = true;
+export function createFarmDocsRuntimeHandler() {
+  throw new Error("The Node docs server must not be imported by an edge build.");
+}
+`,
+  );
+  await fs.writeFile(
+    path.join(adapterRoot, "react.js"),
+    `export function hydrateFarmDocs() {}
+`,
+  );
+  await fs.writeFile(
+    path.join(adapterRoot, "edge-compiler.js"),
+    `const origin = "https://farm-docs-build.invalid";
+const response = (body, contentType = "text/plain; charset=utf-8", status = 200) => ({
+  status,
+  statusText: status === 200 ? "OK" : "Not Found",
+  headers: [["content-type", contentType]],
+  body,
+});
+
+export function compileFarmDocsEdgeManifest(_config, options) {
+  const guideMarkdown = "# Worker Guide\\n\\nThis content is precompiled for the Worker runtime.\\n\\ncanonical_url: \\"" + origin + "/docs/edge-guide\\"\\n";
+  const guide = {
+    title: "Worker Guide",
+    url: "/docs/edge-guide",
+    content: "Worker Guide This content is precompiled for the Worker runtime.",
+    rawContent: guideMarkdown,
+    sourcePath: "test-edge-docs:edge-guide",
+  };
+  return {
+    protocol: 1,
+    originPlaceholder: origin,
+    entry: "/docs",
+    apiPath: "/api/docs",
+    routes: {
+      "/docs": response(
+        "<!doctype html><html><body><main>Edge Docs</main><script type=\\"module\\" src=\\"" + options.clientEntry + "\\"></script></body></html>",
+        "text/html; charset=utf-8",
+      ),
+      "/docs/edge-guide": response(
+        "<!doctype html><html><body><main>Worker Guide</main><script type=\\"module\\" src=\\"" + options.clientEntry + "\\"></script></body></html>",
+        "text/html; charset=utf-8",
+      ),
+      "/docs/edge-guide.md": response(guideMarkdown, "text/markdown; charset=utf-8"),
+      "/llms.txt": response("# Edge Runtime Docs\\n\\nWorker Guide\\n"),
+      "/sitemap.xml": response(
+        "<?xml version=\\"1.0\\"?><urlset><url><loc>" + origin + "/docs/edge-guide</loc></url></urlset>",
+        "application/xml; charset=utf-8",
+      ),
+      "/robots.txt": response("Sitemap: " + origin + "/sitemap.xml\\n"),
+      "/.well-known/agent.json": response(
+        JSON.stringify({ name: "Edge Runtime Docs", baseUrl: origin, api: { docs: "/api/docs" } }),
+        "application/json; charset=utf-8",
+      ),
+    },
+    navigation: {
+      "/docs/edge-guide": response(
+        JSON.stringify({ data: { title: "Worker Guide", url: "/docs/edge-guide" } }),
+        "application/json; charset=utf-8",
+      ),
+    },
+    api: {
+      static: {},
+      markdown: { "edge-guide": response(guideMarkdown, "text/markdown; charset=utf-8") },
+      empty: response("[]", "application/json; charset=utf-8"),
+      post: response(JSON.stringify({ error: "Not Found" }), "application/json; charset=utf-8", 404),
+      search: { pages: [guide], search: true, siteTitle: "Edge Runtime Docs", limit: 10 },
+    },
+  };
+}
+`,
+  );
+}
+
 async function createProviderFixture(
   target: "cloudflare" | "netlify",
-  options: { docs?: boolean } = {},
+  options: { docs?: "builtin" | "adapter" } = {},
 ): Promise<{
   root: string;
   outputDir: string;
@@ -42,6 +139,7 @@ async function createProviderFixture(
   await fs.mkdir(path.join(root, "src", "app", "api", "runtime"), { recursive: true });
   await fs.mkdir(path.join(root, "public"), { recursive: true });
   if (options.docs) {
+    if (options.docs === "adapter") await installEdgeDocsAdapterFixture(root);
     await fs.mkdir(path.join(root, "src", "app", "docs", "edge-guide"), { recursive: true });
     await fs.writeFile(
       path.join(root, "src", "app", "docs", "page.md"),
@@ -149,7 +247,16 @@ export const GET = createEndpoint(
       ...(options.docs
         ? {
             docs: {
-              adapter: false,
+              adapter:
+                options.docs === "adapter"
+                  ? {
+                      id: "test-edge-docs-adapter",
+                      protocol: 1,
+                      server: "test-edge-docs-adapter/server",
+                      react: "test-edge-docs-adapter/react",
+                      edgeCompiler: "test-edge-docs-adapter/edge-compiler",
+                    }
+                  : false,
               entry: "/docs",
               nav: { title: "Edge Runtime Docs" },
               search: { provider: "simple", enabled: true, maxResults: 10 },
@@ -170,7 +277,10 @@ export const GET = createEndpoint(
   };
 }
 
-async function expectEdgeDocsRuntime(request: (path: string) => Promise<Response>): Promise<void> {
+async function expectEdgeDocsRuntime(
+  request: (path: string, init?: RequestInit) => Promise<Response>,
+  options: { navigation?: boolean } = {},
+): Promise<void> {
   const page = await request("/docs");
   expect(page.status).toBe(200);
   expect(page.headers.get("content-type")).toContain("text/html");
@@ -190,6 +300,16 @@ async function expectEdgeDocsRuntime(request: (path: string) => Promise<Response
   expect(await search.json()).toEqual(
     expect.arrayContaining([expect.objectContaining({ href: "/docs/edge-guide" })]),
   );
+
+  if (options.navigation) {
+    const navigation = await request("/docs/edge-guide", {
+      headers: { "x-farm-docs-navigation": "1" },
+    });
+    expect(navigation.status).toBe(200);
+    await expect(navigation.json()).resolves.toMatchObject({
+      data: { title: "Worker Guide", url: "/docs/edge-guide" },
+    });
+  }
 
   const llms = await request("/llms.txt");
   expect(llms.status).toBe(200);
@@ -284,7 +404,7 @@ afterAll(async () => {
 
 describe("first-class provider runtime output", () => {
   it("runs the Cloudflare Pages output in workerd", async () => {
-    const { root, outputDir } = await createProviderFixture("cloudflare", { docs: true });
+    const { root, outputDir } = await createProviderFixture("cloudflare", { docs: "builtin" });
     const workerDirectory = path.join(outputDir, "_worker.js");
     const runtime = new Miniflare({
       compatibilityDate: "2026-07-01",
@@ -304,8 +424,8 @@ describe("first-class provider runtime output", () => {
       await expectProviderRuntime("cloudflare", (requestPath, init) =>
         runtime.dispatchFetch(new URL(requestPath, "https://farm-runtime.test"), init),
       );
-      await expectEdgeDocsRuntime((requestPath) =>
-        runtime.dispatchFetch(new URL(requestPath, "https://farm-runtime.test")),
+      await expectEdgeDocsRuntime((requestPath, init) =>
+        runtime.dispatchFetch(new URL(requestPath, "https://farm-runtime.test"), init),
       );
 
       const serverEntry = await fs.readFile(
@@ -314,6 +434,42 @@ describe("first-class provider runtime output", () => {
       );
       expect(serverEntry).toContain("farm-docs:edge-guide");
       expect(serverEntry).not.toContain(path.join(root, "src", "app", "docs"));
+    } finally {
+      await runtime.dispose();
+    }
+  }, 180_000);
+
+  it("runs edge-capable adapter docs in the Cloudflare Worker", async () => {
+    const { root, outputDir } = await createProviderFixture("cloudflare", { docs: "adapter" });
+    const workerDirectory = path.join(outputDir, "_worker.js");
+    const runtime = new Miniflare({
+      compatibilityDate: "2026-07-01",
+      compatibilityFlags: ["nodejs_compat"],
+      modules: true,
+      modulesRoot: workerDirectory,
+      scriptPath: path.join(workerDirectory, "index.js"),
+      assets: {
+        directory: outputDir,
+        routerConfig: {
+          has_user_worker: true,
+        },
+      },
+    });
+
+    try {
+      await expectEdgeDocsRuntime(
+        (requestPath, init) =>
+          runtime.dispatchFetch(new URL(requestPath, "https://farm-runtime.test"), init),
+        { navigation: true },
+      );
+
+      const serverEntry = await fs.readFile(
+        path.join(workerDirectory, "_virtual_farm-ssr-entry.mjs"),
+        "utf8",
+      );
+      expect(serverEntry).toContain("test-edge-docs:edge-guide");
+      expect(serverEntry).not.toContain(path.join(root, "src", "app", "docs"));
+      expect(serverEntry).not.toContain("TEST_DOCS_NODE_SERVER_SENTINEL");
     } finally {
       await runtime.dispose();
     }

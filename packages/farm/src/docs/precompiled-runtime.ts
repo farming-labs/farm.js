@@ -22,7 +22,11 @@ export interface FarmDocsCompiledManifest {
   protocol: 1;
   originPlaceholder: string;
   entry: string;
+  /** Public docs API route. Older manifests default to `/api/docs`. */
+  apiPath?: string;
   routes: Record<string, FarmDocsCompiledResponse>;
+  /** Adapter-owned page-data responses used by client-side docs navigation. */
+  navigation?: Record<string, FarmDocsCompiledResponse>;
   api: {
     static: Record<string, FarmDocsCompiledResponse>;
     markdown: Record<string, FarmDocsCompiledResponse>;
@@ -79,9 +83,12 @@ function normalizeAction(value: string | null | undefined): string | undefined {
   return value?.trim().toLowerCase().replace(/_/g, "-") || undefined;
 }
 
-function getAPIPathTarget(pathname: string): { format?: string; slug?: string } {
+function getAPIPathTarget(
+  pathname: string,
+  apiPath = "/api/docs",
+): { format?: string; slug?: string } {
   const normalizedPath = pathname.replace(/\/+$/, "") || "/";
-  const prefix = "/api/docs";
+  const prefix = normalizePathname(apiPath);
   if (normalizedPath !== prefix && !normalizedPath.startsWith(`${prefix}/`)) return {};
 
   const rawValue = normalizedPath === prefix ? "" : normalizedPath.slice(prefix.length + 1);
@@ -115,10 +122,10 @@ function getAPIPathTarget(pathname: string): { format?: string; slug?: string } 
   return { slug: value };
 }
 
-function getAPIFormat(url: URL): string | undefined {
+function getAPIFormat(url: URL, apiPath?: string): string | undefined {
   return (
     normalizeAction(url.searchParams.get("format") || url.searchParams.get("type")) ||
-    getAPIPathTarget(url.pathname).format
+    getAPIPathTarget(url.pathname, apiPath).format
   );
 }
 
@@ -172,17 +179,22 @@ async function searchDocs(
 export function createFarmDocsPrecompiledRuntime(
   manifest: FarmDocsCompiledManifest,
 ): FarmDocsPrecompiledRuntime {
+  const apiPath = normalizePathname(manifest.apiPath || "/api/docs");
+
   return {
     async handleDocsRequest(request) {
       if (request.method !== "GET" && request.method !== "HEAD") return null;
       const pathname = normalizePathname(new URL(request.url).pathname);
-      const compiled = manifest.routes[pathname];
+      const compiled =
+        request.headers.get("x-farm-docs-navigation") === "1"
+          ? manifest.navigation?.[pathname]
+          : manifest.routes[pathname];
       return compiled ? createResponse(compiled, manifest, request) : null;
     },
 
     async handleAPIRequest(request) {
       const url = new URL(request.url);
-      if (url.pathname !== "/api/docs" && !url.pathname.startsWith("/api/docs/")) return null;
+      if (url.pathname !== apiPath && !url.pathname.startsWith(`${apiPath}/`)) return null;
 
       const method = request.method.toUpperCase();
       if (method === "POST") return createResponse(manifest.api.post, manifest, request);
@@ -193,9 +205,9 @@ export function createFarmDocsPrecompiledRuntime(
         );
       }
 
-      const format = getAPIFormat(url);
+      const format = getAPIFormat(url, apiPath);
       if (format === "markdown" || (!format && url.pathname.endsWith(".md"))) {
-        const target = getAPIPathTarget(url.pathname);
+        const target = getAPIPathTarget(url.pathname, apiPath);
         const slug = normalizeAPISlug(
           url.searchParams.get("path") || url.searchParams.get("slug") || target.slug,
           manifest.entry,

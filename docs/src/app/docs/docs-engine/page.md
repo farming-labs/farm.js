@@ -8,9 +8,10 @@ section: "Content"
 
 Serve a @farming-labs/docs-powered docs runtime from Farm config, including human pages and agent-readable API routes.
 
-Farm supports the built-in docs renderer on Node.js and edge deployment targets. Edge production builds
-compile the docs tree into a runtime-neutral content snapshot, so Workers serve the same HTML,
-Markdown, search, sitemap, robots, and agent-discovery routes without filesystem access.
+Farm supports the built-in docs renderer and edge-capable external adapters on Node.js and edge
+deployment targets. Edge production builds compile the docs tree into a runtime-neutral content
+snapshot, so Workers serve HTML, client-navigation data, Markdown, search, sitemap, robots, and
+agent-discovery routes without filesystem access.
 
 ## Enable docs
 
@@ -206,7 +207,8 @@ path-style machine routes. Most applications do not need either wrapper.
 - Keep the canonical docs configuration in the `docs` property of `farm.config.ts`.
 - Use an external docs config only when a large navigation or theme definition is easier to maintain separately.
 - Edge output snapshots docs content during `farm build`; rebuild the app after changing a page or docs configuration. `farm dev` continues to read source files live.
-- Edge output currently supports Farm's built-in renderer (`docs.adapter: false`). A framework-specific external docs adapter still requires a Node target until that adapter declares an edge runtime contract.
+- Edge output supports Farm's built-in renderer (`docs.adapter: false`) and external adapters that publish an `edgeCompiler` entry. The current `@farming-labs/farmjs` adapter publishes that compiler automatically; applications do not configure it themselves. The capability is additive, so older Farm releases ignore it and retain their existing Node behavior.
+- The official adapter's edge snapshot covers pages, client navigation, CSS, Markdown, search, sitemap, robots, and agent discovery. Set `mcp: false` and `telemetry: false` in the docs configuration because both features are enabled by default for production Node runtimes. Runtime-only adapter features such as docs MCP, Ask AI, feedback callbacks, analytics, telemetry, observability, and localized filesystem trees still require a Node target. Farm stops the build with the unsupported feature names instead of silently dropping them.
 - Built-in and serializable hosted search providers run on edge targets. A function-backed custom search adapter requires a Node target because functions cannot be embedded in the content snapshot.
 - Keep generated docs routes public unless product docs require auth.
 - Verify docs build output before publishing package docs.

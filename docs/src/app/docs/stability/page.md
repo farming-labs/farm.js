@@ -86,7 +86,7 @@ These are off by default and outside the stability promise:
 
 ## Known limits in 0.1
 
-- **External docs adapters on edge.** Farm's built-in docs renderer is precompiled for edge targets. A framework-specific external adapter still needs a Node target until it declares an edge runtime contract.
+- **Runtime-only docs features on edge.** Farm can precompile the built-in renderer and external adapters that publish an edge compiler, but adapter features that require live server callbacks or mutable sessions still need a Node target. The official adapter reports the exact unsupported features during the build.
 - **Node.js 22.13 or newer** is required for development and for Node deployment targets.
 
 ## Reporting problems
