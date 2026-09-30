@@ -171,6 +171,10 @@ The client waits for a shell's background refresh before hydrating. Farm applies
 response's page props, route slots, manifests, locale, and deferred values first, so hydration sees
 the same data that produced the refreshed HTML.
 
+The background refresh reconciles the completed response into the existing shell. Stable elements
+keep their DOM identity, focus, text selection, form values, and scroll position while server-owned
+attributes and content update.
+
 ## Cache keys and tags
 
 Use stable keys for data and broad tags for invalidation. Keys identify one cached value, while tags let multiple values be refreshed together.
