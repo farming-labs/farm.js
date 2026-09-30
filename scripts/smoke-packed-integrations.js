@@ -106,6 +106,15 @@ function writeFixture(fixtureDirectory, packedPackages, targets) {
         type: "module",
         packageManager: rootManifest.packageManager,
         dependencies,
+        // Transitive Farm dependencies (an integration's dependency on core,
+        // for example) must also resolve to the packed archives. Without this
+        // pnpm fetches them from npm, which fails before the version is
+        // published and otherwise tests the registry copy instead.
+        pnpm: {
+          overrides: Object.fromEntries(
+            [...packedPackages.entries()].map(([name, archive]) => [name, fileDependency(archive)]),
+          ),
+        },
       },
       null,
       2,
