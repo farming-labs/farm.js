@@ -6,7 +6,7 @@ import { NetlifyDev } from "@netlify/dev";
 import { Miniflare } from "miniflare";
 import { afterAll, describe, expect, it } from "vitest";
 import { build } from "../../packages/farm/src/build";
-import { resolveConfig } from "../../packages/farm/src/config";
+import { loadConfig, resolveConfig } from "../../packages/farm/src/config";
 
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const corePackageRoot = path.join(workspaceRoot, "packages", "farm");
@@ -54,6 +54,23 @@ async function createProviderFixture(
   await fs.writeFile(
     path.join(root, "package.json"),
     JSON.stringify({ private: true, type: "module" }, null, 2),
+  );
+  await fs.writeFile(
+    path.join(root, "farm.config.ts"),
+    `
+import { apiMcp } from ${JSON.stringify(path.join(workspaceRoot, "packages", "farm-mcp", "src", "index.ts"))};
+
+export default {
+  plugins: [
+    apiMcp({
+      allowUnauthenticated: true,
+      tools: {
+        "GET /api/runtime": { name: "get_runtime", readOnlyHint: true },
+      },
+    }),
+  ],
+};
+`.trim(),
   );
   await fs.writeFile(
     path.join(root, "src", "app", "layout.tsx"),
@@ -105,8 +122,10 @@ export function GET(request: Request) {
   );
   await fs.writeFile(path.join(root, "public", "runtime-marker.txt"), `${target} static asset`);
 
+  const userConfig = await loadConfig(root, undefined, "production");
   const config = await resolveConfig(
     {
+      ...userConfig,
       root,
       srcDir: "src",
       images: { provider: "none" },
@@ -181,7 +200,7 @@ async function expectEdgeDocsRuntime(request: (path: string) => Promise<Response
 
 async function expectProviderRuntime(
   provider: "cloudflare" | "netlify",
-  request: (path: string) => Promise<Response>,
+  request: (path: string, init?: RequestInit) => Promise<Response>,
 ): Promise<void> {
   const page = await request("/");
   expect(page.status).toBe(200);
@@ -202,6 +221,37 @@ async function expectProviderRuntime(
 
   const missing = await request("/missing-provider-route");
   expect(missing.status).toBe(404);
+
+  const mcp = await request("/api/mcp", {
+    method: "POST",
+    headers: {
+      accept: "application/json, text/event-stream",
+      "content-type": "application/json",
+      "mcp-protocol-version": "2025-11-25",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "get_runtime", arguments: {} },
+    }),
+  });
+  expect(mcp.status, await mcp.clone().text()).toBe(200);
+  const payload = await readMCPResponse(mcp);
+  expect(payload.result.structuredContent).toEqual({ result: { ok: true, query: null } });
+}
+
+async function readMCPResponse(response: Response): Promise<any> {
+  const text = await response.text();
+  if (!response.headers.get("content-type")?.startsWith("text/event-stream")) {
+    return JSON.parse(text);
+  }
+  const data = text
+    .split("\n")
+    .find((line) => line.startsWith("data: "))
+    ?.slice("data: ".length);
+  if (!data) throw new Error(`Missing MCP SSE data: ${text}`);
+  return JSON.parse(data);
 }
 
 afterAll(async () => {
@@ -228,8 +278,8 @@ describe("first-class provider runtime output", () => {
     });
 
     try {
-      await expectProviderRuntime("cloudflare", (requestPath) =>
-        runtime.dispatchFetch(new URL(requestPath, "https://farm-runtime.test")),
+      await expectProviderRuntime("cloudflare", (requestPath, init) =>
+        runtime.dispatchFetch(new URL(requestPath, "https://farm-runtime.test"), init),
       );
       await expectEdgeDocsRuntime((requestPath) =>
         runtime.dispatchFetch(new URL(requestPath, "https://farm-runtime.test")),
@@ -275,9 +325,9 @@ functions = ${JSON.stringify(path.relative(root, path.join(outputDir, "server"))
 
     try {
       await runtime.start();
-      await expectProviderRuntime("netlify", async (requestPath) => {
+      await expectProviderRuntime("netlify", async (requestPath, init) => {
         const response = await runtime.handle(
-          new Request(new URL(requestPath, "https://farm-runtime.test")),
+          new Request(new URL(requestPath, "https://farm-runtime.test"), init),
         );
         return response ?? new Response(null, { status: 404 });
       });

@@ -736,6 +736,10 @@ function hasFarmServerRuntimePlugins(config: ResolvedFarmConfig): boolean {
   });
 }
 
+function hasFarmPluginRoutes(config: ResolvedFarmConfig): boolean {
+  return (config.plugins || []).some((plugin) => Boolean(plugin.routes));
+}
+
 export async function discoverMiddlewareRoutes(
   appDir: string | readonly string[],
 ): Promise<UniversalMiddlewareRoute[]> {
@@ -4047,6 +4051,7 @@ async function buildSSRInMemory(
   const hasMiddlewareConfig = hasFarmMiddlewareConfig(config.middleware);
   const hasRouteContextConfig = hasCustomFarmRouteContext(config);
   const hasServerRuntimePlugins = hasFarmServerRuntimePlugins(config);
+  const hasPluginRoutes = hasFarmPluginRoutes(config);
   const configModulePath =
     hasServerRuntimeIntegrations ||
     hasObservabilityHandler ||
@@ -4054,6 +4059,7 @@ async function buildSSRInMemory(
     hasMiddlewareConfig ||
     hasRouteContextConfig ||
     hasServerRuntimePlugins ||
+    hasPluginRoutes ||
     hasIntegrationProviders
       ? await findFarmConfigPath(root)
       : null;
@@ -4097,6 +4103,7 @@ async function buildSSRInMemory(
     hasServerRuntimeIntegrations,
     hasRuntimeIntegrationConfig,
     hasConfiguredRuntimePlugins,
+    hasServerRuntimePlugins,
     preset,
     i18nCatalogs,
     isolatedClientBoundaryModules,
@@ -4531,6 +4538,7 @@ function generateVirtualEntryCode(
   hasServerRuntimeIntegrations: boolean,
   hasRuntimeIntegrationConfig: boolean,
   hasConfiguredRuntimePlugins: boolean,
+  hasServerRuntimePlugins: boolean,
   preset: string,
   i18nCatalogs: FarmI18nCatalogs,
   isolatedClientBoundaryModules: ReadonlySet<string>,
@@ -4538,7 +4546,7 @@ function generateVirtualEntryCode(
 ): string {
   const hasCompressionRuntime =
     config.compress && resolveFarmInstrumentationRuntime(preset) === "nodejs";
-  const hasPluginRuntime = hasRuntimeIntegrationConfig || hasConfiguredRuntimePlugins;
+  const hasPluginRuntime = hasRuntimeIntegrationConfig || hasServerRuntimePlugins;
   const hasPrecompiledDocs = Boolean(farmDocsPrecompiledManifest);
   const adapterOwnsDocsRuntime = Boolean(
     isReactRenderer(config.renderer) &&
@@ -5446,7 +5454,11 @@ const farmDocsAPIHandler = ${
 
 // API routes bundled at build time
 const apiRoutes = ${apiRoutes.length > 0 ? "mergePluginAPIRoutes(" : ""}[${apiRegistrations.join(",")}
-]${apiRoutes.length > 0 ? `, configuredPlugins, ${JSON.stringify(apiRoutes.map(({ path, methods }) => ({ path, methods })))})` : ""};
+]${
+    apiRoutes.length > 0
+      ? `, configuredPlugins, ${JSON.stringify(apiRoutes.map(({ path, methods }) => ({ path, methods })))}, { bodySizeLimit: ${JSON.stringify(config.server.bodySizeLimit)} })`
+      : ""
+  };
 const farmLocalAPIBasePath = ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))};
 const farmOpenAPIReference = ${JSON.stringify(openAPIReference)};
 

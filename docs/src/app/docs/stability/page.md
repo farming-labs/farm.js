@@ -42,7 +42,7 @@ An integration's stable surface is its Farm API: the factory, options, mounted r
 - Renderer packages: `@farm.js/react` (the React compiler and runtime package; the default React path lives in core), `@farm.js/preact`, `@farm.js/solid`, `@farm.js/vue`, `@farm.js/svelte`
 - Plugins: `@farm.js/analyzer`, `@farm.js/cache-redis`, `@farm.js/content`, `@farm.js/hints`, `@farm.js/msw`, `@farm.js/otel`, `@farm.js/partytown`, `@farm.js/preview-tunnel`, `@farm.js/pwa`, `@farm.js/scripts`, `@farm.js/search`, `@farm.js/stylex`, `@farm.js/sync`
 
-**Experimental packages:** `@farm.js/federation`, `@farm.js/wasm`, `@farm.js/webmcp`.
+**Experimental packages:** `@farm.js/federation`, `@farm.js/mcp`, `@farm.js/wasm`, `@farm.js/webmcp`.
 
 ## Renderers
 
@@ -79,6 +79,7 @@ These are off by default and outside the stability promise:
 | Partial Prerendering      | `experimental.ppr`, then opt routes in                              |
 | Isolated client hydration | `experimental.isolatedClientHydration: "analyze" \| "enabled"`      |
 | React compiler            | `react({ experimental: { compiler: true } })` from `@farm.js/react` |
+| API route MCP server      | `apiMcp()` from `@farm.js/mcp`                                      |
 | WebMCP browser tools      | `@farm.js/webmcp`                                                   |
 | Module federation         | `@farm.js/federation`                                               |
 | WebAssembly components    | `@farm.js/wasm`                                                     |

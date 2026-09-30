@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "zod";
-import { createRouteFactory, type PluginAPIRouter } from "../api/route";
+import { createRouteFactory, resolvePluginRoutes, type PluginAPIRouter } from "../api/route";
 import { definePlugin } from "../plugin";
 import { defineConfig } from "../config-entry";
 import { APIRouteManager } from "../api/route-manager";
@@ -71,6 +71,80 @@ describe("plugin API routes", () => {
       match.params,
     );
     expect(await response.json()).toEqual({ id: "u2", projectId: "p2", format: "full" });
+  });
+
+  it("lets plugins invoke app endpoints without exposing plugin endpoints", async () => {
+    const middleware = vi.fn(() => ({ subject: "user-1" }));
+    const handler = vi.fn((_request, { input, context }) => ({
+      id: input.params.id,
+      tags: input.query.tag,
+      subject: context.subject,
+    }));
+    const appRoute = createRouteFactory().get("/api/items/[id]", {
+      input: {
+        params: z.object({ id: z.string() }),
+        query: z.object({ tag: z.union([z.string(), z.array(z.string())]) }),
+      },
+      middleware: [middleware],
+      handler,
+    });
+    let appEndpointAvailable = false;
+    let pluginEndpointVisible = true;
+    const bridge = definePlugin({
+      name: "test:bridge",
+      routes: ({ route, api }) => {
+        appEndpointAvailable = api.available;
+        const endpoint = api.get("GET", "/api/items/[id]");
+        pluginEndpointVisible = Boolean(api.get("POST", "/api/bridge"));
+        if (api.available && !endpoint) throw new Error("Missing app endpoint");
+        return [
+          route.post("/api/bridge", {
+            handler: async (request) =>
+              endpoint!.invoke(
+                new Request("http://farm.test/api/items/42?tag=one&tag=two", {
+                  signal: request.signal,
+                }),
+                { id: "42" },
+              ),
+          }),
+        ];
+      },
+    });
+    const merged = mergePluginAPIRoutes(
+      [
+        {
+          path: appRoute.path,
+          methods: [appRoute.method],
+          endpoints: { GET: appRoute.endpoint },
+        },
+      ],
+      [bridge],
+    );
+    const response = await invokeAPIRouteEndpoint(
+      merged.find((route) => route.path === "/api/bridge")!.endpoints.POST,
+      new Request("http://farm.test/api/bridge", { method: "POST" }),
+    );
+    expect(appEndpointAvailable).toBe(true);
+    expect(pluginEndpointVisible).toBe(false);
+    expect(await response.json()).toEqual({
+      id: "42",
+      tags: ["one", "two"],
+      subject: "user-1",
+    });
+    expect(middleware).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses an unavailable local API during type-only plugin route discovery", () => {
+    const plugin = definePlugin({
+      name: "test:type-only",
+      routes: ({ route, api }) => {
+        expect(api.available).toBe(false);
+        expect(api.get("GET", "/api/items")).toBeUndefined();
+        return [route.get("/api/type-only", { handler: () => null })];
+      },
+    });
+    expect(() => resolvePluginRoutes([plugin])).not.toThrow();
   });
 
   it("generates typed, reusable nested callers without requests during binding", async () => {

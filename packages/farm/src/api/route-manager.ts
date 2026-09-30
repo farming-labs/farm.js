@@ -116,10 +116,9 @@ export class APIRouteManager {
         await this.loadProgrammaticApiRoutes(appDir);
       }
       this.routes = new Map(
-        mergePluginAPIRoutes([...this.routes.values()], this.plugins).map((route) => [
-          route.path,
-          route,
-        ]),
+        mergePluginAPIRoutes([...this.routes.values()], this.plugins, undefined, {
+          bodySizeLimit: this.bodySizeLimit,
+        }).map((route) => [route.path, route]),
       );
     } catch (error) {
       this.routes = previousRoutes;
