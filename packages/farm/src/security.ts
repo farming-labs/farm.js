@@ -10,9 +10,10 @@ export interface FarmCspOptions {
   /** Emit Content-Security-Policy-Report-Only instead of enforcing the policy. */
   reportOnly?: boolean;
   /**
-   * Generate a fresh nonce for every dynamic HTML response, add it to the
-   * governing script directive, and stamp it on script elements. Static HTML
-   * needs hashes instead and is not served through the nonce runtime.
+   * Generate a fresh nonce for every dynamic HTML response and per-page
+   * script hashes for prerendered HTML. Farm adds the matching sources to the
+   * governing script directive and stamps dynamic script elements with the
+   * response nonce.
    */
   nonce?: boolean;
 }
@@ -20,7 +21,7 @@ export interface FarmCspOptions {
 export type FarmCspConfig = string | FarmCspOptions;
 
 export interface FarmSecurityConfig {
-  /** App-wide CSP. Nonce mode applies to dynamic HTML and bypasses static output. */
+  /** App-wide CSP for dynamic responses and prerendered output. */
   csp?: FarmCspConfig | false;
   /** @deprecated Use csp. */
   contentSecurityPolicy?: never;
@@ -162,7 +163,22 @@ export function createFarmCspNonce(security: ResolvedFarmSecurityConfig): string
 
 export function applyFarmCspNonceToPolicy(policy: string, nonce: string): string {
   validateCspNonce(nonce);
-  const source = `'nonce-${nonce}'`;
+  return applyFarmCspScriptSourcesToPolicy(policy, [`'nonce-${nonce}'`]);
+}
+
+export function applyFarmCspHashesToPolicy(policy: string, hashes: readonly string[]): string {
+  const sources = hashes.map((hash) => {
+    if (!/^sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2}$/.test(hash)) {
+      throw new TypeError(`Invalid CSP script hash: ${JSON.stringify(hash)}.`);
+    }
+    return `'${hash}'`;
+  });
+  return applyFarmCspScriptSourcesToPolicy(policy, sources);
+}
+
+function applyFarmCspScriptSourcesToPolicy(policy: string, sources: readonly string[]): string {
+  const uniqueSources = [...new Set(sources)];
+  if (uniqueSources.length === 0) return policy;
   const segments = policy
     .split(";")
     .map((segment) => segment.trim())
@@ -176,19 +192,61 @@ export function applyFarmCspNonceToPolicy(policy: string, nonce: string): string
         ? "default-src"
         : undefined;
 
-  if (!governingName) return `${policy}; script-src ${source}`;
+  if (!governingName) return `${policy}; script-src ${uniqueSources.join(" ")}`;
   return segments
-    .map((segment, index) =>
-      names[index] === governingName && !segment.split(/\s+/).includes(source)
-        ? `${segment} ${source}`
-        : segment,
-    )
+    .map((segment, index) => {
+      if (names[index] !== governingName) return segment;
+      const existing = new Set(segment.split(/\s+/));
+      const missing = uniqueSources.filter((source) => !existing.has(source));
+      return missing.length > 0 ? `${segment} ${missing.join(" ")}` : segment;
+    })
     .join("; ");
 }
 
 export function addFarmCspNonceToScriptTags(html: string, nonce: string): string {
   validateCspNonce(nonce);
   return createFarmCspNonceRewriter(nonce).write(html, true);
+}
+
+export function removeFarmCspNoncesFromScriptTags(html: string): string {
+  return createFarmScriptTagRewriter(stripScriptNonceAttribute).write(html, true);
+}
+
+export async function createFarmCspScriptHashes(html: string): Promise<string[]> {
+  const hashes: string[] = [];
+  const seen = new Set<string>();
+  for (const content of collectFarmInlineScriptContents(html)) {
+    const digest = await globalThis.crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(content),
+    );
+    let binary = "";
+    for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte);
+    const hash = `sha256-${globalThis.btoa(binary)}`;
+    if (!seen.has(hash)) {
+      seen.add(hash);
+      hashes.push(hash);
+    }
+  }
+  return hashes;
+}
+
+export async function applyFarmCspHashesToHtml(
+  html: string,
+  security: ResolvedFarmSecurityConfig,
+): Promise<{ html: string; header: { key: string; value: string } } | undefined> {
+  if (!security.csp || !security.csp.nonce) return undefined;
+  const staticHtml = removeFarmCspNoncesFromScriptTags(html);
+  const hashes = await createFarmCspScriptHashes(staticHtml);
+  return {
+    html: staticHtml,
+    header: {
+      key: security.csp.reportOnly
+        ? "Content-Security-Policy-Report-Only"
+        : "Content-Security-Policy",
+      value: applyFarmCspHashesToPolicy(security.csp.value, hashes),
+    },
+  };
 }
 
 export function applyFarmCspNonceToResponse(
@@ -339,6 +397,10 @@ function validateCspNonce(value: string): void {
 
 export function createFarmCspNonceRewriter(nonce: string) {
   validateCspNonce(nonce);
+  return createFarmScriptTagRewriter((tag) => stampScriptTag(tag, nonce));
+}
+
+function createFarmScriptTagRewriter(transformScriptTag: (tag: string) => string) {
   let pending = "";
   let rawTextElement: string | undefined;
 
@@ -430,7 +492,7 @@ export function createFarmCspNonceRewriter(nonce: string) {
         const tagName = tagNameMatch[1]!.toLowerCase();
         const isClosing = lowerTag.startsWith("</");
         const isSelfClosing = /\/\s*>$/.test(tag);
-        output += !isClosing && tagName === "script" ? stampScriptTag(tag, nonce) : tag;
+        output += !isClosing && tagName === "script" ? transformScriptTag(tag) : tag;
         pending = pending.slice(end + 1);
         if (!isClosing && !isSelfClosing && rawTextElements.has(tagName)) {
           rawTextElement = tagName;
@@ -457,10 +519,95 @@ const rawTextElements = new Set([
 function stampScriptTag(tag: string, nonce: string): string {
   const opening = tag.match(/^<script\b/i)?.[0];
   if (!opening) return tag;
-  const attributes = tag
-    .slice(opening.length, -1)
-    .replace(/\s+nonce\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+  const attributes = stripScriptNonceAttribute(tag).slice(opening.length, -1);
   return `<script nonce="${nonce}"${attributes}>`;
+}
+
+function stripScriptNonceAttribute(tag: string): string {
+  let normalized = tag;
+  let range = findScriptTagAttributeRange(normalized, "nonce");
+  while (range) {
+    normalized = normalized.slice(0, range.start) + normalized.slice(range.end);
+    range = findScriptTagAttributeRange(normalized, "nonce");
+  }
+  return normalized;
+}
+
+function collectFarmInlineScriptContents(html: string): string[] {
+  const contents: string[] = [];
+  let offset = 0;
+
+  while (offset < html.length) {
+    const start = html.indexOf("<", offset);
+    if (start === -1) break;
+    if (html.startsWith("<!--", start)) {
+      const commentEnd = html.indexOf("-->", start + 4);
+      offset = commentEnd === -1 ? html.length : commentEnd + 3;
+      continue;
+    }
+
+    const remaining = html.slice(start);
+    const tagNameMatch = remaining.toLowerCase().match(/^<\/?([a-z][a-z0-9:-]*)\b/);
+    if (!tagNameMatch) {
+      offset = start + 1;
+      continue;
+    }
+    const tagEnd = findHtmlTagEnd(remaining);
+    if (tagEnd === -1) break;
+    const tag = remaining.slice(0, tagEnd + 1);
+    const tagName = tagNameMatch[1]!.toLowerCase();
+    const isClosing = remaining.startsWith("</");
+    const isSelfClosing = /\/\s*>$/.test(tag);
+    offset = start + tagEnd + 1;
+    if (isClosing || isSelfClosing || !rawTextElements.has(tagName)) continue;
+
+    if (tagName === "plaintext") break;
+    const closingStart = findHtmlToken(html.toLowerCase().slice(offset), `</${tagName}`);
+    const contentEnd = closingStart === -1 ? html.length : offset + closingStart;
+    if (tagName === "script" && !findScriptTagAttributeRange(tag, "src")) {
+      contents.push(html.slice(offset, contentEnd));
+    }
+    if (closingStart === -1) break;
+    const closingEnd = findHtmlTagEnd(html.slice(contentEnd));
+    if (closingEnd === -1) break;
+    offset = contentEnd + closingEnd + 1;
+  }
+
+  return contents;
+}
+
+function findScriptTagAttributeRange(
+  tag: string,
+  expectedName: string,
+): { start: number; end: number } | undefined {
+  const opening = tag.match(/^<script\b/i)?.[0];
+  if (!opening) return undefined;
+  let offset = opening.length;
+
+  while (offset < tag.length - 1) {
+    const whitespaceStart = offset;
+    while (/\s/.test(tag[offset] || "")) offset++;
+    if (tag[offset] === "/" || tag[offset] === ">" || offset >= tag.length - 1) break;
+
+    const nameStart = offset;
+    while (offset < tag.length && !/[\s=/>]/.test(tag[offset]!)) offset++;
+    const name = tag.slice(nameStart, offset).toLowerCase();
+    while (/\s/.test(tag[offset] || "")) offset++;
+    if (tag[offset] === "=") {
+      offset++;
+      while (/\s/.test(tag[offset] || "")) offset++;
+      const quote = tag[offset] === '"' || tag[offset] === "'" ? tag[offset++] : undefined;
+      if (quote) {
+        while (offset < tag.length && tag[offset] !== quote) offset++;
+        if (tag[offset] === quote) offset++;
+      } else {
+        while (offset < tag.length && !/[\s>]/.test(tag[offset]!)) offset++;
+      }
+    }
+    if (name === expectedName) return { start: whitespaceStart, end: offset };
+  }
+
+  return undefined;
 }
 
 function findHtmlToken(input: string, token: string): number {

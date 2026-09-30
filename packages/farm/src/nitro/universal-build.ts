@@ -43,6 +43,7 @@ import type { FarmIsolatedClientHydrationMode } from "../types";
 import { isFarmMarkdownPageFile } from "../app-markdown";
 import type { ProgrammaticRedirectRoute } from "../routes";
 import type { NitroConfig } from "nitro/types";
+import { applyFarmCspHashesToHtml } from "../security";
 import {
   applyFarmWorkflowVercelCrons,
   prepareFarmWorkflowsForNitro,
@@ -8442,7 +8443,6 @@ function getPhysicalPrerenderBypassReason(options: {
     rewriteSources,
     pathname,
   } = options;
-  if (config.security.csp && config.security.csp.nonce) return "per-request CSP nonce";
   if (config.i18n.enabled) return "request-sensitive i18n";
   if (redirectSources.some((source) => middlewarePatternMatches(source, pathname))) {
     return "redirect";
@@ -8952,6 +8952,27 @@ export default async function farmNitroEventHandler(event) {
 
   // Build with Nitro
   const nitroInstance = await nitroBuilder.createNitro(nitroConfig);
+  if (config.security.csp && config.security.csp.nonce) {
+    nitroInstance.hooks.hook("prerender:generate", async (route) => {
+      if (!route.contents || !route.contentType?.toLowerCase().includes("html")) return;
+      const staticCsp = await applyFarmCspHashesToHtml(route.contents, config.security);
+      if (!staticCsp) return;
+
+      route.contents = staticCsp.html;
+      const routeRule = nitroInstance.options.routeRules[route.route] || {};
+      const headers = { ...routeRule.headers };
+      for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === staticCsp.header.key.toLowerCase()) delete headers[key];
+      }
+      headers[staticCsp.header.key] = staticCsp.header.value;
+      nitroInstance.options.routeRules[route.route] = { ...routeRule, headers };
+    });
+    nitroInstance.hooks.hook("prerender:done", () => {
+      // The final adapter build reads both the resolved options and Nitro's
+      // routing index. Refresh the latter after per-page policies are known.
+      nitroInstance.routing.sync();
+    });
+  }
   if (farmNodeServerEntryPath) {
     // The custom entry is only for the final long-running Node server. Nitro
     // derives its prerenderer config from this config, so remove the override

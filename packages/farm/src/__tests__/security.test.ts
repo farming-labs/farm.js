@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   addFarmCspNonceToScriptTags,
+  applyFarmCspHashesToHtml,
+  applyFarmCspHashesToPolicy,
   applyFarmCspNonceToPolicy,
   applyFarmCspNonceToResponse,
+  createFarmCspScriptHashes,
   farmCspBlocksFrameworkInlineScripts,
   getFarmSecurityHeader,
+  removeFarmCspNoncesFromScriptTags,
   resolveFarmSecurityConfig,
   serializeFarmCspDirectives,
 } from "../security";
@@ -120,6 +124,22 @@ describe("security.csp", () => {
     );
   });
 
+  it("adds unique hashes to the governing script directive", () => {
+    expect(
+      applyFarmCspHashesToPolicy("default-src 'self'; script-src-elem 'self'", [
+        "sha256-YWJjZA==",
+        "sha256-YWJjZA==",
+        "sha384-ZWZnaA==",
+      ]),
+    ).toBe("default-src 'self'; script-src-elem 'self' 'sha256-YWJjZA==' 'sha384-ZWZnaA=='");
+    expect(applyFarmCspHashesToPolicy("img-src 'self'", ["sha256-YWJjZA=="])).toBe(
+      "img-src 'self'; script-src 'sha256-YWJjZA=='",
+    );
+    expect(() => applyFarmCspHashesToPolicy("script-src 'self'", ["sha256-bad value"])).toThrow(
+      /Invalid CSP script hash/,
+    );
+  });
+
   it("normalizes every script tag to the response nonce", () => {
     expect(
       addFarmCspNonceToScriptTags(
@@ -144,6 +164,47 @@ describe("security.csp", () => {
         "<!-- <script>commented()</script> -->" +
         '<script nonce="abc123">real()</script>',
     );
+  });
+
+  it("removes only real script nonce attributes", () => {
+    expect(
+      removeFarmCspNoncesFromScriptTags(
+        '<script data-label="nonce=\'keep\'" nonce = "remove" nonce=also-remove>one()</script>' +
+          "<!-- <script nonce='keep'>commented()</script> -->" +
+          "<script NONCE=remove src='/app.js'></script>",
+      ),
+    ).toBe(
+      "<script data-label=\"nonce='keep'\">one()</script>" +
+        "<!-- <script nonce='keep'>commented()</script> -->" +
+        "<script src='/app.js'></script>",
+    );
+  });
+
+  it("hashes exact inline script contents and ignores external or script-like text", async () => {
+    const first = "\n  one();\n";
+    const html =
+      `<script nonce="old">${first}</script>` +
+      `<script>${first}</script>` +
+      '<script src="/app.js"></script>' +
+      '<style>.example::after { content: "<script>ignored()</script>"; }</style>' +
+      "<!-- <script>commented()</script> -->" +
+      "<script>two()</script>";
+    const expectedFirst = await sha256(first);
+    const expectedSecond = await sha256("two()");
+
+    expect(await createFarmCspScriptHashes(html)).toEqual([expectedFirst, expectedSecond]);
+
+    const result = await applyFarmCspHashesToHtml(
+      html,
+      resolveFarmSecurityConfig({
+        csp: { policy: "script-src 'self'; object-src 'none'", nonce: true },
+      }),
+    );
+    expect(result?.html).not.toContain('nonce="old"');
+    expect(result?.header).toEqual({
+      key: "Content-Security-Policy",
+      value: `script-src 'self' '${expectedFirst}' '${expectedSecond}'; object-src 'none'`,
+    });
   });
 
   it("rewrites streamed script tags split across response chunks", async () => {
@@ -172,6 +233,13 @@ describe("security.csp", () => {
     );
   });
 });
+
+async function sha256(value: string): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  let binary = "";
+  for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte);
+  return `sha256-${globalThis.btoa(binary)}`;
+}
 
 describe("farmCspBlocksFrameworkInlineScripts", () => {
   const blocks = (csp: string) =>

@@ -343,8 +343,9 @@ They do not prevent hydration or navigation.
   be public. Never pass a provider secret.
 - Use a provider-published `integrity` value with `crossOrigin: "anonymous"` when the provider offers
   stable, versioned assets. A mutable latest URL cannot safely use a fixed integrity hash.
-- Allow the provider origin in Content Security Policy. Per-request CSP nonces are not a static
-  script option and should not be placed in Farm config.
+- Allow the provider origin in Content Security Policy. `security.csp.nonce` gives dynamic pages a
+  per-response nonce and prerendered pages per-page hashes, but an external `src` still needs its
+  origin allowed. Never place a literal nonce value in Farm config.
 - Farm validates global paths and only allows `data-*` custom attributes. It does not audit or
   sandbox vendor code.
 - A loaded script can modify global browser state. Runtime cleanup removes Farm's observers,

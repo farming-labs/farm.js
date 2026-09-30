@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,6 +62,12 @@ async function createProviderFixture(
 import { apiMcp } from ${JSON.stringify(path.join(workspaceRoot, "packages", "farm-mcp", "src", "index.ts"))};
 
 export default {
+  security: {
+    csp: {
+      policy: "script-src 'self'; object-src 'none'",
+      nonce: true,
+    },
+  },
   plugins: [
     apiMcp({
       allowUnauthenticated: true,
@@ -85,6 +92,8 @@ import React, { lazy, Suspense } from "react";
 const StreamTail = lazy(() =>
   new Promise((resolve) => setTimeout(() => resolve(import("./stream-tail")), 25)),
 );
+
+export const ssg = true;
 
 export default function Page() {
   return (
@@ -213,6 +222,15 @@ async function expectProviderRuntime(
   const html = await page.text();
   expect(html).toContain(`data-provider-runtime="${provider}"`);
   expect(html).toContain('data-stream-tail="complete"');
+  expect(html).not.toMatch(/<script\b[^>]*\bnonce\s*=/i);
+  const policy = page.headers.get("content-security-policy");
+  expect(policy).toContain("script-src 'self'");
+  expect(policy).not.toContain("'nonce-");
+  for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+    if (/(?:^|\s)src\s*=/i.test(match[1]!)) continue;
+    const hash = createHash("sha256").update(match[2]!).digest("base64");
+    expect(policy).toContain(`'sha256-${hash}'`);
+  }
 
   const api = await request(`/api/runtime?provider=${provider}`);
   expect(api.status, await api.clone().text()).toBe(200);

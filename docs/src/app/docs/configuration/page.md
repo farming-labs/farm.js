@@ -563,8 +563,8 @@ security: {
 You can also pass an already serialized policy as `csp: "default-src 'self'; object-src 'none'"`. The longer `contentSecurityPolicy` config name is intentionally unsupported; use `csp`.
 
 Farm emits small inline hydration, theme, and route-state bootstraps. The first example uses the
-compatibility path, so it permits inline scripts. For a strict script policy on dynamically rendered
-pages, enable per-request nonces and remove `'unsafe-inline'`:
+compatibility path, so it permits inline scripts. For a strict script policy, enable Farm's managed
+script authorization and remove `'unsafe-inline'`:
 
 ```ts
 security: {
@@ -581,14 +581,15 @@ security: {
 }
 ```
 
-Farm generates a fresh nonce for every dynamic HTML response, adds it to the directive that governs
-script elements (`script-src-elem`, then `script-src`, then `default-src`), and stamps every script
-element in the streamed document. Any existing script `nonce` attribute is normalized to the fresh
-response nonce so application-authored inline scripts follow the same policy.
+For dynamic HTML, Farm generates a fresh nonce for every response, adds it to the directive that
+governs script elements (`script-src-elem`, then `script-src`, then `default-src`), and stamps every
+script element in the streamed document. Any existing script `nonce` attribute is normalized to the
+fresh response nonce so application-authored inline scripts follow the same policy.
 
-Nonce mode requires a request runtime. Farm bypasses SSG and PPR shell reuse for those responses so a
-nonce is never cached or reused. Hash-based CSP for fully static output is still not available; keep
-nonce mode off and use the compatibility policy when deploying a site with no request runtime. Keep
+For fully prerendered HTML, the same option keeps the page static. Farm removes the build-time nonce,
+hashes the exact contents of every inline script with SHA-256, and emits a route-specific policy with
+those hashes. External scripts still need their origin in `script-src` or `script-src-elem`. Dynamic
+responses and PPR shells continue to use fresh nonces, so a nonce is never cached or reused. Keep
 `reportOnly` on while auditing and verify every third-party script and connection before enforcing the
 policy.
 

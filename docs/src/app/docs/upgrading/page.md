@@ -46,10 +46,9 @@ These changes landed between the last beta and 0.1.0. Most apps need no code cha
 - **React on edge targets.** Edge presets bundle React DOM's edge server build (`server.browser` on
   React 18) instead of its Node build. Cloudflare module Workers now bundle React instead of
   failing at startup with `No such module "react"`.
-- **Content Security Policy nonces.** Dynamic HTML responses can enable `security.csp.nonce` for a
-  strict script policy. Farm generates a per-request nonce, applies it to streamed script elements,
-  and bypasses SSG/PPR shell reuse for those responses. Fully static output still needs the
-  compatibility policy until per-page hashes are available. See
+- **Content Security Policy nonces and hashes.** Enable `security.csp.nonce` for a strict script
+  policy. Farm generates a per-request nonce for dynamic HTML and applies it to streamed script
+  elements. Fully prerendered pages stay static and receive per-page SHA-256 hashes instead. See
   [Content Security Policy](/docs/configuration#content-security-policy).
 - **Caller-owned databases.** `storage.dispose()` no longer closes a database you passed to
   `databaseStorage(database)`. Databases Farm creates from storage configuration are still closed

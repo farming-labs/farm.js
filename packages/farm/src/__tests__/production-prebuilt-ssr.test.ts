@@ -386,8 +386,6 @@ describe("production prebuilt SSR output", () => {
       await fs.writeFile(
         path.join(root, "src", "app", "page.tsx"),
         `
-export const ssg = true;
-
 export default function Page() {
   return (
     <main data-csp-nonce-page>

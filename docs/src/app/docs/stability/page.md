@@ -86,7 +86,6 @@ These are off by default and outside the stability promise:
 
 ## Known limits in 0.1
 
-- **Static strict script Content Security Policy.** Dynamic responses support per-request nonces through `security.csp.nonce`. Fully static output does not yet emit per-page script hashes, so strict script CSP needs a request runtime. See [Content Security Policy](/docs/configuration#content-security-policy).
 - **External docs adapters on edge.** Farm's built-in docs renderer is precompiled for edge targets. A framework-specific external adapter still needs a Node target until it declares an edge runtime contract.
 - **Node.js 22.13 or newer** is required for development and for Node deployment targets.
 
