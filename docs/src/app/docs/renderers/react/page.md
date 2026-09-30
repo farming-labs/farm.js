@@ -902,6 +902,12 @@ path. A failed runtime guard returns that keyed boundary to React before compile
 No option or component primitive is required. The report exposes the emitted binding count as
 `keyedMapLookupTargets`.
 
+When a key-directed identity, Set-membership, or Map-lookup refresh selects multiple binding
+updates, the runtime prepares every selected value and resolves every selected DOM target before
+committing the batch. A reader failure in a later selected row therefore leaves earlier rows
+untouched, while an invalid target uses the complete React fallback. Preparation retains the same
+changed-key set; it does not scan unaffected rows. Single-binding refreshes retain the direct path.
+
 #### Producer-side Set and Map deltas
 
 The Set-membership and Map-lookup paths above normally compare complete previous and next

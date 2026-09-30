@@ -4176,6 +4176,27 @@ type CompilerPreparedKeyedRowBindingUpdate = readonly [
   value: unknown,
 ];
 
+function prepareKeyedRowBindingUpdate(
+  props: CompilerKeyedRowBindingSource,
+  instance: CompilerKeyedRowInstance,
+  item: unknown,
+  index: number,
+  bindingIndex: number,
+): CompilerPreparedKeyedRowBindingUpdate | null | undefined {
+  const binding = props.bindings[bindingIndex];
+  const rawValue = binding.read(item, index);
+  const value = normalizedKeyedRowBindingValue(binding, rawValue);
+  if (Object.is(instance.values[bindingIndex], value)) return null;
+  const target = findCompilerHostTarget(instance.element, binding.path);
+  if (!target || (binding.kind !== "text" && !binding.name)) return undefined;
+  return [bindingIndex, target, value];
+}
+
+type CompilerPreparedKeyedRowBindingCommit = readonly [
+  instance: CompilerKeyedRowInstance,
+  update: CompilerPreparedKeyedRowBindingUpdate,
+];
+
 function prepareKeyedRowBindingUpdates(
   props: CompilerKeyedRowBindingSource,
   instance: CompilerKeyedRowInstance,
@@ -4184,13 +4205,9 @@ function prepareKeyedRowBindingUpdates(
 ): CompilerPreparedKeyedRowBindingUpdate[] | undefined {
   const updates: CompilerPreparedKeyedRowBindingUpdate[] = [];
   for (let bindingIndex = 0; bindingIndex < props.bindings.length; bindingIndex += 1) {
-    const binding = props.bindings[bindingIndex];
-    const rawValue = binding.read(item, index);
-    const value = normalizedKeyedRowBindingValue(binding, rawValue);
-    if (Object.is(instance.values[bindingIndex], value)) continue;
-    const target = findCompilerHostTarget(instance.element, binding.path);
-    if (!target || (binding.kind !== "text" && !binding.name)) return undefined;
-    updates.push([bindingIndex, target, value]);
+    const update = prepareKeyedRowBindingUpdate(props, instance, item, index, bindingIndex);
+    if (update === undefined) return undefined;
+    if (update) updates.push(update);
   }
   return updates;
 }
@@ -9278,6 +9295,7 @@ function createKeyedRowsBlockComponent(
         }
       }
 
+      let preparedBindingUpdates: CompilerPreparedKeyedRowBindingCommit[] | undefined;
       for (const bindingIndex of affectedBindingIndices) {
         const binding = this.currentProps.bindings[bindingIndex];
         const identityTarget = binding.identityTarget;
@@ -9314,52 +9332,33 @@ function createKeyedRowsBlockComponent(
           nextMapLookupTarget?.eligible,
         );
 
+        let selectedKeys: Iterable<string>;
+        let selectedCount: number;
         if (canTargetMapLookup && previousMapLookupTarget && nextMapLookupTarget) {
           const keys = keyedMapLookupChangedKeys(previousMapLookupTarget, nextMapLookupTarget);
-          for (const key of keys) {
-            const instance = this.instances.get(key);
-            if (instance) {
-              applyKeyedRowBinding(
-                this.currentProps,
-                instance,
-                instance.item,
-                instance.index,
-                bindingIndex,
-              );
-            }
-          }
+          selectedKeys = keys;
+          selectedCount = keys.size;
         } else if (canTargetMembership && previousMembershipTarget && nextMembershipTarget) {
           const keys = keyedMembershipChangedKeys(previousMembershipTarget, nextMembershipTarget);
-          for (const key of keys) {
-            const instance = this.instances.get(key);
-            if (instance) {
-              applyKeyedRowBinding(
-                this.currentProps,
-                instance,
-                instance.item,
-                instance.index,
-                bindingIndex,
-              );
-            }
-          }
+          selectedKeys = keys;
+          selectedCount = keys.size;
         } else if (canTargetIdentity && previousIdentityTarget && nextIdentityTarget) {
           const keys = new Set<string>();
           if (previousIdentityTarget.key !== undefined) keys.add(previousIdentityTarget.key);
           if (nextIdentityTarget.key !== undefined) keys.add(nextIdentityTarget.key);
-          for (const key of keys) {
-            const instance = this.instances.get(key);
-            if (instance) {
-              applyKeyedRowBinding(
-                this.currentProps,
-                instance,
-                instance.item,
-                instance.index,
-                bindingIndex,
-              );
-            }
-          }
+          selectedKeys = keys;
+          selectedCount = keys.size;
         } else {
-          for (const instance of this.instances.values()) {
+          selectedKeys = this.instances.keys();
+          selectedCount = this.instances.size;
+        }
+
+        const prepare = affectedBindingIndices.length > 1 || selectedCount > 1;
+        if (prepare) preparedBindingUpdates ||= [];
+        for (const key of selectedKeys) {
+          const instance = this.instances.get(key);
+          if (!instance) continue;
+          if (!prepare) {
             applyKeyedRowBinding(
               this.currentProps,
               instance,
@@ -9367,9 +9366,38 @@ function createKeyedRowsBlockComponent(
               instance.index,
               bindingIndex,
             );
+            continue;
           }
+          const update = prepareKeyedRowBindingUpdate(
+            this.currentProps,
+            instance,
+            instance.item,
+            instance.index,
+            bindingIndex,
+          );
+          if (update === undefined) {
+            this.activateFallback(afterCommit);
+            return true;
+          }
+          if (update) preparedBindingUpdates!.push([instance, update]);
         }
+      }
 
+      if (preparedBindingUpdates) {
+        for (const [instance, [bindingIndex, target, value]] of preparedBindingUpdates) {
+          commitKeyedRowBinding(
+            this.currentProps.bindings[bindingIndex],
+            instance,
+            bindingIndex,
+            value,
+            target,
+          );
+        }
+      }
+      for (const bindingIndex of affectedBindingIndices) {
+        const nextIdentityTarget = nextIdentityTargets.get(bindingIndex);
+        const nextMembershipTarget = nextMembershipTargets.get(bindingIndex);
+        const nextMapLookupTarget = nextMapLookupTargets.get(bindingIndex);
         if (nextIdentityTarget) this.identityTargets.set(bindingIndex, nextIdentityTarget);
         else this.identityTargets.delete(bindingIndex);
         if (nextMembershipTarget) {
