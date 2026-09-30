@@ -62,8 +62,11 @@ export const GET = createEndpoint(
 ```
 
 The route still owns validation and endpoint middleware. The top-level `mcp` config separately owns
-transport authentication in `farm.config.ts`. See the [API MCP guide](/docs/plugins/mcp) for
-generated names and security boundaries.
+transport authentication in `farm.config.ts`. Alternatively, select explicitly pathed endpoint
+instances in `mcp.tools` and return allowed tool names from `mcp.authorize` to control discovery
+and invocation per caller. The same list can include standalone `defineTool()` definitions from
+`@farm.js/mcp` for operations without an HTTP route. See the [API MCP guide](/docs/plugins/mcp)
+for mixed composition, generated names, and security boundaries.
 
 ## Next-style exports
 

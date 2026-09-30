@@ -14,7 +14,15 @@ import {
   type RouteMethod,
   type RouteSchema,
 } from "@farm.js/core/plugin";
-import type { FarmMCPAuthorization, FarmMCPAuthorizeContext, FarmMCPConfig } from "@farm.js/core";
+import type {
+  FarmMCPAuthorization,
+  FarmMCPAuthorizeContext,
+  FarmMCPConfig,
+  FarmMCPTool,
+  FarmMCPStandaloneTool,
+  FarmMCPExecuteContext,
+} from "@farm.js/core";
+import { parseRouteSchema } from "@farm.js/core/api/runtime";
 import { toJSONSchema } from "zod";
 
 const TOOL_NAME = /^[A-Za-z0-9_.-]{1,128}$/;
@@ -38,17 +46,31 @@ export interface APIMCPOptions extends Omit<FarmMCPConfig, "enabled"> {}
 
 type ResolvedToolOptions = APIMCPToolOptions;
 
-interface BoundTool {
+interface BoundToolBase {
   key: string;
-  route: PluginLocalAPIEndpoint;
   config: ResolvedToolOptions;
   inputSchema: JSONSchema;
   annotations: ToolAnnotations;
 }
 
+type BoundTool = BoundToolBase &
+  (
+    | { kind: "endpoint"; route: PluginLocalAPIEndpoint }
+    | { kind: "standalone"; definition: FarmMCPStandaloneTool }
+  );
+
+export type { FarmMCPStandaloneTool, FarmMCPExecuteContext } from "@farm.js/core";
+
+/** Define a server-only MCP tool with schema-inferred execute arguments. */
+export function defineTool<Schema extends RouteSchema, Result>(
+  definition: FarmMCPStandaloneTool<Schema, Result>,
+): FarmMCPStandaloneTool<Schema, Result> {
+  return definition;
+}
+
 /**
- * Mount an experimental Streamable HTTP MCP server backed by selected Farm API routes.
- * The API endpoints remain the authority for validation, middleware, context, and errors.
+ * Mount an experimental Streamable HTTP MCP server with API routes and standalone tools.
+ * API endpoints retain their validation and middleware; standalone tools own their schema and execute.
  */
 export function apiMcp(options: APIMCPOptions): FarmPlugin {
   const normalized = validateOptions(options);
@@ -56,7 +78,7 @@ export function apiMcp(options: APIMCPOptions): FarmPlugin {
   return {
     name: "farm:api-mcp",
     routes: ({ route, api }) => {
-      const tools = api.available ? bindTools(api, normalized.path) : [];
+      const tools = api.available ? bindTools(api, normalized) : [];
       const handler = createHandler(normalized, tools);
       const serve = (request: Request, body: unknown) => handler(request, body);
 
@@ -76,9 +98,36 @@ export function apiMcp(options: APIMCPOptions): FarmPlugin {
 }
 
 function createHandler(options: NormalizedOptions, tools: readonly BoundTool[]) {
-  const mcp = createMcpHandler(({ requestInfo }) => {
-    const server = new McpServer({ name: options.name, version: options.version });
+  const catalog: readonly FarmMCPTool[] = Object.freeze(
+    tools.map((tool) =>
+      Object.freeze({
+        name: tool.config.name,
+        title: tool.config.title,
+        description: tool.config.description,
+        ...tool.annotations,
+        ...(tool.kind === "endpoint"
+          ? { kind: "endpoint" as const, method: tool.route.method, path: tool.route.path }
+          : { kind: "standalone" as const }),
+      }),
+    ),
+  );
+  const serverIdentity = Object.freeze({
+    name: options.name,
+    version: options.version,
+    path: options.path,
+  });
+  const toolNames = new Set(catalog.map(({ name }) => name));
+  const mcp = createMcpHandler(({ requestInfo, authInfo }) => {
+    const server = new McpServer(
+      { name: options.name, version: options.version },
+      { capabilities: { tools: {} } },
+    );
+    const allowed = authInfo?.extra?.farmAllowedTools as readonly string[] | undefined;
+    const allowedNames = allowed === undefined ? undefined : new Set(allowed);
+    // A fresh server is created per HTTP request. Unregistered tools are neither
+    // discoverable nor callable, regardless of the incoming protocol method.
     for (const tool of tools) {
+      if (allowedNames && !allowedNames.has(tool.config.name)) continue;
       server.registerTool(
         tool.config.name,
         {
@@ -87,13 +136,21 @@ function createHandler(options: NormalizedOptions, tools: readonly BoundTool[]) 
           inputSchema: fromJsonSchema(tool.inputSchema, schemaValidator),
           annotations: tool.annotations,
         },
-        async (input, context) =>
-          invokeTool(
-            tool,
-            input as JSONRecord,
-            context.http?.req ?? requestInfo,
-            context.mcpReq.signal,
-          ),
+        async (input, context) => {
+          const request = context.http?.req ?? requestInfo;
+          if (tool.kind === "endpoint") {
+            return invokeTool(tool, input as JSONRecord, request, context.mcpReq.signal);
+          }
+          const authorization = authInfo?.extra?.farmAuthorization as
+            | FarmMCPAuthorization
+            | undefined;
+          if (!request || !authorization) return toolError("Missing MCP authorization context.");
+          return invokeStandaloneTool(tool, input, {
+            request,
+            authorization,
+            signal: AbortSignal.any([request.signal, context.mcpReq.signal]),
+          });
+        },
       );
     }
     return server;
@@ -102,7 +159,12 @@ function createHandler(options: NormalizedOptions, tools: readonly BoundTool[]) 
   return async (request: Request, parsedBody: unknown): Promise<Response> => {
     let authorization: APIMCPAuthorization;
     if (options.authorize) {
-      const result = await options.authorize({ request, tool: getCalledTool(parsedBody) });
+      const result = await options.authorize({
+        request,
+        tool: getCalledTool(parsedBody),
+        tools: catalog,
+        server: serverIdentity,
+      });
       if (result === false) return unauthorized();
       if (!result || typeof result.subject !== "string" || result.subject.length === 0) {
         throw new TypeError(
@@ -116,13 +178,13 @@ function createHandler(options: NormalizedOptions, tools: readonly BoundTool[]) 
 
     return mcp.fetch(request, {
       parsedBody,
-      authInfo: toMCPAuthInfo(authorization),
+      authInfo: toMCPAuthInfo(authorization, resolveAllowedTools(authorization, toolNames)),
     });
   };
 }
 
 async function invokeTool(
-  tool: BoundTool,
+  tool: BoundTool & { kind: "endpoint" },
   input: JSONRecord,
   sourceRequest: Request | undefined,
   signal: AbortSignal,
@@ -176,14 +238,52 @@ async function invokeTool(
   }
 }
 
-function bindTools(api: PluginLocalAPI, mcpPath: string): BoundTool[] {
-  const selected = new Map<
-    string,
-    { route: PluginLocalAPIEndpoint; config: EndpointMCPMetadata }
-  >();
-  for (const endpoint of api.list()) {
-    if (!endpoint.mcp) continue;
-    if (endpoint.path === mcpPath) {
+async function invokeStandaloneTool(
+  tool: BoundTool & { kind: "standalone" },
+  input: unknown,
+  context: FarmMCPExecuteContext,
+) {
+  try {
+    context.signal.throwIfAborted();
+    // JSON Schema advertises the wire shape; the original validator owns async
+    // refinements, defaults, and transforms, just as it does for API endpoints.
+    const parsed = await parseRouteSchema(tool.definition.inputSchema, input);
+    context.signal.throwIfAborted();
+    const result = await tool.definition.execute(parsed, context);
+    context.signal.throwIfAborted();
+    const text = JSON.stringify(result, (_key, value) => {
+      if (
+        typeof value === "bigint" ||
+        typeof value === "function" ||
+        typeof value === "symbol" ||
+        (typeof value === "number" && !Number.isFinite(value)) ||
+        (value !== null &&
+          typeof value === "object" &&
+          !Array.isArray(value) &&
+          Object.getPrototypeOf(value) !== Object.prototype &&
+          Object.getPrototypeOf(value) !== null)
+      )
+        throw new TypeError(
+          "Standalone MCP tools must return JSON-serializable data, not a Response or stream.",
+        );
+      return value;
+    });
+    if (text === undefined)
+      throw new TypeError("Standalone MCP tools must return JSON-serializable data.");
+    return {
+      content: [{ type: "text" as const, text }],
+      structuredContent: { result: JSON.parse(text) },
+    };
+  } catch (error) {
+    return toolError(error instanceof Error ? error.message : "Farm MCP tool execution failed.");
+  }
+}
+
+function bindTools(api: PluginLocalAPI, options: NormalizedOptions): BoundTool[] {
+  const selected: BoundTool[] = [];
+  const endpoints = new Set<string>();
+  const select = (endpoint: PluginLocalAPIEndpoint, metadata?: EndpointMCPMetadata) => {
+    if (endpoint.path === options.path) {
       throw new TypeError(
         `apiMcp cannot expose its own route (${endpoint.method} ${endpoint.path}).`,
       );
@@ -193,25 +293,92 @@ function bindTools(api: PluginLocalAPI, mcpPath: string): BoundTool[] {
         `apiMcp cannot expose OPTIONS route ${endpoint.path}; use an application operation instead.`,
       );
     }
-    selected.set(`${endpoint.method} ${endpoint.path}`, {
+    const key = `${endpoint.method} ${endpoint.path}`;
+    if (endpoints.has(key))
+      throw new TypeError(`apiMcp endpoint ${key} is selected more than once.`);
+    endpoints.add(key);
+    const config = { ...(endpoint.mcp === true ? {} : endpoint.mcp), ...metadata };
+    const resolved = {
+      ...config,
+      name: config.name ?? deriveToolName(endpoint.method, endpoint.path),
+    };
+    selected.push({
+      kind: "endpoint",
+      key,
       route: endpoint,
-      config: endpoint.mcp === true ? {} : endpoint.mcp,
+      config: resolved,
+      inputSchema: createToolInputSchema(endpoint),
+      annotations: createAnnotations(endpoint.method, resolved),
     });
+  };
+  if (options.tools === undefined) {
+    for (const endpoint of api.list()) {
+      if (endpoint.mcp) select(endpoint);
+    }
+  } else {
+    for (const definition of options.tools) {
+      if (definition && typeof definition === "object" && "execute" in definition) {
+        if (
+          "endpoint" in definition ||
+          typeof definition.execute !== "function" ||
+          !definition.inputSchema
+        ) {
+          throw new TypeError(
+            "Standalone MCP tools need inputSchema and execute, without an endpoint reference.",
+          );
+        }
+        const config = { ...definition, name: definition.name };
+        selected.push({
+          kind: "standalone",
+          key: `tool ${definition.name}`,
+          definition,
+          config,
+          inputSchema: requireObjectSchema(
+            toInputJSONSchema(definition.inputSchema, "inputSchema"),
+            "inputSchema",
+          ),
+          annotations: createAnnotations(undefined, config),
+        });
+        continue;
+      }
+      const { endpoint, ...metadata } =
+        typeof definition === "function" ? { endpoint: definition } : (definition ?? {});
+      if (
+        typeof endpoint !== "function" ||
+        !endpoint.__types ||
+        typeof endpoint.__path !== "string" ||
+        !endpoint.__path.startsWith("/api/") ||
+        typeof endpoint.__method !== "string"
+      ) {
+        throw new TypeError(
+          "apiMcp tools need a createEndpoint reference with an explicit /api path; use createEndpoint('/api/...', options, handler), or keep mcp metadata on a path-inferred route.",
+        );
+      }
+      if (endpoint.__path === options.path) {
+        throw new TypeError(
+          `apiMcp cannot expose its own route (${endpoint.__method} ${endpoint.__path}).`,
+        );
+      }
+      // Config and route modules may be independently evaluated. Resolve the
+      // mounted endpoint by its declared contract, never by function identity.
+      const mounted = api.get(endpoint.__method as RouteMethod, endpoint.__path);
+      if (!mounted)
+        throw new TypeError(
+          `apiMcp ${endpoint.__method} ${endpoint.__path} is not a mounted app endpoint.`,
+        );
+      select(mounted, metadata);
+    }
   }
 
-  if (selected.size === 0) {
+  if (selected.length === 0) {
     throw new TypeError(
-      "apiMcp needs at least one endpoint configured with mcp: true or MCP metadata.",
+      "apiMcp needs at least one endpoint or standalone tool selected in tools, or route-owned MCP metadata.",
     );
   }
 
   const names = new Set<string>();
-  return Array.from(selected, ([key, selection]) => {
-    const config: ResolvedToolOptions = {
-      ...selection.config,
-      name: selection.config.name ?? deriveToolName(selection.route.method, selection.route.path),
-    };
-    if (!TOOL_NAME.test(config.name)) {
+  for (const { key, config } of selected) {
+    if (typeof config.name !== "string" || !TOOL_NAME.test(config.name)) {
       throw new TypeError(
         `apiMcp tool for "${key}" needs a valid MCP name (1-128 letters, numbers, dots, underscores, or hyphens).`,
       );
@@ -219,14 +386,8 @@ function bindTools(api: PluginLocalAPI, mcpPath: string): BoundTool[] {
     if (names.has(config.name))
       throw new TypeError(`apiMcp tool name "${config.name}" is duplicated.`);
     names.add(config.name);
-    return {
-      key,
-      route: selection.route,
-      config,
-      inputSchema: createToolInputSchema(selection.route),
-      annotations: createAnnotations(selection.route.method, config),
-    };
-  });
+  }
+  return selected;
 }
 
 function deriveToolName(method: RouteMethod, path: string): string {
@@ -320,15 +481,13 @@ function toInputJSONSchema(schema: RouteSchema, location: string): JSONSchema {
     result =
       typeof standardJSON === "function"
         ? standardJSON({ target: "draft-2020-12" })
-        : toJSONSchema(schema as never);
+        : toJSONSchema(schema as never, { io: "input" });
   } catch (error) {
     const reason = error instanceof Error ? ` ${error.message}` : "";
-    throw new TypeError(
-      `apiMcp cannot represent the selected route's ${location} schema.${reason}`,
-    );
+    throw new TypeError(`apiMcp cannot represent the selected tool's ${location} schema.${reason}`);
   }
   if (!result || typeof result !== "object" || Array.isArray(result)) {
-    throw new TypeError(`apiMcp cannot represent the selected route's ${location} schema.`);
+    throw new TypeError(`apiMcp cannot represent the selected tool's ${location} schema.`);
   }
   const json = { ...(result as JSONSchema) };
   delete json.$schema;
@@ -427,11 +586,14 @@ function asRecord(value: unknown, location: string): JSONRecord {
   return value as JSONRecord;
 }
 
-function createAnnotations(method: RouteMethod, options: ResolvedToolOptions): ToolAnnotations {
+function createAnnotations(
+  method: RouteMethod | undefined,
+  options: ResolvedToolOptions,
+): ToolAnnotations {
   const readOnly = method === "GET" || method === "HEAD" || method === "QUERY";
   return {
     readOnlyHint: options.readOnlyHint ?? readOnly,
-    destructiveHint: options.destructiveHint ?? method === "DELETE",
+    destructiveHint: options.destructiveHint ?? (method === undefined || method === "DELETE"),
     ...(options.idempotentHint === undefined ? {} : { idempotentHint: options.idempotentHint }),
     ...(options.openWorldHint === undefined ? {} : { openWorldHint: options.openWorldHint }),
   };
@@ -445,12 +607,29 @@ function getCalledTool(body: unknown): string | undefined {
     : undefined;
 }
 
-function toMCPAuthInfo(authorization: APIMCPAuthorization): AuthInfo {
+function resolveAllowedTools(
+  authorization: APIMCPAuthorization,
+  names: ReadonlySet<string>,
+): string[] | undefined {
+  if (authorization.tools === undefined) return undefined;
+  if (
+    !Array.isArray(authorization.tools) ||
+    authorization.tools.some((name) => typeof name !== "string" || !names.has(name))
+  ) {
+    throw new TypeError("apiMcp authorize tools must be an array of configured tool names.");
+  }
+  return [...authorization.tools];
+}
+
+function toMCPAuthInfo(
+  authorization: APIMCPAuthorization,
+  allowedTools?: readonly string[],
+): AuthInfo {
   return {
     token: "farm-authorized",
     clientId: authorization.subject,
     scopes: Array.isArray(authorization.scopes) ? authorization.scopes : [],
-    extra: { farmAuthorization: authorization },
+    extra: { farmAuthorization: authorization, farmAllowedTools: allowedTools },
   };
 }
 
@@ -473,9 +652,9 @@ interface NormalizedOptions extends Omit<APIMCPOptions, "path" | "name" | "versi
 
 function validateOptions(options: APIMCPOptions): NormalizedOptions {
   if (!options || typeof options !== "object") throw new TypeError("apiMcp options are required.");
-  if ("tools" in options) {
+  if (options.tools !== undefined && !Array.isArray(options.tools)) {
     throw new TypeError(
-      "apiMcp tools belong on createEndpoint({ mcp: ... }); the transport does not accept a method/path map.",
+      "apiMcp tools must be an array of endpoint references, { endpoint, ...metadata } declarations, or defineTool() tools, not a method/path map.",
     );
   }
   if (!options.authorize && options.allowUnauthenticated !== true) {

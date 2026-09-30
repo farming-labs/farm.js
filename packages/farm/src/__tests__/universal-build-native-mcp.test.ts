@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { resolveFarmMCPConfig } from "../mcp-config";
 import { generateNativeMCPPluginSource } from "../nitro/universal-build";
+import { createEndpoint } from "../api/endpoint";
 
 describe("native MCP plugin in the production entry", () => {
   it("recreates the plugin from layered top-level config", () => {
@@ -13,16 +14,21 @@ describe("native MCP plugin in the production entry", () => {
     expect(pluginSource).toContain("farmNativeMCPPlugin");
 
     const authorize = vi.fn(() => ({ subject: "agent" }));
+    const first = createEndpoint("/api/first", { method: "GET" }, () => null);
+    const second = createEndpoint("/api/second", { method: "GET" }, () => null);
+    const selected = [{ endpoint: second, name: "second" }];
     const farmRuntimeConfigs = [
       {
         mcp: {
           authorize,
           path: "/api/agent",
+          tools: [first],
         },
       },
       {
         mcp: {
           name: "project-api",
+          tools: selected,
         },
       },
     ];
@@ -36,6 +42,7 @@ describe("native MCP plugin in the production entry", () => {
     };
 
     expect(createFarmMCPPlugin).toHaveBeenCalledTimes(1);
+    expect(plugin.config.tools).toBe(selected);
     expect(plugin.config).toMatchObject({
       name: "project-api",
       authorize,

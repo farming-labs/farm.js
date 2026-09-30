@@ -157,7 +157,9 @@ async function createProviderFixture(
   await fs.writeFile(
     path.join(root, "farm.config.ts"),
     `
-import { apiMcp } from ${JSON.stringify(path.join(workspaceRoot, "packages", "farm-mcp", "src", "index.ts"))};
+import { apiMcp, defineTool } from ${JSON.stringify(path.join(workspaceRoot, "packages", "farm-mcp", "src", "index.ts"))};
+import { z } from ${JSON.stringify(path.join(corePackageRoot, "node_modules", "zod", "index.js"))};
+import { GET } from "./src/app/api/runtime/route";
 
 export default {
   security: {
@@ -168,7 +170,20 @@ export default {
   },
   plugins: [
     apiMcp({
-      allowUnauthenticated: true,
+      tools: [GET, defineTool({
+        name: "whoami",
+        inputSchema: z.object({ message: z.string().trim().min(1) }),
+        execute: ({ message }, { authorization, signal }) => ({ message, subject: authorization.subject, aborted: signal.aborted }),
+      })],
+      authorize: ({ request, tools, server }) => {
+        if (server.path !== "/api/mcp" || tools[0]?.name !== "get_runtime" || tools[1]?.kind !== "standalone") {
+          throw new Error("Missing MCP policy context");
+        }
+        return {
+          subject: "fixture",
+          tools: request.headers.get("authorization") === "Bearer denied" ? [] : tools.map(tool => tool.name),
+        };
+      },
     }),
   ],
 };
@@ -211,6 +226,7 @@ export default function Page() {
 import { createEndpoint } from "@farm.js/core/api";
 
 export const GET = createEndpoint(
+  "/api/runtime",
   {
     method: "GET",
     mcp: { name: "get_runtime", readOnlyHint: true },
@@ -382,6 +398,51 @@ async function expectProviderRuntime(
   expect(mcp.status, await mcp.clone().text()).toBe(200);
   const payload = await readMCPResponse(mcp);
   expect(payload.result.structuredContent).toEqual({ result: { ok: true, query: null } });
+
+  const native = await request("/api/mcp", {
+    method: "POST",
+    headers: {
+      accept: "application/json, text/event-stream",
+      "content-type": "application/json",
+      "mcp-protocol-version": "2025-11-25",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "whoami", arguments: { message: " hello " } },
+    }),
+  });
+  expect(native.status).toBe(200);
+  expect((await readMCPResponse(native)).result.structuredContent).toEqual({
+    result: { message: "hello", subject: "fixture", aborted: false },
+  });
+
+  for (const [method, name] of [
+    ["tools/list", "get_runtime"],
+    ["tools/call", "get_runtime"],
+    ["tools/call", "whoami"],
+  ]) {
+    const denied = await request("/api/mcp", {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+        "mcp-protocol-version": "2025-11-25",
+        authorization: "Bearer denied",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method,
+        params: { name, arguments: { message: "hello" } },
+      }),
+    });
+    expect(denied.status).toBe(200);
+    const result = await readMCPResponse(denied);
+    if (method === "tools/list") expect(result.result.tools).toEqual([]);
+    else expect(result.error).toBeDefined();
+  }
 }
 
 async function readMCPResponse(response: Response): Promise<any> {

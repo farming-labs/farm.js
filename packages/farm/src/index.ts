@@ -176,6 +176,12 @@ export type {
 } from "./auth-config";
 export type {
   FarmMCPAuthorization,
+  FarmMCPEndpoint,
+  FarmMCPToolDefinition,
+  FarmMCPStandaloneTool,
+  FarmMCPExecuteContext,
+  FarmMCPTool,
+  FarmMCPServer,
   FarmMCPAuthorizeContext,
   FarmMCPConfig,
   FarmMCPUserConfig,

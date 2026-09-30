@@ -253,7 +253,7 @@ mount, and shortcut together.
 | api           | Configuring the public root used by Farm's typed browser API client.                  |
 | integrations  | Registering built-in or custom integrations.                                          |
 | auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.           |
-| mcp           | Exposing opted-in typed API routes through one authenticated MCP endpoint.            |
+| mcp           | Composing API routes and standalone tools in one authenticated MCP server.            |
 | theme         | Enabling light, dark, and system modes with client and server APIs.                   |
 | storage       | Configuring KV drivers/mounts and, in the current beta, an integration DB client.     |
 | migrations    | Running one-shot schema/provider commands with `farm migrate`.                        |
@@ -364,9 +364,13 @@ export default defineConfig({
 });
 ```
 
-This mounts `/api/mcp`. Individual typed API routes remain private unless their endpoint config sets
-`mcp: true` or supplies MCP metadata. See [API MCP](/docs/plugins/mcp) for tool naming, route
-metadata, and the two authorization boundaries.
+This mounts `/api/mcp`. Typed API routes are not exposed as MCP tools unless their endpoint config sets
+`mcp: true` or supplies MCP metadata, or you explicitly select endpoint instances in `mcp.tools`.
+`authorize` receives `{ request, tool, tools, server }`; return `{ subject, tools: ["tool_name"] }`
+to limit both discovery and invocation for that caller. You can also add standalone `defineTool()`
+definitions from `@farm.js/mcp` to the same list; these validate their own input and receive the
+authorized principal without creating separate HTTP routes. See [API MCP](/docs/plugins/mcp) for
+mixed declarations, the resolved catalog, and permission checks.
 
 ## Isolated client hydration
 

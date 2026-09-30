@@ -13,6 +13,12 @@ const tools = [
     input: "body.name + status",
     mode: "WRITE",
   },
+  {
+    name: "search_projects",
+    route: "MCP only · defineTool()",
+    input: "query",
+    mode: "READ",
+  },
 ] as const;
 
 export default function HomePage() {
@@ -21,10 +27,10 @@ export default function HomePage() {
       <header>
         <div>
           <p className="eyebrow">@farm.js/mcp · experimental</p>
-          <h1>Your typed API is the tool.</h1>
+          <h1>API routes and tools. One server.</h1>
           <p className="lede">
-            Expose only the Farm routes you choose. MCP supplies the protocol; your existing
-            validation, middleware, request context, and handlers stay authoritative.
+            Compose typed API routes and standalone tools with one authorization policy.
+            Existing endpoints keep their validation and middleware; standalone tools need no HTTP route.
           </p>
         </div>
         <div className="endpoint" aria-label="MCP endpoint">
@@ -51,9 +57,9 @@ export default function HomePage() {
         <span className="connector" aria-hidden="true">→</span>
         <article>
           <span className="step">03</span>
-          <p className="label">Typed endpoint</p>
+          <p className="label">Endpoint or tool</p>
           <h2>Validates + executes</h2>
-          <code>createEndpoint()</code>
+          <code>createEndpoint() / defineTool()</code>
         </article>
       </section>
 
@@ -61,7 +67,7 @@ export default function HomePage() {
         <div className="tool-surface">
           <div className="section-heading">
             <div>
-              <p className="label">Explicit route opt-ins</p>
+              <p className="label">Explicit tool selection</p>
               <h2>Advertised tools</h2>
             </div>
             <span className="count">{tools.length} tools</span>

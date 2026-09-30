@@ -16,6 +16,7 @@ import { parseRouteSchema } from "./route-schema";
 import { omitFarmResponseBody } from "../response-body";
 
 export { registerAPIRouteShape, type APIRouteShapeSource } from "./route-shape";
+export { parseRouteSchema } from "./route-schema";
 export { mergePluginAPIRoutes } from "./plugin-route-runtime";
 
 export {

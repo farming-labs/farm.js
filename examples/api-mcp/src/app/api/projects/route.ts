@@ -5,20 +5,21 @@ import { projects } from "../../../lib/projects";
 const DEMO_TOKEN = "demo-token";
 
 function requireDemoToken({ request }: EndpointMiddlewareContext) {
-  if (request.headers.get("authorization") !== `Bearer ${DEMO_TOKEN}`) {
+  const token = request.headers.get("authorization");
+  const writer = token === `Bearer ${DEMO_TOKEN}`;
+  if (!writer && token !== "Bearer demo-reader") {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  return { actor: "demo-agent" };
+  if (!writer && request.method !== "GET") {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+  return { actor: writer ? "demo-agent" : "demo-reader" };
 }
 
 export const GET = createEndpoint(
+  "/api/projects",
   {
     method: "GET",
-    mcp: {
-      name: "list_projects",
-      description: "List projects, optionally filtered by status.",
-      readOnlyHint: true,
-    },
     query: z.object({ status: z.enum(["active", "planned"]).optional() }),
     middleware: [requireDemoToken],
   },
@@ -31,13 +32,9 @@ export const GET = createEndpoint(
 );
 
 export const POST = createEndpoint(
+  "/api/projects",
   {
     method: "POST",
-    mcp: {
-      name: "create_project",
-      description: "Create a project in the demo workspace.",
-      destructiveHint: false,
-    },
     body: z.object({
       name: z.string().trim().min(2).max(80),
       status: z.enum(["active", "planned"]).default("planned"),

@@ -191,6 +191,12 @@ export type {
 } from "./auth-config";
 export type {
   FarmMCPAuthorization,
+  FarmMCPEndpoint,
+  FarmMCPToolDefinition,
+  FarmMCPStandaloneTool,
+  FarmMCPExecuteContext,
+  FarmMCPTool,
+  FarmMCPServer,
   FarmMCPAuthorizeContext,
   FarmMCPConfig,
   FarmMCPUserConfig,
@@ -334,7 +340,7 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
    * `@farm.js/auth/client`.
    */
   auth?: FarmAuthUserConfig;
-  /** Expose opted-in typed API routes through an authenticated MCP transport. */
+  /** Compose opted-in API routes and standalone tools through an authenticated MCP transport. */
   mcp?: FarmMCPUserConfig;
   /** Shared application data, route, ISR, and PPR cache. */
   cache?: FarmCacheUserConfig;

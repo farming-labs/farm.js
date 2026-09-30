@@ -2,17 +2,73 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { FarmPlugin } from "./plugin";
+import type { EndpointMCPMetadata, TypedEndpoint } from "./api/endpoint";
+import type { RouteMethod } from "./api/route";
+import type { RouteSchema, RouteSchemaOutput } from "./api/route-schema";
+
+/** A server-only endpoint reference. Config references must declare an explicit /api path. */
+export type FarmMCPEndpoint = TypedEndpoint<any, any, any, any, any, any, any, any>;
+
+export interface FarmMCPExecuteContext {
+  /** The principal returned by authorize, or { subject: "anonymous" } for public servers. */
+  readonly authorization: Readonly<FarmMCPAuthorization>;
+  readonly request: Request;
+  /** Observe this signal in cancellable work. Cancellation cannot undo side effects. */
+  readonly signal: AbortSignal;
+}
+
+/** A server-only tool with no corresponding HTTP endpoint. */
+export interface FarmMCPStandaloneTool<
+  Schema extends RouteSchema = RouteSchema,
+  Result = unknown,
+> extends EndpointMCPMetadata {
+  name: string;
+  /** Must describe an object and support input JSON Schema conversion. */
+  inputSchema: Schema;
+  /** Return JSON-serializable data, not a Response or an MCP protocol envelope. */
+  execute(
+    input: RouteSchemaOutput<Schema>,
+    context: FarmMCPExecuteContext,
+  ): Result | Promise<Result>;
+  endpoint?: never;
+}
+
+/** Compose endpoint references and standalone tools. */
+export type FarmMCPToolDefinition =
+  | FarmMCPEndpoint
+  | (EndpointMCPMetadata & { endpoint: FarmMCPEndpoint; execute?: never })
+  | FarmMCPStandaloneTool<any>;
+
+/** Resolved tool identity, without handlers, validators, or a way to bypass authorization. */
+export type FarmMCPTool = Readonly<EndpointMCPMetadata> & {
+  readonly name: string;
+} & (
+    | { readonly kind: "endpoint"; readonly method: RouteMethod; readonly path: string }
+    | { readonly kind: "standalone"; readonly method?: never; readonly path?: never }
+  );
+
+export interface FarmMCPServer {
+  readonly name: string;
+  readonly version: string;
+  readonly path: `/api/${string}`;
+}
 
 export interface FarmMCPAuthorization extends Record<string, unknown> {
   /** Stable application principal identifier. Never written to a response or log by Farm. */
   subject: string;
   scopes?: string[];
+  /** Allowed tool names for this request. Omit for all configured tools; [] denies all tools. */
+  tools?: readonly string[];
 }
 
 export interface FarmMCPAuthorizeContext {
   request: Request;
-  /** Present for a single `tools/call` request and omitted for other MCP methods or batches. */
+  /** Untrusted requested name for a single tools/call; omitted for other methods or batches. */
   tool?: string;
+  /** Complete configured catalog, before applying this caller's permissions. */
+  tools: readonly FarmMCPTool[];
+  /** Resolved transport identity, for policies shared by multiple MCP endpoints. */
+  server: FarmMCPServer;
 }
 
 export interface FarmMCPConfig {
@@ -24,6 +80,8 @@ export interface FarmMCPConfig {
   name?: string;
   /** MCP server version. @default "1.0.0" */
   version?: string;
+  /** Explicit endpoint/standalone tool allowlist. Omit to discover route-owned MCP metadata. */
+  tools?: readonly FarmMCPToolDefinition[];
   /** Authorize every MCP request. Returning false responds with 401 before protocol handling. */
   authorize?: (
     context: FarmMCPAuthorizeContext,
