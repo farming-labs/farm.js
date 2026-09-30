@@ -276,7 +276,7 @@ function createNetlifyDeployArgs(root: string, outputDir: string, site?: string)
     "--prod",
     "--no-build",
     "--dir=dist",
-    `--functions=${path.relative(root, path.join(outputDir, "server"))}`,
+    `--functions=${path.relative(root, path.join(outputDir, "server")).split(path.sep).join(path.posix.sep)}`,
     ...(site ? [`--site=${site}`] : []),
   ];
 }
