@@ -61,7 +61,10 @@ function createResponse(
   request: Request,
 ): Response {
   const headers = new Headers(
-    compiled.headers.map(([key, value]) => [key, replaceOrigin(value, manifest, request)]),
+    compiled.headers.map(([key, value]): [string, string] => [
+      key,
+      replaceOrigin(value, manifest, request),
+    ]),
   );
   return new Response(
     request.method === "HEAD" ? null : replaceOrigin(compiled.body, manifest, request),
