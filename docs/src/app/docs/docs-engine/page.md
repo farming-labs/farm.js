@@ -204,6 +204,7 @@ path-style machine routes. Most applications do not need either wrapper.
 ## Production notes
 
 - Keep docs content in markdown so human pages and agent-readable pages stay in sync.
+- Vercel functions bundle the docs content and last-modified metadata beside the server entry. Verify the emitted function without access to the source checkout so local files cannot hide a missing deployment asset.
 - Keep the canonical docs configuration in the `docs` property of `farm.config.ts`.
 - Use an external docs config only when a large navigation or theme definition is easier to maintain separately.
 - Edge output snapshots docs content during `farm build`; rebuild the app after changing a page or docs configuration. `farm dev` continues to read source files live.

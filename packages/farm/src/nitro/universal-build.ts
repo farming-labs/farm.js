@@ -9362,7 +9362,9 @@ async function copyFarmDocsContentForVercel(
   const docsContentDir = resolveBuildDocsContentDir(config, root);
   if (!docsContentDir) return;
 
-  const bundledContentDir = path.join(nitroFuncDir, "chunks", "nitro", "farm-docs-content");
+  // Nitro v3 emits the SSR entry at the function root. Its docs lookup searches
+  // beside the entry and its ancestors, not the old chunks/nitro directory.
+  const bundledContentDir = path.join(nitroFuncDir, "farm-docs-content");
   const lastModifiedManifest = createFarmDocsLastModifiedManifest(docsContentDir, {
     fallback: "now",
   });
