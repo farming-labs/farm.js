@@ -31,7 +31,19 @@ export function extractFarmFullDocument(markup: string): string | null {
   const start = markup.search(/<!doctype|<html[\s>]/i);
   const closeIndex = markup.toLowerCase().lastIndexOf("</html>");
   if (start < 0 || closeIndex < 0) return null;
-  return markup.slice(start, closeIndex + "</html>".length);
+  const closeEnd = closeIndex + "</html>".length;
+  let document = markup.slice(start, closeEnd);
+  // React may flush Suspense reveal scripts after closing the app-authored
+  // document and Farm's outer segment wrappers. Preserve that streamed tail
+  // by moving it back inside the document body.
+  const streamedTail = markup
+    .slice(closeEnd)
+    .replace(/^(?:\s*<\/div>)+/i, "")
+    .trim();
+  if (streamedTail) {
+    document = document.replace(/<\/body>/i, () => `${streamedTail}</body>`);
+  }
+  return document;
 }
 
 /** True when a rendered layout tree is (or wraps) a full HTML document. */

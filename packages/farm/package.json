@@ -84,6 +84,9 @@
       "app-markdown": [
         "./dist/app-markdown.d.ts"
       ],
+      "internal/app-markdown-runtime": [
+        "./dist/internal/app-markdown-runtime.d.ts"
+      ],
       "observability": [
         "./dist/observability.d.ts"
       ],
@@ -577,6 +580,11 @@
       "types": "./dist/internal/metadata-image-runtime.d.ts",
       "import": "./dist/internal/metadata-image-runtime.mjs",
       "require": "./dist/internal/metadata-image-runtime.cjs"
+    },
+    "./internal/app-markdown-runtime": {
+      "types": "./dist/internal/app-markdown-runtime.d.ts",
+      "import": "./dist/internal/app-markdown-runtime.mjs",
+      "require": "./dist/internal/app-markdown-runtime.cjs"
     },
     "./internal/compression-runtime": {
       "types": "./dist/internal/compression-runtime.d.ts",

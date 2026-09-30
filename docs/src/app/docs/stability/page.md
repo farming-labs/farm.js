@@ -58,13 +58,13 @@ Framework-level behavior (routing, APIs, actions, queries, middleware, deploymen
 
 ## Deployment targets
 
-| Target                       | Preset             | Level        | How it is verified                                                                     |
-| ---------------------------- | ------------------ | ------------ | -------------------------------------------------------------------------------------- |
-| `node`                       | `node-server`      | Stable       | Production browser suites in CI run against a built `node-server` output.              |
-| `vercel`                     | `vercel`           | Stable       | Build Output tests in CI; the Farm documentation site is deployed with it.             |
-| `cloudflare`                 | `cloudflare-pages` | Beta         | Build tests in CI; worker startup and streaming checked in `workerd`, not yet in CI.   |
-| `netlify`                    | `netlify`          | Beta         | Build tests in CI; no runtime check yet.                                               |
-| Direct Nitro `preset` values | any                | Pass-through | Farm passes the preset to Nitro. Output is not tested by Farm unless it appears above. |
+| Target                       | Preset             | Level        | How it is verified                                                                             |
+| ---------------------------- | ------------------ | ------------ | ---------------------------------------------------------------------------------------------- |
+| `node`                       | `node-server`      | Stable       | Production browser suites in CI run against a built `node-server` output.                      |
+| `vercel`                     | `vercel`           | Stable       | Build Output tests in CI; the Farm documentation site is deployed with it.                     |
+| `cloudflare`                 | `cloudflare-pages` | Stable       | Built output runs in `workerd` on every supported Node.js version in CI.                       |
+| `netlify`                    | `netlify`          | Stable       | Built output runs through Netlify's request pipeline on every supported Node.js version in CI. |
+| Direct Nitro `preset` values | any                | Pass-through | Farm passes the preset to Nitro. Output is not tested by Farm unless it appears above.         |
 
 `deploy.target` values get Farm's defaults and deploy commands. A raw Nitro `preset` such as `vercel-edge`, `netlify-edge`, `cloudflare-module`, `deno`, or `bun` is supported on a best-effort basis. See [Deployment](/docs/deployment).
 

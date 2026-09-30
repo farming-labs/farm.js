@@ -19,6 +19,7 @@
     "test:packed-integrations": "node scripts/smoke-packed-integrations.js",
     "test:packed-app": "node scripts/smoke-packed-app.js",
     "test:ci": "node scripts/run-tests.js",
+    "test:deploy-runtimes": "pnpm --filter @farm.js/core build:runtime && pnpm --dir packages/farm exec vitest run --config vitest.deploy-runtimes.config.ts",
     "test:e2e": "playwright test",
     "test:e2e:production": "pnpm --filter @farm.js/core build && pnpm --filter @farm.js/cli build && pnpm test:e2e:production:run",
     "test:e2e:production:run": "playwright test --config playwright.production.config.ts",
@@ -76,9 +77,11 @@
     "oxlint": "^1.42.0"
   },
   "devDependencies": {
+    "@netlify/dev": "5.1.3",
     "@playwright/test": "^1.52.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.10.5",
+    "miniflare": "4.20260710.0",
     "supports-color": "^10.2.2",
     "turbo": "^1.11.2",
     "typescript": "^5.3.3"

@@ -248,7 +248,11 @@ test("reports Netlify deploys as production operations", async () => {
     const plan = await createFarmDeployPlan({ root });
 
     assert.equal(plan.production, true);
-    assert.equal(plan.deploy.command, "netlify deploy --prod --dir=.");
+    assert.equal(
+      plan.deploy.command,
+      "netlify deploy --prod --no-build --dir=dist --functions=.farm/.output/server",
+    );
+    assert.equal(plan.deploy.cwd, root);
     assert.match(formatFarmDeployPlan(plan), /Production: yes/);
   } finally {
     if (root) await rm(root, { recursive: true, force: true });
@@ -271,7 +275,14 @@ test("binds an untrusted Netlify site value to the intended option", async () =>
     const plan = await createFarmDeployPlan({ root });
 
     assert.equal(plan.deploy.executable, "netlify");
-    assert.deepEqual(plan.deploy.args, ["deploy", "--prod", "--dir=.", `--site=${site}`]);
+    assert.deepEqual(plan.deploy.args, [
+      "deploy",
+      "--prod",
+      "--no-build",
+      "--dir=dist",
+      "--functions=.farm/.output/server",
+      `--site=${site}`,
+    ]);
     assert.match(
       plan.deploy.command,
       /'--site=--alias=attacker; touch \/tmp\/farm-deploy-injected'/,

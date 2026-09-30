@@ -4924,11 +4924,11 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
     ? `import { applyMarkdownNegotiationHeaders, createMarkdownMirrorResponse } from "@farm.js/core/markdown";`
     : "";
   const appMarkdownImport = hasMarkdownPages
-    ? `import { createFarmMarkdownRouteModule, createFarmMarkdownSourceResponse } from "@farm.js/core/app-markdown";`
+    ? `import { createFarmMarkdownRouteModule, createFarmMarkdownSourceResponse } from "@farm.js/core/internal/app-markdown-runtime";`
     : "const createFarmMarkdownSourceResponse = null;";
   // Always available: agents can request Markdown on any route, so the
   // Markdown error body is not gated on the app having Markdown page files.
-  const markdownErrorImport = `import { FARM_MARKDOWN_CONTENT_TYPE, createFarmMarkdownErrorBody, farmRequestWantsMarkdown } from "@farm.js/core/app-markdown";`;
+  const markdownErrorImport = `import { FARM_MARKDOWN_CONTENT_TYPE, createFarmMarkdownErrorBody, farmRequestWantsMarkdown } from "@farm.js/core/internal/app-markdown-runtime";`;
   const mdxComponentsPath =
     typeof config.mdx?.components === "string"
       ? path.isAbsolute(config.mdx.components)
@@ -5766,7 +5766,22 @@ function extractFarmFullDocument(markup) {
   const start = markup.search(/<!doctype|<html[\\s>]/i);
   const closeIndex = markup.toLowerCase().lastIndexOf("</html>");
   if (start < 0 || closeIndex < 0) return null;
-  return markup.slice(start, closeIndex + "</html>".length);
+  const closeEnd = closeIndex + "</html>".length;
+  let document = markup.slice(start, closeEnd);
+  // Farm's segment wrappers sit outside an app-authored <html>. When React
+  // streams a suspended descendant, it closes those wrappers after </html>
+  // and then emits the reveal payload. Keep that payload inside <body> instead
+  // of discarding it with the wrapper suffix.
+  const streamedTail = markup
+    .slice(closeEnd)
+    .replace(/^(?:\\s*<\\/div>)+/i, "")
+    .trim();
+  if (streamedTail) {
+    document = document.replace(/<\\/body>/i, function() {
+      return streamedTail + "</body>";
+    });
+  }
+  return document;
 }
 
 function ensureFarmDocumentHead(markup) {
