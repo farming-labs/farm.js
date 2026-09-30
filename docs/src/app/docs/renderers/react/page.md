@@ -2488,6 +2488,8 @@ updating its binding cache or the DOM. A later throwing reader therefore leaves 
 single-row refreshes with one binding retain the direct single-binding path. Stable multi-row
 refreshes whose row structure is unchanged additionally prepare every row's binding updates before
 committing any row, so a reader failure in a later row leaves earlier rows untouched.
+Single-removal refreshes with multiple static survivors use the same preflight before committing
+survivor bindings or detaching the removed row.
 Conditional branch bindings and keyed-row bindings inside nested keyed or mixed ranges are also
 read and prepared without DOM writes until every sibling range has passed adoption. A later invalid
 range therefore cannot partially patch an earlier branch or keyed row before React takes over. If

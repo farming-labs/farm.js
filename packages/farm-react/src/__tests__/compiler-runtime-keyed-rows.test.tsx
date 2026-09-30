@@ -1080,6 +1080,107 @@ describe("compiled keyed-row runtime", () => {
     expect(mutations).toEqual([]);
   });
 
+  it("keeps single-removal row refreshes atomic when a later survivor binding fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    class Boundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+      state = { failed: false };
+
+      static getDerivedStateFromError() {
+        return { failed: true };
+      }
+
+      render() {
+        return this.state.failed ? <p>Recovered by boundary</p> : this.props.children;
+      }
+    }
+
+    const Inventory = createCompiledComponent({
+      displayName: "ThrowingSingleRemovalRows",
+      initialize: () => [
+        [
+          { id: "a", label: "First", selected: false },
+          { id: "remove", label: "Remove", selected: false },
+          { id: "b", label: "Last", selected: false },
+        ],
+      ],
+      render(_props: Record<string, never>, state, blocks) {
+        const items = () => state[0].get() as Item[];
+        const KeyedRows = blocks.KeyedRows;
+        return (
+          <section>
+            <button
+              onClick={() =>
+                state[0].set([
+                  { id: "a", label: "First", selected: true },
+                  { id: "b", label: "Broken", selected: true },
+                ])
+              }
+            >
+              Remove and break later row
+            </button>
+            <KeyedRows
+              id={0}
+              render={() => (
+                <ul>
+                  {items().map((item) => (
+                    <li aria-selected={Boolean(item.selected)} key={item.id}>
+                      {item.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              items={items}
+              rowKey={(item) => (item as Item).id}
+              create={(item) => rowDescriptor(item as Item)}
+              bindings={[
+                {
+                  kind: "attribute",
+                  path: [],
+                  name: "aria-selected",
+                  read: (item) => {
+                    if ((item as Item).label === "Broken") {
+                      throw new Error("later surviving row binding failed");
+                    }
+                    return Boolean((item as Item).selected);
+                  },
+                },
+              ]}
+            />
+          </section>
+        );
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+    });
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () =>
+      root.render(
+        <Boundary>
+          <Inventory />
+        </Boundary>,
+      ),
+    );
+    const firstRow = container.querySelector("li")!;
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(firstRow, { attributes: true });
+
+    await act(async () => {
+      container.querySelector("button")!.click();
+      await flushCompilerUpdates();
+    });
+    mutations.push(...observer.takeRecords());
+    observer.disconnect();
+
+    expect(container.textContent).toBe("Recovered by boundary");
+    expect(firstRow.isConnected).toBe(false);
+    expect(mutations).toEqual([]);
+  });
+
   it("matches React across 1,000 deterministic keyed operations", async () => {
     type Update = (items: Item[]) => Item[];
     let compiledSet: (next: CompilerStateUpdater) => void = () => undefined;
