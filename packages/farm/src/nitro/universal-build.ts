@@ -4405,6 +4405,58 @@ export function generateNativeAuthIntegrationSource(auth: ResolvedFarmConfig["au
 }
 
 /**
+ * Runtime source that remounts the top-level `mcp` configuration in a built server.
+ *
+ * Production re-evaluates raw layer and application config modules instead of
+ * calling `resolveConfig`, so the internal plugin created during the build is
+ * not otherwise present in the runtime plugin list. The literal import keeps
+ * the optional MCP package traceable for server and edge bundles while disabled
+ * applications carry no import or runtime code.
+ */
+export function generateNativeMCPPluginSource(mcp: ResolvedFarmConfig["mcp"] | undefined): {
+  importSource: string;
+  registerSource: string;
+  pluginSource: string;
+} {
+  if (mcp?.enabled !== true) {
+    return { importSource: "", registerSource: "", pluginSource: "" };
+  }
+
+  return {
+    importSource: `import { createFarmMCPPlugin as __farmCreateMCPPlugin } from "@farm.js/mcp/internal";`,
+    registerSource: `function __farmMCPIsPlainObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function __farmMergeMCPConfig(base, override) {
+  const output = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    if (value === undefined) continue;
+    output[key] =
+      __farmMCPIsPlainObject(output[key]) && __farmMCPIsPlainObject(value)
+        ? __farmMergeMCPConfig(output[key], value)
+        : value;
+  }
+  return output;
+}
+
+const farmNativeMCPConfig = farmRuntimeConfigs.reduce((merged, runtimeConfig) => {
+  const value = runtimeConfig?.mcp;
+  if (value === undefined) return merged;
+  if (value === false) return false;
+  return __farmMergeMCPConfig(merged && merged !== false ? merged : {}, value);
+}, undefined);
+const farmNativeMCPPlugin =
+  farmNativeMCPConfig && farmNativeMCPConfig.enabled !== false
+    ? __farmCreateMCPPlugin(farmNativeMCPConfig)
+    : null;`,
+    pluginSource: `...(farmNativeMCPPlugin ? [farmNativeMCPPlugin] : []),`,
+  };
+}
+
+/**
  * Runtime source for the production entry's integration request dispatch.
  *
  * `matchLocalIntegrationRequest` stays route-only: it answers "does this URL
@@ -5017,11 +5069,13 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
     ? `import * as FarmInstrumentationModule from ${toVirtualEntryImportSpecifier(instrumentationPath)};`
     : "";
   const nativeAuth = generateNativeAuthIntegrationSource(config.auth);
+  const nativeMCP = generateNativeMCPPluginSource(config.mcp);
   const integrationImports = `
 ${configModulePath ? `import * as FarmUserConfigModule from ${toVirtualEntryImportSpecifier(configModulePath)};` : ""}
 ${layerConfigImports}
 ${integrationRuntimeImport}
 ${nativeAuth.importSource}
+${nativeMCP.importSource}
 `;
   const imageRuntime = resolveImageRuntime(config, preset);
   const imageRuntimeImport =
@@ -5216,6 +5270,7 @@ const farmUserConfig = ${
   };
 const farmRuntimeConfigs = [${[...layerConfigValues, "farmUserConfig"].join(", ")}].filter(Boolean);
 const farmResolvedRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs);
+${nativeMCP.registerSource}
 // Config middleware from layers is appended in layer order ahead of the
 // project's, the same merge development applies (mergeFarmLayerConfig).
 // Object.assign above would keep only the last config's middleware.
@@ -5283,6 +5338,7 @@ const integrationRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs, {
 const configuredPlugins = [
   ${hasCompressionRuntime && hasPluginRuntime ? "createCompressionPlugin()," : ""}
   ${hasRuntimeIntegrationConfig ? "...resolveIntegrationPlugins(serverRuntimeIntegrations)," : ""}
+  ${nativeMCP.pluginSource}
   ${
     hasConfiguredRuntimePlugins
       ? `...farmRuntimeConfigs.flatMap((runtimeConfig) =>

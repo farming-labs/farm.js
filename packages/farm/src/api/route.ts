@@ -2,6 +2,7 @@ import {
   createEndpoint,
   type TypedEndpoint,
   type AnyEndpointMiddleware,
+  type EndpointMCPOptions,
   type EndpointMiddlewareResult,
   type InferEndpointMiddlewareContext,
 } from "./endpoint";
@@ -105,6 +106,8 @@ export type RouteOptions<
   input?: I & ParamsCheck<P, I>;
   /** Validate plain JSON handler results. Raw Response/stream results are never buffered. */
   output?: O;
+  /** Opt this app-owned endpoint into an installed MCP transport. */
+  mcp?: EndpointMCPOptions;
   middleware?: RouteMiddlewares<MiddlewareResults>;
   handler(
     request: Request,
@@ -157,6 +160,7 @@ export interface PluginLocalAPIEndpoint {
   readonly method: RouteMethod;
   readonly input: Readonly<RouteInputSchemas>;
   readonly output?: RouteSchema;
+  readonly mcp?: EndpointMCPOptions;
   invoke(request: Request, params?: Readonly<Record<string, string | string[]>>): Promise<Response>;
 }
 
@@ -169,6 +173,8 @@ export interface PluginLocalAPI {
   /** False during type-only route discovery, where app endpoint modules are unavailable. */
   readonly available: boolean;
   get(method: RouteMethod, path: string): PluginLocalAPIEndpoint | undefined;
+  /** Enumerate app-owned endpoints. Plugin routes are excluded. */
+  list(): readonly PluginLocalAPIEndpoint[];
 }
 
 export type PluginRoutesFactory<R extends PluginRoutes = PluginRoutes> = (context: {
@@ -180,6 +186,9 @@ const unavailablePluginLocalAPI: PluginLocalAPI = Object.freeze({
   available: false,
   get() {
     return undefined;
+  },
+  list() {
+    return [];
   },
 });
 
@@ -217,6 +226,7 @@ function createRouteFactoryAt(prefix: string): RouteFactory {
           query: input.query,
           headers: input.headers,
           middleware: options.middleware,
+          mcp: options.mcp,
         },
         (ctx) =>
           options.handler(ctx.request, {

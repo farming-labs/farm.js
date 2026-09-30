@@ -81,6 +81,7 @@ describe("plugin API routes", () => {
       subject: context.subject,
     }));
     const appRoute = createRouteFactory().get("/api/items/[id]", {
+      mcp: { name: "get_item", readOnlyHint: true },
       input: {
         params: z.object({ id: z.string() }),
         query: z.object({ tag: z.union([z.string(), z.array(z.string())]) }),
@@ -90,12 +91,16 @@ describe("plugin API routes", () => {
     });
     let appEndpointAvailable = false;
     let pluginEndpointVisible = true;
+    let listedEndpointNames: Array<string | undefined> = [];
     const bridge = definePlugin({
       name: "test:bridge",
       routes: ({ route, api }) => {
         appEndpointAvailable = api.available;
         const endpoint = api.get("GET", "/api/items/[id]");
         pluginEndpointVisible = Boolean(api.get("POST", "/api/bridge"));
+        listedEndpointNames = api
+          .list()
+          .map((entry) => (entry.mcp === true ? undefined : entry.mcp?.name));
         if (api.available && !endpoint) throw new Error("Missing app endpoint");
         return [
           route.post("/api/bridge", {
@@ -126,6 +131,7 @@ describe("plugin API routes", () => {
     );
     expect(appEndpointAvailable).toBe(true);
     expect(pluginEndpointVisible).toBe(false);
+    expect(listedEndpointNames).toEqual(["get_item"]);
     expect(await response.json()).toEqual({
       id: "42",
       tags: ["one", "two"],

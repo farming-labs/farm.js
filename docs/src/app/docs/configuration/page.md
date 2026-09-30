@@ -253,6 +253,7 @@ mount, and shortcut together.
 | api           | Configuring the public root used by Farm's typed browser API client.                  |
 | integrations  | Registering built-in or custom integrations.                                          |
 | auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.           |
+| mcp           | Exposing opted-in typed API routes through one authenticated MCP endpoint.            |
 | theme         | Enabling light, dark, and system modes with client and server APIs.                   |
 | storage       | Configuring KV drivers/mounts and, in the current beta, an integration DB client.     |
 | migrations    | Running one-shot schema/provider commands with `farm migrate`.                        |
@@ -344,6 +345,28 @@ This also applies to RSC builds and their Nitro servers, including apps configur
 `defineConfig` from `@farm.js/plugin/rsc`. API requests at the custom prefix stay on the API
 pipeline rather than being decoded as server actions. The canonical `/api` routes remain available;
 an external API URL changes the client destination only, not the local server mount.
+
+## MCP transport
+
+Install `@farm.js/mcp`, then configure one authenticated transport directly—no plugin array is
+needed:
+
+```ts title="farm.config.ts"
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  mcp: {
+    authorize: async ({ request }) => {
+      const session = await getSession(request);
+      return session ? { subject: session.user.id } : false;
+    },
+  },
+});
+```
+
+This mounts `/api/mcp`. Individual typed API routes remain private unless their endpoint config sets
+`mcp: true` or supplies MCP metadata. See [API MCP](/docs/plugins/mcp) for tool naming, route
+metadata, and the two authorization boundaries.
 
 ## Isolated client hydration
 

@@ -183,6 +183,21 @@ export type EndpointInvalidations<
       context: EndpointInvalidationContext<TContext, TBody, TQuery, THeaders>,
     ) => readonly EndpointInvalidationTarget[] | Promise<readonly EndpointInvalidationTarget[]>);
 
+/** Metadata used when an installed MCP transport exposes this endpoint as a tool. */
+export interface EndpointMCPMetadata {
+  /** Optional MCP tool name. Farm derives one from the method and path when omitted. */
+  name?: string;
+  title?: string;
+  description?: string;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
+/** Opt an endpoint into MCP discovery with derived or explicit tool metadata. */
+export type EndpointMCPOptions = true | EndpointMCPMetadata;
+
 type ValidateEndpointMiddlewares<TMiddlewares extends readonly AnyEndpointMiddleware[]> = {
   readonly [TIndex in keyof TMiddlewares]: TMiddlewares[TIndex] extends AnyEndpointMiddleware
     ? [Awaited<ReturnType<TMiddlewares[TIndex]>>] extends [EndpointMiddlewareResult<object>]
@@ -245,6 +260,11 @@ export type EndpointOptions<
   errors?: TErrors;
   /** OpenAPI-only operation metadata. This does not enforce authentication at runtime. */
   openapi?: EndpointOpenAPIMetadata;
+  /**
+   * Opt this endpoint into an installed MCP transport. This is discovery metadata only;
+   * transport and endpoint authorization remain required separately.
+   */
+  mcp?: EndpointMCPOptions;
   /** @deprecated Use plain functions in `middleware` for Farm endpoint middleware. */
   use?: any[];
 };
@@ -292,6 +312,7 @@ export type TypedEndpoint<
   __path?: string;
   __method?: string;
   __openapi?: EndpointOpenAPIMetadata;
+  __mcp?: EndpointMCPOptions;
 } & ((options?: {
   body?: TBodyInput;
   query?: TQueryInput;
@@ -466,6 +487,7 @@ export function createEndpoint(
     errors: _errors,
     invalidates: _invalidates,
     openapi: _openapi,
+    mcp: _mcp,
     ...betterCallOptions
   } = options;
 
@@ -490,6 +512,7 @@ export function createEndpoint(
   endpoint.__invalidates = options.invalidates;
   endpoint.__errors = errors;
   endpoint.__openapi = options.openapi;
+  endpoint.__mcp = options.mcp;
 
   // Store type information for inference
   endpoint.__types = {

@@ -174,6 +174,13 @@ export type {
   FarmAuthUserConfig,
   ResolvedFarmAuthConfig,
 } from "./auth-config";
+export type {
+  FarmMCPAuthorization,
+  FarmMCPAuthorizeContext,
+  FarmMCPConfig,
+  FarmMCPUserConfig,
+  ResolvedFarmMCPConfig,
+} from "./mcp-config";
 export * from "./deferred";
 export * from "./after";
 export {

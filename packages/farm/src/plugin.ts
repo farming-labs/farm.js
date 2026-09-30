@@ -10,6 +10,7 @@ export type {
   RouteMethod,
 } from "./api/route";
 export type { RouteSchema } from "./api/route-schema";
+export type { EndpointMCPMetadata, EndpointMCPOptions } from "./api/endpoint";
 // Reachable from every route a plugin declares (each endpoint carries its
 // OpenAPI metadata), so it must be nameable from this entry the same way
 // RouteDefinition is. Otherwise a plugin package's declaration emit falls back to

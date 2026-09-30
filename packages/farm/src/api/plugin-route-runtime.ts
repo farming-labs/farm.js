@@ -90,6 +90,12 @@ function createPluginLocalAPI(
           headers: endpoint.__types?.headers,
         }),
         output: endpoint.__output,
+        mcp:
+          endpoint.__mcp === true
+            ? true
+            : endpoint.__mcp
+              ? Object.freeze({ ...endpoint.__mcp })
+              : undefined,
         invoke(request: Request, params: Readonly<Record<string, string | string[]>> = {}) {
           return invokeAPIRouteEndpoint(endpoint, request, { ...params }, bodySizeLimit);
         },
@@ -97,11 +103,15 @@ function createPluginLocalAPI(
       endpoints.set(`${normalizedMethod} ${route.path}`, descriptor);
     }
   }
+  const listedEndpoints = Object.freeze(Array.from(endpoints.values()));
 
   return Object.freeze({
     available: true,
     get(method: RouteMethod, path: string) {
       return endpoints.get(`${method.toUpperCase()} ${path}`);
+    },
+    list() {
+      return listedEndpoints;
     },
   });
 }

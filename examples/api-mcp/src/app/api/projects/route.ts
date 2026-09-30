@@ -14,6 +14,11 @@ function requireDemoToken({ request }: EndpointMiddlewareContext) {
 export const GET = createEndpoint(
   {
     method: "GET",
+    mcp: {
+      name: "list_projects",
+      description: "List projects, optionally filtered by status.",
+      readOnlyHint: true,
+    },
     query: z.object({ status: z.enum(["active", "planned"]).optional() }),
     middleware: [requireDemoToken],
   },
@@ -28,6 +33,11 @@ export const GET = createEndpoint(
 export const POST = createEndpoint(
   {
     method: "POST",
+    mcp: {
+      name: "create_project",
+      description: "Create a project in the demo workspace.",
+      destructiveHint: false,
+    },
     body: z.object({
       name: z.string().trim().min(2).max(80),
       status: z.enum(["active", "planned"]).default("planned"),

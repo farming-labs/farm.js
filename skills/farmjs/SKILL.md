@@ -114,6 +114,7 @@ Common config fields:
 - `experimental.serverComponents`: enables server component behavior
 - `integrations`: provider integrations object
 - `auth`: built-in email/password auth and sessions
+- `mcp`: authenticated MCP transport for opted-in typed API routes
 - `theme`: light, dark, and system behavior
 - `storage.mounts`: named storage instances
 - `migrations`: one-shot schema and provider commands

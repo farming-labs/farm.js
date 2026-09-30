@@ -8,15 +8,16 @@ import {
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/server/validators/cf-worker";
 import {
   type FarmPlugin,
+  type EndpointMCPMetadata,
   type PluginLocalAPI,
   type PluginLocalAPIEndpoint,
   type RouteMethod,
   type RouteSchema,
 } from "@farm.js/core/plugin";
+import type { FarmMCPAuthorization, FarmMCPAuthorizeContext, FarmMCPConfig } from "@farm.js/core";
 import { toJSONSchema } from "zod";
 
 const TOOL_NAME = /^[A-Za-z0-9_.-]{1,128}$/;
-const TOOL_ROUTE = /^(GET|HEAD|QUERY|POST|PUT|PATCH|DELETE) (\/api(?:\/[^?#]*)?)$/;
 const SENSITIVE_HEADER =
   /^(authorization|cookie|set-cookie|proxy-authorization|x-api-key|x-auth-token|x-.*(?:token|secret|key))$/i;
 const schemaValidator = new CfWorkerJsonSchemaValidator();
@@ -24,50 +25,23 @@ const schemaValidator = new CfWorkerJsonSchemaValidator();
 type JSONSchema = Record<string, unknown>;
 type JSONRecord = Record<string, unknown>;
 
-export interface APIMCPAuthorization extends JSONRecord {
-  /** Stable application principal identifier. Never written to a response or log by Farm. */
-  subject: string;
-  scopes?: string[];
-}
+export interface APIMCPAuthorization extends FarmMCPAuthorization {}
 
-export interface APIMCPAuthorizeContext {
-  request: Request;
-  /** Present for a single `tools/call` request and omitted for other MCP methods or batches. */
-  tool?: string;
-}
+export interface APIMCPAuthorizeContext extends FarmMCPAuthorizeContext {}
 
-export interface APIMCPToolOptions {
-  /** MCP tool name. Must be unique within this server. */
+/** @deprecated Put `EndpointMCPMetadata` on a route's `mcp` option instead. */
+export interface APIMCPToolOptions extends EndpointMCPMetadata {
   name: string;
-  title?: string;
-  description?: string;
-  readOnlyHint?: boolean;
-  destructiveHint?: boolean;
-  idempotentHint?: boolean;
-  openWorldHint?: boolean;
 }
 
-export interface APIMCPOptions {
-  /** Canonical Farm API path for the Streamable HTTP endpoint. @default "/api/mcp" */
-  path?: `/api/${string}`;
-  /** MCP server identity. @default "farm-api" */
-  name?: string;
-  /** MCP server version. @default "1.0.0" */
-  version?: string;
-  /** Explicit API route allowlist keyed by `METHOD /api/path`. */
-  tools: Record<string, APIMCPToolOptions>;
-  /** Authorize every MCP HTTP request. Returning false responds with 401 before protocol handling. */
-  authorize?: (
-    context: APIMCPAuthorizeContext,
-  ) => APIMCPAuthorization | false | Promise<APIMCPAuthorization | false>;
-  /** Deliberate escape hatch for public servers. Authentication is required by default. */
-  allowUnauthenticated?: boolean;
-}
+export interface APIMCPOptions extends Omit<FarmMCPConfig, "enabled"> {}
+
+type ResolvedToolOptions = APIMCPToolOptions;
 
 interface BoundTool {
   key: string;
   route: PluginLocalAPIEndpoint;
-  config: APIMCPToolOptions;
+  config: ResolvedToolOptions;
   inputSchema: JSONSchema;
   annotations: ToolAnnotations;
 }
@@ -82,7 +56,7 @@ export function apiMcp(options: APIMCPOptions): FarmPlugin {
   return {
     name: "farm:api-mcp",
     routes: ({ route, api }) => {
-      const tools = api.available ? bindTools(api, normalized.tools, normalized.path) : [];
+      const tools = api.available ? bindTools(api, normalized.path) : [];
       const handler = createHandler(normalized, tools);
       const serve = (request: Request, body: unknown) => handler(request, body);
 
@@ -202,35 +176,85 @@ async function invokeTool(
   }
 }
 
-function bindTools(
-  api: PluginLocalAPI,
-  definitions: Readonly<Record<string, APIMCPToolOptions>>,
-  mcpPath: string,
-): BoundTool[] {
-  const names = new Set<string>();
-  return Object.entries(definitions).map(([key, config]) => {
-    const parsed = TOOL_ROUTE.exec(key);
-    if (!parsed) {
-      throw new TypeError(`apiMcp tool key "${key}" must use "METHOD /api/path".`);
+function bindTools(api: PluginLocalAPI, mcpPath: string): BoundTool[] {
+  const selected = new Map<
+    string,
+    { route: PluginLocalAPIEndpoint; config: EndpointMCPMetadata }
+  >();
+  for (const endpoint of api.list()) {
+    if (!endpoint.mcp) continue;
+    if (endpoint.path === mcpPath) {
+      throw new TypeError(
+        `apiMcp cannot expose its own route (${endpoint.method} ${endpoint.path}).`,
+      );
     }
-    const method = parsed[1] as RouteMethod;
-    const path = parsed[2];
-    if (path === mcpPath) throw new TypeError(`apiMcp cannot expose its own route (${key}).`);
-    const endpoint = api.get(method, path);
-    if (!endpoint) {
-      throw new TypeError(`apiMcp tool "${config.name}" references missing route ${key}.`);
+    if (endpoint.method === "OPTIONS") {
+      throw new TypeError(
+        `apiMcp cannot expose OPTIONS route ${endpoint.path}; use an application operation instead.`,
+      );
+    }
+    selected.set(`${endpoint.method} ${endpoint.path}`, {
+      route: endpoint,
+      config: endpoint.mcp === true ? {} : endpoint.mcp,
+    });
+  }
+
+  if (selected.size === 0) {
+    throw new TypeError(
+      "apiMcp needs at least one endpoint configured with mcp: true or MCP metadata.",
+    );
+  }
+
+  const names = new Set<string>();
+  return Array.from(selected, ([key, selection]) => {
+    const config: ResolvedToolOptions = {
+      ...selection.config,
+      name: selection.config.name ?? deriveToolName(selection.route.method, selection.route.path),
+    };
+    if (!TOOL_NAME.test(config.name)) {
+      throw new TypeError(
+        `apiMcp tool for "${key}" needs a valid MCP name (1-128 letters, numbers, dots, underscores, or hyphens).`,
+      );
     }
     if (names.has(config.name))
       throw new TypeError(`apiMcp tool name "${config.name}" is duplicated.`);
     names.add(config.name);
     return {
       key,
-      route: endpoint,
+      route: selection.route,
       config,
-      inputSchema: createToolInputSchema(endpoint),
-      annotations: createAnnotations(method, config),
+      inputSchema: createToolInputSchema(selection.route),
+      annotations: createAnnotations(selection.route.method, config),
     };
   });
+}
+
+function deriveToolName(method: RouteMethod, path: string): string {
+  const parts = [method.toLowerCase()];
+  for (const segment of path.split("/").slice(2)) {
+    const parameter = /^\[{1,2}(?:\.\.\.)?([^\]]+)\]{1,2}$/.exec(segment)?.[1];
+    const source = parameter ?? segment;
+    const normalized = source
+      .normalize("NFKD")
+      .replace(/[^A-Za-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .toLowerCase();
+    if (!normalized) {
+      throw new TypeError(
+        `apiMcp cannot derive a tool name for ${method} ${path}; set mcp: { name: "..." }.`,
+      );
+    }
+    if (parameter) parts.push("by");
+    parts.push(normalized);
+  }
+  if (parts.length === 1) parts.push("api");
+  const name = parts.join("_");
+  if (!TOOL_NAME.test(name)) {
+    throw new TypeError(
+      `apiMcp cannot derive a valid tool name for ${method} ${path}; set mcp: { name: "..." }.`,
+    );
+  }
+  return name;
 }
 
 function createToolInputSchema(endpoint: PluginLocalAPIEndpoint): JSONSchema {
@@ -403,7 +427,7 @@ function asRecord(value: unknown, location: string): JSONRecord {
   return value as JSONRecord;
 }
 
-function createAnnotations(method: RouteMethod, options: APIMCPToolOptions): ToolAnnotations {
+function createAnnotations(method: RouteMethod, options: ResolvedToolOptions): ToolAnnotations {
   const readOnly = method === "GET" || method === "HEAD" || method === "QUERY";
   return {
     readOnlyHint: options.readOnlyHint ?? readOnly,
@@ -449,11 +473,11 @@ interface NormalizedOptions extends Omit<APIMCPOptions, "path" | "name" | "versi
 
 function validateOptions(options: APIMCPOptions): NormalizedOptions {
   if (!options || typeof options !== "object") throw new TypeError("apiMcp options are required.");
-  if (!options.tools || typeof options.tools !== "object" || Array.isArray(options.tools)) {
-    throw new TypeError("apiMcp tools must be an explicit route map.");
+  if ("tools" in options) {
+    throw new TypeError(
+      "apiMcp tools belong on createEndpoint({ mcp: ... }); the transport does not accept a method/path map.",
+    );
   }
-  if (Object.keys(options.tools).length === 0)
-    throw new TypeError("apiMcp needs at least one tool.");
   if (!options.authorize && options.allowUnauthenticated !== true) {
     throw new TypeError(
       "apiMcp requires authorize; set allowUnauthenticated: true only for a deliberately public server.",
@@ -462,16 +486,6 @@ function validateOptions(options: APIMCPOptions): NormalizedOptions {
   const path = options.path ?? "/api/mcp";
   if (!/^\/api\/[^/?#]+(?:\/[^/?#]+)*$/.test(path)) {
     throw new TypeError("apiMcp path must be a canonical /api path.");
-  }
-  const names = new Set<string>();
-  for (const [key, config] of Object.entries(options.tools)) {
-    if (!TOOL_ROUTE.test(key)) throw new TypeError(`apiMcp tool key "${key}" is invalid.`);
-    if (!config || typeof config !== "object" || !TOOL_NAME.test(config.name)) {
-      throw new TypeError(`apiMcp tool for "${key}" needs a valid MCP name.`);
-    }
-    if (names.has(config.name))
-      throw new TypeError(`apiMcp tool name "${config.name}" is duplicated.`);
-    names.add(config.name);
   }
   return {
     ...options,

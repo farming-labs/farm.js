@@ -64,9 +64,6 @@ export default {
   plugins: [
     apiMcp({
       allowUnauthenticated: true,
-      tools: {
-        "GET /api/runtime": { name: "get_runtime", readOnlyHint: true },
-      },
     }),
   ],
 };
@@ -104,20 +101,28 @@ export default function Page() {
   await fs.writeFile(
     path.join(root, "src", "app", "api", "runtime", "route.ts"),
     `
-export function GET(request: Request) {
-  return Response.json(
-    {
-      ok: true,
-      query: new URL(request.url).searchParams.get("provider"),
-    },
-    {
-      headers: {
-        "set-cookie": "farm-runtime=verified; Path=/; HttpOnly; SameSite=Lax",
-        "x-farm-runtime": "verified",
+import { createEndpoint } from "@farm.js/core/api";
+
+export const GET = createEndpoint(
+  {
+    method: "GET",
+    mcp: { name: "get_runtime", readOnlyHint: true },
+  },
+  ({ request }) => {
+    return Response.json(
+      {
+        ok: true,
+        query: new URL(request.url).searchParams.get("provider"),
       },
-    },
-  );
-}
+      {
+        headers: {
+          "set-cookie": "farm-runtime=verified; Path=/; HttpOnly; SameSite=Lax",
+          "x-farm-runtime": "verified",
+        },
+      },
+    );
+  },
+);
 `.trim(),
   );
   await fs.writeFile(path.join(root, "public", "runtime-marker.txt"), `${target} static asset`);

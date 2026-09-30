@@ -1,14 +1,15 @@
 ---
-title: "API MCP Plugin"
-description: "Expose an explicit allowlist of typed Farm API routes as authenticated MCP tools over Streamable HTTP."
+title: "API MCP"
+description: "Expose opted-in typed Farm API routes as authenticated MCP tools over Streamable HTTP."
 section: "Plugin Ecosystem"
 ---
 
-# API MCP Plugin
+# API MCP
 
-`@farm.js/mcp` turns selected Farm API routes into an MCP server. The plugin generates tool input
-schemas from the routes' existing validators, then invokes the same endpoint implementation used by
-ordinary HTTP and typed server callers.
+`@farm.js/mcp` turns selected Farm API routes into an MCP server. Opt in next to the endpoint with
+`mcp: true` or tool metadata. Farm generates tool input schemas from the route's existing
+validators, then invokes the same endpoint implementation used by ordinary HTTP and typed server
+callers.
 
 The endpoint defaults to `/api/mcp` and implements MCP Streamable HTTP. It is a server capability,
 unlike [WebMCP](/docs/plugins/webmcp), which registers tools in a supporting browser while a page is
@@ -22,36 +23,21 @@ pnpm add @farm.js/mcp
 
 ```ts title="farm.config.ts"
 import { defineConfig } from "@farm.js/core";
-import { apiMcp } from "@farm.js/mcp";
 
 export default defineConfig({
-  plugins: [
-    apiMcp({
-      tools: {
-        "GET /api/projects": {
-          name: "list_projects",
-          description: "List projects visible to the current user.",
-          readOnlyHint: true,
-        },
-        "POST /api/projects": {
-          name: "create_project",
-          description: "Create a project.",
-          destructiveHint: false,
-        },
-      },
-      authorize: async ({ request, tool }) => {
-        const session = await getSession(request);
-        if (!session) return false;
-        return { subject: session.user.id, scopes: session.scopes };
-      },
-    }),
-  ],
+  mcp: {
+    authorize: async ({ request, tool }) => {
+      const session = await getSession(request);
+      if (!session) return false;
+      return { subject: session.user.id, scopes: session.scopes };
+    },
+  },
 });
 ```
 
-Every tool is explicit. The plugin does not scan for routes to expose and cannot invoke a route that
-is absent from `tools`. A missing route, duplicate tool name, unsupported schema, or unstable route
-set fails the build instead of producing a partially working server.
+The top-level config mounts the transport and owns its global authorization policy. Farm loads the
+installed `@farm.js/mcp` package only when this config is enabled. It never exposes an endpoint
+unless that endpoint opts in.
 
 ## Keep the API route authoritative
 
@@ -70,6 +56,11 @@ async function requireProjectAccess({ request }: EndpointMiddlewareContext) {
 export const GET = createEndpoint(
   {
     method: "GET",
+    mcp: {
+      name: "list_projects",
+      description: "List projects visible to the current user.",
+      readOnlyHint: true,
+    },
     query: z.object({ status: z.enum(["active", "planned"]).optional() }),
     middleware: [requireProjectAccess],
   },
@@ -79,13 +70,42 @@ export const GET = createEndpoint(
 );
 ```
 
+Use `mcp: true` when the generated name is sufficient. Farm derives names from the method and path,
+such as `get_projects` for `GET /api/projects` and `get_projects_by_team` for
+`GET /api/projects/[team]`. Use an object to set `name`, `title`, `description`, or behavior hints.
+Duplicate or invalid explicit names fail the build. A path that cannot produce a valid derived name
+fails with an instruction to provide one explicitly. Duplicate tool names, unsupported schemas, or
+an empty tool set also fail the build instead of producing a partially working server.
+
+Package and plugin authors use the same route-owned metadata on `createRouteFactory()` routes:
+
+```ts
+import { createRouteFactory } from "@farm.js/core/api";
+import { z } from "zod";
+
+const route = createRouteFactory();
+
+export const projectsRoute = route.post("/api/projects", {
+  mcp: {
+    name: "create_project",
+    description: "Create a project.",
+    destructiveHint: false,
+  },
+  input: { body: z.object({ name: z.string().min(1) }) },
+  handler: async (_request, { input }) => createProject(input.body),
+});
+```
+
+Both route APIs keep the HTTP method and path next to the handler, so there is no separate
+`"METHOD /api/path"` MCP map to synchronize.
+
 An MCP call runs the endpoint validator, middleware, handler, and error mapping exactly once. It also
 forwards the original request's cookies and authorization header, so the route sees the same
 credentials as the MCP boundary. Tool arguments cannot replace security-sensitive headers.
 
 Use both authorization layers:
 
-- `apiMcp.authorize` protects the MCP transport and can reject requests before protocol handling.
+- `mcp.authorize` protects the MCP transport and can reject requests before protocol handling.
 - Endpoint middleware protects the underlying API route, including direct HTTP and typed local calls.
 
 Authorization is required by default. `allowUnauthenticated: true` is an explicit escape hatch for a
@@ -135,7 +155,6 @@ client configuration.
 
 | Option                 | Default    | Purpose                                                              |
 | ---------------------- | ---------- | -------------------------------------------------------------------- |
-| `tools`                | required   | Explicit map of `METHOD /api/path` to MCP tool metadata.             |
 | `authorize`            | required   | Authorize every MCP request and return a stable subject plus scopes. |
 | `allowUnauthenticated` | `false`    | Deliberately permit a public MCP endpoint instead of `authorize`.    |
 | `path`                 | `/api/mcp` | Canonical Farm API path for the Streamable HTTP endpoint.            |
@@ -148,9 +167,23 @@ permissions or replace confirmation for consequential actions.
 
 ## Runtime support
 
-The plugin works in development and production on Farm's stable Node, Vercel, Cloudflare, and
-Netlify targets. Removing `apiMcp()` removes the endpoint and MCP runtime from the application
-bundle.
+The MCP transport works in development and production on Farm's stable Node, Vercel, Cloudflare,
+and Netlify targets. Removing the top-level `mcp` config removes the endpoint and MCP runtime from
+the application bundle.
+
+The lower-level `apiMcp()` helper remains available for advanced manual plugin composition. It has
+the same boundary as top-level config: it mounts and authorizes the transport, while
+`createEndpoint()` or `createRouteFactory()` owns every tool declaration.
+
+```ts
+import { apiMcp } from "@farm.js/mcp";
+
+export default defineConfig({
+  plugins: [apiMcp({ authorize: authorizeAgent })],
+});
+```
+
+Normal applications do not need this manual form.
 
 The runnable [`examples/api-mcp`](https://github.com/farming-labs/farm.js/tree/main/examples/api-mcp)
 shows authenticated read and write tools backed by one typed API route.

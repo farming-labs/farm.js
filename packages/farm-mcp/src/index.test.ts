@@ -12,6 +12,10 @@ function createFixture(options: { authorize?: boolean } = {}) {
     subject: request.headers.get("authorization"),
   }));
   const list = route.get("/api/projects/[team]", {
+    mcp: {
+      description: "List projects for one team.",
+      readOnlyHint: true,
+    },
     input: {
       params: z.object({ team: z.string().min(1) }),
       query: z.object({ tag: z.union([z.string(), z.array(z.string())]) }),
@@ -22,6 +26,11 @@ function createFixture(options: { authorize?: boolean } = {}) {
     },
   });
   const create = route.post("/api/projects", {
+    mcp: {
+      name: "create_project",
+      description: "Create a project.",
+      destructiveHint: false,
+    },
     input: {
       body: z.object({ name: z.string().min(1) }),
       headers: z.object({ authorization: z.string() }),
@@ -30,23 +39,16 @@ function createFixture(options: { authorize?: boolean } = {}) {
       return { id: "p1", name: input.body.name };
     },
   });
-  const plugin = apiMcp({
-    tools: {
-      "GET /api/projects/[team]": {
-        name: "list_projects",
-        description: "List projects for one team.",
-      },
-      "POST /api/projects": { name: "create_project" },
-    },
-    ...(options.authorize
+  const plugin = apiMcp(
+    options.authorize
       ? {
           authorize: ({ request }) =>
             request.headers.get("authorization") === "Bearer good"
               ? { subject: "user-1", scopes: ["projects"] }
               : false,
         }
-      : { allowUnauthenticated: true }),
-  });
+      : { allowUnauthenticated: true },
+  );
   const routes = mergePluginAPIRoutes(
     [
       { path: list.path, methods: [list.method], endpoints: { GET: list.endpoint } },
@@ -90,26 +92,71 @@ async function readMCP(response: Response): Promise<any> {
 
 describe("apiMcp", () => {
   it("requires an explicit authorization posture", () => {
-    expect(() => apiMcp({ tools: { "GET /api/projects": { name: "list_projects" } } })).toThrow(
-      "requires authorize",
-    );
+    expect(() => apiMcp({})).toThrow("requires authorize");
   });
 
-  it("fails the build for missing allowlisted routes and duplicate names", () => {
-    const missing = apiMcp({
-      allowUnauthenticated: true,
-      tools: { "GET /api/missing": { name: "missing" } },
+  it("fails the build for no selected tools and duplicate route-owned names", () => {
+    const empty = apiMcp({ allowUnauthenticated: true });
+    expect(() => mergePluginAPIRoutes([], [empty])).toThrow("at least one endpoint");
+    const one = route.get("/api/one", {
+      mcp: { name: "same" },
+      handler: () => ({ ok: true }),
     });
-    expect(() => mergePluginAPIRoutes([], [missing])).toThrow("references missing route");
+    const two = route.get("/api/two", {
+      mcp: { name: "same" },
+      handler: () => ({ ok: true }),
+    });
+    expect(() =>
+      mergePluginAPIRoutes(
+        [
+          { path: one.path, methods: [one.method], endpoints: { GET: one.endpoint } },
+          { path: two.path, methods: [two.method], endpoints: { GET: two.endpoint } },
+        ],
+        [apiMcp({ allowUnauthenticated: true })],
+      ),
+    ).toThrow("duplicated");
+  });
+
+  it("rejects the old method/path tool map with route-owned migration guidance", () => {
     expect(() =>
       apiMcp({
         allowUnauthenticated: true,
-        tools: {
-          "GET /api/one": { name: "same" },
-          "GET /api/two": { name: "same" },
-        },
+        tools: { "GET /api/projects": { name: "list_projects" } },
+      } as never),
+    ).toThrow("tools belong on createEndpoint");
+  });
+
+  it("derives a tool name for mcp: true and rejects invalid route metadata", async () => {
+    const health = route.get("/api/health", {
+      mcp: true,
+      handler: () => ({ ok: true }),
+    });
+    const plugin = apiMcp({ allowUnauthenticated: true });
+    const routes = mergePluginAPIRoutes(
+      [{ path: health.path, methods: [health.method], endpoints: { GET: health.endpoint } }],
+      [plugin],
+    );
+    const endpoint = routes.find((entry) => entry.path === "/api/mcp")!.endpoints.POST;
+    const payload = await readMCP(
+      await sendMCP(endpoint, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {},
       }),
-    ).toThrow("duplicated");
+    );
+    expect(payload.result.tools).toEqual([expect.objectContaining({ name: "get_health" })]);
+
+    const invalid = route.get("/api/invalid", {
+      mcp: { name: "invalid name" },
+      handler: () => null,
+    });
+    expect(() =>
+      mergePluginAPIRoutes(
+        [{ path: invalid.path, methods: [invalid.method], endpoints: { GET: invalid.endpoint } }],
+        [plugin],
+      ),
+    ).toThrow("needs a valid MCP name");
   });
 
   it("rejects unauthorized requests before MCP protocol handling", async () => {
@@ -125,7 +172,7 @@ describe("apiMcp", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
-  it("advertises only allowlisted routes with generated input schemas", async () => {
+  it("advertises route-owned tools with generated schemas", async () => {
     const { endpoint } = createFixture();
     const response = await sendMCP(endpoint, {
       jsonrpc: "2.0",
@@ -137,7 +184,7 @@ describe("apiMcp", () => {
     const payload = await readMCP(response);
     expect(payload.result.tools).toEqual([
       expect.objectContaining({
-        name: "list_projects",
+        name: "get_projects_by_team",
         description: "List projects for one team.",
         annotations: expect.objectContaining({ readOnlyHint: true, destructiveHint: false }),
         inputSchema: expect.objectContaining({
@@ -158,7 +205,7 @@ describe("apiMcp", () => {
         id: 2,
         method: "tools/call",
         params: {
-          name: "list_projects",
+          name: "get_projects_by_team",
           arguments: { params: { team: "farm" }, query: { tag: ["one", "two"] } },
         },
       },

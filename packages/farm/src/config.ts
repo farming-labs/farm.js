@@ -72,6 +72,12 @@ import {
   type FarmAuthUserConfig,
   type ResolvedFarmAuthConfig,
 } from "./auth-config";
+import {
+  resolveFarmMCPConfig,
+  resolveFarmMCPPlugin,
+  type FarmMCPUserConfig,
+  type ResolvedFarmMCPConfig,
+} from "./mcp-config";
 import { resolveFarmPerformanceConfig, type ResolvedFarmPerformanceConfig } from "./preload";
 import { validateConfigRouteSource } from "./plugins/route-pattern";
 import {
@@ -183,6 +189,13 @@ export type {
   FarmAuthUserConfig,
   ResolvedFarmAuthConfig,
 } from "./auth-config";
+export type {
+  FarmMCPAuthorization,
+  FarmMCPAuthorizeContext,
+  FarmMCPConfig,
+  FarmMCPUserConfig,
+  ResolvedFarmMCPConfig,
+} from "./mcp-config";
 export type {
   FarmCspConfig,
   FarmCspDirectives,
@@ -321,6 +334,8 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
    * `@farm.js/auth/client`.
    */
   auth?: FarmAuthUserConfig;
+  /** Expose opted-in typed API routes through an authenticated MCP transport. */
+  mcp?: FarmMCPUserConfig;
   /** Shared application data, route, ISR, and PPR cache. */
   cache?: FarmCacheUserConfig;
   migrations?: FarmMigrationsUserConfig;
@@ -393,6 +408,7 @@ export interface ResolvedFarmConfig extends Required<
     | "images"
     | "i18n"
     | "auth"
+    | "mcp"
     | "performance"
     | "security"
     | "theme"
@@ -424,6 +440,7 @@ export interface ResolvedFarmConfig extends Required<
   images: ResolvedFarmImageConfig;
   i18n: ResolvedFarmI18nConfig;
   auth: ResolvedFarmAuthConfig;
+  mcp: ResolvedFarmMCPConfig;
   performance: ResolvedFarmPerformanceConfig;
   security: ResolvedFarmSecurityConfig;
   theme: ResolvedFarmThemeConfig;
@@ -972,6 +989,7 @@ export async function resolveConfig(
   setEnv(env);
   const api = await resolveFarmAPIConfig(userConfig.api, { root, mode, env });
   const auth = resolveFarmAuthConfig(userConfig.auth);
+  const mcp = resolveFarmMCPConfig(userConfig.mcp);
   if (auth.enabled && userConfig.integrations?.auth) {
     throw new Error(
       "Choose either the top-level `auth` config or `integrations.auth`; they cannot both own the auth route.",
@@ -981,6 +999,12 @@ export async function resolveConfig(
     root,
     mode,
   });
+  const nativeMCPPlugin = await resolveFarmMCPPlugin(mcp, { root });
+  if (nativeMCPPlugin && userConfig.plugins?.some((plugin) => plugin?.name === "farm:api-mcp")) {
+    throw new Error(
+      "Choose either the top-level `mcp` config or `apiMcp()` in `plugins`; they configure the same MCP transport.",
+    );
+  }
   const integrations = nativeAuthIntegration
     ? { ...userConfig.integrations, auth: nativeAuthIntegration }
     : userConfig.integrations || {};
@@ -1029,6 +1053,7 @@ export async function resolveConfig(
     storage: userConfig.storage || {},
     cache: userConfig.cache || {},
     auth,
+    mcp,
     suppressLintOnLink: userConfig.suppressLintOnLink ?? false,
     experimental: {
       serverComponents: false,
@@ -1038,7 +1063,11 @@ export async function resolveConfig(
       ...userConfig.experimental,
     },
     agent: resolveFarmAgentConfig(userConfig.agent),
-    plugins: [...resolveIntegrationPlugins(integrations), ...(userConfig.plugins || [])],
+    plugins: [
+      ...resolveIntegrationPlugins(integrations),
+      ...(nativeMCPPlugin ? [nativeMCPPlugin] : []),
+      ...(userConfig.plugins || []),
+    ],
     integrations,
     trailingSlash: userConfig.trailingSlash ?? false,
     redirects: () => [...redirects, ...routeRuleRedirects],

@@ -14,7 +14,7 @@ import { createApiClients } from "@farm.js/core/client";
 const body = z.object({ count: z.string().transform(Number), label: z.string().default("default") });
 const query = z.object({ page: z.string().default("1").transform(Number) });
 const headers = z.object({ "x-count": z.string().transform(Number), "x-label": z.string().default("farm") });
-const endpoint = createEndpoint({ method: "POST", body, query, headers }, ({ body, query, headers }) => {
+const endpoint = createEndpoint({ method: "POST", body, query, headers, mcp: { name: "create_count" } }, ({ body, query, headers }) => {
   const count: number = body.count;
   const page: number = query.page;
   const label: string = body.label;
@@ -60,7 +60,7 @@ const standardCaller = createApiClients<{ standard: { post: typeof standardEndpo
 standardCaller.standard.post({ body: { raw: "2" } });
 // @ts-expect-error standard-schema output is not input
 standardCaller.standard.post({ body: { parsed: 2 } });
-const route = createRouteFactory().post("/api/plugin", { input: { body, query }, handler: (_, { input }) => input.body.count });
+const route = createRouteFactory().post("/api/plugin", { mcp: true, input: { body, query }, handler: (_, { input }) => input.body.count });
 const pluginCaller = createApiClients<{ plugin: { post: typeof route.endpoint } }>().apiClient;
 pluginCaller.plugin.post({ body: { count: "2" }, query: { page: "3" } });
 `;

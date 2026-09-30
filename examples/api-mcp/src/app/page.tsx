@@ -46,7 +46,7 @@ export default function HomePage() {
           <span className="step">02</span>
           <p className="label">Farm boundary</p>
           <h2>Authenticates + maps</h2>
-          <code>apiMcp({`{ tools }`})</code>
+          <code>mcp: {`{ authorize }`}</code>
         </article>
         <span className="connector" aria-hidden="true">→</span>
         <article>
@@ -61,7 +61,7 @@ export default function HomePage() {
         <div className="tool-surface">
           <div className="section-heading">
             <div>
-              <p className="label">Explicit allowlist</p>
+              <p className="label">Explicit route opt-ins</p>
               <h2>Advertised tools</h2>
             </div>
             <span className="count">{tools.length} tools</span>

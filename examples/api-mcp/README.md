@@ -1,6 +1,7 @@
 # Farm API MCP demo
 
-This example exposes two existing typed Farm API routes as authenticated MCP tools.
+This example enables Farm's top-level `mcp` transport and opts two typed API routes in with
+endpoint-level `mcp` metadata.
 
 ![Farm API MCP demo](./api-mcp-demo.png)
 
