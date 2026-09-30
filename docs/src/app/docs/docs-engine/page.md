@@ -8,6 +8,8 @@ section: "Content"
 
 Serve a @farming-labs/docs-powered docs runtime from Farm config, including human pages and agent-readable API routes.
 
+The docs runtime needs a Node.js deployment target (`node`, `vercel`, or `netlify`). Builds for edge presets such as Cloudflare fail with an explanation, because the runtime cannot start in a Worker. See [Stability and Support](/docs/stability#known-limits-in-01).
+
 ## Enable docs
 
 **farm.config.ts**

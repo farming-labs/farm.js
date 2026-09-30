@@ -795,6 +795,25 @@ export async function discoverMiddlewareRoutes(
  * - Uses virtual bundle plugin to expose to Nitro
  * - Creates virtual entry wrapping Web Standard handler
  */
+/**
+ * The docs runtime reads its content from the filesystem and bundles
+ * CommonJS dependencies that load Node built-ins with require(), so an edge
+ * Worker cannot even load the server entry. Fail the build instead of
+ * shipping output that crashes at startup.
+ */
+export function assertFarmDocsRuntimeSupported(
+  config: Pick<ResolvedFarmConfig, "docs">,
+  preset: string,
+): void {
+  if (!config.docs?.enabled || getFarmPresetRuntime(preset) !== "edge") return;
+  throw new Error(
+    `The docs engine (docs.enabled) needs a Node.js runtime, but the "${preset}" preset ` +
+      "deploys to an edge runtime where it cannot start. Deploy this app with a Node target " +
+      'such as "node", "vercel", or "netlify", or set docs: { enabled: false } for this ' +
+      "deployment. See https://farmjs.dev/docs/stability#known-limits-in-01.",
+  );
+}
+
 export async function buildUniversal(
   config: ResolvedFarmConfig,
   routeManager: RouteManager,
@@ -810,6 +829,7 @@ export async function buildUniversal(
 ): Promise<void> {
   const root = options.root || config.root || process.cwd();
   const preset = options.preset || config.preset || "node-server";
+  assertFarmDocsRuntimeSupported(config, preset);
   const srcDir = config.srcDir || "src";
   const distDir = config.distDir || ".farm";
   const deployOutputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
