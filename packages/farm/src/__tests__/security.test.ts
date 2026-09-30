@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  addFarmCspNonceToScriptTags,
+  applyFarmCspNonceToPolicy,
+  applyFarmCspNonceToResponse,
   farmCspBlocksFrameworkInlineScripts,
   getFarmSecurityHeader,
   resolveFarmSecurityConfig,
@@ -48,15 +51,15 @@ describe("security.csp", () => {
   it("revalidates resolved policy values", () => {
     expect(
       resolveFarmSecurityConfig({
-        csp: { value: "default-src 'self';", reportOnly: true },
+        csp: { value: "default-src 'self';", reportOnly: true, nonce: false },
       }),
     ).toEqual({
-      csp: { value: "default-src 'self'", reportOnly: true },
+      csp: { value: "default-src 'self'", reportOnly: true, nonce: false },
     });
 
     expect(() =>
       resolveFarmSecurityConfig({
-        csp: { value: "default-src 'self'\r\nX-Test: yes", reportOnly: false },
+        csp: { value: "default-src 'self'\r\nX-Test: yes", reportOnly: false, nonce: false },
       }),
     ).toThrow(/single-line/);
   });
@@ -95,6 +98,78 @@ describe("security.csp", () => {
         csp: { policy: "default-src 'self'", reportOnly: "yes" },
       } as never),
     ).toThrow(/reportOnly must be a boolean/);
+    expect(() =>
+      resolveFarmSecurityConfig({
+        csp: { policy: "default-src 'self'", nonce: "yes" },
+      } as never),
+    ).toThrow(/nonce must be a boolean/);
+  });
+
+  it("adds a per-response nonce to the governing script directive", () => {
+    expect(applyFarmCspNonceToPolicy("default-src 'self'; object-src 'none'", "abc123")).toBe(
+      "default-src 'self' 'nonce-abc123'; object-src 'none'",
+    );
+    expect(
+      applyFarmCspNonceToPolicy(
+        "default-src 'self'; script-src 'self'; script-src-elem https:",
+        "abc123",
+      ),
+    ).toBe("default-src 'self'; script-src 'self'; script-src-elem https: 'nonce-abc123'");
+    expect(applyFarmCspNonceToPolicy("img-src 'self'", "abc123")).toBe(
+      "img-src 'self'; script-src 'nonce-abc123'",
+    );
+  });
+
+  it("normalizes every script tag to the response nonce", () => {
+    expect(
+      addFarmCspNonceToScriptTags(
+        '<script>one()</script><SCRIPT type="module" src="/app.js"></SCRIPT><script nonce="app">two()</script>',
+        "abc123",
+      ),
+    ).toBe(
+      '<script nonce="abc123">one()</script><script nonce="abc123" type="module" src="/app.js"></SCRIPT><script nonce="abc123">two()</script>',
+    );
+  });
+
+  it("does not rewrite script-like text or stop at quoted angle brackets", () => {
+    const html =
+      '<script data-label="a > b">const sample = "<script>nested";</script>' +
+      '<style>.example::after { content: "<script>"; }</style>' +
+      "<!-- <script>commented()</script> -->" +
+      "<script>real()</script>";
+
+    expect(addFarmCspNonceToScriptTags(html, "abc123")).toBe(
+      '<script nonce="abc123" data-label="a > b">const sample = "<script>nested";</script>' +
+        '<style>.example::after { content: "<script>"; }</style>' +
+        "<!-- <script>commented()</script> -->" +
+        '<script nonce="abc123">real()</script>',
+    );
+  });
+
+  it("rewrites streamed script tags split across response chunks", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const encoder = new TextEncoder();
+        controller.enqueue(encoder.encode("<!doctype html><scr"));
+        controller.enqueue(encoder.encode('ipt type="module" src="/app.js"></script><script'));
+        controller.enqueue(encoder.encode(">inline()</script>"));
+        controller.close();
+      },
+    });
+    const security = resolveFarmSecurityConfig({
+      csp: { policy: "script-src 'self'", nonce: true },
+    });
+    const response = applyFarmCspNonceToResponse(
+      new Response(stream, { headers: { "content-type": "text/html; charset=utf-8" } }),
+      security,
+    );
+    const policy = response.headers.get("content-security-policy")!;
+    const nonce = policy.match(/'nonce-([^']+)'/)?.[1];
+
+    expect(nonce).toBeTruthy();
+    expect(await response.text()).toBe(
+      `<!doctype html><script nonce="${nonce}" type="module" src="/app.js"></script><script nonce="${nonce}">inline()</script>`,
+    );
   });
 });
 
@@ -143,5 +218,13 @@ describe("farmCspBlocksFrameworkInlineScripts", () => {
 
   it("does not flag when CSP is disabled", () => {
     expect(farmCspBlocksFrameworkInlineScripts(resolveFarmSecurityConfig(undefined))).toBe(false);
+  });
+
+  it("does not flag a strict policy when runtime nonces are enabled", () => {
+    expect(
+      farmCspBlocksFrameworkInlineScripts(
+        resolveFarmSecurityConfig({ csp: { policy: "script-src 'self'", nonce: true } }),
+      ),
+    ).toBe(false);
   });
 });

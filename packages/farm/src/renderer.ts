@@ -331,6 +331,8 @@ export interface FarmServerRendererRuntime {
       onShellReady(): void;
       onShellError(error: unknown): void;
       onError(error: unknown): void;
+      /** CSP nonce forwarded to renderer-owned inline streaming scripts. */
+      nonce?: string;
     },
   ) => { pipe(destination: NodeJS.WritableStream): void };
   /** WHATWG streaming primitive used by Web-stream-capable renderers. */

@@ -41,6 +41,67 @@ afterEach(async () => {
 });
 
 describe("file route loading.tsx and error.tsx", () => {
+  it("uses one fresh CSP nonce for the response header and every framework script", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          default: function DashboardPage() {
+            return React.createElement(
+              "main",
+              null,
+              "Nonce protected",
+              React.createElement("script", { nonce: "stale-app-nonce" }, "window.appReady=true"),
+            );
+          },
+        },
+      },
+      {
+        clientMetadata: { isClientComponent: true, shouldHydrate: true },
+        security: {
+          csp: { nonce: true, policy: "default-src 'self'; script-src 'self'" },
+        },
+      },
+    );
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    const policy = String(response.headers.get("content-security-policy"));
+    const nonce = policy.match(/'nonce-([^']+)'/)?.[1];
+    const document = new JSDOM(response.body).window.document;
+    expect(nonce).toBeTruthy();
+    expect(document.querySelectorAll("script").length).toBeGreaterThan(0);
+    expect(
+      Array.from(document.querySelectorAll("script")).every((script) => script.nonce === nonce),
+    ).toBe(true);
+    expect(policy).not.toContain("unsafe-inline");
+  });
+
+  it("bypasses reusable PPR shells when CSP nonces are enabled", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          ppr: true,
+          default: function DashboardPage() {
+            return React.createElement("main", null, "Nonce protected PPR route");
+          },
+        },
+      },
+      {
+        security: {
+          csp: { nonce: true, policy: "default-src 'self'; script-src 'self'" },
+        },
+      },
+    );
+    (renderer as any).config.experimental.ppr = true;
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    expect(response.headers.get("x-farm-ppr")).toBe("bypass");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
   it("renders the nearest loading.tsx while a file route suspends", async () => {
     const release = createDeferred<void>();
     const response = createMockResponse();
@@ -828,6 +889,7 @@ function createRenderer(
     integrations?: FarmConfig["integrations"];
     basePath?: string;
     root?: string;
+    security?: FarmConfig["security"];
   } = {},
 ) {
   const metadataImageEntry = {
@@ -1005,6 +1067,7 @@ function createRenderer(
       ...createConfig(options.root),
       integrations: options.integrations ?? {},
       basePath: options.basePath ?? "/",
+      security: options.security,
     },
     routeManager as any,
   );

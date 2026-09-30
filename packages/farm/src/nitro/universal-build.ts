@@ -4844,6 +4844,7 @@ function generateVirtualEntryCode(
   addMetadataImageReference,
   appendFarmRedirectQuery,
   applyFarmBasePath,
+  applyFarmCspNonceToResponse,
   applyFarmThemeDocument,
   appendFarmLinkHeader,
   applyProductionMiddlewareHeaders,
@@ -4879,6 +4880,7 @@ function generateVirtualEntryCode(
   resolveFarmRouteContext,
   resolveFarmTrailingSlashRedirect,
   resolveDefaultErrorStatus,
+  resolveFarmSecurityConfig,
   resolveFarmInstrumentationRuntime,
   runWithFarmRequestSpan,
   searchParamsToObject,
@@ -5293,6 +5295,7 @@ configureFarmCache(farmResolvedRuntimeConfig.cache);
 const farmI18nConfig = ${JSON.stringify(config.i18n)};
 const farmServerConfig = ${JSON.stringify(config.server)};
 const farmThemeConfig = ${JSON.stringify(config.theme)};
+const farmSecurityConfig = resolveFarmSecurityConfig(${JSON.stringify(config.security)});
 _setDefaultFarmThemeConfig(farmThemeConfig);
 const farmInstrumentationLifecycle = createFarmInstrumentationLifecycle(
   ${instrumentationPath ? "FarmInstrumentationModule" : "null"},
@@ -8092,7 +8095,10 @@ async function handleFarmFetch(request, context) {
           const pathname = new URL(runtimeRequest.url).pathname;
           const routePathname = getFarmRoutePathname(pathname);
           return applyFarmPreloadBudget(
-            applyConfiguredResponseHeaders(response, routePathname),
+            applyFarmCspNonceToResponse(
+              applyConfiguredResponseHeaders(response, routePathname),
+              farmSecurityConfig,
+            ),
             routePathname,
           );
         };
@@ -8304,6 +8310,7 @@ function getPhysicalPrerenderBypassReason(options: {
     rewriteSources,
     pathname,
   } = options;
+  if (config.security.csp && config.security.csp.nonce) return "per-request CSP nonce";
   if (config.i18n.enabled) return "request-sensitive i18n";
   if (redirectSources.some((source) => middlewarePatternMatches(source, pathname))) {
     return "redirect";

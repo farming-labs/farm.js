@@ -85,7 +85,7 @@ These are off by default and outside the stability promise:
 
 ## Known limits in 0.1
 
-- **Strict script Content Security Policy.** Farm's inline hydration and theme scripts carry no nonce, so `script-src` must allow `'unsafe-inline'` without a nonce, hash, or `'strict-dynamic'`. See [Content Security Policy](/docs/configuration#content-security-policy). Nonce support is tracked in [#1275](https://github.com/farming-labs/farm.js/issues/1275).
+- **Static strict script Content Security Policy.** Dynamic responses support per-request nonces through `security.csp.nonce`. Fully static output does not yet emit per-page script hashes, so strict script CSP needs a request runtime. See [Content Security Policy](/docs/configuration#content-security-policy).
 - **The docs engine needs a Node.js runtime.** With `docs: { enabled: true }`, deploy to a Node target (`node`, `vercel`, or `netlify`). Builds for edge presets such as `cloudflare` fail with an explanation, because the docs runtime cannot start in a Worker.
 - **Node.js 22.13 or newer** is required for development and for Node deployment targets.
 

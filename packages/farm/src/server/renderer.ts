@@ -108,6 +108,14 @@ import { pathToFileURL } from "node:url";
 import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
 import type { FarmIslandStrategy } from "../island";
 import { createDefaultErrorDiagnostics } from "./error-diagnostics";
+import {
+  addFarmCspNonceToScriptTags,
+  createFarmCspNonceRewriter,
+  createFarmCspNonce,
+  getFarmSecurityHeader,
+  resolveFarmSecurityConfig,
+  type ResolvedFarmSecurityConfig,
+} from "../security";
 
 let cachedClerkProvider: { ClerkProvider: any } | null = null;
 
@@ -481,6 +489,7 @@ export class ServerRenderer {
   private i18nRuntime?: FarmI18nRuntime;
   private viteServer?: ViteDevServer;
   private rendererRuntime!: FarmServerRendererRuntime;
+  private security: ResolvedFarmSecurityConfig;
 
   constructor(
     config: Required<FarmConfig>,
@@ -492,6 +501,7 @@ export class ServerRenderer {
     this.routeManager = routeManager;
     this.i18nRuntime = i18nRuntime;
     this.viteServer = viteServer;
+    this.security = resolveFarmSecurityConfig(config.security);
     this.loadSSGManifest();
   }
 
@@ -841,6 +851,10 @@ export class ServerRenderer {
     middlewareContext: Map<string, any>,
     pluginExposedContext: Map<string, any>,
   ): string | undefined {
+    if (this.security.csp && this.security.csp.nonce) {
+      return "csp-nonce";
+    }
+
     const method = (req.method || "GET").toUpperCase();
     if (method !== "GET" && method !== "HEAD") {
       return "method";
@@ -1051,6 +1065,12 @@ export class ServerRenderer {
     await this.initialize();
     setFarmBasePath(this.config.basePath);
     setFarmTrailingSlashPreference(this.config.trailingSlash);
+    const cspNonce = createFarmCspNonce(this.security);
+    if (cspNonce) {
+      (req as any).__FARM_CSP_NONCE__ = cspNonce;
+      const header = getFarmSecurityHeader(this.security, cspNonce)!;
+      res.setHeader(header.key, header.value);
+    }
     const request = createWebRequestFromFarmRequest(req, {
       trustProxy: this.config.server?.trustProxy,
     });
@@ -1142,7 +1162,10 @@ export class ServerRenderer {
 
       // Pre-rendered HTML only represents retrieval requests. Other methods must
       // continue through the live route so their request semantics are preserved.
-      if (shouldServePrerenderedPage(process.env.NODE_ENV, req.method)) {
+      if (
+        !(req as any).__FARM_CSP_NONCE__ &&
+        shouldServePrerenderedPage(process.env.NODE_ENV, req.method)
+      ) {
         const ssgPage = await this.shouldServeSSG(pathname);
         if (ssgPage) {
           const served = await this.serveSSGPage(req, res, ssgPage);
@@ -2194,7 +2217,7 @@ export class ServerRenderer {
       if (typeof res.removeHeader === "function") {
         res.removeHeader("X-Farm-PPR");
       }
-      res.write(this.createFullHTML(html, false, options.pathname));
+      res.write(this.secureDocumentHTML(req, this.createFullHTML(html, false, options.pathname)));
       res.end();
       return true;
     } catch (renderError) {
@@ -2424,12 +2447,13 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         route,
         durationMs: Date.now() - startedAt,
       });
-      if ((req.method || "GET").toUpperCase() !== "HEAD") res.write(html);
+      const securedHtml = this.secureDocumentHTML(req, html);
+      if ((req.method || "GET").toUpperCase() !== "HEAD") res.write(securedHtml);
       res.end();
       // The buffered document is rendered per request and never split at a
       // static boundary, so a shell capture must not store it: caching it
       // would serve this visitor's data to everyone until revalidation.
-      if (!options.captureStaticShell) await options.onComplete?.(html);
+      if (!options.captureStaticShell) await options.onComplete?.(securedHtml);
       emitFarmEvent({
         type: "render.stream.complete",
         route,
@@ -2632,7 +2656,11 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         element,
       );
       const devStyleLinks = this.collectDevStyleLinks();
+      const cspNonce = this.getCspNonce(req);
+      const secureDocumentHTML = (html: string) =>
+        cspNonce ? addFarmCspNonceToScriptTags(html, cspNonce) : html;
       const { pipe } = renderToPipeableStream(streamRoot, {
+        nonce: cspNonce,
         onShellReady() {
           const shellReadyMs = Date.now() - streamStartTime;
           emitFarmEvent({
@@ -2664,57 +2692,80 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
 </head>
 <body class="">
   <div id="root">`;
-          htmlParts.push(shell);
-          staticShellParts?.push(shell);
+          const securedShell = secureDocumentHTML(shell);
+          htmlParts.push(securedShell);
+          staticShellParts?.push(securedShell);
 
           let firstChunk = true;
           let checkedFullDocument = false;
+          const cspNonceRewriter = cspNonce ? createFarmCspNonceRewriter(cspNonce) : undefined;
+          const cspStreamDecoder = cspNonceRewriter ? new TextDecoder() : undefined;
+          const recordRenderedChunk = (chunkText: string) => {
+            if (!chunkText) return;
+            if (!checkedFullDocument) {
+              checkedFullDocument = true;
+              if (opensFarmFullDocument(chunkText)) {
+                fullDocumentRoutes.add(fullDocumentRouteKey);
+                warnFarmFullDocumentLayout();
+              }
+            }
+            htmlParts.push(chunkText);
+
+            if (staticShellParts && findStaticShellBoundary && !staticShellClosed) {
+              const dynamicIndex = findStaticShellBoundary(chunkText);
+              if (dynamicIndex >= 0) {
+                if (dynamicIndex > 0) {
+                  staticShellParts.push(chunkText.slice(0, dynamicIndex));
+                }
+                staticShellClosed = true;
+                if (!suspenseHoleEmitted) {
+                  suspenseHoleEmitted = true;
+                  options.onSuspenseHoleDetected?.();
+                }
+              } else {
+                staticShellParts.push(chunkText);
+              }
+            }
+          };
           const writableStream = new Writable({
             write(chunk, encoding, callback) {
               if (firstChunk && process.env.FARM_VERBOSE) {
                 console.log(`[FARM STREAM] first pipe chunk at ${Date.now() - streamStartTime}ms`);
                 firstChunk = false;
               }
-              const chunkText = Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk);
+              const chunkText = Buffer.isBuffer(chunk)
+                ? cspStreamDecoder
+                  ? cspStreamDecoder.decode(chunk, { stream: true })
+                  : chunk.toString()
+                : String(chunk);
+              const securedChunkText = cspNonceRewriter
+                ? cspNonceRewriter.write(chunkText)
+                : chunkText;
               // The shell was already flushed, so this response still nests the
               // document; record the route so later requests take the buffered
               // path (which composes it correctly) and warn the developer once.
-              if (!checkedFullDocument) {
-                checkedFullDocument = true;
-                if (opensFarmFullDocument(chunkText)) {
-                  fullDocumentRoutes.add(fullDocumentRouteKey);
-                  warnFarmFullDocumentLayout();
-                }
-              }
-              htmlParts.push(chunkText);
+              recordRenderedChunk(securedChunkText);
 
-              if (staticShellParts && findStaticShellBoundary && !staticShellClosed) {
-                const dynamicIndex = findStaticShellBoundary(chunkText);
-                if (dynamicIndex >= 0) {
-                  if (dynamicIndex > 0) {
-                    staticShellParts.push(chunkText.slice(0, dynamicIndex));
-                  }
-                  staticShellClosed = true;
-                  if (!suspenseHoleEmitted) {
-                    suspenseHoleEmitted = true;
-                    options.onSuspenseHoleDetected?.();
-                  }
-                } else {
-                  staticShellParts.push(chunkText);
-                }
-              }
-
-              res.write(chunk, encoding, () => {
+              const onWrite = () => {
                 if (typeof (res as any).flush === "function") (res as any).flush();
                 callback();
-              });
+              };
+              if (cspNonceRewriter) res.write(securedChunkText, onWrite);
+              else res.write(chunk, encoding, onWrite);
             },
             final(callback) {
+              if (cspNonceRewriter) {
+                const tail = cspNonceRewriter.write(cspStreamDecoder!.decode(), true);
+                recordRenderedChunk(tail);
+                if (tail) res.write(tail);
+              }
               const suspenseRevealFallback = `<script>(function(){function moveFragment(srcId,placeholderId){var src=document.getElementById(srcId),ph=document.getElementById(placeholderId);if(!src||!ph||!ph.parentNode)return false;while(src.firstChild)ph.parentNode.insertBefore(src.firstChild,ph);ph.parentNode.removeChild(ph);if(src.parentNode)src.parentNode.removeChild(src);return true}function revealBoundary(boundaryId,sectionId){var boundary=document.getElementById(boundaryId),section=document.getElementById(sectionId);if(!boundary||!section||!boundary.parentNode)return false;var start=boundary.previousSibling;if(!start||start.nodeType!==8)return false;var parent=boundary.parentNode;var node=boundary;var depth=0;while(node){if(node.nodeType===8){var data=node.data;if(data==="/$"||data==="/&"){if(depth===0)break;depth--;}else if(data==="$"||data==="$?"||data==="$~"||data==="$!"||data==="&"){depth++;}}var next=node.nextSibling;parent.removeChild(node);node=next;}while(section.firstChild)parent.insertBefore(section.firstChild,node);if(section.parentNode)section.parentNode.removeChild(section);start.data="$";return true}var tries=0;var timer=setInterval(function(){var changed=false;document.querySelectorAll('div[id^="S:"]').forEach(function(section){var suffix=section.id.slice(2);changed=moveFragment('S:'+suffix,'P:'+suffix)||changed;});document.querySelectorAll('template[id^="B:"]').forEach(function(boundary){var suffix=boundary.id.slice(2);changed=revealBoundary('B:'+suffix,'S:'+suffix)||changed;});tries++;if(tries>80||(!document.querySelector('template[id^="B:"]')&&!document.querySelector('template[id^="P:"]'))){clearInterval(timer);}},50);})();</script>`;
-              const footer = createDocumentFooter({
-                suspenseRevealFallback,
-                deferredHydrationScript: createDeferredHydrationScript(deferredProps.records),
-              });
+              const footer = secureDocumentHTML(
+                createDocumentFooter({
+                  suspenseRevealFallback,
+                  deferredHydrationScript: createDeferredHydrationScript(deferredProps.records),
+                }),
+              );
               htmlParts.push(footer);
               res.write(footer);
               res.end();
@@ -2759,7 +2810,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
           // Queue the shell immediately, then start piping the Suspense stream.
           // Waiting for the write callback can delay the fallback until the whole
           // response is ready under some dev-server wrappers.
-          res.write(shell);
+          res.write(securedShell);
           if (typeof (res as any).flush === "function") {
             (res as any).flush();
           }
@@ -2859,7 +2910,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
 
           const html = this.createFullHTML(content, false, pathname);
           res.setHeader("Content-Type", "text/html; charset=utf-8");
-          res.write(html);
+          res.write(this.secureDocumentHTML(req, html));
           res.end();
           return;
         }
@@ -2874,7 +2925,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
 
     const html = this.createFullHTML(defaultContent, false, pathname);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.write(html);
+    res.write(this.secureDocumentHTML(req, html));
     res.end();
   }
 
@@ -2925,7 +2976,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "private, no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    res.write(html);
+    res.write(this.secureDocumentHTML(req, html));
     res.end();
   }
 
@@ -3014,6 +3065,16 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
 ${clientScript}
 </body>
 </html>`;
+  }
+
+  private getCspNonce(req: FarmRequest): string | undefined {
+    const value = (req as any).__FARM_CSP_NONCE__;
+    return typeof value === "string" ? value : undefined;
+  }
+
+  private secureDocumentHTML(req: FarmRequest, html: string): string {
+    const nonce = this.getCspNonce(req);
+    return nonce ? addFarmCspNonceToScriptTags(html, nonce) : html;
   }
 
   private applyDeploymentHeaders(req: FarmRequest, res: FarmResponse): void {

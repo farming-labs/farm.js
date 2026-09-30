@@ -539,16 +539,37 @@ security: {
 
 You can also pass an already serialized policy as `csp: "default-src 'self'; object-src 'none'"`. The longer `contentSecurityPolicy` config name is intentionally unsupported; use `csp`.
 
-Farm currently emits small inline hydration, theme, and route-state bootstraps, so the compatible example allows inline scripts and styles. Keep `reportOnly` on while auditing, inspect violations, and enforce only after the deployed HTML and every third-party integration satisfy the policy.
+Farm emits small inline hydration, theme, and route-state bootstraps. The first example uses the
+compatibility path, so it permits inline scripts. For a strict script policy on dynamically rendered
+pages, enable per-request nonces and remove `'unsafe-inline'`:
 
-### Strict script policies are not supported yet
+```ts
+security: {
+  csp: {
+    nonce: true,
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+    },
+  },
+}
+```
 
-Farm's inline scripts carry no nonce, and their content changes per page, so neither a nonce nor a hash can allow them. The directive that governs script elements (`script-src-elem`, then `script-src`, then `default-src`) must therefore:
+Farm generates a fresh nonce for every dynamic HTML response, adds it to the directive that governs
+script elements (`script-src-elem`, then `script-src`, then `default-src`), and stamps every script
+element in the streamed document. Any existing script `nonce` attribute is normalized to the fresh
+response nonce so application-authored inline scripts follow the same policy.
 
-- include `'unsafe-inline'`, and
-- list no `'nonce-…'`, `'sha256-…'`/`'sha384-…'`/`'sha512-…'`, or `'strict-dynamic'` source. Browsers ignore `'unsafe-inline'` as soon as any of those is present, which blocks Farm's scripts and stops hydration.
+Nonce mode requires a request runtime. Farm bypasses SSG and PPR shell reuse for those responses so a
+nonce is never cached or reused. Hash-based CSP for fully static output is still not available; keep
+nonce mode off and use the compatibility policy when deploying a site with no request runtime. Keep
+`reportOnly` on while auditing and verify every third-party script and connection before enforcing the
+policy.
 
-Farm checks the resolved policy at startup and warns when it would block these scripts. Per-request nonce support is tracked in [#1275](https://github.com/farming-labs/farm.js/issues/1275). You can still restrict script origins, `object-src`, `base-uri`, `frame-ancestors`, `form-action`, and the other directives above.
+Without `nonce: true`, Farm warns when a configured policy would block its inline framework scripts.
 
 ## Server HTTP policy
 

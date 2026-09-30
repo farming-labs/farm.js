@@ -897,6 +897,7 @@ describe("resolveConfig", () => {
     expect(config.security.csp).toEqual({
       value: "default-src 'self'; object-src 'none'",
       reportOnly: false,
+      nonce: false,
     });
     expect((await config.headers()).at(-1)).toEqual({
       source: "/*",
@@ -907,6 +908,32 @@ describe("resolveConfig", () => {
         },
       ],
     });
+  });
+
+  it("defers nonce-enabled CSP headers to the dynamic HTML response", async () => {
+    const config = await resolveConfig(
+      {
+        root: process.cwd(),
+        security: {
+          csp: {
+            nonce: true,
+            directives: { scriptSrc: ["'self'"], objectSrc: ["'none'"] },
+          },
+        },
+      },
+      "production",
+    );
+
+    expect(config.security.csp).toEqual({
+      value: "script-src 'self'; object-src 'none'",
+      reportOnly: false,
+      nonce: true,
+    });
+    expect(
+      (await config.headers()).some((entry) =>
+        entry.headers.some((header) => header.key.toLowerCase() === "content-security-policy"),
+      ),
+    ).toBe(false);
   });
 });
 

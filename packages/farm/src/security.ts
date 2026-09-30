@@ -9,12 +9,18 @@ export interface FarmCspOptions {
   directives?: FarmCspDirectives;
   /** Emit Content-Security-Policy-Report-Only instead of enforcing the policy. */
   reportOnly?: boolean;
+  /**
+   * Generate a fresh nonce for every dynamic HTML response, add it to the
+   * governing script directive, and stamp it on script elements. Static HTML
+   * needs hashes instead and is not served through the nonce runtime.
+   */
+  nonce?: boolean;
 }
 
 export type FarmCspConfig = string | FarmCspOptions;
 
 export interface FarmSecurityConfig {
-  /** App-wide Content Security Policy applied to pages, APIs, and static output. */
+  /** App-wide CSP. Nonce mode applies to dynamic HTML and bypasses static output. */
   csp?: FarmCspConfig | false;
   /** @deprecated Use csp. */
   contentSecurityPolicy?: never;
@@ -23,6 +29,7 @@ export interface FarmSecurityConfig {
 export interface ResolvedFarmCspConfig {
   value: string;
   reportOnly: boolean;
+  nonce: boolean;
 }
 
 export interface ResolvedFarmSecurityConfig {
@@ -50,6 +57,7 @@ export function resolveFarmSecurityConfig(
       csp: {
         value: validateSerializedCsp(csp),
         reportOnly: false,
+        nonce: false,
       },
     };
   }
@@ -59,6 +67,7 @@ export function resolveFarmSecurityConfig(
   }
 
   const reportOnly = validateReportOnly(csp.reportOnly);
+  const nonce = validateNonce(csp.nonce);
   if (Object.prototype.hasOwnProperty.call(csp, "value")) {
     if (
       Object.prototype.hasOwnProperty.call(csp, "policy") ||
@@ -72,6 +81,7 @@ export function resolveFarmSecurityConfig(
       csp: {
         value: validateSerializedCsp(csp.value),
         reportOnly,
+        nonce,
       },
     };
   }
@@ -91,6 +101,7 @@ export function resolveFarmSecurityConfig(
           ? validateSerializedCsp(policy)
           : serializeFarmCspDirectives(directives as FarmCspDirectives),
       reportOnly,
+      nonce,
     },
   };
 }
@@ -130,30 +141,116 @@ export function serializeFarmCspDirectives(directives: FarmCspDirectives): strin
 
 export function getFarmSecurityHeader(
   security: ResolvedFarmSecurityConfig,
+  nonce?: string,
 ): { key: string; value: string } | undefined {
   if (!security.csp) return undefined;
+  if (security.csp.nonce && !nonce) return undefined;
   return {
     key: security.csp.reportOnly
       ? "Content-Security-Policy-Report-Only"
       : "Content-Security-Policy",
-    value: security.csp.value,
+    value: nonce ? applyFarmCspNonceToPolicy(security.csp.value, nonce) : security.csp.value,
   };
+}
+
+export function createFarmCspNonce(security: ResolvedFarmSecurityConfig): string | undefined {
+  if (!security.csp || !security.csp.nonce) return undefined;
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+export function applyFarmCspNonceToPolicy(policy: string, nonce: string): string {
+  validateCspNonce(nonce);
+  const source = `'nonce-${nonce}'`;
+  const segments = policy
+    .split(";")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  const names = segments.map((segment) => segment.split(/\s+/, 1)[0]!.toLowerCase());
+  const governingName = names.includes("script-src-elem")
+    ? "script-src-elem"
+    : names.includes("script-src")
+      ? "script-src"
+      : names.includes("default-src")
+        ? "default-src"
+        : undefined;
+
+  if (!governingName) return `${policy}; script-src ${source}`;
+  return segments
+    .map((segment, index) =>
+      names[index] === governingName && !segment.split(/\s+/).includes(source)
+        ? `${segment} ${source}`
+        : segment,
+    )
+    .join("; ");
+}
+
+export function addFarmCspNonceToScriptTags(html: string, nonce: string): string {
+  validateCspNonce(nonce);
+  return createFarmCspNonceRewriter(nonce).write(html, true);
+}
+
+export function applyFarmCspNonceToResponse(
+  response: Response,
+  security: ResolvedFarmSecurityConfig,
+): Response {
+  if (!security.csp || !security.csp.nonce) return response;
+  if (!response.headers.get("content-type")?.toLowerCase().includes("text/html")) return response;
+
+  const nonce = createFarmCspNonce(security)!;
+  const securityHeader = getFarmSecurityHeader(security, nonce)!;
+  const headers = new Headers(response.headers);
+  headers.set(securityHeader.key, securityHeader.value);
+  headers.delete("content-length");
+
+  if (!response.body) {
+    return new Response(null, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  const rewriter = createFarmCspNonceRewriter(nonce);
+  const body = response.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        const output = rewriter.write(decoder.decode(chunk, { stream: true }));
+        if (output) controller.enqueue(encoder.encode(output));
+      },
+      flush(controller) {
+        const output = rewriter.write(decoder.decode(), true);
+        if (output) controller.enqueue(encoder.encode(output));
+      },
+    }),
+  );
+
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 /**
  * Whether a resolved CSP would block the inline scripts the framework injects
  * into SSR documents (theme bootstrap, hydration bootstraps).
  *
- * Those scripts carry no nonce, and their content varies per page, so a hash
- * cannot allow them either (see the CSP-nonce RFC). They run only when the
+ * Without nonce mode, those scripts carry no nonce and their content varies
+ * per page, so a static hash cannot allow them either. They run only when the
  * governing directive (`script-src-elem`, then `script-src`, then
  * `default-src`) allows `'unsafe-inline'` and lists no nonce, hash, or
  * `'strict-dynamic'` source: browsers ignore `'unsafe-inline'` as soon as any
  * of those is present. A policy with no script-governing directive does not
- * restrict inline scripts, so it is not flagged.
+ * restrict inline scripts, so it is not flagged. Nonce mode handles this at
+ * response time and therefore never reports the static policy as blocking.
  */
 export function farmCspBlocksFrameworkInlineScripts(security: ResolvedFarmSecurityConfig): boolean {
   if (!security.csp) return false;
+  if (security.csp.nonce) return false;
 
   const directives = parseCspDirectives(security.csp.value);
   const governing =
@@ -224,6 +321,181 @@ function validateReportOnly(value: unknown): boolean {
     throw new TypeError("security.csp.reportOnly must be a boolean.");
   }
   return value;
+}
+
+function validateNonce(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value !== "boolean") {
+    throw new TypeError("security.csp.nonce must be a boolean.");
+  }
+  return value;
+}
+
+function validateCspNonce(value: string): void {
+  if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(value)) {
+    throw new TypeError("A CSP nonce must be a base64 or base64url value.");
+  }
+}
+
+export function createFarmCspNonceRewriter(nonce: string) {
+  validateCspNonce(nonce);
+  let pending = "";
+  let rawTextElement: string | undefined;
+
+  return {
+    write(chunk: string, final = false): string {
+      pending += chunk;
+      let output = "";
+
+      while (pending) {
+        const lower = pending.toLowerCase();
+        if (rawTextElement) {
+          if (rawTextElement === "plaintext") {
+            output += pending;
+            pending = "";
+            break;
+          }
+          const closing = `</${rawTextElement}`;
+          const start = findHtmlToken(lower, closing);
+          if (start === -1) {
+            if (final) {
+              output += pending;
+              pending = "";
+            } else {
+              const keep = matchingSuffixLength(lower, closing);
+              output += pending.slice(0, pending.length - keep);
+              pending = pending.slice(pending.length - keep);
+            }
+            break;
+          }
+
+          output += pending.slice(0, start);
+          pending = pending.slice(start);
+          const end = findHtmlTagEnd(pending);
+          if (end === -1) {
+            if (final) {
+              output += pending;
+              pending = "";
+            }
+            break;
+          }
+          output += pending.slice(0, end + 1);
+          pending = pending.slice(end + 1);
+          rawTextElement = undefined;
+          continue;
+        }
+
+        const start = pending.indexOf("<");
+        if (start === -1) {
+          output += pending;
+          pending = "";
+          break;
+        }
+        output += pending.slice(0, start);
+        pending = pending.slice(start);
+        const lowerTag = pending.toLowerCase();
+
+        if (pending.startsWith("<!--")) {
+          const end = pending.indexOf("-->", 4);
+          if (end === -1) {
+            if (final) {
+              output += pending;
+              pending = "";
+            }
+            break;
+          }
+          output += pending.slice(0, end + 3);
+          pending = pending.slice(end + 3);
+          continue;
+        }
+        if (!final && "<!--".startsWith(pending)) break;
+
+        const tagNameMatch = lowerTag.match(/^<\/?([a-z][a-z0-9:-]*)\b/);
+        if (!tagNameMatch) {
+          if (!final && /^<\/?[a-z][a-z0-9:-]*$/i.test(pending)) break;
+          output += pending[0];
+          pending = pending.slice(1);
+          continue;
+        }
+
+        const end = findHtmlTagEnd(pending);
+        if (end === -1) {
+          if (!final) break;
+          output += pending;
+          pending = "";
+          break;
+        }
+
+        const tag = pending.slice(0, end + 1);
+        const tagName = tagNameMatch[1]!.toLowerCase();
+        const isClosing = lowerTag.startsWith("</");
+        const isSelfClosing = /\/\s*>$/.test(tag);
+        output += !isClosing && tagName === "script" ? stampScriptTag(tag, nonce) : tag;
+        pending = pending.slice(end + 1);
+        if (!isClosing && !isSelfClosing && rawTextElements.has(tagName)) {
+          rawTextElement = tagName;
+        }
+      }
+
+      return output;
+    },
+  };
+}
+
+const rawTextElements = new Set([
+  "iframe",
+  "noembed",
+  "noframes",
+  "plaintext",
+  "script",
+  "style",
+  "textarea",
+  "title",
+  "xmp",
+]);
+
+function stampScriptTag(tag: string, nonce: string): string {
+  const opening = tag.match(/^<script\b/i)?.[0];
+  if (!opening) return tag;
+  const attributes = tag
+    .slice(opening.length, -1)
+    .replace(/\s+nonce\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+  return `<script nonce="${nonce}"${attributes}>`;
+}
+
+function findHtmlToken(input: string, token: string): number {
+  let offset = 0;
+  while (offset < input.length) {
+    const index = input.indexOf(token, offset);
+    if (index === -1) return -1;
+    const boundary = input[index + token.length];
+    if (boundary === undefined || /[\s/>]/.test(boundary)) return index;
+    offset = index + 1;
+  }
+  return -1;
+}
+
+function matchingSuffixLength(input: string, token: string): number {
+  const limit = Math.min(token.length - 1, input.length);
+  for (let length = limit; length > 0; length--) {
+    if (token.startsWith(input.slice(-length))) return length;
+  }
+  return 0;
+}
+
+function findHtmlTagEnd(tag: string): number {
+  let quote: '"' | "'" | undefined;
+  for (let index = 1; index < tag.length; index++) {
+    const character = tag[index];
+    if (quote) {
+      if (character === quote) quote = undefined;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === ">") {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

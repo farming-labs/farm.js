@@ -379,6 +379,78 @@ async function expectNitroFallback(root: string): Promise<void> {
 }
 
 describe("production prebuilt SSR output", () => {
+  it("adds a fresh CSP nonce to production HTML and every script tag", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+export const ssg = true;
+
+export default function Page() {
+  return (
+    <main data-csp-nonce-page>
+      Nonce-protected production output
+      <script nonce="stale-build-nonce">window.appReady=true</script>
+    </main>
+  );
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "production-csp-nonce-test",
+          security: {
+            csp: {
+              nonce: true,
+              policy: "default-src 'self'; script-src 'self'",
+            },
+          },
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const firstPolicy = response.headers.get("content-security-policy") ?? "";
+          const firstNonce = firstPolicy.match(/'nonce-([^']+)'/)?.[1];
+          const firstHtml = await response.text();
+          const firstScripts = Array.from(firstHtml.matchAll(/<script\b[^>]*>/gi), ([tag]) => tag);
+
+          expect(firstNonce).toBeTruthy();
+          expect(firstPolicy).not.toContain("'unsafe-inline'");
+          expect(firstScripts.length).toBeGreaterThan(0);
+          expect(firstScripts.every((tag) => tag.includes(`nonce="${firstNonce}"`))).toBe(true);
+
+          const secondResponse = await fetch(response.url);
+          const secondPolicy = secondResponse.headers.get("content-security-policy") ?? "";
+          const secondNonce = secondPolicy.match(/'nonce-([^']+)'/)?.[1];
+          const secondHtml = await secondResponse.text();
+          const secondScripts = Array.from(
+            secondHtml.matchAll(/<script\b[^>]*>/gi),
+            ([tag]) => tag,
+          );
+
+          expect(secondNonce).toBeTruthy();
+          expect(secondNonce).not.toBe(firstNonce);
+          expect(secondScripts.length).toBeGreaterThan(0);
+          expect(secondScripts.every((tag) => tag.includes(`nonce="${secondNonce}"`))).toBe(true);
+        },
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("matches application routes beneath the configured basePath", async () => {
     const root = await createProductionFixture();
 

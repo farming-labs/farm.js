@@ -956,10 +956,9 @@ export async function resolveConfig(
   if (farmCspBlocksFrameworkInlineScripts(security)) {
     logger.warn(
       "security.csp blocks the inline scripts Farm injects for theming and hydration. " +
-        "Strict script CSP is not supported yet: the governing script directive must allow " +
-        "'unsafe-inline' and list no nonce, hash, or 'strict-dynamic' source, because " +
-        "browsers ignore 'unsafe-inline' when any of those is present. Nonce support is " +
-        "tracked in https://github.com/farming-labs/farm.js/issues/1275.",
+        "Set security.csp.nonce to true for a per-request nonce on dynamic HTML, or make " +
+        "the governing script directive allow 'unsafe-inline' without a nonce, hash, or " +
+        "'strict-dynamic' source.",
     );
   }
 
