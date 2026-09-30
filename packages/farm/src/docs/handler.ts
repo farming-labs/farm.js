@@ -676,6 +676,7 @@ function getDocsDiscoveryOptions(docs: FarmDocsResolvedConfig, request: Request)
         getNavigation: false,
         getCodeExamples: false,
         getConfigSchema: false,
+        getContext: false,
       },
     },
     feedback: undefined,

@@ -16,6 +16,7 @@ import {
   type DocsSearchSourcePage,
   type DocsSitemapPageInput,
 } from "@farming-labs/docs";
+import { resolveApiReferenceOpenApiDiscovery } from "@farming-labs/docs/server";
 import { resolveDocsConfig } from "../config";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./types";
 import {
@@ -339,13 +340,14 @@ function getDocsDiscoveryOptions(context: FarmDocsAPIContext, request: Request) 
         getNavigation: false,
         getCodeExamples: false,
         getConfigSchema: false,
+        getContext: false,
       },
     },
     feedback: undefined,
     llms: getDocsLlmsOptions(context, request),
     sitemap: context.docs.config.sitemap ?? true,
     robots: context.docs.config.robots ?? true,
-    openapi: context.docs.config.apiReference,
+    openapi: resolveApiReferenceOpenApiDiscovery(context.docs.config.apiReference),
     markdown: {
       acceptHeader: true,
       signatureAgentHeader: true,
@@ -455,6 +457,7 @@ function buildDiagnostics(context: FarmDocsAPIContext) {
         getNavigation: false,
         getCodeExamples: false,
         getConfigSchema: false,
+        getContext: false,
       },
     },
   });
