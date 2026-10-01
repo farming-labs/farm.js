@@ -574,6 +574,51 @@ test("exchanges GitHub login for a scoped expiring preview session", async () =>
   }
 });
 
+test("rate limits managed auth exchange before contacting GitHub", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  let limitChecks = 0;
+  let githubRequests = 0;
+  const gateway = await createGatewayServer(store, {
+    auth: {
+      signingSecret: "managed-preview-test-secret-that-is-long-enough",
+      githubClientId: "github-client-id",
+      rateLimitExchange: (request) => {
+        limitChecks += 1;
+        assert.equal(request.headers.get("x-forwarded-for"), "203.0.113.8");
+        return limitChecks === 1 ? { allowed: true } : { allowed: false, retryAfterMs: 1_250 };
+      },
+      fetch: async () => {
+        githubRequests += 1;
+        return Response.json({ id: 42, login: "farm-user" });
+      },
+    },
+  });
+
+  try {
+    const exchange = (
+      body = JSON.stringify({ provider: "github", accessToken: "provider-token" }),
+    ) =>
+      fetch(`${gateway.url}/api/auth/exchange`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": "203.0.113.8",
+        },
+        body,
+      });
+
+    assert.equal((await exchange()).status, 200);
+    const limited = await exchange("not-json");
+    assert.equal(limited.status, 429);
+    assert.equal(limited.headers.get("retry-after"), "2");
+    assert.match(await limited.text(), /Too many Farm Preview login attempts/);
+    assert.equal(limitChecks, 2);
+    assert.equal(githubRequests, 1);
+  } finally {
+    await gateway.close();
+  }
+});
+
 test("shows browser visitors a friendly expired preview page", async () => {
   const store = new MemoryPreviewGatewayStore();
   const gateway = await createGatewayServer(store);

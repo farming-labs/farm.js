@@ -26,3 +26,6 @@ const handler = createPreviewGatewayHandler({
 ```
 
 Keep the signing secret server-only and at least 32 bytes long. GitHub access tokens are used only to resolve the account identity during exchange and are not included in Farm credentials.
+Managed public gateways should also provide `rateLimitExchange`. The hook runs before the request body
+is read or the provider API is called, and rejected requests receive `429` with `Retry-After`. Use a
+shared store for multi-instance deployments; the hosted Vercel example uses an atomic Redis window.

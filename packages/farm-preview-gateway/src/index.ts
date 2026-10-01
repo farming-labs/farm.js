@@ -20,6 +20,8 @@ export {
   verifyPreviewAccountToken,
   verifyPreviewTunnelGrant,
   type PreviewAccountClaims,
+  type PreviewAuthExchangeRateLimiter,
+  type PreviewAuthExchangeRateLimitResult,
   type PreviewAccountIdentity,
   type PreviewManagedAuthOptions,
   type PreviewTunnelGrant,
@@ -204,6 +206,8 @@ export function createPreviewGatewayHandler(
 
       if (request.method === "POST" && url.pathname === "/api/auth/exchange") {
         if (!config.auth) return text("Managed preview authentication is not configured.", 404);
+        const rateLimitResponse = await limitPreviewAccountExchange(request, config.auth);
+        if (rateLimitResponse) return rateLimitResponse;
         return await exchangePreviewAccount(request, config.auth);
       }
 
@@ -256,6 +260,25 @@ export function createPreviewGatewayHandler(
       if (!claimed) return false;
       const session = await store.getSessionByName(claimed);
       return Boolean(session && isPreviewClientOnline(session, config));
+    },
+  });
+}
+
+async function limitPreviewAccountExchange(request: Request, auth: PreviewManagedAuthOptions) {
+  if (!auth.rateLimitExchange) return undefined;
+  const result = await auth.rateLimitExchange(request);
+  if (result.allowed) return undefined;
+
+  const retryAfterMs =
+    Number.isFinite(result.retryAfterMs) && (result.retryAfterMs ?? 0) > 0
+      ? result.retryAfterMs!
+      : 1000;
+  return new Response("Too many Farm Preview login attempts. Try again shortly.", {
+    status: 429,
+    headers: {
+      "cache-control": "no-store",
+      "content-type": "text/plain; charset=utf-8",
+      "retry-after": String(Math.max(1, Math.ceil(retryAfterMs / 1000))),
     },
   });
 }
