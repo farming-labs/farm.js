@@ -1111,18 +1111,21 @@ export async function resolveConfig(
 }
 
 function formatConfigLoadError(error: unknown): string {
-  if (error instanceof Error) return error.message || error.stack || error.name;
-  if (error && typeof error === "object") {
+  if (error && (typeof error === "object" || typeof error === "function")) {
     for (const property of ["message", "stack", "name"] as const) {
       try {
         const value = Reflect.get(error, property);
         if (typeof value === "string" && value) return value;
       } catch {
-        // Fall through to the ordinary string representation for exotic objects.
+        // Continue to the next diagnostic when an exotic getter throws.
       }
     }
   }
-  return String(error);
+  try {
+    return String(error);
+  } catch {
+    return "Unknown config loader error";
+  }
 }
 
 export async function loadConfig(
