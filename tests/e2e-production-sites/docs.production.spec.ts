@@ -1,5 +1,5 @@
 import { access, readFile } from "node:fs/promises";
-import { expect, type Locator, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 test.beforeAll(async () => {
   await Promise.all([
@@ -625,6 +625,14 @@ test("article sidebar tracks native navigation, reading position, pointer, and k
 });
 
 /**
+ * The agents section links to its part of the release post. The site-wide
+ * release banner carries a link with the same name, so match by destination.
+ */
+function agentAnnouncementLink(page: Page) {
+  return page.locator('a[href="/blog/0.1.0#agent-infrastructure"]');
+}
+
+/**
  * A confirmed signup resets the waitlist for the next address: the field is
  * cleared, the button is idle and enabled again, and no status message stays.
  */
@@ -704,7 +712,7 @@ test("agent waitlist validates input and confirms a saved signup after client na
   await expect(loader).toBeHidden();
   expect((await submit.boundingBox())!.width).toBeCloseTo(idleButtonSize!.width, 1);
 
-  await page.getByRole("link", { name: "Read the announcement", exact: true }).click();
+  await agentAnnouncementLink(page).click();
   await expect(form).toHaveCount(0);
   await page.getByRole("link", { name: "Explore agent infrastructure", exact: true }).click();
   await expect(submit).toBeEnabled();
@@ -829,7 +837,7 @@ test("agents page connects the blog, planned capabilities, Markdown, and shared 
       description: "Agent infrastructure early access — Farm.js agents page",
     },
   ]);
-  await page.getByRole("link", { name: "Read the announcement", exact: true }).click();
+  await agentAnnouncementLink(page).click();
   await expect(page).toHaveURL(/\/blog\/0\.1\.0#agent-infrastructure$/);
   await expect(form).toHaveCount(0);
   await expect(
