@@ -1,5 +1,5 @@
 import { access, readFile } from "node:fs/promises";
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, test } from "@playwright/test";
 
 test.beforeAll(async () => {
   await Promise.all([
@@ -624,6 +624,18 @@ test("article sidebar tracks native navigation, reading position, pointer, and k
   await expect(indicator).toHaveCSS("transition-duration", "0.22s");
 });
 
+/**
+ * A confirmed signup resets the waitlist for the next address: the field is
+ * cleared, the button is idle and enabled again, and no status message stays.
+ */
+async function expectWaitlistReset(form: Locator) {
+  await expect(form.getByLabel("Email address")).toHaveValue("");
+  await expect(form).not.toHaveAttribute("aria-busy");
+  await expect(form.getByRole("button")).toHaveText("Join the waitlist");
+  await expect(form.getByRole("button")).toBeEnabled();
+  await expect(form.getByRole("status")).toHaveText("");
+}
+
 test("agent waitlist validates input and confirms a saved signup after client navigation", async ({
   page,
 }) => {
@@ -688,12 +700,7 @@ test("agent waitlist validates input and confirms a saved signup after client na
       },
     ]);
   finishResponse();
-  await expect(form.getByRole("status")).toHaveText(
-    "You're on the list. We'll email you when early access is ready.",
-  );
-  await expect(submit).toHaveText("You're on the list");
-  await expect(submit).toBeDisabled();
-  await expect(form).not.toHaveAttribute("aria-busy");
+  await expectWaitlistReset(form);
   await expect(loader).toBeHidden();
   expect((await submit.boundingBox())!.width).toBeCloseTo(idleButtonSize!.width, 1);
 
@@ -703,7 +710,7 @@ test("agent waitlist validates input and confirms a saved signup after client na
   await expect(submit).toBeEnabled();
   await email.fill("returning-reader@example.com");
   await submit.click();
-  await expect(form.getByRole("status")).toContainText("You're on the list");
+  await expectWaitlistReset(form);
   expect(submissions).toHaveLength(2);
   const markdown = await page.request.get("/blog/0.1.0.md");
   expect(await markdown.text()).toContain("## Agent infrastructure");
@@ -753,7 +760,7 @@ test("agent waitlist keeps failures recoverable and fits narrow screens", async 
   }
   result = "success";
   await submit.click();
-  await expect(form.getByRole("status")).toContainText("You're on the list");
+  await expectWaitlistReset(form);
 });
 
 test("agents page connects the blog, planned capabilities, Markdown, and shared waitlist", async ({
@@ -815,7 +822,7 @@ test("agents page connects the blog, planned capabilities, Markdown, and shared 
   await expect(form).toBeVisible();
   await form.getByLabel("Email address").fill("agents-page@example.com");
   await form.getByRole("button").click();
-  await expect(form.getByRole("status")).toContainText("You're on the list");
+  await expectWaitlistReset(form);
   expect(submissions).toEqual([
     {
       email: "agents-page@example.com",
