@@ -267,7 +267,14 @@ describe("apiMcp", () => {
     const echo = route.post("/api/echo", {
       mcp: { name: "echo" },
       input: {
-        headers: z.object({}).passthrough(),
+        headers: z.object({
+          "x-client-tag": z.string().optional(),
+          origin: z.string().optional(),
+          "x-forwarded-host": z.string().optional(),
+          "x-client-ip": z.string().optional(),
+          "x-original-host": z.string().optional(),
+          "x-original-url": z.string().optional(),
+        }),
       },
       handler,
     });
@@ -280,14 +287,36 @@ describe("apiMcp", () => {
     const list = await readMCP(
       await sendMCP(endpoint, { jsonrpc: "2.0", id: 1, method: "tools/list" }),
     );
-    expect(list.result.tools[0].inputSchema.properties).not.toHaveProperty("headers");
+    const headerSchema = list.result.tools[0].inputSchema.properties.headers;
+    expect(headerSchema.properties).toHaveProperty("x-client-tag");
+    expect(headerSchema.properties).not.toHaveProperty("origin");
+    expect(headerSchema.properties).not.toHaveProperty("x-forwarded-host");
+    expect(headerSchema.properties).not.toHaveProperty("x-client-ip");
+    expect(headerSchema.properties).not.toHaveProperty("x-original-host");
+    expect(headerSchema.properties).not.toHaveProperty("x-original-url");
+
+    const allowed = await readMCP(
+      await sendMCP(endpoint, {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "echo", arguments: { headers: { "x-client-tag": "tool" } } },
+      }),
+    );
+    expect(allowed.result.structuredContent).toEqual({
+      result: {
+        origin: null,
+        forwardedHost: null,
+        clientTag: "tool",
+      },
+    });
 
     const result = await readMCP(
       await sendMCP(
         endpoint,
         {
           jsonrpc: "2.0",
-          id: 2,
+          id: 3,
           method: "tools/call",
           params: {
             name: "echo",

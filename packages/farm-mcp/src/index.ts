@@ -27,7 +27,7 @@ import { toJSONSchema } from "zod";
 
 const TOOL_NAME = /^[A-Za-z0-9_.-]{1,128}$/;
 const PROTECTED_HEADER =
-  /^(authorization|cookie|set-cookie|proxy-authorization|x-api-key|x-auth-token|x-.*(?:token|secret|key)|connection|keep-alive|te|trailer|transfer-encoding|upgrade|host|origin|referer|forwarded|via|x-forwarded-.+|x-real-ip|cf-.+|true-client-ip|fastly-.+|x-vercel-.+|sec-fetch-.+|access-control-request-.+)$/i;
+  /^(authorization|cookie|set-cookie|proxy-authorization|x-api-key|x-auth-token|x-.*(?:token|secret|key)|connection|keep-alive|te|trailer|transfer-encoding|upgrade|host|origin|referer|forwarded|via|x-forwarded-.+|x-real-ip|x-client-ip|x-cluster-client-ip|x-original-.+|x-rewrite-url|cf-.+|true-client-ip|fastly-.+|x-vercel-.+|sec-fetch-.+|access-control-request-.+)$/i;
 const schemaValidator = new CfWorkerJsonSchemaValidator();
 
 type JSONSchema = Record<string, unknown>;
