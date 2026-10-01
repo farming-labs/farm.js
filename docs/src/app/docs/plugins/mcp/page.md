@@ -312,7 +312,8 @@ Both route APIs keep the HTTP method and path next to the handler, so there is n
 
 An MCP call runs the endpoint validator, middleware, handler, and error mapping exactly once. It also
 forwards the original request's cookies and authorization header, so the route sees the same
-credentials as the MCP boundary. Tool arguments cannot replace security-sensitive headers.
+credentials as the MCP boundary. Tool arguments cannot replace security-sensitive credentials or
+request-provenance headers such as `Host`, `Origin`, `Referer`, `Forwarded`, or `X-Forwarded-*`.
 
 Use both authorization layers:
 
@@ -331,7 +332,7 @@ Farm maps route inputs into one MCP argument object:
 | Params      | `params`      | Includes dynamic, catch-all, and optional catch-all segments. |
 | Query       | `query`       | Preserves repeated query values as arrays.                    |
 | JSON body   | `body`        | Available for methods that accept a request body.             |
-| Headers     | `headers`     | Sensitive credential headers are never agent-controlled.      |
+| Headers     | `headers`     | Credential and request-provenance headers are never agent-controlled. |
 
 For example, a tool call for `GET /api/projects/[team]` can send:
 

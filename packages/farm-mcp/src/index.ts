@@ -26,8 +26,8 @@ import { parseRouteSchema } from "@farm.js/core/api/runtime";
 import { toJSONSchema } from "zod";
 
 const TOOL_NAME = /^[A-Za-z0-9_.-]{1,128}$/;
-const SENSITIVE_HEADER =
-  /^(authorization|cookie|set-cookie|proxy-authorization|x-api-key|x-auth-token|x-.*(?:token|secret|key))$/i;
+const PROTECTED_HEADER =
+  /^(authorization|cookie|set-cookie|proxy-authorization|x-api-key|x-auth-token|x-.*(?:token|secret|key)|connection|keep-alive|te|trailer|transfer-encoding|upgrade|host|origin|referer|forwarded|via|x-forwarded-.+|x-real-ip|cf-.+|true-client-ip|fastly-.+|x-vercel-.+|sec-fetch-.+|access-control-request-.+)$/i;
 const schemaValidator = new CfWorkerJsonSchemaValidator();
 
 type JSONSchema = Record<string, unknown>;
@@ -617,11 +617,11 @@ function requireObjectSchema(schema: JSONSchema, location: string): JSONSchema {
 function safeHeaderSchema(schema: JSONSchema): JSONSchema {
   const properties = Object.fromEntries(
     Object.entries(schema.properties as JSONRecord).filter(
-      ([name]) => !SENSITIVE_HEADER.test(name),
+      ([name]) => !PROTECTED_HEADER.test(name),
     ),
   );
   const required = ((schema.required as string[] | undefined) ?? []).filter(
-    (name) => !SENSITIVE_HEADER.test(name),
+    (name) => !PROTECTED_HEADER.test(name),
   );
   const safe: JSONSchema = {
     ...schema,
@@ -682,8 +682,8 @@ function createForwardedHeaders(source: Headers | undefined, supplied: JSONRecor
     if (name.toLowerCase().startsWith("mcp-")) headers.delete(name);
   }
   for (const [name, value] of Object.entries(supplied)) {
-    if (SENSITIVE_HEADER.test(name)) {
-      throw new TypeError(`Tool input cannot override sensitive header "${name}".`);
+    if (PROTECTED_HEADER.test(name)) {
+      throw new TypeError(`Tool input cannot override protected header "${name}".`);
     }
     if (typeof value !== "string") throw new TypeError(`Header "${name}" must be a string.`);
     headers.set(name, value);
