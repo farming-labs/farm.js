@@ -175,6 +175,10 @@ The background refresh reconciles the completed response into the existing shell
 keep their DOM identity, focus, text selection, form values, and scroll position while server-owned
 attributes and content update.
 
+If the background refresh fails, hydration still proceeds after the first attempt. Farm retries a
+failed refresh with backoff, at most three times and only while the browser is online, and stops as
+soon as hydration starts, so a retry never replaces DOM the client has taken over.
+
 ## Cache keys and tags
 
 Use stable keys for data and broad tags for invalidation. Keys identify one cached value, while tags let multiple values be refreshed together.

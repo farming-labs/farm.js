@@ -3198,6 +3198,8 @@ function resetReactRoot() {
 // Hydrate client components
 async function hydrate() {
   await window.__FARM_PPR_REFRESH_PROMISE__;
+  // A PPR refresh that is still retrying must not replace DOM once hydration starts.
+  window.__FARM_PPR_HYDRATING__ = true;
   await farmClientRuntime.start();
 
   if (await hydrateFarmDocsAdapterRuntime()) {
