@@ -1110,6 +1110,15 @@ export async function resolveConfig(
   return resolved;
 }
 
+function formatConfigLoadError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const message = Reflect.get(error, "message");
+    if (typeof message === "string" && message) return message;
+  }
+  return String(error);
+}
+
 export async function loadConfig(
   rootDir?: string,
   configPath?: string,
@@ -1166,9 +1175,12 @@ export async function loadConfig(
 
       const loadedConfig = await loadFarmConfigFile<FarmUserConfig>(normalizedPath, { root });
       return loadedConfig.root === undefined ? { ...loadedConfig, root } : loadedConfig;
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to load config from ${relativePath}: ${message}`);
+    } catch (error) {
+      const configError = new Error(
+        `Failed to load config from ${relativePath}: ${formatConfigLoadError(error)}`,
+      );
+      (configError as Error & { cause?: unknown }).cause = error;
+      throw configError;
     }
   }
   return undefined;

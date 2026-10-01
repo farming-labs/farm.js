@@ -255,6 +255,19 @@ describe("loadConfig", () => {
     );
   });
 
+  it("preserves messages from structured config loader errors", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-config-error-"));
+
+    await fs.writeFile(
+      path.join(root, "farm.config.mjs"),
+      'throw { name: "Error", message: "structured config failure" };',
+    );
+
+    await expect(loadConfig(root, undefined, "development")).rejects.toThrow(
+      "Failed to load config from farm.config.mjs: structured config failure",
+    );
+  });
+
   it("loads farm.config.ts when it transitively imports local tsx modules", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-config-tsx-"));
 
