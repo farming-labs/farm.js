@@ -113,6 +113,66 @@ function isVersionVisible(name, version) {
   }
 }
 
+function readRegistryManifest(name, version) {
+  return JSON.parse(
+    execFileSync(
+      "npm",
+      ["view", `${name}@${version}`, "dependencies", "peerDependencies", "--json"],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    ),
+  );
+}
+
+function findStableCoreDependencyMismatches(
+  packages,
+  getManifest = readRegistryManifest,
+  coreName = "@farm.js/core",
+) {
+  const stableCore = packages.find((pkg) => pkg.name === coreName && !pkg.version.includes("-"));
+  if (!stableCore) return [];
+
+  const mismatches = [];
+  for (const pkg of packages) {
+    if (!pkg.version.includes("-beta.") || pkg.name === coreName) continue;
+    let manifest;
+    try {
+      manifest = getManifest(pkg.name, pkg.version);
+    } catch {
+      mismatches.push({
+        package: `${pkg.name}@${pkg.version}`,
+        reason: "registry manifest unavailable",
+      });
+      continue;
+    }
+    const dependency = manifest?.dependencies?.[coreName] ?? manifest?.peerDependencies?.[coreName];
+    if (typeof dependency === "string" && dependency.includes("-")) {
+      mismatches.push({
+        package: `${pkg.name}@${pkg.version}`,
+        dependency,
+        stableCore: stableCore.version,
+      });
+    }
+  }
+  return mismatches;
+}
+
+function assertStableCoreDependencies(packages, getManifest = readRegistryManifest) {
+  const mismatches = findStableCoreDependencyMismatches(packages, getManifest);
+  if (mismatches.length === 0) return;
+  throw new Error(
+    [
+      "Refusing stable publication while beta packages resolve a prerelease @farm.js/core:",
+      ...mismatches.map(({ package: name, dependency, reason }) =>
+        reason ? `- ${name}: ${reason}` : `- ${name}: ${dependency}`,
+      ),
+      "Republish those packages against the stable core before promoting latest.",
+    ].join("\n"),
+  );
+}
+
 function tryPublishPackage(pkg) {
   try {
     execFileSync(
@@ -184,6 +244,8 @@ async function main(args = process.argv.slice(2)) {
     throw new Error("No public packages found under packages/.");
   }
 
+  if (!options.dryRun) assertStableCoreDependencies(packages);
+
   const groups = groupPackagesByDistTag(packages);
 
   if (options.dryRun) {
@@ -221,6 +283,8 @@ if (require.main === module) {
 module.exports = {
   distTagForVersion,
   groupPackagesByDistTag,
+  findStableCoreDependencyMismatches,
+  assertStableCoreDependencies,
   isRetryableStagedPublishError,
   parsePublishBetaArgs,
   publishArgs,

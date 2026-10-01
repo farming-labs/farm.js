@@ -27,6 +27,10 @@ Farm follows semantic versioning with the usual rules for `0.x` releases:
 
 The integration packages pin `@farm.js/core` to the exact version they were released with, so keep every package in the shared release group on the same version. `farm upgrade` does this for you.
 
+Independently versioned beta plugins must also be republished against a stable core before a
+stable release is promoted. The release publisher checks registry manifests and stops if a beta
+package still resolves a prerelease core, preventing two Farm runtimes from being installed.
+
 ## Packages
 
 **Stable, released together at the same version:**

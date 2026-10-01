@@ -3,6 +3,7 @@ const { test } = require("node:test");
 
 const {
   distTagForVersion,
+  findStableCoreDependencyMismatches,
   groupPackagesByDistTag,
   isRetryableStagedPublishError,
   parsePublishBetaArgs,
@@ -98,5 +99,32 @@ test("publishes a stable shared group next to independent betas", () => {
   assert.deepEqual(
     groups.get("beta").map((pkg) => pkg.name),
     ["@farm.js/vue"],
+  );
+});
+
+test("detects beta packages that still resolve a prerelease core", () => {
+  const packages = [
+    { name: "@farm.js/core", version: "0.1.0" },
+    { name: "@farm.js/otel", version: "0.1.0-beta.27" },
+    { name: "@farm.js/vue", version: "0.1.0-beta.27" },
+  ];
+  const manifests = {
+    "@farm.js/otel": { dependencies: { "@farm.js/core": "0.1.0-beta.109" } },
+    "@farm.js/vue": { peerDependencies: { "@farm.js/core": "^0.1.0-beta.109" } },
+  };
+  assert.deepEqual(
+    findStableCoreDependencyMismatches(packages, (name) => manifests[name]),
+    [
+      {
+        package: "@farm.js/otel@0.1.0-beta.27",
+        dependency: "0.1.0-beta.109",
+        stableCore: "0.1.0",
+      },
+      {
+        package: "@farm.js/vue@0.1.0-beta.27",
+        dependency: "^0.1.0-beta.109",
+        stableCore: "0.1.0",
+      },
+    ],
   );
 });
