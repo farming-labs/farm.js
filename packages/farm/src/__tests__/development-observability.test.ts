@@ -27,17 +27,39 @@ async function getAvailablePort(): Promise<number> {
   return port;
 }
 
-async function waitForServer(url: string, output: () => string): Promise<Response> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 120; attempt++) {
-    try {
-      return await fetch(url);
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-  throw new Error(`Development server did not start: ${String(lastError)}\n${output()}`);
+async function waitForServerReady(
+  child: ReturnType<typeof spawn>,
+  output: () => string,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const finish = (error?: Error) => {
+      clearTimeout(timeout);
+      child.off("message", onMessage);
+      child.off("error", onError);
+      child.off("exit", onExit);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onMessage = (message: unknown) => {
+      if (message === "farm:test:ready") finish();
+    };
+    const onError = (error: Error) =>
+      finish(new Error(`Development server failed to start: ${error.message}\n${output()}`));
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) =>
+      finish(
+        new Error(
+          `Development server exited before it was ready (${code}/${signal}):\n${output()}`,
+        ),
+      );
+    const timeout = setTimeout(
+      () => finish(new Error(`Development server readiness timed out:\n${output()}`)),
+      30_000,
+    );
+
+    child.on("message", onMessage);
+    child.on("error", onError);
+    child.on("exit", onExit);
+  });
 }
 
 describe("development OpenTelemetry tracing", () => {
@@ -135,6 +157,7 @@ process.once("SIGTERM", async () => {
   process.exit(0);
 });
 await server.listen(Number(process.env.PORT));
+process.send?.("farm:test:ready");
 `.trim(),
       );
 
@@ -146,12 +169,13 @@ await server.listen(Number(process.env.PORT));
           FARM_TRACE_OUTPUT: traceOutput,
           PORT: String(port),
         },
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["ignore", "pipe", "pipe", "ipc"],
       });
       developmentServer.stdout?.on("data", (chunk) => output.push(String(chunk)));
       developmentServer.stderr?.on("data", (chunk) => output.push(String(chunk)));
 
-      const response = await waitForServer(`http://localhost:${port}/`, () => output.join(""));
+      await waitForServerReady(developmentServer, () => output.join(""));
+      const response = await fetch(`http://localhost:${port}/`);
       const body = await response.text();
       if (response.status !== 200) {
         throw new Error(
