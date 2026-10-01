@@ -6,6 +6,8 @@ export interface PreviewGatewayPlan {
   provider: "farm-gateway";
   gatewayUrl: string;
   relayUrl: string;
+  /** Credential transport negotiated with the gateway control API. */
+  controlAuth?: "bearer" | "query";
   /**
    * Credential for the native relay, when one is configured. Kept off
    * `relayUrl` so the displayed and logged relay endpoint stays clean.
@@ -455,16 +457,18 @@ async function pollGatewayRequests(
   options: { signal: AbortSignal; pollTimeoutMs: number },
 ) {
   try {
-    const response = await fetch(
+    const control = createGatewayControlRequest(
       `${plan.gatewayUrl}/api/sessions/${session.id}/requests?wait=${options.pollTimeoutMs}`,
-      {
-        headers: {
-          accept: "application/json",
-          authorization: `Bearer ${session.token}`,
-        },
-        signal: options.signal,
-      },
+      plan,
+      session,
     );
+    const response = await fetch(control.url, {
+      headers: {
+        accept: "application/json",
+        ...control.headers,
+      },
+      signal: options.signal,
+    });
 
     if (response.status === 204) {
       return [];
@@ -488,18 +492,20 @@ async function sendGatewayResponse(
   responseBody: PreviewGatewayResponse,
   signal: AbortSignal,
 ) {
-  const response = await fetch(
+  const control = createGatewayControlRequest(
     `${plan.gatewayUrl}/api/sessions/${session.id}/responses/${requestId}`,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${session.token}`,
-      },
-      body: JSON.stringify(responseBody),
-      signal,
-    },
+    plan,
+    session,
   );
+  const response = await fetch(control.url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...control.headers,
+    },
+    body: JSON.stringify(responseBody),
+    signal,
+  });
 
   if (!response.ok) {
     throw new Error(
@@ -509,10 +515,31 @@ async function sendGatewayResponse(
 }
 
 async function closeGatewaySession(plan: PreviewGatewayPlan, session: PreviewGatewaySession) {
-  await fetch(`${plan.gatewayUrl}/api/sessions/${session.id}`, {
+  const control = createGatewayControlRequest(
+    `${plan.gatewayUrl}/api/sessions/${session.id}`,
+    plan,
+    session,
+  );
+  await fetch(control.url, {
     method: "DELETE",
-    headers: { authorization: `Bearer ${session.token}` },
+    headers: control.headers,
   });
+}
+
+function createGatewayControlRequest(
+  endpoint: string,
+  plan: PreviewGatewayPlan,
+  session: PreviewGatewaySession,
+): { url: string; headers: Record<string, string> } {
+  if (plan.controlAuth === "query") {
+    const url = new URL(endpoint);
+    url.searchParams.set("token", session.token);
+    return { url: url.toString(), headers: {} };
+  }
+  return {
+    url: endpoint,
+    headers: { authorization: `Bearer ${session.token}` },
+  };
 }
 
 export function formatGatewayPlan(plan: PreviewGatewayPlan) {

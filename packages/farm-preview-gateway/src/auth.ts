@@ -68,6 +68,7 @@ export function getPreviewAuthPublicConfig(options: PreviewManagedAuthOptions) {
   const durations = resolvePreviewDurations(options);
   return {
     enabled: true as const,
+    controlAuth: "bearer" as const,
     provider: "github" as const,
     clientId: options.githubClientId,
     scope: "read:user",

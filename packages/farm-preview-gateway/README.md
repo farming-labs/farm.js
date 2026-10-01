@@ -33,3 +33,6 @@ shared store for multi-instance deployments; the hosted Vercel example uses an a
 Managed grants and explicitly requested durations are absolute expiries. An unauthenticated session
 created without `expiresInMs` instead uses `sessionTtlMs` as an idle lease and extends it only when the
 local polling agent proves it is still online.
+
+Current gateways advertise bearer-header authentication for polling session controls. The Farm CLI
+uses query-string session tokens only after it positively identifies a pre-auth compatibility gateway.

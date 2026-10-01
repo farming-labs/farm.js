@@ -481,6 +481,7 @@ test("exchanges GitHub login for a scoped expiring preview session", async () =>
     );
     assert.deepEqual(config, {
       enabled: true,
+      controlAuth: "bearer",
       provider: "github",
       clientId: "github-client-id",
       scope: "read:user",
