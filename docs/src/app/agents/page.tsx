@@ -40,7 +40,7 @@ const availableNow = [
     title: "Run agents beside your app.",
     code: "integrations: { agent: eve() }",
     description:
-      "Register Eve or Cloudflare Agents in farm.config.ts. farm dev starts the runtime and serves its routes on your app's origin; production composes both into one deployment.",
+      "Register Eve or Cloudflare Agents in farm.config.ts. farm dev starts the runtime and serves its routes on your app's origin. In production they ship together on Vercel (Eve) or in one Cloudflare Worker (Cloudflare Agents), or Farm proxies to a runtime you deploy separately.",
     href: "/docs/integrations/eve",
     link: "Agent integrations",
   },
@@ -52,7 +52,7 @@ const availableNow = [
     title: "Every page in Markdown.",
     code: 'curl -H "Accept: text/markdown" /pricing',
     description:
-      "Pages answer agents with a Markdown mirror, by .md suffix or Accept header. Turn on OpenAPI and llms.txt with ordinary config.",
+      "Pages answer agents with a Markdown mirror, by .md suffix or Accept header. Turn on OpenAPI with ordinary config, and the docs engine adds llms.txt.",
     href: "/docs/markdown",
     link: "Markdown mirrors",
   },
