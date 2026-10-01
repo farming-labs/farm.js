@@ -212,6 +212,44 @@ describe("apiMcp", () => {
       2,
       expect.objectContaining({ tool: "delete_projects" }),
     );
+    expect(authorize).toHaveBeenCalledTimes(2);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("rejects batches that resolve to different authorization identities", async () => {
+    const handler = vi.fn(() => ({ deleted: true }));
+    const destructive = route.delete("/api/projects", {
+      mcp: { name: "delete_projects" },
+      handler,
+    });
+    const authorize = vi.fn(({ tool }: { tool?: string }) =>
+      tool === "delete_projects" ? { subject: "user-2" } : { subject: "user-1" },
+    );
+    const routes = mergePluginAPIRoutes(
+      [
+        {
+          path: destructive.path,
+          methods: [destructive.method],
+          endpoints: { DELETE: destructive.endpoint },
+        },
+      ],
+      [apiMcp({ authorize })],
+    );
+    const endpoint = routes.find((entry) => entry.path === "/api/mcp")!.endpoints.POST;
+
+    const response = await sendMCP(endpoint, [
+      { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "delete_projects", arguments: {} },
+      },
+    ]);
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Unauthorized" });
+    expect(authorize).toHaveBeenCalledTimes(2);
     expect(handler).not.toHaveBeenCalled();
   });
 

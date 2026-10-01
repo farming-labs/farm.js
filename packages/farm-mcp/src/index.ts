@@ -162,6 +162,8 @@ function createHandler(options: NormalizedOptions, tools: readonly BoundTool[]) 
       const messages =
         Array.isArray(parsedBody) && parsedBody.length > 0 ? parsedBody : [parsedBody];
       let first: APIMCPAuthorization | undefined;
+      let denied = false;
+      let inconsistent = false;
       for (const message of messages) {
         const result = await options.authorize({
           request,
@@ -169,19 +171,21 @@ function createHandler(options: NormalizedOptions, tools: readonly BoundTool[]) 
           tools: catalog,
           server: serverIdentity,
         });
-        if (result === false) return unauthorized();
+        if (result === false) {
+          denied = true;
+          continue;
+        }
         if (!result || typeof result.subject !== "string" || result.subject.length === 0) {
           throw new TypeError(
             "apiMcp authorize must return false or an object with a subject string.",
           );
         }
         if (first && !sameAuthorizationIdentity(first, result)) {
-          throw new TypeError(
-            "apiMcp authorize must return the same subject, scopes, and tools for every JSON-RPC batch item.",
-          );
+          inconsistent = true;
         }
         first ??= result;
       }
+      if (denied || inconsistent) return unauthorized();
       authorization = first!;
     } else {
       authorization = { subject: "anonymous" };

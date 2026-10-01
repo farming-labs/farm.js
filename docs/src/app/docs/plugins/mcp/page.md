@@ -179,6 +179,8 @@ or malformed permission lists fail closed with a server error.
 
 Every allowed item in a batch must resolve to the same subject, scopes, and allowed tool names
 because one HTTP batch has one authenticated identity.
+Authorization runs once per batch item, so keep batches bounded when the policy performs remote
+or otherwise expensive session checks.
 
 Only allowed tools appear in discovery, and guessing a hidden name does not make it callable.
 Permissions are evaluated for each request and do not carry over between callers. A stable
