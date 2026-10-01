@@ -9614,6 +9614,28 @@ function resolvePackageJson(parentRequire: NodeJS.Require, packageName: string):
       // Try the next package metadata export.
     }
   }
+
+  // Some modern packages, including Sharp 0.35+, do not export their
+  // package.json. Resolve their entry point and walk back to the package root
+  // so production staging keeps working without requiring a legacy export.
+  try {
+    let directory = path.dirname(parentRequire.resolve(packageName));
+    while (directory !== path.dirname(directory)) {
+      const candidate = path.join(directory, "package.json");
+      if (existsSync(candidate)) {
+        try {
+          const manifest = JSON.parse(readFileSync(candidate, "utf8")) as { name?: unknown };
+          if (manifest.name === packageName) return candidate;
+        } catch {
+          // Ignore unrelated or malformed metadata while walking upward.
+        }
+      }
+      if (path.basename(directory) === "node_modules") break;
+      directory = path.dirname(directory);
+    }
+  } catch {
+    // Keep the existing null result and caller diagnostics when resolution fails.
+  }
   return null;
 }
 
