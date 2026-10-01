@@ -48,10 +48,11 @@ export type FarmCacheInvalidationTarget =
  *
  * The brand exists only in TypeScript. At runtime the value remains the
  * original string or structured array, so all existing cache APIs continue to
- * accept untyped keys.
+ * accept untyped keys. `__farmDefinedCacheKeyData` is reserved for Farm's type
+ * system and must not be declared by application types.
  */
 export type DefinedCacheKey<TData, TKey extends RouteDataCacheKey = RouteDataCacheKey> = TKey & {
-  /** @internal Type-only brand shared by the ESM and CommonJS declarations. */
+  /** @internal Reserved type-only brand shared by the ESM and CommonJS declarations. */
   readonly __farmDefinedCacheKeyData: TData;
 };
 
