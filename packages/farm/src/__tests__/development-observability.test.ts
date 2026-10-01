@@ -175,7 +175,17 @@ process.send?.("farm:test:ready");
       developmentServer.stderr?.on("data", (chunk) => output.push(String(chunk)));
 
       await waitForServerReady(developmentServer, () => output.join(""));
-      const response = await fetch(`http://localhost:${port}/`);
+      const request = async (pathname: string) => {
+        try {
+          return await fetch(`http://localhost:${port}${pathname}`);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new Error(
+            `Development request to ${pathname} failed: ${message}\n${output.join("")}`,
+          );
+        }
+      };
+      const response = await request("/");
       const body = await response.text();
       if (response.status !== 200) {
         throw new Error(
@@ -184,7 +194,7 @@ process.send?.("farm:test:ready");
       }
       expect(body).toContain('data-instrumentation="development:nodejs"');
 
-      const apiResponse = await fetch(`http://localhost:${port}/api/failure`);
+      const apiResponse = await request("/api/failure");
       expect(apiResponse.status).toBe(500);
       await expect(apiResponse.json()).resolves.toEqual({ error: "Internal server error" });
 
