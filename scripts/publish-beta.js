@@ -114,16 +114,26 @@ function isVersionVisible(name, version) {
 }
 
 function readRegistryManifest(name, version) {
-  return JSON.parse(
-    execFileSync(
-      "npm",
-      ["view", `${name}@${version}`, "dependencies", "peerDependencies", "--json"],
-      {
+  const spec = `${name}@${version}`;
+  execFileSync("npm", ["view", spec, "version", "--json"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const readField = (field) => {
+    try {
+      const value = execFileSync("npm", ["view", spec, field, "--json"], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
-      },
-    ),
-  );
+      }).trim();
+      return value ? JSON.parse(value) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  return {
+    dependencies: readField("dependencies"),
+    peerDependencies: readField("peerDependencies"),
+  };
 }
 
 function findStableCoreDependencyMismatches(
