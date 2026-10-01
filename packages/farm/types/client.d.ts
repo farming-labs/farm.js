@@ -16,7 +16,7 @@ import type {
   RefObject,
   RefAttributes,
 } from "react";
-import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "@farm.js/core/cache";
+import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "../dist/cache.mjs";
 import type { ServerFn } from "@farm.js/core/server-fn";
 import type {
   createAPIClient as coreCreateAPIClient,
