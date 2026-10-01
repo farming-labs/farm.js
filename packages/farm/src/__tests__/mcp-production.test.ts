@@ -41,6 +41,9 @@ async function verifyPolicy(
     ...(standaloneOnly ? [] : ["read_projects"]),
     "search_projects",
   ]);
+  for (const tool of reader.result.tools) {
+    expect(tool.outputSchema).toMatchObject({ type: "object", required: ["result"] });
+  }
   const writer = await read(await call("tools/list", "writer"));
   expect(writer.result.tools.map((tool: { name: string }) => tool.name)).toEqual([
     ...(standaloneOnly ? [] : ["read_projects", "create_project"]),
@@ -90,8 +93,17 @@ async function verifyPolicy(
     await call("tools/call", "reader", { name: "search_projects", arguments: { query: " farm " } }),
   );
   expect(search.result.structuredContent).toEqual({
-    result: { query: "farm", actor: "reader", credential: "Bearer reader" },
+    result: { query: "FARM", actor: "reader", credential: "Bearer reader" },
   });
+  const invalidOutput = await read(
+    await call("tools/call", "reader", {
+      name: "search_projects",
+      arguments: { query: "farm", invalid: true },
+    }),
+  );
+  expect(invalidOutput.result.isError).toBe(true);
+  expect(invalidOutput.result.structuredContent).toBeUndefined();
+  expect(JSON.stringify(invalidOutput)).not.toContain("private output");
   const forbidden = await read(
     await call("tools/call", "reader", { name: "private_tool", arguments: {} }),
   );
@@ -131,7 +143,7 @@ describe("MCP composition and authorization", () => {
           await fs.writeFile(
             path.join(root, "src", "app", "api", "projects", "route.ts"),
             `
-import { createEndpoint } from "@farm.js/core/api";
+import { createEndpoint, createRouteFactory } from "@farm.js/core/api";
 import { z } from "zod";
 let calls = 0;
 function authorize({ request }) {
@@ -140,7 +152,9 @@ function authorize({ request }) {
   if (request.method === "POST" && token !== "Bearer writer") return Response.json({}, { status: 403 });
   return { actor: token.slice(7) };
 }
-export const GET = createEndpoint("/api/projects", { method: "GET", middleware: [authorize] }, () => ({ calls }));
+export const GET = createRouteFactory().get("/api/projects", {
+  middleware: [authorize], output: z.object({ calls: z.number() }), handler: () => ({ calls }),
+}).endpoint;
 export const POST = createEndpoint("/api/projects", {
   method: "POST", middleware: [authorize], body: z.object({ name: z.string().min(1) }),
 }, ({ body, context }) => ({ name: body.name, calls: ++calls, actor: context.actor }));
@@ -162,10 +176,11 @@ export default defineConfig({
     name: "projects",
     tools: [
       ${standaloneOnly ? "" : '{ endpoint: GET, name: "read_projects" }, { endpoint: POST, name: "create_project" },'}
-      defineTool({ name: "search_projects", inputSchema: z.object({ query: z.string().trim().min(1) }),
-        execute: ({ query }, { authorization, request, signal }) => {
+      defineTool({ name: "search_projects", inputSchema: z.object({ query: z.string().trim().min(1), invalid: z.boolean().optional() }),
+        outputSchema: z.object({ query: z.string().transform(value => value.toUpperCase()).pipe(z.string()), actor: z.string(), credential: z.string().nullable() }),
+        execute: ({ query, invalid }, { authorization, request, signal }) => {
           signal.throwIfAborted();
-          return { query, actor: authorization.subject, credential: request.headers.get("authorization") };
+          return { query: invalid ? 42 : query, actor: authorization.subject, credential: request.headers.get("authorization"), secret: "private output" };
         },
       }),
       defineTool({ name: "private_tool", inputSchema: z.object({}), execute: () => ({ calls: ++privateCalls }) }),

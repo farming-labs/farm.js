@@ -50,21 +50,29 @@ interface BoundToolBase {
   key: string;
   config: ResolvedToolOptions;
   inputSchema: JSONSchema;
+  outputSchema?: JSONSchema;
   annotations: ToolAnnotations;
 }
 
 type BoundTool = BoundToolBase &
   (
     | { kind: "endpoint"; route: PluginLocalAPIEndpoint }
-    | { kind: "standalone"; definition: FarmMCPStandaloneTool }
+    | {
+        kind: "standalone";
+        definition: FarmMCPStandaloneTool<RouteSchema, unknown, RouteSchema | undefined>;
+      }
   );
 
 export type { FarmMCPStandaloneTool, FarmMCPExecuteContext } from "@farm.js/core";
 
 /** Define a server-only MCP tool with schema-inferred execute arguments. */
-export function defineTool<Schema extends RouteSchema, Result>(
-  definition: FarmMCPStandaloneTool<Schema, Result>,
-): FarmMCPStandaloneTool<Schema, Result> {
+export function defineTool<
+  Schema extends RouteSchema,
+  Result,
+  OutputSchema extends RouteSchema | undefined = undefined,
+>(
+  definition: FarmMCPStandaloneTool<Schema, Result, OutputSchema>,
+): FarmMCPStandaloneTool<Schema, Result, OutputSchema> {
   return definition;
 }
 
@@ -134,6 +142,11 @@ function createHandler(options: NormalizedOptions, tools: readonly BoundTool[]) 
           title: tool.config.title,
           description: tool.config.description,
           inputSchema: fromJsonSchema(tool.inputSchema, schemaValidator),
+          ...(tool.outputSchema === undefined
+            ? {}
+            : {
+                outputSchema: fromJsonSchema(tool.outputSchema, schemaValidator),
+              }),
           annotations: tool.annotations,
         },
         async (input, context) => {
@@ -249,8 +262,20 @@ async function invokeStandaloneTool(
     // refinements, defaults, and transforms, just as it does for API endpoints.
     const parsed = await parseRouteSchema(tool.definition.inputSchema, input);
     context.signal.throwIfAborted();
-    const result = await tool.definition.execute(parsed, context);
+    let result = await tool.definition.execute(parsed, context);
     context.signal.throwIfAborted();
+    if (tool.definition.outputSchema !== undefined) {
+      try {
+        result = await parseRouteSchema(tool.definition.outputSchema, result);
+      } catch {
+        // Output can contain private application data. Do not return validator
+        // issues or custom refinement messages to the caller.
+        return toolError(
+          `MCP tool "${tool.config.name}" returned a value that does not match its output schema.`,
+        );
+      }
+      context.signal.throwIfAborted();
+    }
     const text = JSON.stringify(result, (_key, value) => {
       if (
         typeof value === "bigint" ||
@@ -308,6 +333,7 @@ function bindTools(api: PluginLocalAPI, options: NormalizedOptions): BoundTool[]
       route: endpoint,
       config: resolved,
       inputSchema: createToolInputSchema(endpoint),
+      outputSchema: createToolOutputSchema(endpoint.output),
       annotations: createAnnotations(endpoint.method, resolved),
     });
   };
@@ -334,9 +360,10 @@ function bindTools(api: PluginLocalAPI, options: NormalizedOptions): BoundTool[]
           definition,
           config,
           inputSchema: requireObjectSchema(
-            toInputJSONSchema(definition.inputSchema, "inputSchema"),
+            toToolJSONSchema(definition.inputSchema, "inputSchema"),
             "inputSchema",
           ),
+          outputSchema: createToolOutputSchema(definition.outputSchema),
           annotations: createAnnotations(undefined, config),
         });
         continue;
@@ -427,17 +454,17 @@ function createToolInputSchema(endpoint: PluginLocalAPIEndpoint): JSONSchema {
     if ((pathParams.required as unknown[] | undefined)?.length) required.push("params");
   }
   if (endpoint.input.query) {
-    const query = requireObjectSchema(toInputJSONSchema(endpoint.input.query, "query"), "query");
+    const query = requireObjectSchema(toToolJSONSchema(endpoint.input.query, "query"), "query");
     properties.query = query;
     if ((query.required as unknown[] | undefined)?.length) required.push("query");
   }
   if (endpoint.input.body) {
-    properties.body = toInputJSONSchema(endpoint.input.body, "body");
+    properties.body = toToolJSONSchema(endpoint.input.body, "body");
     required.push("body");
   }
   if (endpoint.input.headers) {
     const headers = safeHeaderSchema(
-      requireObjectSchema(toInputJSONSchema(endpoint.input.headers, "headers"), "headers"),
+      requireObjectSchema(toToolJSONSchema(endpoint.input.headers, "headers"), "headers"),
     );
     if (Object.keys((headers.properties as JSONRecord | undefined) ?? {}).length > 0) {
       properties.headers = headers;
@@ -460,7 +487,7 @@ function createPathParamsSchema(
     ...path.matchAll(/\/(?:\[\[\.\.\.([^\]]+)\]\]|\[\.\.\.([^\]]+)\]|\[([^\]]+)\])/g),
   ];
   if (segments.length === 0) return undefined;
-  if (schema) return requireObjectSchema(toInputJSONSchema(schema, "params"), "params");
+  if (schema) return requireObjectSchema(toToolJSONSchema(schema, "params"), "params");
   const properties: Record<string, JSONSchema> = {};
   const required: string[] = [];
   for (const match of segments) {
@@ -474,14 +501,18 @@ function createPathParamsSchema(
   return { type: "object", properties, required, additionalProperties: false };
 }
 
-function toInputJSONSchema(schema: RouteSchema, location: string): JSONSchema {
-  const standardJSON = (schema as any)["~standard"]?.jsonSchema?.input;
+function toToolJSONSchema(
+  schema: RouteSchema,
+  location: string,
+  io: "input" | "output" = "input",
+): JSONSchema {
   let result: unknown;
   try {
+    const standardJSON = (schema as any)["~standard"]?.jsonSchema?.[io];
     result =
       typeof standardJSON === "function"
         ? standardJSON({ target: "draft-2020-12" })
-        : toJSONSchema(schema as never, { io: "input" });
+        : toJSONSchema(schema as never, { io });
   } catch (error) {
     const reason = error instanceof Error ? ` ${error.message}` : "";
     throw new TypeError(`apiMcp cannot represent the selected tool's ${location} schema.${reason}`);
@@ -492,6 +523,73 @@ function toInputJSONSchema(schema: RouteSchema, location: string): JSONSchema {
   const json = { ...(result as JSONSchema) };
   delete json.$schema;
   return json;
+}
+
+function createToolOutputSchema(schema: RouteSchema | undefined): JSONSchema | undefined {
+  if (schema === undefined) return undefined;
+  return {
+    type: "object",
+    properties: { result: nestOutputSchema(toToolJSONSchema(schema, "outputSchema", "output")) },
+    required: ["result"],
+    additionalProperties: false,
+  };
+}
+
+/** Keep document-local references pointing at the result schema, not the new envelope. */
+function nestOutputSchema(schema: JSONSchema): JSONSchema {
+  // An explicit resource ID already establishes its own reference scope.
+  if (typeof schema.$id === "string") return schema;
+  const result = { ...schema };
+  for (const keyword of ["$ref", "$dynamicRef"]) {
+    const reference = result[keyword];
+    if (typeof reference === "string" && (reference === "#" || reference.startsWith("#/"))) {
+      result[keyword] = `#/properties/result${reference.slice(1)}`;
+    }
+  }
+  const nest = (value: unknown): unknown =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? nestOutputSchema(value as JSONSchema)
+      : value;
+  // Visit schema positions only: const/default/examples can contain literal $ref keys.
+  for (const keyword of [
+    "$defs",
+    "definitions",
+    "properties",
+    "patternProperties",
+    "dependentSchemas",
+    "dependencies",
+  ]) {
+    const children = result[keyword];
+    if (children && typeof children === "object" && !Array.isArray(children)) {
+      result[keyword] = Object.fromEntries(
+        Object.entries(children).map(([key, child]) => [key, nest(child)]),
+      );
+    }
+  }
+  for (const keyword of [
+    "items",
+    "prefixItems",
+    "allOf",
+    "anyOf",
+    "oneOf",
+    "additionalItems",
+    "additionalProperties",
+    "unevaluatedItems",
+    "unevaluatedProperties",
+    "propertyNames",
+    "contains",
+    "not",
+    "if",
+    "then",
+    "else",
+    "contentSchema",
+  ]) {
+    if (keyword in result) {
+      const child = result[keyword];
+      result[keyword] = Array.isArray(child) ? child.map(nest) : nest(child);
+    }
+  }
+  return result;
 }
 
 function requireObjectSchema(schema: JSONSchema, location: string): JSONSchema {

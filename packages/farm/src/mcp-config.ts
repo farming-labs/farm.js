@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import type { FarmPlugin } from "./plugin";
 import type { EndpointMCPMetadata, TypedEndpoint } from "./api/endpoint";
 import type { RouteMethod } from "./api/route";
-import type { RouteSchema, RouteSchemaOutput } from "./api/route-schema";
+import type { RouteSchema, RouteSchemaInput, RouteSchemaOutput } from "./api/route-schema";
 
 /** A server-only endpoint reference. Config references must declare an explicit /api path. */
 export type FarmMCPEndpoint = TypedEndpoint<any, any, any, any, any, any, any, any>;
@@ -21,15 +21,20 @@ export interface FarmMCPExecuteContext {
 export interface FarmMCPStandaloneTool<
   Schema extends RouteSchema = RouteSchema,
   Result = unknown,
+  OutputSchema extends RouteSchema | undefined = undefined,
 > extends EndpointMCPMetadata {
   name: string;
   /** Must describe an object and support input JSON Schema conversion. */
   inputSchema: Schema;
+  /** Validate/transform returned data and advertise its output shape inside MCP's result envelope. */
+  outputSchema?: OutputSchema;
   /** Return JSON-serializable data, not a Response or an MCP protocol envelope. */
   execute(
     input: RouteSchemaOutput<Schema>,
     context: FarmMCPExecuteContext,
-  ): Result | Promise<Result>;
+  ): OutputSchema extends RouteSchema
+    ? NoInfer<RouteSchemaInput<OutputSchema>> | Promise<NoInfer<RouteSchemaInput<OutputSchema>>>
+    : Result | Promise<Result>;
   endpoint?: never;
 }
 
@@ -37,7 +42,7 @@ export interface FarmMCPStandaloneTool<
 export type FarmMCPToolDefinition =
   | FarmMCPEndpoint
   | (EndpointMCPMetadata & { endpoint: FarmMCPEndpoint; execute?: never })
-  | FarmMCPStandaloneTool<any>;
+  | FarmMCPStandaloneTool<any, unknown, any>;
 
 /** Resolved tool identity, without handlers, validators, or a way to bypass authorization. */
 export type FarmMCPTool = Readonly<EndpointMCPMetadata> & {

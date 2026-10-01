@@ -173,6 +173,7 @@ export default {
       tools: [GET, defineTool({
         name: "whoami",
         inputSchema: z.object({ message: z.string().trim().min(1) }),
+        outputSchema: z.object({ message: z.string(), subject: z.string(), aborted: z.boolean() }),
         execute: ({ message }, { authorization, signal }) => ({ message, subject: authorization.subject, aborted: signal.aborted }),
       })],
       authorize: ({ request, tools, server }) => {

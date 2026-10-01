@@ -26,6 +26,14 @@ export default defineConfig({
         name: "search_projects",
         description: "Search the demo workspace without a separate HTTP route.",
         inputSchema: z.object({ query: z.string().trim().min(1) }),
+        outputSchema: z.object({
+          projects: z.array(z.object({
+            id: z.string(),
+            name: z.string(),
+            status: z.enum(["active", "planned"]),
+          })),
+          actor: z.string(),
+        }),
         readOnlyHint: true,
         destructiveHint: false,
         execute: ({ query }, { authorization, signal }) => {

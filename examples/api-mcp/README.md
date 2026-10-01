@@ -2,6 +2,10 @@
 
 This example composes two typed endpoint instances and one standalone `defineTool()` in Farm's
 top-level `mcp.tools` config.
+
+The standalone search tool declares `outputSchema`, so returned projects are validated before
+being sent to the client. Discovery advertises the schema inside Farm's existing `{ result: ... }`
+structured-content envelope; tools without an output schema keep their existing behavior.
 `authorize` receives the complete resolved tool catalog and returns the tool names each caller
 may discover and invoke. Endpoint middleware also protects direct HTTP requests. The standalone
 `search_projects` tool receives validated input and the authorized principal; it has no HTTP route.

@@ -28,9 +28,37 @@ declare const context: FarmMCPExecuteContext;
 const result: { value: number } | Promise<{ value: number }> = native.execute({ count: 4, limit: 5 }, context);
 // @ts-expect-error execute receives validated schema output, not wire input
 native.execute({ count: "4", limit: 5 }, context);
+const validated = defineTool({
+  name: "validated_count",
+  inputSchema: z.object({ value: z.number() }),
+  outputSchema: z.object({ count: z.string().transform(Number).pipe(z.number()) }),
+  execute: ({ value }) => ({ count: String(value) }),
+});
+const schemaInput: { count: string } | Promise<{ count: string }> = validated.execute({ value: 4 }, context);
+const asyncValidated = defineTool({
+  name: "async_count",
+  inputSchema: z.object({}),
+  outputSchema: z.object({ count: z.number() }),
+  execute: async () => ({ count: 1 }),
+});
+defineTool({
+  name: "wrong_output", inputSchema: z.object({}), outputSchema: z.object({ count: z.number() }),
+  // @ts-expect-error the result must match the output schema's input, not any
+  execute: () => ({ count: "wrong" }),
+});
+defineTool({
+  name: "wrong_async_output", inputSchema: z.object({}), outputSchema: z.object({ count: z.number() }),
+  // @ts-expect-error asynchronous results are checked too
+  execute: async () => ({ count: "wrong" }),
+});
+defineTool({
+  name: "wrong_transform_input", inputSchema: z.object({}), outputSchema: z.string().transform(Number).pipe(z.number()),
+  // @ts-expect-error execute returns the pre-transform schema input
+  execute: () => 4,
+});
 const endpoint = createEndpoint("/api/count", { method: "GET" }, () => ({ value: 1 }));
 defineConfig({ mcp: {
-  tools: [{ endpoint, name: "api_count" }, native],
+  tools: [{ endpoint, name: "api_count" }, native, validated, asyncValidated],
   authorize: ({ tools }) => {
     for (const tool of tools) {
       if (tool.kind === "endpoint") {

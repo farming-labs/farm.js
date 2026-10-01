@@ -369,7 +369,9 @@ This mounts `/api/mcp`. Typed API routes are not exposed as MCP tools unless the
 `authorize` receives `{ request, tool, tools, server }`; return `{ subject, tools: ["tool_name"] }`
 to limit both discovery and invocation for that caller. You can also add standalone `defineTool()`
 definitions from `@farm.js/mcp` to the same list; these validate their own input and receive the
-authorized principal without creating separate HTTP routes. See [API MCP](/docs/plugins/mcp) for
+authorized principal without creating separate HTTP routes. Optional `outputSchema` validates
+standalone results; endpoint-backed tools reuse a route factory's `output` validator. Both advertise
+the validated result shape to MCP clients. See [API MCP](/docs/plugins/mcp) for
 mixed declarations, the resolved catalog, and permission checks.
 
 ## Isolated client hydration

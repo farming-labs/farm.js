@@ -157,6 +157,62 @@ tools can reach validation or execution. Keep definitions and their provider SDK
 Use a shared database or storage backend for data read by both routes and standalone tools;
 config and route modules can be loaded independently, and module-local state is not a shared store.
 
+## Validate tool results
+
+Add `outputSchema` to a standalone tool to check its returned data before sending it to the
+client. The handler's return type must match the schema's **input** type. Farm runs the original
+output validator once, including async refinements, defaults, and transforms, and advertises
+the schema's **output** shape in MCP discovery.
+
+```ts
+import { defineTool } from "@farm.js/mcp";
+import { z } from "zod";
+
+const countCharacters = defineTool({
+  name: "count_characters",
+  inputSchema: z.object({ text: z.string() }),
+  outputSchema: z.object({ count: z.number().int().nonnegative() }),
+  execute: ({ text }) => ({ count: Array.from(text).length }),
+});
+
+// Include countCharacters in mcp.tools.
+```
+
+`outputSchema` describes your returned data, not the MCP envelope. A result of `{ count: 4 }`
+still produces JSON text content and `structuredContent: { result: { count: 4 } }`. Farm wraps
+the advertised schema to match that existing envelope. Objects, arrays, scalars, and `null`
+work when they are JSON-compatible. The SDK also checks the serialized result against the
+advertised schema. An invalid result becomes a tool error, without successful structured data;
+standalone output-validator messages are not exposed to the client.
+
+For endpoint-backed tools, Farm derives the MCP output schema from the existing
+`createRouteFactory()` **`output`** option. There is no second MCP-specific validator to maintain:
+
+```ts title="src/app/api/health/route.ts"
+import { createRouteFactory } from "@farm.js/core/api";
+import { z } from "zod";
+
+const route = createRouteFactory();
+export const GET = route.get("/api/health", {
+  mcp: { name: "health", readOnlyHint: true },
+  output: z.object({ ok: z.boolean() }),
+  handler: () => ({ ok: true }),
+}).endpoint;
+```
+
+The endpoint runtime validates and transforms plain handler results; MCP does not run that
+validator a second time. Raw `Response` results bypass the endpoint's output parser, but their
+successful JSON payload must still match the advertised MCP output shape. Non-success HTTP
+responses remain tool errors rather than being checked against a success schema. `createEndpoint()`
+does not have an `output` option; use the route factory when you need an endpoint output validator.
+
+Both forms are optional. Tools without an output schema retain their current behavior and do
+not advertise one. Zod 4 schemas must have a JSON-representable output; for example, pipe a
+transform into a representable schema with `.transform(Number).pipe(z.number())`. Other Standard
+Schema validators must expose `~standard.jsonSchema.output()` as well as their validation method.
+An output schema that cannot be represented fails registration/build instead of silently omitting
+the contract. Output validation cannot undo side effects already performed by the handler.
+
 ## Authorize individual tools
 
 Every `authorize` call receives:
