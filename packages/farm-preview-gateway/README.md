@@ -29,3 +29,7 @@ Keep the signing secret server-only and at least 32 bytes long. GitHub access to
 Managed public gateways should also provide `rateLimitExchange`. The hook runs before the request body
 is read or the provider API is called, and rejected requests receive `429` with `Retry-After`. Use a
 shared store for multi-instance deployments; the hosted Vercel example uses an atomic Redis window.
+
+Managed grants and explicitly requested durations are absolute expiries. An unauthenticated session
+created without `expiresInMs` instead uses `sessionTtlMs` as an idle lease and extends it only when the
+local polling agent proves it is still online.

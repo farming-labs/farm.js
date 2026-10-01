@@ -715,7 +715,9 @@ test("refuses every registration when no relay credential is configured", async 
 
 test("binds an authorized native relay session to its absolute expiry", async () => {
   const seen = [];
+  const coordinator = new MemoryRelayCoordinator();
   const relay = createPersistentPreviewRelay({
+    coordinator,
     authorizeAgent(input) {
       seen.push(input);
       if (input.token !== "session-grant" || input.name !== "expiring") return false;
@@ -735,10 +737,14 @@ test("binds an authorized native relay session to its absolute expiry", async ()
     assert.equal(ready.type, "ready");
     assert.ok(ready.expiresAt > Date.now());
     assert.deepEqual(seen, [{ token: "session-grant", name: "expiring" }]);
+    assert.ok(coordinator.claimTtlMs > 0 && coordinator.claimTtlMs <= 75);
+    assert.ok(coordinator.touchTtlMs.length > 0);
+    assert.ok(coordinator.touchTtlMs.every((ttlMs) => ttlMs > 0 && ttlMs <= 75));
 
     const [code, reason] = await closed;
     assert.equal(code, 1000);
     assert.equal(reason.toString(), "Preview expired");
+    assert.equal(coordinator.releaseCalls, 1);
     await expectInactive(ready.publicUrl);
   } finally {
     socket.close();
@@ -943,8 +949,12 @@ class MemoryRelayCoordinator {
   sessions = new Map();
   requests = new Map();
   responses = new Map();
+  claimTtlMs = 0;
+  touchTtlMs = [];
+  releaseCalls = 0;
 
   async claimSession(session, ttlMs) {
+    this.claimTtlMs = ttlMs;
     const existing = await this.findSession(session.name);
     if (existing) return false;
     this.sessions.set(session.name, { ...session, expiresAt: Date.now() + ttlMs });
@@ -962,6 +972,7 @@ class MemoryRelayCoordinator {
   }
 
   async touchSession(session, ttlMs) {
+    this.touchTtlMs.push(ttlMs);
     const existing = this.sessions.get(session.name);
     if (existing?.id !== session.id) return false;
     existing.expiresAt = Date.now() + ttlMs;
@@ -969,6 +980,7 @@ class MemoryRelayCoordinator {
   }
 
   async releaseSession(session) {
+    this.releaseCalls += 1;
     if (this.sessions.get(session.name)?.id === session.id) this.sessions.delete(session.name);
   }
 

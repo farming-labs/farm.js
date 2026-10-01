@@ -7,6 +7,8 @@ import { createInterface } from "node:readline/promises";
 import { logger } from "@farm.js/core";
 import type { PreviewGatewayPlan } from "./preview-gateway";
 
+export const PREVIEW_EXPIRY_CLOCK_SKEW_MS = 1000 * 60 * 5;
+
 export interface PreviewAuthPublicConfig {
   enabled: boolean;
   provider?: "github";
@@ -59,9 +61,7 @@ export async function authorizePreviewGatewayPlan(
   const config = await loadPreviewAuthConfig(plan.gatewayUrl, runtime.fetch);
 
   if (!config.enabled) {
-    const expiresInMs =
-      options.expiresInMs ?? (await runtime.promptDuration(config)) ?? config.defaultSessionTtlMs;
-    return { ...plan, expiresInMs };
+    return options.expiresInMs === undefined ? plan : { ...plan, expiresInMs: options.expiresInMs };
   }
   if (config.provider !== "github" || !config.clientId) {
     throw new Error("The Farm Preview gateway returned an unsupported login configuration.");
@@ -217,7 +217,7 @@ async function requestTunnelGrant(
     !grant.token ||
     typeof grant.expiresAt !== "number" ||
     !Number.isSafeInteger(grant.expiresAt) ||
-    grant.expiresAt <= Date.now()
+    grant.expiresAt <= Date.now() - PREVIEW_EXPIRY_CLOCK_SKEW_MS
   ) {
     throw new Error("Farm Preview returned an invalid tunnel grant.");
   }
@@ -311,7 +311,7 @@ async function exchangePreviewAccount(
     !account.token ||
     !account.user?.login ||
     !Number.isSafeInteger(account.expiresAt) ||
-    account.expiresAt <= Date.now()
+    account.expiresAt <= Date.now() - PREVIEW_EXPIRY_CLOCK_SKEW_MS
   ) {
     throw new Error("Farm Preview returned an invalid account credential.");
   }

@@ -11,7 +11,11 @@ import {
 } from "./preview-gateway";
 import { runNativePreviewTunnel } from "./preview-native";
 import { createHttpLocalUrl } from "./local-url";
-import { authorizePreviewGatewayPlan, parsePreviewDuration } from "./preview-auth";
+import {
+  authorizePreviewGatewayPlan,
+  parsePreviewDuration,
+  PREVIEW_EXPIRY_CLOCK_SKEW_MS,
+} from "./preview-auth";
 
 export interface PreviewFarmOptions {
   root?: string;
@@ -94,6 +98,14 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
         session,
       };
     } catch (error) {
+      if (
+        authorizedPlan.expiresAt &&
+        authorizedPlan.expiresAt <= Date.now() + PREVIEW_EXPIRY_CLOCK_SKEW_MS
+      ) {
+        throw new Error(
+          "The native preview relay stopped at or near the hosted expiry; the expiring grant was not reused for polling fallback.",
+        );
+      }
       logger.warn(
         `Native preview relay unavailable; using compatibility gateway polling.${formatPreviewError(error)}`,
       );

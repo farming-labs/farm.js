@@ -574,6 +574,45 @@ test("exchanges GitHub login for a scoped expiring preview session", async () =>
   }
 });
 
+test("slides default self-hosted sessions but preserves explicit absolute expiry", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store, { sessionTtlMs: 60_000 });
+
+  try {
+    const sliding = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "sliding-session" }),
+    }).then((response) => response.json());
+    assert.equal(sliding.expiresAt, undefined);
+
+    const storedSliding = await store.getSessionById(sliding.id);
+    assert.ok(storedSliding);
+    const forcedNearExpiry = Date.now() + 1_000;
+    storedSliding.expiresAt = forcedNearExpiry;
+    const slidingHeartbeat = await fetch(`${gateway.url}/api/sessions/${sliding.id}/heartbeat`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${sliding.token}` },
+    }).then((response) => response.json());
+    assert.equal(slidingHeartbeat.expiresAt, undefined);
+    assert.ok((await store.getSessionById(sliding.id)).expiresAt > forcedNearExpiry + 50_000);
+
+    const absolute = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "absolute-session", expiresInMs: 60_000 }),
+    }).then((response) => response.json());
+    assert.ok(absolute.expiresAt > Date.now());
+    const absoluteHeartbeat = await fetch(`${gateway.url}/api/sessions/${absolute.id}/heartbeat`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${absolute.token}` },
+    }).then((response) => response.json());
+    assert.equal(absoluteHeartbeat.expiresAt, absolute.expiresAt);
+  } finally {
+    await gateway.close();
+  }
+});
+
 test("rate limits managed auth exchange before contacting GitHub", async () => {
   const store = new MemoryPreviewGatewayStore();
   let limitChecks = 0;

@@ -52,6 +52,8 @@ export interface PreviewGatewaySession {
   localUrl?: string;
   createdAt: number;
   expiresAt: number;
+  /** Internal idle expiry marker. Missing means expiresAt is an absolute cap. */
+  slidingExpiration?: true;
   lastHeartbeatAt?: number;
 }
 
@@ -615,6 +617,7 @@ async function createSession(
   const requestedName = sanitizePreviewName(input.name);
   let name = requestedName || randomPreviewName();
   let expiresAt = Date.now() + config.sessionTtlMs;
+  let slidingExpiration = true;
 
   if (config.auth) {
     const grantToken = readPreviewBearerToken(request);
@@ -628,6 +631,7 @@ async function createSession(
       });
       name = grant.name;
       expiresAt = grant.expiresAt;
+      slidingExpiration = false;
     } catch (error) {
       if (error instanceof PreviewAuthError)
         throw new GatewayHttpError(error.status, error.message);
@@ -635,6 +639,7 @@ async function createSession(
     }
   } else if (Number.isFinite(input.expiresInMs)) {
     expiresAt = Date.now() + clamp(Number(input.expiresInMs), 60_000, config.sessionTtlMs);
+    slidingExpiration = false;
   }
 
   // A name that is still owned by a live session cannot be claimed by a new
@@ -668,6 +673,7 @@ async function createSession(
     localUrl: input.localUrl,
     createdAt: Date.now(),
     expiresAt,
+    ...(slidingExpiration ? { slidingExpiration: true as const } : {}),
     lastHeartbeatAt: Date.now(),
   };
 
@@ -678,7 +684,7 @@ async function createSession(
     name: session.name,
     token: session.token,
     publicUrl: session.publicUrl,
-    expiresAt: session.expiresAt,
+    ...(session.slidingExpiration ? {} : { expiresAt: session.expiresAt }),
   });
 }
 
@@ -726,7 +732,10 @@ async function handleSessionRoute(
 
   if (request.method === "POST" && route.action === "heartbeat") {
     await markSessionOnline(store, config, session);
-    return json({ ok: true, expiresAt: session.expiresAt });
+    return json({
+      ok: true,
+      ...(session.slidingExpiration ? {} : { expiresAt: session.expiresAt }),
+    });
   }
 
   if (request.method === "DELETE" && !route.action) {
@@ -925,7 +934,11 @@ async function markSessionOnline(
   config: PreviewGatewayRuntimeConfig,
   session: PreviewGatewaySession,
 ) {
-  session.lastHeartbeatAt = Date.now();
+  const now = Date.now();
+  session.lastHeartbeatAt = now;
+  if (session.slidingExpiration) {
+    session.expiresAt = now + config.sessionTtlMs;
+  }
   await store.touchSession(session, remainingSessionTtl(session, config));
 }
 

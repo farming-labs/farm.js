@@ -1,5 +1,6 @@
 import { logger } from "@farm.js/core";
 import type { PreviewAgentSession } from "@farm.js/tunnel";
+import { PREVIEW_EXPIRY_CLOCK_SKEW_MS } from "./preview-auth";
 import type { PreviewGatewayPlan } from "./preview-gateway";
 
 export interface NativeTunnelRuntime {
@@ -49,7 +50,7 @@ export async function runNativePreviewTunnel(
     if (!waited) {
       throw new Error("The native preview tunnel stopped before its lifecycle could be observed.");
     }
-    if (!stopping && plan.expiresAt && Date.now() + 1000 < plan.expiresAt) {
+    if (!stopping && plan.expiresAt && Date.now() + PREVIEW_EXPIRY_CLOCK_SKEW_MS < plan.expiresAt) {
       throw new Error("The native preview relay disconnected before the preview expired.");
     }
     return session;
