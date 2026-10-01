@@ -167,13 +167,18 @@ Every `authorize` call receives:
   `kind` (`"endpoint"` or `"standalone"`), optional title/description, and behavior hints.
   Endpoint entries also have HTTP `method` and route `path`; standalone entries do not.
   The catalog contains no handlers or validators.
-- `tool`: the untrusted requested name for a single `tools/call`, if present. It is omitted for
-  initialization, listing, and batches; compare it against the catalog rather than trusting it.
+- `tool`: the untrusted requested name for a `tools/call`, if present. It is omitted for
+  initialization and listing. For a JSON-RPC batch, Farm calls `authorize` for every item with
+  that item's tool name and rejects the entire batch before dispatch when any item is denied;
+  compare it against the catalog rather than trusting it.
 
 Return `false` to reject the entire request with HTTP 401. Otherwise return a `subject` and,
 optionally, `tools`, an array of allowed **tool names**. Omit this return field to retain access to
 all configured tools; return `tools: []` to allow the MCP connection but no tools. Unknown names
 or malformed permission lists fail closed with a server error.
+
+Every allowed item in a batch must resolve to the same subject, scopes, and allowed tool names
+because one HTTP batch has one authenticated identity.
 
 Only allowed tools appear in discovery, and guessing a hidden name does not make it callable.
 Permissions are evaluated for each request and do not carry over between callers. A stable

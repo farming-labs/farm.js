@@ -159,19 +159,30 @@ function createHandler(options: NormalizedOptions, tools: readonly BoundTool[]) 
   return async (request: Request, parsedBody: unknown): Promise<Response> => {
     let authorization: APIMCPAuthorization;
     if (options.authorize) {
-      const result = await options.authorize({
-        request,
-        tool: getCalledTool(parsedBody),
-        tools: catalog,
-        server: serverIdentity,
-      });
-      if (result === false) return unauthorized();
-      if (!result || typeof result.subject !== "string" || result.subject.length === 0) {
-        throw new TypeError(
-          "apiMcp authorize must return false or an object with a subject string.",
-        );
+      const messages =
+        Array.isArray(parsedBody) && parsedBody.length > 0 ? parsedBody : [parsedBody];
+      let first: APIMCPAuthorization | undefined;
+      for (const message of messages) {
+        const result = await options.authorize({
+          request,
+          tool: getCalledTool(message),
+          tools: catalog,
+          server: serverIdentity,
+        });
+        if (result === false) return unauthorized();
+        if (!result || typeof result.subject !== "string" || result.subject.length === 0) {
+          throw new TypeError(
+            "apiMcp authorize must return false or an object with a subject string.",
+          );
+        }
+        if (first && !sameAuthorizationIdentity(first, result)) {
+          throw new TypeError(
+            "apiMcp authorize must return the same subject, scopes, and tools for every JSON-RPC batch item.",
+          );
+        }
+        first ??= result;
       }
-      authorization = result;
+      authorization = first!;
     } else {
       authorization = { subject: "anonymous" };
     }
@@ -605,6 +616,24 @@ function getCalledTool(body: unknown): string | undefined {
   return request.method === "tools/call" && typeof request.params?.name === "string"
     ? request.params.name
     : undefined;
+}
+
+function sameAuthorizationIdentity(left: APIMCPAuthorization, right: APIMCPAuthorization): boolean {
+  return (
+    left.subject === right.subject &&
+    sameAuthorizationList(left.scopes, right.scopes) &&
+    sameAuthorizationList(left.tools, right.tools)
+  );
+}
+
+function sameAuthorizationList(left: unknown, right: unknown): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  if (!Array.isArray(left) || !Array.isArray(right)) return false;
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  return (
+    leftSet.size === rightSet.size && Array.from(leftSet).every((value) => rightSet.has(value))
+  );
 }
 
 function resolveAllowedTools(

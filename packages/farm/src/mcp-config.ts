@@ -63,7 +63,7 @@ export interface FarmMCPAuthorization extends Record<string, unknown> {
 
 export interface FarmMCPAuthorizeContext {
   request: Request;
-  /** Untrusted requested name for a single tools/call; omitted for other methods or batches. */
+  /** Untrusted requested name for a tools/call; authorization runs separately for every JSON-RPC batch item. */
   tool?: string;
   /** Complete configured catalog, before applying this caller's permissions. */
   tools: readonly FarmMCPTool[];

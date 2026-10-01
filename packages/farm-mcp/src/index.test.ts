@@ -174,6 +174,47 @@ describe("apiMcp", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("authorizes every tool call in a JSON-RPC batch before dispatch", async () => {
+    const handler = vi.fn(() => ({ deleted: true }));
+    const destructive = route.delete("/api/projects", {
+      mcp: { name: "delete_projects" },
+      handler,
+    });
+    const authorize = vi.fn(({ tool }: { tool?: string }) =>
+      tool === "delete_projects" ? false : { subject: "user-1", scopes: ["projects"] },
+    );
+    const routes = mergePluginAPIRoutes(
+      [
+        {
+          path: destructive.path,
+          methods: [destructive.method],
+          endpoints: { DELETE: destructive.endpoint },
+        },
+      ],
+      [apiMcp({ authorize })],
+    );
+    const endpoint = routes.find((entry) => entry.path === "/api/mcp")!.endpoints.POST;
+
+    const response = await sendMCP(endpoint, [
+      { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "delete_projects", arguments: {} },
+      },
+    ]);
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Unauthorized" });
+    expect(authorize).toHaveBeenNthCalledWith(1, expect.objectContaining({ tool: undefined }));
+    expect(authorize).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ tool: "delete_projects" }),
+    );
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it("advertises route-owned tools with generated schemas", async () => {
     const { endpoint } = createFixture();
     const response = await sendMCP(endpoint, {
@@ -240,7 +281,7 @@ describe("apiMcp", () => {
     }
     expect(authorize).toHaveBeenCalledTimes(3);
     const contexts = authorize.mock.calls.map(([context]) => context);
-    expect(contexts.map(({ tool }) => tool)).toEqual([undefined, "missing", undefined]);
+    expect(contexts.map(({ tool }) => tool)).toEqual([undefined, "missing", "create_project"]);
     for (const context of contexts) {
       expect(context.server).toEqual({ name: "projects", version: "2", path: "/api/mcp" });
       expect(context.tools).toEqual([
