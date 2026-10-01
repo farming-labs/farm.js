@@ -327,11 +327,11 @@ deliberately public server.
 
 Farm maps route inputs into one MCP argument object:
 
-| Route input | Tool argument | Notes                                                         |
-| ----------- | ------------- | ------------------------------------------------------------- |
-| Params      | `params`      | Includes dynamic, catch-all, and optional catch-all segments. |
-| Query       | `query`       | Preserves repeated query values as arrays.                    |
-| JSON body   | `body`        | Available for methods that accept a request body.             |
+| Route input | Tool argument | Notes                                                                 |
+| ----------- | ------------- | --------------------------------------------------------------------- |
+| Params      | `params`      | Includes dynamic, catch-all, and optional catch-all segments.         |
+| Query       | `query`       | Preserves repeated query values as arrays.                            |
+| JSON body   | `body`        | Available for methods that accept a request body.                     |
 | Headers     | `headers`     | Credential and request-provenance headers are never agent-controlled. |
 
 For example, a tool call for `GET /api/projects/[team]` can send:
