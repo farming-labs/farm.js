@@ -263,8 +263,25 @@ describe("loadConfig", () => {
       'throw { name: "Error", message: "structured config failure" };',
     );
 
+    const error = await loadConfig(root, undefined, "development").catch((error) => error);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toMatchObject({
+      message: "Failed to load config from farm.config.mjs: structured config failure",
+      cause: { name: "Error", message: "structured config failure" },
+    });
+  });
+
+  it("uses a structured config loader stack when its message is empty", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-config-error-"));
+
+    await fs.writeFile(
+      path.join(root, "farm.config.mjs"),
+      'throw { name: "Error", message: "", stack: "serialized config stack" };',
+    );
+
     await expect(loadConfig(root, undefined, "development")).rejects.toThrow(
-      "Failed to load config from farm.config.mjs: structured config failure",
+      "Failed to load config from farm.config.mjs: serialized config stack",
     );
   });
 

@@ -1111,10 +1111,16 @@ export async function resolveConfig(
 }
 
 function formatConfigLoadError(error: unknown): string {
-  if (error instanceof Error) return error.message;
+  if (error instanceof Error) return error.message || error.stack || error.name;
   if (error && typeof error === "object") {
-    const message = Reflect.get(error, "message");
-    if (typeof message === "string" && message) return message;
+    for (const property of ["message", "stack", "name"] as const) {
+      try {
+        const value = Reflect.get(error, property);
+        if (typeof value === "string" && value) return value;
+      } catch {
+        // Fall through to the ordinary string representation for exotic objects.
+      }
+    }
   }
   return String(error);
 }
