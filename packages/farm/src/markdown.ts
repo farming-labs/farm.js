@@ -203,6 +203,17 @@ export function applyMarkdownNegotiationHeaders(
   });
 }
 
+// Elements that start a new block. Their text belongs on its own line.
+const BLOCK_TAGS =
+  /<\/?(ul|ol|main|section|article|header|footer|nav|aside|div|form|fieldset|legend|figure|figcaption|table|thead|tbody|tfoot|tr|dl|dt|dd|details|summary|address)\b[^>]*>/gi;
+
+// Elements a browser always lays out as their own box, so they never sit inside
+// a word and a separator is safe. Without one, `<label>Token</label><button>Open
+// </button>` read as "TokenOpen". Inline wrappers such as span, a, or em stay
+// joined because animations and markup split single words across them.
+const BOX_TAGS =
+  /<\/?(label|button|input|select|textarea|option|output|meter|progress|td|th)\b[^>]*>/gi;
+
 export function htmlToMarkdown(
   html: string,
   options: {
@@ -242,13 +253,23 @@ export function htmlToMarkdown(
     return `\n- ${toInlineMarkdown(content).trim()}`;
   });
   source = source
-    .replace(/<\/?(ul|ol|main|section|article|header|footer|nav|aside|div)\b[^>]*>/gi, "\n")
+    .replace(BLOCK_TAGS, "\n")
+    .replace(BOX_TAGS, " ")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<hr\s*\/?>/gi, "\n\n---\n\n");
 
+  // Outside code fences, collapse the spacing that tag separators and indented
+  // source HTML leave behind: four leading spaces would read as a code block.
+  let inFence = false;
   let markdown = stripTags(source)
     .split("\n")
-    .map((line) => line.replace(/[ \t]+$/g, ""))
+    .map((line) => {
+      if (line.startsWith("```")) {
+        inFence = !inFence;
+        return line;
+      }
+      return inFence ? line.replace(/[ \t]+$/g, "") : line.replace(/[ \t]+/g, " ").trim();
+    })
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -467,7 +488,9 @@ function toInlineMarkdown(html: string): string {
     .replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_, content) => {
       return `\`${decodeHtml(stripTags(content)).trim()}\``;
     })
-    .replace(/<br\s*\/?>/gi, "\n");
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(BLOCK_TAGS, " ")
+    .replace(BOX_TAGS, " ");
 
   source = stripTags(source);
   return decodeHtml(source).replace(/\s+/g, " ");

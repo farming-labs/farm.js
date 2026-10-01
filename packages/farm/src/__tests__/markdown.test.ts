@@ -316,6 +316,49 @@ describe("htmlToMarkdown", () => {
     );
   });
 
+  it("keeps form controls and table cells from running together", () => {
+    // Reduced from farmjs.dev/telemetry, which rendered "Dashboard tokenOpen dashboard".
+    const form = htmlToMarkdown(
+      [
+        '<main><form method="post">',
+        '<label for="token">Dashboard token</label>',
+        '<input id="token" type="password" required="">',
+        '<button type="submit">Open dashboard</button>',
+        "</form></main>",
+      ].join(""),
+      { includeMetadata: false },
+    );
+    expect(form).toBe("Dashboard token Open dashboard\n");
+
+    const table = htmlToMarkdown(
+      "<main><table><tr><th>Target</th><th>Status</th></tr><tr><td>node</td><td>ready</td></tr></table></main>",
+      { includeMetadata: false },
+    );
+    // Rows stay separate paragraphs; a single newline would render as one line.
+    expect(table).toBe("Target Status\n\nnode ready\n");
+  });
+
+  it("keeps indentation inside code blocks while tidying spacing around them", () => {
+    expect(
+      htmlToMarkdown(
+        "<main><pre><code>if (ok) {\n    run();\n}</code></pre><button>Copy</button></main>",
+        {
+          includeMetadata: false,
+        },
+      ),
+    ).toBe("```\nif (ok) {\n    run();\n}\n```\n\nCopy\n");
+  });
+
+  it("does not split words that are only wrapped in inline elements", () => {
+    // Letter- and word-split animations wrap one word in sibling spans; without
+    // layout information they must read as the source text, not "Hel lo".
+    expect(
+      htmlToMarkdown("<p><span>Hel</span><span>lo</span> ex<strong>am</strong>ple</p>", {
+        includeMetadata: false,
+      }),
+    ).toBe("Hello ex**am**ple\n");
+  });
+
   it("prefers page content over layout chrome", () => {
     expect(
       htmlToMarkdown(
