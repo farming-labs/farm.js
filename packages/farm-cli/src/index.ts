@@ -35,6 +35,7 @@ export {
   resolvePreviewTarget,
   runPreviewTunnel,
   type PreviewFarmOptions,
+  type PreviewFarmGatewayPlan,
   type PreviewFarmResult,
   type PreviewTarget,
   type PreviewTunnelPlan,

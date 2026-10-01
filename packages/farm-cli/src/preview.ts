@@ -48,10 +48,13 @@ export interface PreviewTunnelPlan {
 
 export interface PreviewFarmResult {
   target: PreviewTarget;
-  plan: PreviewTunnelPlan | PreviewGatewayPlan;
+  plan: PreviewTunnelPlan | PreviewFarmGatewayPlan;
   publicUrl?: string;
   session?: PreviewAgentSession | PreviewGatewaySession;
 }
+
+/** The managed plan exposed to callers, without its internal relay credential. */
+export type PreviewFarmGatewayPlan = Omit<PreviewGatewayPlan, "relayToken">;
 
 const MAX_TUNNEL_SCAN_CHARS = 64 * 1024;
 const DEFAULT_PREVIEW_PORTS = [3000, 4319, 5173, 4173, 8080];
@@ -73,7 +76,7 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
     if (options.dryRun) {
       logger.info(formatGatewayPlan(plan));
       logger.success("Preview gateway dry run completed.");
-      return { target, plan };
+      return { target, plan: redactPreviewGatewayPlan(plan) };
     }
 
     const authorizedPlan = await authorizePreviewGatewayPlan(plan, {
@@ -84,7 +87,12 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
     logger.info("Opening native Farm preview tunnel...");
     try {
       const session = await runNativePreviewTunnel(authorizedPlan);
-      return { target, plan: authorizedPlan, publicUrl: session.publicUrl, session };
+      return {
+        target,
+        plan: redactPreviewGatewayPlan(authorizedPlan),
+        publicUrl: session.publicUrl,
+        session,
+      };
     } catch (error) {
       logger.warn(
         `Native preview relay unavailable; using compatibility gateway polling.${formatPreviewError(error)}`,
@@ -92,7 +100,12 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
       const session = await runPreviewGateway(authorizedPlan, {
         timeoutMs: options.timeoutMs,
       });
-      return { target, plan: authorizedPlan, publicUrl: session.publicUrl, session };
+      return {
+        target,
+        plan: redactPreviewGatewayPlan(authorizedPlan),
+        publicUrl: session.publicUrl,
+        session,
+      };
     }
   }
 
@@ -107,6 +120,11 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
   logger.info("Opening public tunnel...");
   const publicUrl = await runPreviewTunnel(plan, options.timeoutMs ?? 30000);
   return { target, plan, publicUrl };
+}
+
+function redactPreviewGatewayPlan(plan: PreviewGatewayPlan): PreviewFarmGatewayPlan {
+  const { relayToken: _relayToken, ...publicPlan } = plan;
+  return publicPlan;
 }
 
 function formatPreviewError(error: unknown) {

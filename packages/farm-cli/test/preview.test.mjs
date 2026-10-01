@@ -327,6 +327,26 @@ test("carries a configured relay credential without putting it in the relay URL"
   }
 });
 
+test("keeps relay credentials out of public preview results", async () => {
+  const previousToken = process.env.FARM_PREVIEW_RELAY_TOKEN;
+  process.env.FARM_PREVIEW_RELAY_TOKEN = "do-not-expose-this-relay-credential";
+
+  try {
+    const result = await previewFarm({
+      provider: "farm",
+      port: 3000,
+      noProbe: true,
+      dryRun: true,
+      name: "redacted-result",
+    });
+
+    assert.equal("relayToken" in result.plan, false);
+    assert.ok(!JSON.stringify(result).includes("do-not-expose-this-relay-credential"));
+  } finally {
+    restoreEnv("FARM_PREVIEW_RELAY_TOKEN", previousToken);
+  }
+});
+
 test("runs the managed preview through the native tunnel lifecycle", async () => {
   let resolveWait;
   const wait = new Promise((resolve) => {
