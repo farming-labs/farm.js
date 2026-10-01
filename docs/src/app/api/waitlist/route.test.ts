@@ -47,9 +47,8 @@ function waitlistRequest(body: unknown): Request {
 describe("waitlist signup endpoint", () => {
   describe("abuse protection", () => {
     it("refuses a flood of submissions for the same address", async () => {
-      // Public, unauthenticated, and it writes to the database. The upsert is
-      // keyed on email, so a loop can also overwrite an existing entry's
-      // description, not just add rows.
+      // Public, unauthenticated, and it writes to the database, so a loop must
+      // not be able to fill the table.
       const email = `flood-${Date.now()}@example.com`;
       const statuses: number[] = [];
       for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -62,6 +61,49 @@ describe("waitlist signup endpoint", () => {
 
       expect(statuses[0]).not.toBe(429);
       expect(statuses).toContain(429);
+    });
+  });
+
+  describe("existing entries", () => {
+    it("keeps the first description when someone resubmits an address", async () => {
+      // Back the mock with real upsert semantics so the test sees what is stored.
+      const rows = new Map<string, { id: string; description: string }>();
+      prismaMocks.upsert.mockImplementation(
+        async ({
+          where,
+          create,
+          update,
+        }: {
+          where: { email: string };
+          create: { email: string; description: string };
+          update: { description?: string };
+        }) => {
+          const existing = rows.get(where.email);
+          const row = existing
+            ? { ...existing, ...update }
+            : { id: `entry-${rows.size + 1}`, description: create.description };
+          rows.set(where.email, row);
+          return { id: row.id };
+        },
+      );
+      process.env.DATABASE_URL = "postgres://waitlist.test/db";
+      const email = `owner-${Date.now()}@example.com`;
+
+      const first = await invokeAPIRouteEndpoint(
+        POST,
+        waitlistRequest({ email, description: "Building a support agent" }),
+      );
+      // Anyone can submit any address, so a second submission must not be able
+      // to replace what the owner wrote.
+      const second = await invokeAPIRouteEndpoint(
+        POST,
+        waitlistRequest({ email, description: "Replaced by someone else" }),
+      );
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(await second.json()).toMatchObject({ ok: true });
+      expect(rows.get(email)?.description).toBe("Building a support agent");
     });
   });
 
@@ -149,7 +191,7 @@ describe("waitlist signup endpoint", () => {
       await expect(response.json()).resolves.toEqual({ ok: true, id: "test-id" });
       expect(prismaMocks.upsert).toHaveBeenCalledWith({
         where: { email: "agent-reader@example.com" },
-        update: { description },
+        update: {},
         create: { email: "agent-reader@example.com", description },
         select: { id: true },
       });
@@ -165,7 +207,7 @@ describe("waitlist signup endpoint", () => {
       await expect(response.json()).resolves.toEqual({ ok: true, id: "test-id" });
       expect(prismaMocks.upsert).toHaveBeenCalledWith({
         where: { email: "agents-page@example.com" },
-        update: { description },
+        update: {},
         create: { email: "agents-page@example.com", description },
         select: { id: true },
       });
@@ -196,7 +238,7 @@ describe("waitlist signup endpoint", () => {
       expect(prismaMocks.upsert).toHaveBeenCalledTimes(1);
       expect(prismaMocks.upsert).toHaveBeenCalledWith({
         where: { email: "user@example.com" },
-        update: { description: "auth and data" },
+        update: {},
         create: { email: "user@example.com", description: "auth and data" },
         select: { id: true },
       });

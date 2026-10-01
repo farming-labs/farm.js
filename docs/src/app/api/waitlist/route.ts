@@ -44,9 +44,11 @@ export const POST = createEndpoint(
 
     try {
       const prisma = await getWaitlistPrisma();
+      // Anyone can submit any address, so a repeat submission must not replace
+      // what the address's owner wrote. The first description is kept.
       const entry = await prisma.waitlistEntry.upsert({
         where: { email },
-        update: { description },
+        update: {},
         create: { email, description },
         select: { id: true },
       });
