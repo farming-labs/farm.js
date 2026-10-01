@@ -664,7 +664,7 @@
     "esbuild": "^0.28.0",
     "fast-glob": "^3.3.2",
     "h3": "2.0.1-rc.32",
-    "image-size": "^2.0.2",
+    "image-size": "^2.0.4",
     "intl-messageformat": "11.2.12",
     "marked": "^12.0.2",
     "nitro": "3.0.260903-beta",
@@ -708,7 +708,7 @@
   },
   "optionalDependencies": {
     "rolldown": "1.2.0",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.5",
     "vite-rolldown": "npm:vite@8.1.5"
   },
   "engines": {
