@@ -592,7 +592,7 @@ test("shows browser visitors a friendly expired preview page", async () => {
 async function createGatewayServer(store, options = {}) {
   const handler = createNodePreviewGatewayHandler({
     store,
-    domain: "preview.farming-labs.dev",
+    domain: "preview.farmjs.dev",
     requestTimeoutMs: 2000,
     pollTimeoutMs: 1000,
     pollIntervalMs: 10,

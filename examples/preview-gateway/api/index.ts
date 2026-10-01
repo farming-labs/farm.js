@@ -207,7 +207,7 @@ export const config = {
   maxDuration: 1800,
 };
 
-const domain = process.env.FARM_PREVIEW_DOMAIN || "preview.farming-labs.dev";
+const domain = process.env.FARM_PREVIEW_DOMAIN || "preview.farmjs.dev";
 const coordinator = createRedisPreviewRelayCoordinator();
 const auth = createManagedPreviewAuth();
 const pollingGateway = createNodePreviewGatewayHandler({

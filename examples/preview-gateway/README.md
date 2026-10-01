@@ -4,7 +4,7 @@ This is the Vercel gateway behind `farm preview`.
 
 This example is for Farming Labs maintainers or teams self-hosting their own gateway. Regular Farm app developers do not need to copy, deploy, or configure this app. The default `farm preview` command is backed by the hosted Farming Labs gateway.
 
-It accepts public requests on `*.preview.farming-labs.dev`, hands them to the local `farm preview` CLI over its persistent outbound WebSocket, and returns the local app response to the public caller. The existing outbound HTTPS polling gateway remains available as a compatibility fallback.
+It accepts public requests on `*.preview.farmjs.dev`, hands them to the local `farm preview` CLI over its persistent outbound WebSocket, and returns the local app response to the public caller. The existing outbound HTTPS polling gateway remains available as a compatibility fallback.
 
 The hosted relay uses Redis to coordinate WebSocket agents and HTTP requests across Vercel Function instances. Requests that reach the Function holding the agent socket stay on the direct in-memory path; requests that reach another instance cross the shared Redis queue.
 
@@ -21,8 +21,8 @@ Configure the Vercel project root directory as `examples/preview-gateway`. Deplo
 Attach both domains to the Vercel project:
 
 ```txt
-preview.farming-labs.dev
-*.preview.farming-labs.dev
+preview.farmjs.dev
+*.preview.farmjs.dev
 ```
 
 Vercel will show the DNS records it expects. After DNS is verified, Vercel handles HTTPS certificates for the apex and wildcard preview domains.
@@ -72,8 +72,8 @@ KV_REST_API_TOKEN
 Set:
 
 ```txt
-FARM_PREVIEW_DOMAIN=preview.farming-labs.dev
-FARM_PREVIEW_GATEWAY_URL=https://preview.farming-labs.dev
+FARM_PREVIEW_DOMAIN=preview.farmjs.dev
+FARM_PREVIEW_GATEWAY_URL=https://preview.farmjs.dev
 ```
 
 ### Managed developer login
@@ -107,7 +107,7 @@ farm preview --name stripe-webhook --expires 2h
 The CLI prints:
 
 ```txt
-Public: https://stripe-webhook.preview.farming-labs.dev
+Public: https://stripe-webhook.preview.farmjs.dev
 ```
 
 ## Local gateway development

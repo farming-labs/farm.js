@@ -213,9 +213,7 @@ export function createPreviewTunnelPlan(
 ): PreviewTunnelPlan {
   const requestedName =
     sanitizePreviewName(options.name || process.env.FARM_PREVIEW_NAME) || randomPreviewName();
-  const domain = normalizePreviewDomain(
-    process.env.FARM_PREVIEW_DOMAIN || "preview.farming-labs.dev",
-  );
+  const domain = normalizePreviewDomain(process.env.FARM_PREVIEW_DOMAIN || "preview.farmjs.dev");
   const requestedHostname = `${requestedName}.${domain}`;
   const template = process.env.FARM_PREVIEW_TUNNEL_COMMAND;
 
@@ -299,6 +297,7 @@ export function parsePreviewPublicUrl(
       host.endsWith(".ngrok-free.app") ||
       host.endsWith(".ngrok.dev") ||
       host.endsWith(".ngrok.io") ||
+      host.endsWith(".preview.farmjs.dev") ||
       host.endsWith(".preview.farming-labs.dev")
     );
   });

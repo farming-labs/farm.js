@@ -62,8 +62,8 @@ export interface ForwardGatewayRequestOptions {
   maxResponseBodyBytes?: number;
 }
 
-const DEFAULT_GATEWAY_URL = "https://preview.farming-labs.dev";
-const DEFAULT_PREVIEW_DOMAIN = "preview.farming-labs.dev";
+const DEFAULT_GATEWAY_URL = "https://preview.farmjs.dev";
+const DEFAULT_PREVIEW_DOMAIN = "preview.farmjs.dev";
 const DEFAULT_POLL_TIMEOUT_MS = 15000;
 const DEFAULT_LOCAL_PROBE_INTERVAL_MS = 2000;
 const DEFAULT_LOCAL_PROBE_TIMEOUT_MS = 1000;

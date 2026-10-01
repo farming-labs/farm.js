@@ -31,14 +31,18 @@ const cliBin = path.resolve(testDir, "../bin/farm.js");
 
 test("parses public preview urls from tunnel output", () => {
   assert.equal(
-    parsePreviewPublicUrl("your url is: https://stripe-demo.preview.farming-labs.dev"),
-    "https://stripe-demo.preview.farming-labs.dev",
+    parsePreviewPublicUrl("your url is: https://stripe-demo.preview.farmjs.dev"),
+    "https://stripe-demo.preview.farmjs.dev",
   );
   assert.equal(
     parsePreviewPublicUrl(
-      "docs: https://developers.cloudflare.com\nready: https://stripe-demo.preview.farming-labs.dev",
-      "stripe-demo.preview.farming-labs.dev",
+      "docs: https://developers.cloudflare.com\nready: https://stripe-demo.preview.farmjs.dev",
+      "stripe-demo.preview.farmjs.dev",
     ),
+    "https://stripe-demo.preview.farmjs.dev",
+  );
+  assert.equal(
+    parsePreviewPublicUrl("legacy: https://stripe-demo.preview.farming-labs.dev"),
     "https://stripe-demo.preview.farming-labs.dev",
   );
   assert.equal(
@@ -211,7 +215,7 @@ test("creates a tunnel plan from the preview command template", () => {
   const previousDomain = process.env.FARM_PREVIEW_DOMAIN;
   process.env.FARM_PREVIEW_TUNNEL_COMMAND =
     "farm-preview-agent tunnel --url {url} --hostname {hostname}";
-  process.env.FARM_PREVIEW_DOMAIN = "preview.farming-labs.dev";
+  process.env.FARM_PREVIEW_DOMAIN = "preview.farmjs.dev";
 
   try {
     const plan = createPreviewTunnelPlan(
@@ -229,7 +233,7 @@ test("creates a tunnel plan from the preview command template", () => {
     assert.equal(plan.shell, true);
     assert.match(plan.command, /farm-preview-agent tunnel/);
     assert.match(plan.command, /"http:\/\/localhost:3000"/);
-    assert.match(plan.command, /"stripe-webhook.preview.farming-labs.dev"/);
+    assert.match(plan.command, /"stripe-webhook.preview.farmjs.dev"/);
   } finally {
     restoreEnv("FARM_PREVIEW_TUNNEL_COMMAND", previousCommand);
     restoreEnv("FARM_PREVIEW_DOMAIN", previousDomain);
@@ -255,8 +259,8 @@ test("marks the npx localtunnel plan for Windows shell resolution", () => {
 test("creates a managed gateway preview plan by default", () => {
   const previousGateway = process.env.FARM_PREVIEW_GATEWAY_URL;
   const previousDomain = process.env.FARM_PREVIEW_DOMAIN;
-  process.env.FARM_PREVIEW_GATEWAY_URL = "https://preview.farming-labs.dev";
-  process.env.FARM_PREVIEW_DOMAIN = "preview.farming-labs.dev";
+  process.env.FARM_PREVIEW_GATEWAY_URL = "https://preview.farmjs.dev";
+  process.env.FARM_PREVIEW_DOMAIN = "preview.farmjs.dev";
 
   try {
     const plan = createPreviewGatewayPlan(
@@ -272,10 +276,10 @@ test("creates a managed gateway preview plan by default", () => {
     );
 
     assert.equal(plan.provider, "farm-gateway");
-    assert.equal(plan.gatewayUrl, "https://preview.farming-labs.dev");
-    assert.equal(plan.relayUrl, "wss://preview.farming-labs.dev/agent");
+    assert.equal(plan.gatewayUrl, "https://preview.farmjs.dev");
+    assert.equal(plan.relayUrl, "wss://preview.farmjs.dev/agent");
     assert.equal(plan.relayToken, undefined);
-    assert.equal(plan.requestedPublicUrl, "https://stripe-webhook.preview.farming-labs.dev");
+    assert.equal(plan.requestedPublicUrl, "https://stripe-webhook.preview.farmjs.dev");
   } finally {
     restoreEnv("FARM_PREVIEW_GATEWAY_URL", previousGateway);
     restoreEnv("FARM_PREVIEW_DOMAIN", previousDomain);
@@ -334,7 +338,7 @@ test("runs the managed preview through the native tunnel lifecycle", async () =>
       calls.push(["start", ...args]);
       return {
         sessionId: "native-session",
-        publicUrl: "https://native.preview.farming-labs.dev",
+        publicUrl: "https://native.preview.farmjs.dev",
       };
     },
     async stopPreviewAgent(sessionId) {
@@ -348,8 +352,8 @@ test("runs the managed preview through the native tunnel lifecycle", async () =>
   };
   const plan = {
     provider: "farm-gateway",
-    gatewayUrl: "https://preview.farming-labs.dev",
-    relayUrl: "wss://preview.farming-labs.dev/agent",
+    gatewayUrl: "https://preview.farmjs.dev",
+    relayUrl: "wss://preview.farmjs.dev/agent",
     target: {
       localUrl: "http://localhost:3000",
       host: "localhost",
@@ -357,14 +361,14 @@ test("runs the managed preview through the native tunnel lifecycle", async () =>
       source: "port",
     },
     requestedName: "native",
-    requestedHostname: "native.preview.farming-labs.dev",
-    requestedPublicUrl: "https://native.preview.farming-labs.dev",
+    requestedHostname: "native.preview.farmjs.dev",
+    requestedPublicUrl: "https://native.preview.farmjs.dev",
   };
 
   const running = runNativePreviewTunnel(plan, { runtime });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(calls, [
-    ["start", "wss://preview.farming-labs.dev/agent", "native", "http://localhost:3000"],
+    ["start", "wss://preview.farmjs.dev/agent", "native", "http://localhost:3000"],
     ["wait", "native-session"],
   ]);
 
@@ -377,8 +381,8 @@ test("runs the managed preview through the native tunnel lifecycle", async () =>
 test("treats a managed native disconnect before expiry as a fallback signal", async () => {
   const plan = {
     provider: "farm-gateway",
-    gatewayUrl: "https://preview.farming-labs.dev",
-    relayUrl: "wss://preview.farming-labs.dev/agent",
+    gatewayUrl: "https://preview.farmjs.dev",
+    relayUrl: "wss://preview.farmjs.dev/agent",
     expiresAt: Date.now() + 60_000,
     target: {
       localUrl: "http://localhost:3000",
@@ -387,14 +391,14 @@ test("treats a managed native disconnect before expiry as a fallback signal", as
       source: "port",
     },
     requestedName: "reconnect",
-    requestedHostname: "reconnect.preview.farming-labs.dev",
-    requestedPublicUrl: "https://reconnect.preview.farming-labs.dev",
+    requestedHostname: "reconnect.preview.farmjs.dev",
+    requestedPublicUrl: "https://reconnect.preview.farmjs.dev",
   };
   const runtime = {
     async startPreviewAgent() {
       return {
         sessionId: "native-session",
-        publicUrl: "https://reconnect.preview.farming-labs.dev",
+        publicUrl: "https://reconnect.preview.farmjs.dev",
       };
     },
     async stopPreviewAgent() {
@@ -857,7 +861,7 @@ test("runs farm preview dry-run through the managed gateway by default", async (
         "--name",
         "checkout-test",
         "--gateway",
-        "https://preview.farming-labs.dev",
+        "https://preview.farmjs.dev",
         "--dry-run",
       ],
       {
@@ -870,9 +874,9 @@ test("runs farm preview dry-run through the managed gateway by default", async (
     );
 
     assert.match(stdout, /Creating public preview/);
-    assert.match(stdout, /Gateway: https:\/\/preview\.farming-labs\.dev/);
+    assert.match(stdout, /Gateway: https:\/\/preview\.farmjs\.dev/);
     assert.match(stdout, new RegExp(`Local:\\s+http://localhost:${server.port}`));
-    assert.match(stdout, /checkout-test\.preview\.farming-labs\.dev/);
+    assert.match(stdout, /checkout-test\.preview\.farmjs\.dev/);
     assert.match(stdout, /gateway dry run completed/i);
   } finally {
     await server.close();
@@ -898,7 +902,7 @@ test("runs farm preview dry-run through the CLI", async () => {
     assert.match(stdout, /Creating public preview/);
     assert.match(stdout, new RegExp(`Local:\\s+http://localhost:${server.port}`));
     assert.match(stdout, /farm-preview-agent tunnel/);
-    assert.match(stdout, /checkout-test\.preview\.farming-labs\.dev/);
+    assert.match(stdout, /checkout-test\.preview\.farmjs\.dev/);
     assert.match(stdout, /dry run completed/i);
   } finally {
     await server.close();
@@ -978,7 +982,7 @@ async function createPreviewGatewayTestServer() {
           id: "sess_watch",
           name: "watch-check",
           token: "token_watch",
-          publicUrl: "https://watch-check.preview.farming-labs.dev",
+          publicUrl: "https://watch-check.preview.farmjs.dev",
         }),
       );
       return;
@@ -1035,7 +1039,7 @@ async function createQueuedPreviewGatewayTestServer(requests, options = {}) {
           id: "sess_queue",
           name: "request-isolation",
           token: "token_queue",
-          publicUrl: "https://request-isolation.preview.farming-labs.dev",
+          publicUrl: "https://request-isolation.preview.farmjs.dev",
         }),
       );
       return;
@@ -1109,7 +1113,7 @@ test("terminates the tunnel process when the preview URL times out", async () =>
     args: ["-e", script],
     target: { localUrl: "http://127.0.0.1:3000", host: "127.0.0.1", port: 3000, source: "port" },
     requestedName: "timeout-preview",
-    requestedHostname: "timeout-preview.preview.farming-labs.dev",
+    requestedHostname: "timeout-preview.preview.farmjs.dev",
   };
 
   const previousPidFile = process.env.FARM_TEST_PID_FILE;
@@ -1150,7 +1154,7 @@ test("ignores vendor documentation URLs before a built-in tunnel is ready", asyn
     provider: "cloudflared",
     target: { localUrl: "http://127.0.0.1:3000", host: "127.0.0.1", port: 3000, source: "port" },
     requestedName: "actual-preview",
-    requestedHostname: "actual-preview.preview.farming-labs.dev",
+    requestedHostname: "actual-preview.preview.farmjs.dev",
   };
 
   const publicUrl = await runPreviewTunnel(plan, 2_000);
@@ -1173,7 +1177,7 @@ test("finds the preview URL after a noisy tunnel prologue", async () => {
     args: ["-e", script],
     target: { localUrl: "http://127.0.0.1:3000", host: "127.0.0.1", port: 3000, source: "port" },
     requestedName: "noisy-preview",
-    requestedHostname: "noisy-preview.preview.farming-labs.dev",
+    requestedHostname: "noisy-preview.preview.farmjs.dev",
   };
 
   const publicUrl = await runPreviewTunnel(plan, 10_000);

@@ -48,10 +48,10 @@ Sign in to Farm Preview in your browser.
 Code: FARM-W7KD
 Open: https://github.com/login/device
 Signed in to Farm Preview as sam.
-Relay: wss://preview.farming-labs.dev/agent
+Relay: wss://preview.farmjs.dev/agent
 Opening native Farm preview tunnel...
 Preview URL ready.
-Public: https://checkout-test.preview.farming-labs.dev
+Public: https://checkout-test.preview.farmjs.dev
 Expires: Sep 30, 2026, 3:45 PM
 Forwarding requests through the native tunnel until Ctrl+C.
 ```
@@ -70,7 +70,7 @@ its absolute expiry instead of turning a relay invocation limit into a shortened
 Open the public URL from another browser, device, webhook provider, or test runner:
 
 ```txt
-https://checkout-test.preview.farming-labs.dev
+https://checkout-test.preview.farmjs.dev
 ```
 
 Keep both terminals running while you test. Stop the preview with `Ctrl+C`.
@@ -143,7 +143,7 @@ farm preview --port 4324 --name stripe-webhook
 Farm normalizes the name into a safe subdomain:
 
 ```txt
-https://stripe-webhook.preview.farming-labs.dev
+https://stripe-webhook.preview.farmjs.dev
 ```
 
 Names are best treated as temporary handles. Stop and restart the command when you want to rotate the session.
@@ -219,7 +219,7 @@ farm preview --port 4324 --name stripe-local
 Use the public route in the provider dashboard:
 
 ```txt
-https://stripe-local.preview.farming-labs.dev/api/stripe/webhook
+https://stripe-local.preview.farmjs.dev/api/stripe/webhook
 ```
 
 When the provider sends an event, the preview terminal shows the public request and the dev terminal shows the Farm API route. This is the fastest way to test integration routes before deploying them.
@@ -229,7 +229,7 @@ When the provider sends an event, the preview terminal shows the public request 
 For auth providers that require a public redirect URL, use a named preview URL and paste the callback path:
 
 ```txt
-https://auth-check.preview.farming-labs.dev/api/auth/callback
+https://auth-check.preview.farmjs.dev/api/auth/callback
 ```
 
 Keep the preview running for the whole login test. If you restart with a different name, update the provider callback URL too.
@@ -239,14 +239,14 @@ Keep the preview running for the whole login test. If you restart with a differe
 The default gateway is operated by Farming Labs:
 
 ```txt
-https://preview.farming-labs.dev
+https://preview.farmjs.dev
 ```
 
 Regular Farm apps do not need Vercel, DNS, Redis, ngrok, `cloudflared`, or a separately installed tunnel binary. The CLI loads `@farm.js/tunnel`, tries to open one outbound WebSocket to the gateway, and forwards requests through its native Rust transport. Compatibility gateway polling keeps previews available while the hosted relay is being rolled out.
 
 The hosted gateway owns:
 
-- TLS for `*.preview.farming-labs.dev`.
+- TLS for `*.preview.farmjs.dev`.
 - Developer identity, name authorization, and absolute session expiry.
 - Short-lived, single-preview tunnel grants. A shared relay secret is never sent to developers.
 - Request and response relay over the persistent WebSocket or compatibility polling path.

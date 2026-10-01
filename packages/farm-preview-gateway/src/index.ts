@@ -105,7 +105,7 @@ interface PreviewGatewayRuntimeConfig {
   auth?: PreviewManagedAuthOptions;
 }
 
-const DEFAULT_DOMAIN = "preview.farming-labs.dev";
+const DEFAULT_DOMAIN = "preview.farmjs.dev";
 const DEFAULT_SESSION_TTL_MS = 1000 * 60 * 30;
 const DEFAULT_CLIENT_HEARTBEAT_TIMEOUT_MS = 1000 * 20;
 const DEFAULT_REQUEST_TIMEOUT_MS = 25000;
