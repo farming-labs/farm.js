@@ -9483,27 +9483,19 @@ function createKeyedRowsBlockComponent(
       return true;
     }
 
-    private reconcileSingleRemoval(
+    private reconcileRemovals(
       rows: { items: unknown[]; keys: string[] },
       afterCommit?: () => void,
       dirtyState?: ReadonlySet<number>,
     ): boolean {
-      if (this.hasReactOwnedRows() || rows.keys.length + 1 !== this.instances.size) return false;
-      const previousKeys = [...this.instances.keys()];
-      let removedIndex = 0;
-      while (
-        removedIndex < rows.keys.length &&
-        previousKeys[removedIndex] === rows.keys[removedIndex]
-      ) {
-        removedIndex += 1;
+      if (this.hasReactOwnedRows() || rows.keys.length >= this.instances.size) return false;
+      const removed: CompilerKeyedRowInstance[] = [];
+      let nextIndex = 0;
+      for (const [key, instance] of this.instances) {
+        if (key === rows.keys[nextIndex]) nextIndex += 1;
+        else removed.push(instance);
       }
-      for (let index = removedIndex; index < rows.keys.length; index += 1) {
-        if (previousKeys[index + 1] !== rows.keys[index]) return false;
-      }
-
-      const removedKey = previousKeys[removedIndex];
-      const removed = this.instances.get(removedKey);
-      if (!removed) return false;
+      if (nextIndex !== rows.keys.length) return false;
       const shouldPrepareBindings =
         rows.items.length > 1 &&
         this.currentProps.bindings.length > 0 &&
@@ -9558,11 +9550,13 @@ function createKeyedRowsBlockComponent(
         existing.index = index;
       }
 
-      removed.scope?.cleanup();
-      removed.element.remove();
-      this.instances.delete(removedKey);
-      this.eventHandlers.delete(removedKey);
-      this.conditionalListeners.delete(removedKey);
+      for (const instance of removed) {
+        instance.scope?.cleanup();
+        instance.element.remove();
+        this.instances.delete(instance.key);
+        this.eventHandlers.delete(instance.key);
+        this.conditionalListeners.delete(instance.key);
+      }
       this.commitCurrentCollection(dirtyState);
       this.notifyConditionalChanges(conditionalChanges, afterCommit);
       return true;
@@ -9627,7 +9621,7 @@ function createKeyedRowsBlockComponent(
       }
 
       if (this.reconcileStableRows(rows, afterCommit, dirtyState)) return;
-      if (this.reconcileSingleRemoval(rows, afterCommit, dirtyState)) return;
+      if (this.reconcileRemovals(rows, afterCommit, dirtyState)) return;
 
       const nextKeys = new Set(rows.keys);
       const hasSurvivingRows = rows.keys.some((key) => this.instances.has(key));

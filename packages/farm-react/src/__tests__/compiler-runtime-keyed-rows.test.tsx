@@ -162,6 +162,91 @@ describe("compiled keyed-row runtime", () => {
     expect(listRenders).toBe(1);
   });
 
+  it("keeps ordered survivors on the removal fast path without hiding later reorders", async () => {
+    let setItems: (next: CompilerStateUpdater) => void = () => undefined;
+    const Inventory = createCompiledComponent({
+      displayName: "MultiRemovalRows",
+      initialize: () => [
+        [
+          { id: "a", label: "Alpha" },
+          { id: "b", label: "Beta" },
+          { id: "c", label: "Gamma" },
+          { id: "d", label: "Delta" },
+          { id: "e", label: "Epsilon" },
+        ],
+      ],
+      render(_props: Record<string, never>, state, blocks) {
+        setItems = (next) => state[0].set(next);
+        const items = () => state[0].get() as Item[];
+        const KeyedRows = blocks.KeyedRows;
+        return (
+          <section>
+            <KeyedRows
+              id={0}
+              render={() => (
+                <ol>
+                  {items().map((item) => (
+                    <li data-key={item.id} key={item.id}>
+                      {item.label}
+                    </li>
+                  ))}
+                </ol>
+              )}
+              items={items}
+              rowKey={(item) => (item as Item).id}
+              create={(item) => rowDescriptor(item as Item)}
+              bindings={[{ kind: "text", path: [], read: (item) => [(item as Item).label] }]}
+            />
+          </section>
+        );
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+    });
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Inventory />));
+    const initial = new Map(
+      [...container.querySelectorAll<HTMLLIElement>("li")].map((row) => [row.dataset.key, row]),
+    );
+
+    await act(async () => {
+      setItems([
+        { id: "a", label: "Alpha!" },
+        { id: "c", label: "Gamma!" },
+        { id: "e", label: "Epsilon!" },
+      ]);
+      await flushCompilerUpdates();
+    });
+
+    let rows = [...container.querySelectorAll<HTMLLIElement>("li")];
+    expect(rows.map((row) => [row.dataset.key, row.textContent])).toEqual([
+      ["a", "Alpha!"],
+      ["c", "Gamma!"],
+      ["e", "Epsilon!"],
+    ]);
+    expect(rows).toEqual([initial.get("a"), initial.get("c"), initial.get("e")]);
+    expect(initial.get("b")?.isConnected).toBe(false);
+    expect(initial.get("d")?.isConnected).toBe(false);
+
+    await act(async () => {
+      setItems([
+        { id: "e", label: "Epsilon!!" },
+        { id: "a", label: "Alpha!!" },
+      ]);
+      await flushCompilerUpdates();
+    });
+
+    rows = [...container.querySelectorAll<HTMLLIElement>("li")];
+    expect(rows.map((row) => [row.dataset.key, row.textContent])).toEqual([
+      ["e", "Epsilon!!"],
+      ["a", "Alpha!!"],
+    ]);
+    expect(rows).toEqual([initial.get("e"), initial.get("a")]);
+  });
+
   it("uses LIS to move only the rows outside the stable subsequence", async () => {
     let setItems: (next: CompilerStateUpdater) => void = () => undefined;
     const Inventory = createCompiledComponent({
