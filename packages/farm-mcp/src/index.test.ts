@@ -333,14 +333,9 @@ describe("apiMcp", () => {
         { origin: "https://trusted.example", "x-forwarded-host": "trusted.example" },
       ),
     );
-    expect(result.result.structuredContent).toEqual({
-      result: {
-        origin: "https://trusted.example",
-        forwardedHost: "trusted.example",
-        clientTag: null,
-      },
-    });
-    expect(handler).toHaveBeenCalledTimes(1);
+    expect(result.result.isError).toBe(true);
+    expect(result.result.content[0].text).toContain("additional properties schema");
+    expect(handler).not.toHaveBeenCalled();
   });
 
   it("advertises route-owned tools with generated schemas", async () => {
