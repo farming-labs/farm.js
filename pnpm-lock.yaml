@@ -1066,8 +1066,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/farm-preview-gateway
       '@farm.js/preview-tunnel':
-        specifier: 0.1.0-beta.19
-        version: 0.1.0-beta.19
+        specifier: workspace:*
+        version: link:../../packages/farm-preview-tunnel
       '@vercel/blob':
         specifier: ^2.6.1
         version: 2.6.1
@@ -5777,15 +5777,6 @@ packages:
     os: [win32]
     requiresBuild: true
     optional: true
-
-  /@farm.js/preview-tunnel@0.1.0-beta.19:
-    resolution: {integrity: sha512-dA4xbLyJh/ZPHyAyzHS2ajKHhTSt+Z3WmE1BNow6bJAyhCHkGwtjcmoyr9kYvQAf6QDxWp7vUQQO4jkAsW7UrA==}
-    dependencies:
-      ws: 8.21.0
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-    dev: false
 
   /@farm.js/tunnel-darwin-arm64@0.1.1:
     resolution: {integrity: sha512-QFZGrH22vJbHa7DbwH61kraQzIFhmi8ipd4fIP9s5cHWQB+2W0uEodZoBVbrSLhxGwxcYHqG46VJwlCIQCjnvA==}
