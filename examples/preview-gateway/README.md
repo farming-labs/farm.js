@@ -76,6 +76,23 @@ FARM_PREVIEW_DOMAIN=preview.farming-labs.dev
 FARM_PREVIEW_GATEWAY_URL=https://preview.farming-labs.dev
 ```
 
+### Managed developer login
+
+Create a GitHub OAuth app with Device Flow enabled. Configure its public client id and a private Farm
+signing secret:
+
+```bash
+openssl rand -hex 32
+vercel env add FARM_PREVIEW_GITHUB_CLIENT_ID production
+vercel env add FARM_PREVIEW_AUTH_SECRET production
+```
+
+The signing secret must contain at least 32 bytes and must not be distributed to CLI users. When
+both variables are present, the gateway exchanges a verified GitHub device login for an opaque Farm
+account token, then issues a name-bound, expiring grant for each preview. Set
+`FARM_PREVIEW_DEFAULT_TTL_MS` and `FARM_PREVIEW_MAX_TTL_MS` to override the default one-hour and
+maximum 24-hour lifetimes. Set both auth variables or neither; a partial setup fails at startup.
+
 Without Blob or Redis REST env vars, compatibility polling falls back to in-memory storage. That is useful for local development, but not reliable for production Vercel traffic because requests can be handled by different Function instances.
 
 ## CLI usage
@@ -84,7 +101,7 @@ After the gateway is deployed:
 
 ```bash
 farm dev
-farm preview --name stripe-webhook
+farm preview --name stripe-webhook --expires 2h
 ```
 
 The CLI prints:

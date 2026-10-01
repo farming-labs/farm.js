@@ -313,6 +313,8 @@ program
     process.env.FARM_PREVIEW_PROVIDER,
   )
   .option("--name <name>", "Readable preview URL name")
+  .option("--expires <duration>", "Preview lifetime, for example 30m, 2h, or 1d")
+  .option("--login", "Sign in again instead of reusing the saved Farm Preview account")
   .option("--dry-run", "Validate target detection and print the preview plan without opening it")
   .option("--no-probe", "Skip local reachability check when --port is provided")
   .action(async (options) => {
@@ -326,6 +328,8 @@ program
         url: options.url,
         gatewayUrl: options.gateway,
         name: options.name,
+        expires: options.expires,
+        login: options.login,
         dryRun: options.dryRun,
         noProbe: options.noProbe,
         provider: options.provider,

@@ -454,6 +454,141 @@ test("reports an online session name as claimed for the other preview transport"
   }
 });
 
+test("exchanges GitHub login for a scoped expiring preview session", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const signingSecret = "managed-preview-test-secret-that-is-long-enough";
+  const gateway = await createGatewayServer(store, {
+    auth: {
+      signingSecret,
+      githubClientId: "github-client-id",
+      defaultSessionTtlMs: 60_000,
+      maxSessionTtlMs: 120_000,
+      fetch: async (_url, init) => {
+        assert.equal(init.headers.authorization, "Bearer github-provider-token");
+        return Response.json({
+          id: 42,
+          login: "farm-user",
+          name: "Farm User",
+          avatar_url: "https://avatars.example.com/farm-user",
+        });
+      },
+    },
+  });
+
+  try {
+    const config = await fetch(`${gateway.url}/api/auth/config`).then((response) =>
+      response.json(),
+    );
+    assert.deepEqual(config, {
+      enabled: true,
+      provider: "github",
+      clientId: "github-client-id",
+      scope: "read:user",
+      defaultSessionTtlMs: 60_000,
+      maxSessionTtlMs: 120_000,
+    });
+
+    const accountResponse = await fetch(`${gateway.url}/api/auth/exchange`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "github", accessToken: "github-provider-token" }),
+    });
+    assert.equal(accountResponse.status, 200);
+    const account = await accountResponse.json();
+    assert.equal(account.user.login, "farm-user");
+    assert.ok(account.token);
+
+    const invalidExpiry = await fetch(`${gateway.url}/api/tunnel/grants`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${account.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name: "managed-demo", expiresInMs: 1.5 }),
+    });
+    assert.equal(invalidExpiry.status, 400);
+
+    const grantResponse = await fetch(`${gateway.url}/api/tunnel/grants`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${account.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name: "managed-demo", expiresInMs: 90_000 }),
+    });
+    assert.equal(grantResponse.status, 200);
+    const grant = await grantResponse.json();
+    assert.equal(grant.name, "managed-demo");
+    assert.ok(grant.expiresAt > Date.now() + 80_000);
+
+    const mismatchedGrant = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${grant.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name: "another-name" }),
+    });
+    assert.equal(mismatchedGrant.status, 401);
+
+    const [prefix, payload, signature] = grant.token.split(".");
+    const tamperedPayload = `${payload.startsWith("A") ? "B" : "A"}${payload.slice(1)}`;
+    const tamperedToken = `${prefix}.${tamperedPayload}.${signature}`;
+    const tamperedGrant = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${tamperedToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name: "managed-demo" }),
+    });
+    assert.equal(tamperedGrant.status, 401);
+
+    const unauthenticated = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "managed-demo" }),
+    });
+    assert.equal(unauthenticated.status, 401);
+
+    const sessionResponse = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${grant.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name: "managed-demo", localUrl: "http://localhost:4321" }),
+    });
+    assert.equal(sessionResponse.status, 200);
+    const session = await sessionResponse.json();
+    assert.equal(session.expiresAt, grant.expiresAt);
+
+    const heartbeat = await fetch(`${gateway.url}/api/sessions/${session.id}/heartbeat`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(heartbeat.status, 200);
+    assert.equal((await heartbeat.json()).expiresAt, grant.expiresAt);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("shows browser visitors a friendly expired preview page", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store);
+
+  try {
+    const response = await fetch(`${gateway.url}/__preview/finished-demo`, {
+      headers: { accept: "text/html" },
+    });
+    assert.equal(response.status, 410);
+    assert.match(await response.text(), /This Farm preview has expired/);
+  } finally {
+    await gateway.close();
+  }
+});
+
 async function createGatewayServer(store, options = {}) {
   const handler = createNodePreviewGatewayHandler({
     store,

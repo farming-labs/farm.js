@@ -39,12 +39,18 @@ export async function runNativePreviewTunnel(
 
   logger.success("Preview URL ready.");
   logger.info(`Public: ${session.publicUrl}`);
+  if (plan.expiresAt) {
+    logger.info(`Expires: ${new Date(plan.expiresAt).toLocaleString()}`);
+  }
   logger.info("Forwarding requests through the native tunnel until Ctrl+C.");
 
   try {
     const waited = await runtime.waitPreviewAgent(session.sessionId);
     if (!waited) {
       throw new Error("The native preview tunnel stopped before its lifecycle could be observed.");
+    }
+    if (!stopping && plan.expiresAt && Date.now() + 1000 < plan.expiresAt) {
+      throw new Error("The native preview relay disconnected before the preview expired.");
     }
     return session;
   } finally {

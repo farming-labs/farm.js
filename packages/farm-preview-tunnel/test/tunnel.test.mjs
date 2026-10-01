@@ -713,6 +713,60 @@ test("refuses every registration when no relay credential is configured", async 
   }
 });
 
+test("binds an authorized native relay session to its absolute expiry", async () => {
+  const seen = [];
+  const relay = createPersistentPreviewRelay({
+    authorizeAgent(input) {
+      seen.push(input);
+      if (input.token !== "session-grant" || input.name !== "expiring") return false;
+      return { expiresAt: Date.now() + 75 };
+    },
+  });
+  const address = await relay.listen();
+  const socket = new WebSocket(`${address.websocketUrl}?token=session-grant`);
+
+  try {
+    await once(socket, "open");
+    const readyMessage = once(socket, "message");
+    const closed = once(socket, "close");
+    socket.send(JSON.stringify({ type: "register", name: "expiring" }));
+    const [data] = await readyMessage;
+    const ready = JSON.parse(data.toString());
+    assert.equal(ready.type, "ready");
+    assert.ok(ready.expiresAt > Date.now());
+    assert.deepEqual(seen, [{ token: "session-grant", name: "expiring" }]);
+
+    const [code, reason] = await closed;
+    assert.equal(code, 1000);
+    assert.equal(reason.toString(), "Preview expired");
+    await expectInactive(ready.publicUrl);
+  } finally {
+    socket.close();
+    await relay.close();
+  }
+});
+
+test("rejects an invalid expiry returned by the relay authorizer", async () => {
+  const relay = createPersistentPreviewRelay({
+    authorizeAgent: () => ({ expiresAt: Number.NaN }),
+  });
+  const address = await relay.listen();
+  const socket = new WebSocket(`${address.websocketUrl}?token=session-grant`);
+
+  try {
+    await once(socket, "open");
+    const message = once(socket, "message");
+    const closed = once(socket, "close");
+    socket.send(JSON.stringify({ type: "register", name: "invalid-expiry" }));
+    const [data] = await message;
+    assert.match(JSON.parse(data.toString()).message, /expired or is invalid/);
+    assert.equal((await closed)[0], 1008);
+  } finally {
+    socket.close();
+    await relay.close();
+  }
+});
+
 test("keeps a name an authenticated gateway session owns out of relay claims", async () => {
   const gatewayOwnedNames = new Set(["victim"]);
   const relay = createPersistentPreviewRelay({
