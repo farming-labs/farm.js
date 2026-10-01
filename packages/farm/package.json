@@ -680,7 +680,7 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
-    "@clerk/react": "^6.1.0",
+    "@clerk/react": "^6.4.3",
     "@farm.js/renderer-tests": "workspace:*",
     "@opentelemetry/sdk-node": "0.221.0",
     "@opentelemetry/sdk-trace-base": "2.10.0",

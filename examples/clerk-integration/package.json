@@ -9,8 +9,8 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@clerk/backend": "^3.2.0",
-    "@clerk/react": "^6.1.0",
+    "@clerk/backend": "^3.2.14",
+    "@clerk/react": "^6.4.3",
     "@farm.js/clerk": "workspace:*",
     "@farm.js/core": "workspace:*",
     "react": "19.2.8",
