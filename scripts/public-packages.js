@@ -14,7 +14,7 @@ function readPublicPackages(root = workspaceRoot) {
       if (!fs.existsSync(manifestPath)) return null;
       const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
       return manifest.name && manifest.version && !manifest.private
-        ? { dir, name: manifest.name, version: manifest.version }
+        ? { dir, name: manifest.name, version: manifest.version, manifest }
         : null;
     })
     .filter(Boolean)

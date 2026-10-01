@@ -104,9 +104,9 @@ test("publishes a stable shared group next to independent betas", () => {
 
 test("detects beta packages that still resolve a prerelease core", () => {
   const packages = [
-    { name: "@farm.js/core", version: "0.1.0" },
-    { name: "@farm.js/otel", version: "0.1.0-beta.27" },
-    { name: "@farm.js/vue", version: "0.1.0-beta.27" },
+    { name: "@farm.js/core", version: "0.1.0", manifest: {} },
+    { name: "@farm.js/otel", version: "0.1.0-beta.27", manifest: {} },
+    { name: "@farm.js/vue", version: "0.1.0-beta.27", manifest: {} },
   ];
   const manifests = {
     "@farm.js/otel": { dependencies: { "@farm.js/core": "0.1.0-beta.109" } },
@@ -123,6 +123,56 @@ test("detects beta packages that still resolve a prerelease core", () => {
       {
         package: "@farm.js/vue@0.1.0-beta.27",
         dependency: "^0.1.0-beta.109",
+        stableCore: "0.1.0",
+      },
+    ],
+  );
+});
+
+test("checks peer dependencies even when a stable runtime dependency is present", () => {
+  const packages = [
+    { name: "@farm.js/core", version: "0.1.0", manifest: {} },
+    {
+      name: "@farm.js/webmcp",
+      version: "0.1.0-beta.0",
+      manifest: {
+        dependencies: { "@farm.js/core": "^0.1.0" },
+        peerDependencies: { "@farm.js/core": "^0.1.0-beta.109" },
+      },
+    },
+  ];
+
+  assert.deepEqual(
+    findStableCoreDependencyMismatches(packages, () => packages[1].manifest),
+    [
+      {
+        package: "@farm.js/webmcp@0.1.0-beta.0",
+        dependency: "^0.1.0-beta.109",
+        stableCore: "0.1.0",
+      },
+    ],
+  );
+});
+
+test("uses the local manifest before a beta version is visible on the registry", () => {
+  const packages = [
+    { name: "@farm.js/core", version: "0.1.0", manifest: {} },
+    {
+      name: "@farm.js/new-tool",
+      version: "0.1.0-beta.0",
+      manifest: { dependencies: { "@farm.js/core": "0.1.0-beta.109" } },
+    },
+  ];
+
+  assert.deepEqual(
+    findStableCoreDependencyMismatches(packages, (_name, _version, localManifest) => {
+      if (!localManifest) throw new Error("not visible yet");
+      return localManifest;
+    }),
+    [
+      {
+        package: "@farm.js/new-tool@0.1.0-beta.0",
+        dependency: "0.1.0-beta.109",
         stableCore: "0.1.0",
       },
     ],

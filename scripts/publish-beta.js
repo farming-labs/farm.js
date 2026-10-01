@@ -113,22 +113,28 @@ function isVersionVisible(name, version) {
   }
 }
 
-function readRegistryManifest(name, version) {
+function readRegistryManifest(name, version, localManifest) {
   const spec = `${name}@${version}`;
-  execFileSync("npm", ["view", spec, "version", "--json"], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const readField = (field) => {
-    try {
-      const value = execFileSync("npm", ["view", spec, field, "--json"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      }).trim();
-      return value ? JSON.parse(value) : undefined;
-    } catch {
-      return undefined;
+  try {
+    execFileSync("npm", ["view", spec, "version", "--json"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    if (localManifest) {
+      return {
+        dependencies: localManifest.dependencies,
+        peerDependencies: localManifest.peerDependencies,
+      };
     }
+    throw error;
+  }
+  const readField = (field) => {
+    const value = execFileSync("npm", ["view", spec, field, "--json"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    return value ? JSON.parse(value) : undefined;
   };
   return {
     dependencies: readField("dependencies"),
@@ -149,7 +155,7 @@ function findStableCoreDependencyMismatches(
     if (!pkg.version.includes("-beta.") || pkg.name === coreName) continue;
     let manifest;
     try {
-      manifest = getManifest(pkg.name, pkg.version);
+      manifest = getManifest(pkg.name, pkg.version, pkg.manifest);
     } catch {
       mismatches.push({
         package: `${pkg.name}@${pkg.version}`,
@@ -157,13 +163,17 @@ function findStableCoreDependencyMismatches(
       });
       continue;
     }
-    const dependency = manifest?.dependencies?.[coreName] ?? manifest?.peerDependencies?.[coreName];
-    if (typeof dependency === "string" && dependency.includes("-")) {
-      mismatches.push({
-        package: `${pkg.name}@${pkg.version}`,
-        dependency,
-        stableCore: stableCore.version,
-      });
+    for (const dependency of [
+      manifest?.dependencies?.[coreName],
+      manifest?.peerDependencies?.[coreName],
+    ]) {
+      if (typeof dependency === "string" && dependency.includes("-")) {
+        mismatches.push({
+          package: `${pkg.name}@${pkg.version}`,
+          dependency,
+          stableCore: stableCore.version,
+        });
+      }
     }
   }
   return mismatches;
