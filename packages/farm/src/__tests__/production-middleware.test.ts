@@ -18,6 +18,10 @@ async function readJavaScriptOutput(dir: string): Promise<string> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   const contents = await Promise.all(
     entries.map(async (entry) => {
+      // Runtime packages are staged alongside the Nitro bundle. Inspect only
+      // generated server chunks here; package internals may legitimately
+      // mention their optional native package names (Sharp 0.35+ does this).
+      if (entry.name === "node_modules") return "";
       const entryPath = path.join(dir, entry.name);
       if (entry.isDirectory()) return readJavaScriptOutput(entryPath);
       return entry.name.endsWith(".mjs") ? fs.readFile(entryPath, "utf8") : "";
