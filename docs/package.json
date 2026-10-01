@@ -8,7 +8,7 @@
     "build": "pnpm --filter @farm.js/core build:runtime && pnpm --filter @farm.js/cli build && pnpm --filter @farm.js/devtools build:runtime && pnpm run prisma:generate && NODE_OPTIONS=--max-old-space-size=6144 farm build && pnpm run check:vercel",
     "check:vercel": "node scripts/check-vercel-runtime.mjs",
     "preview": "farm preview",
-    "test": "vitest run",
+    "test": "pnpm run prisma:generate && vitest run",
     "prisma:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://user:password@localhost:5432/farmjs} node ../scripts/run-prisma-generate.mjs",
     "db:push": "prisma db push",
     "db:waitlist": "pnpm run prisma:generate && node --env-file-if-exists=.env.local scripts/setup-waitlist.mjs"
