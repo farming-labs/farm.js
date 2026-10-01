@@ -103,6 +103,12 @@ async function verifyPolicy(
   );
   expect(invalidOutput.result.isError).toBe(true);
   expect(invalidOutput.result.structuredContent).toBeUndefined();
+  expect(invalidOutput.result.content).toEqual([
+    {
+      type: "text",
+      text: 'MCP tool "search_projects" returned a value that does not match its output schema.',
+    },
+  ]);
   expect(JSON.stringify(invalidOutput)).not.toContain("private output");
   const forbidden = await read(
     await call("tools/call", "reader", { name: "private_tool", arguments: {} }),

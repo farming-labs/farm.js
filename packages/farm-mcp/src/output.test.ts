@@ -5,8 +5,8 @@ import { createRouteFactory } from "@farm.js/core/api";
 import { invokeAPIRouteEndpoint, mergePluginAPIRoutes } from "@farm.js/core/api/runtime";
 import { apiMcp, defineTool } from "./index.js";
 
-async function call(endpoint: any, method: string, params?: unknown, signal?: AbortSignal) {
-  const response = await invokeAPIRouteEndpoint(
+function request(endpoint: any, method: string, params?: unknown, signal?: AbortSignal) {
+  return invokeAPIRouteEndpoint(
     endpoint,
     new Request("http://farm.test/api/mcp", {
       method: "POST",
@@ -19,6 +19,10 @@ async function call(endpoint: any, method: string, params?: unknown, signal?: Ab
       signal,
     }),
   );
+}
+
+async function call(endpoint: any, method: string, params?: unknown) {
+  const response = await request(endpoint, method, params);
   const text = await response.text();
   const data = response.headers.get("content-type")?.startsWith("text/event-stream")
     ? text
@@ -309,17 +313,22 @@ describe("MCP output schemas", () => {
     });
     const execute = vi.fn(() => ({ count: 4 }));
     const endpoint = standalone(z.object({ count: z.number() }).refine(validate), execute);
-    const pending = call(
+    const pending = request(
       endpoint,
       "tools/call",
       { name: "result", arguments: {} },
       controller.signal,
-    ).catch(() => undefined);
+    );
     await ready;
     controller.abort();
     finish();
     const response = await pending;
-    expect(response?.result?.structuredContent).toBeUndefined();
+    // Aborting the HTTP request closes the SDK's SSE stream; no MCP result is
+    // sent to the disconnected client. Inspect that response directly instead
+    // of swallowing a JSON parse error and making the assertion vacuous.
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    expect(await response.text()).toBe("");
     expect(execute).toHaveBeenCalledTimes(1);
     expect(validate).toHaveBeenCalledTimes(1);
   });
