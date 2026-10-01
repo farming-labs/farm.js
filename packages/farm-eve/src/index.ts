@@ -109,7 +109,13 @@ export function eve(options: EveOptions = {}): EveIntegration {
       ? {
           async afterBuild(context) {
             if (context.preset !== "vercel" && context.preset !== "vercel-edge") {
-              return;
+              // Returning here used to ship the app without Eve: no origin was
+              // configured, so every /eve request answered 503 in production.
+              throw new Error(
+                `@farm.js/eve is only composed into Vercel output, and this build uses the "${context.preset}" preset. ` +
+                  'Deploy with deploy.target "vercel", set origin (or EVE_BASE_URL during the build) to a separately deployed Eve service, ' +
+                  "or set vercel: false if the server will receive EVE_BASE_URL at runtime.",
+              );
             }
             assertEveNodeVersion();
             await writeEveVercelOutput({
