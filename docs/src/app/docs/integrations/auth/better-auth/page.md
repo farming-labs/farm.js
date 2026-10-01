@@ -160,3 +160,8 @@ For client-only guards, wait for `authClient.getSession()` before rendering priv
 - Keep database and OAuth credentials server-only.
 - Verify trusted origins, cookies, and proxy headers on the deployed origin.
 - Test sign-up, sign-in, session reads, sign-out, provider callbacks, and every enabled plugin.
+
+When upgrading an existing installation to Better Auth 1.7, review the generated schema before
+deploying. Run `compileFarmAuthMigration()` (or the Better Auth migration command) against a copy
+of the production database, resolve duplicate account keys and any provider or plugin-specific
+data steps, then apply the reviewed migration before starting the new application version.
