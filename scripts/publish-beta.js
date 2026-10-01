@@ -113,6 +113,11 @@ function isVersionVisible(name, version) {
   }
 }
 
+function isMissingRegistryVersion(error) {
+  const output = `${error?.stdout ?? ""}${error?.stderr ?? ""}${error?.message ?? ""}`;
+  return /E404|404 Not Found|No match found/i.test(output);
+}
+
 function readRegistryManifest(name, version, localManifest) {
   const spec = `${name}@${version}`;
   try {
@@ -121,7 +126,7 @@ function readRegistryManifest(name, version, localManifest) {
       stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (error) {
-    if (localManifest) {
+    if (localManifest && isMissingRegistryVersion(error)) {
       return {
         dependencies: localManifest.dependencies,
         peerDependencies: localManifest.peerDependencies,
@@ -305,6 +310,7 @@ module.exports = {
   groupPackagesByDistTag,
   findStableCoreDependencyMismatches,
   assertStableCoreDependencies,
+  isMissingRegistryVersion,
   isRetryableStagedPublishError,
   parsePublishBetaArgs,
   publishArgs,

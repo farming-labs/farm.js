@@ -5,6 +5,7 @@ const {
   distTagForVersion,
   findStableCoreDependencyMismatches,
   groupPackagesByDistTag,
+  isMissingRegistryVersion,
   isRetryableStagedPublishError,
   parsePublishBetaArgs,
   publishArgs,
@@ -64,6 +65,11 @@ test("does not retry unrelated publish failures", () => {
     isRetryableStagedPublishError("npm error 404 Not Found - PUT https://registry.npmjs.org/x"),
     false,
   );
+});
+
+test("only falls back to local metadata when the registry reports a missing version", () => {
+  assert.equal(isMissingRegistryVersion({ stderr: "npm error E404 No match found" }), true);
+  assert.equal(isMissingRegistryVersion({ stderr: "npm error ECONNRESET" }), false);
 });
 
 test("derives each package's dist-tag from its version", () => {
