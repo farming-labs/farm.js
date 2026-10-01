@@ -1066,8 +1066,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/farm-preview-gateway
       '@farm.js/preview-tunnel':
-        specifier: 0.1.0-beta.19
-        version: 0.1.0-beta.19
+        specifier: workspace:*
+        version: link:../../packages/farm-preview-tunnel
       '@vercel/blob':
         specifier: ^2.6.1
         version: 2.6.1
