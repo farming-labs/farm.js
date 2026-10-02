@@ -170,8 +170,8 @@ interface MetadataImageEntry extends RouteEntry {
 
 export interface ApplicationMetadataRouteEntry extends RouteEntry {
   kind: ApplicationMetadataRouteKind;
-  fileName: "sitemap" | "robots" | "manifest";
-  outputName: "sitemap.xml" | "robots.txt" | "manifest.webmanifest";
+  fileName: "sitemap" | "robots" | "manifest" | "llms";
+  outputName: "sitemap.xml" | "robots.txt" | "manifest.webmanifest" | "llms.txt";
 }
 
 interface RedirectEntry {
@@ -888,7 +888,10 @@ export class RouteManager {
       `**/{opengraph-image,twitter-image}.{${componentGlob},png,jpg,jpeg,gif,webp}`,
       appDir,
     );
-    const metadataRouteFiles = await safeGlobFiles("**/{sitemap,robots,manifest}.{ts,js}", appDir);
+    const metadataRouteFiles = await safeGlobFiles(
+      "**/{sitemap,robots,manifest,llms}.{ts,js}",
+      appDir,
+    );
 
     const canonicalPageGroups = new Map<
       string,
@@ -1426,6 +1429,9 @@ function getApplicationMetadataRouteDescriptor(fileName: string): {
   if (fileName === "manifest") {
     return { kind: "manifest", fileName: "manifest", outputName: "manifest.webmanifest" };
   }
+  if (fileName === "llms") {
+    return { kind: "llms", fileName: "llms", outputName: "llms.txt" };
+  }
   return null;
 }
 
@@ -1433,7 +1439,7 @@ function getApplicationMetadataRouteSuffix(pathname: string): {
   kind: ApplicationMetadataRouteKind;
   outputName: ApplicationMetadataRouteEntry["outputName"];
 } | null {
-  for (const fileName of ["sitemap", "robots", "manifest"] as const) {
+  for (const fileName of ["sitemap", "robots", "manifest", "llms"] as const) {
     const descriptor = getApplicationMetadataRouteDescriptor(fileName)!;
     if (
       pathname === `/${descriptor.outputName}` ||

@@ -4,6 +4,11 @@
  * sites that do not want agent exposure (internal tools, private dashboards) are
  * unaffected.
  */
+import {
+  resolveFarmLlmsTxtConfig,
+  type FarmLlmsTxtUserConfig,
+  type ResolvedFarmLlmsTxtConfig,
+} from "./llms-txt";
 
 /** schema.org JSON-LD emitted in the document head to identify the site. */
 export interface FarmAgentJsonLd {
@@ -37,18 +42,30 @@ export interface FarmAgentUserConfig {
    * @default false
    */
   jsonLd?: boolean | FarmAgentJsonLd;
+  /**
+   * Serve `/llms.txt` (https://llmstxt.org): a Markdown index of the app's static
+   * pages, linking to their Markdown mirrors. `true` builds it from page metadata;
+   * an object sets the title, summary, details, and which routes to list. A
+   * `src/app/llms.ts` metadata route replaces the generated file.
+   *
+   * @default false
+   */
+  llmsTxt?: boolean | FarmLlmsTxtUserConfig;
 }
 
 export interface ResolvedFarmAgentConfig {
   jsonLd: FarmAgentJsonLd | false;
+  llmsTxt: ResolvedFarmLlmsTxtConfig;
 }
 
 export function resolveFarmAgentConfig(
   input: FarmAgentUserConfig | undefined,
 ): ResolvedFarmAgentConfig {
   const jsonLd = input?.jsonLd;
-  if (!jsonLd) return { jsonLd: false };
-  return { jsonLd: jsonLd === true ? {} : jsonLd };
+  return {
+    jsonLd: !jsonLd ? false : jsonLd === true ? {} : jsonLd,
+    llmsTxt: resolveFarmLlmsTxtConfig(input?.llmsTxt),
+  };
 }
 
 export interface FarmAgentJsonLdContext {

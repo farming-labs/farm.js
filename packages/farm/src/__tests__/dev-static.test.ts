@@ -123,6 +123,39 @@ describe("shouldBypassFarmRouterForDottedPath", () => {
     ).toBe(true);
   });
 
+  it("keeps a generated /llms.txt on the Farm renderer", () => {
+    // agent.llmsTxt serves /llms.txt without an llms.ts file, so no route matches it;
+    // treating it as a static file 404'd it in dev while production served it.
+    const routeManager = createRouteManager({});
+    expect(
+      shouldBypassFarmRouterForDottedPath(
+        "/llms.txt",
+        routeManager,
+        [publicDir, root],
+        ["/llms.txt"],
+      ),
+    ).toBe(false);
+    expect(shouldBypassFarmRouterForDottedPath("/llms.txt", routeManager, [publicDir, root])).toBe(
+      true,
+    );
+  });
+
+  it("lets a real file shadow a generated path", () => {
+    fs.writeFileSync(path.join(publicDir, "llms.txt"), "# Static");
+    try {
+      expect(
+        shouldBypassFarmRouterForDottedPath(
+          "/llms.txt",
+          createRouteManager({}),
+          [publicDir, root],
+          ["/llms.txt"],
+        ),
+      ).toBe(true);
+    } finally {
+      fs.rmSync(path.join(publicDir, "llms.txt"));
+    }
+  });
+
   it("never bypasses undotted or html paths", () => {
     const routeManager = createRouteManager({});
     expect(shouldBypassFarmRouterForDottedPath("/about", routeManager, [publicDir, root])).toBe(

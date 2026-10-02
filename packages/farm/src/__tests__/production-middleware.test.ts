@@ -82,6 +82,11 @@ describe("production middleware runtime", () => {
         createFarmVercelImmutableAssetRoute(),
       );
       expect(vercelOutputConfig.routes[filesystemIndex]).toEqual({ handle: "filesystem" });
+      // public/llms.txt ships as a static file, which the filesystem phase serves before
+      // the function's generated agent.llmsTxt index.
+      expect(
+        await fs.readFile(path.join(root, ".vercel", "output", "static", "llms.txt"), "utf8"),
+      ).toBe("# Static fixture index\n");
       // At least one preset source route (a redirect or header route) is
       // preserved ahead of the immutable route; the old wholesale rebuild
       // dropped every one of them on Vercel.
@@ -306,6 +311,49 @@ describe("production middleware runtime", () => {
       const sitemapXml = await sitemapResponse.text();
       expect(sitemapXml).toContain("<loc>https://example.test/?campaign=spring&amp;summer</loc>");
       expect(sitemapXml).toContain("<lastmod>2026-08-16T12:00:00.000Z</lastmod>");
+
+      // agent.llmsTxt with no root llms.ts: the generated index of static pages.
+      const llmsResponse = await serverModule.default.fetch(
+        new Request("https://example.test/llms.txt"),
+      );
+      expect(llmsResponse.status).toBe(200);
+      expect(llmsResponse.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+      const llmsText = await llmsResponse.text();
+      expect(
+        llmsText.startsWith(
+          "# Farm production fixture\n\n> Pages served by the production fixture.\n\n## Pages\n\n",
+        ),
+      ).toBe(true);
+      expect(llmsText).toContain(
+        "- [Explicit image](https://example.test/dashboard/explicit.md)\n",
+      );
+      expect(llmsText).toContain("- [Dashboard notes](https://example.test/dashboard/notes.md)\n");
+      expect(llmsText).toContain("- [Public notes](https://example.test/public-notes.md)\n");
+      expect(llmsText).not.toContain("private-notes");
+      expect(llmsText).not.toContain("[id]");
+
+      // A nested llms.ts receives the same pages and defaults and wins under its segment.
+      const notesLlmsResponse = await serverModule.default.fetch(
+        new Request("https://example.test/public-notes/llms.txt"),
+      );
+      expect(notesLlmsResponse.status).toBe(200);
+      expect(await notesLlmsResponse.text()).toBe(
+        [
+          "# Fixture notes",
+          "",
+          "> Pages served by the production fixture.",
+          "",
+          "## Notes",
+          "",
+          "- [Dashboard notes](https://example.test/dashboard/notes.md)",
+          "- [Public notes](https://example.test/public-notes.md)",
+          "",
+          "## Optional",
+          "",
+          "- [Status](https://status.example.test)",
+          "",
+        ].join("\n"),
+      );
 
       const userSitemapResponse = await serverModule.default.fetch(
         new Request("https://example.test/users/42/sitemap.xml"),

@@ -357,6 +357,25 @@ function getMarkdownAlternatePath(pathname: string): string {
   return pathname === "/" ? "/index.md" : `${pathname}.md`;
 }
 
+/** @internal The `.md` URL that serves a page's Markdown mirror. */
+export function getFarmMarkdownMirrorPath(pathname: string): string {
+  return getMarkdownAlternatePath(pathname);
+}
+
+/** @internal Whether `pathname` has a Markdown mirror under `config`. */
+export function isFarmMarkdownMirrorExposed(
+  config: FarmMarkdownResolvedConfig | undefined,
+  pathname: string,
+): boolean {
+  if (!config?.enabled) return false;
+  return config.expose === true || findExposedMarkdownRoute(config, pathname) !== null;
+}
+
+/** @internal Matches a page pathname against a route pattern such as `/docs/[...slug]`. */
+export function matchesFarmMarkdownRoutePattern(pattern: string, pathname: string): boolean {
+  return routeMatches(pattern, pathname);
+}
+
 function appendHeaderToken(headers: Headers, name: string, token: string): void {
   const current = headers.get(name);
   if (!current) {

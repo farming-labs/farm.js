@@ -20,12 +20,15 @@ export function shouldBypassFarmRouterForDottedPath(
   pathname: string,
   routeManager: DottedPathRouteMatcher | null | undefined,
   baseDirs: Array<string | false | undefined>,
+  /** Dotted paths the renderer serves without a route file, such as a configured /llms.txt. */
+  generatedPaths: readonly string[] = [],
 ): boolean {
   if (!pathname.includes(".") || pathname.endsWith(".html")) return false;
   const matchesAppRoute = Boolean(
     routeManager?.matchRoute(pathname)?.route ||
     routeManager?.matchMetadataRoute(pathname) ||
-    routeManager?.matchMetadataImage(pathname),
+    routeManager?.matchMetadataImage(pathname) ||
+    generatedPaths.includes(pathname),
   );
   return !matchesAppRoute || devServableFileExists(pathname, baseDirs);
 }

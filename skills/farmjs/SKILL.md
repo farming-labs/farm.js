@@ -115,6 +115,7 @@ Common config fields:
 - `integrations`: provider integrations object
 - `auth`: built-in email/password auth and sessions
 - `mcp`: authenticated MCP transport for opted-in typed API routes
+- `agent`: opt-in agent readiness: an `llmsTxt` index of static pages and schema.org `jsonLd`
 - `theme`: light, dark, and system behavior
 - `storage.mounts`: named storage instances
 - `migrations`: one-shot schema and provider commands
@@ -145,6 +146,8 @@ Read `docs/src/app/docs/configuration/page.md` before adding an unfamiliar optio
 - Farm writes typed `Link href` declarations into `src/farm.d.ts`
 - Typed `href` supports query strings and hashes, for example `/users/123?tab=profile`
 - File boundaries include `loading`, `error`, and `not-found`
+- Metadata route files `sitemap.ts`, `robots.ts`, `manifest.ts`, and `llms.ts` serve
+  `/sitemap.xml`, `/robots.txt`, `/manifest.webmanifest`, and `/llms.txt`
 - Route exports or route rules select dynamic, static, ISR, PPR, runtime, and cache behavior
 
 Page shape:
@@ -443,6 +446,9 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
 - Configure `theme` for no-flash light/dark/system rendering and typed client/server access.
 - Use Farm image helpers plus the `images` allowlist and format policy for optimization.
 - Use `docs` for human docs, shared search, markdown, `llms.txt`, sitemap, robots, and agent APIs.
+- Use `agent.llmsTxt` for an app's own `/llms.txt`. A static `public/llms.txt` overrides it, and so
+  does `src/app/llms.ts`, which returns the whole file as a string or the structured format and
+  receives the generated `pages` and `defaults`.
 - Use `md`/`mdx` for page mirrors and content routes; use `openapi` for API references.
 - Use `after()` only for short post-response work and a jobs integration for durable work.
 - Configure OpenTelemetry and Farm runtime events for correlated traces.

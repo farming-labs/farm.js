@@ -385,9 +385,21 @@ describe("resolveConfig", () => {
     expect((disabled.openapi as any).specRoute).toBe(false);
   });
 
-  it("resolves the agent config with JSON-LD off by default", async () => {
+  it("resolves the agent config with JSON-LD and llms.txt off by default", async () => {
     const defaults = await resolveConfig({}, "production");
     expect(defaults.agent.jsonLd).toBe(false);
+    expect(defaults.agent.llmsTxt).toEqual({ enabled: false, include: [], exclude: [] });
+
+    const llms = await resolveConfig(
+      { agent: { llmsTxt: { title: "Acme", exclude: ["/admin/[...path]"] } } },
+      "production",
+    );
+    expect(llms.agent.llmsTxt).toEqual({
+      enabled: true,
+      title: "Acme",
+      include: [],
+      exclude: ["/admin/[...path]"],
+    });
 
     const enabled = await resolveConfig({ agent: { jsonLd: true } }, "production");
     expect(enabled.agent.jsonLd).toEqual({});

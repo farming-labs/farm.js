@@ -141,6 +141,11 @@ export default defineConfig({
 Explicit `page.md` and `page.mdx` sources use `mdx.markdownRoutes`; set that option to `false` when
 their raw routes must also be disabled.
 
+## llms.txt
+
+Set `agent: { llmsTxt: true }` to publish `/llms.txt`, an index that points language models at these
+mirrors. See [Agent readiness](/docs/configuration#agent-readiness).
+
 ## Per-route options
 
 Routes can include a display title and cache override.

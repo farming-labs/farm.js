@@ -254,6 +254,7 @@ mount, and shortcut together.
 | integrations  | Registering built-in or custom integrations.                                          |
 | auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.           |
 | mcp           | Composing API routes and standalone tools in one authenticated MCP server.            |
+| agent         | Opt-in agent readiness: an llms.txt index and schema.org JSON-LD.                     |
 | theme         | Enabling light, dark, and system modes with client and server APIs.                   |
 | storage       | Configuring KV drivers/mounts and, in the current beta, an integration DB client.     |
 | migrations    | Running one-shot schema/provider commands with `farm migrate`.                        |
@@ -373,6 +374,41 @@ authorized principal without creating separate HTTP routes. Optional `outputSche
 standalone results; endpoint-backed tools reuse a route factory's `output` validator. Both advertise
 the validated result shape to MCP clients. See [API MCP](/docs/plugins/mcp) for
 mixed declarations, the resolved catalog, and permission checks.
+
+## Agent readiness
+
+`agent` holds opt-in features that help AI agents and crawlers understand a public site. Both are
+off by default, so internal tools and private dashboards are unaffected.
+
+```ts title="farm.config.ts"
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  agent: {
+    llmsTxt: {
+      title: "Acme",
+      summary: "Billing for small teams.",
+      exclude: ["/admin/[...path]"],
+    },
+    jsonLd: true,
+  },
+});
+```
+
+`llmsTxt: true` serves [`/llms.txt`](https://llmstxt.org): a Markdown index of every static page,
+with each page's metadata title and description, linking to its [Markdown mirror](/docs/markdown)
+when one is exposed. An options object sets the `title` and `summary` (the root layout's metadata by
+default), adds `details` Markdown, and narrows the list with `include` and `exclude` route patterns,
+which use the same syntax as `md.expose`. Dynamic routes are left out because they have no single
+URL.
+
+Two things override the generated file. A static `public/llms.txt` is served as-is. An
+[`llms.ts` metadata route](/docs/routing#application-metadata-routes) replaces it with whatever it
+returns, either the complete file as a string or the structured format, and receives the generated
+pages and defaults to build on. When the [docs engine](/docs/docs-engine) is enabled too, the app's
+own llms.txt takes `/llms.txt`.
+
+`jsonLd: true` adds a schema.org `Organization` to page heads; an object sets the `@type` and fields.
 
 ## Isolated client hydration
 

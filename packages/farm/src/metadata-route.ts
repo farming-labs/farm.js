@@ -1,6 +1,13 @@
+import {
+  serializeFarmLlmsTxt,
+  type FarmLlmsTxt,
+  type FarmLlmsTxtLink,
+  type FarmLlmsTxtPage,
+  type FarmLlmsTxtSection,
+} from "./llms-txt";
 import { omitFarmResponseBody } from "./response-body";
 
-export type ApplicationMetadataRouteKind = "sitemap" | "robots" | "manifest";
+export type ApplicationMetadataRouteKind = "sitemap" | "robots" | "manifest" | "llms";
 
 export namespace MetadataRoute {
   export type SitemapChangeFrequency =
@@ -60,6 +67,24 @@ export namespace MetadataRoute {
     categories?: string[];
     icons?: ManifestIcon[];
     [key: string]: unknown;
+  }
+
+  /**
+   * The object an `llms.ts` metadata route returns, rendered as llms.txt. An
+   * `llms.ts` can also return the complete file as a string, or a `Response`.
+   */
+  export type LlmsTxt = FarmLlmsTxt;
+  export type LlmsTxtSection = FarmLlmsTxtSection;
+  export type LlmsTxtLink = FarmLlmsTxtLink;
+  /** A static page of the app, usable directly as an llms.txt link. */
+  export type LlmsTxtPage = FarmLlmsTxtPage;
+
+  /** What an `llms.ts` default-export function receives. */
+  export interface LlmsTxtContext extends MetadataRouteContext {
+    /** The app's static pages, linking to their Markdown mirrors when exposed. */
+    pages: LlmsTxtPage[];
+    /** The llms.txt that `agent.llmsTxt` would serve, to extend instead of replace. */
+    defaults: LlmsTxt;
   }
 }
 
@@ -228,11 +253,13 @@ export function createFarmMetadataRouteResponse(
       ? serializeSitemap(value)
       : kind === "robots"
         ? serializeRobots(value)
-        : serializeManifest(value);
+        : kind === "llms"
+          ? serializeFarmLlmsTxt(value)
+          : serializeManifest(value);
   const contentType =
     kind === "sitemap"
       ? "application/xml; charset=utf-8"
-      : kind === "robots"
+      : kind === "robots" || kind === "llms"
         ? "text/plain; charset=utf-8"
         : "application/manifest+json; charset=utf-8";
 

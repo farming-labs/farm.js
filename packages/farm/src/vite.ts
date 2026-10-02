@@ -35,6 +35,7 @@ import {
 } from "./routes-shared";
 import type { FarmDocsAPIHandler } from "./docs";
 import { createMarkdownMirrorResponse, resolveMarkdownMirrorTarget } from "./markdown";
+import { resolveFarmLlmsTxtConfig } from "./llms-txt";
 import {
   FARM_MARKDOWN_CONTENT_TYPE,
   createFarmMarkdownErrorBody,
@@ -1822,7 +1823,13 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               docsHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
             }
           }
-          if (farmDocsHandler) {
+          // An app's own llms.txt (agent.llmsTxt or src/app/llms.ts) takes /llms.txt
+          // from the docs engine, as in production; the renderer serves it below.
+          const appOwnsLlmsTxt =
+            requestPathname === "/llms.txt" &&
+            (resolveFarmLlmsTxtConfig(farmConfig.agent?.llmsTxt).enabled ||
+              farmApp.getRouteManager().matchMetadataRoute(requestPathname) !== null);
+          if (farmDocsHandler && !appOwnsLlmsTxt) {
             const docsRequest = new Request(fullUrl, {
               method: requestMethod,
               headers: docsHeaders,
@@ -2343,10 +2350,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // request maps to a real file on disk or nothing in the app matches
           // the pathname.
           if (
-            shouldBypassFarmRouterForDottedPath(requestPathname, farmApp?.getRouteManager(), [
-              server.config.publicDir,
-              server.config.root,
-            ])
+            shouldBypassFarmRouterForDottedPath(
+              requestPathname,
+              farmApp?.getRouteManager(),
+              [server.config.publicDir, server.config.root],
+              resolveFarmLlmsTxtConfig(farmConfig.agent?.llmsTxt).enabled ? ["/llms.txt"] : [],
+            )
           ) {
             return next();
           }

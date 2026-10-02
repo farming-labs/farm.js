@@ -78,6 +78,12 @@ import { renderFarmFontDevHead } from "../font-vite";
 import { createFarmMetadataImageResponse } from "../metadata-image";
 import { createFarmMetadataRouteResponse } from "../metadata-route";
 import {
+  collectFarmLlmsTxtPages,
+  createFarmDefaultLlmsTxt,
+  resolveFarmLlmsTxtConfig,
+} from "../llms-txt";
+import { resolveMarkdownConfig } from "../markdown";
+import {
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
 } from "../trailing-slash";
@@ -1135,6 +1141,15 @@ export class ServerRenderer {
         return;
       }
 
+      if (
+        pathname === "/llms.txt" &&
+        resolveFarmLlmsTxtConfig(this.config.agent?.llmsTxt).enabled
+      ) {
+        await this.renderGeneratedLlmsTxt(req, res);
+        completeRender(res.statusCode || 200, pathname);
+        return;
+      }
+
       const metadataImageMatch = this.routeManager.matchMetadataImage(pathname);
       if (metadataImageMatch) {
         await this.renderMetadataImage(req, res, {
@@ -2015,6 +2030,7 @@ export class ServerRenderer {
               params: match.params,
               searchParams: url.searchParams,
               path: match.routePath,
+              ...(match.metadata.kind === "llms" ? await this.createLlmsTxtContext(request) : {}),
             })
           : routeModule.default;
       const response = createFarmMetadataRouteResponse(match.metadata.kind, value, routeModule, {
@@ -2031,6 +2047,64 @@ export class ServerRenderer {
         }),
       );
     }
+  }
+
+  private async renderGeneratedLlmsTxt(req: FarmRequest, res: FarmResponse): Promise<void> {
+    try {
+      const request = createWebRequestFromFarmRequest(req, {
+        trustProxy: this.config.server?.trustProxy,
+      });
+      const { defaults } = await this.createLlmsTxtContext(request);
+      await sendWebResponse(
+        res as any,
+        createFarmMetadataRouteResponse("llms", defaults, {}, { method: req.method }),
+      );
+    } catch (error) {
+      logger.error(`Generated llms.txt failed: ${error}`);
+      await sendWebResponse(
+        res as any,
+        new Response("Internal Server Error", {
+          status: 500,
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        }),
+      );
+    }
+  }
+
+  /** Same inputs the production server gives llms.txt: static pages and root metadata. */
+  private async createLlmsTxtContext(request: Request) {
+    const config = resolveFarmLlmsTxtConfig(this.config.agent?.llmsTxt);
+    const origin = new URL(request.url).origin;
+    const sources: Array<{ pattern: string; metadata?: unknown }> = [];
+    for (const [pattern, route] of this.routeManager.getRoutes()) {
+      if (pattern.includes("[")) continue;
+      try {
+        sources.push({
+          pattern,
+          metadata: (await this.routeManager.loadRouteModule(route.modulePath)).metadata,
+        });
+      } catch (error) {
+        // The page itself will surface this error; list it with its fallback title.
+        logger.warn(`Could not read metadata for ${pattern} in llms.txt: ${error}`);
+        sources.push({ pattern });
+      }
+    }
+
+    const rootLayout = this.routeManager.getLayouts().get("/");
+    const rootMetadata = rootLayout
+      ? (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).metadata
+      : undefined;
+    const pages = collectFarmLlmsTxtPages(sources, {
+      origin,
+      basePath: this.config.basePath,
+      markdown: resolveMarkdownConfig(this.config.md as any),
+      include: config.include,
+      exclude: config.exclude,
+    });
+    return {
+      pages,
+      defaults: createFarmDefaultLlmsTxt({ origin, pages, config, rootMetadata }),
+    };
   }
 
   private async renderMetadataImage(

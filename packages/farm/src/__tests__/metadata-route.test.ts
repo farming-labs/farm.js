@@ -84,6 +84,31 @@ Host: https://farm.test
     expect(await response.text()).toBe("");
   });
 
+  it("serializes llms.txt as plain text and strips the body for HEAD", async () => {
+    const value = {
+      title: "Acme",
+      summary: "Billing for small teams.",
+      sections: [
+        { title: "Pages", links: [{ title: "Pricing", url: "https://acme.test/pricing.md" }] },
+      ],
+    };
+    const response = createFarmMetadataRouteResponse("llms", value, { revalidate: 3600 });
+
+    expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe(
+      "public, s-maxage=3600, stale-while-revalidate=300",
+    );
+    expect(await response.text()).toBe(
+      "# Acme\n\n> Billing for small teams.\n\n## Pages\n\n- [Pricing](https://acme.test/pricing.md)\n",
+    );
+    const head = createFarmMetadataRouteResponse("llms", value, {}, { method: "HEAD" });
+    expect(await head.text()).toBe("");
+
+    const written = createFarmMetadataRouteResponse("llms", "# Acme\n\n> Written by hand.");
+    expect(written.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(await written.text()).toBe("# Acme\n\n> Written by hand.\n");
+  });
+
   it("preserves custom Responses and rejects unsupported methods", async () => {
     const custom = new Response("custom feed", {
       status: 202,

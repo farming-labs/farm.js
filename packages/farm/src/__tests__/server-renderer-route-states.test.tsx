@@ -359,6 +359,118 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain("<loc>https://farm.test/dashboard?locale=am</loc>");
   });
 
+  describe("llms.txt", () => {
+    const pricingModulePath = "/test/src/app/pricing/page.tsx";
+    const postModulePath = "/test/src/app/blog/[slug]/page.tsx";
+    const llmsModulePath = "/test/src/app/dashboard/llms.ts";
+    const pages = {
+      [layoutModulePath]: {
+        default: ({ children }: any) => children,
+        metadata: { title: { default: "Acme", template: "%s | Acme" }, description: "Billing." },
+      },
+      [routeModulePath]: { default: () => null, metadata: { title: "Dashboard" } },
+      [pricingModulePath]: {
+        default: () => null,
+        metadata: { title: "Pricing", description: "Plans and limits" },
+      },
+      [postModulePath]: { default: () => null, metadata: { title: "Post" } },
+    };
+    const routes = {
+      "/dashboard": routeModulePath,
+      "/pricing": pricingModulePath,
+      "/blog/[slug]": postModulePath,
+    };
+
+    it("serves the generated index when agent.llmsTxt is on", async () => {
+      const response = createMockResponse();
+      const renderer = createRenderer(pages, {
+        routes,
+        layouts: { "/": layoutModulePath },
+        agent: { llmsTxt: true },
+      });
+
+      await renderer.renderPage(createMockRequest("/llms.txt"), response);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+      expect(response.body).toBe(
+        [
+          "# Acme",
+          "",
+          "> Billing.",
+          "",
+          "## Pages",
+          "",
+          "- [Dashboard](http://farm.test/dashboard.md)",
+          "- [Pricing](http://farm.test/pricing.md): Plans and limits",
+          "",
+        ].join("\n"),
+      );
+    });
+
+    it("leaves /llms.txt alone when agent.llmsTxt is off", async () => {
+      const response = createMockResponse();
+      const renderer = createRenderer(pages, { routes, layouts: { "/": layoutModulePath } });
+
+      await renderer.renderPage(createMockRequest("/llms.txt"), response);
+
+      // This mock matches every path to the dashboard page, so "off" means the
+      // request fell through to page rendering instead of an llms.txt response.
+      expect(response.headers.get("content-type")).not.toBe("text/plain; charset=utf-8");
+      expect(response.body).not.toContain("## Pages");
+    });
+
+    it("lets llms.ts extend the generated pages and defaults", async () => {
+      const response = createMockResponse();
+      const renderer = createRenderer(
+        {
+          ...pages,
+          [llmsModulePath]: {
+            default: ({ defaults, pages: staticPages }: any) => ({
+              ...defaults,
+              title: "Acme docs",
+              sections: [
+                {
+                  title: "Product",
+                  links: staticPages.filter((page: any) => page.path !== "/dashboard"),
+                },
+                {
+                  title: "Optional",
+                  links: [{ title: "Status", url: "https://status.acme.test" }],
+                },
+              ],
+            }),
+          },
+        },
+        {
+          routes,
+          layouts: { "/": layoutModulePath },
+          applicationMetadata: { kind: "llms", modulePath: llmsModulePath, outputName: "llms.txt" },
+        },
+      );
+
+      await renderer.renderPage(createMockRequest("/dashboard/llms.txt"), response);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toBe(
+        [
+          "# Acme docs",
+          "",
+          "> Billing.",
+          "",
+          "## Product",
+          "",
+          "- [Pricing](http://farm.test/pricing.md): Plans and limits",
+          "",
+          "## Optional",
+          "",
+          "- [Status](https://status.acme.test)",
+          "",
+        ].join("\n"),
+      );
+    });
+  });
+
   it("automatically links the nearest manifest.ts from rendered pages", async () => {
     const response = createMockResponse();
     const renderer = createRenderer(
@@ -871,10 +983,14 @@ function createRenderer(
     opengraphImage?: boolean;
     staticImage?: { modulePath: string; staticInfo: any };
     applicationMetadata?: {
-      kind: "sitemap" | "robots" | "manifest";
+      kind: "sitemap" | "robots" | "manifest" | "llms";
       modulePath: string;
-      outputName: "sitemap.xml" | "robots.txt" | "manifest.webmanifest";
+      outputName: "sitemap.xml" | "robots.txt" | "manifest.webmanifest" | "llms.txt";
     };
+    /** Page and layout route patterns mapped to module paths, for llms.txt. */
+    routes?: Record<string, string>;
+    layouts?: Record<string, string>;
+    agent?: FarmConfig["agent"];
     clientMetadata?: {
       isClientComponent: boolean;
       shouldHydrate: boolean;
@@ -929,7 +1045,13 @@ function createRenderer(
         },
       }
     : null;
+  const toRouteEntries = (entries: Record<string, string> = {}) =>
+    new Map(
+      Object.entries(entries).map(([pattern, modulePath]) => [pattern, { pattern, modulePath }]),
+    );
   const routeManager = {
+    getRoutes: () => toRouteEntries(options.routes),
+    getLayouts: () => toRouteEntries(options.layouts),
     matchMetadataRoute(pathname: string) {
       if (
         !applicationMetadataEntry ||
@@ -1068,6 +1190,7 @@ function createRenderer(
       integrations: options.integrations ?? {},
       basePath: options.basePath ?? "/",
       security: options.security,
+      ...(options.agent ? { agent: options.agent } : {}),
     },
     routeManager as any,
   );
