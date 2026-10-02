@@ -2025,7 +2025,10 @@ export class ServerRenderer {
       const url = new URL(request.url);
       const llmsContext: Partial<Awaited<ReturnType<ServerRenderer["createLlmsTxtContext"]>>> =
         match.metadata.kind === "llms" || match.metadata.kind === "llms-full"
-          ? await this.createLlmsTxtContext(request, match.metadata.kind === "llms-full")
+          ? await this.createLlmsTxtContext(request, {
+              full: match.metadata.kind === "llms-full",
+              req,
+            })
           : {};
       const value =
         typeof routeModule.default === "function"
@@ -2079,7 +2082,7 @@ export class ServerRenderer {
         trustProxy: this.config.server?.trustProxy,
       });
       const config = resolveFarmLlmsTxtConfig(this.config.agent?.llmsTxt);
-      const context = await this.createLlmsTxtContext(request, kind === "llms-full");
+      const context = await this.createLlmsTxtContext(request, { full: kind === "llms-full", req });
       const body =
         kind === "llms-full"
           ? await renderFarmLlmsFullTxt(context.defaults, {
@@ -2111,7 +2114,7 @@ export class ServerRenderer {
   /** Same inputs the production server gives llms.txt: static pages and root metadata. */
   private async createLlmsTxtContext(
     request: Request,
-    full = false,
+    options: { full?: boolean; req?: FarmRequest } = {},
   ): Promise<{
     pages: ReturnType<typeof collectFarmLlmsTxtPages>;
     defaults: ReturnType<typeof createFarmDefaultLlmsTxt>;
@@ -2119,20 +2122,21 @@ export class ServerRenderer {
   }> {
     const config = resolveFarmLlmsTxtConfig(this.config.agent?.llmsTxt);
     const origin = new URL(request.url).origin;
-    const sources: Array<{ pattern: string; metadata?: unknown }> = [];
-    for (const [pattern, route] of this.routeManager.getRoutes()) {
-      if (pattern.includes("[")) continue;
-      try {
-        sources.push({
-          pattern,
-          metadata: (await this.routeManager.loadRouteModule(route.modulePath)).metadata,
-        });
-      } catch (error) {
-        // The page itself will surface this error; list it with its fallback title.
-        logger.warn(`Could not read metadata for ${pattern} in llms.txt: ${error}`);
-        sources.push({ pattern });
-      }
-    }
+    const staticRoutes = [...this.routeManager.getRoutes()].filter(
+      ([pattern]) => !pattern.includes("["),
+    );
+    const sources = await Promise.all(
+      staticRoutes.map(async ([pattern, route]) => {
+        try {
+          const metadata = (await this.routeManager.loadRouteModule(route.modulePath)).metadata;
+          return { pattern, metadata: metadata as unknown };
+        } catch (error) {
+          // The page itself will surface this error; list it with its fallback title.
+          logger.warn(`Could not read metadata for ${pattern} in llms.txt: ${error}`);
+          return { pattern };
+        }
+      }),
+    );
 
     const rootLayout = this.routeManager.getLayouts().get("/");
     const rootMetadata = rootLayout
@@ -2148,9 +2152,33 @@ export class ServerRenderer {
     return {
       pages,
       defaults: createFarmDefaultLlmsTxt({ origin, pages, config, rootMetadata }),
-      // Development reads mirrors the way its .md handler renders pages: back through
-      // this dev server, which also serves Markdown sources and agent overrides.
-      ...(full ? { markdown: createFarmLlmsMarkdownReader((page) => fetch(page)) } : {}),
+      ...(options.full ? { markdown: this.createDevMarkdownReader(options.req) } : {}),
+    };
+  }
+
+  /**
+   * Reads page mirrors back through this dev server, the way its .md handler
+   * renders pages, so Markdown sources and agent overrides are included. Requests
+   * go to the server's own socket address: the page URLs carry the Host header,
+   * which a client controls, and fetching them would let anyone who can reach a
+   * network-exposed dev server point it at other hosts. HEAD reads nothing, since
+   * its body is discarded.
+   */
+  private createDevMarkdownReader(req?: FarmRequest): (url: string) => Promise<string | null> {
+    const socket = req?.socket as
+      | { localAddress?: string; localPort?: number; encrypted?: boolean }
+      | undefined;
+    if (req?.method?.toUpperCase() === "HEAD" || !socket?.localAddress || !socket.localPort) {
+      return async () => null;
+    }
+    const host = socket.localAddress.includes(":")
+      ? `[${socket.localAddress}]`
+      : socket.localAddress;
+    const localOrigin = `${socket.encrypted ? "https" : "http"}://${host}:${socket.localPort}`;
+    const read = createFarmLlmsMarkdownReader((page) => fetch(page));
+    return (url) => {
+      const target = new URL(url);
+      return read(`${localOrigin}${target.pathname}${target.search}`);
     };
   }
 

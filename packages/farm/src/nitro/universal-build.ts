@@ -6300,7 +6300,14 @@ function createFarmLlmsTxtContext(request, full) {
     }),
     // llms-full.txt reads each page's .md mirror through this same handler,
     // with a fresh request so the caller's cookies never shape its content.
-    ...(full ? { markdown: createFarmLlmsMarkdownReader((page) => handleFarmRequest(page)) } : {}),
+    // HEAD discards the body, so it reads nothing.
+    ...(full
+      ? {
+          markdown: request.method.toUpperCase() === "HEAD"
+            ? async () => null
+            : createFarmLlmsMarkdownReader((page) => handleFarmRequest(page)),
+        }
+      : {}),
   };
 }
 

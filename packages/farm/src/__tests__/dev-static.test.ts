@@ -2,7 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { devServableFileExists, shouldBypassFarmRouterForDottedPath } from "../dev-static";
+import {
+  devServableFileExists,
+  farmAppOwnsLlmsPath,
+  shouldBypassFarmRouterForDottedPath,
+} from "../dev-static";
 
 describe("devServableFileExists", () => {
   let root: string;
@@ -154,6 +158,27 @@ describe("shouldBypassFarmRouterForDottedPath", () => {
     } finally {
       fs.rmSync(path.join(publicDir, "llms.txt"));
     }
+  });
+
+  it("treats a public llms file as the app's own, ahead of the docs engine", () => {
+    const owns = (pathname: string, generatedPaths: string[] = [], metadata: string[] = []) =>
+      farmAppOwnsLlmsPath(pathname, {
+        generatedPaths,
+        routeManager: createRouteManager({ metadata }),
+        baseDirs: [publicDir, root],
+      });
+
+    expect(owns("/llms.txt")).toBe(false);
+    expect(owns("/llms.txt", ["/llms.txt"])).toBe(true);
+    expect(owns("/llms-full.txt", [], ["/llms-full.txt"])).toBe(true);
+    fs.writeFileSync(path.join(publicDir, "llms-full.txt"), "# Static");
+    try {
+      // agent.llmsTxt off and no route file: the public file still owns the path.
+      expect(owns("/llms-full.txt")).toBe(true);
+    } finally {
+      fs.rmSync(path.join(publicDir, "llms-full.txt"));
+    }
+    expect(owns("/robots.txt", ["/robots.txt"])).toBe(false);
   });
 
   it("never bypasses undotted or html paths", () => {

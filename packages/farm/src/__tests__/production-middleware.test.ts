@@ -332,8 +332,12 @@ describe("production middleware runtime", () => {
       );
       expect(llmsText).toContain("- [Dashboard notes](https://example.test/dashboard/notes.md)\n");
       expect(llmsText).toContain("- [Public notes](https://example.test/public-notes.md)\n");
-      expect(llmsText).not.toContain("private-notes");
+      expect(llmsText).not.toContain("rewrite-target");
       expect(llmsText).not.toContain("[id]");
+      // Listed even though it answers 401: the index only names pages.
+      expect(llmsText).toContain(
+        "- [Private notes](https://example.test/dashboard/private-notes.md)\n",
+      );
 
       // llms-full.txt inlines each listed page's .md mirror, read through the same server.
       const llmsFullResponse = await serverModule.default.fetch(
@@ -349,12 +353,18 @@ describe("production middleware runtime", () => {
       ).toBe(true);
       // A Markdown page contributes its source; a React page its rendered mirror.
       expect(llmsFull).toContain(
-        "## Public notes\n\nURL: https://example.test/public-notes.md\n\n# Public notes\n\npublic-notes-source\n\n---\n\n",
+        "## Public notes\n\nURL: https://example.test/public-notes.md\n\n# Public notes\n\npublic-notes-source\n",
       );
       expect(llmsFull).toContain(
         "## Explicit image\n\nURL: https://example.test/dashboard/explicit.md\n\n# Explicit image\n\nSource: /dashboard/explicit\n\nexplicit image page",
       );
-      expect(llmsFull).not.toContain("private-notes");
+      // /dashboard/private-notes answers 401 without credentials. Its block stays,
+      // but the body is never read into a file anyone can fetch.
+      expect(llmsFull).toContain(
+        "## Private notes\n\nURL: https://example.test/dashboard/private-notes.md\n\n---",
+      );
+      expect(llmsFull).not.toContain("dashboard-private-notes-source");
+      expect(llmsFull).not.toContain("rewrite-target");
 
       // A nested llms-full.ts that returns a string is served exactly as written.
       const notesFullResponse = await serverModule.default.fetch(
@@ -379,6 +389,7 @@ describe("production middleware runtime", () => {
           "## Notes",
           "",
           "- [Dashboard notes](https://example.test/dashboard/notes.md)",
+          "- [Private notes](https://example.test/dashboard/private-notes.md)",
           "- [Public notes](https://example.test/public-notes.md)",
           "",
           "## Optional",

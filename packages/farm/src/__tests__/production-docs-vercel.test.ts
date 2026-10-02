@@ -107,7 +107,11 @@ describe("Vercel docs content", () => {
       expect((await appLlms.text()).startsWith("# App index\n")).toBe(true);
       const docsLlms = await handler.fetch(new Request("https://farm.test/.well-known/llms.txt"));
       expect(docsLlms.status).toBe(200);
-      expect(await docsLlms.text()).not.toContain("# App index");
+      const docsLlmsText = await docsLlms.text();
+      expect(docsLlmsText).not.toContain("# App index");
+      // The docs engine's own index, which lists the fixture's docs pages.
+      expect(docsLlmsText).toContain("Upgrading");
+      expect(docsLlmsText).toContain("/docs/upgrading");
       // The docs engine also serves /llms-full.txt; agent.llmsTxt takes that path too.
       const appLlmsFull = await handler.fetch(new Request("https://farm.test/llms-full.txt"));
       expect(appLlmsFull.status).toBe(200);

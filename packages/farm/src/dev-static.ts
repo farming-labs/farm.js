@@ -40,6 +40,28 @@ export function shouldBypassFarmRouterForDottedPath(
  * servable base dirs (project root, public dir), matching the
  * filesystem-first behavior of production hosting.
  */
+/**
+ * Whether the app serves /llms.txt or /llms-full.txt itself, through
+ * `agent.llmsTxt`, an llms.ts or llms-full.ts route, or a real file such as
+ * public/llms.txt. Development then keeps the docs engine off that path, as
+ * production does, where platforms serve files before any route.
+ */
+export function farmAppOwnsLlmsPath(
+  pathname: string,
+  options: {
+    generatedPaths: readonly string[];
+    routeManager?: DottedPathRouteMatcher | null;
+    baseDirs: Array<string | false | undefined>;
+  },
+): boolean {
+  if (pathname !== "/llms.txt" && pathname !== "/llms-full.txt") return false;
+  return (
+    options.generatedPaths.includes(pathname) ||
+    Boolean(options.routeManager?.matchMetadataRoute(pathname)) ||
+    devServableFileExists(pathname, options.baseDirs)
+  );
+}
+
 export function devServableFileExists(
   pathname: string,
   baseDirs: Array<string | false | undefined>,

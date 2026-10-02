@@ -405,20 +405,24 @@ function routeMatches(pattern: string, pathname: string): boolean {
     return true;
   }
 
-  const escaped = pattern
-    .split("/")
-    .map((segment) => {
-      if (/^\[\.\.\.[^\]]+\]$/.test(segment)) {
-        return ".*";
-      }
-      if (/^\[[^\]]+\]$/.test(segment)) {
-        return "[^/]+";
-      }
-      return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    })
-    .join("/");
+  let source = "";
+  pattern.split("/").forEach((segment, index) => {
+    // [[...name]] is optional: it matches the base path and anything below it.
+    if (/^\[\[\.\.\.[^\]]+\]\]$/.test(segment)) {
+      source += "(?:/.*)?";
+      return;
+    }
+    const prefix = index === 0 ? "" : "/";
+    if (/^\[\.\.\.[^\]]+\]$/.test(segment)) {
+      source += `${prefix}.*`;
+    } else if (/^\[[^\]]+\]$/.test(segment)) {
+      source += `${prefix}[^/]+`;
+    } else {
+      source += prefix + segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+  });
 
-  return new RegExp(`^${escaped}$`).test(pathname);
+  return new RegExp(`^${source}$`).test(pathname);
 }
 
 function isHtmlResponse(response: Response): boolean {

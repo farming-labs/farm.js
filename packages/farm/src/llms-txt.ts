@@ -328,7 +328,7 @@ export async function renderFarmLlmsFullTxt(
   if (llms.summary?.trim()) blocks.push(`> ${toSingleLine(llms.summary)}`);
   if (llms.details?.trim()) blocks.push(llms.details.trim());
   const pages = links.map((link, index) => {
-    const parts = [`## ${toSingleLine(link.title)}`, `URL: ${link.url.trim()}`];
+    const parts = [`## ${toSingleLine(link.title)}`, `URL: ${escapeLinkUrl(link.url)}`];
     if (link.description?.trim()) parts.push(toSingleLine(link.description));
     const content = stripFrontmatter(contents[index] ?? "").trim();
     if (content) parts.push(content);
@@ -410,13 +410,13 @@ function escapeLinkText(value: string): string {
   return toSingleLine(value).replace(/[\\[\]]/g, "\\$&");
 }
 
-// encodeURIComponent leaves "(" and ")" alone, and ")" would end the link early.
+// encodeURIComponent writes UTF-8 and escapes whitespace and angle brackets, but
+// leaves "(" and ")" alone, and ")" would end the Markdown link early.
 function escapeLinkUrl(value: string): string {
   return value
     .trim()
-    .replace(
-      /[\s()<>]/g,
-      (character) => `%${character.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`,
+    .replace(/[\s()<>]/g, (character) =>
+      character === "(" ? "%28" : character === ")" ? "%29" : encodeURIComponent(character),
     );
 }
 

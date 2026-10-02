@@ -402,11 +402,13 @@ default), adds `details` Markdown, and narrows the list with `include` and `excl
 which use the same syntax as `md.expose`. Dynamic routes are left out because they have no single
 URL.
 
-It also serves `/llms-full.txt`: the same header, then each listed page's Markdown mirror inlined
-under its title, URL, and description, separated by `---`. Pages are read with a fresh request that
-carries no cookies or credentials, so a page behind auth is left out rather than copied into a file
-anyone can fetch. Set `full: false` to serve only `/llms.txt`. Rendering llms-full.txt renders every
-listed page, so set `revalidate` (seconds) to let a CDN cache both files on busy sites.
+It also serves `/llms-full.txt`: the same header, then a block per listed page with its title, URL,
+and description, separated by `---`. Pages with an exposed Markdown mirror get it inlined; a page
+without one keeps its block but no body. Pages are read with a fresh request that carries no cookies
+or credentials, so a page behind auth is left out rather than copied into a file anyone can fetch.
+`full: false` turns off the generated `/llms-full.txt` (a `public/llms-full.txt` or `llms-full.ts`
+still serves that path). Rendering llms-full.txt renders every listed page, so set `revalidate`
+(seconds) to let a CDN cache both generated files on busy sites.
 
 Each file can be overridden on its own. A static `public/llms.txt` or `public/llms-full.txt` is
 served as-is. An [`llms.ts` or `llms-full.ts` metadata route](/docs/routing#application-metadata-routes)
@@ -415,7 +417,9 @@ structured format, and receives the generated pages and defaults to build on. Wh
 [docs engine](/docs/docs-engine) is enabled too, the app's own files take `/llms.txt` and
 `/llms-full.txt`.
 
-`jsonLd: true` adds a schema.org `Organization` to page heads; an object sets the `@type` and fields.
+`jsonLd: true` adds a schema.org `Organization` to page heads, built from the site's metadata: the
+site name or title, `metadataBase`, and description. A page with none of those gets no JSON-LD. An
+object sets the `type` (emitted as `@type`) and fields such as `name`, `url`, `logo`, and `sameAs`.
 
 ## Isolated client hydration
 

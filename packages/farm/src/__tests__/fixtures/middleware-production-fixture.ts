@@ -71,7 +71,7 @@ export default {
     llmsTxt: {
       title: "Farm production fixture",
       summary: "Pages served by the production fixture.",
-      exclude: ["/dashboard/private-notes"],
+      exclude: ["/rewrite-target"],
     },
   },
   deploy: {

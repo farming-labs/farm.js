@@ -79,7 +79,7 @@ import { createDeferredDataResponse } from "./deferred";
 import { _withAfterNodeMiddleware } from "./after";
 import { _runWithAPIRequestRuntime } from "./api/server-context";
 import type { APIRequestRuntime } from "./api/server-client-bridge";
-import { shouldBypassFarmRouterForDottedPath } from "./dev-static";
+import { farmAppOwnsLlmsPath, shouldBypassFarmRouterForDottedPath } from "./dev-static";
 import { findClientServerFnViolation, formatServerFnBoundaryError } from "./server-query-boundary";
 import {
   analyzeClientBoundary,
@@ -1830,12 +1830,13 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               docsHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
             }
           }
-          // An app's own llms.txt and llms-full.txt (agent.llmsTxt, llms.ts, llms-full.ts)
-          // take those paths from the docs engine, as in production; the renderer serves them.
-          const appOwnsLlmsTxt =
-            farmLlmsTxtGeneratedPaths(farmConfig).includes(requestPathname) ||
-            ((requestPathname === "/llms.txt" || requestPathname === "/llms-full.txt") &&
-              farmApp.getRouteManager().matchMetadataRoute(requestPathname) !== null);
+          // An app's own llms.txt and llms-full.txt (agent.llmsTxt, llms.ts, llms-full.ts,
+          // or a public file) take those paths from the docs engine, as in production.
+          const appOwnsLlmsTxt = farmAppOwnsLlmsPath(requestPathname, {
+            generatedPaths: farmLlmsTxtGeneratedPaths(farmConfig),
+            routeManager: farmApp.getRouteManager(),
+            baseDirs: [server.config.publicDir, server.config.root],
+          });
           if (farmDocsHandler && !appOwnsLlmsTxt) {
             const docsRequest = new Request(fullUrl, {
               method: requestMethod,

@@ -954,13 +954,15 @@ export default function llms({
 
 `llms.ts` renders the [llmstxt.org](https://llmstxt.org) format: `title` as the H1, `summary` as a
 quote, `details` as Markdown, and each section as an H2 list of links. To write the whole file
-yourself, return it as a string instead. Besides the usual arguments,
-its function receives `pages`, the app's static pages linked to their Markdown mirrors, and
+yourself, return it as a string instead; Farm serves it as the complete file and adds a final newline
+when it is missing. Besides the usual arguments, its function receives `pages`, the app's static
+pages, each linking to its Markdown mirror when `md` exposes one and to the page itself otherwise, and
 `defaults`, the index [`agent.llmsTxt`](/docs/configuration#agent-readiness) would serve, so it can
 extend the generated file instead of starting over. An `llms.ts` replaces `agent.llmsTxt` at its path.
 
 `llms-full.ts` serves `/llms-full.txt` the same way. When it returns the structured format, Farm
-inlines the Markdown mirror of every same-origin link; a string is served as written. Its function
+inlines the Markdown mirror of every same-origin link that has one; a string is served as the
+complete file, with a final newline added when missing. Its function
 also receives `markdown(url)`, which reads a page's mirror without the request's cookies and returns
 `null` when the page is unavailable.
 

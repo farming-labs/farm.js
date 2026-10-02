@@ -85,6 +85,21 @@ describe("serializeFarmLlmsTxt", () => {
     expect(() => serializeFarmLlmsTxt("  \n")).toThrow("llms.ts returned an empty llms.txt");
   });
 
+  it("percent-encodes link URLs as UTF-8", () => {
+    // A no-break space is two UTF-8 bytes; encoding its UTF-16 code unit gave %A0.
+    expect(
+      serializeFarmLlmsTxt({
+        title: "Acme",
+        sections: [
+          {
+            title: "Pages",
+            links: [{ title: "Menu", url: "https://acme.test/a\u00a0b (draft).md" }],
+          },
+        ],
+      }),
+    ).toContain("- [Menu](https://acme.test/a%C2%A0b%20%28draft%29.md)\n");
+  });
+
   it("rejects malformed values with the field that is wrong", () => {
     expect(() => serializeFarmLlmsTxt(null)).toThrow(
       "must return llms.txt text, an llms.txt object, or a Response",
@@ -197,6 +212,15 @@ describe("collectFarmLlmsTxtPages", () => {
         markdown: resolveMarkdownConfig(false),
       })[0].url,
     ).toBe("https://acme.test/");
+  });
+
+  it("matches optional catch-all patterns at their base and below", () => {
+    const pages = [{ pattern: "/docs" }, { pattern: "/docs/install" }, { pattern: "/pricing" }];
+    const paths = (options: { include?: string[]; exclude?: string[] }) =>
+      collectFarmLlmsTxtPages(pages, { origin, basePath: "", ...options }).map((page) => page.path);
+
+    expect(paths({ include: ["/docs/[[...slug]]"] })).toEqual(["/docs", "/docs/install"]);
+    expect(paths({ exclude: ["/docs/[[...slug]]"] })).toEqual(["/pricing"]);
   });
 
   it("applies include and exclude route patterns", () => {
@@ -363,6 +387,21 @@ describe("renderFarmLlmsFullTxt", () => {
     expect(text).toBe(
       "# Acme\n\n## About\n\nURL: https://acme.test/about.md\n\n# About\n\n---\n\nKeep this rule.\n",
     );
+  });
+
+  it("escapes the URL line of each page block", async () => {
+    // A newline in a link URL must not start a new Markdown block.
+    const text = await renderFarmLlmsFullTxt(
+      {
+        title: "Acme",
+        sections: [
+          { title: "Pages", links: [{ title: "X", url: "https://other.test/a\n## Injected" }] },
+        ],
+      },
+      { origin: "https://acme.test", readMarkdown: async () => null },
+    );
+    expect(text).toContain("URL: https://other.test/a%0A##%20Injected\n");
+    expect(text.match(/^## /gm)).toHaveLength(1);
   });
 
   it("serves a string unchanged and bounds concurrent reads", async () => {

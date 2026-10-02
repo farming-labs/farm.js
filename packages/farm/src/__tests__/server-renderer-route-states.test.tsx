@@ -421,11 +421,13 @@ describe("file route loading.tsx and error.tsx", () => {
     });
 
     // Development reads each page's Markdown back through the dev server, like its
-    // .md handler does; stand in for it, with /pricing behind auth.
+    // .md handler does, at the server's own socket address; stand in for it, with
+    // /pricing behind auth.
     function stubMarkdownFetch() {
       return vi.spyOn(globalThis, "fetch").mockImplementation(async (input: any) => {
         const request = input instanceof Request ? input : new Request(input);
         expect(request.headers.get("cookie")).toBeNull();
+        expect(new URL(request.url).origin).toBe("http://127.0.0.1:4317");
         if (new URL(request.url).pathname === "/dashboard.md") {
           return new Response("# Dashboard\n\ndashboard-markdown-body\n", {
             headers: { "content-type": "text/markdown; charset=utf-8" },
@@ -433,6 +435,14 @@ describe("file route loading.tsx and error.tsx", () => {
         }
         return new Response("Unauthorized", { status: 401 });
       });
+    }
+
+    function createDevRequest(url: string, extra: Partial<FarmRequest> = {}): FarmRequest {
+      return {
+        ...createMockRequest(url),
+        socket: { localAddress: "127.0.0.1", localPort: 4317 },
+        ...extra,
+      } as FarmRequest;
     }
 
     it("serves a generated llms-full.txt with each page's Markdown", async () => {
@@ -444,7 +454,7 @@ describe("file route loading.tsx and error.tsx", () => {
         agent: { llmsTxt: { revalidate: 300 } },
       });
 
-      await renderer.renderPage(createMockRequest("/llms-full.txt"), response);
+      await renderer.renderPage(createDevRequest("/llms-full.txt"), response);
 
       expect(response.statusCode).toBe(200);
       expect(response.headers.get("cache-control")).toBe(
@@ -477,6 +487,46 @@ describe("file route loading.tsx and error.tsx", () => {
       expect(fetchSpy).toHaveBeenCalledTimes(2);
     });
 
+    it("never fetches from the host a client names in the Host header", async () => {
+      const fetchSpy = stubMarkdownFetch();
+      const response = createMockResponse();
+      const renderer = createRenderer(pages, {
+        routes,
+        layouts: { "/": layoutModulePath },
+        agent: { llmsTxt: true },
+      });
+      const request = createDevRequest("/llms-full.txt");
+      request.headers = { host: "metadata.internal:8080" };
+
+      await renderer.renderPage(request, response);
+
+      // Links still name the requested host; reads go to the dev server itself.
+      expect(response.body).toContain("URL: http://metadata.internal:8080/dashboard.md");
+      expect(response.body).toContain("dashboard-markdown-body");
+      for (const [input] of fetchSpy.mock.calls) {
+        expect(new URL(String(input instanceof Request ? input.url : input)).host).toBe(
+          "127.0.0.1:4317",
+        );
+      }
+    });
+
+    it("answers HEAD /llms-full.txt without reading any page", async () => {
+      const fetchSpy = stubMarkdownFetch();
+      const response = createMockResponse();
+      const renderer = createRenderer(pages, {
+        routes,
+        layouts: { "/": layoutModulePath },
+        agent: { llmsTxt: true },
+      });
+
+      await renderer.renderPage(createDevRequest("/llms-full.txt", { method: "HEAD" }), response);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+      expect(response.body).toBe("");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
     it("leaves /llms-full.txt alone when agent.llmsTxt.full is false", async () => {
       const fetchSpy = stubMarkdownFetch();
       const response = createMockResponse();
@@ -486,7 +536,7 @@ describe("file route loading.tsx and error.tsx", () => {
         agent: { llmsTxt: { full: false } },
       });
 
-      await renderer.renderPage(createMockRequest("/llms-full.txt"), response);
+      await renderer.renderPage(createDevRequest("/llms-full.txt"), response);
 
       expect(response.body).not.toContain("URL: http://farm.test/dashboard.md");
       expect(fetchSpy).not.toHaveBeenCalled();
@@ -517,7 +567,7 @@ describe("file route loading.tsx and error.tsx", () => {
         },
       );
 
-      await renderer.renderPage(createMockRequest("/dashboard/llms-full.txt"), response);
+      await renderer.renderPage(createDevRequest("/dashboard/llms-full.txt"), response);
 
       expect(response.statusCode).toBe(200);
       expect(response.body).toBe(
