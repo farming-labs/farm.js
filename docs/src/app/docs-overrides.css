@@ -569,3 +569,35 @@
   border: 1px solid var(--farm-code-line);
   border-radius: 3px;
 }
+
+/* ---------- On this page: a mono label over light, quiet entries ---------- */
+
+#farm-docs-root #nd-toc #toc-title {
+  gap: 8px;
+  color: var(--farm-code-legend);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+#farm-docs-root #nd-toc #toc-title svg {
+  width: 12px;
+  height: 12px;
+}
+#farm-docs-root #nd-toc a {
+  padding-block: 5px;
+  color: rgb(255 255 255 / 0.5);
+  font-size: 13px;
+  font-weight: 300;
+  line-height: 1.5;
+  transition: color 150ms;
+}
+#farm-docs-root #nd-toc a:hover {
+  color: rgb(255 255 255 / 0.85);
+}
+#farm-docs-root #nd-toc a[data-active="true"] {
+  color: #ededed;
+  font-weight: 400;
+}
