@@ -200,6 +200,7 @@ export function createPreviewGatewayHandler(
             ? getPreviewAuthPublicConfig(config.auth)
             : {
                 enabled: false,
+                controlAuth: "bearer",
                 defaultSessionTtlMs: config.sessionTtlMs,
                 maxSessionTtlMs: config.sessionTtlMs,
               },

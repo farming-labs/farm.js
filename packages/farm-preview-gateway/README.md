@@ -17,10 +17,16 @@ Public disconnects are propagated through the request queue. The polling agent a
 Managed deployments can configure `auth` with a GitHub OAuth client id and a signing secret. The gateway then exposes the CLI login exchange, issues account-bound tunnel grants scoped to one preview name and absolute expiry, and requires a grant before creating a session:
 
 ```ts
+const githubClientId = process.env.FARM_PREVIEW_GITHUB_CLIENT_ID;
+const signingSecret = process.env.FARM_PREVIEW_AUTH_SECRET;
+if (!githubClientId || !signingSecret) {
+  throw new Error("Farm Preview managed auth is not configured");
+}
+
 const handler = createPreviewGatewayHandler({
   auth: {
-    githubClientId: process.env.FARM_PREVIEW_GITHUB_CLIENT_ID,
-    signingSecret: process.env.FARM_PREVIEW_AUTH_SECRET,
+    githubClientId,
+    signingSecret,
   },
 });
 ```
@@ -33,3 +39,6 @@ shared store for multi-instance deployments; the hosted Vercel example uses an a
 Managed grants and explicitly requested durations are absolute expiries. An unauthenticated session
 created without `expiresInMs` instead uses `sessionTtlMs` as an idle lease and extends it only when the
 local polling agent proves it is still online.
+
+Current gateways advertise bearer-header authentication for polling session controls. The Farm CLI
+uses query-string session tokens only after it positively identifies a pre-auth compatibility gateway.

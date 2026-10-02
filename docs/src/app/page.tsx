@@ -701,13 +701,21 @@ function Hero() {
           Bring the stack you already use. Farm.js connects your app router, typed APIs, middleware,
           integrations, docs, and deployment so they work together as one product.
         </p>
-        <div className="mt-6 flex justify-center">
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
           <ButtonLink
             href="/docs/getting-started"
             icon={<BookOpen aria-hidden className="size-3.5" strokeWidth={1.5} />}
             size="compact"
           >
             Get Started
+          </ButtonLink>
+          <ButtonLink
+            href="/agents"
+            icon={<Bot aria-hidden className="size-3.5" strokeWidth={1.5} />}
+            size="compact"
+            variant="secondary"
+          >
+            Agent infrastructure
           </ButtonLink>
         </div>
         <div className="mt-6 w-[calc(100%-3rem)] max-w-[34rem] text-left">

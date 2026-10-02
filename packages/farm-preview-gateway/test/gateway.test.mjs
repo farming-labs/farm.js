@@ -481,6 +481,7 @@ test("exchanges GitHub login for a scoped expiring preview session", async () =>
     );
     assert.deepEqual(config, {
       enabled: true,
+      controlAuth: "bearer",
       provider: "github",
       clientId: "github-client-id",
       scope: "read:user",
@@ -661,6 +662,17 @@ test("rate limits managed auth exchange before contacting GitHub", async () => {
 test("shows browser visitors a friendly expired preview page", async () => {
   const store = new MemoryPreviewGatewayStore();
   const gateway = await createGatewayServer(store);
+  const expiredSession = {
+    id: "sess_expired",
+    name: "finished-demo",
+    hostname: "finished-demo.preview.farmjs.dev",
+    publicUrl: `${gateway.url}/__preview/finished-demo`,
+    token: "expired-token",
+    createdAt: Date.now() - 120_000,
+    expiresAt: Date.now() - 60_000,
+    lastHeartbeatAt: Date.now() - 60_000,
+  };
+  await store.createSession(expiredSession, 1);
 
   try {
     const response = await fetch(`${gateway.url}/__preview/finished-demo`, {
@@ -668,6 +680,7 @@ test("shows browser visitors a friendly expired preview page", async () => {
     });
     assert.equal(response.status, 410);
     assert.match(await response.text(), /This Farm preview has expired/);
+    assert.equal(await store.getSessionById(expiredSession.id), undefined);
   } finally {
     await gateway.close();
   }
