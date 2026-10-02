@@ -52,7 +52,7 @@ const availableNow = [
     title: "Every page in Markdown.",
     code: 'curl -H "Accept: text/markdown" /pricing',
     description:
-      "Pages answer agents with a Markdown mirror, by .md suffix or Accept header. Turn on OpenAPI with ordinary config, and the docs engine adds llms.txt.",
+      "Pages answer agents with a Markdown mirror, by .md suffix or Accept header. Turn on OpenAPI and llms.txt with ordinary config.",
     href: "/docs/markdown",
     link: "Markdown mirrors",
   },
