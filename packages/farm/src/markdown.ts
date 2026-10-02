@@ -228,12 +228,17 @@ export function htmlToMarkdown(
   } = {},
 ): string {
   const title = options.title ?? extractHtmlTitle(html);
-  let source = removeHiddenElements(
-    extractHtmlBody(html)
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
-      .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, "")
-      .replace(/<!--[\s\S]*?-->/g, ""),
+  // Hidden elements go before the body is extracted, since extraction drops the
+  // <main> or <body> tag whose own attributes may hide it, and after scripts go,
+  // so markup quoted in a script string is never read as an element.
+  let source = extractHtmlBody(
+    removeHiddenElements(
+      html
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, "")
+        .replace(/<!--[\s\S]*?-->/g, ""),
+    ),
   );
 
   // Code blocks are set aside behind placeholders so the tidying below never
@@ -583,7 +588,7 @@ function removeHiddenElements(html: string): string {
     if (!isHiddenElement(attributes)) continue;
     const start = match.index;
     let end = start + tag.length;
-    if (!VOID_TAGS.has(name.toLowerCase()) && !attributes.trimEnd().endsWith("/")) {
+    if (!VOID_TAGS.has(name.toLowerCase()) && !isSelfClosingTag(tag)) {
       // Unclosed, it is left in place rather than taking the rest of the page with it.
       const close = findClosingTagEnd(html, name, end);
       if (close === undefined) continue;
@@ -608,17 +613,32 @@ function isHiddenElement(attributes: string): boolean {
   return false;
 }
 
-/** The end of the tag that closes the element opened before `from`, counting nesting. */
+/**
+ * `<path d="M0" />`, but not `<a href=/docs/>`, whose slash ends an unquoted
+ * value. HTML ignores the flag on other elements, but honoring it where it is
+ * written keeps a self-closed SVG child from pairing with a later close tag.
+ */
+function isSelfClosingTag(tag: string): boolean {
+  return /(?:^<[a-zA-Z][\w:-]*|[\s"'])\/>$/.test(tag);
+}
+
+/**
+ * The end of the tag that closes the element opened before `from`, counting
+ * nesting. Every tag is matched whole, quoted attribute values included, so a
+ * tag written inside an attribute value is never taken for a real one.
+ */
 function findClosingTagEnd(html: string, name: string, from: number): number | undefined {
-  const tags = new RegExp(`<(/?)${name}(?=[\\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>`, "gi");
+  const tags = /<(\/?)([a-zA-Z][\w:-]*)(?:[^>"']|"[^"]*"|'[^']*')*>/g;
   tags.lastIndex = from;
+  const target = name.toLowerCase();
   let depth = 1;
   let match: RegExpExecArray | null;
   while ((match = tags.exec(html))) {
+    if (match[2]!.toLowerCase() !== target) continue;
     if (match[1]) {
       depth -= 1;
       if (depth === 0) return match.index + match[0].length;
-    } else if (!match[0].endsWith("/>")) {
+    } else if (!isSelfClosingTag(match[0])) {
       depth += 1;
     }
   }
