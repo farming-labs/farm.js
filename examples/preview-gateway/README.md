@@ -44,6 +44,9 @@ vercel integration add upstash/upstash-kv \
 ```
 
 The integration injects `REDIS_URL`. Without it, the WebSocket relay uses only the current Function's memory, which is suitable for local development but not multi-instance Vercel traffic.
+The same Redis connection enforces a shared per-client limit on managed login exchanges. A production
+deployment with managed authentication enabled refuses to start without `REDIS_URL`, `KV_URL`, or
+`UPSTASH_REDIS_URL` so GitHub token verification cannot be exposed without shared abuse control.
 
 ### Compatibility polling storage
 

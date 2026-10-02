@@ -28,7 +28,31 @@
 .agents-hero {
   position: relative;
 }
+/* Same flickering grid as the landing hero. The wrapper has no height, so the hero keeps its size;
+   the field reaches up behind the bottom of the copy (the copy stays on top), invisible at the top,
+   strongest where it meets the illustration, and soft at the sides. */
+.agents-hero-flicker {
+  position: relative;
+  height: 0;
+  pointer-events: none;
+}
+.agents-hero-flicker-field {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 150px;
+  -webkit-mask-image:
+    linear-gradient(180deg, transparent, rgb(0 0 0 / 0.25) 40%, #000),
+    linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(180deg, transparent, rgb(0 0 0 / 0.25) 40%, #000),
+    linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+  mask-composite: intersect;
+}
 .agents-hero-copy {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   max-width: 58rem;
   margin-inline: auto;
@@ -347,6 +371,9 @@
 @media (max-width: 900px) {
   .agents-hero-copy {
     padding: 56px 24px 24px;
+  }
+  .agents-hero-flicker-field {
+    height: 110px;
   }
   .agent-artwork {
     min-height: 300px;

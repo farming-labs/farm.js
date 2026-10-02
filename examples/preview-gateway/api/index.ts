@@ -10,6 +10,7 @@ import {
 import { createPersistentPreviewRelay } from "@farm.js/preview-tunnel";
 import { del, get, list, put } from "@vercel/blob";
 
+import { createRedisPreviewAuthExchangeRateLimiter } from "../lib/redis-auth-rate-limiter.js";
 import { createRedisPreviewRelayCoordinator } from "../lib/redis-coordinator.js";
 
 interface ExpiringValue<T> {
@@ -259,9 +260,16 @@ function createManagedPreviewAuth(): PreviewManagedAuthOptions | undefined {
       "Managed preview auth requires FARM_PREVIEW_AUTH_SECRET and FARM_PREVIEW_GITHUB_CLIENT_ID.",
     );
   }
+  const rateLimitExchange = createRedisPreviewAuthExchangeRateLimiter();
+  if (!rateLimitExchange && process.env.VERCEL_ENV === "production") {
+    throw new Error(
+      "Managed preview auth requires REDIS_URL, KV_URL, or UPSTASH_REDIS_URL for shared exchange rate limiting.",
+    );
+  }
   return {
     signingSecret,
     githubClientId,
+    rateLimitExchange,
     defaultSessionTtlMs: readDuration("FARM_PREVIEW_DEFAULT_TTL_MS", 1000 * 60 * 60),
     maxSessionTtlMs: readDuration("FARM_PREVIEW_MAX_TTL_MS", 1000 * 60 * 60 * 24),
   };

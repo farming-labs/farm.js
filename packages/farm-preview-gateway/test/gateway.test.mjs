@@ -481,6 +481,7 @@ test("exchanges GitHub login for a scoped expiring preview session", async () =>
     );
     assert.deepEqual(config, {
       enabled: true,
+      controlAuth: "bearer",
       provider: "github",
       clientId: "github-client-id",
       scope: "read:user",
@@ -574,9 +575,104 @@ test("exchanges GitHub login for a scoped expiring preview session", async () =>
   }
 });
 
+test("slides default self-hosted sessions but preserves explicit absolute expiry", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store, { sessionTtlMs: 60_000 });
+
+  try {
+    const sliding = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "sliding-session" }),
+    }).then((response) => response.json());
+    assert.equal(sliding.expiresAt, undefined);
+
+    const storedSliding = await store.getSessionById(sliding.id);
+    assert.ok(storedSliding);
+    const forcedNearExpiry = Date.now() + 1_000;
+    storedSliding.expiresAt = forcedNearExpiry;
+    const slidingHeartbeat = await fetch(`${gateway.url}/api/sessions/${sliding.id}/heartbeat`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${sliding.token}` },
+    }).then((response) => response.json());
+    assert.equal(slidingHeartbeat.expiresAt, undefined);
+    assert.ok((await store.getSessionById(sliding.id)).expiresAt > forcedNearExpiry + 50_000);
+
+    const absolute = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "absolute-session", expiresInMs: 60_000 }),
+    }).then((response) => response.json());
+    assert.ok(absolute.expiresAt > Date.now());
+    const absoluteHeartbeat = await fetch(`${gateway.url}/api/sessions/${absolute.id}/heartbeat`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${absolute.token}` },
+    }).then((response) => response.json());
+    assert.equal(absoluteHeartbeat.expiresAt, absolute.expiresAt);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("rate limits managed auth exchange before contacting GitHub", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  let limitChecks = 0;
+  let githubRequests = 0;
+  const gateway = await createGatewayServer(store, {
+    auth: {
+      signingSecret: "managed-preview-test-secret-that-is-long-enough",
+      githubClientId: "github-client-id",
+      rateLimitExchange: (request) => {
+        limitChecks += 1;
+        assert.equal(request.headers.get("x-forwarded-for"), "203.0.113.8");
+        return limitChecks === 1 ? { allowed: true } : { allowed: false, retryAfterMs: 1_250 };
+      },
+      fetch: async () => {
+        githubRequests += 1;
+        return Response.json({ id: 42, login: "farm-user" });
+      },
+    },
+  });
+
+  try {
+    const exchange = (
+      body = JSON.stringify({ provider: "github", accessToken: "provider-token" }),
+    ) =>
+      fetch(`${gateway.url}/api/auth/exchange`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": "203.0.113.8",
+        },
+        body,
+      });
+
+    assert.equal((await exchange()).status, 200);
+    const limited = await exchange("not-json");
+    assert.equal(limited.status, 429);
+    assert.equal(limited.headers.get("retry-after"), "2");
+    assert.match(await limited.text(), /Too many Farm Preview login attempts/);
+    assert.equal(limitChecks, 2);
+    assert.equal(githubRequests, 1);
+  } finally {
+    await gateway.close();
+  }
+});
+
 test("shows browser visitors a friendly expired preview page", async () => {
   const store = new MemoryPreviewGatewayStore();
   const gateway = await createGatewayServer(store);
+  const expiredSession = {
+    id: "sess_expired",
+    name: "finished-demo",
+    hostname: "finished-demo.preview.farmjs.dev",
+    publicUrl: `${gateway.url}/__preview/finished-demo`,
+    token: "expired-token",
+    createdAt: Date.now() - 120_000,
+    expiresAt: Date.now() - 60_000,
+    lastHeartbeatAt: Date.now() - 60_000,
+  };
+  await store.createSession(expiredSession, 1);
 
   try {
     const response = await fetch(`${gateway.url}/__preview/finished-demo`, {
@@ -584,6 +680,7 @@ test("shows browser visitors a friendly expired preview page", async () => {
     });
     assert.equal(response.status, 410);
     assert.match(await response.text(), /This Farm preview has expired/);
+    assert.equal(await store.getSessionById(expiredSession.id), undefined);
   } finally {
     await gateway.close();
   }

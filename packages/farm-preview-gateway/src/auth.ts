@@ -10,7 +10,22 @@ export interface PreviewManagedAuthOptions {
   maxSessionTtlMs?: number;
   githubApiUrl?: string;
   fetch?: typeof fetch;
+  /**
+   * Shared abuse-control hook for the provider-token exchange endpoint.
+   * Implementations must not consume the request body.
+   */
+  rateLimitExchange?: PreviewAuthExchangeRateLimiter;
 }
+
+export interface PreviewAuthExchangeRateLimitResult {
+  allowed: boolean;
+  /** How long the caller should wait before retrying a rejected exchange. */
+  retryAfterMs?: number;
+}
+
+export type PreviewAuthExchangeRateLimiter = (
+  request: Request,
+) => PreviewAuthExchangeRateLimitResult | Promise<PreviewAuthExchangeRateLimitResult>;
 
 export interface PreviewAccountIdentity {
   provider: "github";
@@ -53,6 +68,7 @@ export function getPreviewAuthPublicConfig(options: PreviewManagedAuthOptions) {
   const durations = resolvePreviewDurations(options);
   return {
     enabled: true as const,
+    controlAuth: "bearer" as const,
     provider: "github" as const,
     clientId: options.githubClientId,
     scope: "read:user",

@@ -258,6 +258,17 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
     let session: AgentSession | undefined;
     let registering = false;
     let expirationTimer: NodeJS.Timeout | undefined;
+    let detached = false;
+
+    const detachSession = () => {
+      if (!session || detached) return;
+      detached = true;
+      if (agents.get(session.name)?.id === session.id) {
+        agents.delete(session.name);
+        failPendingRequestsForSession(session.id, pending);
+      }
+      void options.coordinator?.releaseSession(session).catch(() => undefined);
+    };
 
     socket.on("message", (data) => {
       void (async () => {
@@ -344,9 +355,17 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
               socket,
               ...(expiresAt !== undefined ? { expiresAt } : {}),
             };
+            const coordinatorTtlMs = remainingCoordinatorSessionTtl(
+              nextSession,
+              coordinatorSessionTtlMs,
+            );
+            if (coordinatorTtlMs <= 0) {
+              rejectAgentCredential(socket, "The preview tunnel grant has expired or is invalid.");
+              return;
+            }
             if (
               options.coordinator &&
-              !(await options.coordinator.claimSession(nextSession, coordinatorSessionTtlMs))
+              !(await options.coordinator.claimSession(nextSession, coordinatorTtlMs))
             ) {
               rejectPreviewName(socket, name);
               return;
@@ -376,6 +395,7 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
                 if (!session?.expiresAt) return;
                 const remainingMs = session.expiresAt - Date.now();
                 if (remainingMs <= 0) {
+                  detachSession();
                   socket.close(1000, "Preview expired");
                   return;
                 }
@@ -393,6 +413,7 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
                 agents,
                 options.coordinator,
                 coordinatorSessionTtlMs,
+                detachSession,
               );
             }
           } finally {
@@ -419,11 +440,7 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
 
     socket.on("close", () => {
       if (expirationTimer) clearTimeout(expirationTimer);
-      if (session && agents.get(session.name)?.id === session.id) {
-        agents.delete(session.name);
-        failPendingRequestsForSession(session.id, pending);
-        void options.coordinator?.releaseSession(session).catch(() => undefined);
-      }
+      detachSession();
     });
   });
 
@@ -612,6 +629,7 @@ async function pumpCoordinatedRequests(
   agents: Map<string, AgentSession>,
   coordinator: PersistentPreviewRelayCoordinator,
   sessionTtlMs: number,
+  detachSession: () => void,
 ) {
   const waitMs = Math.max(50, Math.min(15_000, Math.floor(sessionTtlMs / 3)));
   try {
@@ -619,7 +637,13 @@ async function pumpCoordinatedRequests(
       agents.get(session.name)?.id === session.id &&
       session.socket.readyState === session.socket.OPEN
     ) {
-      if (!(await coordinator.touchSession(session, sessionTtlMs))) {
+      const ttlMs = remainingCoordinatorSessionTtl(session, sessionTtlMs);
+      if (ttlMs <= 0) {
+        detachSession();
+        session.socket.close(1000, "Preview expired");
+        return;
+      }
+      if (!(await coordinator.touchSession(session, ttlMs))) {
         session.socket.close(1011, "Preview session ownership was lost");
         return;
       }
@@ -636,6 +660,12 @@ async function pumpCoordinatedRequests(
   } catch {
     session.socket.close(1011, "Preview relay coordination failed");
   }
+}
+
+function remainingCoordinatorSessionTtl(session: AgentSession, sessionTtlMs: number) {
+  return session.expiresAt === undefined
+    ? sessionTtlMs
+    : Math.min(sessionTtlMs, session.expiresAt - Date.now());
 }
 
 function resolvePublicRoute(request: IncomingMessage, publicDomain: string | undefined) {

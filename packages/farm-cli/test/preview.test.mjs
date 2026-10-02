@@ -71,9 +71,47 @@ test("keeps working while a pre-auth preview gateway is being upgraded", async (
 
   assert.deepEqual(config, {
     enabled: false,
+    controlAuth: "query",
     defaultSessionTtlMs: 30 * 60 * 1000,
     maxSessionTtlMs: 30 * 60 * 1000,
   });
+});
+
+test("uses a sliding session when a pre-auth gateway has no explicit expiry", async () => {
+  let prompted = false;
+  const plan = {
+    provider: "farm-gateway",
+    gatewayUrl: "https://preview.example.com",
+    relayUrl: "wss://preview.example.com/agent",
+    target: { localUrl: "http://localhost:3000", host: "localhost", port: 3000, source: "port" },
+    requestedName: "sliding",
+    requestedHostname: "sliding.preview.example.com",
+    requestedPublicUrl: "https://sliding.preview.example.com",
+  };
+  const runtime = {
+    fetch: async () => new Response(null, { status: 404 }),
+    async openBrowser() {
+      return false;
+    },
+    async wait() {},
+    credentials: {
+      async get() {},
+      async set() {},
+      async delete() {},
+    },
+    async promptDuration() {
+      prompted = true;
+      return 60_000;
+    },
+  };
+
+  const authorized = await authorizePreviewGatewayPlan(plan, { runtime });
+  assert.equal(authorized.expiresInMs, undefined);
+  assert.equal(prompted, false);
+  assert.equal(
+    (await authorizePreviewGatewayPlan(plan, { runtime, expiresInMs: 120_000 })).expiresInMs,
+    120_000,
+  );
 });
 
 test("returns to the CLI after first-run device login with a scoped tunnel grant", async () => {
@@ -155,12 +193,61 @@ test("returns to the CLI after first-run device login with a scoped tunnel grant
     },
   };
 
-  const authorized = await authorizePreviewGatewayPlan(plan, { runtime });
+  const authorized = await authorizePreviewGatewayPlan(plan, { runtime, forceLogin: true });
   assert.equal(savedCredential, "farm-account-token");
+  assert.equal(authorized.controlAuth, "bearer");
   assert.equal(authorized.relayToken, "single-preview-grant");
   assert.equal(authorized.expiresInMs, 7_200_000);
   assert.ok(authorized.expiresAt > Date.now());
   assert.ok(calls.some((call) => call.url.endsWith("/api/auth/exchange")));
+});
+
+test("accepts a fresh server grant when the client clock is slightly ahead", async () => {
+  const plan = {
+    provider: "farm-gateway",
+    gatewayUrl: "https://preview.example.com",
+    relayUrl: "wss://preview.example.com/agent",
+    target: { localUrl: "http://localhost:3000", host: "localhost", port: 3000, source: "port" },
+    requestedName: "clock-skew",
+    requestedHostname: "clock-skew.preview.example.com",
+    requestedPublicUrl: "https://clock-skew.preview.example.com",
+  };
+  const serverExpiry = Date.now() - 60_000;
+  const runtime = {
+    async fetch(url) {
+      if (url.endsWith("/api/auth/config")) {
+        return Response.json({
+          enabled: true,
+          provider: "github",
+          clientId: "github-client",
+          defaultSessionTtlMs: 60_000,
+          maxSessionTtlMs: 600_000,
+        });
+      }
+      if (url.endsWith("/api/tunnel/grants")) {
+        return Response.json({ token: "clock-skew-grant", expiresAt: serverExpiry });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    },
+    async openBrowser() {
+      return false;
+    },
+    async wait() {},
+    credentials: {
+      async get() {
+        return "stored-account-token";
+      },
+      async set() {},
+      async delete() {},
+    },
+    async promptDuration() {
+      return 60_000;
+    },
+  };
+
+  const authorized = await authorizePreviewGatewayPlan(plan, { runtime });
+  assert.equal(authorized.relayToken, "clock-skew-grant");
+  assert.equal(authorized.expiresAt, serverExpiry);
 });
 
 test("resolves a running local preview target", async () => {
@@ -327,6 +414,26 @@ test("carries a configured relay credential without putting it in the relay URL"
   }
 });
 
+test("keeps relay credentials out of public preview results", async () => {
+  const previousToken = process.env.FARM_PREVIEW_RELAY_TOKEN;
+  process.env.FARM_PREVIEW_RELAY_TOKEN = "do-not-expose-this-relay-credential";
+
+  try {
+    const result = await previewFarm({
+      provider: "farm",
+      port: 3000,
+      noProbe: true,
+      dryRun: true,
+      name: "redacted-result",
+    });
+
+    assert.equal("relayToken" in result.plan, false);
+    assert.ok(!JSON.stringify(result).includes("do-not-expose-this-relay-credential"));
+  } finally {
+    restoreEnv("FARM_PREVIEW_RELAY_TOKEN", previousToken);
+  }
+});
+
 test("runs the managed preview through the native tunnel lifecycle", async () => {
   let resolveWait;
   const wait = new Promise((resolve) => {
@@ -383,7 +490,7 @@ test("treats a managed native disconnect before expiry as a fallback signal", as
     provider: "farm-gateway",
     gatewayUrl: "https://preview.farmjs.dev",
     relayUrl: "wss://preview.farmjs.dev/agent",
-    expiresAt: Date.now() + 60_000,
+    expiresAt: Date.now() + 10 * 60_000,
     target: {
       localUrl: "http://localhost:3000",
       host: "localhost",
@@ -413,6 +520,32 @@ test("treats a managed native disconnect before expiry as a fallback signal", as
     runNativePreviewTunnel(plan, { runtime }),
     /disconnected before the preview expired/,
   );
+});
+
+test("treats a native disconnect within clock skew as hosted expiry", async () => {
+  const plan = {
+    provider: "farm-gateway",
+    gatewayUrl: "https://preview.farmjs.dev",
+    relayUrl: "wss://preview.farmjs.dev/agent",
+    expiresAt: Date.now() + 60_000,
+    target: { localUrl: "http://localhost:3000", host: "localhost", port: 3000, source: "port" },
+    requestedName: "expiring",
+    requestedHostname: "expiring.preview.farmjs.dev",
+    requestedPublicUrl: "https://expiring.preview.farmjs.dev",
+  };
+  const runtime = {
+    async startPreviewAgent() {
+      return { sessionId: "native-session", publicUrl: plan.requestedPublicUrl };
+    },
+    async stopPreviewAgent() {
+      return true;
+    },
+    async waitPreviewAgent() {
+      return true;
+    },
+  };
+
+  assert.equal((await runNativePreviewTunnel(plan, { runtime })).sessionId, "native-session");
 });
 
 test("forwards a gateway request to the local target", async () => {
@@ -693,10 +826,13 @@ test("keeps the gateway session alive after one local request fails", async () =
     }
     res.end("ok");
   });
-  const gateway = await createQueuedPreviewGatewayTestServer([
-    { id: "req_fail", method: "GET", path: "/fail" },
-    { id: "req_ok", method: "GET", path: "/ok" },
-  ]);
+  const gateway = await createQueuedPreviewGatewayTestServer(
+    [
+      { id: "req_fail", method: "GET", path: "/fail" },
+      { id: "req_ok", method: "GET", path: "/ok" },
+    ],
+    { expectedControlAuth: "bearer" },
+  );
   const plan = createPreviewGatewayPlan(
     {
       localUrl: `http://localhost:${app.port}`,
@@ -843,6 +979,56 @@ test("falls back to gateway polling while the hosted native relay is unavailable
   } finally {
     restoreEnv("FARM_PREVIEW_RELAY_URL", previousRelay);
     await app.close().catch(() => undefined);
+    await gateway.close();
+  }
+});
+
+test("uses query credentials only for a detected legacy polling gateway", async () => {
+  const app = await createTestServer((_req, res) => {
+    res.statusCode = 201;
+    res.end("legacy-ok");
+  });
+  const gateway = await createQueuedPreviewGatewayTestServer(
+    [{ id: "req_legacy", method: "GET", path: "/legacy", headers: {} }],
+    { expectedControlAuth: "query" },
+  );
+  const plan = createPreviewGatewayPlan(
+    {
+      localUrl: `http://localhost:${app.port}`,
+      host: "localhost",
+      port: app.port,
+      source: "port",
+    },
+    { gatewayUrl: gateway.url, name: "legacy-auth" },
+  );
+  const runtime = {
+    fetch,
+    async openBrowser() {
+      return false;
+    },
+    async wait() {},
+    credentials: {
+      async get() {},
+      async set() {},
+      async delete() {},
+    },
+    async promptDuration() {},
+  };
+
+  try {
+    const authorized = await authorizePreviewGatewayPlan(plan, { runtime });
+    assert.equal(authorized.controlAuth, "query");
+    await runPreviewGateway(authorized, {
+      maxRequests: 1,
+      pollTimeoutMs: 10,
+      localProbeIntervalMs: 1_000,
+    });
+    assert.deepEqual(
+      gateway.responses.map(({ requestId, response }) => [requestId, response.status]),
+      [["req_legacy", 201]],
+    );
+  } finally {
+    await app.close();
     await gateway.close();
   }
 });
@@ -1046,6 +1232,7 @@ async function createQueuedPreviewGatewayTestServer(requests, options = {}) {
     }
 
     if (req.method === "GET" && url.pathname === "/api/sessions/sess_queue/requests") {
+      assertGatewayControlAuth(req, url, options.expectedControlAuth, "token_queue");
       if (options.pollDelayMs)
         await new Promise((resolve) => setTimeout(resolve, options.pollDelayMs));
       res.setHeader("content-type", "application/json");
@@ -1054,6 +1241,7 @@ async function createQueuedPreviewGatewayTestServer(requests, options = {}) {
     }
 
     if (req.method === "POST" && url.pathname.startsWith("/api/sessions/sess_queue/responses/")) {
+      assertGatewayControlAuth(req, url, options.expectedControlAuth, "token_queue");
       responses.push({
         requestId: url.pathname.split("/").pop(),
         response: JSON.parse(await readRequestBody(req)),
@@ -1063,6 +1251,7 @@ async function createQueuedPreviewGatewayTestServer(requests, options = {}) {
     }
 
     if (req.method === "DELETE" && url.pathname === "/api/sessions/sess_queue") {
+      assertGatewayControlAuth(req, url, options.expectedControlAuth, "token_queue");
       res.end("ok");
       return;
     }
@@ -1076,6 +1265,17 @@ async function createQueuedPreviewGatewayTestServer(requests, options = {}) {
     responses,
     close: server.close,
   };
+}
+
+function assertGatewayControlAuth(req, url, expected, token) {
+  if (!expected) return;
+  if (expected === "query") {
+    assert.equal(url.searchParams.get("token"), token);
+    assert.equal(req.headers.authorization, undefined);
+    return;
+  }
+  assert.equal(url.searchParams.get("token"), null);
+  assert.equal(req.headers.authorization, `Bearer ${token}`);
 }
 
 function readRequestBody(req) {
