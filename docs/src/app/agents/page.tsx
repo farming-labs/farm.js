@@ -41,7 +41,7 @@ const availableNow = [
     title: "Run agents beside your app.",
     code: "integrations: { agent: eve() }",
     description:
-      "Register Eve or Cloudflare Agents in farm.config.ts. farm dev starts the runtime and serves its routes on your app's origin. In production they ship together on Vercel (Eve) or in one Worker built with the cloudflare-module preset (Cloudflare Agents); otherwise Farm proxies to a runtime you deploy separately.",
+      "Register Eve or Cloudflare Agents in farm.config.ts. farm dev starts the runtime and serves its routes on your app's origin. In production they ship together on Vercel (Eve) or in one Worker built with the cloudflare-module preset (Cloudflare Agents). On other targets, deploy the runtime separately and set its origin; Farm proxies to it.",
     href: "/docs/integrations/eve",
     link: "Agent integrations",
   },
