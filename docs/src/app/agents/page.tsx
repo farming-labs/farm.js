@@ -14,6 +14,7 @@ import {
 import { AgentArtwork } from "../../components/agents/artwork";
 import { AgentWaitlist } from "../../components/agents/waitlist";
 import { BlogFigure } from "../../components/blog/figures";
+import { FlickeringGrid } from "../../components/ui/flickering-grid";
 import {
   AnnouncementBar,
   IndexedLabel,
@@ -149,6 +150,19 @@ export default function AgentsPage() {
                 </p>
                 <div id="waitlist" className="agents-signup">
                   <AgentWaitlist source="agents" note={false} />
+                </div>
+              </div>
+              {/* The landing hero's flickering grid, behind the bottom of the hero copy (adds no height). */}
+              <div aria-hidden className="agents-hero-flicker">
+                <div className="agents-hero-flicker-field">
+                  <FlickeringGrid
+                    className="absolute inset-0"
+                    color="rgb(255, 255, 255)"
+                    flickerChance={0.9}
+                    gridGap={7}
+                    maxOpacity={0.36}
+                    squareSize={2}
+                  />
                 </div>
               </div>
               <AgentArtwork />
