@@ -806,3 +806,106 @@ html[data-farm-docs-runtime] :is(.omni-footer-hint, .omni-filter-label, .omni-fi
 html[data-farm-docs-runtime] .omni-filter-button {
   color: #ededed !important;
 }
+
+/* ---------- release announcement on docs pages ----------
+   The bar is added by components/docs-announcement.ts; its 28px strip is reserved here so nothing
+   shifts when it appears. --fd-banner-height is the docs theme's own offset, so the sticky header,
+   sidebar, and On this page sit below the bar. */
+
+html[data-farm-docs-runtime] #farm-docs-root {
+  --fd-banner-height: 28px;
+  padding-top: 28px;
+}
+html[data-farm-docs-runtime] .farm-docs-announcement {
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
+  /* Above the header row (80) and llms.txt cell (90), below the phone menu drawer (100). */
+  z-index: 95;
+  display: flex;
+  height: 28px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0 8px;
+  padding: 0 16px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.12);
+  background: #000;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+html[data-farm-docs-runtime] .farm-docs-announcement span {
+  color: rgb(255 255 255 / 0.76);
+}
+html[data-farm-docs-runtime] .farm-docs-announcement a {
+  color: rgb(255 255 255 / 0.8);
+  text-decoration: underline;
+  text-decoration-color: rgb(255 255 255 / 0.4);
+  text-underline-offset: 2px;
+}
+html[data-farm-docs-runtime] .farm-docs-announcement a:is(:hover, :focus-visible) {
+  color: #fff;
+  text-decoration-color: #fff;
+}
+
+/* ---------- docs header: a real search field and a quiet llms.txt label ---------- */
+
+/* The header row (sticky on desktop, fixed on phones) pins itself to the very top, so move it and
+   the fixed llms.txt cell below the announcement. */
+html[data-farm-docs-runtime] #nd-subnav {
+  top: var(--fd-banner-height) !important;
+}
+/* The fixed llms.txt cell sits below the announcement like the rest of the header. */
+html[data-farm-docs-runtime] .fd-agent-llms-directive {
+  top: 28px !important;
+  color: var(--farm-code-legend) !important;
+  font-size: 11px !important;
+  letter-spacing: 0.08em !important;
+  transition: color 150ms;
+}
+html[data-farm-docs-runtime] .fd-agent-llms-directive:is(:hover, :focus-visible) {
+  color: #ededed !important;
+}
+/* Desktop: the header's search control becomes a field (icon, label, the theme's ⌘K chip) in the
+   page-action style. Phones keep the theme's icon button. */
+@media (min-width: 768px) {
+  html[data-farm-docs-runtime] #nd-subnav button[data-search] {
+    flex: none;
+    gap: 10px;
+    width: 260px !important;
+    min-width: 260px !important;
+    height: 30px !important;
+    white-space: nowrap;
+    margin-inline: 12px;
+    padding: 0 6px 0 10px !important;
+    justify-content: flex-start !important;
+    border: 1px solid var(--farm-code-line) !important;
+    border-radius: 3px !important;
+    background: var(--farm-code-bg) !important;
+    color: var(--farm-code-legend) !important;
+    transition:
+      border-color 150ms,
+      color 150ms;
+  }
+  html[data-farm-docs-runtime] #nd-subnav button[data-search]:is(:hover, :focus-visible) {
+    border-color: var(--farm-code-line-strong) !important;
+    color: #ededed !important;
+  }
+  html[data-farm-docs-runtime] #nd-subnav button[data-search] svg {
+    width: 14px !important;
+    height: 14px !important;
+  }
+  html[data-farm-docs-runtime] #nd-subnav button[data-search]::before {
+    order: 1;
+    content: "Search docs";
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  html[data-farm-docs-runtime] #nd-subnav button[data-search]::after {
+    order: 2;
+    margin-left: auto;
+  }
+}
