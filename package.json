@@ -54,7 +54,7 @@
     "clean": "turbo clean",
     "bump": "bumpp",
     "version-packages": "pnpm run bump",
-    "release:build": "NODE_OPTIONS=--max-old-space-size=6144 pnpm build",
+    "release:build": "NODE_OPTIONS=--max-old-space-size=8192 pnpm build",
     "release:check": "pnpm run release:build && pnpm run test:packed-integrations && pnpm run test:packed-app && pnpm test -- --skip-incompatible",
     "release:prepare": "node scripts/sync-release-versions.js && pnpm run release:check",
     "release:prepare:no-test": "node scripts/sync-release-versions.js && pnpm run release:build",
