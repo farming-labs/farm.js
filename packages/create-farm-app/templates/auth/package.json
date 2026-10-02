@@ -11,8 +11,8 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farm.js/auth": "0.1.0",
-    "@farm.js/core": "0.1.0",
+    "@farm.js/auth": "0.1.1-beta.1",
+    "@farm.js/core": "0.1.1-beta.1",
     "@farming-labs/docs": "0.2.116",
     "@farming-labs/farmjs": "0.2.116",
     "@farming-labs/theme": "0.2.116",
@@ -23,8 +23,8 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@farm.js/cli": "0.1.0",
-    "@farm.js/devtools": "0.1.0",
+    "@farm.js/cli": "0.1.1-beta.1",
+    "@farm.js/devtools": "0.1.1-beta.1",
     "@types/node": "22.20.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

@@ -713,13 +713,18 @@ test("refuses every registration when no relay credential is configured", async 
   }
 });
 
-test("binds an authorized native relay session to its absolute expiry", async () => {
+test("binds an authorized native relay session to its absolute expiry", async (t) => {
+  const ttlMs = 10_000;
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
   const seen = [];
+  const coordinator = new MemoryRelayCoordinator();
+  coordinator.takeRequest = () => new Promise(() => {});
   const relay = createPersistentPreviewRelay({
+    coordinator,
     authorizeAgent(input) {
       seen.push(input);
       if (input.token !== "session-grant" || input.name !== "expiring") return false;
-      return { expiresAt: Date.now() + 75 };
+      return { expiresAt: Date.now() + ttlMs };
     },
   });
   const address = await relay.listen();
@@ -733,12 +738,17 @@ test("binds an authorized native relay session to its absolute expiry", async ()
     const [data] = await readyMessage;
     const ready = JSON.parse(data.toString());
     assert.equal(ready.type, "ready");
-    assert.ok(ready.expiresAt > Date.now());
+    assert.equal(ready.expiresAt, Date.now() + ttlMs);
     assert.deepEqual(seen, [{ token: "session-grant", name: "expiring" }]);
+    assert.ok(coordinator.claimTtlMs > 0 && coordinator.claimTtlMs <= ttlMs);
+    assert.ok(coordinator.touchTtlMs.length > 0);
+    assert.ok(coordinator.touchTtlMs.every((ttl) => ttl > 0 && ttl <= ttlMs));
 
+    t.mock.timers.tick(ttlMs);
     const [code, reason] = await closed;
     assert.equal(code, 1000);
     assert.equal(reason.toString(), "Preview expired");
+    assert.equal(coordinator.releaseCalls, 1);
     await expectInactive(ready.publicUrl);
   } finally {
     socket.close();
@@ -943,8 +953,12 @@ class MemoryRelayCoordinator {
   sessions = new Map();
   requests = new Map();
   responses = new Map();
+  claimTtlMs = 0;
+  touchTtlMs = [];
+  releaseCalls = 0;
 
   async claimSession(session, ttlMs) {
+    this.claimTtlMs = ttlMs;
     const existing = await this.findSession(session.name);
     if (existing) return false;
     this.sessions.set(session.name, { ...session, expiresAt: Date.now() + ttlMs });
@@ -962,6 +976,7 @@ class MemoryRelayCoordinator {
   }
 
   async touchSession(session, ttlMs) {
+    this.touchTtlMs.push(ttlMs);
     const existing = this.sessions.get(session.name);
     if (existing?.id !== session.id) return false;
     existing.expiresAt = Date.now() + ttlMs;
@@ -969,6 +984,7 @@ class MemoryRelayCoordinator {
   }
 
   async releaseSession(session) {
+    this.releaseCalls += 1;
     if (this.sessions.get(session.name)?.id === session.id) this.sessions.delete(session.name);
   }
 

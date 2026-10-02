@@ -352,8 +352,12 @@ The preview URL forwards public internet traffic to your local app. Treat it lik
 - Stop the command when testing is finished.
 - The CLI caches only the opaque Farm account credential, never the GitHub provider token. The
   credential file is created with user-only permissions. Use `--login` to replace it.
-- Tunnel grants are bound to one normalized preview name and one absolute expiry. Control requests
-  send session credentials in the `Authorization` header instead of query strings.
+- Tunnel grants are bound to one normalized preview name and one absolute expiry. Current polling
+  control requests send session credentials in the `Authorization` header. The native agent is
+  configured with one relay URL, so its name-bound grant is carried only on the outbound `/agent`
+  WebSocket URL; it is never added to the public preview URL. Pre-auth compatibility gateways may
+  still require their random session token in control-request query strings. Gateway operators
+  should redact `/agent` and legacy control-request query strings from access logs.
 - Do not expose admin-only routes, local dashboards, or secret-bearing pages unless you trust the audience.
 - Do not paste a preview URL into untrusted systems.
 - Rotate preview names after sharing sensitive routes.
