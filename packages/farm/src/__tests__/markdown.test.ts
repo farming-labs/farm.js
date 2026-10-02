@@ -384,6 +384,27 @@ describe("htmlToMarkdown", () => {
     ).toBe("> Run this:\n> ```\n> pnpm install\n>\n> pnpm dev\n> ```\n");
   });
 
+  it("decodes text outside paragraphs, such as in a div or span", () => {
+    expect(
+      htmlToMarkdown("<main><div>Tom &amp; Jerry&#x27;s</div></main>", { includeMetadata: false }),
+    ).toBe("Tom & Jerry's\n");
+  });
+
+  it("keeps escaped tags in text as text", () => {
+    const markdown = (html: string) => htmlToMarkdown(html, { includeMetadata: false });
+
+    expect(markdown("<main><p>Use &lt;div&gt; here</p></main>")).toBe("Use <div> here\n");
+    expect(markdown("<main><li>Wrap it in &lt;main&gt;</li></main>")).toBe("- Wrap it in <main>\n");
+    expect(markdown("<main><p>Run <code>&lt;section&gt;</code></p></main>")).toBe(
+      "Run `<section>`\n",
+    );
+    expect(
+      markdown(
+        "<main><blockquote><p>a &amp;lt; b &lt;br&gt;</p><pre><code>&lt;div&gt;hi&lt;/div&gt;</code></pre></blockquote></main>",
+      ),
+    ).toBe("> a &lt; b <br>\n> ```\n> <div>hi</div>\n> ```\n");
+  });
+
   it("does not split words that are only wrapped in inline elements", () => {
     // Letter- and word-split animations wrap one word in sibling spans; without
     // layout information they must read as the source text, not "Hel lo".
