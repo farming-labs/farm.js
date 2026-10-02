@@ -695,3 +695,114 @@
 #farm-docs-root #nd-page .fd-breadcrumb-current {
   color: #d8d8d8 !important;
 }
+
+/* ---------- search dialog (rendered under <body>, so scoped to docs pages by the html attribute) ---------- */
+
+html[data-farm-docs-runtime] .omni-overlay {
+  background: rgb(0 0 0 / 0.7) !important;
+  backdrop-filter: blur(6px);
+}
+html[data-farm-docs-runtime] .omni-content {
+  border: 1px solid var(--farm-code-line) !important;
+  border-radius: 3px !important;
+  background: var(--farm-code-bg) !important;
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.65) !important;
+}
+html[data-farm-docs-runtime] .omni-header {
+  border-bottom: 1px solid var(--farm-code-line) !important;
+}
+html[data-farm-docs-runtime] .omni-search-icon {
+  color: var(--farm-code-legend) !important;
+}
+html[data-farm-docs-runtime] .omni-search-input {
+  color: #ededed !important;
+  font-size: 15px !important;
+  font-weight: 300 !important;
+}
+html[data-farm-docs-runtime] .omni-search-input::placeholder {
+  color: var(--farm-code-dim);
+}
+/* Key chips (ESC, return, arrows) share the page-action chip look. */
+html[data-farm-docs-runtime] :is(.omni-close-btn, .omni-kbd-sm) {
+  height: 22px;
+  padding: 0 7px !important;
+  border: 1px solid var(--farm-code-line) !important;
+  border-radius: 3px !important;
+  background: #000 !important;
+  color: var(--farm-code-legend) !important;
+  font-family: var(--font-geist-mono), ui-monospace, monospace !important;
+  font-size: 10px !important;
+  font-weight: 400 !important;
+  letter-spacing: 0.06em;
+}
+html[data-farm-docs-runtime] .omni-close-btn:is(:hover, :focus-visible) {
+  border-color: var(--farm-code-line-strong) !important;
+  color: #ededed !important;
+}
+html[data-farm-docs-runtime] .omni-group-label {
+  color: var(--farm-code-legend) !important;
+  font-family: var(--font-geist-mono), ui-monospace, monospace !important;
+  font-size: 11px !important;
+  font-weight: 400 !important;
+  letter-spacing: 0.08em;
+}
+/* Results: lighter type, the selected row marked with the film's white edge. */
+html[data-farm-docs-runtime] .omni-item {
+  padding: 12px 18px !important;
+  border-top: 1px solid rgb(255 255 255 / 0.06) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+html[data-farm-docs-runtime] .omni-item.omni-item-active {
+  background: rgb(255 255 255 / 0.04) !important;
+  box-shadow: inset 2px 0 0 #ededed !important;
+}
+html[data-farm-docs-runtime] .omni-item::before {
+  display: none !important;
+}
+html[data-farm-docs-runtime] .omni-item-subtitle {
+  color: var(--farm-code-dim) !important;
+  font-family: var(--font-geist-mono), ui-monospace, monospace !important;
+  font-size: 10.5px !important;
+  letter-spacing: 0.04em;
+}
+html[data-farm-docs-runtime] .omni-item-label {
+  margin-top: 4px;
+  color: #ededed !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+}
+html[data-farm-docs-runtime] .omni-item-description {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: rgb(255 255 255 / 0.5) !important;
+  font-size: 13px !important;
+  font-weight: 300 !important;
+  line-height: 1.55 !important;
+}
+/* Matches read by brightness, not grey boxes (which scattered across title letters). */
+html[data-farm-docs-runtime] .omni-highlight {
+  padding: 0 !important;
+  background: transparent !important;
+  color: inherit !important;
+}
+html[data-farm-docs-runtime] .omni-item-description .omni-highlight {
+  color: #ededed !important;
+  font-weight: 400;
+}
+html[data-farm-docs-runtime] .omni-footer {
+  border-top: 1px solid var(--farm-code-line) !important;
+  background: transparent !important;
+}
+html[data-farm-docs-runtime] :is(.omni-footer-hint, .omni-filter-label, .omni-filter-button) {
+  color: var(--farm-code-legend) !important;
+  font-family: var(--font-geist-mono), ui-monospace, monospace !important;
+  font-size: 10.5px !important;
+  letter-spacing: 0.04em;
+}
+html[data-farm-docs-runtime] .omni-filter-button {
+  color: #ededed !important;
+}
