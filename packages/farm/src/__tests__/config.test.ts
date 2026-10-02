@@ -388,7 +388,12 @@ describe("resolveConfig", () => {
   it("resolves the agent config with JSON-LD and llms.txt off by default", async () => {
     const defaults = await resolveConfig({}, "production");
     expect(defaults.agent.jsonLd).toBe(false);
-    expect(defaults.agent.llmsTxt).toEqual({ enabled: false, include: [], exclude: [] });
+    expect(defaults.agent.llmsTxt).toEqual({
+      enabled: false,
+      include: [],
+      exclude: [],
+      full: false,
+    });
 
     const llms = await resolveConfig(
       { agent: { llmsTxt: { title: "Acme", exclude: ["/admin/[...path]"] } } },
@@ -399,6 +404,7 @@ describe("resolveConfig", () => {
       title: "Acme",
       include: [],
       exclude: ["/admin/[...path]"],
+      full: true,
     });
 
     const enabled = await resolveConfig({ agent: { jsonLd: true } }, "production");

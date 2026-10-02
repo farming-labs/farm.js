@@ -1,6 +1,7 @@
 /**
  * llms.txt (https://llmstxt.org): a Markdown index at `/llms.txt` that tells
- * language models what a site is and where its readable pages live.
+ * language models what a site is and where its readable pages live, plus
+ * `/llms-full.txt`, the same index with each page's Markdown inlined.
  *
  * `agent.llmsTxt` in farm.config.ts serves a generated index of the app's static
  * pages. A `src/app/llms.ts` metadata route replaces it with whatever it returns,
@@ -60,6 +61,17 @@ export interface FarmLlmsTxtUserConfig {
   include?: string[];
   /** Route patterns to leave out, such as `/admin/[...path]`. */
   exclude?: string[];
+  /**
+   * Also serve `/llms-full.txt`, the index with each page's Markdown mirror inlined.
+   *
+   * @default true
+   */
+  full?: boolean;
+  /**
+   * Seconds a CDN may cache the generated files. Rendering llms-full.txt renders
+   * every listed page, so cache it on busy sites. Defaults to no caching.
+   */
+  revalidate?: number;
 }
 
 export interface ResolvedFarmLlmsTxtConfig {
@@ -69,6 +81,8 @@ export interface ResolvedFarmLlmsTxtConfig {
   details?: string;
   include: string[];
   exclude: string[];
+  full: boolean;
+  revalidate?: number;
 }
 
 export interface FarmLlmsTxtPageSource {
@@ -79,18 +93,29 @@ export interface FarmLlmsTxtPageSource {
 export function resolveFarmLlmsTxtConfig(
   input: boolean | FarmLlmsTxtUserConfig | undefined,
 ): ResolvedFarmLlmsTxtConfig {
-  if (!input) return { enabled: false, include: [], exclude: [] };
-  if (input === true) return { enabled: true, include: [], exclude: [] };
+  if (!input) return { enabled: false, include: [], exclude: [], full: false };
+  if (input === true) return { enabled: true, include: [], exclude: [], full: true };
   if (typeof input !== "object") {
     throw new TypeError("agent.llmsTxt must be true, false, or an options object.");
   }
   // Also accepts its own output, so already-resolved config passes through unchanged.
-  if (input.enabled === false) return { enabled: false, include: [], exclude: [] };
+  if (input.enabled === false) return { enabled: false, include: [], exclude: [], full: false };
 
   for (const key of ["title", "summary", "details"] as const) {
     if (input[key] !== undefined && typeof input[key] !== "string") {
       throw new TypeError(`agent.llmsTxt.${key} must be a string.`);
     }
+  }
+  if (input.full !== undefined && typeof input.full !== "boolean") {
+    throw new TypeError("agent.llmsTxt.full must be a boolean.");
+  }
+  if (
+    input.revalidate !== undefined &&
+    (typeof input.revalidate !== "number" ||
+      !Number.isFinite(input.revalidate) ||
+      input.revalidate < 0)
+  ) {
+    throw new TypeError("agent.llmsTxt.revalidate must be a number of seconds.");
   }
 
   return {
@@ -100,6 +125,8 @@ export function resolveFarmLlmsTxtConfig(
     ...(input.details ? { details: input.details } : {}),
     include: resolveRoutePatterns(input.include, "include"),
     exclude: resolveRoutePatterns(input.exclude, "exclude"),
+    full: input.full !== false,
+    ...(input.revalidate !== undefined ? { revalidate: input.revalidate } : {}),
   };
 }
 
@@ -238,6 +265,112 @@ export function serializeFarmLlmsTxt(value: unknown): string {
   }
 
   return `${blocks.filter(Boolean).join("\n\n")}\n`;
+}
+
+/**
+ * Reads a page's Markdown the way an agent would: a fresh `.md` request with no
+ * cookies or credentials, so a page behind auth answers 401 and is left out of
+ * a file that CDNs may cache, instead of leaking into it.
+ */
+export function createFarmLlmsMarkdownReader(
+  fetchMarkdown: (request: Request) => Promise<Response>,
+): (url: string) => Promise<string | null> {
+  return async (url) => {
+    try {
+      const response = await fetchMarkdown(
+        new Request(url, { headers: { accept: "text/markdown" } }),
+      );
+      const type = response.headers.get("content-type") ?? "";
+      if (!response.ok || !type.toLowerCase().startsWith("text/markdown")) {
+        await response.body?.cancel();
+        return null;
+      }
+      return await response.text();
+    } catch {
+      return null;
+    }
+  };
+}
+
+/**
+ * Renders llms-full.txt: the llms.txt header, then one block per linked page with
+ * its Markdown inlined, in the layout the docs engine uses. A string passes
+ * through unchanged. Only same-origin links are fetched.
+ */
+export async function renderFarmLlmsFullTxt(
+  value: unknown,
+  options: {
+    origin: string;
+    readMarkdown: (url: string) => Promise<string | null>;
+    concurrency?: number;
+  },
+): Promise<string> {
+  // Validates the value, and returns strings unchanged apart from the final newline.
+  const index = serializeFarmLlmsTxt(value);
+  if (typeof value === "string") return index;
+
+  const llms = value as FarmLlmsTxt;
+  const links: FarmLlmsTxtLink[] = [];
+  const seen = new Set<string>();
+  for (const section of llms.sections ?? []) {
+    for (const link of section.links) {
+      if (seen.has(link.url)) continue;
+      seen.add(link.url);
+      links.push(link);
+    }
+  }
+
+  const contents = await mapWithConcurrency(links, options.concurrency ?? 4, (link) =>
+    shouldInlineLlmsLink(link.url, options.origin) ? options.readMarkdown(link.url) : null,
+  );
+
+  const blocks = [`# ${toSingleLine(llms.title)}`];
+  if (llms.summary?.trim()) blocks.push(`> ${toSingleLine(llms.summary)}`);
+  if (llms.details?.trim()) blocks.push(llms.details.trim());
+  const pages = links.map((link, index) => {
+    const parts = [`## ${toSingleLine(link.title)}`, `URL: ${link.url.trim()}`];
+    if (link.description?.trim()) parts.push(toSingleLine(link.description));
+    const content = stripFrontmatter(contents[index] ?? "").trim();
+    if (content) parts.push(content);
+    return parts.join("\n\n");
+  });
+  if (pages.length) blocks.push(pages.join("\n\n---\n\n"));
+  return `${blocks.join("\n\n")}\n`;
+}
+
+// Markdown sources keep their YAML frontmatter, whose --- lines would read as page
+// separators. The block header already carries the title and description.
+function stripFrontmatter(markdown: string): string {
+  const match = /^\uFEFF?---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/.exec(markdown);
+  return match ? markdown.slice(match[0].length) : markdown;
+}
+
+function shouldInlineLlmsLink(url: string, origin: string): boolean {
+  let target: URL;
+  try {
+    target = new URL(url, origin);
+  } catch {
+    return false;
+  }
+  // Inlining llms.txt or llms-full.txt itself would recurse.
+  return target.origin === origin && !/\/llms(-full)?\.txt$/.test(target.pathname);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  run: (item: T) => Promise<R> | R,
+): Promise<R[]> {
+  const results: R[] = [];
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await run(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(limit, 1), items.length) }, worker));
+  return results;
 }
 
 function readMetadataTitle(metadata: unknown): string | undefined {

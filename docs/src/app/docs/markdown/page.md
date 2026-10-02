@@ -144,7 +144,8 @@ their raw routes must also be disabled.
 ## llms.txt
 
 Set `agent: { llmsTxt: true }` to publish `/llms.txt`, an index that points language models at these
-mirrors. See [Agent readiness](/docs/configuration#agent-readiness).
+mirrors, and `/llms-full.txt`, which inlines them. See
+[Agent readiness](/docs/configuration#agent-readiness).
 
 ## Per-route options
 

@@ -139,6 +139,13 @@ import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
 import { resolveFarmRequestURL } from "./server/request";
 import { reportOpenAPIDevGenerationResult } from "./openapi/dev-status";
 
+/** Paths `agent.llmsTxt` serves without a route file. */
+function farmLlmsTxtGeneratedPaths(config: { agent?: { llmsTxt?: unknown } }): string[] {
+  const llms = resolveFarmLlmsTxtConfig(config.agent?.llmsTxt as never);
+  if (!llms.enabled) return [];
+  return llms.full ? ["/llms.txt", "/llms-full.txt"] : ["/llms.txt"];
+}
+
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
   images?: FarmUserConfig["images"];
@@ -1823,11 +1830,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               docsHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
             }
           }
-          // An app's own llms.txt (agent.llmsTxt or src/app/llms.ts) takes /llms.txt
-          // from the docs engine, as in production; the renderer serves it below.
+          // An app's own llms.txt and llms-full.txt (agent.llmsTxt, llms.ts, llms-full.ts)
+          // take those paths from the docs engine, as in production; the renderer serves them.
           const appOwnsLlmsTxt =
-            requestPathname === "/llms.txt" &&
-            (resolveFarmLlmsTxtConfig(farmConfig.agent?.llmsTxt).enabled ||
+            farmLlmsTxtGeneratedPaths(farmConfig).includes(requestPathname) ||
+            ((requestPathname === "/llms.txt" || requestPathname === "/llms-full.txt") &&
               farmApp.getRouteManager().matchMetadataRoute(requestPathname) !== null);
           if (farmDocsHandler && !appOwnsLlmsTxt) {
             const docsRequest = new Request(fullUrl, {
@@ -2354,7 +2361,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               requestPathname,
               farmApp?.getRouteManager(),
               [server.config.publicDir, server.config.root],
-              resolveFarmLlmsTxtConfig(farmConfig.agent?.llmsTxt).enabled ? ["/llms.txt"] : [],
+              farmLlmsTxtGeneratedPaths(farmConfig),
             )
           ) {
             return next();

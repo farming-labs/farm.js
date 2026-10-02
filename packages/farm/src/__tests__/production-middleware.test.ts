@@ -87,6 +87,9 @@ describe("production middleware runtime", () => {
       expect(
         await fs.readFile(path.join(root, ".vercel", "output", "static", "llms.txt"), "utf8"),
       ).toBe("# Static fixture index\n");
+      expect(
+        await fs.readFile(path.join(root, ".vercel", "output", "static", "llms-full.txt"), "utf8"),
+      ).toBe("# Static fixture index, in full\n");
       // At least one preset source route (a redirect or header route) is
       // preserved ahead of the immutable route; the old wholesale rebuild
       // dropped every one of them on Vercel.
@@ -331,6 +334,36 @@ describe("production middleware runtime", () => {
       expect(llmsText).toContain("- [Public notes](https://example.test/public-notes.md)\n");
       expect(llmsText).not.toContain("private-notes");
       expect(llmsText).not.toContain("[id]");
+
+      // llms-full.txt inlines each listed page's .md mirror, read through the same server.
+      const llmsFullResponse = await serverModule.default.fetch(
+        new Request("https://example.test/llms-full.txt"),
+      );
+      expect(llmsFullResponse.status).toBe(200);
+      expect(llmsFullResponse.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+      const llmsFull = await llmsFullResponse.text();
+      expect(
+        llmsFull.startsWith(
+          "# Farm production fixture\n\n> Pages served by the production fixture.\n\n## ",
+        ),
+      ).toBe(true);
+      // A Markdown page contributes its source; a React page its rendered mirror.
+      expect(llmsFull).toContain(
+        "## Public notes\n\nURL: https://example.test/public-notes.md\n\n# Public notes\n\npublic-notes-source\n\n---\n\n",
+      );
+      expect(llmsFull).toContain(
+        "## Explicit image\n\nURL: https://example.test/dashboard/explicit.md\n\n# Explicit image\n\nSource: /dashboard/explicit\n\nexplicit image page",
+      );
+      expect(llmsFull).not.toContain("private-notes");
+
+      // A nested llms-full.ts that returns a string is served exactly as written.
+      const notesFullResponse = await serverModule.default.fetch(
+        new Request("https://example.test/public-notes/llms-full.txt"),
+      );
+      expect(notesFullResponse.status).toBe(200);
+      expect(await notesFullResponse.text()).toBe(
+        "# Fixture notes, in full\n\npublic-notes-source\n",
+      );
 
       // A nested llms.ts receives the same pages and defaults and wins under its segment.
       const notesLlmsResponse = await serverModule.default.fetch(

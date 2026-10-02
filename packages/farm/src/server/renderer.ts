@@ -80,6 +80,8 @@ import { createFarmMetadataRouteResponse } from "../metadata-route";
 import {
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
+  createFarmLlmsMarkdownReader,
+  renderFarmLlmsFullTxt,
   resolveFarmLlmsTxtConfig,
 } from "../llms-txt";
 import { resolveMarkdownConfig } from "../markdown";
@@ -1141,11 +1143,9 @@ export class ServerRenderer {
         return;
       }
 
-      if (
-        pathname === "/llms.txt" &&
-        resolveFarmLlmsTxtConfig(this.config.agent?.llmsTxt).enabled
-      ) {
-        await this.renderGeneratedLlmsTxt(req, res);
+      const generatedLlmsKind = this.getGeneratedLlmsKind(pathname);
+      if (generatedLlmsKind) {
+        await this.renderGeneratedLlmsTxt(req, res, generatedLlmsKind);
         completeRender(res.statusCode || 200, pathname);
         return;
       }
@@ -2023,6 +2023,10 @@ export class ServerRenderer {
         trustProxy: this.config.server?.trustProxy,
       });
       const url = new URL(request.url);
+      const llmsContext: Partial<Awaited<ReturnType<ServerRenderer["createLlmsTxtContext"]>>> =
+        match.metadata.kind === "llms" || match.metadata.kind === "llms-full"
+          ? await this.createLlmsTxtContext(request, match.metadata.kind === "llms-full")
+          : {};
       const value =
         typeof routeModule.default === "function"
           ? await (routeModule.default as any)({
@@ -2030,10 +2034,18 @@ export class ServerRenderer {
               params: match.params,
               searchParams: url.searchParams,
               path: match.routePath,
-              ...(match.metadata.kind === "llms" ? await this.createLlmsTxtContext(request) : {}),
+              ...llmsContext,
             })
           : routeModule.default;
-      const response = createFarmMetadataRouteResponse(match.metadata.kind, value, routeModule, {
+      // llms-full objects need each page's Markdown, which only this side can fetch.
+      const body =
+        match.metadata.kind === "llms-full" && !(value instanceof Response)
+          ? await renderFarmLlmsFullTxt(value, {
+              origin: url.origin,
+              readMarkdown: llmsContext.markdown!,
+            })
+          : value;
+      const response = createFarmMetadataRouteResponse(match.metadata.kind, body, routeModule, {
         method,
       });
       await sendWebResponse(res as any, response);
@@ -2049,18 +2061,43 @@ export class ServerRenderer {
     }
   }
 
-  private async renderGeneratedLlmsTxt(req: FarmRequest, res: FarmResponse): Promise<void> {
+  /** `/llms.txt` and `/llms-full.txt` from `agent.llmsTxt` when no file route owns them. */
+  private getGeneratedLlmsKind(pathname: string): "llms" | "llms-full" | null {
+    const config = resolveFarmLlmsTxtConfig(this.config.agent?.llmsTxt);
+    if (!config.enabled) return null;
+    if (pathname === "/llms.txt") return "llms";
+    return pathname === "/llms-full.txt" && config.full ? "llms-full" : null;
+  }
+
+  private async renderGeneratedLlmsTxt(
+    req: FarmRequest,
+    res: FarmResponse,
+    kind: "llms" | "llms-full",
+  ): Promise<void> {
     try {
       const request = createWebRequestFromFarmRequest(req, {
         trustProxy: this.config.server?.trustProxy,
       });
-      const { defaults } = await this.createLlmsTxtContext(request);
+      const config = resolveFarmLlmsTxtConfig(this.config.agent?.llmsTxt);
+      const context = await this.createLlmsTxtContext(request, kind === "llms-full");
+      const body =
+        kind === "llms-full"
+          ? await renderFarmLlmsFullTxt(context.defaults, {
+              origin: new URL(request.url).origin,
+              readMarkdown: context.markdown!,
+            })
+          : context.defaults;
       await sendWebResponse(
         res as any,
-        createFarmMetadataRouteResponse("llms", defaults, {}, { method: req.method }),
+        createFarmMetadataRouteResponse(
+          kind,
+          body,
+          { revalidate: config.revalidate },
+          { method: req.method },
+        ),
       );
     } catch (error) {
-      logger.error(`Generated llms.txt failed: ${error}`);
+      logger.error(`Generated ${kind}.txt failed: ${error}`);
       await sendWebResponse(
         res as any,
         new Response("Internal Server Error", {
@@ -2072,7 +2109,14 @@ export class ServerRenderer {
   }
 
   /** Same inputs the production server gives llms.txt: static pages and root metadata. */
-  private async createLlmsTxtContext(request: Request) {
+  private async createLlmsTxtContext(
+    request: Request,
+    full = false,
+  ): Promise<{
+    pages: ReturnType<typeof collectFarmLlmsTxtPages>;
+    defaults: ReturnType<typeof createFarmDefaultLlmsTxt>;
+    markdown?: (url: string) => Promise<string | null>;
+  }> {
     const config = resolveFarmLlmsTxtConfig(this.config.agent?.llmsTxt);
     const origin = new URL(request.url).origin;
     const sources: Array<{ pattern: string; metadata?: unknown }> = [];
@@ -2104,6 +2148,9 @@ export class ServerRenderer {
     return {
       pages,
       defaults: createFarmDefaultLlmsTxt({ origin, pages, config, rootMetadata }),
+      // Development reads mirrors the way its .md handler renders pages: back through
+      // this dev server, which also serves Markdown sources and agent overrides.
+      ...(full ? { markdown: createFarmLlmsMarkdownReader((page) => fetch(page)) } : {}),
     };
   }
 

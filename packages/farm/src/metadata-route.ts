@@ -7,7 +7,7 @@ import {
 } from "./llms-txt";
 import { omitFarmResponseBody } from "./response-body";
 
-export type ApplicationMetadataRouteKind = "sitemap" | "robots" | "manifest" | "llms";
+export type ApplicationMetadataRouteKind = "sitemap" | "robots" | "manifest" | "llms" | "llms-full";
 
 export namespace MetadataRoute {
   export type SitemapChangeFrequency =
@@ -85,6 +85,16 @@ export namespace MetadataRoute {
     pages: LlmsTxtPage[];
     /** The llms.txt that `agent.llmsTxt` would serve, to extend instead of replace. */
     defaults: LlmsTxt;
+  }
+
+  /**
+   * What an `llms-full.ts` default-export function receives. Returning an
+   * `LlmsTxt` object inlines each same-origin link's Markdown; returning a string
+   * serves it as the complete file.
+   */
+  export interface LlmsFullTxtContext extends LlmsTxtContext {
+    /** A page's Markdown mirror, read without the request's cookies; `null` if unavailable. */
+    markdown(url: string): Promise<string | null>;
   }
 }
 
@@ -253,13 +263,13 @@ export function createFarmMetadataRouteResponse(
       ? serializeSitemap(value)
       : kind === "robots"
         ? serializeRobots(value)
-        : kind === "llms"
+        : kind === "llms" || kind === "llms-full"
           ? serializeFarmLlmsTxt(value)
           : serializeManifest(value);
   const contentType =
     kind === "sitemap"
       ? "application/xml; charset=utf-8"
-      : kind === "robots" || kind === "llms"
+      : kind === "robots" || kind === "llms" || kind === "llms-full"
         ? "text/plain; charset=utf-8"
         : "application/manifest+json; charset=utf-8";
 

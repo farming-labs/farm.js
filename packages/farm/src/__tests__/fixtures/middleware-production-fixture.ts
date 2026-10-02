@@ -145,6 +145,10 @@ export default {
   await fs.mkdir(path.join(root, "public"), { recursive: true });
   await fs.writeFile(path.join(root, "public", "llms.txt"), "# Static fixture index\n");
   await fs.writeFile(
+    path.join(root, "public", "llms-full.txt"),
+    "# Static fixture index, in full\n",
+  );
+  await fs.writeFile(
     path.join(root, "src", "app", "sitemap.ts"),
     `
 export const revalidate = 600;
@@ -481,6 +485,15 @@ export async function middleware(
   await fs.writeFile(
     path.join(root, "src", "app", "public-notes", "page.md"),
     `# Public notes\n\npublic-notes-source\n`,
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "public-notes", "llms-full.ts"),
+    `
+export default async function llmsFull({ markdown }: any) {
+  const notes = await markdown("https://example.test/public-notes.md");
+  return "# Fixture notes, in full\\n\\n" + notes.split("\\n\\n")[1].trim() + "\\n";
+}
+`.trim(),
   );
   // Overrides agent.llmsTxt under /public-notes and builds on the generated pages.
   await fs.writeFile(

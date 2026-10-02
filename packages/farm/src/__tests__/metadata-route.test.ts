@@ -104,6 +104,10 @@ Host: https://farm.test
     const head = createFarmMetadataRouteResponse("llms", value, {}, { method: "HEAD" });
     expect(await head.text()).toBe("");
 
+    const full = createFarmMetadataRouteResponse("llms-full", "# Acme\n\n## Pricing\n");
+    expect(full.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(await full.text()).toBe("# Acme\n\n## Pricing\n");
+
     const written = createFarmMetadataRouteResponse("llms", "# Acme\n\n> Written by hand.");
     expect(written.headers.get("content-type")).toBe("text/plain; charset=utf-8");
     expect(await written.text()).toBe("# Acme\n\n> Written by hand.\n");

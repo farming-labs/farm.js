@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
+  createFarmLlmsMarkdownReader,
+  renderFarmLlmsFullTxt,
   resolveFarmLlmsTxtConfig,
   serializeFarmLlmsTxt,
 } from "../llms-txt";
@@ -105,7 +107,17 @@ describe("resolveFarmLlmsTxtConfig", () => {
     expect(resolveFarmLlmsTxtConfig(undefined).enabled).toBe(false);
     expect(resolveFarmLlmsTxtConfig(false).enabled).toBe(false);
     expect(resolveFarmLlmsTxtConfig({ enabled: false, title: "Acme" }).enabled).toBe(false);
-    expect(resolveFarmLlmsTxtConfig(true)).toEqual({ enabled: true, include: [], exclude: [] });
+    expect(resolveFarmLlmsTxtConfig(true)).toEqual({
+      enabled: true,
+      include: [],
+      exclude: [],
+      full: true,
+    });
+    expect(resolveFarmLlmsTxtConfig({ full: false, revalidate: 600 })).toMatchObject({
+      enabled: true,
+      full: false,
+      revalidate: 600,
+    });
   });
 
   it("passes resolved config through unchanged", () => {
@@ -122,6 +134,12 @@ describe("resolveFarmLlmsTxtConfig", () => {
     );
     expect(() => resolveFarmLlmsTxtConfig({ exclude: ["admin"] })).toThrow(
       'agent.llmsTxt.exclude[0] must be a route pattern starting with "/"',
+    );
+    expect(() => resolveFarmLlmsTxtConfig({ full: "yes" as never })).toThrow(
+      "agent.llmsTxt.full must be a boolean",
+    );
+    expect(() => resolveFarmLlmsTxtConfig({ revalidate: -1 })).toThrow(
+      "agent.llmsTxt.revalidate must be a number of seconds",
     );
   });
 });
@@ -251,5 +269,159 @@ describe("createFarmDefaultLlmsTxt", () => {
       title: "acme.test",
       sections: [],
     });
+  });
+});
+
+describe("renderFarmLlmsFullTxt", () => {
+  const index = {
+    title: "Acme",
+    summary: "Billing for small teams.",
+    sections: [
+      {
+        title: "Pages",
+        links: [
+          { title: "Pricing", url: "https://acme.test/pricing.md", description: "Plans" },
+          { title: "Account", url: "https://acme.test/account.md" },
+        ],
+      },
+      {
+        title: "Optional",
+        links: [
+          { title: "Status", url: "https://status.example/" },
+          { title: "Index", url: "https://acme.test/llms.txt" },
+          { title: "Pricing again", url: "https://acme.test/pricing.md" },
+        ],
+      },
+    ],
+  };
+
+  it("inlines each same-origin page in the docs-engine layout", async () => {
+    const read: string[] = [];
+    const text = await renderFarmLlmsFullTxt(index, {
+      origin: "https://acme.test",
+      async readMarkdown(url) {
+        read.push(url);
+        return url.endsWith("/pricing.md") ? "# Pricing\n\nPro is $20.\n" : null;
+      },
+    });
+
+    expect(text).toBe(
+      [
+        "# Acme",
+        "",
+        "> Billing for small teams.",
+        "",
+        "## Pricing",
+        "",
+        "URL: https://acme.test/pricing.md",
+        "",
+        "Plans",
+        "",
+        "# Pricing",
+        "",
+        "Pro is $20.",
+        "",
+        "---",
+        "",
+        "## Account",
+        "",
+        "URL: https://acme.test/account.md",
+        "",
+        "---",
+        "",
+        "## Status",
+        "",
+        "URL: https://status.example/",
+        "",
+        "---",
+        "",
+        "## Index",
+        "",
+        "URL: https://acme.test/llms.txt",
+        "",
+      ].join("\n"),
+    );
+    // Other origins and llms.txt itself are never fetched; duplicate links render once.
+    expect(read.sort()).toEqual(["https://acme.test/account.md", "https://acme.test/pricing.md"]);
+  });
+
+  it("drops a page's frontmatter so its --- lines cannot pass for page separators", async () => {
+    const text = await renderFarmLlmsFullTxt(
+      {
+        title: "Acme",
+        sections: [
+          { title: "Pages", links: [{ title: "About", url: "https://acme.test/about.md" }] },
+        ],
+      },
+      {
+        origin: "https://acme.test",
+        readMarkdown: async () =>
+          '---\ntitle: "About"\ndescription: "Who we are"\n---\n\n# About\n\n---\n\nKeep this rule.\n',
+      },
+    );
+
+    expect(text).toBe(
+      "# Acme\n\n## About\n\nURL: https://acme.test/about.md\n\n# About\n\n---\n\nKeep this rule.\n",
+    );
+  });
+
+  it("serves a string unchanged and bounds concurrent reads", async () => {
+    expect(
+      await renderFarmLlmsFullTxt("# Hand-written", {
+        origin: "https://acme.test",
+        readMarkdown: async () => "unused",
+      }),
+    ).toBe("# Hand-written\n");
+
+    const links = Array.from({ length: 9 }, (_, index) => ({
+      title: `Page ${index}`,
+      url: `https://acme.test/p${index}.md`,
+    }));
+    let active = 0;
+    let peak = 0;
+    await renderFarmLlmsFullTxt(
+      { title: "Acme", sections: [{ title: "Pages", links }] },
+      {
+        origin: "https://acme.test",
+        concurrency: 3,
+        async readMarkdown() {
+          peak = Math.max(peak, ++active);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          active -= 1;
+          return "body";
+        },
+      },
+    );
+    expect(peak).toBe(3);
+  });
+});
+
+describe("createFarmLlmsMarkdownReader", () => {
+  it("reads Markdown with a fresh request and skips anything else", async () => {
+    const requests: Request[] = [];
+    const read = createFarmLlmsMarkdownReader(async (request) => {
+      requests.push(request);
+      const path = new URL(request.url).pathname;
+      if (path === "/public.md") {
+        return new Response("# Public", {
+          headers: { "content-type": "text/markdown; charset=utf-8" },
+        });
+      }
+      if (path === "/private.md") return new Response("Unauthorized", { status: 401 });
+      if (path === "/html")
+        return new Response("<p>x</p>", { headers: { "content-type": "text/html" } });
+      throw new Error("network down");
+    });
+
+    expect(await read("https://acme.test/public.md")).toBe("# Public");
+    expect(await read("https://acme.test/private.md")).toBeNull();
+    expect(await read("https://acme.test/html")).toBeNull();
+    expect(await read("https://acme.test/broken.md")).toBeNull();
+    // No cookies or credentials: a page behind auth answers 401 instead of leaking.
+    for (const request of requests) {
+      expect(request.headers.get("cookie")).toBeNull();
+      expect(request.headers.get("authorization")).toBeNull();
+      expect(request.headers.get("accept")).toBe("text/markdown");
+    }
   });
 });

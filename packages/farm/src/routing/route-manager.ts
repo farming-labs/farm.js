@@ -170,8 +170,8 @@ interface MetadataImageEntry extends RouteEntry {
 
 export interface ApplicationMetadataRouteEntry extends RouteEntry {
   kind: ApplicationMetadataRouteKind;
-  fileName: "sitemap" | "robots" | "manifest" | "llms";
-  outputName: "sitemap.xml" | "robots.txt" | "manifest.webmanifest" | "llms.txt";
+  fileName: "sitemap" | "robots" | "manifest" | "llms" | "llms-full";
+  outputName: "sitemap.xml" | "robots.txt" | "manifest.webmanifest" | "llms.txt" | "llms-full.txt";
 }
 
 interface RedirectEntry {
@@ -889,7 +889,7 @@ export class RouteManager {
       appDir,
     );
     const metadataRouteFiles = await safeGlobFiles(
-      "**/{sitemap,robots,manifest,llms}.{ts,js}",
+      "**/{sitemap,robots,manifest,llms,llms-full}.{ts,js}",
       appDir,
     );
 
@@ -1432,6 +1432,9 @@ function getApplicationMetadataRouteDescriptor(fileName: string): {
   if (fileName === "llms") {
     return { kind: "llms", fileName: "llms", outputName: "llms.txt" };
   }
+  if (fileName === "llms-full") {
+    return { kind: "llms-full", fileName: "llms-full", outputName: "llms-full.txt" };
+  }
   return null;
 }
 
@@ -1439,7 +1442,7 @@ function getApplicationMetadataRouteSuffix(pathname: string): {
   kind: ApplicationMetadataRouteKind;
   outputName: ApplicationMetadataRouteEntry["outputName"];
 } | null {
-  for (const fileName of ["sitemap", "robots", "manifest", "llms"] as const) {
+  for (const fileName of ["sitemap", "robots", "manifest", "llms", "llms-full"] as const) {
     const descriptor = getApplicationMetadataRouteDescriptor(fileName)!;
     if (
       pathname === `/${descriptor.outputName}` ||

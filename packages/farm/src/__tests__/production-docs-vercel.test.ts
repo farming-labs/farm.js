@@ -108,6 +108,10 @@ describe("Vercel docs content", () => {
       const docsLlms = await handler.fetch(new Request("https://farm.test/.well-known/llms.txt"));
       expect(docsLlms.status).toBe(200);
       expect(await docsLlms.text()).not.toContain("# App index");
+      // The docs engine also serves /llms-full.txt; agent.llmsTxt takes that path too.
+      const appLlmsFull = await handler.fetch(new Request("https://farm.test/llms-full.txt"));
+      expect(appLlmsFull.status).toBe(200);
+      expect((await appLlmsFull.text()).startsWith("# App index\n")).toBe(true);
 
       const manifest = JSON.parse(
         await fs.readFile(

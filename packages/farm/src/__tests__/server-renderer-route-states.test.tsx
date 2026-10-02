@@ -420,6 +420,122 @@ describe("file route loading.tsx and error.tsx", () => {
       expect(response.body).not.toContain("## Pages");
     });
 
+    // Development reads each page's Markdown back through the dev server, like its
+    // .md handler does; stand in for it, with /pricing behind auth.
+    function stubMarkdownFetch() {
+      return vi.spyOn(globalThis, "fetch").mockImplementation(async (input: any) => {
+        const request = input instanceof Request ? input : new Request(input);
+        expect(request.headers.get("cookie")).toBeNull();
+        if (new URL(request.url).pathname === "/dashboard.md") {
+          return new Response("# Dashboard\n\ndashboard-markdown-body\n", {
+            headers: { "content-type": "text/markdown; charset=utf-8" },
+          });
+        }
+        return new Response("Unauthorized", { status: 401 });
+      });
+    }
+
+    it("serves a generated llms-full.txt with each page's Markdown", async () => {
+      const fetchSpy = stubMarkdownFetch();
+      const response = createMockResponse();
+      const renderer = createRenderer(pages, {
+        routes,
+        layouts: { "/": layoutModulePath },
+        agent: { llmsTxt: { revalidate: 300 } },
+      });
+
+      await renderer.renderPage(createMockRequest("/llms-full.txt"), response);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers.get("cache-control")).toBe(
+        "public, s-maxage=300, stale-while-revalidate=300",
+      );
+      expect(response.body).toBe(
+        [
+          "# Acme",
+          "",
+          "> Billing.",
+          "",
+          "## Dashboard",
+          "",
+          "URL: http://farm.test/dashboard.md",
+          "",
+          "# Dashboard",
+          "",
+          "dashboard-markdown-body",
+          "",
+          "---",
+          "",
+          "## Pricing",
+          "",
+          "URL: http://farm.test/pricing.md",
+          "",
+          "Plans and limits",
+          "",
+        ].join("\n"),
+      );
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("leaves /llms-full.txt alone when agent.llmsTxt.full is false", async () => {
+      const fetchSpy = stubMarkdownFetch();
+      const response = createMockResponse();
+      const renderer = createRenderer(pages, {
+        routes,
+        layouts: { "/": layoutModulePath },
+        agent: { llmsTxt: { full: false } },
+      });
+
+      await renderer.renderPage(createMockRequest("/llms-full.txt"), response);
+
+      expect(response.body).not.toContain("URL: http://farm.test/dashboard.md");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("inlines pages for an llms-full.ts that returns the llms structure", async () => {
+      stubMarkdownFetch();
+      const fullModulePath = "/test/src/app/dashboard/llms-full.ts";
+      const response = createMockResponse();
+      const renderer = createRenderer(
+        {
+          ...pages,
+          [fullModulePath]: {
+            default: ({ defaults }: any) => ({
+              title: "Acme handbook",
+              sections: [{ title: "Pages", links: defaults.sections[0].links.slice(0, 1) }],
+            }),
+          },
+        },
+        {
+          routes,
+          layouts: { "/": layoutModulePath },
+          applicationMetadata: {
+            kind: "llms-full",
+            modulePath: fullModulePath,
+            outputName: "llms-full.txt",
+          },
+        },
+      );
+
+      await renderer.renderPage(createMockRequest("/dashboard/llms-full.txt"), response);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toBe(
+        [
+          "# Acme handbook",
+          "",
+          "## Dashboard",
+          "",
+          "URL: http://farm.test/dashboard.md",
+          "",
+          "# Dashboard",
+          "",
+          "dashboard-markdown-body",
+          "",
+        ].join("\n"),
+      );
+    });
+
     it("lets llms.ts extend the generated pages and defaults", async () => {
       const response = createMockResponse();
       const renderer = createRenderer(
@@ -983,9 +1099,14 @@ function createRenderer(
     opengraphImage?: boolean;
     staticImage?: { modulePath: string; staticInfo: any };
     applicationMetadata?: {
-      kind: "sitemap" | "robots" | "manifest" | "llms";
+      kind: "sitemap" | "robots" | "manifest" | "llms" | "llms-full";
       modulePath: string;
-      outputName: "sitemap.xml" | "robots.txt" | "manifest.webmanifest" | "llms.txt";
+      outputName:
+        | "sitemap.xml"
+        | "robots.txt"
+        | "manifest.webmanifest"
+        | "llms.txt"
+        | "llms-full.txt";
     };
     /** Page and layout route patterns mapped to module paths, for llms.txt. */
     routes?: Record<string, string>;

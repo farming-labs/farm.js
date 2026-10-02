@@ -853,14 +853,15 @@ Root layout metadata applies the favicon to every route. Nested layouts and page
 
 ### Application metadata routes
 
-Use server-only metadata files when crawlers or browsers need an application-level document rather than an HTML `<meta>` tag. Farm discovers four conventions in `src/app` and route segments:
+Use server-only metadata files when crawlers or browsers need an application-level document rather than an HTML `<meta>` tag. Farm discovers five conventions in `src/app` and route segments:
 
-| File          | Public route            | Default return type      |
-| ------------- | ----------------------- | ------------------------ |
-| `sitemap.ts`  | `/sitemap.xml`          | `MetadataRoute.Sitemap`  |
-| `robots.ts`   | `/robots.txt`           | `MetadataRoute.Robots`   |
-| `manifest.ts` | `/manifest.webmanifest` | `MetadataRoute.Manifest` |
-| `llms.ts`     | `/llms.txt`             | `MetadataRoute.LlmsTxt`  |
+| File           | Public route            | Default return type      |
+| -------------- | ----------------------- | ------------------------ |
+| `sitemap.ts`   | `/sitemap.xml`          | `MetadataRoute.Sitemap`  |
+| `robots.ts`    | `/robots.txt`           | `MetadataRoute.Robots`   |
+| `manifest.ts`  | `/manifest.webmanifest` | `MetadataRoute.Manifest` |
+| `llms.ts`      | `/llms.txt`             | `MetadataRoute.LlmsTxt`  |
+| `llms-full.ts` | `/llms-full.txt`        | `MetadataRoute.LlmsTxt`  |
 
 The default export can be a literal value or a sync or async function. Functions receive the matched `params`, the current `Request`, its `URLSearchParams`, and the concrete route-segment `path`.
 
@@ -957,6 +958,16 @@ yourself, return it as a string instead. Besides the usual arguments,
 its function receives `pages`, the app's static pages linked to their Markdown mirrors, and
 `defaults`, the index [`agent.llmsTxt`](/docs/configuration#agent-readiness) would serve, so it can
 extend the generated file instead of starting over. An `llms.ts` replaces `agent.llmsTxt` at its path.
+
+`llms-full.ts` serves `/llms-full.txt` the same way. When it returns the structured format, Farm
+inlines the Markdown mirror of every same-origin link; a string is served as written. Its function
+also receives `markdown(url)`, which reads a page's mirror without the request's cookies and returns
+`null` when the page is unavailable.
+
+```ts
+// src/app/llms-full.ts: reuse the llms.txt structure and let Farm inline each page
+export { default } from "./llms";
+```
 
 Farm automatically adds the nearest discovered manifest to rendered page heads unless `metadata.manifest` already supplies an explicit URL. A nested file keeps its route prefix: `src/app/docs/sitemap.ts` is served at `/docs/sitemap.xml`, and a file under `[tenant]` receives the concrete tenant param.
 
