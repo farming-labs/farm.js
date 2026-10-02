@@ -17,38 +17,56 @@
 
 #farm-docs-root .fd-docs-content {
   color: rgb(255 255 255 / 0.72);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 300;
-  line-height: 1.8;
+  line-height: 1.75;
 }
 #farm-docs-root .fd-docs-content :where(p, li, td) {
   font-weight: 300;
+}
+/* The theme sizes paragraphs, list items, and cells directly, so set the reading size on them. */
+#farm-docs-root .fd-docs-content p,
+#farm-docs-root .fd-docs-content li {
+  font-size: 15px;
+  line-height: 1.75;
+}
+#farm-docs-root .fd-docs-content .fd-table-wrapper td {
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+#farm-docs-root .fd-docs-content blockquote p {
+  font-size: 14px;
 }
 #farm-docs-root .fd-docs-content strong {
   color: #e6e6e6;
   font-weight: 450;
 }
 #farm-docs-root .fd-docs-content h1 {
-  font-size: clamp(32px, 3vw, 40px);
-  font-weight: 450;
-  line-height: 1.1;
+  font-size: clamp(28px, 2.6vw, 34px);
+  font-weight: 380;
+  line-height: 1.12;
   letter-spacing: -0.04em;
 }
 #farm-docs-root .fd-docs-content h2 {
-  font-size: 26px;
-  font-weight: 450;
-  line-height: 1.25;
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.3;
   letter-spacing: -0.03em;
 }
 #farm-docs-root .fd-docs-content h3 {
-  font-size: 19px;
-  font-weight: 450;
-  line-height: 1.35;
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.4;
   letter-spacing: -0.02em;
+}
+#farm-docs-root .fd-docs-content h4 {
+  font-size: 15px;
+  font-weight: 450;
+  line-height: 1.45;
 }
 #farm-docs-root .fd-docs-content .fd-page-description {
   color: rgb(255 255 255 / 0.56);
-  font-size: 17px;
+  font-size: 15.5px;
   font-weight: 300;
   line-height: 1.65;
 }
@@ -408,8 +426,8 @@
   max-width: 100%;
   overflow: hidden;
   color: #ededed !important;
-  font-size: 15px;
-  font-weight: 450;
+  font-size: 14.5px;
+  font-weight: 400;
   letter-spacing: -0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -455,7 +473,7 @@
   border-spacing: 0;
   border-collapse: separate;
   background: transparent;
-  font-size: 14px;
+  font-size: 13.5px;
   line-height: 1.6;
 }
 /* Plain th/td lists, not the is() pseudo-class: the minifier adds a -webkit-any() copy that
@@ -470,7 +488,7 @@
 #farm-docs-root .fd-docs-content .fd-table-wrapper th {
   padding-block: 11px !important;
   border-bottom: 1px solid var(--farm-code-line) !important;
-  background: transparent !important;
+  background: rgb(255 255 255 / 0.035) !important;
   color: var(--farm-code-legend);
   font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-size: 11px;
@@ -511,7 +529,7 @@
   background: var(--farm-code-bg);
   box-shadow: inset 2px 0 0 #ededed;
   color: rgb(255 255 255 / 0.72);
-  font-size: 15px;
+  font-size: 14px;
   font-style: normal;
   font-weight: 300;
   quotes: none;
