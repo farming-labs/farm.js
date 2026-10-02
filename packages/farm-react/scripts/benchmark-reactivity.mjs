@@ -6,6 +6,7 @@ import { JSDOM } from "jsdom";
 import { createCompiledComponent } from "../dist/compiler-runtime.mjs";
 
 const bindingCount = Number(process.env.FARM_REACTIVITY_BINDINGS || 2_048);
+const keyedRowCount = Number(process.env.FARM_REACTIVITY_KEYED_ROWS || 2_048);
 const warmupSamples = Number(process.env.FARM_REACTIVITY_WARMUP || 10);
 const measuredSamples = Number(process.env.FARM_REACTIVITY_SAMPLES || 40);
 const updatesPerSample = Number(process.env.FARM_REACTIVITY_UPDATES || 5);
@@ -270,6 +271,112 @@ async function measurePrimitiveProps(compiled) {
   }
 }
 
+function mountKeyedRemovalPreflight() {
+  let bindingReads = 0;
+  let renderPlans = 0;
+  let setItems;
+  const initialItems = Array.from({ length: keyedRowCount }, (_, index) => ({
+    id: `row-${index}`,
+    label: `Row ${index}`,
+  }));
+  const KeyedRemoval = createCompiledComponent({
+    displayName: "KeyedRemovalPreflight",
+    initialize: () => [initialItems],
+    render(_props, state, blocks) {
+      renderPlans += 1;
+      setItems = (next) => state[0].set(next);
+      const items = () => state[0].get();
+      const KeyedRows = blocks.KeyedRows;
+      return React.createElement(
+        "section",
+        null,
+        React.createElement(KeyedRows, {
+          bindings: [
+            {
+              kind: "text",
+              path: [],
+              read(item) {
+                bindingReads += 1;
+                return [item.label];
+              },
+            },
+          ],
+          create: (item) => ({
+            kind: "element",
+            tag: "li",
+            attributes: [{ name: "data-key", value: item.id }],
+            styles: [],
+            children: [item.label],
+          }),
+          id: 0,
+          items,
+          render: () =>
+            React.createElement(
+              "ol",
+              null,
+              ...items().map((item) =>
+                React.createElement("li", { "data-key": item.id, key: item.id }, item.label),
+              ),
+            ),
+          rowKey: (item) => item.id,
+        }),
+      );
+    },
+    bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+  });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  flushSync(() => root.render(React.createElement(KeyedRemoval)));
+  const firstRow = container.querySelector("li");
+  bindingReads = 0;
+  return {
+    bindingReads: () => bindingReads,
+    container,
+    firstRow,
+    removeTwo() {
+      setItems((items) => items.slice(0, -2));
+    },
+    renderPlans: () => renderPlans,
+    unmount() {
+      flushSync(() => root.unmount());
+      container.remove();
+    },
+  };
+}
+
+async function measureKeyedRemovalPreflight() {
+  const totalUpdates = (warmupSamples + measuredSamples) * updatesPerSample;
+  if (keyedRowCount <= totalUpdates * 2) {
+    throw new Error(
+      `Keyed removal benchmark needs more than ${totalUpdates * 2} rows for this sample count.`,
+    );
+  }
+  const fixture = mountKeyedRemovalPreflight();
+  try {
+    const timing = await measure(async () => {
+      fixture.removeTwo();
+      await flushCompilerUpdate();
+    });
+    const remainingRows = keyedRowCount - totalUpdates * 2;
+    const rows = fixture.container.querySelectorAll("li");
+    return {
+      ...timing,
+      bindingReads: fixture.bindingReads(),
+      expectedBindingReads: totalUpdates * keyedRowCount - totalUpdates * (totalUpdates + 1),
+      outputCorrect:
+        rows.length === remainingRows &&
+        rows[0]?.getAttribute("data-key") === "row-0" &&
+        rows[rows.length - 1]?.getAttribute("data-key") === `row-${remainingRows - 1}`,
+      preservedFirstRow: rows[0] === fixture.firstRow,
+      remainingRows,
+      renderPlans: fixture.renderPlans(),
+    };
+  } finally {
+    fixture.unmount();
+  }
+}
+
 const staticCold = await measureBranchAction("static", 2);
 const hybridCold = await measureBranchAction("hybrid", 2);
 const staticActive = await measureBranchAction("static", 1);
@@ -278,11 +385,13 @@ const staticIndexed = await measureIndexedScheduling("static");
 const hybridIndexed = await measureIndexedScheduling("hybrid");
 const reactPrimitiveProps = await measurePrimitiveProps(false);
 const compiledPrimitiveProps = await measurePrimitiveProps(true);
+const keyedRemovalPreflight = await measureKeyedRemovalPreflight();
 
 const totalMeasuredUpdates = measuredSamples * updatesPerSample;
 const report = {
   workload: {
     bindingCount,
+    keyedRowCount,
     measuredSamples,
     totalMeasuredUpdates,
     updatesPerSample,
@@ -307,6 +416,7 @@ const report = {
     compiled: compiledPrimitiveProps,
     speedup: reactPrimitiveProps.medianMs / compiledPrimitiveProps.medianMs,
   },
+  keyedRemovalPreflight,
 };
 
 console.log(JSON.stringify(report, null, 2));
@@ -342,4 +452,17 @@ if (
   bindingCount * (warmupSamples + measuredSamples) * updatesPerSample
 ) {
   throw new Error("Compiled primitive prop updates did not patch every declared binding.");
+}
+if (!keyedRemovalPreflight.outputCorrect || !keyedRemovalPreflight.preservedFirstRow) {
+  throw new Error("Keyed removal benchmark did not preserve the expected DOM output and identity.");
+}
+if (keyedRemovalPreflight.bindingReads !== keyedRemovalPreflight.expectedBindingReads) {
+  throw new Error(
+    `Keyed removal benchmark performed ${keyedRemovalPreflight.bindingReads} binding reads instead of ${keyedRemovalPreflight.expectedBindingReads}.`,
+  );
+}
+if (keyedRemovalPreflight.renderPlans !== 1) {
+  throw new Error(
+    `Keyed removal benchmark rebuilt ${keyedRemovalPreflight.renderPlans} render plans.`,
+  );
 }

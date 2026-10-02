@@ -468,7 +468,7 @@ const preview: FigureSpec = {
   },
   frame(t) {
     const open = 0.9;
-    const url = "checkout-test.preview.farming-labs.dev";
+    const url = "checkout-test.preview.farmjs.dev";
     // Each request comes in from its client, crosses the tunnel to localhost, and the response returns.
     const reqs = [
       ["phone", 1.6, "200"],

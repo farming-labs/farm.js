@@ -120,7 +120,7 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   );
   const contents = page.locator(".blog-contents");
   await expect(contents).toHaveCSS("width", "280px");
-  await expect(contents.getByRole("navigation").getByRole("link")).toHaveCount(16);
+  await expect(contents.getByRole("navigation").getByRole("link")).toHaveCount(17);
   await expect(contents.getByRole("link", { name: "Current limits", exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "What still has limits" })).toHaveCount(0);
   await expect(page.locator('input[type="email"], [data-agent-waitlist-root]')).toHaveCount(0);
@@ -688,23 +688,30 @@ test("agent waitlist validates input and confirms a saved signup after client na
       },
     ]);
   finishResponse();
-  await expect(form.getByRole("status")).toHaveText(
-    "You're on the list. We'll email you when early access is ready.",
-  );
-  await expect(submit).toHaveText("You're on the list");
-  await expect(submit).toBeDisabled();
+  // A confirmed signup resets the form: the field clears, no message lingers, and the button is
+  // ready for another address.
+  await expect(email).toHaveValue("");
+  await expect(email).not.toHaveAttribute("readonly");
+  await expect(form.getByRole("status")).toHaveText("");
+  await expect(submit).toHaveText("Join the waitlist");
+  await expect(submit).toBeEnabled();
   await expect(form).not.toHaveAttribute("aria-busy");
   await expect(loader).toBeHidden();
   expect((await submit.boundingBox())!.width).toBeCloseTo(idleButtonSize!.width, 1);
 
-  await page.getByRole("link", { name: "Read the announcement", exact: true }).click();
+  // The site banner has its own "Read the announcement" link; use the agents page's section link.
+  await page
+    .getByRole("link", { name: "Read the announcement", exact: true })
+    .and(page.locator('[href$="#agent-infrastructure"]'))
+    .click();
   await expect(form).toHaveCount(0);
   await page.getByRole("link", { name: "Explore agent infrastructure", exact: true }).click();
   await expect(submit).toBeEnabled();
   await email.fill("returning-reader@example.com");
   await submit.click();
-  await expect(form.getByRole("status")).toContainText("You're on the list");
-  expect(submissions).toHaveLength(2);
+  await expect.poll(() => submissions.length).toBe(2);
+  await expect(email).toHaveValue("");
+  await expect(submit).toBeEnabled();
   const markdown = await page.request.get("/blog/0.1.0.md");
   expect(await markdown.text()).toContain("## Agent infrastructure");
 });
@@ -753,7 +760,10 @@ test("agent waitlist keeps failures recoverable and fits narrow screens", async 
   }
   result = "success";
   await submit.click();
-  await expect(form.getByRole("status")).toContainText("You're on the list");
+  // Success after failures clears the earlier error and resets the field.
+  await expect(email).toHaveValue("");
+  await expect(form.getByRole("status")).toHaveText("");
+  await expect(submit).toBeEnabled();
 });
 
 test("agents page connects the blog, planned capabilities, Markdown, and shared waitlist", async ({
@@ -815,14 +825,19 @@ test("agents page connects the blog, planned capabilities, Markdown, and shared 
   await expect(form).toBeVisible();
   await form.getByLabel("Email address").fill("agents-page@example.com");
   await form.getByRole("button").click();
-  await expect(form.getByRole("status")).toContainText("You're on the list");
+  await expect(form.getByLabel("Email address")).toHaveValue("");
+  await expect(form.getByRole("status")).toHaveText("");
   expect(submissions).toEqual([
     {
       email: "agents-page@example.com",
       description: "Agent infrastructure early access — Farm.js agents page",
     },
   ]);
-  await page.getByRole("link", { name: "Read the announcement", exact: true }).click();
+  // The site banner has its own "Read the announcement" link; use the agents page's section link.
+  await page
+    .getByRole("link", { name: "Read the announcement", exact: true })
+    .and(page.locator('[href$="#agent-infrastructure"]'))
+    .click();
   await expect(page).toHaveURL(/\/blog\/0\.1\.0#agent-infrastructure$/);
   await expect(form).toHaveCount(0);
   await expect(

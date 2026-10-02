@@ -40,7 +40,7 @@ describe("launch post figures", () => {
     expect(text("agents")).toContain("this.sql");
     expect(text("agents")).toContain("Durable Object");
     expect(text("webmcp")).toContain("search_products");
-    expect(text("preview")).toContain("checkout-test.preview.farming-labs.dev");
+    expect(text("preview")).toContain("checkout-test.preview.farmjs.dev");
     // Illustration-only figures never repeat code; merged figures show the post's code verbatim.
     const plain = (html: string) =>
       html

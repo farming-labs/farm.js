@@ -4,6 +4,7 @@ import { enhanceCodeBlocks } from "./components/blog/code-copy";
 import { enhanceContents } from "./components/blog/contents-navigation";
 import { enhanceFigures } from "./components/blog/figure-player";
 import { enhanceAgentWaitlist } from "./components/agents/waitlist-client";
+import { mountDocsAnnouncement } from "./components/docs-announcement";
 
 export default defineClient({
   setup() {
@@ -43,10 +44,19 @@ export default defineClient({
         }
       }
     }
+    function refreshDocs() {
+      const docsRoot = document.getElementById("farm-docs-root");
+      if (docsRoot && !mounted.has(docsRoot))
+        mounted.set(docsRoot, mountDocsAnnouncement(docsRoot));
+    }
     // Setup covers initial HTML; rendered covers route entry and history.
     refresh();
+    refreshDocs();
     return {
-      refresh,
+      refresh(afterRender = false) {
+        refresh(afterRender);
+        refreshDocs();
+      },
       dispose() {
         for (const dispose of mounted.values()) dispose();
         mounted.clear();

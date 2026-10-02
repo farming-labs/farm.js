@@ -7,12 +7,19 @@ The agent opens one outbound WebSocket to the relay, and the relay multiplexes H
 ```ts
 import { createPersistentPreviewRelay, startTypeScriptPreviewAgent } from "@farm.js/preview-tunnel";
 
-const relay = createPersistentPreviewRelay({ port: 4400 });
+const registrationToken = process.env.FARM_PREVIEW_RELAY_TOKEN;
+if (!registrationToken) throw new Error("FARM_PREVIEW_RELAY_TOKEN is required");
+
+const relay = createPersistentPreviewRelay({
+  port: 4400,
+  registrationToken,
+});
 const address = await relay.listen();
 
 const agent = await startTypeScriptPreviewAgent({
   relayUrl: address.websocketUrl,
   name: "my-preview",
+  token: registrationToken,
   targetUrl: "http://127.0.0.1:3000",
 });
 
@@ -43,7 +50,9 @@ const relay = createPersistentPreviewRelay({
 });
 ```
 
-`registrationToken` remains available for simple self-hosted deployments that use one shared secret.
+`registrationToken` is intended for simple self-hosted deployments that use one shared secret. The
+agent must pass that secret through its `token` option. Managed deployments should instead mint a
+short-lived grant, validate it in `authorizeAgent`, and pass that grant through the same agent option.
 
 When the relay can run on multiple server instances, provide a shared `PersistentPreviewRelayCoordinator`. Same-instance requests continue to use the direct in-memory path; the coordinator carries requests and responses only when the HTTP request lands on another instance. The hosted Vercel gateway uses Redis lists and expiring session ownership for this path.
 
