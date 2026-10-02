@@ -70,14 +70,20 @@
   font-weight: 300;
   line-height: 1.65;
 }
+/* Inline code sits close to the light reading text instead of standing out from it: Geist Mono
+   like the code panels, a lighter weight, and a hairline border (half a pixel is one device
+   pixel on high-density screens, and rounds up to one pixel elsewhere). */
 #farm-docs-root .fd-docs-content :not(pre) > code {
-  padding: 1px 6px;
-  border: 1px solid #262626;
+  padding: 1px 5px;
+  border: 0.5px solid rgb(255 255 255 / 0.1);
   border-radius: 3px;
-  background: #0c0c0c;
-  color: #d6d6d6;
+  background: var(--farm-code-bg);
+  color: rgb(255 255 255 / 0.78);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-size: 0.84em;
-  font-weight: 400;
+  font-weight: 350;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ---------- page actions: a toolbar under the description ---------- */

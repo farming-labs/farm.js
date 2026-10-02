@@ -727,14 +727,18 @@
   text-underline-offset: 4px;
   text-decoration-thickness: 1px;
 }
+/* Like inline code in the docs: dimmer, thinner text and a hairline border, so it does not
+   outshine the reading text around it. It keeps the prose's light weight. */
 .blog-prose :not(pre) > code {
   padding: 2px 5px;
-  border: 1px solid #252525;
-  background: #0c0c0c;
-  color: #d6d6d6;
+  border: 0.5px solid rgb(255 255 255 / 0.1);
+  background: #070707;
+  color: rgb(255 255 255 / 0.78);
   font-family: var(--font-geist-mono), monospace;
   font-size: 0.8em;
   overflow-wrap: anywhere;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 .blog-prose pre {
   overflow-x: auto;
