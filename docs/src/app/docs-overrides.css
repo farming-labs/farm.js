@@ -601,3 +601,66 @@
   color: #ededed;
   font-weight: 400;
 }
+
+/* ---------- docs sidebar (desktop and phone drawer): mono section labels over light page links ----------
+   Only navigation items are targeted (links carry data-active, sections and folders aria-expanded),
+   so the logo link, whose text the theme hides behind the mark, is left alone. */
+
+#farm-docs-root #nd-sidebar a[data-active],
+#farm-docs-root #nd-sidebar button[aria-expanded],
+#farm-docs-root #nd-sidebar-mobile a[data-active],
+#farm-docs-root #nd-sidebar-mobile button[aria-expanded] {
+  color: rgb(255 255 255 / 0.55) !important;
+  font-size: 13px !important;
+  font-weight: 300 !important;
+  transition: color 150ms;
+}
+#farm-docs-root #nd-sidebar a[data-active]:hover,
+#farm-docs-root #nd-sidebar button[aria-expanded]:hover,
+#farm-docs-root #nd-sidebar-mobile a[data-active]:hover,
+#farm-docs-root #nd-sidebar-mobile button[aria-expanded]:hover {
+  background: transparent !important;
+  color: rgb(255 255 255 / 0.88) !important;
+}
+#farm-docs-root #nd-sidebar a[data-active] svg,
+#farm-docs-root #nd-sidebar button[aria-expanded] svg,
+#farm-docs-root #nd-sidebar-mobile a[data-active] svg,
+#farm-docs-root #nd-sidebar-mobile button[aria-expanded] svg {
+  opacity: 0.55;
+  transition: opacity 150ms;
+}
+#farm-docs-root #nd-sidebar a[data-active]:hover svg,
+#farm-docs-root #nd-sidebar button[aria-expanded]:hover svg,
+#farm-docs-root #nd-sidebar-mobile a[data-active]:hover svg,
+#farm-docs-root #nd-sidebar-mobile button[aria-expanded]:hover svg {
+  opacity: 0.85;
+}
+#farm-docs-root #nd-sidebar a[data-active="true"],
+#farm-docs-root #nd-sidebar-mobile a[data-active="true"] {
+  background: transparent !important;
+  color: #ededed !important;
+  font-weight: 400 !important;
+}
+#farm-docs-root #nd-sidebar a[data-active="true"] svg,
+#farm-docs-root #nd-sidebar-mobile a[data-active="true"] svg {
+  opacity: 1;
+}
+/* Top-level sections (Start, Core, ...) are the only buttons at the base indent. */
+#farm-docs-root #nd-sidebar button[style*="calc(2 * var(--spacing))"],
+#farm-docs-root #nd-sidebar-mobile button[style*="calc(2 * var(--spacing))"] {
+  color: var(--farm-code-legend) !important;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px !important;
+  font-weight: 400 !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#farm-docs-root #nd-sidebar button[style*="calc(2 * var(--spacing))"]:hover,
+#farm-docs-root #nd-sidebar-mobile button[style*="calc(2 * var(--spacing))"]:hover {
+  color: #ededed !important;
+}
+#farm-docs-root #nd-sidebar button[style*="calc(2 * var(--spacing))"] svg,
+#farm-docs-root #nd-sidebar-mobile button[style*="calc(2 * var(--spacing))"] svg {
+  width: 13px;
+  height: 13px;
+}
