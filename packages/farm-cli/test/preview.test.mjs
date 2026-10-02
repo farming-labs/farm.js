@@ -193,7 +193,7 @@ test("returns to the CLI after first-run device login with a scoped tunnel grant
     },
   };
 
-  const authorized = await authorizePreviewGatewayPlan(plan, { runtime });
+  const authorized = await authorizePreviewGatewayPlan(plan, { runtime, forceLogin: true });
   assert.equal(savedCredential, "farm-account-token");
   assert.equal(authorized.controlAuth, "bearer");
   assert.equal(authorized.relayToken, "single-preview-grant");
