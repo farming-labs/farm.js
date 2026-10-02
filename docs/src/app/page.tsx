@@ -1,10 +1,8 @@
 import type { Metadata, PageProps } from "@farm.js/core";
 import { FARM_VERSION } from "@farm.js/core/version";
 import {
-  ArrowRight,
   ArrowUpRight,
   Blocks,
-  BookOpen,
   BookOpenText,
   Bot,
   Braces,
@@ -13,7 +11,6 @@ import {
   Code2,
   Cpu,
   Database,
-  ExternalLink,
   FileOutput,
   FolderTree,
   Layers3,
@@ -60,7 +57,7 @@ import {
   SiteFooter as Footer,
 } from "../components/site-chrome";
 import { BenchmarkSection } from "../components/home/benchmark-section";
-import { HeroTitleFrame } from "../components/home/hero-title-frame";
+import { HeroTitle } from "../components/home/hero-title";
 import {
   HighlightedCode,
   HighlightedCodeTabs,
@@ -623,13 +620,14 @@ function BrandIcon({ src, className }: { src: string; className?: string }) {
 function ButtonLink({
   href,
   children,
-  icon,
+  glyph,
   size = "default",
   variant = "primary",
 }: {
   href: string;
   children: ReactNode;
-  icon?: ReactNode;
+  /** A short mark built from characters, like the launch video's signs: `>_`, `#`, `{}`. */
+  glyph?: string;
   size?: "default" | "compact";
   variant?: "primary" | "secondary";
 }) {
@@ -647,31 +645,17 @@ function ButtonLink({
       )}
       href={href}
     >
-      {icon ? (
-        <span
-          aria-hidden
-          className={cx(
-            "grid shrink-0 place-items-center",
-            size === "compact" ? "size-3.5" : "size-4",
-          )}
-        >
-          {icon}
+      {glyph ? (
+        <span aria-hidden className="shrink-0 whitespace-pre opacity-55">
+          {glyph}
         </span>
       ) : null}
       <span>{children}</span>
       {isExternal ? (
-        <ExternalLink
-          aria-hidden
-          className={size === "compact" ? "size-3" : "size-3.5"}
-          strokeWidth={1.5}
-        />
-      ) : (
-        <ArrowRight
-          aria-hidden
-          className={size === "compact" ? "size-3" : "size-3.5"}
-          strokeWidth={1.5}
-        />
-      )}
+        <span aria-hidden className="shrink-0 opacity-55">
+          ↗
+        </span>
+      ) : null}
     </a>
   );
 }
@@ -691,31 +675,23 @@ function Hero() {
         <div className="text-white/42">
           <IndexedLabel index="00" label="Build / Ship / Scale" />
         </div>
-        <HeroTitleFrame>
-          <h1 className="max-w-full text-[1.125rem] font-medium leading-[1.02] tracking-normal text-white min-[360px]:text-[1.3125rem] min-[380px]:text-[1.4375rem] min-[400px]:text-[1.5rem] min-[420px]:text-[1.625rem] sm:text-[2.25rem] md:text-[2.625rem] lg:text-[3.25rem]">
-            <span className="block">a framework for</span>{" "}
-            <span className="block whitespace-nowrap">product-integrated apps</span>
-          </h1>
-        </HeroTitleFrame>
+        <HeroTitle
+          after="apps"
+          className="max-w-full text-[1.125rem] font-medium leading-[1.02] tracking-normal text-white min-[360px]:text-[1.3125rem] min-[380px]:text-[1.4375rem] min-[400px]:text-[1.5rem] min-[420px]:text-[1.625rem] sm:text-[2.25rem] md:text-[2.625rem] lg:text-[3.25rem]"
+          href="/agents"
+          lead="a framework for"
+          linkLabel="Agent infrastructure"
+          swap="agent-native"
+          tag="/agents"
+          word="product-integrated"
+        />
         <p className="mt-5 max-w-[38rem] text-balance text-sm leading-6 text-white/56 sm:text-[15px] sm:leading-6">
           Bring the stack you already use. Farm.js connects your app router, typed APIs, middleware,
           integrations, docs, and deployment so they work together as one product.
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
-          <ButtonLink
-            href="/docs/getting-started"
-            icon={<BookOpen aria-hidden className="size-3.5" strokeWidth={1.5} />}
-            size="compact"
-          >
+          <ButtonLink href="/docs/getting-started" glyph=">_" size="compact">
             Get Started
-          </ButtonLink>
-          <ButtonLink
-            href="/agents"
-            icon={<Bot aria-hidden className="size-3.5" strokeWidth={1.5} />}
-            size="compact"
-            variant="secondary"
-          >
-            Agent infrastructure
           </ButtonLink>
         </div>
         <div className="mt-6 w-[calc(100%-3rem)] max-w-[34rem] text-left">
@@ -1616,10 +1592,7 @@ function AgentSectionIntro() {
               in development and production while its native SDK stays intact.
             </p>
             <div className="mt-8 flex items-center">
-              <ButtonLink
-                href="/docs/integrations#agent-runtimes"
-                icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
-              >
+              <ButtonLink href="/docs/integrations#agent-runtimes" glyph="#">
                 Agent Integrations
               </ButtonLink>
             </div>
@@ -1741,10 +1714,7 @@ function IntegrationsSection() {
               your own.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-2">
-              <ButtonLink
-                href="/docs/integrations"
-                icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
-              >
+              <ButtonLink href="/docs/integrations" glyph="{}">
                 Explore Integrations
               </ButtonLink>
             </div>
@@ -1828,10 +1798,7 @@ function FinalCta() {
         </p>
       </div>
       <div className="farm-top-rule flex items-center justify-center bg-white/[0.035] p-4">
-        <ButtonLink
-          href="/docs/getting-started"
-          icon={<Rocket aria-hidden className="size-4" strokeWidth={1.5} />}
-        >
+        <ButtonLink href="/docs/getting-started" glyph=">_">
           Get Started
         </ButtonLink>
       </div>
