@@ -143,9 +143,10 @@ export default async function UserPage({ params }: PageProps) {
 }
 ```
 
-When `parseRouteParams` or `loadRouteParams` receives `URLSearchParams`, repeated values are
-comma-joined in URL order before parsing. `asArrayOf` therefore receives every value, while a
-scalar parser receives the comma-joined string. Object-based route params are unchanged.
+When `parseRouteParams` or `loadRouteParams` receives `URLSearchParams`, repeated values retain URL
+order. The default `asArrayOf` format and scalar parsers receive the comma-joined value. A structured
+`asArrayOf` parser keeps every repeated entry as a distinct item, including commas within an item.
+Object-based route params are unchanged.
 
 ## Pagination metadata
 

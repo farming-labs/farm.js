@@ -17,6 +17,7 @@ import { emitter, type KeyUpdate } from "./sync";
 export { parseRouteParams, loadRouteParams, type RouteParamsInput } from "./params";
 
 import { asString as asStringClient, asInteger as asIntegerClient, type Parser } from "./parsers";
+import { parseQueryParameter } from "./values";
 
 export {
   asString,
@@ -67,10 +68,8 @@ const getCurrentSearchParams = (): URLSearchParams => {
   }
 };
 
-const readSearchParam = (searchParams: URLSearchParams, key: string): string => {
-  const values = searchParams.getAll(key);
-  return values.length > 1 ? values.join(",") : (values[0] ?? "");
-};
+const parseSearchParam = <T>(searchParams: URLSearchParams, key: string, parser: Parser<T>) =>
+  parseQueryParameter(parser, searchParams.getAll(key));
 
 const throttleTimers = new Map<
   string,
@@ -292,7 +291,7 @@ export function useQueryState<TParser extends Parser<any>>(
   type T = NonNullable<ReturnType<TParser["parse"]>>;
   const [state, setState] = useState<T | null>(() => {
     const searchParams = getCurrentSearchParams();
-    const parsed = parser.parse(readSearchParam(searchParams, key));
+    const parsed = parseSearchParam(searchParams, key, parser);
     return parsed;
   });
 
@@ -321,7 +320,7 @@ export function useQueryState<TParser extends Parser<any>>(
 
     const onPopState = () => {
       const searchParams = getCurrentSearchParams();
-      const parsed = parser.parse(readSearchParam(searchParams, key));
+      const parsed = parseSearchParam(searchParams, key, parser);
       const sourceChanged = stateKeyRef.current !== key;
       stateKeyRef.current = key;
       if (sourceChanged || !areParsedValuesEqual(parser, stateRef.current, parsed)) {
@@ -331,7 +330,7 @@ export function useQueryState<TParser extends Parser<any>>(
     };
 
     const onEmitterUpdate = (searchParams: URLSearchParams) => {
-      const parsed = parser.parse(readSearchParam(searchParams, key));
+      const parsed = parseSearchParam(searchParams, key, parser);
       if (!areParsedValuesEqual(parser, stateRef.current, parsed)) {
         setState(parsed);
         stateRef.current = parsed;
@@ -402,7 +401,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
     const result = {} as { [K in keyof T]: ReturnType<T[K]["parse"]> };
 
     Object.entries(parsers).forEach(([key, parser]) => {
-      result[key as keyof T] = parser.parse(readSearchParam(searchParams, key));
+      result[key as keyof T] = parseSearchParam(searchParams, key, parser);
     });
 
     return result;
@@ -458,7 +457,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
         currentKeys.some((key) => !Object.prototype.hasOwnProperty.call(parsers, key));
 
       Object.entries(parsers).forEach(([key, parser]) => {
-        const parsed = parser.parse(readSearchParam(searchParams, key));
+        const parsed = parseSearchParam(searchParams, key, parser);
         const currentValue = stateRef.current[key as keyof T];
 
         if (!areParsedValuesEqual(parser, currentValue, parsed)) {

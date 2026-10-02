@@ -4,6 +4,8 @@
  * Shared parsers that can be used in both client and server contexts
  */
 
+import { PARSE_REPEATED_VALUES, type RepeatedValueParser } from "./values";
+
 export interface Parser<T> {
   parse: (value: string) => T | null;
   serialize: (value: T) => string;
@@ -175,15 +177,22 @@ export function asArrayOf<T>(itemParser: Parser<T>, options: ArrayParserOptions 
       value.map((item) => itemParser.serialize(item)),
       structured,
     );
-
-  return {
+  const parseRepeated = (values: readonly string[]) =>
+    values.map((item) => itemParser.parse(item)).filter((item) => item !== null) as T[];
+  const parser: RepeatedValueParser<T[]> = {
     parse,
     serialize,
-    withDefault: (defaultValue: T[]) => ({
-      parse: (value: string) => parse(value) ?? defaultValue,
-      serialize,
-    }),
+    withDefault: (defaultValue: T[]) => {
+      const parserWithDefault: RepeatedValueParser<T[]> = {
+        parse: (value: string) => parse(value) ?? defaultValue,
+        serialize,
+      };
+      if (structured) parserWithDefault[PARSE_REPEATED_VALUES] = parseRepeated;
+      return parserWithDefault;
+    },
   };
+  if (structured) parser[PARSE_REPEATED_VALUES] = parseRepeated;
+  return parser;
 }
 
 // JSON parser

@@ -49,6 +49,25 @@ describe("query route params parsing", () => {
     expect(loadedSearch.tag).toEqual(parsed.tag);
   });
 
+  it("preserves structured array item boundaries across query parsing surfaces", async () => {
+    const input = new URLSearchParams();
+    input.append("location", "New York, NY");
+    input.append("location", "Los Angeles, CA");
+    const parsers = {
+      location: asArrayOf(asString, { format: "structured" }).withDefault!([]),
+    };
+
+    const parsed = parseRouteParams(input, parsers);
+    const [loadedRoute, loadedSearch] = await Promise.all([
+      loadRouteParams(Promise.resolve(input), parsers),
+      loadSearchParams(Promise.resolve(input), parsers),
+    ]);
+
+    expect(parsed.location).toEqual(["New York, NY", "Los Angeles, CA"]);
+    expect(loadedRoute.location).toEqual(parsed.location);
+    expect(loadedSearch.location).toEqual(parsed.location);
+  });
+
   it("passes repeated values to scalar parsers as one comma-joined string", async () => {
     const input = new URLSearchParams("tag=react&tag=vite&tag=zod");
 

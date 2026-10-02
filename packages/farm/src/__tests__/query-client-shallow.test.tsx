@@ -122,6 +122,27 @@ describe("useQueryState shallow routing", () => {
     expect(value).toEqual(["react", "vite"]);
   });
 
+  it("preserves structured array item boundaries through useQueryState", () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?location=New%20York%2C%20NY&location=Los%20Angeles%2C%20CA",
+    );
+    let value: string[] | null = null;
+
+    function App() {
+      [value] = useQueryState("location", asArrayOf(asString, { format: "structured" }));
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    expect(value).toEqual(["New York, NY", "Los Angeles, CA"]);
+  });
+
   it("reads every repeated value through useQueryStates", () => {
     window.history.replaceState(null, "", "/?tag=react&tag=vite");
     let value: string[] | null = null;
