@@ -34,34 +34,35 @@ export function shouldBypassFarmRouterForDottedPath(
 }
 
 /**
- * Route segments may legitimately contain dots (e.g. /kinfish/farm.js), so a
- * dot alone cannot classify a dev request as a static asset. A dotted path is
- * only treated as an asset when it maps to a real file under one of the
- * servable base dirs (project root, public dir), matching the
- * filesystem-first behavior of production hosting.
- */
-/**
  * Whether the app serves /llms.txt or /llms-full.txt itself, through
- * `agent.llmsTxt`, an llms.ts or llms-full.ts route, or a real file such as
- * public/llms.txt. Development then keeps the docs engine off that path, as
- * production does, where platforms serve files before any route.
+ * `agent.llmsTxt`, an llms.ts or llms-full.ts route, or a file in the public
+ * dir. Development then keeps the docs engine off that path, as production
+ * does, where platforms serve public files before any route. Other files under
+ * the project root do not count: production does not emit them.
  */
 export function farmAppOwnsLlmsPath(
   pathname: string,
   options: {
     generatedPaths: readonly string[];
     routeManager?: DottedPathRouteMatcher | null;
-    baseDirs: Array<string | false | undefined>;
+    publicDir: string | false | undefined;
   },
 ): boolean {
   if (pathname !== "/llms.txt" && pathname !== "/llms-full.txt") return false;
   return (
     options.generatedPaths.includes(pathname) ||
     Boolean(options.routeManager?.matchMetadataRoute(pathname)) ||
-    devServableFileExists(pathname, options.baseDirs)
+    devServableFileExists(pathname, [options.publicDir])
   );
 }
 
+/**
+ * Route segments may legitimately contain dots (e.g. /kinfish/farm.js), so a
+ * dot alone cannot classify a dev request as a static asset. A dotted path is
+ * only treated as an asset when it maps to a real file under one of the
+ * servable base dirs (project root, public dir), matching the
+ * filesystem-first behavior of production hosting.
+ */
 export function devServableFileExists(
   pathname: string,
   baseDirs: Array<string | false | undefined>,

@@ -1,5 +1,8 @@
 import * as fs from "fs";
+import * as https from "https";
+import { isIP } from "net";
 import * as path from "path";
+import * as tls from "tls";
 import type {
   FarmConfig,
   FarmRequest,
@@ -19,7 +22,7 @@ import {
   removeFarmDocumentTitles,
 } from "./full-document";
 import { getClientModuleMetadata } from "../utils/client-component";
-import { Writable } from "stream";
+import { Readable, Writable } from "stream";
 import {
   _clearCurrentMiddlewareContext,
   _clearCurrentMiddlewareData,
@@ -396,6 +399,52 @@ function toMiddlewareMap(input: unknown): Map<string, any> {
     return new Map(Object.entries(input as Record<string, any>));
   }
   return new Map<string, any>();
+}
+
+/**
+ * GETs a page from this HTTPS dev server. The connection goes to the server's
+ * own socket address, while SNI and certificate verification use the hostname
+ * the page was requested under, which is the name the dev certificate covers.
+ */
+function requestOwnHttpsServer(
+  request: Request,
+  address: { host: string; port: number },
+): Promise<Response> {
+  const url = new URL(request.url);
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  return new Promise((resolve, reject) => {
+    const outgoing = https.request(
+      {
+        host: address.host,
+        port: address.port,
+        method: "GET",
+        path: `${url.pathname}${url.search}`,
+        headers: { ...Object.fromEntries(request.headers), host: url.host },
+        // SNI carries names only, never IP addresses.
+        ...(isIP(hostname) ? {} : { servername: hostname }),
+        checkServerIdentity: (_, certificate) => tls.checkServerIdentity(hostname, certificate),
+      },
+      (incoming) => {
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(incoming.headers)) {
+          for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+            headers.append(name, item);
+          }
+        }
+        const status = incoming.statusCode ?? 502;
+        const hasBody = ![204, 205, 304].includes(status);
+        if (!hasBody) incoming.resume();
+        resolve(
+          new Response(hasBody ? (Readable.toWeb(incoming) as ReadableStream) : null, {
+            status,
+            headers,
+          }),
+        );
+      },
+    );
+    outgoing.on("error", reject);
+    outgoing.end();
+  });
 }
 
 function isWebResponse(value: unknown): value is Response {
@@ -2161,8 +2210,9 @@ export class ServerRenderer {
    * renders pages, so Markdown sources and agent overrides are included. Requests
    * go to the server's own socket address: the page URLs carry the Host header,
    * which a client controls, and fetching them would let anyone who can reach a
-   * network-exposed dev server point it at other hosts. HEAD reads nothing, since
-   * its body is discarded.
+   * network-exposed dev server point it at other hosts. Over HTTPS the certificate
+   * is still checked against the requested hostname. HEAD reads nothing, since its
+   * body is discarded.
    */
   private createDevMarkdownReader(req?: FarmRequest): (url: string) => Promise<string | null> {
     const socket = req?.socket as
@@ -2171,10 +2221,14 @@ export class ServerRenderer {
     if (req?.method?.toUpperCase() === "HEAD" || !socket?.localAddress || !socket.localPort) {
       return async () => null;
     }
+    if (socket.encrypted) {
+      const address = { host: socket.localAddress, port: socket.localPort };
+      return createFarmLlmsMarkdownReader((page) => requestOwnHttpsServer(page, address));
+    }
     const host = socket.localAddress.includes(":")
       ? `[${socket.localAddress}]`
       : socket.localAddress;
-    const localOrigin = `${socket.encrypted ? "https" : "http"}://${host}:${socket.localPort}`;
+    const localOrigin = `http://${host}:${socket.localPort}`;
     const read = createFarmLlmsMarkdownReader((page) => fetch(page));
     return (url) => {
       const target = new URL(url);

@@ -1835,7 +1835,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           const appOwnsLlmsTxt = farmAppOwnsLlmsPath(requestPathname, {
             generatedPaths: farmLlmsTxtGeneratedPaths(farmConfig),
             routeManager: farmApp.getRouteManager(),
-            baseDirs: [server.config.publicDir, server.config.root],
+            publicDir: server.config.publicDir,
           });
           if (farmDocsHandler && !appOwnsLlmsTxt) {
             const docsRequest = new Request(fullUrl, {

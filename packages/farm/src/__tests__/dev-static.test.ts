@@ -165,7 +165,7 @@ describe("shouldBypassFarmRouterForDottedPath", () => {
       farmAppOwnsLlmsPath(pathname, {
         generatedPaths,
         routeManager: createRouteManager({ metadata }),
-        baseDirs: [publicDir, root],
+        publicDir,
       });
 
     expect(owns("/llms.txt")).toBe(false);
@@ -177,6 +177,13 @@ describe("shouldBypassFarmRouterForDottedPath", () => {
       expect(owns("/llms-full.txt")).toBe(true);
     } finally {
       fs.rmSync(path.join(publicDir, "llms-full.txt"));
+    }
+    fs.writeFileSync(path.join(root, "llms.txt"), "# Draft");
+    try {
+      // Production does not emit files outside the public dir, so neither does this.
+      expect(owns("/llms.txt")).toBe(false);
+    } finally {
+      fs.rmSync(path.join(root, "llms.txt"));
     }
     expect(owns("/robots.txt", ["/robots.txt"])).toBe(false);
   });

@@ -1,7 +1,9 @@
 // @vitest-environment node
 
 import React from "react";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import https from "node:https";
+import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { imageSize } from "image-size";
@@ -507,6 +509,56 @@ describe("file route loading.tsx and error.tsx", () => {
         expect(new URL(String(input instanceof Request ? input.url : input)).host).toBe(
           "127.0.0.1:4317",
         );
+      }
+    });
+
+    it("reads pages from an HTTPS dev server, verifying the requested hostname", async () => {
+      // A test-only self-signed certificate that names farm.test and no IP address.
+      const fixtures = path.resolve("src/__tests__/fixtures/tls");
+      const cert = await readFile(path.join(fixtures, "farm-test.crt"), "utf8");
+      const key = await readFile(path.join(fixtures, "farm-test.key"), "utf8");
+      const hosts: Array<string | undefined> = [];
+      const server = https.createServer({ cert, key }, (request, response) => {
+        hosts.push(request.headers.host);
+        if (request.url === "/dashboard.md") {
+          response.writeHead(200, { "content-type": "text/markdown; charset=utf-8" });
+          response.end("# Dashboard\n\ndashboard-markdown-body\n");
+          return;
+        }
+        response.writeHead(401).end("Unauthorized");
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const { port } = server.address() as AddressInfo;
+      const previousCa = https.globalAgent.options.ca;
+      https.globalAgent.options.ca = cert;
+      const renderFull = async (host: string) => {
+        const response = createMockResponse();
+        const renderer = createRenderer(pages, {
+          routes,
+          layouts: { "/": layoutModulePath },
+          agent: { llmsTxt: true },
+        });
+        const request = createDevRequest("/llms-full.txt", {
+          socket: { localAddress: "127.0.0.1", localPort: port, encrypted: true },
+        } as Partial<FarmRequest>);
+        request.headers = { host };
+        await renderer.renderPage(request, response);
+        return response.body;
+      };
+
+      try {
+        // Connects to 127.0.0.1, which the certificate does not name, and still
+        // verifies it, against farm.test.
+        expect(await renderFull(`farm.test:${port}`)).toContain("dashboard-markdown-body");
+        expect(hosts).toContain(`farm.test:${port}`);
+        // A hostname the certificate does not cover still fails verification.
+        hosts.length = 0;
+        expect(await renderFull(`other.test:${port}`)).not.toContain("dashboard-markdown-body");
+        expect(hosts).toEqual([]);
+      } finally {
+        https.globalAgent.options.ca = previousCa;
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
       }
     });
 
