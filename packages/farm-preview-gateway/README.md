@@ -17,10 +17,16 @@ Public disconnects are propagated through the request queue. The polling agent a
 Managed deployments can configure `auth` with a GitHub OAuth client id and a signing secret. The gateway then exposes the CLI login exchange, issues account-bound tunnel grants scoped to one preview name and absolute expiry, and requires a grant before creating a session:
 
 ```ts
+const githubClientId = process.env.FARM_PREVIEW_GITHUB_CLIENT_ID;
+const signingSecret = process.env.FARM_PREVIEW_AUTH_SECRET;
+if (!githubClientId || !signingSecret) {
+  throw new Error("Farm Preview managed auth is not configured");
+}
+
 const handler = createPreviewGatewayHandler({
   auth: {
-    githubClientId: process.env.FARM_PREVIEW_GITHUB_CLIENT_ID,
-    signingSecret: process.env.FARM_PREVIEW_AUTH_SECRET,
+    githubClientId,
+    signingSecret,
   },
 });
 ```
