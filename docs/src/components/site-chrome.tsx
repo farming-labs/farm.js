@@ -94,7 +94,9 @@ export function IndexedLabel({
 }) {
   return (
     <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] font-normal uppercase tracking-normal text-current">
-      <span className="text-white/26">{index}</span>
+      <span aria-hidden className="text-white/26">
+        {index}
+      </span>
       <span aria-hidden className="text-white/18">
         /
       </span>
