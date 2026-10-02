@@ -133,6 +133,51 @@ describe("client cache persistence engine", () => {
     expect(store.has("user:secret")).toBe(false);
   });
 
+  it("does not restore hydration that started before the cache was cleared", async () => {
+    let releaseGet!: () => void;
+    const getGate = new Promise<void>((resolve) => {
+      releaseGet = resolve;
+    });
+    let getStarted!: () => void;
+    const getInFlight = new Promise<void>((resolve) => {
+      getStarted = resolve;
+    });
+    const stale = persisted({ email: "alice@example.com" });
+    const adapter: FarmClientCacheAdapter = {
+      keys: async () => ["user:profile"],
+      get: async () => {
+        getStarted();
+        await getGate;
+        return stale;
+      },
+      set: async () => {},
+      delete: async () => {},
+      clear: async () => {},
+    };
+
+    initPersistedClientCache(adapter, { flushDelayMs: 0 });
+    await getInFlight;
+
+    await clearPersistedCache();
+    expect(getFarmClientDataCache().get("user:profile")).toBeUndefined();
+
+    releaseGet();
+    await microtasks();
+
+    expect(getFarmClientDataCache().get("user:profile")).toBeUndefined();
+
+    disposePersistedClientCache();
+    const { adapter: nextAdapter } = memoryAdapter({
+      "user:profile": persisted({ email: "bob@example.com" }),
+    });
+    initPersistedClientCache(nextAdapter, { flushDelayMs: 0 });
+    await microtasks();
+
+    expect(getFarmClientDataCache().get<{ email: string }>("user:profile")?.data.email).toBe(
+      "bob@example.com",
+    );
+  });
+
   it("clears in-memory entries on logout when no adapter is configured", async () => {
     disposePersistedClientCache();
     const cache = getFarmClientDataCache();
