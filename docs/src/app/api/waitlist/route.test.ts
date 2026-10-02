@@ -47,8 +47,8 @@ function waitlistRequest(body: unknown): Request {
 describe("waitlist signup endpoint", () => {
   describe("abuse protection", () => {
     it("refuses a flood of submissions for the same address", async () => {
-      // Public, unauthenticated, and it writes to the database, so a loop must
-      // not be able to fill the table.
+      // Public, unauthenticated, and it writes to the database, so repeated
+      // requests for one address have to hit the per-address rate limit.
       const email = `flood-${Date.now()}@example.com`;
       const statuses: number[] = [];
       for (let attempt = 0; attempt < 8; attempt += 1) {
