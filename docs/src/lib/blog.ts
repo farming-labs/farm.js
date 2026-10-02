@@ -19,6 +19,7 @@ export const launchSections = [
   ["an-integrations-ecosystem", "Integrations"],
   ["a-plugin-ecosystem-starting-with-devtools", "Plugins & DevTools"],
   ["typed-content-collections", "Content"],
+  ["local-first-data-with-sync", "Sync"],
   ["a-cli-that-explains-your-app", "The CLI"],
   ["built-for-agents-too", "Built for agents"],
   ["api-routes-as-mcp-tools", "MCP composition"],

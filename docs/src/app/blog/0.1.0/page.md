@@ -149,6 +149,12 @@ Local edits are watched in development; production serves a validated, bundled s
 
 Already have a CMS? A `remote()` source can feed the same pipeline from an API or database, including Sanity and Contentful. Production remains a build-time snapshot: publish changes through a rebuild, rather than expecting live CMS reads on every request. The [Content guide](https://farmjs.dev/docs/plugins/content) covers sources, typed assets, static routes, and optional write callbacks.
 
+<span id="local-first-data-with-sync" className="blog-heading-anchor" />
+
+## Local-first data with Sync
+
+**`@farm.js/sync`** keeps rows in the browser: reads render from a local store, writes show up before the server answers, and offline edits queue until the connection returns. It runs on top of your own database, a server-side `where` filter decides which rows each device can hold, and it is in beta. The [Sync guide](https://farmjs.dev/docs/plugins/sync) covers setup.
+
 <span id="a-cli-that-explains-your-app" className="blog-heading-anchor" />
 
 ## A CLI that explains your app

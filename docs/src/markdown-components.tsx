@@ -16,6 +16,18 @@ const highlighter = createHighlighterCoreSync({
   engine: createJavaScriptRegexEngine(),
 });
 const languages = new Set(highlighter.getLoadedLanguages());
+// The launch film's code palette over vesper: plain code soft grey, keywords and punctuation dim,
+// names a step brighter, strings brightest (the docs map the same colours in docs-overrides.css).
+const FILM_PALETTE: Record<string, string> = {
+  "#FFFFFF": "#a1a1a1",
+  "#FFF": "#a1a1a1",
+  "#A0A0A0": "#6b6b6b",
+  "#FFC799": "#d4d4d4",
+  "#FFCFA8": "#d4d4d4",
+  "#FF8080": "#d4d4d4",
+  "#99FFE4": "#e8e8e8",
+};
+const filmColor = (color?: string) => (color && FILM_PALETTE[color.toUpperCase()]) ?? "#a1a1a1";
 
 function Code({ children, className, ...props }: ComponentPropsWithoutRef<"code">) {
   const language = className?.match(/(?:^|\s)language-([^\s]+)/)?.[1];
@@ -34,7 +46,7 @@ function Code({ children, className, ...props }: ComponentPropsWithoutRef<"code"
         <Fragment key={line}>
           {line > 0 ? "\n" : null}
           {tokens.map((token, index) => (
-            <span key={index} style={{ color: token.color }}>
+            <span key={index} style={{ color: filmColor(token.color) }}>
               {token.content}
             </span>
           ))}

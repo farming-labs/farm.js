@@ -736,54 +736,75 @@
 .blog-prose pre {
   overflow-x: auto;
   max-width: 100%;
-  padding: 20px 22px;
+  padding: 24px 22px 20px;
   margin: 0;
   position: relative;
   border: 0;
-  background: #080808;
-  color: #d8d8d8;
+  background: transparent;
+  color: #a1a1a1;
   font-family: var(--font-geist-mono), monospace;
   font-size: 12px;
   font-weight: 400;
   line-height: 1.8;
 }
+/* Code reads like the launch film's code panels: a soft-bordered panel whose label and copy
+   control sit on its top border. */
 .blog-code-block {
-  margin-bottom: 24px;
-  border: 1px solid var(--blog-line);
-  background: #080808;
+  position: relative;
+  margin: 36px 0 24px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 3px;
+  background: #070707;
 }
 .blog-code-toolbar {
+  position: absolute;
+  top: 0;
+  right: 12px;
+  left: 14px;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 40px;
   gap: 1rem;
-  border-bottom: 1px solid var(--blog-line);
-  padding-left: 0.85rem;
-  color: #929292;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: #8f8f8f;
   font-family: var(--font-geist-mono), monospace;
-  font-size: 0.61rem;
-  letter-spacing: 0.045em;
+  font-size: 11px;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+.blog-code-toolbar > span:first-child {
+  padding: 0 8px;
+  background: #000;
+  line-height: 22px;
 }
 .blog-code-actions {
   display: flex;
   align-items: center;
   gap: 0.7rem;
+  pointer-events: auto;
+}
+.blog-code-actions > span[aria-hidden] {
+  display: none;
 }
 .blog-code-copy:not([hidden]) {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
+  /* Fixed width so COPY, COPIED, and RETRY never shift the border legend. */
   width: 74px;
-  min-height: 40px;
-  padding: 0 0.55rem;
-  border-left: 1px solid var(--blog-line);
-  color: #b7b7b7;
-  background: #18181b;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 3px;
+  color: #8f8f8f;
+  background: #000;
   font: inherit;
-  font-size: 0.62rem;
+  font-size: 10px;
   text-transform: inherit;
   white-space: nowrap;
   cursor: pointer;
@@ -795,11 +816,11 @@
 .blog-code-copy:hover:not(:disabled),
 .blog-code-copy:focus-visible {
   color: #ededed;
-  border-color: #444;
-  background: #202023;
+  border-color: rgb(255 255 255 / 0.32);
+  background: #000;
 }
 .blog-code-copy:active {
-  background: #202020;
+  background: #0c0c0c;
 }
 .blog-code-copy:disabled {
   cursor: wait;
@@ -812,9 +833,12 @@
 .blog-code-copy[data-state="copied"] .blog-copy-check {
   display: block;
 }
+/* Touch: keep the chip small on the border but give it a 44px hit area. */
 @media (pointer: coarse) {
-  .blog-code-copy:not([hidden]) {
-    min-height: 44px;
+  .blog-code-copy:not([hidden])::before {
+    position: absolute;
+    inset: -10px -6px;
+    content: "";
   }
 }
 .blog-prose pre:focus-visible {
@@ -836,24 +860,24 @@
   height: 0;
   scroll-margin-top: 76px;
 }
-.blog-heading-anchor:target + h2 {
-  text-decoration: underline;
-  text-decoration-color: #454545;
-  text-underline-offset: 8px;
-}
-/* Section headings link to themselves (added by contents-navigation); no visible "#". */
-.blog-heading-link {
+/* Section headings link to themselves (added by contents-navigation). They read as plain
+   headings; hover shows a thin, quiet underline. Scoped under .blog-prose to outrank the prose
+   link styles, which would otherwise underline them and turn the line white on hover. */
+.blog-prose .blog-heading-link {
   color: inherit;
-  text-decoration: none;
-}
-.blog-heading-link:hover {
   text-decoration: underline;
-  text-decoration-color: #454545;
-  text-underline-offset: 8px;
+  text-decoration-color: transparent;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 7px;
+  transition: text-decoration-color 150ms;
 }
-.blog-heading-link:focus-visible {
-  outline: 2px solid #ededed;
+.blog-prose .blog-heading-link:hover {
+  text-decoration-color: rgb(255 255 255 / 0.24);
+}
+.blog-prose .blog-heading-link:focus-visible {
+  outline: 1px solid rgb(255 255 255 / 0.6);
   outline-offset: 4px;
+  text-decoration-color: transparent;
 }
 .blog-mobile-contents {
   display: none;
