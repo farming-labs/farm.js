@@ -1,7 +1,8 @@
 // @vitest-environment node
 
 import React from "react";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { generateKeyPairSync, sign } from "node:crypto";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import https from "node:https";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -513,10 +514,8 @@ describe("file route loading.tsx and error.tsx", () => {
     });
 
     it("reads pages from an HTTPS dev server, verifying the requested hostname", async () => {
-      // A test-only self-signed certificate that names farm.test and no IP address.
-      const fixtures = path.resolve("src/__tests__/fixtures/tls");
-      const cert = await readFile(path.join(fixtures, "farm-test.crt"), "utf8");
-      const key = await readFile(path.join(fixtures, "farm-test.key"), "utf8");
+      // The certificate names farm.test and no IP address.
+      const { cert, key } = createSelfSignedCertificate("farm.test");
       const hosts: Array<string | undefined> = [];
       const server = https.createServer({ cert, key }, (request, response) => {
         hosts.push(request.headers.host);
@@ -1454,6 +1453,56 @@ function createConfig(root = "/test"): Required<FarmConfig> {
     },
     vite: {},
   } as Required<FarmConfig>;
+}
+
+/**
+ * A throwaway self-signed certificate for `hostname`, built at test time so no
+ * key material lives in the repository: a minimal X.509 v3 certificate in DER,
+ * with a subjectAltName, signed by a fresh P-256 key.
+ */
+function createSelfSignedCertificate(hostname: string): { cert: string; key: string } {
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const der = (tag: number, ...parts: Buffer[]) => {
+    const body = Buffer.concat(parts);
+    const length =
+      body.length < 0x80
+        ? [body.length]
+        : body.length < 0x100
+          ? [0x81, body.length]
+          : [0x82, body.length >> 8, body.length & 0xff];
+    return Buffer.concat([Buffer.from([tag, ...length]), body]);
+  };
+  const oid = (hex: string) => der(0x06, Buffer.from(hex, "hex"));
+  const utcTime = (date: Date) =>
+    der(0x17, Buffer.from(`${date.toISOString().replace(/\D/g, "").slice(2, 14)}Z`));
+  const name = der(0x30, der(0x31, der(0x30, oid("550403"), der(0x0c, Buffer.from(hostname)))));
+  const ecdsaWithSha256 = der(0x30, oid("2a8648ce3d040302"));
+  const now = Date.now();
+  const tbs = der(
+    0x30,
+    der(0xa0, der(0x02, Buffer.from([2]))),
+    der(0x02, Buffer.from([1])),
+    ecdsaWithSha256,
+    name,
+    der(0x30, utcTime(new Date(now - 86_400_000)), utcTime(new Date(now + 86_400_000))),
+    name,
+    publicKey.export({ type: "spki", format: "der" }),
+    der(
+      0xa3,
+      der(0x30, der(0x30, oid("551d11"), der(0x04, der(0x30, der(0x82, Buffer.from(hostname)))))),
+    ),
+  );
+  const certificate = der(
+    0x30,
+    tbs,
+    ecdsaWithSha256,
+    der(0x03, Buffer.from([0]), sign("sha256", tbs, privateKey)),
+  );
+  const lines = certificate.toString("base64").match(/.{1,64}/g) ?? [];
+  return {
+    cert: `-----BEGIN CERTIFICATE-----\n${lines.join("\n")}\n-----END CERTIFICATE-----\n`,
+    key: privateKey.export({ type: "pkcs8", format: "pem" }) as string,
+  };
 }
 
 function createMockRequest(url: string): FarmRequest {
