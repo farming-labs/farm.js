@@ -664,3 +664,34 @@
   width: 13px;
   height: 13px;
 }
+
+/* ---------- breadcrumb: a quiet mono label with room above the title ---------- */
+
+#farm-docs-root #nd-page .fd-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  margin: 0 0 22px !important;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px !important;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+#farm-docs-root #nd-page .fd-breadcrumb-link {
+  color: var(--farm-code-legend) !important;
+  text-decoration: none !important;
+  transition: color 150ms;
+}
+#farm-docs-root #nd-page .fd-breadcrumb-link:hover {
+  color: #ededed !important;
+}
+#farm-docs-root #nd-page .fd-breadcrumb-sep {
+  margin: 0 10px;
+  color: var(--farm-code-dim) !important;
+}
+#farm-docs-root #nd-page .fd-breadcrumb-current {
+  color: #d8d8d8 !important;
+}
