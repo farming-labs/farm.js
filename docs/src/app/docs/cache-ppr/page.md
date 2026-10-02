@@ -167,6 +167,10 @@ When Farm serves a cached shell with dynamic holes, the browser refresh request 
 shared HTTP caches. The completed response is private and is not stored, so the refresh cannot
 receive the same cached shell again.
 
+The client waits for a shell's background refresh before hydrating. Farm applies the completed
+response's page props, route slots, manifests, locale, and deferred values first, so hydration sees
+the same data that produced the refreshed HTML.
+
 ## Cache keys and tags
 
 Use stable keys for data and broad tags for invalidation. Keys identify one cached value, while tags let multiple values be refreshed together.

@@ -353,7 +353,7 @@ function renderI18nAlternateLinks(requestPath: string, snapshot: FarmI18nClientS
 }
 
 export function createPPRRefreshScript(): string {
-  return `<script>(function(){if(window.__FARM_PPR_REFRESHING__)return;window.__FARM_PPR_REFRESHING__=true;function replaceRoot(html){var doc=new DOMParser().parseFromString(html,"text/html");var next=doc.getElementById("root");var current=document.getElementById("root");if(!next||!current)return;current.innerHTML=next.innerHTML;}fetch(window.location.href,{cache:"no-store",credentials:"same-origin",headers:{"x-farm-ppr-refresh":"1"}}).then(function(response){return response.ok?response.text():null;}).then(function(html){if(html)replaceRoot(html);}).catch(function(){});})();</script>`;
+  return `<script>(function(){if(window.__FARM_PPR_REFRESHING__)return;window.__FARM_PPR_REFRESHING__=true;var owner=document.currentScript;function applyState(doc){doc.querySelectorAll("script[data-farm-refresh-state]").forEach(function(source){var script=document.createElement("script");if(owner&&owner.nonce)script.nonce=owner.nonce;script.textContent=source.textContent||"";document.head.appendChild(script);script.remove();});}function replaceRoot(html){var doc=new DOMParser().parseFromString(html,"text/html");var next=doc.getElementById("root");var current=document.getElementById("root");if(!next||!current)return;applyState(doc);current.innerHTML=next.innerHTML;}window.__FARM_PPR_REFRESH_PROMISE__=fetch(window.location.href,{cache:"no-store",credentials:"same-origin",headers:{"x-farm-ppr-refresh":"1"}}).then(function(response){return response.ok?response.text():null;}).then(function(html){if(html)replaceRoot(html);}).catch(function(){});})();</script>`;
 }
 
 export function createPreHydrationClickQueueScript(): string {
@@ -385,8 +385,7 @@ function createDocumentFooter(options: {
 }
 
 function createDeferredHydrationScript(records: readonly DeferredRecord[]): string {
-  if (records.length === 0) return "";
-  return `<script>window.__FARM_DEFERRED_DATA__=${serializeInlineValue(
+  return `<script data-farm-refresh-state>window.__FARM_DEFERRED_DATA__=${serializeInlineValue(
     snapshotDeferredData(records),
   )};</script>`;
 }
@@ -2521,7 +2520,7 @@ export class ServerRenderer {
         ? toViteModuleId(pagePath, this.config.root)
         : "/src/app/page.tsx";
       const deploymentId = this.getDeploymentId();
-      const bootstrapScript = `<script>
+      const bootstrapScript = `<script data-farm-refresh-state>
 window.__FARM_PROPS__ = ${serializeInlineValue((deferredProps.data as any).page)};
 window.__FARM_ROUTE_SLOTS__ = ${serializeInlineValue((deferredProps.data as any).slots)};
 window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(deploymentId)};
@@ -2531,17 +2530,15 @@ window.__FARM_PAGE_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_PAGE_
 window.__FARM_LAYOUT_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ === true)};
 window.__FARM_LAYOUTS__ = ${JSON.stringify((req as any).__FARM_LAYOUTS__ || [])};
 window.__FARM_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_SHOULD_HYDRATE__ === true)};
-${
-  (req as any).__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true
-    ? "window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ = true;"
-    : ""
-}
+window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ = ${JSON.stringify(
+        (req as any).__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true,
+      )};
 window.__FARM_ISLAND_STRATEGY__ = ${JSON.stringify((req as any).__FARM_ISLAND_STRATEGY__ || "load")};
 window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
 window.__FARM_LOADING_MODULE__ = ${JSON.stringify((req as any).__FARM_LOADING_MODULE_PATH__ || null)};
 window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
-${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(getFarmI18nClientSnapshot())};` : ""}
+window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getFarmI18nClientSnapshot()) : "null"};
 </script>`;
       const deferredScript = createDeferredHydrationScript(deferredProps.records);
       const rendererHydrationScript = this.rendererRuntime.generateHydrationScript?.() || "";
@@ -2798,7 +2795,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         page: (req as any).__FARM_PROPS__ || {},
         slots: routeSlotPayload,
       });
-      const propsScript = `<script>
+      const propsScript = `<script data-farm-refresh-state>
 window.__FARM_PROPS__ = ${serializeInlineValue((deferredProps.data as any).page)};
 window.__FARM_ROUTE_SLOTS__ = ${serializeInlineValue((deferredProps.data as any).slots)};
 window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(deploymentId)};
@@ -2812,11 +2809,9 @@ window.__FARM_LAYOUT_SHOULD_HYDRATE__ = ${JSON.stringify(
       )};
 window.__FARM_LAYOUTS__ = ${JSON.stringify((req as any).__FARM_LAYOUTS__ || [])};
 window.__FARM_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_SHOULD_HYDRATE__ === true)};
-${
-  (req as any).__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true
-    ? "window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ = true;"
-    : ""
-}
+window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ = ${JSON.stringify(
+        (req as any).__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true,
+      )};
 window.__FARM_ISLAND_STRATEGY__ = ${JSON.stringify((req as any).__FARM_ISLAND_STRATEGY__ || "load")};
 window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
 window.__FARM_LOADING_MODULE__ = ${JSON.stringify(
@@ -2824,7 +2819,7 @@ window.__FARM_LOADING_MODULE__ = ${JSON.stringify(
       )};
 window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
-${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(getFarmI18nClientSnapshot())};` : ""}
+window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getFarmI18nClientSnapshot()) : "null"};
 </script>`;
       const hydrationClickQueueScript =
         isClientComponent ||

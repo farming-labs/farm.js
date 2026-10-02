@@ -268,9 +268,11 @@ export function htmlToMarkdown(
     return `\n\n${toInlineMarkdown(content).trim()}\n\n`;
   });
   source = source.replace(/<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, content) => {
-    // Code blocks inside were already set aside by this call; the nested call
-    // leaves their placeholders alone, and each is restored here with every
-    // line quoted, including blank lines inside the code.
+    // The nested call returns decoded text, so it is escaped again before
+    // rejoining this pass, which decodes once at the end. Code blocks inside
+    // were already set aside by this call and the nested call leaves their
+    // placeholders alone; each is quoted line by line, blank lines included,
+    // and set aside again so the rest of this pass leaves it untouched.
     const quote = htmlToMarkdown(content, { includeMetadata: false })
       .split("\n")
       .filter((line) => line.trim().length > 0)
@@ -279,11 +281,14 @@ export function htmlToMarkdown(
           line.startsWith(CODE_BLOCK_MARK) && line.endsWith(CODE_BLOCK_MARK)
             ? codeBlocks[Number(line.slice(1, -1))]
             : undefined;
-        if (code === undefined) return `> ${line}`;
-        return code
-          .split("\n")
-          .map((codeLine) => (codeLine ? `> ${codeLine}` : ">"))
-          .join("\n");
+        if (code === undefined) return `> ${escapeHtmlText(line)}`;
+        codeBlocks.push(
+          code
+            .split("\n")
+            .map((codeLine) => (codeLine ? `> ${codeLine}` : ">"))
+            .join("\n"),
+        );
+        return `${CODE_BLOCK_MARK}${codeBlocks.length - 1}${CODE_BLOCK_MARK}`;
       })
       .join("\n");
     return `\n\n${quote}\n\n`;
@@ -297,10 +302,12 @@ export function htmlToMarkdown(
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<hr\s*\/?>/gi, "\n\n---\n\n");
 
-  // Collapse the spacing that tag separators and indented source HTML leave
-  // behind (four leading spaces would read as a code block), then restore the
-  // code blocks set aside above, untouched.
-  let markdown = stripTags(source)
+  // Text keeps its HTML entities through every pass above, so an escaped
+  // `&lt;div&gt;` is never mistaken for a tag; it is decoded exactly once, here,
+  // after the last tags are gone. Then collapse the spacing that tag separators
+  // and indented source HTML leave behind (four leading spaces would read as a
+  // code block), and restore the code blocks set aside above, untouched.
+  let markdown = decodeHtml(stripTags(source))
     .split("\n")
     .map((line) => line.replace(/[ \t]+/g, " ").trim())
     .join("\n")
@@ -519,16 +526,20 @@ function extractFirstElementContent(html: string, tagNames: string[]): string | 
   return undefined;
 }
 
+/**
+ * Converts inline HTML to Markdown. The result keeps its HTML entities:
+ * htmlToMarkdown decodes once, after every tag is gone.
+ */
 function toInlineMarkdown(html: string): string {
   let source = html
     .replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href, text) => {
       const label: string = toInlineMarkdown(text).trim() || href;
-      return `[${label}](${decodeHtml(href)})`;
+      return `[${label}](${href})`;
     })
     .replace(
       /<img\b[^>]*src=["']([^"']+)["'][^>]*alt=["']([^"']*)["'][^>]*\/?>/gi,
       (_, src, alt) => {
-        return `![${decodeHtml(alt)}](${decodeHtml(src)})`;
+        return `![${alt}](${src})`;
       },
     )
     .replace(/<strong\b[^>]*>([\s\S]*?)<\/strong>/gi, (_, content) => {
@@ -544,14 +555,13 @@ function toInlineMarkdown(html: string): string {
       return `_${toInlineMarkdown(content).trim()}_`;
     })
     .replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_, content) => {
-      return `\`${decodeHtml(stripTags(content)).trim()}\``;
+      return `\`${stripTags(content).trim()}\``;
     })
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(BLOCK_TAGS, " ")
     .replace(BOX_TAGS, " ");
 
-  source = stripTags(source);
-  return decodeHtml(source).replace(/\s+/g, " ");
+  return stripTags(source).replace(/\s+/g, " ");
 }
 
 // Elements with no closing tag, which an attribute can hide on their own.
@@ -647,6 +657,10 @@ function findClosingTagEnd(html: string, name: string, from: number): number | u
 
 function stripTags(input: string): string {
   return input.replace(/<[^>]+>/g, "");
+}
+
+function escapeHtmlText(input: string): string {
+  return input.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function decodeHtml(input: string): string {

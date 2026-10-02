@@ -814,6 +814,7 @@ describe("file route loading.tsx and error.tsx", () => {
 
     expect(response.body).toContain("Excellent");
     expect(response.body).toContain('window.__FARM_DEFERRED_DATA__={"d0"');
+    expect(response.body.match(/data-farm-refresh-state/g)).toHaveLength(2);
     expect(response.body).toContain('"status":"fulfilled"');
     expect(response.headers.get("x-farm-deployment-id")).toBe("release-2");
     expect(response.body).toContain('window.__FARM_DEPLOYMENT_ID__ = "release-2"');
@@ -834,6 +835,9 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.headers.get("x-farm-deployment-id")).toBe("release-2");
     expect(response.headers.get("set-cookie")).toContain("__farm_deployment=release-2");
     expect(response.body).toContain('window.__FARM_DEPLOYMENT_ID__ = "release-2"');
+    expect(response.body).toContain("window.__FARM_DEFERRED_DATA__={};");
+    expect(response.body).toContain("window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ = false;");
+    expect(response.body).toContain("window.__FARM_I18N__ = null;");
     expect(response.body).toContain('<meta name="farm-deployment-id" content="release-2">');
   });
 

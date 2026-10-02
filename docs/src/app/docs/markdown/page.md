@@ -169,7 +169,7 @@ export default defineConfig({
 
 ## What gets returned
 
-Markdown mirrors call the rendered page, strip scripts/styles and anything hidden from assistive technology (`aria-hidden="true"`, or the `hidden` attribute except `hidden="until-found"`, which the browser can reveal), convert HTML headings, paragraphs, lists, blockquotes, and code blocks into markdown, then return `text/markdown`. Mark decorative text `aria-hidden` to keep it out of the mirror as well as out of screen readers.
+Markdown mirrors call the rendered page, strip scripts/styles and elements hidden by an attribute (`aria-hidden="true"`, or `hidden` except `hidden="until-found"`, which the browser can reveal), convert HTML headings, paragraphs, lists, blockquotes, and code blocks into markdown, then return `text/markdown`. The mirror is built without CSS, so text hidden only by a stylesheet (`display: none`, a collapsed menu) still appears. Mark decorative text `aria-hidden` to keep it out of the mirror as well as out of screen readers.
 
 **Terminal**
 
