@@ -7,9 +7,12 @@ export type RouteParamsInput =
 
 function normalizeParams(input: Record<string, string | undefined> | URLSearchParams) {
   if (input instanceof URLSearchParams) {
-    const params: Record<string, string | undefined> = {};
+    const params = Object.create(null) as Record<string, string | undefined>;
     input.forEach((value, key) => {
-      params[key] = value;
+      // Match server and client query parsing: preserve repeated values in URL
+      // order using the comma format understood by `asArrayOf`.
+      const current = params[key];
+      params[key] = current === undefined ? value : `${current},${value}`;
     });
     return params;
   }

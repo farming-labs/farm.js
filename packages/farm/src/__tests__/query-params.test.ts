@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { asFloat, asInteger, asIsoDate, asIsoDateTime, asString } from "../query/parsers";
+import {
+  asArrayOf,
+  asFloat,
+  asInteger,
+  asIsoDate,
+  asIsoDateTime,
+  asString,
+} from "../query/parsers";
 import { loadRouteParams, parseRouteParams } from "../query/params";
+import { loadSearchParams } from "../query/server";
 
 describe("query route params parsing", () => {
   it("parses route params synchronously with parser types", () => {
@@ -24,6 +32,35 @@ describe("query route params parsing", () => {
 
     expect(parsed.id).toBe(7);
     expect(parsed.slug).toBe("release-notes");
+  });
+
+  it("preserves repeated URLSearchParams values across query parsing surfaces", async () => {
+    const input = new URLSearchParams("tag=react&tag=vite&tag=zod");
+    const parsers = { tag: asArrayOf(asString) };
+
+    const parsed = parseRouteParams(input, parsers);
+    const [loadedRoute, loadedSearch] = await Promise.all([
+      loadRouteParams(Promise.resolve(input), parsers),
+      loadSearchParams(Promise.resolve(input), parsers),
+    ]);
+
+    expect(parsed.tag).toEqual(["react", "vite", "zod"]);
+    expect(loadedRoute.tag).toEqual(parsed.tag);
+    expect(loadedSearch.tag).toEqual(parsed.tag);
+  });
+
+  it("passes repeated values to scalar parsers as one comma-joined string", async () => {
+    const input = new URLSearchParams("tag=react&tag=vite&tag=zod");
+
+    expect(parseRouteParams(input, { tag: asString }).tag).toBe("react,vite,zod");
+    await expect(loadRouteParams(Promise.resolve(input), { tag: asString })).resolves.toEqual({
+      tag: "react,vite,zod",
+    });
+  });
+
+  it("keeps single and missing URLSearchParams values compatible", () => {
+    expect(parseRouteParams(new URLSearchParams("tag=react"), { tag: asString }).tag).toBe("react");
+    expect(parseRouteParams(new URLSearchParams(), { tag: asString }).tag).toBeNull();
   });
 
   it("throws in strict mode when parser fails", () => {
