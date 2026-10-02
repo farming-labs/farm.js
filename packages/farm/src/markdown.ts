@@ -240,7 +240,11 @@ export function htmlToMarkdown(
   const codeBlocks: string[] = [];
   const setAsideCodeBlock = (_: string, code: string) => {
     const content = decodeHtml(stripTags(code)).trim();
-    const longestRun = Math.max(0, ...(content.match(/`+/g) ?? []).map((run) => run.length));
+    // A reduce, not Math.max(...runs): a large block can exceed the argument limit.
+    const longestRun = (content.match(/`+/g) ?? []).reduce(
+      (longest, run) => Math.max(longest, run.length),
+      0,
+    );
     const fence = "`".repeat(Math.max(3, longestRun + 1));
     codeBlocks.push(`${fence}\n${content}\n${fence}`);
     return `\n\n${CODE_BLOCK_MARK}${codeBlocks.length - 1}${CODE_BLOCK_MARK}\n\n`;
@@ -257,10 +261,23 @@ export function htmlToMarkdown(
     return `\n\n${toInlineMarkdown(content).trim()}\n\n`;
   });
   source = source.replace(/<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, content) => {
+    // Code blocks inside were already set aside by this call; the nested call
+    // leaves their placeholders alone, and each is restored here with every
+    // line quoted, including blank lines inside the code.
     const quote = htmlToMarkdown(content, { includeMetadata: false })
       .split("\n")
       .filter((line) => line.trim().length > 0)
-      .map((line) => `> ${line}`)
+      .map((line) => {
+        const code =
+          line.startsWith(CODE_BLOCK_MARK) && line.endsWith(CODE_BLOCK_MARK)
+            ? codeBlocks[Number(line.slice(1, -1))]
+            : undefined;
+        if (code === undefined) return `> ${line}`;
+        return code
+          .split("\n")
+          .map((codeLine) => (codeLine ? `> ${codeLine}` : ">"))
+          .join("\n");
+      })
       .join("\n");
     return `\n\n${quote}\n\n`;
   });
@@ -282,7 +299,8 @@ export function htmlToMarkdown(
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim()
-    .replace(CODE_BLOCK_PLACEHOLDER, (_, index: string) => codeBlocks[Number(index)] ?? "");
+    // Placeholders this call did not create belong to an outer call (a blockquote).
+    .replace(CODE_BLOCK_PLACEHOLDER, (match, index: string) => codeBlocks[Number(index)] ?? match);
 
   if (options.includeMetadata !== false) {
     const metadata: string[] = [];

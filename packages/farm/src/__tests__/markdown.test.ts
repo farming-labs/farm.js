@@ -365,6 +365,25 @@ describe("htmlToMarkdown", () => {
     ).toBe("````\n```\ncode();\n````\n\nindented body text\n");
   });
 
+  it("sizes the fence of a huge code block without overflowing", () => {
+    // Spreading every backtick run into Math.max exceeds the engine's argument limit.
+    const code = "`a ".repeat(300_000);
+    expect(
+      htmlToMarkdown(`<main><pre><code>${code}</code></pre></main>`, {
+        includeMetadata: false,
+      }).split("\n", 1)[0],
+    ).toBe("```");
+  });
+
+  it("keeps code blocks inside blockquotes, quoting every line", () => {
+    expect(
+      htmlToMarkdown(
+        "<main><blockquote><p>Run this:</p><pre><code>pnpm install\n\npnpm dev</code></pre></blockquote></main>",
+        { includeMetadata: false },
+      ),
+    ).toBe("> Run this:\n> ```\n> pnpm install\n>\n> pnpm dev\n> ```\n");
+  });
+
   it("does not split words that are only wrapped in inline elements", () => {
     // Letter- and word-split animations wrap one word in sibling spans; without
     // layout information they must read as the source text, not "Hel lo".
