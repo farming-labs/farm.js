@@ -149,6 +149,18 @@ Local edits are watched in development; production serves a validated, bundled s
 
 Already have a CMS? A `remote()` source can feed the same pipeline from an API or database, including Sanity and Contentful. Production remains a build-time snapshot: publish changes through a rebuild, rather than expecting live CMS reads on every request. The [Content guide](https://farmjs.dev/docs/plugins/content) covers sources, typed assets, static routes, and optional write callbacks.
 
+<span id="local-first-data-with-sync" className="blog-heading-anchor" />
+
+## Local-first data with Sync
+
+**`@farm.js/sync`** turns a schema into rows that live in the browser. Reads render from a local store, writes show up before the server answers, edits made offline queue until the connection returns, and a revisit paints from disk instead of waiting on the network. It sits on top of your own database rather than replacing it, and it remains independently versioned in beta.
+
+Declare a model once with `defineSchema`, then add `sync()` to `plugins` in `farm.config.ts` with the models the browser may read or write and a `where` row filter the server applies to every request. Field metadata does the rest: the primary key, enum validation before an optimistic write, and an `updatedAt` cursor so later loads only send changed rows.
+
+In a client component, `useLiveQuery("tasks", …)` returns the matching rows, and `useSyncAction("tasks")` writes them. Model names and fields are generated from the schema, so a wrong name is a compile error. Each write updates every view of that row in the same frame, then persists in the background. A rejected write rolls back and lands in a `failures` queue with retry and dismiss, so nothing disappears silently.
+
+`where` is the security boundary, enforced by the query rather than by trusting what the browser sent: a device only ever holds rows that passed the filter, columns the filter names are server-owned, and a writable model without a filter fails the build. Point `storage` at a Farm mount to start, or pass a `pg`, Drizzle, Prisma, D1, or Mongo client to sync against your real tables; `farm sync migrate` prints the SQL for a raw connection and never alters existing tables. The [Sync guide](https://farmjs.dev/docs/plugins/sync) covers incremental sync, existing tables, and failure handling, and the [local-first patterns](https://farmjs.dev/docs/local-first) cover what Farm's cache already does without a new package.
+
 <span id="a-cli-that-explains-your-app" className="blog-heading-anchor" />
 
 ## A CLI that explains your app

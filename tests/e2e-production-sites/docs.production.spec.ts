@@ -120,7 +120,7 @@ test("blog connects the index, article, contents, and Markdown mirror", async ({
   );
   const contents = page.locator(".blog-contents");
   await expect(contents).toHaveCSS("width", "280px");
-  await expect(contents.getByRole("navigation").getByRole("link")).toHaveCount(16);
+  await expect(contents.getByRole("navigation").getByRole("link")).toHaveCount(17);
   await expect(contents.getByRole("link", { name: "Current limits", exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "What still has limits" })).toHaveCount(0);
   await expect(page.locator('input[type="email"], [data-agent-waitlist-root]')).toHaveCount(0);
