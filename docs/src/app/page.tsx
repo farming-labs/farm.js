@@ -1681,11 +1681,11 @@ function VibyCallout() {
             </span>{" "}
             is open-source infrastructure for AI app builders.
           </p>
-          <div className="mt-6 flex h-11 max-w-md items-center gap-2 rounded-sm bg-white/[0.05] px-4 font-mono text-[13px] text-white">
+          <div className="mt-6 flex h-11 max-w-md items-center gap-2 rounded-sm bg-white/[0.05] px-4 font-mono text-[13px] text-white/78">
             <span aria-hidden className="text-white/36">
               $
             </span>
-            <code>pnpm add @viby/sdk</code>
+            <code className="font-mono font-[350] antialiased">pnpm add @viby/sdk</code>
           </div>
           <div className="mt-4 max-w-md font-mono text-[13px]">
             {[

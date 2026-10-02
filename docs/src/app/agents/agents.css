@@ -480,9 +480,12 @@
   padding: 10px 14px;
   border-radius: 2px;
   background: rgb(255 255 255 / 0.04);
-  color: #d8d8d8;
+  color: rgb(255 255 255 / 0.78);
   font-family: var(--font-geist-mono), monospace;
   font-size: 12px;
+  font-weight: 350;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   white-space: nowrap;
   scrollbar-width: none;
 }

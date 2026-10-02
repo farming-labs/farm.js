@@ -219,7 +219,7 @@ export function InstallCommand() {
         </span>
         <div className="min-w-0 overflow-hidden">
           <code
-            className="flex h-full min-w-0 items-center px-2 font-mono text-[9px] tracking-normal text-white/78 sm:px-2.5 sm:text-[10px]"
+            className="flex h-full min-w-0 items-center px-2 font-mono text-[9px] font-[350] tracking-normal text-white/78 antialiased sm:px-2.5 sm:text-[10px]"
             title={activeCommand.command}
           >
             <span aria-hidden className="mr-2 shrink-0 text-white/28">
