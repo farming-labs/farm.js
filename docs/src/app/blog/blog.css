@@ -61,7 +61,7 @@
   font-size: clamp(34px, 4vw, 48px);
   line-height: 1.08;
   letter-spacing: -0.04em;
-  font-weight: 450;
+  font-weight: 400;
 }
 .blog-title-period {
   color: #777;
@@ -145,7 +145,7 @@
 }
 .blog-featured h3 {
   margin: 26px 0 20px;
-  font-weight: 450;
+  font-weight: 400;
   font-size: clamp(26px, 2.5vw, 36px);
   line-height: 1.16;
   letter-spacing: -0.04em;
@@ -520,7 +520,7 @@
 }
 .blog-post-heading h1 {
   font-size: clamp(28px, 2.8vw, 36px);
-  font-weight: 450;
+  font-weight: 400;
   line-height: 1.13;
   letter-spacing: -0.05em;
   margin: 24px 0 22px;
@@ -568,9 +568,12 @@
   align-items: baseline;
   gap: 9px;
   margin-bottom: 24px;
-  color: #dedede;
-  font-size: 12px;
-  font-weight: 550;
+  color: #8f8f8f;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .blog-contents-title > span,
 .blog-contents-index {
@@ -681,7 +684,7 @@
 .blog-prose h2 {
   color: #ededed;
   margin: 52px 0 18px;
-  font-size: 27px;
+  font-size: 24px;
   font-weight: 400;
   line-height: 1.25;
   letter-spacing: -0.035em;
@@ -1046,7 +1049,11 @@
     min-height: 44px;
     padding-block: 14px;
     cursor: pointer;
-    font-size: 12px;
+    color: #8f8f8f;
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
   .blog-mobile-contents summary > span {
     font-family: var(--font-geist-mono), ui-monospace, monospace;
