@@ -82,6 +82,7 @@ export class FarmClientDataCache {
   private invalidatedAt = new Map<string, number>();
   private listeners = new Map<string, Set<FarmClientCacheListener>>();
   private inflight = new Map<string, Promise<unknown>>();
+  private pendingMetadataSweeps = new Set<string>();
   private unsubscribeInvalidation: (() => void) | undefined;
   private gcTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly gcSweepIntervalMs: number | false;
@@ -133,8 +134,12 @@ export class FarmClientDataCache {
     if (!entry) return undefined;
 
     if (entry.gcAt !== undefined && now >= entry.gcAt) {
+      // Match the scheduled sweep: fetching entries still own live work and
+      // are replaced when that work settles. Do not return their expired data.
+      if (entry.fetching) return undefined;
       this.entries.delete(resolved);
       this.persistence?.onDelete(resolved);
+      this.sweepEntryMetadata(new Set([resolved]));
       this.emit(resolved);
       return undefined;
     }
@@ -155,6 +160,7 @@ export class FarmClientDataCache {
     }
 
     this.entries.set(resolved, nextEntry);
+    this.pendingMetadataSweeps.delete(resolved);
     if (nextEntry.gcAt !== undefined) this.scheduleGcSweep();
     this.persistence?.onSet(resolved, nextEntry);
     this.emit(resolved);
@@ -166,6 +172,7 @@ export class FarmClientDataCache {
     const deleted = this.entries.delete(resolved);
     this.inflight.delete(resolved);
     if (deleted) this.persistence?.onDelete(resolved);
+    if (this.pendingMetadataSweeps.has(resolved)) this.sweepPendingEntryMetadata();
     this.emit(resolved);
     return deleted;
   }
@@ -176,6 +183,7 @@ export class FarmClientDataCache {
     this.aliases.clear();
     this.invalidatedAt.clear();
     this.inflight.clear();
+    this.pendingMetadataSweeps.clear();
     this.persistence?.onClear();
     for (const key of keys) this.emit(key);
   }
@@ -256,6 +264,9 @@ export class FarmClientDataCache {
       this.inflight.set(resolved, aliasInflight);
     }
     this.inflight.delete(alias);
+    if (this.pendingMetadataSweeps.delete(alias) && !this.entries.has(resolved)) {
+      this.pendingMetadataSweeps.add(resolved);
+    }
     this.aliases.set(alias, resolved);
     this.emit(alias);
     this.emit(resolved, this.invalidatedAt.has(resolved) ? "invalidate" : undefined);
@@ -276,6 +287,7 @@ export class FarmClientDataCache {
       // must not evict a newer subscriber's live listener set.
       if (listeners!.size === 0 && this.listeners.get(key) === listeners) {
         this.listeners.delete(key);
+        this.sweepPendingEntryMetadata();
       }
     };
   }
@@ -289,7 +301,8 @@ export class FarmClientDataCache {
   }
 
   deleteInflight(key: string): void {
-    this.inflight.delete(this.resolveKey(key));
+    const resolved = this.resolveKey(key);
+    if (this.inflight.delete(resolved)) this.sweepPendingEntryMetadata();
   }
 
   private scheduleGcSweep(): void {
@@ -333,18 +346,38 @@ export class FarmClientDataCache {
    * entries they describe are long gone.
    */
   private sweepEntryMetadata(swept: Set<string>): void {
-    for (const key of swept) this.invalidatedAt.delete(key);
+    const protectedKeys = new Set<string>();
+    for (const key of this.listeners.keys()) protectedKeys.add(this.resolveKey(key));
+    for (const key of this.inflight.keys()) protectedKeys.add(this.resolveKey(key));
+
+    for (const key of swept) {
+      if (this.entries.has(key)) {
+        this.pendingMetadataSweeps.delete(key);
+      } else if (protectedKeys.has(key)) {
+        this.pendingMetadataSweeps.add(key);
+      } else {
+        this.pendingMetadataSweeps.delete(key);
+        this.invalidatedAt.delete(key);
+      }
+    }
 
     for (const [alias, target] of this.aliases) {
       // Keep any alias that is still addressable: one that has its own entry,
-      // that something is subscribed to, or whose target is still live.
-      if (this.entries.has(alias) || this.listeners.has(alias)) continue;
+      // that something is subscribed to, that owns in-flight work, or whose
+      // target is still live.
+      if (this.entries.has(alias) || this.listeners.has(alias) || this.inflight.has(alias))
+        continue;
       const resolved = this.resolveKey(target);
       if (!swept.has(resolved)) continue;
-      if (this.entries.has(resolved) || this.listeners.has(resolved)) continue;
+      if (this.entries.has(resolved) || protectedKeys.has(resolved)) continue;
       this.aliases.delete(alias);
       this.invalidatedAt.delete(alias);
     }
+  }
+
+  private sweepPendingEntryMetadata(): void {
+    if (this.pendingMetadataSweeps.size === 0) return;
+    this.sweepEntryMetadata(new Set(this.pendingMetadataSweeps));
   }
 
   private emit(key: string, event?: "invalidate"): void {

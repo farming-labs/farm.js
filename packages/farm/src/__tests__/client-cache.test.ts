@@ -194,6 +194,122 @@ describe("Farm client data cache gc sweep", () => {
     cache.dispose();
   });
 
+  it("sweeps metadata when a read lazily evicts an expired entry", () => {
+    const cache = new FarmClientDataCache({
+      subscribeToInvalidation: false,
+      gcSweepIntervalMs: false,
+    });
+    const internals = cache as unknown as {
+      aliases: Map<string, string>;
+      invalidatedAt: Map<string, number>;
+    };
+    const onDelete = vi.fn();
+    cache.attachPersistence({ onSet: vi.fn(), onDelete, onClear: vi.fn() });
+
+    const now = 1_000;
+    cache.set("product:1", entryWithGc(now, 100));
+    cache.alias("provisional:abc", "product:1");
+    cache.invalidate("product:1", now + 1);
+
+    expect(cache.get("provisional:abc", now + 100)).toBeUndefined();
+
+    expect(cache.size).toBe(0);
+    expect(internals.aliases.size).toBe(0);
+    expect(internals.invalidatedAt.size).toBe(0);
+    expect(cache.resolveKey("provisional:abc")).toBe("provisional:abc");
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(onDelete).toHaveBeenCalledWith("product:1");
+    cache.dispose();
+  });
+
+  it("keeps lazy-expiration metadata for watched aliases and in-progress targets", () => {
+    const cache = new FarmClientDataCache({
+      subscribeToInvalidation: false,
+      gcSweepIntervalMs: false,
+    });
+    const internals = cache as unknown as {
+      aliases: Map<string, string>;
+      invalidatedAt: Map<string, number>;
+      pendingMetadataSweeps: Set<string>;
+    };
+    const now = 1_000;
+
+    cache.set("watched-target", entryWithGc(now, 100));
+    cache.alias("watched-alias", "watched-target");
+    cache.invalidate("watched-target", now + 1);
+    const unsubscribe = cache.subscribe("watched-alias", () => {});
+
+    cache.set("inflight-target", entryWithGc(now, 100));
+    cache.alias("inflight-alias", "inflight-target");
+    cache.invalidate("inflight-target", now + 1);
+    cache.setInflight("inflight-target", Promise.resolve());
+
+    cache.set("fetching-target", { ...entryWithGc(now, 100), fetching: true });
+    cache.alias("fetching-alias", "fetching-target");
+    cache.invalidate("fetching-target", now + 1);
+
+    expect(cache.get("watched-alias", now + 100)).toBeUndefined();
+    expect(cache.get("inflight-alias", now + 100)).toBeUndefined();
+    expect(cache.get("fetching-alias", now + 100)).toBeUndefined();
+
+    expect(internals.aliases.get("watched-alias")).toBe("watched-target");
+    expect(internals.invalidatedAt.has("watched-target")).toBe(true);
+    expect(internals.aliases.get("inflight-alias")).toBe("inflight-target");
+    expect(internals.invalidatedAt.has("inflight-target")).toBe(true);
+    expect(internals.aliases.get("fetching-alias")).toBe("fetching-target");
+    expect(internals.invalidatedAt.has("fetching-target")).toBe(true);
+    expect(internals.pendingMetadataSweeps.size).toBe(2);
+    expect(cache.size).toBe(1);
+
+    unsubscribe();
+    expect(internals.aliases.has("watched-alias")).toBe(false);
+    expect(internals.invalidatedAt.has("watched-target")).toBe(false);
+
+    cache.deleteInflight("inflight-target");
+    expect(internals.aliases.has("inflight-alias")).toBe(false);
+    expect(internals.invalidatedAt.has("inflight-target")).toBe(false);
+
+    cache.set("fetching-target", {
+      data: { id: "fresh" },
+      updatedAt: now + 2,
+      staleAt: Number.POSITIVE_INFINITY,
+      fetching: false,
+    });
+    expect(internals.aliases.get("fetching-alias")).toBe("fetching-target");
+    expect(internals.invalidatedAt.has("fetching-target")).toBe(false);
+    expect(internals.pendingMetadataSweeps.size).toBe(0);
+    cache.dispose();
+  });
+
+  it("moves deferred cleanup when an in-flight key becomes canonical", () => {
+    const cache = new FarmClientDataCache({
+      subscribeToInvalidation: false,
+      gcSweepIntervalMs: false,
+    });
+    const internals = cache as unknown as {
+      aliases: Map<string, string>;
+      invalidatedAt: Map<string, number>;
+      pendingMetadataSweeps: Set<string>;
+    };
+    const now = 1_000;
+
+    cache.set("provisional", entryWithGc(now, 100));
+    cache.invalidate("provisional", now + 1);
+    cache.setInflight("provisional", Promise.resolve());
+    expect(cache.get("provisional", now + 100)).toBeUndefined();
+    expect(internals.pendingMetadataSweeps).toEqual(new Set(["provisional"]));
+
+    cache.alias("provisional", "canonical");
+    expect(internals.pendingMetadataSweeps).toEqual(new Set(["canonical"]));
+    expect(internals.invalidatedAt.has("canonical")).toBe(true);
+
+    cache.deleteInflight("canonical");
+    expect(internals.pendingMetadataSweeps.size).toBe(0);
+    expect(internals.aliases.has("provisional")).toBe(false);
+    expect(internals.invalidatedAt.has("canonical")).toBe(false);
+    cache.dispose();
+  });
+
   it("keeps alias metadata that is still addressable", () => {
     vi.useFakeTimers();
     const cache = new FarmClientDataCache({ subscribeToInvalidation: false });
