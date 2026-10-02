@@ -18,6 +18,11 @@ import {
   FARM_DOCS_LAST_MODIFIED_MANIFEST,
 } from "../docs/last-modified";
 import { resolveFarmDocsFontAssets } from "../docs/fonts";
+import {
+  addFarmCspNonceToScriptTags,
+  applyFarmCspHashesToPolicy,
+  createFarmCspScriptHashes,
+} from "../security";
 describe("getFarmDocsDocumentNavigationMatchers", () => {
   it("routes enabled docs trees through document navigation", () => {
     expect(
@@ -737,9 +742,12 @@ describe("createFarmDocsHandler", () => {
     expect(html).not.toContain('<span class="code-block-title">tsx</span>');
     expect(html).toContain("sh__token--keyword");
     expect(html).toContain('aria-label="Copy code"');
+    expect(html).toContain("data-code-copy");
     expect(html).toContain('class="code-copy-check"');
     expect(html).toContain("4500");
-    expect(html).toContain("querySelector('code').innerText");
+    expect((html?.match(/<[a-z][^>]*>/gi) || []).some((tag) => /\son[a-z]+\s*=/i.test(tag))).toBe(
+      false,
+    );
     expect(html).toContain(
       'class="fd-table-wrapper table-wrap relative overflow-auto prose-no-margin my-6"',
     );
@@ -750,6 +758,31 @@ describe("createFarmDocsHandler", () => {
     expect(html).not.toContain('<span class="code-block-title">bash</span>');
     expect(html).not.toContain(">Copy</button>");
     expect(html).not.toContain('</span>\n<span class="sh__line"');
+  });
+
+  it("keeps code-copy controls compatible with nonce and static-hash CSP", async () => {
+    const { root, docs } = await createDocsFixture();
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+    const response = await handler(
+      new Request("http://farm.test/docs/guide", { headers: { accept: "text/html" } }),
+    );
+    const html = (await response?.text()) || "";
+
+    expect(html).toContain("data-code-copy");
+    expect((html.match(/<[a-z][^>]*>/gi) || []).some((tag) => /\son[a-z]+\s*=/i.test(tag))).toBe(
+      false,
+    );
+
+    const nonceHtml = addFarmCspNonceToScriptTags(html, "docs-nonce");
+    const scriptTags = nonceHtml.match(/<script\b[^>]*>/gi) || [];
+    expect(scriptTags.length).toBeGreaterThan(0);
+    expect(scriptTags.every((tag) => tag.includes('nonce="docs-nonce"'))).toBe(true);
+
+    const hashes = await createFarmCspScriptHashes(html);
+    const policy = applyFarmCspHashesToPolicy("script-src 'self'", hashes);
+    expect(hashes.length).toBeGreaterThan(0);
+    expect(policy).not.toContain("'unsafe-inline'");
+    for (const hash of hashes) expect(policy).toContain(`'${hash}'`);
   });
 
   it("serves markdown when requested by markdown URL", async () => {
