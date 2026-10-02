@@ -1,0 +1,553 @@
+/* Docs pages in the launch film's design: code reads like the film's code panels, page actions
+   sit as a quiet toolbar under the description, and body copy uses the blog's lighter reading
+   scale. Everything is scoped to #farm-docs-root so the landing page and blog keep their rules. */
+
+:root {
+  --farm-code-bg: #070707;
+  --farm-code-line: rgb(255 255 255 / 0.14);
+  --farm-code-line-strong: rgb(255 255 255 / 0.32);
+  --farm-code-text: #a1a1a1;
+  --farm-code-dim: #6b6b6b;
+  --farm-code-bright: #d4d4d4;
+  --farm-code-string: #e8e8e8;
+  --farm-code-legend: #8f8f8f;
+}
+
+/* ---------- reading ---------- */
+
+#farm-docs-root .fd-docs-content {
+  color: rgb(255 255 255 / 0.72);
+  font-size: 16px;
+  font-weight: 300;
+  line-height: 1.8;
+}
+#farm-docs-root .fd-docs-content :where(p, li, td) {
+  font-weight: 300;
+}
+#farm-docs-root .fd-docs-content strong {
+  color: #e6e6e6;
+  font-weight: 450;
+}
+#farm-docs-root .fd-docs-content h1 {
+  font-size: clamp(32px, 3vw, 40px);
+  font-weight: 450;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+}
+#farm-docs-root .fd-docs-content h2 {
+  font-size: 26px;
+  font-weight: 450;
+  line-height: 1.25;
+  letter-spacing: -0.03em;
+}
+#farm-docs-root .fd-docs-content h3 {
+  font-size: 19px;
+  font-weight: 450;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+}
+#farm-docs-root .fd-docs-content .fd-page-description {
+  color: rgb(255 255 255 / 0.56);
+  font-size: 17px;
+  font-weight: 300;
+  line-height: 1.65;
+}
+#farm-docs-root .fd-docs-content :not(pre) > code {
+  padding: 1px 6px;
+  border: 1px solid #262626;
+  border-radius: 3px;
+  background: #0c0c0c;
+  color: #d6d6d6;
+  font-size: 0.84em;
+  font-weight: 400;
+}
+
+/* ---------- page actions: a toolbar under the description ---------- */
+
+#farm-docs-root #nd-docs-layout .fd-page-actions {
+  gap: 8px;
+  margin: 6px 0 30px;
+}
+#farm-docs-root #nd-docs-layout .fd-page-action-btn {
+  gap: 8px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--farm-code-line) !important;
+  border-radius: 3px !important;
+  background: var(--farm-code-bg) !important;
+  box-shadow: none !important;
+  color: var(--farm-code-text) !important;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition:
+    border-color 150ms,
+    color 150ms;
+}
+#farm-docs-root #nd-docs-layout .fd-page-action-btn::before,
+#farm-docs-root #nd-docs-layout .fd-page-action-btn::after {
+  display: none !important;
+}
+#farm-docs-root
+  #nd-docs-layout
+  .fd-page-action-btn:is(:hover, :focus-visible, [aria-expanded="true"]) {
+  border-color: var(--farm-code-line-strong) !important;
+  color: #ededed !important;
+}
+#farm-docs-root #nd-docs-layout .fd-page-action-btn svg {
+  width: 13px;
+  height: 13px;
+  color: currentColor;
+}
+
+/* ---------- code blocks: the launch film's code panels ---------- */
+
+#farm-docs-root #nd-docs-layout figure.shiki {
+  margin: 28px 0;
+  overflow: visible;
+  border: 1px solid var(--farm-code-line) !important;
+  border-radius: 3px !important;
+  background: var(--farm-code-bg) !important;
+  box-shadow: none !important;
+}
+/* Labels sit on the panel's top border, like the film's code legends: the file name on the
+   left and the copy control as a small chip on the right. */
+#farm-docs-root #nd-docs-layout figure.shiki {
+  margin-top: 36px;
+}
+#farm-docs-root #nd-docs-layout figure.shiki > div.border-b {
+  position: absolute;
+  top: 0;
+  right: 12px;
+  left: 14px;
+  z-index: 3;
+  gap: 0;
+  height: auto;
+  padding: 0;
+  border: 0 !important;
+  background: transparent;
+  color: var(--farm-code-legend);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 22px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+#farm-docs-root #nd-docs-layout figure.shiki > div.border-b::before {
+  display: none;
+}
+#farm-docs-root #nd-docs-layout figure.shiki > div.border-b > div:first-child {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px 0 8px;
+  background: #000;
+}
+#farm-docs-root #nd-docs-layout figure.shiki > div.border-b > div:first-child svg {
+  width: 12px;
+  height: 12px;
+  opacity: 0.7;
+}
+#farm-docs-root #nd-docs-layout figure.shiki > div.border-b > figcaption {
+  flex: none;
+  padding: 0 8px 0 0;
+  background: #000;
+}
+/* The copy control, titled or not, is a chip on the top-right border. */
+#farm-docs-root #nd-docs-layout figure.shiki > div.border-b > div:last-child:not(:first-child),
+#farm-docs-root #nd-docs-layout figure.shiki > div.absolute {
+  margin: 0 0 0 auto;
+  pointer-events: auto;
+}
+#farm-docs-root #nd-docs-layout figure.shiki > div.absolute {
+  top: 0;
+  right: 12px;
+  border-radius: 0;
+  backdrop-filter: none;
+  transform: translateY(-50%);
+}
+#farm-docs-root
+  #nd-docs-layout
+  figure.shiki
+  :is(div.border-b > div:last-child, div.absolute)
+  button {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--farm-code-line);
+  border-radius: 3px;
+  background: #000;
+  color: var(--farm-code-legend);
+  transition:
+    border-color 150ms,
+    color 150ms;
+}
+#farm-docs-root
+  #nd-docs-layout
+  figure.shiki
+  :is(div.border-b > div:last-child, div.absolute)
+  button:is(:hover, :focus-visible) {
+  border-color: var(--farm-code-line-strong);
+  color: #ededed;
+}
+#farm-docs-root
+  #nd-docs-layout
+  figure.shiki
+  :is(div.border-b > div:last-child, div.absolute)
+  button
+  svg {
+  width: 13px;
+  height: 13px;
+}
+/* Highlighted lines get the film's white edge. */
+#farm-docs-root #nd-docs-layout figure.shiki :is(.line.highlighted, [data-highlighted-line]) {
+  margin-inline: -20px;
+  padding-inline: 20px;
+  background: rgb(255 255 255 / 0.06) !important;
+  box-shadow: inset 2px 0 0 #ededed;
+}
+/* The film's palette over Shiki's vesper colours: plain code soft grey, keywords and punctuation
+   dim, names a step brighter, strings brightest. The theme writes "--shiki-dark: #HEX". */
+#farm-docs-root
+  #nd-docs-layout
+  .shiki
+  span:is(
+    [style*="--shiki-dark: #FFF" i],
+    [style*="--shiki-dark:#FFF" i],
+    [style*="--shiki-dark: #FFFFFF" i],
+    [style*="--shiki-dark:#FFFFFF" i]
+  ) {
+  color: var(--farm-code-text) !important;
+}
+#farm-docs-root
+  #nd-docs-layout
+  .shiki
+  span:is([style*="--shiki-dark: #A0A0A0" i], [style*="--shiki-dark:#A0A0A0" i]) {
+  color: var(--farm-code-dim) !important;
+}
+#farm-docs-root
+  #nd-docs-layout
+  .shiki
+  span:is(
+    [style*="--shiki-dark: #FFC799" i],
+    [style*="--shiki-dark:#FFC799" i],
+    [style*="--shiki-dark: #FFCFA8" i],
+    [style*="--shiki-dark:#FFCFA8" i],
+    [style*="--shiki-dark: #FF8080" i],
+    [style*="--shiki-dark:#FF8080" i]
+  ) {
+  color: var(--farm-code-bright) !important;
+}
+#farm-docs-root
+  #nd-docs-layout
+  .shiki
+  span:is([style*="--shiki-dark: #99FFE4" i], [style*="--shiki-dark:#99FFE4" i]) {
+  color: var(--farm-code-string) !important;
+}
+
+/* Code sits the same 18px from the border on every side. The paddings below subtract what the
+   line box already adds (about 3.5px above the first line and 4px below the last, 1px of border at
+   the side), measured in the rendered page. Titled blocks add room above for the file-name legend. */
+#farm-docs-root #nd-docs-layout figure.shiki [role="region"] {
+  padding: 14.5px 0 14px !important;
+  font-size: 13px;
+}
+#farm-docs-root #nd-docs-layout figure.shiki:has(> div.border-b) [role="region"] {
+  padding-top: 22.5px !important;
+}
+#farm-docs-root #nd-docs-layout figure.shiki pre {
+  margin: 0 !important;
+  padding: 0 17px !important;
+  line-height: 1.75;
+}
+
+/* "Open in" menu: one bordered panel. Rows have no borders of their own (each row drawing a top
+   and bottom border stacked into double lines); hover lifts the row instead. */
+#farm-docs-root #nd-docs-layout .fd-page-action-menu {
+  gap: 0 !important;
+  min-width: 228px;
+  padding: 4px !important;
+  border: 1px solid var(--farm-code-line) !important;
+  border-radius: 3px !important;
+  background: var(--farm-code-bg) !important;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.6) !important;
+}
+#farm-docs-root #nd-docs-layout .fd-page-action-menu-item {
+  gap: 10px;
+  height: 30px;
+  padding: 0 10px !important;
+  border: 0 !important;
+  border-radius: 2px !important;
+  background: transparent !important;
+  color: var(--farm-code-text) !important;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  transition:
+    background-color 120ms,
+    color 120ms;
+}
+#farm-docs-root #nd-docs-layout .fd-page-action-menu-item:is(:hover, :focus-visible) {
+  background: rgb(255 255 255 / 0.06) !important;
+  color: #ededed !important;
+  outline: none;
+}
+#farm-docs-root #nd-docs-layout .fd-page-action-menu-item::before,
+#farm-docs-root #nd-docs-layout .fd-page-action-menu-item::after {
+  display: none !important;
+}
+#farm-docs-root #nd-docs-layout .fd-page-action-menu-icon svg {
+  width: 14px;
+  height: 14px;
+}
+#farm-docs-root #nd-docs-layout .fd-page-action-menu-item > svg:last-child {
+  margin-left: auto;
+  opacity: 0.5;
+}
+
+/* ---------- page footer: Edit on GitHub, llms links, last updated ---------- */
+
+#farm-docs-root #nd-docs-layout .fd-page-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 48px;
+  padding-top: 20px;
+  border-top: 1px solid var(--farm-code-line);
+  color: var(--farm-code-legend);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+/* Edit on GitHub matches the page action buttons. */
+#farm-docs-root #nd-docs-layout .fd-page-footer > a:first-child {
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px !important;
+  border: 1px solid var(--farm-code-line) !important;
+  border-radius: 3px !important;
+  background: var(--farm-code-bg) !important;
+  box-shadow: none !important;
+  color: var(--farm-code-text) !important;
+  font: inherit;
+  font-weight: 400;
+  text-decoration: none;
+  transition:
+    border-color 150ms,
+    color 150ms;
+}
+#farm-docs-root #nd-docs-layout .fd-page-footer > a:first-child:is(:hover, :focus-visible) {
+  border-color: var(--farm-code-line-strong) !important;
+  color: #ededed !important;
+}
+#farm-docs-root #nd-docs-layout .fd-page-footer > a:first-child svg {
+  width: 13px;
+  height: 13px;
+}
+#farm-docs-root #nd-docs-layout .fd-llms-txt-links {
+  display: inline-flex;
+  gap: 14px;
+}
+#farm-docs-root #nd-docs-layout .fd-llms-txt-link {
+  color: var(--farm-code-legend) !important;
+  font: inherit;
+  text-decoration: none !important;
+  transition: color 150ms;
+}
+#farm-docs-root #nd-docs-layout .fd-llms-txt-link:is(:hover, :focus-visible) {
+  color: #ededed !important;
+}
+#farm-docs-root #nd-docs-layout .fd-last-updated-footer {
+  margin-left: auto;
+  color: var(--farm-code-dim);
+  font: inherit;
+}
+
+/* ---------- previous / next page ---------- */
+
+#farm-docs-root #nd-docs-layout .fd-page-nav {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 12px;
+  margin-top: 24px;
+}
+#farm-docs-root #nd-docs-layout .fd-page-nav-card {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  padding: 16px 18px !important;
+  border: 1px solid var(--farm-code-line) !important;
+  border-radius: 3px !important;
+  background: var(--farm-code-bg) !important;
+  box-shadow: none !important;
+  text-decoration: none !important;
+  transition: border-color 150ms;
+}
+#farm-docs-root #nd-docs-layout .fd-page-nav-card::before,
+#farm-docs-root #nd-docs-layout .fd-page-nav-card::after {
+  display: none !important;
+}
+#farm-docs-root #nd-docs-layout .fd-page-nav-next {
+  grid-column: 2;
+  align-items: flex-end;
+  text-align: right;
+}
+#farm-docs-root #nd-docs-layout .fd-page-nav-card:is(:hover, :focus-visible) {
+  border-color: var(--farm-code-line-strong) !important;
+}
+#farm-docs-root #nd-docs-layout .fd-page-nav-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  overflow: hidden;
+  color: #ededed !important;
+  font-size: 15px;
+  font-weight: 450;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#farm-docs-root #nd-docs-layout .fd-page-nav-title svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--farm-code-legend);
+  transition: transform 150ms;
+}
+#farm-docs-root #nd-docs-layout .fd-page-nav-prev:hover .fd-page-nav-title svg {
+  transform: translateX(-2px);
+}
+#farm-docs-root #nd-docs-layout .fd-page-nav-next:hover .fd-page-nav-title svg {
+  transform: translateX(2px);
+}
+#farm-docs-root #nd-docs-layout .fd-page-nav-description {
+  color: var(--farm-code-legend) !important;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+@media (max-width: 640px) {
+  #farm-docs-root #nd-docs-layout .fd-last-updated-footer {
+    margin-left: 0;
+  }
+}
+
+/* ---------- tables: a code-panel frame, mono column labels, quiet row rules ---------- */
+
+#farm-docs-root .fd-docs-content .fd-table-wrapper {
+  margin: 28px 0;
+  border: 1px solid var(--farm-code-line);
+  border-radius: 3px;
+  background: var(--farm-code-bg);
+}
+#farm-docs-root .fd-docs-content .fd-table-wrapper > table {
+  width: 100%;
+  margin: 0;
+  border: 0 !important;
+  border-spacing: 0;
+  border-collapse: separate;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.6;
+}
+/* Plain th/td lists, not the is() pseudo-class: the minifier adds a -webkit-any() copy that
+   Chrome scores higher, which would erase the row rules below. */
+#farm-docs-root .fd-docs-content .fd-table-wrapper th,
+#farm-docs-root .fd-docs-content .fd-table-wrapper td {
+  padding: 12px 16px !important;
+  border: 0 !important;
+  vertical-align: top;
+  text-align: left;
+}
+#farm-docs-root .fd-docs-content .fd-table-wrapper th {
+  padding-block: 11px !important;
+  border-bottom: 1px solid var(--farm-code-line) !important;
+  background: transparent !important;
+  color: var(--farm-code-legend);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+#farm-docs-root .fd-docs-content .fd-table-wrapper td {
+  color: rgb(255 255 255 / 0.72);
+  font-weight: 300;
+}
+#farm-docs-root .fd-docs-content .fd-table-wrapper tbody tr + tr td {
+  border-top: 1px solid rgb(255 255 255 / 0.07) !important;
+}
+#farm-docs-root .fd-docs-content .fd-table-wrapper th + th,
+#farm-docs-root .fd-docs-content .fd-table-wrapper td + td {
+  border-left: 1px solid rgb(255 255 255 / 0.07) !important;
+}
+#farm-docs-root .fd-docs-content .fd-table-wrapper tbody tr {
+  transition: background-color 120ms;
+}
+#farm-docs-root .fd-docs-content .fd-table-wrapper tbody tr:hover {
+  background: rgb(255 255 255 / 0.02);
+}
+#farm-docs-root .fd-docs-content .fd-table-wrapper td code {
+  font-size: 0.86em;
+  white-space: nowrap;
+}
+
+/* ---------- notes (blockquotes and callouts): the film's highlighted-line edge ---------- */
+
+#farm-docs-root .fd-docs-content blockquote {
+  margin: 28px 0;
+  padding: 14px 18px;
+  border: 1px solid var(--farm-code-line);
+  border-radius: 3px;
+  background: var(--farm-code-bg);
+  box-shadow: inset 2px 0 0 #ededed;
+  color: rgb(255 255 255 / 0.72);
+  font-size: 15px;
+  font-style: normal;
+  font-weight: 300;
+  quotes: none;
+}
+#farm-docs-root .fd-docs-content blockquote p::before,
+#farm-docs-root .fd-docs-content blockquote p::after {
+  content: none;
+}
+#farm-docs-root .fd-docs-content blockquote p {
+  margin: 0;
+}
+#farm-docs-root .fd-docs-content blockquote p + p {
+  margin-top: 8px;
+}
+#farm-docs-root .fd-docs-content blockquote strong {
+  color: #ededed;
+  font-weight: 450;
+}
+
+/* ---------- lists, dividers, images ---------- */
+
+#farm-docs-root .fd-docs-content :is(ol, ul) > li::marker {
+  color: var(--farm-code-dim);
+}
+#farm-docs-root .fd-docs-content ol > li::marker {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.82em;
+}
+#farm-docs-root .fd-docs-content :is(ol, ul) > li + li {
+  margin-top: 6px;
+}
+#farm-docs-root .fd-docs-content hr {
+  border: 0;
+  border-top: 1px solid var(--farm-code-line);
+}
+#farm-docs-root .fd-docs-content img {
+  border: 1px solid var(--farm-code-line);
+  border-radius: 3px;
+}

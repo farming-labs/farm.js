@@ -1,6 +1,7 @@
 /* Preserve farmjs.dev's established Pixel Border presentation while the
  * current theme runtime owns browser navigation and hydration behavior. */
 @import "@farming-labs/theme-production/pixel-border/css";
+@import "./docs-overrides.css";
 
 @tailwind base;
 @tailwind components;
