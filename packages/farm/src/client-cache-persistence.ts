@@ -242,7 +242,7 @@ async function hydrateEngine(engine: PersistenceEngine): Promise<void> {
     for (let index = 0; index < keys.length; index += 1) {
       const key = keys[index]!;
       const entry = persisted[index];
-      if (engine.disabled) return;
+      if (engine.disabled || generation !== engine.hydrationGeneration) return;
 
       if (
         !entry ||
