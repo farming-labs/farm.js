@@ -349,6 +349,22 @@ describe("htmlToMarkdown", () => {
     ).toBe("```\nif (ok) {\n    run();\n}\n```\n\nCopy\n");
   });
 
+  it("keeps fenced lines inside code from leaking out of the block", () => {
+    // Docs that show fenced code put ``` lines inside a code block. They must stay
+    // inside it, and the text after the block must still be tidied.
+    expect(
+      htmlToMarkdown(
+        "<main><pre><code>```js\ncode();\n```</code></pre><p>    indented   body text</p></main>",
+        { includeMetadata: false },
+      ),
+    ).toBe("````\n```js\ncode();\n```\n````\n\nindented body text\n");
+    expect(
+      htmlToMarkdown("<main><pre><code>```\ncode();</code></pre>    indented   body text</main>", {
+        includeMetadata: false,
+      }),
+    ).toBe("````\n```\ncode();\n````\n\nindented body text\n");
+  });
+
   it("does not split words that are only wrapped in inline elements", () => {
     // Letter- and word-split animations wrap one word in sibling spans; without
     // layout information they must read as the source text, not "Hel lo".

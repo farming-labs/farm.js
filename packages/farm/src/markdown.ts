@@ -203,6 +203,11 @@ export function applyMarkdownNegotiationHeaders(
   });
 }
 
+// Wraps the index of a code block set aside during conversion. NUL is not
+// valid in HTML text, so rendered pages do not produce this placeholder.
+const CODE_BLOCK_MARK = "\u0000";
+const CODE_BLOCK_PLACEHOLDER = /\u0000(\d+)\u0000/g;
+
 // Elements that start a new block. Their text belongs on its own line.
 const BLOCK_TAGS =
   /<\/?(ul|ol|main|section|article|header|footer|nav|aside|div|form|fieldset|legend|figure|figcaption|table|thead|tbody|tfoot|tr|dl|dt|dd|details|summary|address)\b[^>]*>/gi;
@@ -229,12 +234,22 @@ export function htmlToMarkdown(
     .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, "")
     .replace(/<!--[\s\S]*?-->/g, "");
 
-  source = source.replace(/<pre\b[^>]*><code\b[^>]*>([\s\S]*?)<\/code><\/pre>/gi, (_, code) => {
-    return `\n\n\`\`\`\n${decodeHtml(stripTags(code)).trim()}\n\`\`\`\n\n`;
-  });
-  source = source.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_, code) => {
-    return `\n\n\`\`\`\n${decodeHtml(stripTags(code)).trim()}\n\`\`\`\n\n`;
-  });
+  // Code blocks are set aside behind placeholders so the tidying below never
+  // touches them, and each gets a fence longer than any backtick run inside it,
+  // so code that itself shows ``` fences cannot close the block early.
+  const codeBlocks: string[] = [];
+  const setAsideCodeBlock = (_: string, code: string) => {
+    const content = decodeHtml(stripTags(code)).trim();
+    const longestRun = Math.max(0, ...(content.match(/`+/g) ?? []).map((run) => run.length));
+    const fence = "`".repeat(Math.max(3, longestRun + 1));
+    codeBlocks.push(`${fence}\n${content}\n${fence}`);
+    return `\n\n${CODE_BLOCK_MARK}${codeBlocks.length - 1}${CODE_BLOCK_MARK}\n\n`;
+  };
+  source = source.replace(
+    /<pre\b[^>]*><code\b[^>]*>([\s\S]*?)<\/code><\/pre>/gi,
+    setAsideCodeBlock,
+  );
+  source = source.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, setAsideCodeBlock);
   source = source.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_, level, content) => {
     return `\n\n${"#".repeat(Number(level))} ${toInlineMarkdown(content).trim()}\n\n`;
   });
@@ -258,21 +273,16 @@ export function htmlToMarkdown(
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<hr\s*\/?>/gi, "\n\n---\n\n");
 
-  // Outside code fences, collapse the spacing that tag separators and indented
-  // source HTML leave behind: four leading spaces would read as a code block.
-  let inFence = false;
+  // Collapse the spacing that tag separators and indented source HTML leave
+  // behind (four leading spaces would read as a code block), then restore the
+  // code blocks set aside above, untouched.
   let markdown = stripTags(source)
     .split("\n")
-    .map((line) => {
-      if (line.startsWith("```")) {
-        inFence = !inFence;
-        return line;
-      }
-      return inFence ? line.replace(/[ \t]+$/g, "") : line.replace(/[ \t]+/g, " ").trim();
-    })
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .trim()
+    .replace(CODE_BLOCK_PLACEHOLDER, (_, index: string) => codeBlocks[Number(index)] ?? "");
 
   if (options.includeMetadata !== false) {
     const metadata: string[] = [];
