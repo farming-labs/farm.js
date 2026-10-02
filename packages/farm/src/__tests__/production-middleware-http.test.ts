@@ -194,6 +194,25 @@ describe("production middleware HTTP behavior", () => {
     expect(seen).toEqual({ track: "100%", session: "abc123" });
   });
 
+  it("selects the first duplicate cookie in wire order", async () => {
+    let session: string | undefined;
+    const runner = createProductionMiddlewareRunner({
+      config: {
+        handler(ctx) {
+          session = ctx.cookies.get("session");
+        },
+      },
+    });
+
+    await runner(
+      new Request("https://example.com/", {
+        headers: { cookie: "session=path-specific; session=broader" },
+      }),
+    );
+
+    expect(session).toBe("path-specific");
+  });
+
   it("preserves empty request cookies without inherited record values", async () => {
     const seen: Record<string, string | undefined> = {};
     const runner = createProductionMiddlewareRunner({

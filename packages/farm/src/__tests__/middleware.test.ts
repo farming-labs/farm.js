@@ -1039,7 +1039,7 @@ describe("Middleware Context", () => {
 
   it("should handle cookies", () => {
     const req = createMockRequest("/test");
-    req.headers.cookie = "session=abc123; user=john; preview=";
+    req.headers.cookie = "session=abc123; user=john; session=broader; preview=";
     const res = createMockResponse();
     const ctx = createContext(req, res);
 
