@@ -120,7 +120,7 @@ export function Cover({ asset }: { asset: StrapiMediaAsset }) {
   return (
     <img
       {...getStrapiImageProps(asset, {
-        mediaUrl: process.env.STRAPI_MEDIA_URL ?? process.env.STRAPI_API_URL,
+        mediaUrl: process.env.STRAPI_MEDIA_URL ?? new URL(process.env.STRAPI_API_URL!).origin,
         width: 800,
         sizes: "(max-width: 800px) 100vw, 800px",
       })}

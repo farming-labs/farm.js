@@ -26,6 +26,7 @@ describe("createStrapiWebhookRoute", () => {
 
     expect(route.path).toBe(DEFAULT_STRAPI_WEBHOOK_PATH);
     expect(route.method).toBe("POST");
+    expect(route.bodyFormat).toBe("none");
   });
 
   it("rejects missing or incorrect secrets before parsing the payload", async () => {

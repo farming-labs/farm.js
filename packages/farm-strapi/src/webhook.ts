@@ -70,6 +70,9 @@ export function createStrapiWebhookRoute(
   }
 
   return integrationRoute.post(options.path ?? DEFAULT_STRAPI_WEBHOOK_PATH, {
+    // Authentication happens before the integration runtime performs its
+    // ordinary JSON validation. The handler parses the authenticated body.
+    bodyFormat: "none",
     async handler(request) {
       const presentedSecret = request.headers.get(secretHeader);
       if (!presentedSecret || !(await secretsEqual(options.secret, presentedSecret))) {

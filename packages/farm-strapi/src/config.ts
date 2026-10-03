@@ -66,16 +66,18 @@ function readEnv(name: string): string | undefined {
 }
 
 export function resolveStrapiConfig(input: StrapiIntegrationInput): ResolvedStrapiConfig {
-  const apiUrl = normalizeUrl(input.apiUrl ?? readEnv("STRAPI_API_URL"), "Strapi API URL");
   const configuredMediaUrl = input.mediaUrl ?? readEnv("STRAPI_MEDIA_URL");
+  const mediaUrl = normalizeUrl(configuredMediaUrl, "Strapi media URL");
+  // A supplied client owns its Content API configuration. Only inspect the
+  // API URL when Farm needs it to build a client or derive the media origin.
+  const apiUrl =
+    !input.instance || !mediaUrl
+      ? normalizeUrl(input.apiUrl ?? readEnv("STRAPI_API_URL"), "Strapi API URL")
+      : "";
 
   return {
     apiUrl,
-    mediaUrl: configuredMediaUrl
-      ? normalizeUrl(configuredMediaUrl, "Strapi media URL")
-      : apiUrl
-        ? new URL(apiUrl).origin
-        : "",
+    mediaUrl: mediaUrl || (apiUrl ? new URL(apiUrl).origin : ""),
     token: input.token ?? readEnv("STRAPI_API_TOKEN"),
     webhookSecret: input.webhook?.secret ?? readEnv("STRAPI_WEBHOOK_SECRET"),
   };

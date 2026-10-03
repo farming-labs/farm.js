@@ -21,6 +21,10 @@ describe("createStrapiClient", () => {
     expect(createStrapiClient(config, instance)).toBe(instance);
   });
 
+  it("rejects a missing API URL before calling the provider SDK", () => {
+    expect(() => createStrapiClient({ ...config, apiUrl: "" })).toThrow(/without an API URL/);
+  });
+
   it("does not expose integration-only values on the client", () => {
     const client = createStrapiClient(config) as unknown as Record<string, unknown>;
 

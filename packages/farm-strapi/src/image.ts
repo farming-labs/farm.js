@@ -93,8 +93,8 @@ export function getStrapiImageProps(
   }
   const selected =
     candidates.find((candidate) => candidate.width >= requestedWidth) ?? candidates.at(-1)!;
-  const renderedWidth = Math.round(requestedWidth);
-  const renderedHeight = Math.round((asset.height / asset.width) * renderedWidth);
+  const renderedWidth = Math.round(Math.min(requestedWidth, selected.width));
+  const renderedHeight = Math.round((selected.height / selected.width) * renderedWidth);
 
   return {
     src: selected.url,

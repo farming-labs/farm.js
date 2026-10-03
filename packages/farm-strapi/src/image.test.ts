@@ -32,6 +32,8 @@ describe("getStrapiImageProps", () => {
     });
 
     expect(props.src).toBe("https://media.example.com/uploads/cover.jpg");
+    expect(props.width).toBe(1600);
+    expect(props.height).toBe(900);
   });
 
   it("builds a srcset from each real generated width", () => {

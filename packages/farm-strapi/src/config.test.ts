@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { StrapiClient } from "@strapi/client";
 import { resolveStrapiConfig } from "./config.js";
 
 const VARS = ["STRAPI_API_URL", "STRAPI_MEDIA_URL", "STRAPI_API_TOKEN", "STRAPI_WEBHOOK_SECRET"];
@@ -61,6 +62,18 @@ describe("resolveStrapiConfig", () => {
   it("rejects relative and non-http URLs", () => {
     expect(() => resolveStrapiConfig({ apiUrl: "/api" })).toThrow(/absolute HTTP or HTTPS/);
     expect(() => resolveStrapiConfig({ apiUrl: "file:///tmp/strapi" })).toThrow(/HTTP or HTTPS/);
+  });
+
+  it("does not validate an unused API URL for an app-owned client", () => {
+    const instance = {} as StrapiClient;
+
+    expect(
+      resolveStrapiConfig({
+        instance,
+        apiUrl: "not a URL",
+        mediaUrl: "https://media.example.com",
+      }),
+    ).toMatchObject({ apiUrl: "", mediaUrl: "https://media.example.com" });
   });
 
   it("returns empty required values when they are absent", () => {
