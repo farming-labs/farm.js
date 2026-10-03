@@ -135,12 +135,14 @@ export default function Page() { return <main>home</main>; }`,
       ["module script", fetch(`${origin}/README.md`, { headers: { "sec-fetch-dest": "script" } })],
     ] as const) {
       const response = await request;
+      // Vite may append an inline source map to a transformed module.
+      const body = await response.text();
       expect({
         label,
         status: response.status,
         markdownError: response.headers.get("x-farm-markdown-error"),
-        body: await response.text(),
-      }).toEqual({ label, status: 200, markdownError: null, body: "# Project readme\n" });
+        startsWithSource: body.startsWith("# Project readme\n"),
+      }).toEqual({ label, status: 200, markdownError: null, startsWithSource: true });
     }
 
     // An agent asking for the same path still gets the Markdown 404.
