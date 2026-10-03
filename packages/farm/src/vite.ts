@@ -3544,6 +3544,10 @@ if (import.meta.hot) {
             logger.warn(
               `[Farm.js] Could not refresh the client hydration plan after ${file}: ${error instanceof Error ? error.message : String(error)}`,
             );
+            // regenerateClientManifest() restored the last usable plan. Do not
+            // fall through to the generic app-module invalidation below, which
+            // would discard that plan while the edited source is still invalid.
+            return modules;
           }
         }
       }

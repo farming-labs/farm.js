@@ -1365,6 +1365,13 @@ async function buildClient(
         routePattern === adapterDocsEntry ||
         routePattern.startsWith(`${adapterDocsEntry}/`)),
     );
+  const syntheticDocsEntry =
+    config.docs?.enabled && !adapterOwnsDocsRuntime ? adapterDocsEntry : null;
+  const syntheticDocsPatterns = syntheticDocsEntry
+    ? syntheticDocsEntry === "/"
+      ? ["/", "/[...slug]"]
+      : [syntheticDocsEntry, `${syntheticDocsEntry}/[...slug]`]
+    : [];
 
   const routePlans = pageRoutes.map((route) => ({
     route,
@@ -1396,11 +1403,27 @@ async function buildClient(
       depth: layout.pattern.split("/").filter(Boolean).length,
       metadata: layout,
     })),
-    routePlans.map(({ route, metadata }) => ({
-      pattern: route.pattern,
-      depth: route.pattern.split("/").filter(Boolean).length,
-      metadata,
-    })),
+    [
+      ...routePlans.map(({ route, metadata }) => ({
+        pattern: route.pattern,
+        depth: route.pattern.split("/").filter(Boolean).length,
+        metadata,
+      })),
+      ...syntheticDocsPatterns.map((pattern) => ({
+        pattern,
+        depth: pattern.split("/").filter(Boolean).length,
+        metadata: {
+          mode: isolatedMode,
+          shouldHydrate: false,
+          islandStrategy: null,
+          legacyShouldHydrate: false,
+          legacyIslandStrategy: null,
+          estimatedIsolatedRootCount: 0,
+          hasIsolatedClientBoundaries: false,
+          isolatedBoundaries: [] as IsolatedClientBoundaryReference[],
+        },
+      })),
+    ],
     layoutAppliesToRoute,
   );
 
@@ -1483,9 +1506,8 @@ async function buildClient(
     }
   }
 
-  if (config.docs?.enabled && !adapterOwnsDocsRuntime) {
-    const docsEntry =
-      `/${config.docs.entry || "docs"}`.replace(/\/+/g, "/").replace(/\/$/, "") || "/";
+  if (syntheticDocsEntry) {
+    const docsEntry = syntheticDocsEntry;
     const applicableClientLayouts = clientLayouts.filter(
       (layout) =>
         (layout.shouldHydrate || layout.hasIsolatedClientBoundaries) &&
@@ -1500,9 +1522,7 @@ async function buildClient(
       )
         ? (hydrationStrategies[0] ?? "load")
         : "load";
-      const docsPatterns =
-        docsEntry === "/" ? ["/", "/[...slug]"] : [docsEntry, `${docsEntry}/[...slug]`];
-      const docsClientRoutes = docsPatterns.map((pattern) => ({
+      const docsClientRoutes = syntheticDocsPatterns.map((pattern) => ({
         pattern,
         modulePath: "",
         relativePath: "",

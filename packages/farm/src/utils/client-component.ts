@@ -719,19 +719,39 @@ export function enforceFarmIsolatedHydrationRouteBudget(
     const totalRootCount = layoutRootCount + routeRootCount;
     if (totalRootCount <= boundaryLimit) continue;
 
-    let accumulatedLayoutRoots = 0;
-    const overflowingLayout = applicableLayouts.find((layout) => {
-      if (layout.metadata.hasIsolatedClientBoundaries) {
-        accumulatedLayoutRoots += layout.metadata.estimatedIsolatedRootCount;
-      }
-      return accumulatedLayoutRoots > boundaryLimit;
-    });
     const fallbackReason = `the matched route ${route.pattern} can create ${totalRootCount} isolated roots, above the measured limit of ${boundaryLimit}`;
 
-    if (overflowingLayout) {
-      restoreRouteWideHydration(overflowingLayout.metadata, fallbackReason);
-    } else if (route.metadata.hasIsolatedClientBoundaries) {
-      restoreRouteWideHydration(route.metadata, fallbackReason);
+    const remainingRootCount = () =>
+      applicableLayouts.reduce(
+        (count, layout) =>
+          count +
+          (layout.metadata.hasIsolatedClientBoundaries
+            ? layout.metadata.estimatedIsolatedRootCount
+            : 0),
+        0,
+      ) +
+      (route.metadata.hasIsolatedClientBoundaries ? route.metadata.estimatedIsolatedRootCount : 0);
+
+    // A fallback can expose a later overflow. Re-evaluate the complete chain
+    // until its isolated roots fit instead of stopping after the first owner.
+    while (remainingRootCount() > boundaryLimit) {
+      let accumulatedLayoutRoots = 0;
+      const overflowingLayout = applicableLayouts.find((layout) => {
+        if (layout.metadata.hasIsolatedClientBoundaries) {
+          accumulatedLayoutRoots += layout.metadata.estimatedIsolatedRootCount;
+        }
+        return accumulatedLayoutRoots > boundaryLimit;
+      });
+
+      if (overflowingLayout) {
+        restoreRouteWideHydration(overflowingLayout.metadata, fallbackReason);
+        continue;
+      }
+      if (route.metadata.hasIsolatedClientBoundaries) {
+        restoreRouteWideHydration(route.metadata, fallbackReason);
+        continue;
+      }
+      break;
     }
   }
 

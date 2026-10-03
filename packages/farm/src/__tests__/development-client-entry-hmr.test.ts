@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ViteDevServer } from "vite";
 import { createServer } from "../server/create-server";
+import { logger } from "../utils";
 import { getAvailablePort } from "./dev-server-port";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -132,5 +133,29 @@ export function Counter() { return <button>count</button>; }`,
     );
     expect(updatedResponse.status).toBe(200);
     expect(await updatedResponse.text()).toContain("createFarmIsolatedHydrationRuntime");
+
+    const warn = vi.spyOn(logger, "warn");
+    await fs.writeFile(
+      boundaryPath,
+      `"use client";
+const chosenStrategy = "load";
+export const island = chosenStrategy;
+export function Counter() { return <button>count</button>; }`,
+    );
+    await vi.waitFor(
+      () => {
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining("Could not refresh the client hydration plan"),
+        );
+      },
+      { timeout: 10_000 },
+    );
+
+    const preservedResponse = await fetch(
+      `http://localhost:${address.port}/@farm/client?t=${Date.now()}`,
+    );
+    expect(preservedResponse.status).toBe(200);
+    expect(await preservedResponse.text()).toContain("createFarmIsolatedHydrationRuntime");
+    warn.mockRestore();
   }, 60_000);
 });

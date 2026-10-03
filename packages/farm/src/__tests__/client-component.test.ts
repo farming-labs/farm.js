@@ -920,6 +920,51 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
         hasIsolatedClientBoundaries: true,
       });
     });
+
+    it("rechecks the full owner chain after an async layout fallback", () => {
+      const makeOwner = (estimatedIsolatedRootCount: number) => {
+        const { root, pageFile } = asyncPage("<StarButton count={1} />");
+        return {
+          ...getClientModuleHydrationPlan(pageFile, root, "enabled", islands),
+          estimatedIsolatedRootCount,
+        };
+      };
+      const rootLayout = makeOwner(2);
+      const middleLayout = makeOwner(3);
+      const leafLayout = makeOwner(2);
+      const route = makeOwner(1);
+
+      enforceFarmIsolatedHydrationRouteBudget(
+        [
+          { pattern: "/", depth: 0, metadata: rootLayout },
+          { pattern: "/demo", depth: 1, metadata: middleLayout },
+          { pattern: "/demo/leaf", depth: 2, metadata: leafLayout },
+        ],
+        [{ pattern: "/demo/leaf/page", depth: 3, metadata: route }],
+        (layoutPattern, routePattern) =>
+          layoutPattern === "/" ||
+          routePattern === layoutPattern ||
+          routePattern.startsWith(`${layoutPattern}/`),
+      );
+
+      expect(rootLayout.hasIsolatedClientBoundaries).toBe(true);
+      expect(middleLayout).toMatchObject({
+        hasIsolatedClientBoundaries: false,
+        suppressedAsyncHydration: true,
+      });
+      expect(leafLayout.hasIsolatedClientBoundaries).toBe(true);
+      expect(route).toMatchObject({
+        hasIsolatedClientBoundaries: false,
+        suppressedAsyncHydration: true,
+      });
+      expect(
+        [rootLayout, middleLayout, leafLayout, route].reduce(
+          (count, owner) =>
+            count + (owner.hasIsolatedClientBoundaries ? owner.estimatedIsolatedRootCount : 0),
+          0,
+        ),
+      ).toBe(4);
+    });
   });
 
   it("describes suppressed async hydration with and without a concrete reason", () => {
@@ -1178,7 +1223,7 @@ export function Chart() {}
       path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
       "utf-8",
     );
-    const docsRoutesStart = source.indexOf("if (config.docs?.enabled && !adapterOwnsDocsRuntime)");
+    const docsRoutesStart = source.indexOf("if (syntheticDocsEntry)");
     const docsRoutesEnd = source.indexOf("\n\n  const clientRouteSlots", docsRoutesStart);
     expect(docsRoutesStart).toBeGreaterThan(-1);
     expect(docsRoutesEnd).toBeGreaterThan(docsRoutesStart);
@@ -1187,6 +1232,13 @@ export function Chart() {}
     expect(docsRoutes).toContain("layout.shouldHydrate || layout.hasIsolatedClientBoundaries");
     expect(docsRoutes).toContain("hasIsolatedClientBoundaries: applicableClientLayouts.some(");
     expect(docsRoutes).toContain(".flatMap((layout) => layout.isolatedBoundaries)");
+    const budgetStart = source.indexOf("\n  enforceFarmIsolatedHydrationRouteBudget(");
+    const budgetEnd = source.indexOf("\n  );", budgetStart);
+    expect(budgetStart).toBeGreaterThan(-1);
+    expect(budgetEnd).toBeGreaterThan(budgetStart);
+    expect(source.slice(budgetStart, budgetEnd)).toContain(
+      "...syntheticDocsPatterns.map((pattern) => ({",
+    );
   });
 
   it("scopes isolated root disposal and hydration to SPA navigation subtrees", () => {
