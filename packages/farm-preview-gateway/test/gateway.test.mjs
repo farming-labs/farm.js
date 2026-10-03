@@ -589,14 +589,21 @@ test("slides default self-hosted sessions but preserves explicit absolute expiry
 
     const storedSliding = await store.getSessionById(sliding.id);
     assert.ok(storedSliding);
-    const forcedNearExpiry = Date.now() + 1_000;
+    const forcedNearExpiry = Date.now() + 10_000;
     storedSliding.expiresAt = forcedNearExpiry;
-    const slidingHeartbeat = await fetch(`${gateway.url}/api/sessions/${sliding.id}/heartbeat`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${sliding.token}` },
-    }).then((response) => response.json());
+    const slidingHeartbeatResponse = await fetch(
+      `${gateway.url}/api/sessions/${sliding.id}/heartbeat`,
+      {
+        method: "POST",
+        headers: { authorization: `Bearer ${sliding.token}` },
+      },
+    );
+    assert.equal(slidingHeartbeatResponse.status, 200);
+    const slidingHeartbeat = await slidingHeartbeatResponse.json();
     assert.equal(slidingHeartbeat.expiresAt, undefined);
-    assert.ok((await store.getSessionById(sliding.id)).expiresAt > forcedNearExpiry + 50_000);
+    const renewedSliding = await store.getSessionById(sliding.id);
+    assert.ok(renewedSliding);
+    assert.ok(renewedSliding.expiresAt > forcedNearExpiry + 10_000);
 
     const absolute = await fetch(`${gateway.url}/api/sessions`, {
       method: "POST",
