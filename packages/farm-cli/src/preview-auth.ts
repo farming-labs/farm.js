@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createInterface } from "node:readline/promises";
 import { logger } from "@farm.js/core";
 import type { PreviewGatewayPlan } from "./preview-gateway";
+import { formatCompactPreviewDuration } from "./preview-duration";
 
 export const PREVIEW_EXPIRY_CLOCK_SKEW_MS = 1000 * 60 * 5;
 
@@ -359,7 +360,7 @@ async function openBrowser(url: string) {
 
 async function promptPreviewDuration(config: PreviewAuthPublicConfig) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) return undefined;
-  const defaultDuration = formatCompactDuration(config.defaultSessionTtlMs);
+  const defaultDuration = formatCompactPreviewDuration(config.defaultSessionTtlMs);
   const prompt = createInterface({ input: process.stdin, output: process.stdout });
   try {
     const answer = await prompt.question(`Preview duration (${defaultDuration}): `);
@@ -367,12 +368,6 @@ async function promptPreviewDuration(config: PreviewAuthPublicConfig) {
   } finally {
     prompt.close();
   }
-}
-
-function formatCompactDuration(durationMs: number) {
-  if (durationMs % 86_400_000 === 0) return `${durationMs / 86_400_000}d`;
-  if (durationMs % 3_600_000 === 0) return `${durationMs / 3_600_000}h`;
-  return `${Math.ceil(durationMs / 60_000)}m`;
 }
 
 class FilePreviewCredentialStore implements PreviewCredentialStore {

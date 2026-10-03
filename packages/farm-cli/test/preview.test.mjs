@@ -1141,6 +1141,8 @@ test("runs farm preview dry-run through the managed gateway by default", async (
         "checkout-test",
         "--gateway",
         "https://preview.farmjs.dev",
+        "--expires",
+        "2h",
         "--dry-run",
       ],
       {
@@ -1156,6 +1158,7 @@ test("runs farm preview dry-run through the managed gateway by default", async (
     assert.match(stdout, /Gateway: https:\/\/preview\.farmjs\.dev/);
     assert.match(stdout, new RegExp(`Local:\\s+http://localhost:${server.port}`));
     assert.match(stdout, /checkout-test\.preview\.farmjs\.dev/);
+    assert.match(stdout, /Expires: after 2h/);
     assert.match(stdout, /gateway dry run completed/i);
   } finally {
     await server.close();

@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { logger } from "@farm.js/core";
 import type { PreviewFarmOptions, PreviewTarget } from "./preview";
+import { formatCompactPreviewDuration } from "./preview-duration";
 
 export interface PreviewGatewayPlan {
   provider: "farm-gateway";
@@ -548,14 +549,10 @@ export function formatGatewayPlan(plan: PreviewGatewayPlan) {
     `Relay:   ${plan.relayUrl}`,
     `Local:   ${plan.target.localUrl}`,
     `Public:  ${plan.requestedPublicUrl}`,
-    ...(plan.expiresInMs ? [`Expires: after ${formatCompactDuration(plan.expiresInMs)}`] : []),
+    ...(plan.expiresInMs
+      ? [`Expires: after ${formatCompactPreviewDuration(plan.expiresInMs)}`]
+      : []),
   ].join("\n");
-}
-
-function formatCompactDuration(durationMs: number) {
-  if (durationMs % 86_400_000 === 0) return `${durationMs / 86_400_000}d`;
-  if (durationMs % 3_600_000 === 0) return `${durationMs / 3_600_000}h`;
-  return `${Math.ceil(durationMs / 60_000)}m`;
 }
 
 function formatRequestPath(path: string) {
