@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
 const fetchMock = vi.fn<typeof fetch>();
-const originalUrl = process.env.FARM_AGENTS_API_URL;
-const originalKey = process.env.FARM_AGENTS_API_KEY;
+const originalUrl = process.env.FARMJS_API_URL;
+const originalKey = process.env.FARMJS_API_KEY;
 
 function restore(name: string, value: string | undefined) {
   if (value === undefined) delete process.env[name];
@@ -13,8 +13,8 @@ function restore(name: string, value: string | undefined) {
 }
 
 beforeEach(() => {
-  process.env.FARM_AGENTS_API_URL = "https://infra.test/";
-  process.env.FARM_AGENTS_API_KEY = "test-key";
+  process.env.FARMJS_API_URL = "https://infra.test/";
+  process.env.FARMJS_API_KEY = "farmjs_test-key";
   fetchMock.mockReset();
   fetchMock.mockResolvedValue(Response.json({ id: "abc123def456" }, { status: 201 }));
   vi.stubGlobal("fetch", fetchMock);
@@ -22,8 +22,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  restore("FARM_AGENTS_API_URL", originalUrl);
-  restore("FARM_AGENTS_API_KEY", originalKey);
+  restore("FARMJS_API_URL", originalUrl);
+  restore("FARMJS_API_KEY", originalKey);
 });
 
 function jsonRequest(body: unknown, headers: Record<string, string> = {}) {
@@ -55,13 +55,13 @@ describe("agent-ready check proxy", () => {
     expect(init?.method).toBe("POST");
     expect(init?.body).toBe(JSON.stringify({ url: "vercel.com" }));
     expect(init?.headers).toMatchObject({
-      authorization: "Bearer test-key",
+      authorization: "Bearer farmjs_test-key",
       "x-farm-client-address": "203.0.113.7",
     });
   });
 
   it("sends no visitor address without a key, since the service would not trust it", async () => {
-    delete process.env.FARM_AGENTS_API_KEY;
+    delete process.env.FARMJS_API_KEY;
     await POST(jsonRequest({ url: "vercel.com" }, { "x-real-ip": "203.0.113.7" }));
 
     const headers = fetchMock.mock.calls[0]![1]?.headers as Record<string, string>;
@@ -107,11 +107,11 @@ describe("agent-ready check proxy", () => {
   });
 
   it("answers 503 when the service is not configured or unreachable", async () => {
-    delete process.env.FARM_AGENTS_API_URL;
+    delete process.env.FARMJS_API_URL;
     expect((await POST(jsonRequest({ url: "vercel.com" }))).status).toBe(503);
     expect(fetchMock).not.toHaveBeenCalled();
 
-    process.env.FARM_AGENTS_API_URL = "https://infra.test";
+    process.env.FARMJS_API_URL = "https://infra.test";
     fetchMock.mockRejectedValue(new TypeError("fetch failed"));
     const response = await POST(jsonRequest({ url: "vercel.com" }));
     expect(response.status).toBe(503);

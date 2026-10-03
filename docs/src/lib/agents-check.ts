@@ -3,9 +3,9 @@
  * farmjs.dev renders the form and the reports and talks to that service only
  * from its server: the API origin and key never reach the browser.
  *
- * FARM_AGENTS_API_URL  origin of the agent infrastructure API
- * FARM_AGENTS_API_KEY  shared key; lets the API rate-limit by the visitor's
- *                      address instead of this server's
+ * FARMJS_API_URL  origin of the agent infrastructure API
+ * FARMJS_API_KEY  an API key from the console's Settings > API keys; lets the
+ *                 API rate-limit by the visitor's address instead of this server's
  */
 
 export type AgentCheckStatus = "pass" | "warn" | "fail" | "info";
@@ -43,9 +43,9 @@ export function isAgentCheckId(id: string): boolean {
 }
 
 export function agentCheckApi(): { origin: string; key: string | undefined } | null {
-  const origin = process.env.FARM_AGENTS_API_URL?.trim().replace(/\/+$/, "");
+  const origin = process.env.FARMJS_API_URL?.trim().replace(/\/+$/, "");
   if (!origin) return null;
-  return { origin, key: process.env.FARM_AGENTS_API_KEY?.trim() || undefined };
+  return { origin, key: process.env.FARMJS_API_KEY?.trim() || undefined };
 }
 
 /** A saved report, or null when it does not exist. Throws when the service is unreachable. */
