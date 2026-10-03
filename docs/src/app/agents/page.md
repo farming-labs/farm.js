@@ -30,3 +30,5 @@ These are planned capabilities, not features available in Farm.js v0.1.0. Discov
 [Join the waitlist](/agents#waitlist) for updates and early access. This is not a deployment console.
 
 [Read the announcement](/blog/0.1.0#agent-infrastructure).
+
+[Check your site](/agents/check): score any website on what agents can read and call.

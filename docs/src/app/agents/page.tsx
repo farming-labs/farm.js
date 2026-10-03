@@ -275,6 +275,9 @@ export default function AgentsPage() {
                   <a href="/blog/0.1.0#agent-infrastructure">
                     Read the announcement <ArrowRight size={14} aria-hidden />
                   </a>
+                  <a href="/agents/check">
+                    Check your site <ArrowRight size={14} aria-hidden />
+                  </a>
                 </div>
               </div>
             </section>

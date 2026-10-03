@@ -15,6 +15,8 @@ import "@farm.js/core/css";
 export type RoutePath =
   | "/"
   | "/agents"
+  | "/agents/check"
+  | `/agents/check/${string}`
   | "/blog"
   | "/blog/0.1.0"
   | "/docs"
@@ -116,6 +118,8 @@ export type RoutePath =
 export type RoutePattern =
   | "/"
   | "/agents"
+  | "/agents/check"
+  | "/agents/check/[id]"
   | "/blog"
   | "/blog/0.1.0"
   | "/docs"
@@ -217,6 +221,8 @@ export type RoutePattern =
 export type RouteModulePattern =
   | "/"
   | "/agents"
+  | "/agents/check"
+  | "/agents/check/[id]"
   | "/blog"
   | "/blog/0.1.0"
   | "/docs"

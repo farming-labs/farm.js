@@ -1,0 +1,342 @@
+/* Agent-ready check: the /agents page's grid, cards, labels and code chips, plus a score. */
+
+.agent-check-form .agent-waitlist-status[data-tone="error"] {
+  color: #ff8f87;
+}
+
+/* 06.4.1 What it checks: two columns of shared-border cells, like 06.1. */
+.agent-check-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agent-check-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 32px 48px 36px;
+  color: #bbb;
+}
+.agent-check-list li:nth-child(even) {
+  border-left: 1px solid var(--farm-line);
+}
+.agent-check-list li:nth-child(n + 3) {
+  border-top: 1px solid var(--farm-line);
+}
+.agent-check-list p {
+  max-width: 26rem;
+  color: #929292;
+  font-size: 15px;
+  font-weight: 300;
+  line-height: 1.7;
+}
+.agent-check-list-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: auto;
+}
+.agent-check-list-meta code {
+  padding: 6px 10px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.04);
+  color: rgb(255 255 255 / 0.72);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.agent-check-list-meta span,
+.agent-check-status,
+.agent-check-rows-heading > span {
+  color: #6e6e6e;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.agent-check-status[data-status="pass"] {
+  color: #8ce0b5;
+}
+.agent-check-status[data-status="warn"] {
+  color: #e9c46a;
+}
+.agent-check-status[data-status="fail"] {
+  color: #ff8f87;
+}
+
+/* Report hero: the host, a verdict, and the score in the page's pixel face. */
+.agent-check-hero {
+  position: relative;
+  padding: 64px 48px 48px;
+  background-image: radial-gradient(
+    ellipse 60% 70% at 85% 30%,
+    rgb(255 255 255 / 0.05),
+    transparent 70%
+  );
+}
+.agent-check-hero-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  color: #b7b7b7;
+}
+.agent-check-hero-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 32px;
+  margin-top: 36px;
+}
+.agent-check-hero h1 {
+  overflow: hidden;
+  color: #ededed;
+  font-size: clamp(36px, 4.6vw, 56px);
+  font-weight: 450;
+  line-height: 1.07;
+  letter-spacing: -0.05em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-check-verdict {
+  margin-top: 16px;
+  color: #aaa;
+  font-size: 17px;
+  font-weight: 300;
+  line-height: 1.75;
+}
+.agent-check-meta {
+  margin-top: 6px;
+  overflow: hidden;
+  color: #6e6e6e;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-check-score {
+  color: #ededed;
+  font-size: clamp(72px, 9vw, 120px);
+  line-height: 0.85;
+  white-space: nowrap;
+}
+.agent-check-score span {
+  color: rgb(255 255 255 / 0.36);
+  font-size: 0.3em;
+}
+.agent-check-meter {
+  display: grid;
+  grid-template-columns: repeat(20, minmax(0, 1fr));
+  gap: 3px;
+  margin-top: 36px;
+}
+.agent-check-meter span {
+  height: 10px;
+  background: rgb(255 255 255 / 0.07);
+}
+.agent-check-meter span[data-on] {
+  background: #ededed;
+}
+.agent-check-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 32px;
+}
+.agent-check-actions :is(a, button) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid rgb(255 255 255 / 0.18);
+  border-radius: 0;
+  background: #000;
+  color: #ededed;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.agent-check-actions button[hidden] {
+  display: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .agent-check-actions :is(a, button):hover {
+    border-color: rgb(255 255 255 / 0.42);
+  }
+}
+
+/* Gaps reuse the 06.1 cards; the summary is the card title. */
+.agent-check-gaps h3 {
+  font-size: 22px;
+}
+.agent-check-evidence {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 20px;
+  padding: 10px 14px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.04);
+  list-style: none;
+  color: rgb(255 255 255 / 0.62);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11.5px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.agent-check-fix > p {
+  color: #aaa;
+  font-size: 15px;
+  font-weight: 300;
+  line-height: 1.75;
+}
+.agent-check-code {
+  margin: 16px 0 0;
+  border: 1px solid var(--farm-line);
+}
+.agent-check-code figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--farm-line);
+  color: #8f8f8f;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+.agent-check-code figcaption a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #ededed;
+}
+.agent-check-code pre {
+  margin: 0;
+  padding: 14px;
+  overflow-x: auto;
+  background: #050505;
+  color: #d4d4d4;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+/* Passing and reported checks: one row each, evidence on demand. */
+.agent-check-rows-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 48px;
+  color: #b7b7b7;
+}
+.agent-check-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agent-check-rows li + li {
+  border-top: 1px solid var(--farm-line);
+}
+.agent-check-rows summary {
+  display: grid;
+  grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+  padding: 18px 48px;
+  color: #ededed;
+  cursor: pointer;
+  list-style: none;
+}
+.agent-check-rows summary::-webkit-details-marker {
+  display: none;
+}
+.agent-check-row-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.agent-check-row-chevron {
+  color: #6e6e6e;
+  transition: transform 150ms;
+}
+.agent-check-rows details[open] .agent-check-row-chevron {
+  transform: rotate(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-check-row-chevron {
+    transition: none;
+  }
+}
+.agent-check-row-summary {
+  color: #929292;
+  font-size: 14px;
+  font-weight: 300;
+  line-height: 1.6;
+}
+.agent-check-rows .agent-check-evidence {
+  margin: 0 48px 20px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .agent-check-rows summary:hover {
+    background: rgb(255 255 255 / 0.02);
+  }
+}
+
+@media (max-width: 900px) {
+  .agent-check-hero {
+    padding: 48px 32px 40px;
+  }
+  .agent-check-list li {
+    padding: 28px 32px 32px;
+  }
+  .agent-check-rows summary {
+    padding: 16px 32px;
+  }
+  .agent-check-rows-heading {
+    padding: 20px 32px;
+  }
+  .agent-check-rows .agent-check-evidence {
+    margin: 0 32px 18px;
+  }
+}
+@media (max-width: 600px) {
+  .agent-check-hero {
+    padding: 40px 24px 32px;
+  }
+  .agent-check-hero-body {
+    grid-template-columns: 1fr;
+  }
+  .agent-check-list {
+    grid-template-columns: 1fr;
+  }
+  .agent-check-list li {
+    padding: 24px;
+  }
+  .agent-check-list li:nth-child(even) {
+    border-left: 0;
+  }
+  .agent-check-list li + li {
+    border-top: 1px solid var(--farm-line);
+  }
+  .agent-check-rows summary {
+    grid-template-columns: 1fr auto;
+    padding: 16px 24px;
+  }
+  .agent-check-row-summary {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .agent-check-rows-heading {
+    padding: 18px 24px;
+  }
+  .agent-check-rows .agent-check-evidence {
+    margin: 0 24px 16px;
+  }
+}
