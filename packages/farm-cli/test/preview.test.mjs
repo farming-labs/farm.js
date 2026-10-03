@@ -20,14 +20,14 @@ try {
   const originals = {
     startPreviewAgent: nativeTunnel.startPreviewAgent,
     stopPreviewAgent: nativeTunnel.stopPreviewAgent,
-    waitPreviewAgent: nativeTunnel.waitPreviewAgent,
+    waitPreviewAgentExit: nativeTunnel.waitPreviewAgentExit,
   };
   nativeTunnel.startPreviewAgent = (...args) =>
     (nativeTunnelRuntimeOverride || originals).startPreviewAgent(...args);
   nativeTunnel.stopPreviewAgent = (...args) =>
     (nativeTunnelRuntimeOverride || originals).stopPreviewAgent(...args);
-  nativeTunnel.waitPreviewAgent = (...args) =>
-    (nativeTunnelRuntimeOverride || originals).waitPreviewAgent(...args);
+  nativeTunnel.waitPreviewAgentExit = (...args) =>
+    (nativeTunnelRuntimeOverride || originals).waitPreviewAgentExit(...args);
 } catch {
   // The optional native package intentionally falls back to gateway polling.
 }
@@ -418,8 +418,8 @@ test("carries a configured relay credential without putting it in the relay URL"
     async stopPreviewAgent() {
       return true;
     },
-    async waitPreviewAgent() {
-      return true;
+    async waitPreviewAgentExit() {
+      return { closeCode: 1000, closeReason: "Preview expired" };
     },
   };
 
@@ -479,9 +479,9 @@ test("keeps relay credentials out of native preview results", { skip: !nativeTun
       calls.push(["stop", sessionId]);
       return true;
     },
-    async waitPreviewAgent(sessionId) {
+    async waitPreviewAgentExit(sessionId) {
       calls.push(["wait", sessionId]);
-      return true;
+      return { closeCode: 1000, closeReason: "Preview expired" };
     },
   };
 
@@ -529,8 +529,8 @@ test("runs the managed preview through the native tunnel lifecycle", async () =>
       calls.push(["stop", sessionId]);
       return false;
     },
-    async waitPreviewAgent(sessionId) {
-      calls.push(["wait", sessionId]);
+    async waitPreviewAgentExit(sessionId) {
+      calls.push(["wait-exit", sessionId]);
       return await wait;
     },
   };
@@ -553,16 +553,57 @@ test("runs the managed preview through the native tunnel lifecycle", async () =>
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(calls, [
     ["start", "wss://preview.farmjs.dev/agent", "native", "http://localhost:3000"],
-    ["wait", "native-session"],
+    ["wait-exit", "native-session"],
   ]);
 
-  resolveWait(true);
+  resolveWait({ closeCode: 1000, closeReason: "Preview expired" });
   const session = await running;
   assert.equal(session.sessionId, "native-session");
   assert.deepEqual(calls.at(-1), ["stop", "native-session"]);
 });
 
-test("treats a managed native disconnect before expiry as a fallback signal", async () => {
+test("treats an explicit native tunnel stop as a normal shutdown", async () => {
+  let resolveExit;
+  const exit = new Promise((resolve) => {
+    resolveExit = resolve;
+  });
+  const signalListeners = new Set(process.listeners("SIGTERM"));
+  let stopCalls = 0;
+  const plan = {
+    provider: "farm-gateway",
+    gatewayUrl: "https://preview.farmjs.dev",
+    relayUrl: "wss://preview.farmjs.dev/agent",
+    target: { localUrl: "http://localhost:3000", host: "localhost", port: 3000, source: "port" },
+    requestedName: "stopping",
+    requestedHostname: "stopping.preview.farmjs.dev",
+    requestedPublicUrl: "https://stopping.preview.farmjs.dev",
+  };
+  const runtime = {
+    async startPreviewAgent() {
+      return { sessionId: "stopping-session", publicUrl: plan.requestedPublicUrl };
+    },
+    async stopPreviewAgent() {
+      stopCalls += 1;
+      resolveExit(null);
+      return true;
+    },
+    async waitPreviewAgentExit() {
+      return await exit;
+    },
+  };
+
+  const running = runNativePreviewTunnel(plan, { runtime });
+  await new Promise((resolve) => setImmediate(resolve));
+  const stop = process.listeners("SIGTERM").find((listener) => !signalListeners.has(listener));
+  assert.ok(stop, "expected a native tunnel SIGTERM listener");
+  stop();
+
+  assert.equal((await running).sessionId, "stopping-session");
+  assert.equal(stopCalls, 2);
+  assert.equal(process.listeners("SIGTERM").includes(stop), false);
+});
+
+test("treats an unexpected managed native disconnect as a fallback signal", async () => {
   const plan = {
     provider: "farm-gateway",
     gatewayUrl: "https://preview.farmjs.dev",
@@ -578,33 +619,35 @@ test("treats a managed native disconnect before expiry as a fallback signal", as
     requestedHostname: "reconnect.preview.farmjs.dev",
     requestedPublicUrl: "https://reconnect.preview.farmjs.dev",
   };
-  const runtime = {
-    async startPreviewAgent() {
-      return {
-        sessionId: "native-session",
-        publicUrl: "https://reconnect.preview.farmjs.dev",
-      };
-    },
-    async stopPreviewAgent() {
-      return true;
-    },
-    async waitPreviewAgent() {
-      return true;
-    },
-  };
+  for (const exit of [
+    {},
+    { closeCode: 1000, closeReason: "Maintenance" },
+    { closeCode: 1001, closeReason: "Preview expired" },
+  ]) {
+    const runtime = {
+      async startPreviewAgent() {
+        return {
+          sessionId: "native-session",
+          publicUrl: "https://reconnect.preview.farmjs.dev",
+        };
+      },
+      async stopPreviewAgent() {
+        return true;
+      },
+      async waitPreviewAgentExit() {
+        return exit;
+      },
+    };
 
-  await assert.rejects(
-    runNativePreviewTunnel(plan, { runtime }),
-    /disconnected before the preview expired/,
-  );
+    await assert.rejects(runNativePreviewTunnel(plan, { runtime }), /disconnected unexpectedly/);
+  }
 });
 
-test("treats a native disconnect within clock skew as hosted expiry", async () => {
-  const plan = {
+test("uses the relay close reason for hosted expiry despite client clock skew", async () => {
+  const basePlan = {
     provider: "farm-gateway",
     gatewayUrl: "https://preview.farmjs.dev",
     relayUrl: "wss://preview.farmjs.dev/agent",
-    expiresAt: Date.now() + 60_000,
     target: { localUrl: "http://localhost:3000", host: "localhost", port: 3000, source: "port" },
     requestedName: "expiring",
     requestedHostname: "expiring.preview.farmjs.dev",
@@ -612,17 +655,48 @@ test("treats a native disconnect within clock skew as hosted expiry", async () =
   };
   const runtime = {
     async startPreviewAgent() {
-      return { sessionId: "native-session", publicUrl: plan.requestedPublicUrl };
+      return { sessionId: "native-session", publicUrl: basePlan.requestedPublicUrl };
     },
     async stopPreviewAgent() {
       return true;
     },
-    async waitPreviewAgent() {
-      return true;
+    async waitPreviewAgentExit() {
+      return { closeCode: 1000, closeReason: "Preview expired" };
     },
   };
 
-  assert.equal((await runNativePreviewTunnel(plan, { runtime })).sessionId, "native-session");
+  for (const expiresAt of [Date.now() - 86_400_000, Date.now() + 86_400_000]) {
+    const plan = { ...basePlan, expiresAt };
+    assert.equal((await runNativePreviewTunnel(plan, { runtime })).sessionId, "native-session");
+  }
+});
+
+test("rejects a native lifecycle that cannot be observed", async () => {
+  const plan = {
+    provider: "farm-gateway",
+    gatewayUrl: "https://preview.farmjs.dev",
+    relayUrl: "wss://preview.farmjs.dev/agent",
+    target: { localUrl: "http://localhost:3000", host: "localhost", port: 3000, source: "port" },
+    requestedName: "missing",
+    requestedHostname: "missing.preview.farmjs.dev",
+    requestedPublicUrl: "https://missing.preview.farmjs.dev",
+  };
+  const runtime = {
+    async startPreviewAgent() {
+      return { sessionId: "missing-session", publicUrl: plan.requestedPublicUrl };
+    },
+    async stopPreviewAgent() {
+      return false;
+    },
+    async waitPreviewAgentExit() {
+      return null;
+    },
+  };
+
+  await assert.rejects(
+    runNativePreviewTunnel(plan, { runtime }),
+    /stopped before its lifecycle could be observed/,
+  );
 });
 
 test("forwards a gateway request to the local target", async () => {
@@ -1067,6 +1141,59 @@ test("falls back to gateway polling while the hosted native relay is unavailable
   }
 });
 
+test(
+  "falls back after an unexpected native exit even when the grant appears near expiry",
+  { skip: !nativeTunnel },
+  async () => {
+    const app = await createTestServer();
+    const gateway = await createPreviewGatewayTestServer({ grantExpiresInMs: 1000 });
+    const previousToken = process.env.FARM_PREVIEW_TOKEN;
+    process.env.FARM_PREVIEW_TOKEN = "account-token";
+    nativeTunnelRuntimeOverride = {
+      async startPreviewAgent() {
+        return {
+          sessionId: "near-expiry-native-session",
+          publicUrl: "https://near-expiry.preview.farmjs.dev",
+        };
+      },
+      async stopPreviewAgent() {
+        return true;
+      },
+      async waitPreviewAgentExit() {
+        return {};
+      },
+    };
+
+    try {
+      const preview = previewFarm({
+        provider: "farm",
+        port: app.port,
+        gatewayUrl: gateway.url,
+        name: "near-expiry",
+        timeoutMs: 1000,
+      });
+
+      await gateway.waitForSession();
+      await app.close();
+
+      const result = await Promise.race([
+        preview,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("near-expiry fallback did not stop")), 4000),
+        ),
+      ]);
+
+      assert.equal(result.session.id, "sess_watch");
+      assert.equal(gateway.deletedSessions.length, 1);
+    } finally {
+      nativeTunnelRuntimeOverride = undefined;
+      restoreEnv("FARM_PREVIEW_TOKEN", previousToken);
+      await app.close().catch(() => undefined);
+      await gateway.close();
+    }
+  },
+);
+
 test("uses query credentials advertised by the polling gateway", async () => {
   const app = await createTestServer((_req, res) => {
     res.statusCode = 201;
@@ -1245,7 +1372,7 @@ async function createStreamingTestServer() {
   };
 }
 
-async function createPreviewGatewayTestServer() {
+async function createPreviewGatewayTestServer(options = {}) {
   let resolveSession;
   const sessionReady = new Promise((resolve) => {
     resolveSession = resolve;
@@ -1254,6 +1381,37 @@ async function createPreviewGatewayTestServer() {
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || "/", "http://localhost");
+
+    if (req.method === "GET" && url.pathname === "/api/auth/config" && options.grantExpiresInMs) {
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          enabled: true,
+          provider: "github",
+          clientId: "test-client",
+          defaultSessionTtlMs: 30 * 60_000,
+          maxSessionTtlMs: 24 * 60 * 60_000,
+        }),
+      );
+      return;
+    }
+
+    if (
+      req.method === "POST" &&
+      url.pathname === "/api/tunnel/grants" &&
+      options.grantExpiresInMs
+    ) {
+      await readRequestBody(req);
+      assert.equal(req.headers.authorization, "Bearer account-token");
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          token: "near-expiry-grant",
+          expiresAt: Date.now() + options.grantExpiresInMs,
+        }),
+      );
+      return;
+    }
 
     if (req.method === "POST" && url.pathname === "/api/sessions") {
       await readRequestBody(req);

@@ -1,6 +1,5 @@
 import { logger } from "@farm.js/core";
-import type { PreviewAgentSession } from "@farm.js/tunnel";
-import { PREVIEW_EXPIRY_CLOCK_SKEW_MS } from "./preview-auth";
+import type { PreviewAgentExit, PreviewAgentSession } from "@farm.js/tunnel";
 import type { PreviewGatewayPlan } from "./preview-gateway";
 
 export interface NativeTunnelRuntime {
@@ -10,7 +9,7 @@ export interface NativeTunnelRuntime {
     targetUrl: string,
   ): Promise<PreviewAgentSession>;
   stopPreviewAgent(sessionId: string): Promise<boolean>;
-  waitPreviewAgent(sessionId: string): Promise<boolean>;
+  waitPreviewAgentExit(sessionId: string): Promise<PreviewAgentExit | null>;
 }
 
 export interface RunNativePreviewTunnelOptions {
@@ -46,19 +45,26 @@ export async function runNativePreviewTunnel(
   logger.info("Forwarding requests through the native tunnel until Ctrl+C.");
 
   try {
-    const waited = await runtime.waitPreviewAgent(session.sessionId);
-    if (!waited) {
+    const exit = await runtime.waitPreviewAgentExit(session.sessionId);
+    if (stopping) {
+      return session;
+    }
+    if (!exit) {
       throw new Error("The native preview tunnel stopped before its lifecycle could be observed.");
     }
-    if (!stopping && plan.expiresAt && Date.now() + PREVIEW_EXPIRY_CLOCK_SKEW_MS < plan.expiresAt) {
-      throw new Error("The native preview relay disconnected before the preview expired.");
+    if (isHostedPreviewExpiry(exit)) {
+      return session;
     }
-    return session;
+    throw new Error("The native preview relay disconnected unexpectedly.");
   } finally {
     process.removeListener("SIGINT", stop);
     process.removeListener("SIGTERM", stop);
     await runtime.stopPreviewAgent(session.sessionId).catch(() => false);
   }
+}
+
+function isHostedPreviewExpiry(exit: PreviewAgentExit) {
+  return exit.closeCode === 1000 && exit.closeReason === "Preview expired";
 }
 
 /**
