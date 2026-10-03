@@ -18,6 +18,7 @@ import {
 import { canonicalizeRequestPathname } from "../utils/decode";
 import { normalizeMiddlewareModule } from "./module";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
+import { stripFarmBasePath } from "../base-path";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import type { ResolvedFarmServerConfig } from "../server-http";
 import {
@@ -813,9 +814,11 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     );
     let ctx = contextState.ctx;
     let currentRequest = contextState.getRequest();
+    // Match the app path page routing sees: without basePath (the locale step
+    // strips it too), so file and config middleware run beneath a basePath.
     const initialPathname = options.i18n?.enabled
       ? stripFarmLocaleFromPathname(ctx.pathname, options.i18n)
-      : ctx.pathname;
+      : stripFarmBasePath(ctx.pathname, options.i18n?.basePath ?? "/");
     let parentData: MiddlewareContext["parent"] | undefined;
 
     if (globalConfig) {

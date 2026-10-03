@@ -215,6 +215,10 @@ exactly like `/dashboard` does. This is what makes a matcher safe to gate access
 with. An encoded slash stays inside its own segment, so `%2F` never splits one
 segment into two and reaches `ctx.params` still encoded.
 
+That pathname is relative to the app's `basePath`. With `basePath: "/console"`, a request for
+`/console/dashboard` meets a `/dashboard` matcher and runs `src/app/dashboard/middleware.ts`;
+leave the base path out of matchers.
+
 When a matcher has params, the handler can read them from `ctx.params`.
 
 ```ts

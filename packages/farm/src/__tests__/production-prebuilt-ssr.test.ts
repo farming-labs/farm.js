@@ -484,6 +484,47 @@ export default function Page() {
     }
   }, 120_000);
 
+  it("runs route middleware for pages beneath the configured basePath", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.mkdir(path.join(root, "src", "app", "dashboard"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "dashboard", "page.tsx"),
+        `export default function Page() { return <main>dashboard page</main>; }`,
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "dashboard", "middleware.ts"),
+        `export default function middleware(ctx) { ctx.headers.set("x-dashboard-middleware", "ran"); }`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          basePath: "/workspace",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "production-base-path-middleware-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(await response.text()).toContain("dashboard page");
+          expect(response.headers.get("x-dashboard-middleware")).toBe("ran");
+        },
+        "/workspace/dashboard",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("preserves route-rule redirect status and explicit destination queries", async () => {
     const root = await createProductionFixture();
 

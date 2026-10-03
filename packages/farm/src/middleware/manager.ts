@@ -29,6 +29,7 @@ import {
   isFarmRedirectError,
 } from "../navigation-errors";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
+import { stripFarmBasePath } from "../base-path";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { createCliColors } from "../cli-colors";
 import { appendMiddlewareRoutePath } from "./path";
@@ -211,9 +212,11 @@ export class MiddlewareManager {
   async execute(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
     const url = resolveFarmRequestURL(req, { trustProxy: this.server?.trustProxy });
     const pathname = url.pathname;
+    // Match the app path page routing sees: without basePath (the locale step
+    // strips it too), as the production runner does.
     const routePathname = this.i18n?.enabled
       ? stripFarmLocaleFromPathname(pathname, this.i18n)
-      : pathname;
+      : stripFarmBasePath(pathname, this.i18n?.basePath ?? "/");
     const method = req.method || "GET";
     const startTime = Date.now();
 
