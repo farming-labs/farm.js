@@ -1067,14 +1067,14 @@ test("falls back to gateway polling while the hosted native relay is unavailable
   }
 });
 
-test("uses query credentials only for a detected legacy polling gateway", async () => {
+test("uses query credentials advertised by the polling gateway", async () => {
   const app = await createTestServer((_req, res) => {
     res.statusCode = 201;
     res.end("legacy-ok");
   });
   const gateway = await createQueuedPreviewGatewayTestServer(
     [{ id: "req_legacy", method: "GET", path: "/legacy", headers: {} }],
-    { expectedControlAuth: "query" },
+    { advertisedControlAuth: "query", expectedControlAuth: "query" },
   );
   const plan = createPreviewGatewayPlan(
     {
@@ -1102,6 +1102,7 @@ test("uses query credentials only for a detected legacy polling gateway", async 
   try {
     const authorized = await authorizePreviewGatewayPlan(plan, { runtime });
     assert.equal(authorized.controlAuth, "query");
+    assert.deepEqual(gateway.configRequests, ["/api/auth/config"]);
     await runPreviewGateway(authorized, {
       maxRequests: 1,
       pollTimeoutMs: 10,
@@ -1110,6 +1111,14 @@ test("uses query credentials only for a detected legacy polling gateway", async 
     assert.deepEqual(
       gateway.responses.map(({ requestId, response }) => [requestId, response.status]),
       [["req_legacy", 201]],
+    );
+    assert.deepEqual(
+      new Set(gateway.controlRequests),
+      new Set([
+        "GET /api/sessions/sess_queue/requests",
+        "POST /api/sessions/sess_queue/responses/req_legacy",
+        "DELETE /api/sessions/sess_queue",
+      ]),
     );
   } finally {
     await app.close();
@@ -1298,8 +1307,28 @@ async function createPreviewGatewayTestServer() {
 async function createQueuedPreviewGatewayTestServer(requests, options = {}) {
   const queued = [...requests];
   const responses = [];
+  const configRequests = [];
+  const controlRequests = [];
   const server = await createTestServer(async (req, res) => {
     const url = new URL(req.url || "/", "http://localhost");
+
+    if (
+      req.method === "GET" &&
+      url.pathname === "/api/auth/config" &&
+      options.advertisedControlAuth
+    ) {
+      configRequests.push(url.pathname);
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          enabled: false,
+          controlAuth: options.advertisedControlAuth,
+          defaultSessionTtlMs: 30 * 60 * 1000,
+          maxSessionTtlMs: 30 * 60 * 1000,
+        }),
+      );
+      return;
+    }
 
     if (req.method === "POST" && url.pathname === "/api/sessions") {
       await readRequestBody(req);
@@ -1317,6 +1346,7 @@ async function createQueuedPreviewGatewayTestServer(requests, options = {}) {
 
     if (req.method === "GET" && url.pathname === "/api/sessions/sess_queue/requests") {
       assertGatewayControlAuth(req, url, options.expectedControlAuth, "token_queue");
+      controlRequests.push(`${req.method} ${url.pathname}`);
       if (options.pollDelayMs)
         await new Promise((resolve) => setTimeout(resolve, options.pollDelayMs));
       res.setHeader("content-type", "application/json");
@@ -1326,6 +1356,7 @@ async function createQueuedPreviewGatewayTestServer(requests, options = {}) {
 
     if (req.method === "POST" && url.pathname.startsWith("/api/sessions/sess_queue/responses/")) {
       assertGatewayControlAuth(req, url, options.expectedControlAuth, "token_queue");
+      controlRequests.push(`${req.method} ${url.pathname}`);
       responses.push({
         requestId: url.pathname.split("/").pop(),
         response: JSON.parse(await readRequestBody(req)),
@@ -1336,6 +1367,7 @@ async function createQueuedPreviewGatewayTestServer(requests, options = {}) {
 
     if (req.method === "DELETE" && url.pathname === "/api/sessions/sess_queue") {
       assertGatewayControlAuth(req, url, options.expectedControlAuth, "token_queue");
+      controlRequests.push(`${req.method} ${url.pathname}`);
       res.end("ok");
       return;
     }
@@ -1346,6 +1378,8 @@ async function createQueuedPreviewGatewayTestServer(requests, options = {}) {
 
   return {
     url: `http://localhost:${server.port}`,
+    configRequests,
+    controlRequests,
     responses,
     close: server.close,
   };
