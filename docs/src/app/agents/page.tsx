@@ -154,10 +154,10 @@ export default function AgentsPage() {
                 </div>
                 {/* The landing hero's drag and wire, from "agents" into the waitlist button. */}
                 <SelectionWire
-                  clear="#agents-title, .agents-intro"
                   heading="#agents-title"
+                  padX={0.03}
                   pauseWithin=".agent-waitlist"
-                  route="around-right"
+                  route="down"
                   target=".agent-waitlist button[type=submit]"
                   word=".agents-hero-word"
                 />

@@ -98,35 +98,28 @@ function partOf(points: Point[], amount: number): { points: Point[]; tip: Point 
  * How the wire runs from the selection to the target.
  * - "below": from the selection's bottom edge, down, then across into the
  *   target's left side (the target hangs below the line, to the right).
- * - "around-right": from the selection's right edge, out to a gutter right of
- *   the copy, down, then back into the target's right side, so the wire never
- *   crosses the text between them.
+ * - "down": from the selection's bottom edge, down to just above the target,
+ *   across, and down into its top: a short zigzag.
  */
-type Route = "below" | "around-right";
+type Route = "below" | "down";
 
-function routeFor(
-  route: Route,
-  selection: Box,
-  target: Box,
-  clearRight: number,
-  width: number,
-): Point[] {
-  const targetY = (target.top + target.bottom) / 2;
+function routeFor(route: Route, selection: Box, target: Box): Point[] {
+  const portX = selection.right - Math.min(24, (selection.right - selection.left) / 4);
   if (route === "below") {
-    const portX = selection.right - Math.min(24, (selection.right - selection.left) / 4);
+    const targetY = (target.top + target.bottom) / 2;
     return [
       [portX, selection.bottom],
       [portX, targetY],
       [target.left, targetY],
     ];
   }
-  const portY = (selection.top + selection.bottom) / 2;
-  const gutter = Math.min(width - 4, Math.max(selection.right, target.right, clearRight) + 22);
+  const targetX = (target.left + target.right) / 2;
+  const turnY = Math.max(selection.bottom + 12, target.top - 16);
   return [
-    [selection.right, portY],
-    [gutter, portY],
-    [gutter, targetY],
-    [target.right, targetY],
+    [portX, selection.bottom],
+    [portX, turnY],
+    [targetX, turnY],
+    [targetX, target.top],
   ];
 }
 
@@ -146,8 +139,8 @@ export type SelectionWireProps = {
   holdOnTarget?: boolean;
   /** Clear and pause while focus is inside this element, such as a form someone is filling in. */
   pauseWithin?: string;
-  /** Elements whose text the wire must pass, for the "around-right" route. */
-  clear?: string;
+  /** The selection's side padding, in em: tighter keeps neighbouring glyphs out. */
+  padX?: number;
 };
 
 /**
@@ -167,7 +160,7 @@ export function SelectionWire({
   placeTargetUnderHeading = false,
   holdOnTarget = false,
   pauseWithin,
-  clear,
+  padX = 0.16,
 }: SelectionWireProps) {
   const layerRef = useRef<HTMLDivElement>(null);
   const selectRef = useRef<HTMLDivElement>(null);
@@ -196,7 +189,6 @@ export function SelectionWire({
     const heading = root?.querySelector<HTMLElement>(headingSelector);
     const text = swapText ? root?.querySelector<HTMLElement>(swapText) : null;
     const pauseZone = pauseWithin ? root?.querySelector<HTMLElement>(pauseWithin) : null;
-    const cleared = clear ? [...(root?.querySelectorAll<HTMLElement>(clear) ?? [])] : [];
     if (
       !layer ||
       !root ||
@@ -283,9 +275,9 @@ export function SelectionWire({
       const origin = layer.getBoundingClientRect();
       const wordRect = relative(wordBox.getBoundingClientRect(), origin);
       const headingRect = relative(heading.getBoundingClientRect(), origin);
-      const x0 = wordRect.left - 0.16 * fontSize;
+      const x0 = wordRect.left - padX * fontSize;
       const y0 = wordRect.top - 0.06 * fontSize;
-      const x1 = wordRect.right + 0.16 * fontSize;
+      const x1 = wordRect.right + padX * fontSize;
       const y1 = wordRect.bottom + 0.04 * fontSize;
       const selection: Box = { left: x0, top: y0, right: x1, bottom: y1 };
 
@@ -312,14 +304,7 @@ export function SelectionWire({
             };
           })()
         : relative(target.getBoundingClientRect(), origin);
-      // The right edge of the text the wire must pass: the text itself, not its box.
-      let clearRight = 0;
-      for (const element of cleared) {
-        const range = document.createRange();
-        range.selectNodeContents(element);
-        clearRight = Math.max(clearRight, range.getBoundingClientRect().right - origin.left);
-      }
-      const path = routeFor(route, selection, targetRect, clearRight, origin.width);
+      const path = routeFor(route, selection, targetRect);
       const portPoint = path[0]!;
       const endPoint = path[path.length - 1]!;
       // Where the cursor clicks: on the target, a little right of centre, as in the video.
@@ -550,7 +535,7 @@ export function SelectionWire({
     placeTargetUnderHeading,
     holdOnTarget,
     pauseWithin,
-    clear,
+    padX,
   ]);
 
   return (

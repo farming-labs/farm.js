@@ -78,6 +78,11 @@
 .agents-hero h1 > span:not(.agents-hero-word) {
   color: #8f8f8f;
 }
+/* The word the hero's selection lands on. The heading's tight tracking pulls the
+   period into the selection's edge; a hair of space keeps it outside. */
+.agents-hero-word {
+  margin-right: 0.05em;
+}
 .agents-intro {
   max-width: 32rem;
   margin-inline: auto;
