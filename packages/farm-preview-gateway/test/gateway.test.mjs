@@ -666,7 +666,8 @@ test("fails managed auth exchange closed when its rate limiter is unavailable", 
     auth: {
       signingSecret: "managed-preview-test-secret-that-is-long-enough",
       githubClientId: "github-client-id",
-      rateLimitExchange: async () => {
+      rateLimitExchange: async (request) => {
+        assert.equal(request.bodyUsed, false);
         throw new Error("private redis connection details");
       },
       fetch: async () => {
