@@ -2,9 +2,9 @@ import React from "react";
 import { StarButton } from "./star-button";
 
 // An async server page that imports a "use client" component. React cannot
-// hydrate async components in the browser, so Farm must keep this route
-// server-rendered instead of blanking the page and looping its data fetches.
-// e2e coverage asserts the server HTML survives after load.
+// run an async component in the browser, so the page itself stays server-only
+// and Farm hydrates StarButton as its own island. e2e coverage asserts the
+// server HTML survives and the button is interactive.
 export default async function AsyncClientImportPage() {
   const stars = await Promise.resolve(42);
 

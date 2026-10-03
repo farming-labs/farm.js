@@ -29,12 +29,26 @@ test.describe("Async server pages importing client components", () => {
     expect(asyncComponentErrors).toEqual([]);
   });
 
-  test("async pages with client imports opt out of route hydration", async ({ request }) => {
+  test("client components of an async page hydrate as islands", async ({ page }) => {
+    await page.goto("/async-client-import");
+    const island = page.locator("farm-client-boundary[data-farm-client-boundary]");
+    await expect(island).toHaveCount(1);
+    await expect(island).toHaveAttribute("data-farm-hydrated", "true");
+
+    const button = page.getByTestId("star-button");
+    await expect(button).toHaveText("Stars: 42");
+    await button.click();
+    await button.click();
+    await expect(button).toHaveText("Stars: 44");
+    await expect(page.getByTestId("async-page-title")).toHaveText("Async server page");
+  });
+
+  test("the async page itself never hydrates", async ({ request }) => {
     const response = await request.get("/async-client-import");
     expect(response.status()).toBe(200);
 
-    // Depending on the active render pipeline the hydration flag is either
-    // emitted as false or omitted entirely — it must never be true.
+    // The route-wide flag is either emitted as false or omitted entirely; it
+    // must never be true, because React cannot run the async page component.
     const html = await response.text();
     expect(html).not.toContain("window.__FARM_PAGE_SHOULD_HYDRATE__ = true");
     expect(html).toContain("Fetched stars:");

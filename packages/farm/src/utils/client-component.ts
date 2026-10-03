@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { isFarmIslandStrategy, type FarmIslandStrategy } from "../island";
+import { isReactRenderer, type FarmRenderer } from "../renderer";
 import type { FarmIsolatedClientHydrationMode } from "../types";
 
 function readIfExists(filePath: string): string | null {
@@ -66,8 +67,9 @@ export interface ClientModuleMetadata {
   /**
    * Set when the module would hydrate (client imports or an explicit hydrate
    * export) but its default export is an async server component, which React
-   * cannot run in a client root. Hydration is suppressed so the
-   * server-rendered HTML stays intact instead of crashing to a blank page.
+   * cannot run in a client root, and its client components could not become
+   * isolated islands either. The server-rendered HTML stays intact and those
+   * client components are not interactive.
    */
   suppressedAsyncHydration?: true;
 }
@@ -88,6 +90,45 @@ export interface ClientModuleHydrationPlan extends ClientModuleMetadata {
   isolatedBoundaries: IsolatedClientBoundaryReference[];
   costGuardExceeded?: true;
   fallbackReason?: string;
+  /**
+   * The owner is an async server component whose client components hydrate
+   * as isolated islands. Set regardless of the experiment mode.
+   */
+  asyncOwnerIslands?: true;
+}
+
+export interface FarmClientHydrationPlanOptions {
+  /**
+   * Hydrate the client components of an async server page or layout as
+   * isolated islands whatever the experiment mode is. React cannot run the
+   * async owner in the browser, so independent roots are the only way its
+   * client components become interactive. Pass false for renderers without
+   * isolated roots, and when an integration provider has to wrap the whole
+   * route.
+   */
+  asyncOwnerIslands?: boolean;
+}
+
+/**
+ * Async owners get islands on React, the renderer with isolated roots, unless
+ * an integration provider has to wrap the whole route (an island would render
+ * outside it).
+ */
+export function getFarmClientHydrationPlanOptions(
+  renderer: Pick<FarmRenderer, "name"> | undefined,
+  hasUnsupportedIntegrationProvider: boolean,
+): FarmClientHydrationPlanOptions {
+  return { asyncOwnerIslands: isReactRenderer(renderer) && !hasUnsupportedIntegrationProvider };
+}
+
+/** The warning for an async owner whose client components stay static. */
+export function describeSuppressedAsyncHydration(subject: string, reason?: string): string {
+  return (
+    `${subject} is an async server component that imports client components. React cannot ` +
+    `hydrate an async component, and its client components could not hydrate as isolated ` +
+    `islands${reason ? ` (${reason})` : ""}, so the route stays server-rendered and those ` +
+    `components are not interactive. Fix the reason above, or render them from a synchronous page.`
+  );
 }
 
 /** @internal Largest measured statically bounded independent-root plan. */
@@ -524,6 +565,7 @@ export function getClientModuleHydrationPlan(
   modulePath: string,
   root: string | undefined,
   mode: FarmIsolatedClientHydrationMode = "off",
+  options: FarmClientHydrationPlanOptions = {},
 ): ClientModuleHydrationPlan {
   const metadata = getClientModuleMetadata(modulePath, root);
   const resolvedPath = resolveModuleSourcePath(modulePath, root);
@@ -546,7 +588,13 @@ export function getClientModuleHydrationPlan(
     ...(fallbackReason ? { fallbackReason } : {}),
   });
 
-  if (mode === "off") return emptyPlan();
+  // An async owner has no route-wide root to fall back to, so its client
+  // components become islands whatever the mode, and the cost guard (which
+  // weighs islands against that route-wide root) does not apply.
+  const asyncOwner =
+    metadata.suppressedAsyncHydration === true && options.asyncOwnerIslands === true;
+
+  if (mode === "off" && !asyncOwner) return emptyPlan();
   if (!resolvedPath) return emptyPlan("the owner source could not be resolved");
   if (parsed.isClientComponent) {
     return emptyPlan("the owner is already a client component");
@@ -555,7 +603,9 @@ export function getClientModuleHydrationPlan(
     return emptyPlan("the owner explicitly exports `hydrate = true`");
   }
 
-  const inspection = collectIsolatedClientBoundaries(resolvedPath, root);
+  const inspection = collectIsolatedClientBoundaries(resolvedPath, root, {
+    allowDynamicCardinality: asyncOwner,
+  });
   if (inspection.boundaries.length === 0) {
     return emptyPlan(inspection.fallbackReason);
   }
@@ -567,7 +617,7 @@ export function getClientModuleHydrationPlan(
     );
   }
   const boundaryLimit = isolatedHydrationBoundaryLimit();
-  if (inspection.estimatedBoundaryCount > boundaryLimit) {
+  if (!asyncOwner && inspection.estimatedBoundaryCount > boundaryLimit) {
     return emptyPlan(
       `the client graph can create ${inspection.estimatedBoundaryCount} isolated roots, above the measured limit of ${boundaryLimit}`,
       true,
@@ -575,8 +625,8 @@ export function getClientModuleHydrationPlan(
     );
   }
 
-  const enabled = mode === "enabled";
-  return {
+  const enabled = mode === "enabled" || asyncOwner;
+  const plan: ClientModuleHydrationPlan = {
     ...metadata,
     shouldHydrate: enabled ? false : metadata.shouldHydrate,
     islandStrategy: enabled ? null : metadata.islandStrategy,
@@ -588,10 +638,17 @@ export function getClientModuleHydrationPlan(
     hasIsolatedClientBoundaries: enabled,
     isolatedBoundaries: inspection.boundaries,
   };
+  if (asyncOwner) {
+    delete plan.suppressedAsyncHydration;
+    plan.asyncOwnerIslands = true;
+  }
+  return plan;
 }
 
 interface FarmIsolatedHydrationRoutePlan {
   mode: FarmIsolatedClientHydrationMode;
+  asyncOwnerIslands?: true;
+  suppressedAsyncHydration?: true;
   shouldHydrate: boolean;
   islandStrategy: FarmIslandStrategy | null;
   legacyShouldHydrate: boolean;
@@ -617,6 +674,13 @@ function restoreRouteWideHydration(
   metadata.islandStrategy = metadata.legacyIslandStrategy;
   metadata.hasIsolatedClientBoundaries = false;
   metadata.isolatedBoundaries = [];
+  if (metadata.asyncOwnerIslands) {
+    // An async owner has no route-wide root: it goes back to server-only.
+    delete metadata.asyncOwnerIslands;
+    metadata.suppressedAsyncHydration = true;
+    metadata.fallbackReason = fallbackReason ?? "a parent layout hydrates the whole route";
+    return;
+  }
   if (fallbackReason) {
     metadata.costGuardExceeded = true;
     metadata.fallbackReason = fallbackReason;
@@ -662,9 +726,9 @@ export function enforceFarmIsolatedHydrationRouteBudget(
     });
     const fallbackReason = `the matched route ${route.pattern} can create ${totalRootCount} isolated roots, above the measured limit of ${boundaryLimit}`;
 
-    if (overflowingLayout) {
+    if (overflowingLayout && !overflowingLayout.metadata.asyncOwnerIslands) {
       restoreRouteWideHydration(overflowingLayout.metadata, fallbackReason);
-    } else if (route.metadata.hasIsolatedClientBoundaries) {
+    } else if (route.metadata.hasIsolatedClientBoundaries && !route.metadata.asyncOwnerIslands) {
       restoreRouteWideHydration(route.metadata, fallbackReason);
     }
   }
@@ -1086,6 +1150,10 @@ function hasDynamicJsxCardinality(content: string | null, localBindings: string[
 function collectIsolatedClientBoundaries(
   ownerPath: string,
   root: string | undefined,
+  options: {
+    /** Accept boundaries rendered a data-dependent number of times. */
+    allowDynamicCardinality?: boolean;
+  } = {},
 ): {
   boundaries: IsolatedClientBoundaryReference[];
   estimatedBoundaryCount: number;
@@ -1159,7 +1227,11 @@ function collectIsolatedClientBoundaries(
           return 0;
         }
       }
-      if (staticUses > 0 && hasDynamicJsxCardinality(content, localBindings)) {
+      if (
+        staticUses > 0 &&
+        !options.allowDynamicCardinality &&
+        hasDynamicJsxCardinality(content, localBindings)
+      ) {
         fallbackReason = `the client boundary count imported from ${specifier} is data-dependent`;
         costGuardExceeded = true;
         return 0;

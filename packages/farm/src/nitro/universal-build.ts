@@ -32,11 +32,14 @@ import { builtinModules, createRequire } from "module";
 import { isDeepStrictEqual } from "node:util";
 import { logger, toPosixPath, toViteModuleId } from "../utils";
 import {
+  describeSuppressedAsyncHydration,
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
   getClientModuleMetadata,
+  getFarmClientHydrationPlanOptions,
   resolveFarmIsolatedClientHydrationMode,
   type ClientModuleHydrationPlan,
+  type FarmClientHydrationPlanOptions,
   type IsolatedClientBoundaryReference,
 } from "../utils/client-component";
 import type { FarmIsolatedClientHydrationMode } from "../types";
@@ -1223,11 +1226,12 @@ function getCachedClientModuleHydrationPlan(
   root: string,
   mode: FarmIsolatedClientHydrationMode,
   cache: Map<string, ClientModuleHydrationPlan>,
+  options: FarmClientHydrationPlanOptions = {},
 ): ClientModuleHydrationPlan {
-  const key = `${path.resolve(root)}\0${mode}\0${path.resolve(modulePath)}`;
+  const key = `${path.resolve(root)}\0${mode}\0${options.asyncOwnerIslands === true}\0${path.resolve(modulePath)}`;
   let plan = cache.get(key);
   if (!plan) {
-    plan = getClientModuleHydrationPlan(modulePath, root, mode);
+    plan = getClientModuleHydrationPlan(modulePath, root, mode, options);
     cache.set(key, plan);
   }
   return { ...plan, isolatedBoundaries: [...plan.isolatedBoundaries] };
@@ -1290,6 +1294,10 @@ async function buildClient(
       hasUnsupportedIntegrationProvider: Boolean(unsupportedIntegrationProvider),
     },
   );
+  const planOptions = getFarmClientHydrationPlanOptions(
+    config.renderer,
+    Boolean(unsupportedIntegrationProvider),
+  );
 
   const clientLayouts = layoutRoutes.map((layout) => {
     try {
@@ -1298,6 +1306,7 @@ async function buildClient(
         root,
         isolatedMode,
         hydrationPlanCache,
+        planOptions,
       );
       return {
         ...layout,
@@ -1310,6 +1319,9 @@ async function buildClient(
         hasIsolatedClientBoundaries: metadata.hasIsolatedClientBoundaries,
         isolatedHydrationEligible: metadata.isolatedHydrationEligible,
         isolatedBoundaries: metadata.isolatedBoundaries,
+        asyncOwnerIslands: metadata.asyncOwnerIslands,
+        suppressedAsyncHydration: metadata.suppressedAsyncHydration,
+        fallbackReason: metadata.fallbackReason,
       };
     } catch (error) {
       logger.warn(`⚠️  Could not inspect layout file ${layout.modulePath}: ${error}`);
@@ -1371,6 +1383,7 @@ async function buildClient(
           root,
           isolatedMode,
           hydrationPlanCache,
+          planOptions,
         ),
   }));
 
@@ -1416,9 +1429,7 @@ async function buildClient(
       );
       if (metadata.suppressedAsyncHydration) {
         logger.warn(
-          `⚠️  ${route.pattern} is an async server component that imports client components; ` +
-            `React cannot hydrate async components, so the route stays server-rendered ` +
-            `and its client imports are not interactive.`,
+          `⚠️  ${describeSuppressedAsyncHydration(route.pattern, metadata.fallbackReason)}`,
         );
       }
       if (
@@ -4683,6 +4694,10 @@ function generateVirtualEntryCode(
       hasUnsupportedIntegrationProvider: Boolean(unsupportedIntegrationProvider),
     },
   );
+  const hydrationPlanOptions = getFarmClientHydrationPlanOptions(
+    config.renderer,
+    Boolean(unsupportedIntegrationProvider),
+  );
   const layoutAppliesToRoute = (layoutPattern: string, routePattern: string) =>
     layoutPattern === "/" ||
     routePattern === layoutPattern ||
@@ -4694,6 +4709,7 @@ function generateVirtualEntryCode(
       config.root,
       isolatedHydrationMode,
       hydrationPlanCache,
+      hydrationPlanOptions,
     ),
   }));
   const pageHydrationPlans = new Map(
@@ -4706,6 +4722,7 @@ function generateVirtualEntryCode(
           config.root,
           isolatedHydrationMode,
           hydrationPlanCache,
+          hydrationPlanOptions,
         ),
       ]),
   );

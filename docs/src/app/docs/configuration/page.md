@@ -446,6 +446,10 @@ The option has three modes:
 | `"analyze"` | Reports eligible boundaries without changing emitted code or runtime work.   |
 | `"enabled"` | Hydrates safe client leaves independently and keeps unsupported routes safe. |
 
+The mode applies to synchronous pages and layouts, which have a route-wide alternative. An `async`
+page or layout has none, so its eligible client components always hydrate as islands, in every
+mode. See [Async pages and client components](/docs/server-rendering#async-pages-and-client-components).
+
 An eligible boundary is a local, statically analyzable `"use client"` module with a default or
 named capitalized component export and serializable props. Farm preserves its server-rendered HTML,
 emits the client component as a separate browser chunk, and hydrates that leaf as its own React

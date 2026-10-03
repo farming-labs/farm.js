@@ -4,8 +4,10 @@ import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
   getClientModuleMetadata,
+  getFarmClientHydrationPlanOptions,
   getIslandStrategyExport,
   hasHydrateExport,
   hasUseClientDirective,
@@ -766,6 +768,120 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
       shouldHydrate: false,
       islandStrategy: null,
       suppressedAsyncHydration: true,
+    });
+  });
+
+  describe("async server owners", () => {
+    function asyncPage(body: string, clientSource?: string) {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-async-island-"));
+      tempDirs.push(root);
+      const pageFile = path.join(root, "src", "app", "demo", "page.tsx");
+      fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+      fs.writeFileSync(
+        path.join(root, "src", "app", "demo", "star-button.tsx"),
+        clientSource ??
+          '"use client";\nexport function StarButton({ count }) { return <button>{count}</button>; }\n',
+      );
+      fs.writeFileSync(
+        pageFile,
+        `import { StarButton } from "./star-button";\nexport default async function Page() { const stars = await load(); return ${body}; }\n`,
+      );
+      return {
+        root,
+        pageFile,
+        clientFile: path.join(root, "src", "app", "demo", "star-button.tsx"),
+      };
+    }
+
+    const islands = { asyncOwnerIslands: true };
+
+    it("hydrates the client components of an async page as islands without the experiment", () => {
+      const { root, pageFile, clientFile } = asyncPage("<main><StarButton count={stars} /></main>");
+
+      for (const mode of ["off", "analyze", "enabled"] as const) {
+        const plan = getClientModuleHydrationPlan(pageFile, root, mode, islands);
+        expect(plan).toMatchObject({
+          shouldHydrate: false,
+          hasIsolatedClientBoundaries: true,
+          asyncOwnerIslands: true,
+          isolatedBoundaries: [{ modulePath: clientFile, islandStrategy: "load" }],
+        });
+        expect(plan.suppressedAsyncHydration).toBeUndefined();
+      }
+    });
+
+    it("keeps an async page server-only where islands are unavailable", () => {
+      const { root, pageFile } = asyncPage("<StarButton count={stars} />");
+
+      for (const options of [{}, getFarmClientHydrationPlanOptions({ name: "preact" }, false)]) {
+        expect(getClientModuleHydrationPlan(pageFile, root, "off", options)).toMatchObject({
+          suppressedAsyncHydration: true,
+          hasIsolatedClientBoundaries: false,
+        });
+      }
+      expect(getFarmClientHydrationPlanOptions(undefined, true)).toEqual({
+        asyncOwnerIslands: false,
+      });
+      expect(getFarmClientHydrationPlanOptions({ name: "react" }, false)).toEqual({
+        asyncOwnerIslands: true,
+      });
+    });
+
+    it("does not apply the island cost guard, since there is no route-wide root to fall back to", () => {
+      for (const body of [
+        "<ul>{items.map((item) => <li key={item}><StarButton count={item} /></li>)}</ul>",
+        "<div><StarButton count={1} /><StarButton count={2} /><StarButton count={3} /><StarButton count={4} /><StarButton count={5} /></div>",
+      ]) {
+        const { root, pageFile } = asyncPage(body);
+        expect(getClientModuleHydrationPlan(pageFile, root, "off", islands)).toMatchObject({
+          hasIsolatedClientBoundaries: true,
+          asyncOwnerIslands: true,
+        });
+        // A synchronous owner with the same graph still trips the guard.
+        expect(getClientModuleHydrationPlan(pageFile, root, "enabled")).toMatchObject({
+          hasIsolatedClientBoundaries: false,
+          costGuardExceeded: true,
+        });
+      }
+    });
+
+    it("keeps correctness fallbacks and reports why", () => {
+      const { root, pageFile } = asyncPage("<StarButton><p>server child</p></StarButton>");
+      expect(getClientModuleHydrationPlan(pageFile, root, "off", islands)).toMatchObject({
+        suppressedAsyncHydration: true,
+        hasIsolatedClientBoundaries: false,
+        fallbackReason:
+          "the client boundary imported from ./star-button receives React elements, which cannot cross the boundary as serialized props",
+      });
+
+      const reexport = asyncPage(
+        "<StarButton count={stars} />",
+        '"use client";\nfunction StarButton() { return null; }\nexport { StarButton };\n',
+      );
+      expect(
+        getClientModuleHydrationPlan(reexport.pageFile, reexport.root, "off", islands),
+      ).toMatchObject({ suppressedAsyncHydration: true, hasIsolatedClientBoundaries: false });
+    });
+
+    it("returns an async page to server-only when a parent layout hydrates the whole route", () => {
+      const { root, pageFile } = asyncPage("<StarButton count={stars} />");
+      const page = getClientModuleHydrationPlan(pageFile, root, "off", islands);
+      const layout = { ...page, shouldHydrate: true, hasIsolatedClientBoundaries: false };
+      delete layout.asyncOwnerIslands;
+
+      enforceFarmIsolatedHydrationRouteBudget(
+        [{ pattern: "/", depth: 0, metadata: layout }],
+        [{ pattern: "/demo", depth: 1, metadata: page }],
+        () => true,
+      );
+
+      expect(page).toMatchObject({
+        hasIsolatedClientBoundaries: false,
+        isolatedBoundaries: [],
+        suppressedAsyncHydration: true,
+        fallbackReason: "a parent layout hydrates the whole route",
+      });
+      expect(page.asyncOwnerIslands).toBeUndefined();
     });
   });
 

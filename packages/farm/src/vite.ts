@@ -3003,7 +3003,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           resolvedConfig?.publicRuntimeConfig || options.publicRuntimeConfig,
           isReactRenderer(renderer) ? docs?.adapter?.react : undefined,
           renderer,
-          isolatedHydrationMode === "enabled",
+          isolatedHydrationMode === "enabled" ||
+            (isReactRenderer(renderer) &&
+              (
+                options.isolatedClientBoundaryModules ??
+                farmApp?.getRouteManager().getIsolatedClientBoundaryModules(root)
+              )?.size > 0),
           resolvedConfig?.trailingSlash ?? false,
           resolvedConfig?.basePath ?? "/",
           generateClientCachePersistenceCode(
@@ -3160,29 +3165,19 @@ export const manifest = getManifest();
         transformed = true;
 
         const currentConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
-        const configuredProviders = getIntegrationProviders(currentConfig.integrations).filter(
-          (provider) => provider.component || provider.type === "clerk",
-        );
-        const isolatedHydrationEnabled =
-          resolveFarmIsolatedClientHydrationMode(
-            currentConfig.experimental?.isolatedClientHydration,
-            {
-              serverComponents: currentConfig.experimental?.serverComponents === true,
-              hasUnsupportedIntegrationProvider: configuredProviders.some(
-                (provider) => provider.supportsIsolatedHydration !== true,
-              ),
-            },
-          ) === "enabled" && isReactRenderer(resolveFarmRenderer(currentConfig.renderer));
         let isolatedModuleReference: string | null = null;
         const root = currentConfig.root || server?.config.root || process.cwd();
         const cleanId = id.split("?", 1)[0];
         const selectedIsolatedModules =
           options.isolatedClientBoundaryModules ??
           farmApp?.getRouteManager().getIsolatedClientBoundaryModules(root);
+        // The plan selects a boundary when the experiment is enabled or when an
+        // async server page or layout renders it (those islands do not depend
+        // on the experiment).
         const selectedForIsolatedHydration =
           selectedIsolatedModules?.has(path.resolve(cleanId)) === true;
         if (
-          isolatedHydrationEnabled &&
+          isReactRenderer(resolveFarmRenderer(currentConfig.renderer)) &&
           selectedForIsolatedHydration &&
           isIsolatableClientBoundarySource(clientBoundarySource)
         ) {
@@ -3494,25 +3489,57 @@ if (import.meta.hot) {
       }
 
       const isolatedHydrationMode = currentFarmConfig?.experimental?.isolatedClientHydration;
+      const planRouteManager = farmApp?.getRouteManager();
+      // Async server pages and layouts get islands without the experiment, so
+      // React apps replan when a page or layout changes (it may have become
+      // async) or once any island exists.
+      const tracksAsyncOwnerIslands =
+        isReactRenderer(currentFarmConfig?.renderer) &&
+        planRouteManager !== undefined &&
+        (planRouteManager.getIsolatedClientBoundaryModules(currentFarmConfig.root).size > 0 ||
+          [
+            ...planRouteManager.getRoutes().values(),
+            ...planRouteManager.getLayouts().values(),
+          ].some((entry) => path.resolve(entry.modulePath) === path.resolve(file)));
       if (
         currentSrcRoot &&
-        (isolatedHydrationMode === "enabled" || isolatedHydrationMode === "analyze") &&
+        (isolatedHydrationMode === "enabled" ||
+          isolatedHydrationMode === "analyze" ||
+          tracksAsyncOwnerIslands) &&
         /\.[cm]?[jt]sx?$/.test(normalizedFile)
       ) {
-        const routeManager = farmApp?.getRouteManager();
+        const routeManager = planRouteManager;
         if (routeManager) {
           const previousPlan = JSON.stringify(
             routeManager.generateClientManifest(currentFarmConfig.root),
           );
+          const previousBoundaries = new Set(
+            routeManager.getIsolatedClientBoundaryModules(currentFarmConfig.root),
+          );
           routeManager.invalidateClientManifest();
           const nextPlan = JSON.stringify(
             routeManager.generateClientManifest(currentFarmConfig.root),
+          );
+          const nextBoundaries = routeManager.getIsolatedClientBoundaryModules(
+            currentFarmConfig.root,
           );
           const planChanged = previousPlan !== nextPlan;
           const manifestModule = server.moduleGraph.getModuleById("/@farm/manifest");
           if (manifestModule) server.moduleGraph.invalidateModule(manifestModule);
           if (planChanged) {
             for (const mod of modules) server.moduleGraph.invalidateModule(mod);
+            // A component that gained or lost island ownership needs a fresh transform.
+            for (const boundary of new Set([...previousBoundaries, ...nextBoundaries])) {
+              if (previousBoundaries.has(boundary) === nextBoundaries.has(boundary)) continue;
+              for (const mod of server.moduleGraph.getModulesByFile(boundary) ?? []) {
+                server.moduleGraph.invalidateModule(mod);
+              }
+            }
+            // The client entry includes the island runtime only when a plan needs it.
+            for (const clientId of ["/@farm/client", "/@farm/client.js"]) {
+              const clientModule = server.moduleGraph.getModuleById(clientId);
+              if (clientModule) server.moduleGraph.invalidateModule(clientModule);
+            }
             server.ws.send({ type: "full-reload", path: "*" });
             return [];
           }

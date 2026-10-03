@@ -40,6 +40,7 @@ import { toFileModuleUrl } from "../utils/file-module";
 import {
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
+  getFarmClientHydrationPlanOptions,
   getClientModuleMetadata,
   resolveFarmIsolatedClientHydrationMode,
   type IsolatedClientBoundaryReference,
@@ -120,6 +121,8 @@ export interface FarmClientRouteManifest {
     isolatedBoundaries?: IsolatedClientBoundaryReference[];
     renderPlan: FarmRouteRenderPlan;
     suppressedAsyncHydration?: true;
+    /** Why an async page's client components could not become islands. */
+    suppressedAsyncHydrationReason?: string;
     search?: ProgrammaticRouteSearchClientOptions;
     segments: Array<{
       segment: string;
@@ -624,14 +627,28 @@ export class RouteManager {
         hasUnsupportedIntegrationProvider: Boolean(unsupportedIntegrationProvider),
       },
     );
+    const planOptions = getFarmClientHydrationPlanOptions(
+      this.config.renderer,
+      Boolean(unsupportedIntegrationProvider),
+    );
     const layoutEntries = Array.from(this.layouts.values()).map((entry) => ({
       entry,
-      metadata: getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode),
+      metadata: getClientModuleHydrationPlan(
+        entry.modulePath,
+        normalizedProjectRoot,
+        isolatedMode,
+        planOptions,
+      ),
     }));
 
     const routeEntries = Array.from(this.routes.values()).map((entry) => ({
       entry,
-      metadata: getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode),
+      metadata: getClientModuleHydrationPlan(
+        entry.modulePath,
+        normalizedProjectRoot,
+        isolatedMode,
+        planOptions,
+      ),
     }));
 
     enforceFarmIsolatedHydrationRouteBudget(
@@ -696,6 +713,9 @@ export class RouteManager {
           islandStrategy: metadata.islandStrategy,
         }),
         suppressedAsyncHydration: metadata.suppressedAsyncHydration,
+        ...(metadata.suppressedAsyncHydration && metadata.fallbackReason
+          ? { suppressedAsyncHydrationReason: metadata.fallbackReason }
+          : {}),
         search: getProgrammaticRouteSearchClientOptions(programmaticPage?.search),
         segments: entry.route.segments.map((seg) => ({
           segment: seg.segment,

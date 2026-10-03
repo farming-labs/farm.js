@@ -209,15 +209,45 @@ React-compatible root cannot schedule those children independently. Keep interac
 eligible leaves can also use Farm's experimental React compiler for direct state binding updates
 after their independent roots mount.
 
-### Async pages stay server-only
+### Async pages and client components
 
-React and Preact cannot hydrate an `async` component in the browser. When a page's default export is `async`
-and it imports client components (or exports `hydrate = true`), Farm keeps the route
-server-rendered instead of hydrating it: the SSR HTML stays visible, but the imported client
-components are not interactive on that route. Farm logs a warning pointing at the module when this
-happens. To make the interactivity work, fetch data in a synchronous page (for example through a
-route loader) and render the `"use client"` component from there, or enable experimental server
-components support.
+A page or layout can be an `async` server component and still render `"use client"` components that
+work in the browser:
+
+```tsx
+import { StarButton } from "./star-button";
+
+export default async function RepoPage() {
+  const repo = await getRepo();
+  return (
+    <main>
+      <h1>{repo.name}</h1>
+      <StarButton initialCount={repo.stars} />
+    </main>
+  );
+}
+```
+
+React cannot run an `async` component in the browser, so the page itself stays server-rendered and
+never ships to the client. Each client component it renders hydrates as its own island instead, with
+the props the server passed it. This works by default in React apps; it does not need
+`experimental.isolatedClientHydration`.
+
+Islands have the same limits as [isolated client leaves](#isolated-client-leaves-without-rsc):
+
+- Props must be serializable. Passing server-rendered JSX as `children` or another prop
+  (`<ClientShell><ServerList /></ClientShell>`) does not cross the boundary.
+- A client component must use a supported export shape and must not sit where the HTML parser moves
+  it, such as directly inside `<table>`.
+- An integration provider that wraps the whole route, and does not declare
+  `supportsIsolatedHydration: true`, keeps its routes route-wide.
+- A parent layout that hydrates as a whole route owns the page area, so the async page under it
+  stays static.
+
+When one of these applies, the route stays server-rendered, its client components are not
+interactive, and Farm logs a warning naming the module and the reason. Fix the reason, or render
+the interactive part from a synchronous page. Preact, Solid, Vue, and Svelte keep async pages
+server-only.
 
 ### Isolated client leaves without RSC
 
