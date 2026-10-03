@@ -173,7 +173,7 @@ export function SiteHeader({ activePage }: { activePage?: "blog" | "agents" }) {
             <a
               key={item.label}
               aria-current={activePage && item.href === `/${activePage}` ? "page" : undefined}
-              className="aria-[current=page]:bg-white/[0.04] aria-[current=page]:text-white flex h-full min-w-0 flex-auto items-center border-r border-white/12 px-3 font-mono uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white xl:px-4"
+              className="aria-[current=page]:bg-white/[0.04] aria-[current=page]:text-white flex h-full min-w-0 flex-auto items-center border-r border-white/12 px-3 last:border-r-0 font-mono uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white xl:px-4"
               href={item.href}
             >
               <IndexedLabel index={item.index} icon={item.icon} label={item.label} />
@@ -191,7 +191,7 @@ export function SiteHeader({ activePage }: { activePage?: "blog" | "agents" }) {
             <GithubIcon className="size-4" />
           </a>
           <a
-            className="inline-flex h-11 items-center gap-1.5 border-l border-white/12 bg-white px-5 font-mono text-[10px] font-normal uppercase tracking-normal text-black transition-colors duration-150 hover:bg-white/88 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
+            className="inline-flex h-11 items-center gap-1.5 border-l border-white/12 bg-white bg-clip-padding px-5 font-mono text-[10px] font-normal uppercase tracking-normal text-black transition-colors duration-150 hover:bg-white/88 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
             href="/docs"
           >
             <BookOpenText aria-hidden className="size-3.5" strokeWidth={1.6} />
