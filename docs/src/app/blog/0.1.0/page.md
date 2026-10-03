@@ -7,7 +7,7 @@ description: "Our first stable release. Built for apps and agents."
 
 KinfeMichael Tariku · Oct 2026
 
-<BlogVideo src="/videos/farmjs-v0.1.0-launch.mp4" poster="/videos/farmjs-v0.1.0-launch-poster.jpg" title="Farm.js v0.1.0 · launch film" duration="1:56" caption="The v0.1.0 launch film, with sound" />
+<BlogVideo src="/videos/farmjs-v0.1.0-launch.mp4" poster="/videos/farmjs-v0.1.0-launch-poster.jpg" title="Farm.js v0.1.0 · launch video" duration="1:56" caption="The v0.1.0 launch video" />
 
 Farm.js 0.1 is out. It is the first release with a compatibility promise, and the first one I am comfortable calling stable.
 
