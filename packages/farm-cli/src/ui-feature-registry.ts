@@ -327,6 +327,20 @@ export function sanityContentUIFeature(): UIFeatureDefinition {
   };
 }
 
+export function strapiContentUIFeature(): UIFeatureDefinition {
+  return {
+    name: "strapi-content",
+    description: "Strapi content list UI",
+    components: ["badge", "card"],
+    needsApiClient: false,
+    notes: ['Open "/integrations/strapi" to check the Strapi connection.'],
+    files: () => [
+      componentFile("strapi-content-console.tsx", strapiContentTemplate()),
+      integrationPageFile("strapi", "StrapiContentConsole"),
+    ],
+  };
+}
+
 function billingUIFeature(input: {
   provider: "stripe" | "polar" | "autumn";
   label: string;
@@ -1752,6 +1766,41 @@ export function SanityContentConsole() {
             </code>
             <p className="text-sm text-muted-foreground">
               Point a Sanity webhook at /api/sanity/webhook to keep cached pages fresh.
+            </p>
+          </CardContent>
+        </Card>
+      </section>
+    </main>
+  );
+}
+`;
+}
+
+function strapiContentTemplate() {
+  return `import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+
+export function StrapiContentConsole() {
+  return (
+    <main className="min-h-screen bg-background px-6 py-12 text-foreground">
+      <section className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+        <div className="space-y-3">
+          <Badge variant="secondary">Strapi</Badge>
+          <h1 className="text-3xl font-semibold tracking-normal">Content</h1>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Connected to Strapi</CardTitle>
+            <CardDescription>
+              Query typed documents from server queries and invalidate them from the Strapi webhook.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <code className="block overflow-x-auto rounded-md border bg-muted/30 p-3 text-xs">
+              createStrapiCollection(cms, &quot;articles&quot;).find()
+            </code>
+            <p className="text-sm text-muted-foreground">
+              Send the configured secret header to /api/strapi/webhook when content changes.
             </p>
           </CardContent>
         </Card>

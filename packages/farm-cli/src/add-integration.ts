@@ -13,6 +13,7 @@ import {
   polarBillingUIFeature,
   resendEmailUIFeature,
   sanityContentUIFeature,
+  strapiContentUIFeature,
   stripeBillingUIFeature,
   supabaseAuthUIFeature,
   unkeyApiKeysUIFeature,
@@ -73,6 +74,7 @@ export type FarmIntegrationProvider =
   | "polar"
   | "resend"
   | "sanity"
+  | "strapi"
   | "stripe"
   | "supabase"
   | "unkey"
@@ -591,6 +593,36 @@ export const sanityIntegration = sanity({
   },
   log(event) {
     console.log("[sanity]", event.phase, event.route?.path || "none");
+  },
+});
+`,
+  },
+  {
+    provider: "strapi",
+    aliases: ["strapi-cms"],
+    defaultKey: "cms",
+    packageName: "@farm.js/strapi",
+    fileName: "strapi",
+    exportName: "strapiIntegration",
+    description: "Strapi content with typed reads, responsive media, and webhook invalidation",
+    env: ["STRAPI_API_URL", "STRAPI_API_TOKEN", "STRAPI_MEDIA_URL", "STRAPI_WEBHOOK_SECRET"],
+    dependencies: { "@strapi/client": "^1.6.2" },
+    ui: strapiContentUIFeature(),
+    template: () => `import { strapi } from "@farm.js/strapi";
+
+export const strapiIntegration = strapi({
+  apiUrl: process.env.STRAPI_API_URL,
+  token: process.env.STRAPI_API_TOKEN,
+  mediaUrl: process.env.STRAPI_MEDIA_URL,
+  webhook: {
+    secret: process.env.STRAPI_WEBHOOK_SECRET,
+    onChange(payload) {
+      console.log("[strapi]", payload.event, payload.model);
+      return undefined;
+    },
+  },
+  log(event) {
+    console.log("[strapi]", event.phase, event.route?.path || "none");
   },
 });
 `,

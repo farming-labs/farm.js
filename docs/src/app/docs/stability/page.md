@@ -37,7 +37,7 @@ package still resolves a prerelease core, preventing two Farm runtimes from bein
 
 - `@farm.js/core`, `@farm.js/cli`, `@farm.js/create-app`, `@farm.js/plugin`, `@farm.js/devtools`
 - `@farm.js/integration-utils` and the `@farm.js/integrations` compatibility re-exports
-- The first-party integrations: `@farm.js/ai`, `@farm.js/auth`, `@farm.js/auth0`, `@farm.js/authjs`, `@farm.js/autumn`, `@farm.js/better-auth`, `@farm.js/cf-agent`, `@farm.js/clerk`, `@farm.js/contentful`, `@farm.js/email`, `@farm.js/eve`, `@farm.js/jobs`, `@farm.js/polar`, `@farm.js/preview-gateway`, `@farm.js/sanity`, `@farm.js/sentry`, `@farm.js/stripe`, `@farm.js/supabase`, `@farm.js/unkey`, `@farm.js/workos`
+- The first-party integrations: `@farm.js/ai`, `@farm.js/auth`, `@farm.js/auth0`, `@farm.js/authjs`, `@farm.js/autumn`, `@farm.js/better-auth`, `@farm.js/cf-agent`, `@farm.js/clerk`, `@farm.js/contentful`, `@farm.js/email`, `@farm.js/eve`, `@farm.js/jobs`, `@farm.js/polar`, `@farm.js/preview-gateway`, `@farm.js/sanity`, `@farm.js/sentry`, `@farm.js/strapi`, `@farm.js/stripe`, `@farm.js/supabase`, `@farm.js/unkey`, `@farm.js/workos`
 
 An integration's stable surface is its Farm API: the factory, options, mounted routes, generated client bindings, and documented request and response shapes. Provider behavior follows the provider SDK version declared in the package's peer dependencies.
 

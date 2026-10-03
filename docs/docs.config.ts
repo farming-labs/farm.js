@@ -290,7 +290,10 @@ const sidebar = [
       {
         label: "CMS",
         icon: "file",
-        children: [{ label: "Sanity", slug: "integrations/sanity", icon: "file" }],
+        children: [
+          { label: "Sanity", slug: "integrations/sanity", icon: "file" },
+          { label: "Strapi", slug: "integrations/strapi", icon: "file" },
+        ],
       },
       {
         label: "API Keys",

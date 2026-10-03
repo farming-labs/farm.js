@@ -2530,6 +2530,9 @@ importers:
       '@farm.js/sanity':
         specifier: workspace:*
         version: link:../farm-sanity
+      '@farm.js/strapi':
+        specifier: workspace:*
+        version: link:../farm-strapi
       '@farm.js/stripe':
         specifier: workspace:*
         version: link:../farm-stripe
@@ -2906,6 +2909,25 @@ importers:
       vite:
         specifier: ^5.0.10
         version: 5.4.20(@types/node@20.19.21)
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
+
+  packages/farm-strapi:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@farm.js/integration-utils':
+        specifier: workspace:*
+        version: link:../farm-integration-utils
+    devDependencies:
+      '@strapi/client':
+        specifier: ^1.6.2
+        version: 1.6.2(supports-color@10.2.2)
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
       vitest:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
@@ -12036,6 +12058,16 @@ packages:
   /@standard-schema/spec@1.1.0:
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
+  /@strapi/client@1.6.2(supports-color@10.2.2):
+    resolution: {integrity: sha512-yISbChmwyp0Br1i8iafli38SGy1um9vqN7tzzEHyehrQsx1rkVe1r5Wkgd1DOAYtJcMnH7QmX/owSrHqN4rHEw==}
+    engines: {node: '>=20.18.2 <=24.x.x'}
+    dependencies:
+      debug: 4.4.3(supports-color@10.2.2)
+      qs: 6.15.2
+    transitivePeerDependencies:
+      - supports-color
+    dev: true
+
   /@stylexjs/babel-plugin@0.19.0(supports-color@10.2.2):
     resolution: {integrity: sha512-2SnVZIl047TtqKW0nRTn7Irz0kmoot1bxdGDE/HwfwfF7dJYHqwkIFg92s87v3hj7zxJobrHWwDx1p3qvQXW4g==}
     dependencies:
@@ -21039,6 +21071,13 @@ packages:
     resolution: {integrity: sha512-KTqnxsgGiQ6ZAzZCVlJH5eOjSnvlyEgx1m8bkRJfOhmGRqfo5KLvmAlACQkrjEtOQ4B7wF9TdSLIs9O90MX9xA==}
     engines: {node: '>=16.0.0'}
     dev: false
+
+  /qs@6.15.2:
+    resolution: {integrity: sha512-Rzq0KEyX/w/tEybncDgdkZrJgVUsUMk3xjh3t5bv3S1HTAtg+uOYt72+ZfwiQwKdysThkTBdL/rTi6HDmX9Ddw==}
+    engines: {node: '>=0.6'}
+    dependencies:
+      side-channel: 1.1.1
+    dev: true
 
   /qs@6.15.3:
     resolution: {integrity: sha512-O9gl3zCl5h5blw1KGUzQKhA5oUXSl8rwUIM5o0S3nCXMliSvy5Dzx7/DJcI+SwgICv+IneSZwhBh1oSyEHA71A==}

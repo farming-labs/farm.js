@@ -24,6 +24,7 @@ test("lists official integration providers", () => {
   assert.ok(providers.includes("supabase"));
   assert.ok(providers.includes("unkey"));
   assert.ok(providers.includes("jobs-inngest"));
+  assert.ok(providers.includes("strapi"));
 });
 
 test("all official integration providers expose opt-in UI metadata", () => {

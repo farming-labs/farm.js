@@ -1,0 +1,45 @@
+{
+  "name": "@farm.js/strapi",
+  "version": "0.1.1-beta.2",
+  "description": "Strapi CMS integration for Farm.js",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farming-labs/farm.js",
+    "directory": "packages/farm-strapi"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "dev": "tsc --watch",
+    "type-check": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "@farm.js/integration-utils": "workspace:*"
+  },
+  "devDependencies": {
+    "@strapi/client": "^1.6.2",
+    "typescript": "^5.3.3",
+    "vitest": "^3.2.7"
+  },
+  "peerDependencies": {
+    "@strapi/client": "^1.6.2"
+  }
+}

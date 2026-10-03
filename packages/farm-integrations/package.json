@@ -108,6 +108,10 @@
       "types": "./dist/sanity/index.d.ts",
       "import": "./dist/sanity/index.js"
     },
+    "./strapi": {
+      "types": "./dist/strapi/index.d.ts",
+      "import": "./dist/strapi/index.js"
+    },
     "./unkey": {
       "types": "./dist/unkey/index.d.ts",
       "import": "./dist/unkey/index.js"
@@ -135,6 +139,7 @@
     "@farm.js/jobs": "workspace:*",
     "@farm.js/polar": "workspace:*",
     "@farm.js/sanity": "workspace:*",
+    "@farm.js/strapi": "workspace:*",
     "@farm.js/stripe": "workspace:*",
     "@farm.js/supabase": "workspace:*",
     "@farm.js/unkey": "workspace:*",
