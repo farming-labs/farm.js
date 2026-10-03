@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.0-beta.106",
+  "version": "0.1.1-beta.1",
   "description": "Core Farm.js framework for modern integrated apps",
   "keywords": [
     "@farm.js/core",
@@ -84,6 +84,9 @@
       "app-markdown": [
         "./dist/app-markdown.d.ts"
       ],
+      "internal/app-markdown-runtime": [
+        "./dist/internal/app-markdown-runtime.d.ts"
+      ],
       "observability": [
         "./dist/observability.d.ts"
       ],
@@ -165,6 +168,9 @@
       ],
       "internal/metadata-image-runtime": [
         "./dist/internal/metadata-image-runtime.d.ts"
+      ],
+      "internal/docs-precompiled-runtime": [
+        "./dist/internal/docs-precompiled-runtime.d.ts"
       ],
       "internal/client-runtime": [
         "./dist/internal/client-runtime.d.ts"
@@ -578,6 +584,16 @@
       "import": "./dist/internal/metadata-image-runtime.mjs",
       "require": "./dist/internal/metadata-image-runtime.cjs"
     },
+    "./internal/app-markdown-runtime": {
+      "types": "./dist/internal/app-markdown-runtime.d.ts",
+      "import": "./dist/internal/app-markdown-runtime.mjs",
+      "require": "./dist/internal/app-markdown-runtime.cjs"
+    },
+    "./internal/docs-precompiled-runtime": {
+      "types": "./dist/internal/docs-precompiled-runtime.d.ts",
+      "import": "./dist/internal/docs-precompiled-runtime.mjs",
+      "require": "./dist/internal/docs-precompiled-runtime.cjs"
+    },
     "./internal/compression-runtime": {
       "types": "./dist/internal/compression-runtime.d.ts",
       "import": "./dist/internal/compression-runtime.mjs",
@@ -630,7 +646,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@farming-labs/docs": "^0.2.44",
+    "@farming-labs/docs": "^0.2.116",
     "@farming-labs/orm": "0.0.62",
     "@farming-labs/orm-runtime": "0.0.62",
     "@formatjs/icu-messageformat-parser": "3.5.15",
@@ -648,7 +664,7 @@
     "esbuild": "^0.28.0",
     "fast-glob": "^3.3.2",
     "h3": "2.0.1-rc.32",
-    "image-size": "^2.0.2",
+    "image-size": "^2.0.4",
     "intl-messageformat": "11.2.12",
     "marked": "^12.0.2",
     "nitro": "3.0.260903-beta",
@@ -659,12 +675,12 @@
     "sugar-high": "^0.9.5",
     "supports-color": "^10.2.2",
     "tailwindcss": "4.1.18",
-    "unstorage": "^2.0.0-alpha.3",
+    "unstorage": "2.0.0-alpha.10",
     "vite": "^5.0.10",
     "zod": "^4.1.12"
   },
   "devDependencies": {
-    "@clerk/react": "^6.1.0",
+    "@clerk/react": "^6.4.3",
     "@farm.js/renderer-tests": "workspace:*",
     "@opentelemetry/sdk-node": "0.221.0",
     "@opentelemetry/sdk-trace-base": "2.10.0",
@@ -692,7 +708,7 @@
   },
   "optionalDependencies": {
     "rolldown": "1.2.0",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.5",
     "vite-rolldown": "npm:vite@8.1.5"
   },
   "engines": {

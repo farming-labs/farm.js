@@ -142,6 +142,12 @@ export interface StripeBillingSnapshot {
   metadata?: Record<string, string>;
 }
 
+export interface StripeBillingCheckoutSessionClaim {
+  sessionId: string;
+  owner: StripeBillingOwner;
+  stripeCustomerId: string | null;
+}
+
 export interface StripeBillingStorageAdapter {
   getBillingAccount(owner: StripeBillingOwner): Promise<StripeBillingSnapshot | null>;
   getBillingAccountByStripeCustomerId(customerId: string): Promise<StripeBillingSnapshot | null>;
@@ -151,6 +157,13 @@ export interface StripeBillingStorageAdapter {
   }): Promise<{ customerId: string }>;
   saveBillingSnapshot(snapshot: StripeBillingSnapshot): Promise<void>;
   clearBillingSnapshot(owner: StripeBillingOwner): Promise<void>;
+  /** Returns true for the first claim, false for a replay, or null when unsupported. */
+  claimCheckoutSession?(claim: StripeBillingCheckoutSessionClaim): Promise<boolean | null>;
+  /**
+   * Undo a claim whose work failed, so Stripe's retry of the same session runs
+   * it again instead of finding it already claimed.
+   */
+  releaseCheckoutSession?(sessionId: string): Promise<void>;
 }
 
 export interface StripeBillingStorageTools {
@@ -189,6 +202,17 @@ export interface StripeBillingHooks {
   ): Promise<{ customerId: string }>;
   saveBillingSnapshot?(snapshot: StripeBillingSnapshot, args: StripeBillingArgs): Promise<void>;
   clearBillingSnapshot?(owner: StripeBillingOwner, args: StripeBillingArgs): Promise<void>;
+  /** Persistently claim a checkout session before lifecycle hooks run. */
+  claimCheckoutSession?(
+    claim: StripeBillingCheckoutSessionClaim,
+    args: StripeBillingArgs,
+  ): Promise<boolean | null>;
+  /**
+   * Remove a claim made by `claimCheckoutSession` when saving the snapshot or a
+   * checkout hook failed. Without it a failed checkout stays claimed and
+   * Stripe's retry is skipped.
+   */
+  releaseCheckoutSession?(sessionId: string, args: StripeBillingArgs): Promise<void>;
   onCheckoutCreated?(
     payload: {
       owner: StripeBillingOwner;
@@ -255,6 +279,7 @@ export interface StripeBillingOptions {
 type PrismaDelegate = {
   findFirst(args: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
   create(args: { data: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  deleteMany?(args: { where: Record<string, unknown> }): Promise<unknown>;
   update(args: {
     where: Record<string, unknown>;
     data: Record<string, unknown>;
@@ -264,11 +289,13 @@ type PrismaDelegate = {
 type PrismaStorageOptions = {
   prisma: unknown;
   model?: string;
+  checkoutSessionModel?: string | false;
 };
 
 type StripeOrmModelClient = {
   findFirst(args: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
   create(args: { data: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  deleteMany?(args: { where: Record<string, unknown> }): Promise<unknown>;
   update(args: {
     where: Record<string, unknown>;
     data: Record<string, unknown>;
@@ -278,6 +305,7 @@ type StripeOrmModelClient = {
 type StripeOrmStorageOptions = {
   orm: unknown | Promise<unknown> | (() => unknown | Promise<unknown>);
   model?: string;
+  checkoutSessionModel?: string | false;
 };
 
 type StripeBillingSnapshotRecord = {
@@ -318,6 +346,20 @@ function requireOrmModel(options: { orm: unknown; model: string }): StripeOrmMod
   }
 
   return candidate as StripeOrmModelClient;
+}
+
+function getOptionalOrmModel(orm: unknown, model: string): StripeOrmModelClient | null {
+  const modelClient = (orm as Record<string, unknown> | null)?.[model];
+  if (!modelClient || typeof modelClient !== "object") {
+    return null;
+  }
+
+  const candidate = modelClient as Partial<StripeOrmModelClient>;
+  return typeof candidate.findFirst === "function" &&
+    typeof candidate.create === "function" &&
+    typeof candidate.update === "function"
+    ? (candidate as StripeOrmModelClient)
+    : null;
 }
 
 function createBillingSnapshotData(
@@ -559,19 +601,32 @@ function normalizeStatus(value: unknown): StripeBillingStatus {
   }
 }
 
+function getPrismaDelegate(prisma: unknown, modelName: string): PrismaDelegate | null {
+  const delegate = (prisma as Record<string, unknown> | null)?.[modelName];
+
+  return delegate && typeof delegate === "object" ? (delegate as PrismaDelegate) : null;
+}
+
 function requirePrismaDelegate(options: PrismaStorageOptions): PrismaDelegate {
   const modelName = options.model ?? "billingBillingAccount";
-  const delegate = (options.prisma as Record<string, unknown> | null)?.[modelName];
+  const delegate = getPrismaDelegate(options.prisma, modelName);
 
-  if (!delegate || typeof delegate !== "object") {
+  if (!delegate) {
     throw new Error(`Stripe Prisma storage adapter could not find prisma.${modelName}.`);
   }
 
-  return delegate as PrismaDelegate;
+  return delegate;
 }
 
 export function prismaStorageAdapter(options: PrismaStorageOptions): StripeBillingStorageAdapter {
   const delegate = requirePrismaDelegate(options);
+  const checkoutSessionDelegate =
+    options.checkoutSessionModel === false
+      ? null
+      : getPrismaDelegate(
+          options.prisma,
+          options.checkoutSessionModel ?? "billingBillingCheckoutSession",
+        );
 
   async function findByOwner(owner: StripeBillingOwner) {
     return await delegate.findFirst({
@@ -591,6 +646,37 @@ export function prismaStorageAdapter(options: PrismaStorageOptions): StripeBilli
   }
 
   return withSerializedEnsureCustomer({
+    async releaseCheckoutSession(sessionId) {
+      await checkoutSessionDelegate?.deleteMany?.({ where: { sessionId } });
+    },
+
+    async claimCheckoutSession(claim) {
+      if (!checkoutSessionDelegate) {
+        return null;
+      }
+
+      try {
+        await checkoutSessionDelegate.create({
+          data: {
+            sessionId: claim.sessionId,
+            ownerId: claim.owner.id,
+            ownerKind: claim.owner.kind,
+            stripeCustomerId: claim.stripeCustomerId,
+            processedAt: new Date(),
+          },
+        });
+        return true;
+      } catch (error) {
+        const existing = await checkoutSessionDelegate.findFirst({
+          where: { sessionId: claim.sessionId },
+        });
+        if (existing) {
+          return false;
+        }
+        throw error;
+      }
+    },
+
     async getBillingAccount(owner) {
       const record = await findByOwner(owner);
       return record ? toSnapshot(record) : null;
@@ -728,12 +814,21 @@ export function prismaStorageAdapter(options: PrismaStorageOptions): StripeBilli
 
 export function ormStorageAdapter(options: StripeOrmStorageOptions): StripeBillingStorageAdapter {
   const modelName = options.model ?? "billingAccount";
+  const checkoutSessionModelName =
+    options.checkoutSessionModel === false
+      ? null
+      : (options.checkoutSessionModel ?? "billingCheckoutSession");
+  let ormPromise: Promise<unknown> | undefined;
   let modelPromise: Promise<StripeOrmModelClient> | undefined;
+  let checkoutSessionModelPromise: Promise<StripeOrmModelClient | null> | undefined;
+
+  function getOrm() {
+    ormPromise ??= Promise.resolve(typeof options.orm === "function" ? options.orm() : options.orm);
+    return ormPromise;
+  }
 
   async function getModel(): Promise<StripeOrmModelClient> {
-    modelPromise ??= Promise.resolve(
-      typeof options.orm === "function" ? options.orm() : options.orm,
-    ).then((orm) =>
+    modelPromise ??= getOrm().then((orm) =>
       requireOrmModel({
         orm,
         model: modelName,
@@ -741,6 +836,17 @@ export function ormStorageAdapter(options: StripeOrmStorageOptions): StripeBilli
     );
 
     return modelPromise;
+  }
+
+  async function getCheckoutSessionModel(): Promise<StripeOrmModelClient | null> {
+    if (!checkoutSessionModelName) {
+      return null;
+    }
+
+    checkoutSessionModelPromise ??= getOrm().then((orm) =>
+      getOptionalOrmModel(orm, checkoutSessionModelName),
+    );
+    return checkoutSessionModelPromise;
   }
 
   async function findByOwner(owner: StripeBillingOwner) {
@@ -763,6 +869,39 @@ export function ormStorageAdapter(options: StripeOrmStorageOptions): StripeBilli
   }
 
   return withSerializedEnsureCustomer({
+    async releaseCheckoutSession(sessionId) {
+      const model = await getCheckoutSessionModel();
+      await model?.deleteMany?.({ where: { sessionId } });
+    },
+
+    async claimCheckoutSession(claim) {
+      const model = await getCheckoutSessionModel();
+      if (!model) {
+        return null;
+      }
+
+      try {
+        await model.create({
+          data: {
+            sessionId: claim.sessionId,
+            ownerId: claim.owner.id,
+            ownerKind: claim.owner.kind,
+            stripeCustomerId: claim.stripeCustomerId,
+            processedAt: new Date(),
+          },
+        });
+        return true;
+      } catch (error) {
+        const existing = await model.findFirst({
+          where: { sessionId: claim.sessionId },
+        });
+        if (existing) {
+          return false;
+        }
+        throw error;
+      }
+    },
+
     async getBillingAccount(owner) {
       const record = await findByOwner(owner);
       return record ? toSnapshot(record) : null;
@@ -898,10 +1037,15 @@ type SqliteDatabase = {
 type SqliteStorageOptions = {
   db: SqliteDatabase;
   tableName?: string;
+  checkoutSessionTableName?: string | false;
 };
 
 export function sqliteStorageAdapter(options: SqliteStorageOptions): StripeBillingStorageAdapter {
   const tableName = options.tableName ?? "billing_account";
+  const checkoutSessionTableName =
+    options.checkoutSessionTableName === false
+      ? null
+      : (options.checkoutSessionTableName ?? "billing_checkout_session");
   const db = options.db;
   const tableInfoStatement = db.prepare(`PRAGMA table_info("${tableName}")`);
   const supportedColumns =
@@ -976,12 +1120,52 @@ export function sqliteStorageAdapter(options: SqliteStorageOptions): StripeBilli
       updated_at = CURRENT_TIMESTAMP
     WHERE owner_kind = ? AND owner_id = ?`,
   );
+  let insertCheckoutSession: ReturnType<SqliteDatabase["prepare"]> | null = null;
+  let deleteCheckoutSession: ReturnType<SqliteDatabase["prepare"]> | null = null;
+  if (checkoutSessionTableName) {
+    try {
+      insertCheckoutSession = db.prepare(
+        `INSERT OR IGNORE INTO "${checkoutSessionTableName}" (
+          session_id,
+          owner_id,
+          owner_kind,
+          stripe_customer_id,
+          processed_at
+        ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      );
+      deleteCheckoutSession = db.prepare(
+        `DELETE FROM "${checkoutSessionTableName}" WHERE session_id = ?`,
+      );
+    } catch {
+      // Older schemas have no checkout-session table. The caller falls back to
+      // snapshot comparison until the additive Stripe migration is applied.
+    }
+  }
 
   function readByOwner(owner: StripeBillingOwner) {
     return selectByOwner.get(owner.kind, owner.id) ?? null;
   }
 
   return withSerializedEnsureCustomer({
+    async releaseCheckoutSession(sessionId) {
+      deleteCheckoutSession?.run(sessionId);
+    },
+
+    async claimCheckoutSession(claim) {
+      if (!insertCheckoutSession) {
+        return null;
+      }
+
+      return (
+        insertCheckoutSession.run(
+          claim.sessionId,
+          claim.owner.id,
+          claim.owner.kind,
+          claim.stripeCustomerId,
+        ).changes > 0
+      );
+    },
+
     async getBillingAccount(owner) {
       const record = readByOwner(owner);
       return record ? toSnapshot(record) : null;
@@ -1111,8 +1295,12 @@ type DrizzleStorageOptions = {
         where(condition: unknown): Promise<unknown> | unknown;
       };
     };
+    delete?(table: unknown): {
+      where(condition: unknown): Promise<unknown> | unknown;
+    };
   };
   table: Record<string, unknown>;
+  checkoutSessionTable?: Record<string, unknown>;
   eq(left: unknown, right: unknown): unknown;
   and(...conditions: unknown[]): unknown;
 };
@@ -1122,7 +1310,7 @@ function drizzleHasColumn(table: Record<string, unknown>, key: string): boolean 
 }
 
 export function drizzleStorageAdapter(options: DrizzleStorageOptions): StripeBillingStorageAdapter {
-  const { db, table, eq, and } = options;
+  const { db, table, checkoutSessionTable, eq, and } = options;
 
   async function firstByOwner(owner: StripeBillingOwner) {
     const rows = await db
@@ -1143,6 +1331,46 @@ export function drizzleStorageAdapter(options: DrizzleStorageOptions): StripeBil
   }
 
   return withSerializedEnsureCustomer({
+    async releaseCheckoutSession(sessionId) {
+      if (!checkoutSessionTable || !db.delete) return;
+      await db.delete(checkoutSessionTable).where(eq(checkoutSessionTable.sessionId, sessionId));
+    },
+
+    async claimCheckoutSession(claim) {
+      if (!checkoutSessionTable) {
+        return null;
+      }
+
+      const findClaim = async () => {
+        const rows = await db
+          .select()
+          .from(checkoutSessionTable)
+          .where(eq(checkoutSessionTable.sessionId, claim.sessionId))
+          .limit(1);
+        return rows[0] ?? null;
+      };
+
+      if (await findClaim()) {
+        return false;
+      }
+
+      try {
+        await db.insert(checkoutSessionTable).values({
+          sessionId: claim.sessionId,
+          ownerId: claim.owner.id,
+          ownerKind: claim.owner.kind,
+          stripeCustomerId: claim.stripeCustomerId,
+          processedAt: new Date(),
+        });
+        return true;
+      } catch (error) {
+        if (await findClaim()) {
+          return false;
+        }
+        throw error;
+      }
+    },
+
     async getBillingAccount(owner) {
       const record = await firstByOwner(owner);
       return record ? toSnapshot(record) : null;

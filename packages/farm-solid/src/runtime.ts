@@ -62,6 +62,19 @@ export function isValidElement(value: unknown): boolean {
   return value !== null && value !== undefined && value !== false;
 }
 
+function rejectAsyncComponentResult(value: unknown): unknown {
+  if (
+    value !== null &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof (value as { then?: unknown }).then === "function"
+  ) {
+    throw new TypeError(
+      "FARMJS Solid renderer does not support async function components. Resolve async data before rendering the component.",
+    );
+  }
+  return value;
+}
+
 // CSS properties whose numeric values are unitless in React's style objects.
 const UNITLESS_STYLE_PROPERTIES = new Set([
   "animation-iteration-count",
@@ -125,7 +138,13 @@ function farmStyleObjectToCss(style: Record<string, unknown>): string {
 }
 
 function normalizeProps(element: FarmSolidElement): Record<string, unknown> {
-  const props = { ...element.props };
+  // Preserve accessors used by renderer-owned route state. Object spread
+  // eagerly evaluates Solid props and would flatten page/param signals before
+  // a compiled layout can subscribe to them.
+  const props = Object.defineProperties(
+    {},
+    Object.getOwnPropertyDescriptors(element.props || {}),
+  ) as Record<string, unknown>;
 
   if ("className" in props && !("class" in props)) {
     props.class = props.className;
@@ -179,12 +198,11 @@ function normalizeProps(element: FarmSolidElement): Record<string, unknown> {
     // route slots pass their element through a prop too. The spread copied the
     // raw Farm element(s), which Solid would escape to the string "undefined",
     // so materialize them the same way as positional children.
-    const rawChildren = props.children;
     Object.defineProperty(props, "children", {
       configurable: true,
       enumerable: true,
       get() {
-        return materializeSolidElement(rawChildren);
+        return materializeSolidElement(element.props?.children);
       },
     });
   }
@@ -213,7 +231,7 @@ export function materializeSolidElement(value: unknown): unknown {
   }
 
   const Component = value.type as any;
-  return materializeSolidElement(createComponent(Component, props));
+  return materializeSolidElement(rejectAsyncComponentResult(createComponent(Component, props)));
 }
 
 /**
@@ -227,7 +245,7 @@ export function materializeSolidRoot(value: unknown): unknown {
   }
 
   const Component = value.type as any;
-  return materializeSolidElement(Component(normalizeProps(value)));
+  return materializeSolidElement(rejectAsyncComponentResult(Component(normalizeProps(value))));
 }
 
 const SolidCompat = {

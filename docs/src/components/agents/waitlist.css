@@ -1,0 +1,126 @@
+.agent-waitlist {
+  margin: 28px 0 40px;
+  padding: 24px 0 16px;
+  border-block: 1px solid var(--farm-line);
+}
+.agent-waitlist label {
+  display: block;
+  margin-bottom: 10px;
+  color: #dedede;
+  font-size: 13px;
+  font-weight: 400;
+}
+.agent-waitlist-row {
+  display: flex;
+  gap: 8px;
+}
+.agent-waitlist input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--farm-line);
+  border-radius: 0;
+  background: #080808;
+  color: #ededed;
+  font: inherit;
+  font-size: 16px;
+}
+.agent-waitlist input::placeholder {
+  color: #929292;
+}
+.agent-waitlist :is(input, button):focus-visible {
+  outline: 2px solid #ededed;
+  outline-offset: 3px;
+}
+.agent-waitlist button {
+  min-width: 166px;
+  min-height: 44px;
+  padding: 12px 16px;
+  background: #ededed;
+  color: #080808;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.agent-waitlist button:active:not(:disabled) {
+  background: #ccc;
+}
+.agent-waitlist button:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+.agent-waitlist[aria-busy="true"] button {
+  cursor: wait;
+  opacity: 1;
+}
+.agent-waitlist-button-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  /* Reserve the idle label width so loading never resizes the button. */
+  min-width: 18ch;
+  white-space: nowrap;
+}
+.agent-waitlist-loader {
+  display: none;
+  flex-shrink: 0;
+  grid-template-columns: repeat(3, 4px);
+  gap: 1.5px;
+}
+.agent-waitlist-loader > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.15;
+}
+.agent-waitlist[aria-busy="true"] .agent-waitlist-loader {
+  display: grid;
+}
+.agent-waitlist[aria-busy="true"] .agent-waitlist-loader > span {
+  animation: agent-waitlist-pixel-on 650ms ease-in-out infinite;
+}
+@keyframes agent-waitlist-pixel-on {
+  0%,
+  65%,
+  100% {
+    opacity: 0.15;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-waitlist[aria-busy="true"] .agent-waitlist-loader > span {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+.agent-waitlist .agent-waitlist-note,
+.agent-waitlist .agent-waitlist-status,
+.agent-waitlist-note[data-agent-waitlist-unavailable] {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.agent-waitlist-note {
+  color: #929292;
+}
+.agent-waitlist-status {
+  min-height: 20px;
+  color: #dedede;
+}
+@media (max-width: 600px) {
+  .agent-waitlist-row {
+    flex-direction: column;
+  }
+}
+@media (hover: hover) and (pointer: fine) {
+  .agent-waitlist button:hover:not(:disabled) {
+    background: #fff;
+  }
+}

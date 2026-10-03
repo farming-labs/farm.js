@@ -1,0 +1,56 @@
+{
+  "name": "@farm.js/mcp",
+  "version": "0.1.0-beta.0",
+  "description": "Compose Farm.js API routes and standalone tools in one MCP server",
+  "keywords": [
+    "agents",
+    "farm.js",
+    "mcp"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farming-labs/farm.js",
+    "directory": "packages/farm-mcp"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./internal": {
+      "types": "./dist/internal.d.ts",
+      "import": "./dist/internal.js",
+      "default": "./dist/internal.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "dev": "tsc --watch",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "@modelcontextprotocol/server": "2.0.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3",
+    "vitest": "^3.2.7"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

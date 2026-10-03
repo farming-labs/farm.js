@@ -47,6 +47,15 @@ function makeRequest(url: string, method = "GET") {
   });
 }
 
+function makeQueryRequest(url: string) {
+  // QUERY carries its query in the body, so core requires a Content-Type.
+  return Object.assign(Readable.from([Buffer.from("{}")]), {
+    method: "QUERY",
+    url,
+    headers: { host: "farm.test", "content-type": "application/json" },
+  });
+}
+
 function makeResponse() {
   return Object.assign(new EventEmitter(), {
     statusCode: 200,
@@ -113,5 +122,40 @@ it("still 404s a path that matches no route", async () => {
 
     expect(res.statusCode).toBe(404);
     expect(endpoint).not.toHaveBeenCalled();
+  });
+});
+
+it("discovers every method core serves, including QUERY and HEAD", async () => {
+  await withTempRoot(async (root) => {
+    // The plugin kept its own method list without QUERY or HEAD, so a route
+    // that only exports QUERY was never discovered in dev, and an explicit
+    // HEAD handler was skipped in favor of GET, while production served both.
+    const query = vi.fn(async () => new Response("query"));
+    const head = vi.fn(async () => new Response(null, { headers: { "x-head": "explicit" } }));
+    const get = vi.fn(async () => new Response("get"));
+    const middleware = await createHarness(root, { QUERY: query, HEAD: head, GET: get });
+
+    const queryResponse = makeResponse();
+    await middleware(makeQueryRequest("/api/users/123"), queryResponse, vi.fn());
+    expect(queryResponse.statusCode).toBe(200);
+    expect(query).toHaveBeenCalledTimes(1);
+
+    const headResponse = makeResponse();
+    await middleware(makeRequest("/api/users/123", "HEAD"), headResponse, vi.fn());
+    expect(head).toHaveBeenCalledTimes(1);
+    expect(get).not.toHaveBeenCalled();
+  });
+});
+
+it("serves a route that exports only QUERY", async () => {
+  await withTempRoot(async (root) => {
+    const query = vi.fn(async () => new Response("query"));
+    const middleware = await createHarness(root, { QUERY: query });
+
+    const res = makeResponse();
+    await middleware(makeQueryRequest("/api/users/123"), res, vi.fn());
+
+    expect(res.statusCode).toBe(200);
+    expect(query).toHaveBeenCalledTimes(1);
   });
 });

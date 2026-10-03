@@ -19,6 +19,13 @@ function deleteAccount(handler = vi.fn(async () => ({ deleted: true }))) {
   };
 }
 
+function schemaLessMutation(handler = vi.fn(async () => ({ mutated: true }))) {
+  return {
+    handler,
+    endpoint: createEndpoint({ method: "POST" }, async ({ body }) => handler(body)),
+  };
+}
+
 describe("API route body content types", () => {
   it("does not parse a declared text/plain body as JSON", async () => {
     const { endpoint, handler } = deleteAccount();
@@ -70,5 +77,93 @@ describe("API route body content types", () => {
 
     expect(response.status).toBe(200);
     expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("keeps malformed untyped bodies on the permissive compatibility path", async () => {
+    const { endpoint, handler } = schemaLessMutation();
+    const request = new Request("https://farm.test/api/mutate", {
+      method: "POST",
+      body: "{",
+    });
+    request.headers.delete("content-type");
+
+    const response = await invokeAPIRouteEndpoint(endpoint, request);
+
+    expect(response.status).toBe(200);
+    expect(handler).toHaveBeenCalledWith(undefined);
+  });
+
+  it("keeps bodyless QUERY requests with their required JSON content type", async () => {
+    const handler = vi.fn(async () => ({ results: [] }));
+    const endpoint = createEndpoint({ method: "QUERY" }, async ({ body }) => handler(body));
+    const response = await invokeAPIRouteEndpoint(
+      endpoint,
+      new Request("https://farm.test/api/search", {
+        method: "QUERY",
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(handler).toHaveBeenCalledWith(undefined);
+  });
+
+  it("rejects an empty declared JSON body before a schema-less handler runs", async () => {
+    const { endpoint, handler } = schemaLessMutation();
+    const response = await invokeAPIRouteEndpoint(
+      endpoint,
+      new Request("https://farm.test/api/mutate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid request body",
+      message: "The request body is not valid JSON.",
+    });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("parses an empty declared URL-encoded body as an empty form", async () => {
+    const { endpoint, handler } = schemaLessMutation();
+    const response = await invokeAPIRouteEndpoint(
+      endpoint,
+      new Request("https://farm.test/api/mutate", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(handler).toHaveBeenCalledOnce();
+    const body = handler.mock.calls[0]?.[0];
+    expect(body).toEqual({});
+    expect(Object.getPrototypeOf(body)).toBeNull();
+  });
+
+  it.each([
+    ["schema-less", schemaLessMutation],
+    ["schema-backed", deleteAccount],
+  ])("rejects malformed multipart before a %s handler runs", async (_kind, createMutation) => {
+    const { endpoint, handler } = createMutation();
+    const response = await invokeAPIRouteEndpoint(
+      endpoint,
+      new Request("https://farm.test/api/mutate", {
+        method: "POST",
+        headers: { "content-type": "multipart/form-data; boundary=broken" },
+        body: '--broken\r\nContent-Disposition: form-data; name="value"\r\n\r\nmissing close',
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid request body",
+      message: "The request body is not valid multipart form data.",
+    });
+    expect(handler).not.toHaveBeenCalled();
   });
 });

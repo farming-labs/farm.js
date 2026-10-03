@@ -15,19 +15,14 @@ import {
   Database,
   ExternalLink,
   FileOutput,
-  FileText,
   FolderTree,
-  GitFork,
   Layers3,
   Lock,
-  Menu,
   Network,
   Plug,
   Rocket,
   Route,
   Terminal,
-  Workflow,
-  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
@@ -38,7 +33,6 @@ import cloudflareIconUrl from "simple-icons/icons/cloudflare.svg?url";
 import denoIconUrl from "simple-icons/icons/deno.svg?url";
 import dockerIconUrl from "simple-icons/icons/docker.svg?url";
 import firebaseIconUrl from "simple-icons/icons/firebase.svg?url";
-import githubIconUrl from "simple-icons/icons/github.svg?url";
 import netlifyIconUrl from "simple-icons/icons/netlify.svg?url";
 import nodeIconUrl from "simple-icons/icons/nodedotjs.svg?url";
 import prismaIconUrl from "simple-icons/icons/prisma.svg?url";
@@ -58,8 +52,13 @@ import polarIconUrl from "../assets/brands/polar.svg?url";
 import triggerIconUrl from "../assets/brands/trigger.svg?url";
 import unkeyIconUrl from "../assets/brands/unkey.svg?url";
 import workosIconUrl from "../assets/brands/workos.svg?url";
-import farmingLabsLogoUrl from "../assets/farming-labs-logo-dark.svg?url";
 import nitroIconUrl from "../assets/nitro.svg?url";
+import {
+  AnnouncementBar,
+  IndexedLabel,
+  SiteHeader as Header,
+  SiteFooter as Footer,
+} from "../components/site-chrome";
 import { BenchmarkSection } from "../components/home/benchmark-section";
 import { HeroTitleFrame } from "../components/home/hero-title-frame";
 import {
@@ -77,6 +76,8 @@ import { FileTree } from "../components/ui/file-tree";
 import type { FileTreeNode } from "../components/ui/file-tree";
 import { FlickeringGrid } from "../components/ui/flickering-grid";
 import { farmBenchmark, formatBenchmarkDuration } from "../lib/framework-benchmark";
+import { BlogFigure } from "../components/blog/figures";
+import "../components/blog/figures.css";
 
 const homepageTitle = "Farm.js - Framework for modern integrated apps";
 const homepageDescription =
@@ -100,23 +101,6 @@ export const metadata = {
     images: ["/opengraph-image"],
   },
 } satisfies Metadata;
-
-const navItems = [
-  {
-    index: "01",
-    label: "Guide",
-    href: "/docs/getting-started",
-    icon: BookOpen,
-  },
-  { index: "02", label: "Migrations", href: "/docs/migrations", icon: GitFork },
-  {
-    index: "03",
-    label: "Integrations",
-    href: "/docs/integrations",
-    icon: Blocks,
-  },
-  { index: "04", label: "Resources", href: "/docs", icon: FileText },
-] as const;
 
 type ProductStackItem = {
   label: string;
@@ -395,38 +379,6 @@ const deploymentTiles: readonly DeploymentTile[] = [
   { row: 4, col: 3, label: "Deno", brand: denoIconUrl },
 ];
 
-const footerGroups = [
-  {
-    title: "Framework",
-    icon: BookOpen,
-    brand: null,
-    action: ["Read guide", "/docs/getting-started"],
-    links: [
-      ["Getting started", "/docs/getting-started"],
-      ["Routing", "/docs/routing"],
-      ["Middleware", "/docs/middleware"],
-    ],
-  },
-  {
-    title: "Product",
-    icon: Layers3,
-    brand: null,
-    action: ["Integrations", "/docs/integrations"],
-    links: [
-      ["Integrations", "/docs/integrations"],
-      ["API client", "/docs/api-client"],
-      ["Deployment", "/docs/deployment"],
-    ],
-  },
-  {
-    title: "Open source",
-    icon: GitFork,
-    brand: githubIconUrl,
-    action: ["View source", "https://github.com/farming-labs/farm.js"],
-    links: [["GitHub", "https://github.com/farming-labs/farm.js"]],
-  },
-] as const;
-
 const typedApiCode = `const { data, error } = await api.users.get({
   query: { limit: "5" },
 });
@@ -623,42 +575,6 @@ const routeCodeTabs = [
   },
 ] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
 
-const agentRuntimeCodeTabs = [
-  {
-    id: "eve",
-    label: "Eve / farm.config.ts",
-    language: "ts",
-    highlightLines: [5, 8],
-    code: `import { eve } from "@farm.js/eve";
-
-export default defineConfig({
-    integrations: {
-        agent: eve(),
-    },
-    deploy: {
-        target: "vercel",
-    },
-});`,
-  },
-  {
-    id: "cloudflare",
-    label: "Cloudflare / farm.config.ts",
-    language: "ts",
-    highlightLines: [5, 8, 9],
-    code: `import { cfAgent } from "@farm.js/cf-agent";
-
-export default defineConfig({
-    integrations: {
-        agent: cfAgent(),
-    },
-    deploy: {
-        target: "cloudflare",
-        preset: "cloudflare-module",
-    },
-});`,
-  },
-] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
-
 const agentClientCodeTabs = [
   {
     id: "eve",
@@ -702,68 +618,6 @@ function cx(...classes: Array<string | false | null | undefined>) {
 
 function BrandIcon({ src, className }: { src: string; className?: string }) {
   return <img alt="" aria-hidden className={cx("brightness-0 invert", className)} src={src} />;
-}
-
-function GithubIcon({ className }: { className?: string }) {
-  return <BrandIcon className={className} src={githubIconUrl} />;
-}
-
-function IndexedLabel({
-  index,
-  icon: Icon,
-  label,
-}: {
-  index: string;
-  icon?: LucideIcon;
-  label: string;
-}) {
-  return (
-    <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] font-normal uppercase tracking-normal text-current">
-      <span className="text-white/26">{index}</span>
-      <span aria-hidden className="text-white/18">
-        /
-      </span>
-      {Icon ? <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.5} /> : null}
-      <span className="truncate">{label}</span>
-    </span>
-  );
-}
-
-function Wordmark({ className }: { className?: string }) {
-  return (
-    <a
-      aria-label="Farm.js home"
-      className={cx(
-        "shrink-0 font-mono font-normal uppercase tracking-normal text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white",
-        className,
-      )}
-      href="/"
-    >
-      FARM<span className="text-white/52">.JS</span>
-    </a>
-  );
-}
-
-function FarmingLabsBrand() {
-  return (
-    <a
-      aria-label="Farming Labs brand assets"
-      className="flex shrink-0 items-center text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
-      href="https://www.farming-labs.dev/brand"
-      title="Farming Labs brand"
-    >
-      <img alt="" aria-hidden className="h-[19px] w-auto" src={farmingLabsLogoUrl} />
-    </a>
-  );
-}
-
-function BrandLockup() {
-  return (
-    <div className="flex min-w-0 items-center gap-2.5">
-      <FarmingLabsBrand />
-      <Wordmark className="text-[11px]" />
-    </div>
-  );
 }
 
 function ButtonLink({
@@ -822,92 +676,6 @@ function ButtonLink({
   );
 }
 
-function AnnouncementBar() {
-  return (
-    <a
-      aria-label={`Farm.js ${FARM_VERSION} is open source and in beta. View on GitHub.`}
-      className="farm-announcement flex h-5 items-center justify-center gap-2 border-b border-white/12 px-4 font-mono text-[10px] font-normal uppercase tracking-normal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
-      href="https://github.com/farming-labs/farm.js"
-    >
-      <GithubIcon className="size-3 opacity-55" />
-      <span className="text-white/52">Open source</span>
-      <span aria-hidden className="text-white/24">
-        /
-      </span>
-      <span className="text-white/76">Farm.js {FARM_VERSION}</span>
-    </a>
-  );
-}
-
-function Header() {
-  return (
-    <header className="farm-full-rule sticky top-0 z-50 bg-black/94 backdrop-blur-xl">
-      <div className="flex h-11 w-full items-stretch">
-        <div className="flex shrink-0 items-center px-4 sm:px-7">
-          <BrandLockup />
-        </div>
-
-        <nav
-          aria-label="Primary navigation"
-          className="hidden min-w-0 flex-1 items-stretch border-l border-white/12 lg:flex"
-        >
-          {navItems.map((item) => (
-            <a
-              key={item.label}
-              className="flex h-full min-w-0 flex-1 items-center border-r border-white/12 px-3 font-mono uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white xl:px-5"
-              href={item.href}
-            >
-              <IndexedLabel index={item.index} icon={item.icon} label={item.label} />
-            </a>
-          ))}
-        </nav>
-
-        <div className="ml-auto hidden shrink-0 items-stretch lg:flex">
-          <a
-            aria-label="Open Farm.js on GitHub"
-            className="grid size-11 place-items-center border-l border-white/12 text-white/52 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
-            href="https://github.com/farming-labs/farm.js"
-            title="GitHub"
-          >
-            <GithubIcon className="size-4" />
-          </a>
-          <a
-            className="inline-flex h-11 items-center gap-1.5 border-l border-white/12 bg-white px-5 font-mono text-[10px] font-normal uppercase tracking-normal text-black transition-colors duration-150 hover:bg-white/88 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
-            href="/docs"
-          >
-            <BookOpenText aria-hidden className="size-3.5" strokeWidth={1.6} />
-            Docs
-          </a>
-        </div>
-
-        <details className="group relative ml-auto border-l border-white/12 lg:hidden">
-          <summary className="grid size-11 cursor-pointer list-none place-items-center text-white transition-colors hover:bg-white/[0.04] [&::-webkit-details-marker]:hidden">
-            <span className="sr-only">Open navigation</span>
-            <Menu aria-hidden className="size-4 group-open:hidden" strokeWidth={1.5} />
-            <X aria-hidden className="hidden size-4 group-open:block" strokeWidth={1.5} />
-          </summary>
-          <nav
-            aria-label="Mobile navigation"
-            className="absolute -right-px top-11 w-screen overflow-hidden border border-white/14 bg-black shadow-2xl shadow-black/60"
-          >
-            {[...navItems, { index: "05", label: "Docs", href: "/docs", icon: BookOpenText }].map(
-              (item) => (
-                <a
-                  key={item.label}
-                  className="flex h-12 items-center border-b border-white/10 px-4 font-mono uppercase tracking-normal text-white/58 last:border-b-0 hover:bg-white/[0.04] hover:text-white"
-                  href={item.href}
-                >
-                  <IndexedLabel index={item.index} icon={item.icon} label={item.label} />
-                </a>
-              ),
-            )}
-          </nav>
-        </details>
-      </div>
-    </header>
-  );
-}
-
 function Hero() {
   return (
     <section className="farm-full-rule farm-hero-rule relative w-full overflow-hidden">
@@ -925,7 +693,7 @@ function Hero() {
         </div>
         <HeroTitleFrame>
           <h1 className="max-w-full text-[1.125rem] font-medium leading-[1.02] tracking-normal text-white min-[360px]:text-[1.3125rem] min-[380px]:text-[1.4375rem] min-[400px]:text-[1.5rem] min-[420px]:text-[1.625rem] sm:text-[2.25rem] md:text-[2.625rem] lg:text-[3.25rem]">
-            <span className="block">a framework for</span>
+            <span className="block">a framework for</span>{" "}
             <span className="block whitespace-nowrap">product-integrated apps</span>
           </h1>
         </HeroTitleFrame>
@@ -933,13 +701,21 @@ function Hero() {
           Bring the stack you already use. Farm.js connects your app router, typed APIs, middleware,
           integrations, docs, and deployment so they work together as one product.
         </p>
-        <div className="mt-6 flex justify-center">
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
           <ButtonLink
             href="/docs/getting-started"
             icon={<BookOpen aria-hidden className="size-3.5" strokeWidth={1.5} />}
             size="compact"
           >
             Get Started
+          </ButtonLink>
+          <ButtonLink
+            href="/agents"
+            icon={<Bot aria-hidden className="size-3.5" strokeWidth={1.5} />}
+            size="compact"
+            variant="secondary"
+          >
+            Agent infrastructure
           </ButtonLink>
         </div>
         <div className="mt-6 w-[calc(100%-3rem)] max-w-[34rem] text-left">
@@ -1671,217 +1447,33 @@ function AdvancedRoutesVisual() {
   );
 }
 
-const optimizedBoundaryChecks = [
-  ["Host-only tree", "pass"],
-  ["Client code", "none"],
-  ["Events or refs", "none"],
-  ["Size gate", "pass"],
-] as const;
-
-function FeatureDiagramFrame({
-  ariaLabel,
-  href,
-  icon: Icon,
-  label,
-  status,
-  footerLabel,
-  footerValue,
-  children,
-}: {
-  ariaLabel: string;
-  href: string;
-  icon: LucideIcon;
-  label: string;
-  status: string;
-  footerLabel: string;
-  footerValue: string;
-  children: ReactNode;
-}) {
-  return (
-    <FoundationCanvas interactive>
-      <a
-        aria-label={ariaLabel}
-        className="group/diagram absolute inset-0 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
-        href={href}
-      >
-        <figure className="farm-illustration-surface absolute -bottom-px -right-px top-4 flex w-[calc(100%-1.5rem)] flex-col overflow-hidden border border-white/10 transition-colors duration-150 group-hover/diagram:border-white/18 sm:w-[calc(100%-2.5rem)]">
-          <figcaption className="flex h-10 shrink-0 items-center justify-between border-b border-white/8 px-4 font-mono text-[9px] font-normal uppercase tracking-normal">
-            <span className="flex items-center gap-1.5 text-white/54">
-              <Icon aria-hidden className="size-3" strokeWidth={1.5} />
-              {label}
-            </span>
-            <span className="border border-white/12 bg-white/[0.035] px-2 py-1 text-white/44">
-              {status}
-            </span>
-          </figcaption>
-
-          <div className="relative min-h-0 flex-1">
-            <span
-              aria-hidden
-              className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgb(255_255_255/0.018)_1px,transparent_1px),linear-gradient(90deg,rgb(255_255_255/0.018)_1px,transparent_1px)] bg-[size:24px_24px] opacity-55"
-            />
-            <div className="relative z-10 h-full">{children}</div>
-          </div>
-
-          <div className="flex h-12 shrink-0 items-center justify-between border-t border-white/10 bg-white/[0.025] px-4 font-mono text-[9px] font-normal uppercase tracking-normal sm:px-5">
-            <span className="text-white/32">{footerLabel}</span>
-            <span className="flex items-center gap-2 text-white/86">
-              {footerValue}
-              <ArrowRight
-                aria-hidden
-                className="size-3 transition-transform duration-150 group-hover/diagram:translate-x-0.5"
-                strokeWidth={1.5}
-              />
-            </span>
-          </div>
-        </figure>
-      </a>
-    </FoundationCanvas>
-  );
-}
-
-function DiagramConnector() {
-  return (
-    <div aria-hidden className="flex min-w-0 items-center">
-      <span className="h-px min-w-0 flex-1 bg-white/12" />
-      <span className="grid size-6 shrink-0 place-items-center border border-white/12 bg-black text-white/46">
-        <ArrowRight className="size-2.5" strokeWidth={1.5} />
-      </span>
-      <span className="h-px min-w-0 flex-1 bg-white/12" />
-    </div>
-  );
-}
-
 function OptimizedBoundaryVisual() {
   return (
-    <FeatureDiagramFrame
-      ariaLabel="Read about automatic optimized boundaries"
-      footerLabel="Selected renderer"
-      footerValue="Strata / Rust"
-      href="/docs/server-rendering#automatic-optimized-boundaries"
-      icon={Cpu}
-      label="Boundary analysis"
-      status="Experimental"
-    >
-      <div className="grid h-full grid-cols-[minmax(0,0.88fr)_2.25rem_minmax(0,1.12fr)] items-center px-4 sm:grid-cols-[minmax(0,0.82fr)_3rem_minmax(0,1.18fr)] sm:px-5">
-        <div className="flex h-[152px] min-w-0 flex-col border border-white/12 bg-black/88">
-          <div className="flex h-8 shrink-0 items-center justify-between border-b border-white/8 px-3 font-mono text-[8px] font-normal uppercase tracking-normal">
-            <span className="text-white/34">Candidate</span>
-            <span className="text-white/58">RSC</span>
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-2 text-center font-mono tracking-normal">
-            <span className="border border-white/10 bg-white/[0.035] px-2 py-1 text-[7px] uppercase text-white/38 sm:text-[8px]">
-              Server component
-            </span>
-            <span className="mt-3 text-[11px] text-white/86 sm:text-xs">&lt;article&gt;</span>
-            <span className="mt-1 text-[8px] text-white/32 sm:text-[9px]">host-only region</span>
-          </div>
-        </div>
-
-        <DiagramConnector />
-
-        <div className="flex h-[152px] min-w-0 flex-col border border-white/12 bg-black/88">
-          <div className="flex h-8 shrink-0 items-center justify-between border-b border-white/8 px-3 font-mono text-[8px] font-normal uppercase tracking-normal">
-            <span className="text-white/34">Runtime scan</span>
-            <span className="flex items-center gap-1 text-white/68">
-              <Check aria-hidden className="size-2.5" strokeWidth={1.8} /> Eligible
-            </span>
-          </div>
-          <div className="min-h-0 flex-1 px-3">
-            {optimizedBoundaryChecks.map(([label, value]) => (
-              <div
-                key={label}
-                className="flex h-[30px] items-center justify-between border-b border-white/8 font-mono text-[8px] tracking-normal last:border-b-0 sm:text-[9px]"
-              >
-                <span className="truncate text-white/38">{label}</span>
-                <span className="ml-2 flex shrink-0 items-center gap-1 text-white/68">
-                  <Check aria-hidden className="size-2.5" strokeWidth={1.8} />
-                  {value}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+    <div className="farm-feature-spotlight relative flex min-h-[340px] min-w-0 items-center overflow-hidden px-6 py-8 sm:px-10">
+      <div className="relative z-10 w-full">
+        <BlogFigure fit kind="landing-strata" />
       </div>
-    </FeatureDiagramFrame>
+    </div>
   );
 }
 
 function MarkdownMirrorsVisual() {
   return (
-    <FeatureDiagramFrame
-      ariaLabel="Read about automatic Markdown mirrors"
-      footerLabel="Content negotiation"
-      footerValue="text/markdown"
-      href="/docs/markdown"
-      icon={FileOutput}
-      label="Representation map"
-      status="Automatic"
-    >
-      <div className="grid h-full grid-cols-[minmax(0,0.88fr)_2.25rem_minmax(0,1.12fr)] items-center px-4 sm:grid-cols-[minmax(0,0.82fr)_3rem_minmax(0,1.18fr)] sm:px-5">
-        <div className="flex h-[152px] min-w-0 flex-col border border-white/12 bg-black/88">
-          <div className="flex h-8 shrink-0 items-center justify-between border-b border-white/8 px-3 font-mono text-[8px] font-normal uppercase tracking-normal">
-            <span className="text-white/34">Source</span>
-            <span className="text-white/58">Page</span>
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-2 text-center font-mono tracking-normal">
-            <span className="border border-white/10 bg-white/[0.035] px-2 py-1 text-[7px] uppercase text-white/38 sm:text-[8px]">
-              App route
-            </span>
-            <span className="mt-3 text-[11px] text-white/86 sm:text-xs">/pricing</span>
-            <span className="mt-1 text-[8px] text-white/32 sm:text-[9px]">one source</span>
-          </div>
-        </div>
-
-        <DiagramConnector />
-
-        <div className="flex h-[152px] min-w-0 flex-col border border-white/12 bg-black/88">
-          <div className="flex h-8 shrink-0 items-center justify-between border-b border-white/8 px-3 font-mono text-[8px] font-normal uppercase tracking-normal">
-            <span className="text-white/34">Representations</span>
-            <span className="text-white/58">2 outputs</span>
-          </div>
-          <div className="grid min-h-0 flex-1 grid-rows-2">
-            <div className="flex min-w-0 items-center justify-between border-b border-white/8 px-3 font-mono tracking-normal">
-              <div className="min-w-0">
-                <span className="block text-[7px] uppercase text-white/28 sm:text-[8px]">
-                  Browser
-                </span>
-                <span className="mt-1 block truncate text-[9px] text-white/74 sm:text-[10px]">
-                  /pricing
-                </span>
-              </div>
-              <span className="ml-2 border border-white/10 bg-white/[0.025] px-2 py-1 text-[7px] uppercase text-white/48 sm:text-[8px]">
-                HTML
-              </span>
-            </div>
-            <div className="flex min-w-0 items-center justify-between px-3 font-mono tracking-normal">
-              <div className="min-w-0">
-                <span className="block text-[7px] uppercase text-white/28 sm:text-[8px]">
-                  Agent
-                </span>
-                <span className="mt-1 block truncate text-[9px] text-white/86 sm:text-[10px]">
-                  /pricing.md
-                </span>
-              </div>
-              <span className="ml-2 border border-white/14 bg-white/[0.045] px-2 py-1 text-[7px] uppercase text-white/78 sm:text-[8px]">
-                Markdown
-              </span>
-            </div>
-          </div>
-        </div>
+    <div className="farm-feature-spotlight relative flex min-h-[340px] min-w-0 items-center overflow-hidden px-6 py-8 sm:px-10">
+      <div className="relative z-10 w-full">
+        <BlogFigure fit kind="landing-markdown" />
       </div>
-    </FeatureDiagramFrame>
+    </div>
   );
 }
 
 function AgentRuntimeVisual() {
   return (
-    <FoundationCodeTabsVisual
-      compact
-      id="farm-agent-runtime-code"
-      tabs={agentRuntimeCodeTabs}
-      tabsLabel="Farm agent runtime examples"
-    />
+    <div className="farm-feature-spotlight relative flex min-h-[328px] min-w-0 items-center overflow-hidden px-6 py-8 sm:px-10">
+      <div className="relative z-10 w-full">
+        <BlogFigure fit kind="agents" />
+      </div>
+    </div>
   );
 }
 
@@ -1998,69 +1590,11 @@ function FoundationGrid() {
 
 function AgentRuntimeIllustration() {
   return (
-    <figure className="farm-feature-spotlight farm-agent-spotlight relative mx-auto h-[248px] w-full max-w-[28rem] overflow-hidden md:mx-0 md:h-[280px]">
-      <figcaption className="sr-only">
-        Farm connects the application origin to Eve on Vercel and Cloudflare Agents on Workers.
-      </figcaption>
-
-      <div className="relative z-10 grid h-full grid-cols-[minmax(0,0.82fr)_3rem_minmax(0,1.18fr)] items-center px-2 sm:px-4">
-        <div className="border border-white/10 bg-black/80 p-3 sm:p-4">
-          <div className="flex items-center gap-2 font-mono text-[10px] font-normal uppercase tracking-normal text-white/72">
-            <Route aria-hidden className="size-3.5" strokeWidth={1.5} />
-            Farm app
-          </div>
-          <div className="mt-3 border-t border-white/8 pt-3">
-            <span className="block font-mono text-[8px] font-normal uppercase tracking-normal text-white/34 sm:text-[9px]">
-              Same origin
-            </span>
-            <code className="mt-1 block font-mono text-xs text-white/86">/</code>
-          </div>
-        </div>
-
-        <div aria-hidden className="relative h-[184px]">
-          <span className="absolute left-0 top-1/2 h-px w-1/2 bg-white/22" />
-          <span className="absolute bottom-1/4 left-1/2 top-1/4 w-px bg-white/22" />
-          <span className="absolute left-1/2 right-0 top-1/4 h-px bg-white/22" />
-          <span className="absolute bottom-1/4 left-1/2 right-0 h-px bg-white/22" />
-          <span className="absolute left-1/2 top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 bg-white" />
-          <span className="absolute right-0 top-1/4 size-1 -translate-y-1/2 bg-white/52" />
-          <span className="absolute bottom-1/4 right-0 size-1 translate-y-1/2 bg-white/52" />
-        </div>
-
-        <div className="grid h-[184px] grid-rows-2 gap-3">
-          <div className="border border-white/10 bg-black/80 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <span className="flex min-w-0 items-center gap-2 font-mono text-[9px] font-normal uppercase tracking-normal text-white/76 sm:text-[10px]">
-                <Workflow aria-hidden className="size-3.5 shrink-0" strokeWidth={1.5} />
-                Eve
-              </span>
-              <BrandIcon className="size-3.5 opacity-52" src={vercelIconUrl} />
-            </div>
-            <div className="mt-2 flex items-center justify-between gap-2 border-t border-white/8 pt-2">
-              <code className="font-mono text-[9px] text-white/76">/eve/*</code>
-              <span className="font-mono text-[8px] font-normal uppercase tracking-normal text-white/32">
-                Vercel
-              </span>
-            </div>
-          </div>
-
-          <div className="border border-white/10 bg-black/80 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <span className="flex min-w-0 items-center gap-2 font-mono text-[9px] font-normal uppercase tracking-normal text-white/76 sm:text-[10px]">
-                <BrandIcon className="size-3.5 shrink-0 opacity-72" src={cloudflareIconUrl} />
-                <span className="truncate">Cloudflare Agents</span>
-              </span>
-            </div>
-            <div className="mt-2 flex items-center justify-between gap-2 border-t border-white/8 pt-2">
-              <code className="font-mono text-[9px] text-white/76">/agents/*</code>
-              <span className="font-mono text-[8px] font-normal uppercase tracking-normal text-white/32">
-                Workers
-              </span>
-            </div>
-          </div>
-        </div>
+    <div className="farm-feature-spotlight farm-agent-spotlight relative mx-auto w-full max-w-[28rem] md:mx-0">
+      <div className="relative z-10 w-full">
+        <BlogFigure fit kind="runtimes" />
       </div>
-    </figure>
+    </div>
   );
 }
 
@@ -2133,73 +1667,53 @@ function VibyCallout() {
         <IndexedLabel icon={Terminal} index="04" label="Built with Farm.js" />
       </div>
 
-      <div className="grid min-w-0 items-center gap-8 overflow-hidden bg-black px-6 py-10 sm:px-10 sm:py-12 md:grid-cols-[minmax(0,1fr)_minmax(17rem,24rem)] lg:min-h-[360px] lg:gap-10 lg:px-12">
-        <div className="max-w-lg">
-          <p className="font-mono text-[10px] font-normal uppercase tracking-normal text-white/38">
-            Farm.js in the wild
-          </p>
-          <h2 className="mt-4 text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl">
+      <div className="grid min-w-0 items-center gap-10 overflow-hidden bg-black px-6 py-10 sm:px-10 sm:py-12 lg:min-h-[420px] lg:px-12 xl:grid-cols-[minmax(0,1fr)_minmax(0,30rem)]">
+        <div className="max-w-xl">
+          <h2 className="text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl">
             Vibe coding, powered by Farm.js
           </h2>
           <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
-            Viby is open-source infrastructure for persistent, skill-guided vibe coding products,
-            built and shipped with Farm.js.
+            <span className="font-mono text-white">
+              <span aria-hidden className="text-white/40">
+                &rsaquo;_{" "}
+              </span>
+              viby
+            </span>{" "}
+            is open-source infrastructure for AI app builders.
           </p>
-          <div className="mt-8 flex items-center">
-            <ButtonLink
-              href="https://viby.farming-labs.dev"
-              icon={<Terminal aria-hidden className="size-4" strokeWidth={1.5} />}
-            >
-              Explore Viby
-            </ButtonLink>
+          <div className="mt-6 flex h-11 max-w-md items-center gap-2 rounded-sm bg-white/[0.05] px-4 font-mono text-[13px] text-white/78">
+            <span aria-hidden className="text-white/36">
+              $
+            </span>
+            <code className="font-mono font-[350] antialiased">pnpm add @viby/sdk</code>
+          </div>
+          <div className="mt-4 max-w-md font-mono text-[13px]">
+            {[
+              ["SDK", "viby.farming-labs.dev"],
+              ["Demo", "viby-app.farming-labs.dev"],
+            ].map(([kind, host], index) => (
+              <a
+                key={host}
+                className={`group flex h-11 items-center gap-4 ${index ? "border-t border-white/8 " : ""}text-white/80 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white`}
+                href={`https://${host}`}
+              >
+                <span className="w-12 text-[9px] uppercase tracking-[0.08em] text-white/34">
+                  {kind}
+                </span>
+                <span className="min-w-0 truncate">{host}</span>
+                <ArrowUpRight
+                  aria-hidden
+                  className="ml-auto size-3.5 text-white/40 transition-[color,transform] duration-150 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-white"
+                  strokeWidth={1.5}
+                />
+              </a>
+            ))}
           </div>
         </div>
 
-        <a
-          aria-label="Explore Viby, a vibe coding product built with Farm.js"
-          className="group block min-w-0 border border-white/12 bg-white/[0.025] transition-[background-color,border-color,transform] duration-150 hover:-translate-y-0.5 hover:border-white/24 hover:bg-white/[0.045] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
-          href="https://viby.farming-labs.dev"
-        >
-          <div className="flex h-11 items-center justify-between border-b border-white/10 px-4 font-mono text-[10px] tracking-normal">
-            <span className="flex items-center gap-2 text-white/88">
-              <span aria-hidden className="text-white/46">
-                &rsaquo;_
-              </span>
-              <span>viby</span>
-            </span>
-            <span className="text-[8px] uppercase text-white/34">Farm.js / live</span>
-          </div>
-
-          <div aria-hidden className="p-4 sm:p-5">
-            <span className="font-mono text-[8px] uppercase tracking-normal text-white/30">
-              Prompt
-            </span>
-            <p className="mt-2 border-l border-white/20 pl-3 font-mono text-[11px] leading-5 text-white/72">
-              Build a polished analytics dashboard with filters
-            </p>
-
-            <div className="mt-5 grid gap-2 font-mono text-[9px] tracking-normal">
-              {["src/app/page.tsx", "src/components/chart.tsx", "src/styles.css"].map((file) => (
-                <div
-                  key={file}
-                  className="flex min-w-0 items-center justify-between gap-3 border-t border-white/8 pt-2"
-                >
-                  <span className="truncate text-white/48">{file}</span>
-                  <span className="shrink-0 uppercase text-white/76">generated</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex h-10 items-center justify-between border-t border-white/10 px-4 font-mono text-[8px] uppercase tracking-normal text-white/36">
-            <span className="flex items-center gap-2">
-              <span className="size-1.5 bg-white/72" /> Preview ready
-            </span>
-            <span className="flex items-center gap-1.5 text-white/58 transition-colors duration-150 group-hover:text-white">
-              Open Viby <ArrowUpRight aria-hidden className="size-3" strokeWidth={1.5} />
-            </span>
-          </div>
-        </a>
+        <div className="min-w-0">
+          <BlogFigure fit kind="viby" />
+        </div>
       </div>
     </section>
   );
@@ -2322,117 +1836,6 @@ function FinalCta() {
         </ButtonLink>
       </div>
     </section>
-  );
-}
-
-type FooterLink = readonly [label: string, href: string];
-
-function FooterActionLink({
-  brand,
-  href,
-  icon: Icon,
-  label,
-}: {
-  brand: string | null;
-  href: string;
-  icon: LucideIcon;
-  label: string;
-}) {
-  const DirectionIcon = href.startsWith("http") ? ArrowUpRight : ArrowRight;
-
-  return (
-    <a
-      className="group flex h-12 items-center justify-between border-b border-white/12 px-4 font-mono text-[9px] font-normal uppercase !tracking-[0.04em] text-white/58 transition-[background-color,color] duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
-      href={href}
-    >
-      <span className="flex min-w-0 items-center gap-2">
-        {brand ? (
-          <BrandIcon className="size-3.5 shrink-0 opacity-72" src={brand} />
-        ) : (
-          <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.5} />
-        )}
-        <span className="truncate">{label}</span>
-      </span>
-      <DirectionIcon
-        aria-hidden
-        className="size-3.5 shrink-0 text-white/30 transition-[color,transform] duration-150 group-hover:translate-x-0.5 group-hover:text-white/72"
-        strokeWidth={1.5}
-      />
-    </a>
-  );
-}
-
-function FooterLinksGroup({ title, links }: { title: string; links: readonly FooterLink[] }) {
-  return (
-    <div className="px-4 py-4 md:min-h-[154px]">
-      <h3 className="mb-2 font-mono text-[10px] font-normal uppercase !tracking-[0.04em] text-white/34">
-        {title}
-      </h3>
-      <ul className="grid">
-        {links.map(([label, href]) => {
-          const DirectionIcon = href.startsWith("http") ? ArrowUpRight : ArrowRight;
-          const isGitHub = href.includes("github.com");
-
-          return (
-            <li key={label}>
-              <a
-                className="group flex min-h-7 items-center justify-between gap-2 font-mono text-[9px] font-normal uppercase !tracking-[0.04em] text-white/48 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-                href={href}
-              >
-                <span className="flex items-center gap-2">
-                  {isGitHub ? <GithubIcon className="size-3.5 opacity-72" /> : null}
-                  <span>{label}</span>
-                </span>
-                <DirectionIcon
-                  aria-hidden
-                  className="size-3 shrink-0 text-white/0 transition-[color,transform] duration-150 group-hover:translate-x-0.5 group-hover:text-white/56"
-                  strokeWidth={1.5}
-                />
-              </a>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
-function Footer() {
-  return (
-    <footer className="w-full">
-      <div className="grid grid-cols-1 divide-y divide-white/12 md:grid-cols-4 md:divide-x md:divide-y-0">
-        <div>
-          <div className="flex h-12 items-center border-b border-white/12 px-4">
-            <BrandLockup />
-          </div>
-          <div className="px-4 py-4 md:min-h-[154px]">
-            <p className="max-w-[15rem] font-mono text-[9px] font-normal uppercase leading-5 !tracking-[0.04em] text-white/42">
-              A Framework for Product integrated Apps
-            </p>
-          </div>
-        </div>
-        {footerGroups.map((group) => (
-          <div key={group.title}>
-            <FooterActionLink
-              brand={group.brand}
-              href={group.action[1]}
-              icon={group.icon}
-              label={group.action[0]}
-            />
-            <FooterLinksGroup links={group.links} title={group.title} />
-          </div>
-        ))}
-      </div>
-      <div className="farm-top-rule flex flex-col gap-2 px-4 py-3 font-mono text-[10px] font-normal uppercase !tracking-[0.04em] text-white/34 sm:flex-row sm:items-center sm:justify-between">
-        <span>&copy; {new Date().getFullYear()} Farm.js</span>
-        <a
-          className="inline-flex items-center gap-1.5 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-          href="https://www.farming-labs.dev"
-        >
-          farming-labs.dev <ExternalLink aria-hidden className="size-3" strokeWidth={1.5} />
-        </a>
-      </div>
-    </footer>
   );
 }
 

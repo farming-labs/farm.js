@@ -1,5 +1,7 @@
 import {
   createNodePreviewGatewayHandler,
+  verifyPreviewTunnelGrant,
+  type PreviewManagedAuthOptions,
   type PreviewGatewayRequest,
   type PreviewGatewayResponse,
   type PreviewGatewaySession,
@@ -8,6 +10,7 @@ import {
 import { createPersistentPreviewRelay } from "@farm.js/preview-tunnel";
 import { del, get, list, put } from "@vercel/blob";
 
+import { createRedisPreviewAuthExchangeRateLimiter } from "../lib/redis-auth-rate-limiter.js";
 import { createRedisPreviewRelayCoordinator } from "../lib/redis-coordinator.js";
 
 interface ExpiringValue<T> {
@@ -36,13 +39,11 @@ class VercelBlobPreviewGatewayStore implements PreviewGatewayStore {
   }
 
   async touchSession(session: PreviewGatewaySession, ttlMs: number): Promise<void> {
-    const nextSession = {
-      ...session,
-      expiresAt: Date.now() + ttlMs,
-    };
+    const nextSession = { ...session };
+    const remainingTtlMs = Math.max(1, Math.min(ttlMs, session.expiresAt - Date.now()));
     await Promise.all([
-      this.write(this.sessionKey(session.id), nextSession, ttlMs),
-      this.write(this.nameKey(session.name), session.id, ttlMs),
+      this.write(this.sessionKey(session.id), nextSession, remainingTtlMs),
+      this.write(this.nameKey(session.name), session.id, remainingTtlMs),
     ]);
   }
 
@@ -207,13 +208,15 @@ export const config = {
   maxDuration: 1800,
 };
 
-const domain = process.env.FARM_PREVIEW_DOMAIN || "preview.farming-labs.dev";
+const domain = process.env.FARM_PREVIEW_DOMAIN || "preview.farmjs.dev";
 const coordinator = createRedisPreviewRelayCoordinator();
+const auth = createManagedPreviewAuth();
 const pollingGateway = createNodePreviewGatewayHandler({
   domain,
   baseUrl: process.env.FARM_PREVIEW_GATEWAY_URL,
   clientHeartbeatTimeoutMs: 1000 * 60 * 30,
   store: createVercelBlobStore(),
+  auth,
 });
 
 const persistentRelay = createPersistentPreviewRelay({
@@ -225,12 +228,56 @@ const persistentRelay = createPersistentPreviewRelay({
   coordinator,
   // This handler is the public entry point for the whole gateway domain, so an
   // unauthenticated /agent registration would let anyone claim a preview
-  // hostname. Without FARM_PREVIEW_RELAY_TOKEN set the relay accepts no
-  // registrations and the CLI uses the authenticated polling gateway.
-  registrationToken: process.env.FARM_PREVIEW_RELAY_TOKEN,
+  // hostname. Managed deployments require a name-bound tunnel grant. A
+  // self-hosted legacy deployment can instead opt into one shared relay token;
+  // with neither configured the relay accepts no registrations.
+  ...(auth
+    ? {
+        authorizeAgent: ({ token, name }: { token: string; name: string }) => {
+          try {
+            const grant = verifyPreviewTunnelGrant(token, {
+              signingSecret: auth.signingSecret,
+              name,
+            });
+            return { expiresAt: grant.expiresAt };
+          } catch {
+            return false;
+          }
+        },
+      }
+    : { registrationToken: process.env.FARM_PREVIEW_RELAY_TOKEN }),
   // A relay route wins over the polling fallback, so a name a live polling
   // session owns must not be claimable over the WebSocket transport.
   isPreviewNameClaimed: pollingGateway.isPreviewNameClaimed,
 });
+
+function createManagedPreviewAuth(): PreviewManagedAuthOptions | undefined {
+  const signingSecret = process.env.FARM_PREVIEW_AUTH_SECRET;
+  const githubClientId = process.env.FARM_PREVIEW_GITHUB_CLIENT_ID;
+  if (!signingSecret && !githubClientId) return undefined;
+  if (!signingSecret || !githubClientId) {
+    throw new Error(
+      "Managed preview auth requires FARM_PREVIEW_AUTH_SECRET and FARM_PREVIEW_GITHUB_CLIENT_ID.",
+    );
+  }
+  const rateLimitExchange = createRedisPreviewAuthExchangeRateLimiter();
+  if (!rateLimitExchange && process.env.VERCEL_ENV === "production") {
+    throw new Error(
+      "Managed preview auth requires REDIS_URL, KV_URL, or UPSTASH_REDIS_URL for shared exchange rate limiting.",
+    );
+  }
+  return {
+    signingSecret,
+    githubClientId,
+    rateLimitExchange,
+    defaultSessionTtlMs: readDuration("FARM_PREVIEW_DEFAULT_TTL_MS", 1000 * 60 * 60),
+    maxSessionTtlMs: readDuration("FARM_PREVIEW_MAX_TTL_MS", 1000 * 60 * 60 * 24),
+  };
+}
+
+function readDuration(name: string, fallback: number) {
+  const value = Number(process.env[name]);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
 
 export default persistentRelay.server;

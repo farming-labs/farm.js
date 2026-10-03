@@ -20,14 +20,40 @@ export function shouldBypassFarmRouterForDottedPath(
   pathname: string,
   routeManager: DottedPathRouteMatcher | null | undefined,
   baseDirs: Array<string | false | undefined>,
+  /** Dotted paths the renderer serves without a route file, such as a configured /llms.txt. */
+  generatedPaths: readonly string[] = [],
 ): boolean {
   if (!pathname.includes(".") || pathname.endsWith(".html")) return false;
   const matchesAppRoute = Boolean(
     routeManager?.matchRoute(pathname)?.route ||
     routeManager?.matchMetadataRoute(pathname) ||
-    routeManager?.matchMetadataImage(pathname),
+    routeManager?.matchMetadataImage(pathname) ||
+    generatedPaths.includes(pathname),
   );
   return !matchesAppRoute || devServableFileExists(pathname, baseDirs);
+}
+
+/**
+ * Whether the app serves /llms.txt or /llms-full.txt itself, through
+ * `agent.llmsTxt`, an llms.ts or llms-full.ts route, or a file in the public
+ * dir. Development then keeps the docs engine off that path, as production
+ * does, where platforms serve public files before any route. Other files under
+ * the project root do not count: production does not emit them.
+ */
+export function farmAppOwnsLlmsPath(
+  pathname: string,
+  options: {
+    generatedPaths: readonly string[];
+    routeManager?: DottedPathRouteMatcher | null;
+    publicDir: string | false | undefined;
+  },
+): boolean {
+  if (pathname !== "/llms.txt" && pathname !== "/llms-full.txt") return false;
+  return (
+    options.generatedPaths.includes(pathname) ||
+    Boolean(options.routeManager?.matchMetadataRoute(pathname)) ||
+    devServableFileExists(pathname, [options.publicDir])
+  );
 }
 
 /**

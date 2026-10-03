@@ -27,9 +27,22 @@ export function generateRscEntry(ctx: EntryContext): string {
   });
 
   const debugLog = `// Debug disabled`;
+  const middlewareConfigImports = (ctx.middlewareConfigPaths ?? [])
+    .map(
+      (configPath, index) =>
+        `import * as FarmMiddlewareConfigModule${index} from ${JSON.stringify(
+          configPath.replace(/\\/g, "/"),
+        )};`,
+    )
+    .join("\n");
+  const middlewareConfigValues = (ctx.middlewareConfigPaths ?? []).map(
+    (_configPath, index) =>
+      `(FarmMiddlewareConfigModule${index}.default || FarmMiddlewareConfigModule${index})`,
+  );
   let code = `
 import React from 'react';
 import ServerErrorFallback from '/.farm/rsc-entries/error-fallback.tsx';
+${middlewareConfigImports}
 import { registerAPIRouteShape } from '@farm.js/core/api/runtime';
 import {
   renderToReadableStream,
@@ -307,12 +320,26 @@ async function handleAPIRequest(request) {
     });
   }
 }
+const farmRuntimeConfigs = [${middlewareConfigValues.join(", ")}].filter(Boolean);
+const farmConfigMiddleware = farmRuntimeConfigs.flatMap((config) => {
+  const middleware = config.middleware;
+  if (!middleware) return [];
+  return Array.isArray(middleware) ? middleware : [middleware];
+});
 const farmMiddlewareRunner = createProductionMiddlewareRunner({
-  modules: Object.entries(middlewares).map(([filePath, module]) => ({
-    path: middlewarePathToRoute(filePath),
-    filePath,
-    module,
-  })),
+  config: farmConfigMiddleware,
+  modules: Object.entries(middlewares)
+    .map(([filePath, module]) => ({
+      path: middlewarePathToRoute(filePath),
+      filePath,
+      module,
+    }))
+    .filter((entry) => entry.path !== null)
+    // Root first, as core runs them: a nested guard can rely on what its
+    // parent middleware set, and glob order is alphabetical, not by depth.
+    .sort((left, right) => middlewareRouteDepth(left.path) - middlewareRouteDepth(right.path)),
+  i18n: ${JSON.stringify(ctx.i18n) ?? "undefined"},
+  server: ${JSON.stringify(ctx.server) ?? "undefined"},
 });
 
 debug('Discovered pages:', Object.keys(pages));
@@ -323,22 +350,38 @@ debug('Discovered middlewares:', Object.keys(middlewares));
 debug('Discovered API routes:', Array.from(apiRouteMap.keys()));
 
 /**
- * Convert middleware file path to route path
- * e.g., '/src/middleware.ts' -> '/'
- * e.g., '/src/counter/middleware.ts' -> '/counter'
+ * Convert an app-relative middleware file path to the route it guards, with the
+ * same rules as core's middleware discovery: a route group such as
+ * '(protected)' adds no URL segment, and a '_private' or dot-prefixed folder
+ * holds no routes, so its middleware never runs (null).
+ * e.g., '/middleware.ts' -> '/'
+ * e.g., '/(protected)/dashboard/middleware.ts' -> '/dashboard'
  */
 function middlewarePathToRoute(filePath) {
-  let route = filePath
-    .replace('', '')
-    .replace(/\\/middleware\\.[tj]sx?$/, '') || '/';
-  return route;
+  const segments = filePath
+    .replace(/\\/middleware\\.[tj]sx?$/, '')
+    .split('/')
+    .filter(Boolean);
+  if (segments.some((segment) => segment.startsWith('_') || segment.startsWith('.'))) {
+    return null;
+  }
+  const routeSegments = segments.filter(
+    (segment) => !(segment.startsWith('(') && segment.endsWith(')')),
+  );
+  return routeSegments.length === 0 ? '/' : '/' + routeSegments.join('/');
+}
+
+function middlewareRouteDepth(route) {
+  return route === '/' ? 0 : route.split('/').length - 1;
 }
 
 /**
  * Execute middleware chain for a request
  */
-async function executeMiddleware(request) {
-  return farmMiddlewareRunner(request);
+async function executeMiddleware(request, context) {
+  // The Request was rebuilt by the Nitro handler and has no socket; the
+  // handler passes the connection's address alongside it.
+  return farmMiddlewareRunner(request, { clientAddress: context?.clientAddress });
 }
 
 /**
@@ -473,7 +516,7 @@ function getMatchingBoundary(pageFilePath, modules, kind) {
  * Main request handler - entry point for both dev and production (Nitro).
  * Exported as { fetch: handler } for the RSC/Nitro contract (see vite-plugin-rsc-deploy-example).
  */
-async function handleFarmRequest(request) {
+async function handleFarmRequest(request, context) {
   let url = new URL(request.url);
   let matchedPage = null;
   let errorData = new Map();
@@ -513,7 +556,7 @@ async function handleFarmRequest(request) {
   }
 
   // Execute middleware first
-  const middlewareResult = await executeMiddleware(request);
+  const middlewareResult = await executeMiddleware(request, context);
   
   // If middleware handled the request (e.g., redirect, auth), return the response
   if (middlewareResult.response) {
@@ -959,7 +1002,7 @@ async function handler(request, context) {
     dispatch: async (localRequest) =>
       (await handleAPIRequest(localRequest)) ?? Response.json({ error: 'Not Found' }, { status: 404 }),
   }, () => _runWithCurrentRequest(request, () =>
-    _runWithAfterRequest(request, () => handleFarmRequest(request), context)
+    _runWithAfterRequest(request, () => handleFarmRequest(request, context), context)
   ));
 }
 

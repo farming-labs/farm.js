@@ -1,5 +1,8 @@
 import * as fs from "fs";
+import * as https from "https";
+import { isIP } from "net";
 import * as path from "path";
+import * as tls from "tls";
 import type {
   FarmConfig,
   FarmRequest,
@@ -19,7 +22,7 @@ import {
   removeFarmDocumentTitles,
 } from "./full-document";
 import { getClientModuleMetadata } from "../utils/client-component";
-import { Writable } from "stream";
+import { Readable, Writable } from "stream";
 import {
   _clearCurrentMiddlewareContext,
   _clearCurrentMiddlewareData,
@@ -78,6 +81,14 @@ import { renderFarmFontDevHead } from "../font-vite";
 import { createFarmMetadataImageResponse } from "../metadata-image";
 import { createFarmMetadataRouteResponse } from "../metadata-route";
 import {
+  collectFarmLlmsTxtPages,
+  createFarmDefaultLlmsTxt,
+  createFarmLlmsMarkdownReader,
+  renderFarmLlmsFullTxt,
+  resolveFarmLlmsTxtConfig,
+} from "../llms-txt";
+import { resolveMarkdownConfig } from "../markdown";
+import {
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
 } from "../trailing-slash";
@@ -93,8 +104,10 @@ import { getTheme as getFarmTheme } from "../theme/server";
 import { FARM_VERSION } from "../version";
 import type { ViteDevServer } from "vite";
 import {
+  assertFarmRendererStreamingRuntime,
   getFarmRendererCapabilities,
   getFarmRendererComponentExtensions,
+  getFarmRendererStreamingCapabilitiesForRuntime,
   isReactRenderer,
   readFarmRendererWebStream,
   resolveFarmRendererModule,
@@ -103,8 +116,17 @@ import {
 } from "../renderer";
 import { isRendererCompiledComponent } from "../integration-provider-build";
 import { pathToFileURL } from "node:url";
+import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
 import type { FarmIslandStrategy } from "../island";
 import { createDefaultErrorDiagnostics } from "./error-diagnostics";
+import {
+  addFarmCspNonceToScriptTags,
+  createFarmCspNonceRewriter,
+  createFarmCspNonce,
+  getFarmSecurityHeader,
+  resolveFarmSecurityConfig,
+  type ResolvedFarmSecurityConfig,
+} from "../security";
 
 let cachedClerkProvider: { ClerkProvider: any } | null = null;
 
@@ -330,12 +352,38 @@ function renderI18nAlternateLinks(requestPath: string, snapshot: FarmI18nClientS
   return links.join("");
 }
 
-function createPPRRefreshScript(): string {
-  return `<script>(function(){if(window.__FARM_PPR_REFRESHING__)return;window.__FARM_PPR_REFRESHING__=true;function replaceRoot(html){var doc=new DOMParser().parseFromString(html,"text/html");var next=doc.getElementById("root");var current=document.getElementById("root");if(!next||!current)return;current.innerHTML=next.innerHTML;}fetch(window.location.href,{credentials:"same-origin",headers:{"x-farm-ppr-refresh":"1"}}).then(function(response){return response.ok?response.text():null;}).then(function(html){if(html)replaceRoot(html);}).catch(function(){});})();</script>`;
+/**
+ * Refresh a cached PPR shell's dynamic content in the background, once per
+ * document. Inlined, so it stays hand-minified.
+ *
+ * Hydration awaits `__FARM_PPR_REFRESH_PROMISE__`, which settles after the first
+ * attempt whether it succeeds or fails, so a failing refresh never delays
+ * hydration. A failed attempt (rejected request, non-2xx response, or a document
+ * with no #root) leaves the shell untouched and retries with backoff, at most
+ * PPR_REFRESH_MAX_ATTEMPTS times; while offline it waits for the `online` event
+ * instead of spending an attempt. Retries only apply before hydration starts
+ * (the client sets `__FARM_PPR_HYDRATING__`), so they never replace DOM React
+ * owns. When retries stop without success the latch is released, so a later
+ * explicit refresh can run.
+ */
+export const PPR_REFRESH_MAX_ATTEMPTS = 3;
+
+export function createPPRRefreshScript(): string {
+  return `<script>(function(){if(window.__FARM_PPR_REFRESHING__)return;window.__FARM_PPR_REFRESHING__=true;var owner=document.currentScript;function applyState(doc){doc.querySelectorAll("script[data-farm-refresh-state]").forEach(function(source){var script=document.createElement("script");if(owner&&owner.nonce)script.nonce=owner.nonce;script.textContent=source.textContent||"";document.head.appendChild(script);script.remove();});}function key(node){return node.nodeType===1?node.getAttribute("id"):null}function compatible(current,next){if(current.nodeType!==next.nodeType)return false;if(current.nodeType===1&&current.tagName!==next.tagName)return false;var currentKey=key(current);var nextKey=key(next);return currentKey||nextKey?currentKey===nextKey:true}function syncAttributes(current,next){Array.from(current.attributes).forEach(function(attribute){if(!next.hasAttribute(attribute.name))current.removeAttribute(attribute.name)});Array.from(next.attributes).forEach(function(attribute){if(current.getAttribute(attribute.name)!==attribute.value)current.setAttribute(attribute.name,attribute.value)})}function syncChildren(current,next){var cursor=current.firstChild;Array.from(next.childNodes).forEach(function(nextChild){if(cursor&&compatible(cursor,nextChild)){var matched=cursor;cursor=cursor.nextSibling;syncNode(matched,nextChild);return}var candidate=cursor;while(candidate&&!compatible(candidate,nextChild))candidate=candidate.nextSibling;if(candidate){current.insertBefore(candidate,cursor);syncNode(candidate,nextChild);return}current.insertBefore(nextChild.cloneNode(true),cursor)});while(cursor){var stale=cursor;cursor=cursor.nextSibling;stale.remove()}}function syncNode(current,next){if(current.nodeType===3||current.nodeType===8){if(current.nodeValue!==next.nodeValue)current.nodeValue=next.nodeValue;return}if(current.nodeType!==1)return;var tag=current.tagName;var value=tag==="INPUT"&&current.type==="file"?null:"value" in current?current.value:null;var checked="checked" in current?current.checked:null;var selected=tag==="SELECT"?Array.from(current.options).map(function(option){return option.selected}):null;var focused=document.activeElement===current;var selection=focused&&typeof current.selectionStart==="number"?[current.selectionStart,current.selectionEnd,current.selectionDirection]:null;syncAttributes(current,next);syncChildren(current,next);if(value!==null)current.value=value;if(checked!==null)current.checked=checked;if(selected)Array.from(current.options).forEach(function(option,index){option.selected=selected[index]===true});if(selection)try{current.setSelectionRange(selection[0],selection[1],selection[2])}catch{}}function replaceRoot(html){var doc=new DOMParser().parseFromString(html,"text/html");var next=doc.getElementById("root");var current=document.getElementById("root");if(!next||!current)return false;applyState(doc);syncNode(current,next);return true}var attempts=0,settle;window.__FARM_PPR_REFRESH_PROMISE__=new Promise(function(resolve){settle=resolve;});function release(){window.__FARM_PPR_REFRESHING__=false;}function retry(){settle();if(window.__FARM_PPR_HYDRATING__||attempts>=${PPR_REFRESH_MAX_ATTEMPTS})return release();if(navigator.onLine===false){window.addEventListener("online",run,{once:true});return;}setTimeout(run,1000*Math.pow(2,attempts-1));}function run(){if(window.__FARM_PPR_HYDRATING__)return release();attempts++;fetch(window.location.href,{cache:"no-store",credentials:"same-origin",headers:{"x-farm-ppr-refresh":"1"}}).then(function(response){if(!response.ok)throw new Error("status "+response.status);return response.text();}).then(function(html){if(window.__FARM_PPR_HYDRATING__)return release();if(!replaceRoot(html))throw new Error("no root");settle();}).catch(retry);}run();})();</script>`;
 }
 
-function createPreHydrationClickQueueScript(): string {
-  return `<script>(function(){if(window.__FARM_PREHYDRATION_CLICK_QUEUE__)return;var queue=[];window.__FARM_PREHYDRATION_CLICK_QUEUE__=queue;window.__FARM_HYDRATED__=false;document.documentElement.dataset.farmHydrated="false";function isModified(event){return !!(event.metaKey||event.altKey||event.ctrlKey||event.shiftKey)}function closestQueuedTarget(target){while(target&&target!==document.documentElement){if(target.matches&&target.matches('button,[role="button"],input[type="button"],input[type="submit"],input[type="reset"]'))return target;target=target.parentElement}return null}document.addEventListener("click",function(event){if(window.__FARM_HYDRATED__)return;if(event.defaultPrevented||event.button!==0||isModified(event))return;var target=closestQueuedTarget(event.target);if(!target||target.closest&&target.closest("a[href]")||target.closest&&target.closest('[data-farm-island-hydrated="true"]'))return;if(queue.some(function(item){return item.target===target}))return;queue.push({target:target,createdAt:Date.now()});document.dispatchEvent(new CustomEvent("farm:island-interaction",{detail:{target:target}}));event.preventDefault();event.stopImmediatePropagation()},true);})();</script>`;
+export function createPreHydrationClickQueueScript(): string {
+  // Inlined into every document, so this stays hand-minified rather than
+  // importing from the island runtime, which has not loaded yet at this point.
+  //
+  // Two kinds of interaction are handled. A click or a submit is HELD: the
+  // event is prevented and queued so the island can hydrate and the action can
+  // be reproduced against the same target. A pointerdown or a focusin is only
+  // OBSERVED: it starts hydration early and native behavior proceeds, so
+  // typing into a field or toggling a checkbox is never swallowed. The event
+  // set here must match FARM_ISLAND_ACTIVATION_EVENTS.
+  const selector = JSON.stringify(FARM_ISLAND_REPLAYABLE_SELECTOR);
+  return `<script>(function(){if(window.__FARM_PREHYDRATION_CLICK_QUEUE__)return;var queue=[];window.__FARM_PREHYDRATION_CLICK_QUEUE__=queue;window.__FARM_HYDRATED__=false;document.documentElement.dataset.farmHydrated="false";function isModified(event){return !!(event.metaKey||event.altKey||event.ctrlKey||event.shiftKey)}function inHydrated(node){return !!(node&&node.closest&&node.closest('[data-farm-island-hydrated="true"]'))}function closestQueuedTarget(target){while(target&&target!==document.documentElement){if(target.matches&&target.matches(${selector}))return target;target=target.parentElement}return null}function announce(target,kind){document.dispatchEvent(new CustomEvent("farm:island-interaction",{detail:{target:target,kind:kind||null}}))}function hold(event,target,kind){if(queue.some(function(item){return item.target===target}))return;queue.push({target:target,kind:kind,createdAt:Date.now()});announce(target,kind);event.preventDefault();event.stopImmediatePropagation()}document.addEventListener("click",function(event){if(window.__FARM_HYDRATED__)return;if(event.defaultPrevented||event.button!==0||isModified(event))return;var target=closestQueuedTarget(event.target);if(!target||target.closest&&target.closest("a[href]")||inHydrated(target))return;hold(event,target,"click")},true);document.addEventListener("submit",function(event){if(window.__FARM_HYDRATED__)return;if(event.defaultPrevented)return;var form=event.target;if(!form||form.nodeName!=="FORM"||inHydrated(form))return;hold(event,form,"submit")},true);function observe(event){if(window.__FARM_HYDRATED__)return;var target=event.target;if(!(target&&target.closest)||inHydrated(target))return;announce(target,null)}document.addEventListener("pointerdown",observe,true);document.addEventListener("focusin",observe,true);})();</script>`;
 }
 
 function createDocumentFooter(options: {
@@ -353,8 +401,7 @@ function createDocumentFooter(options: {
 }
 
 function createDeferredHydrationScript(records: readonly DeferredRecord[]): string {
-  if (records.length === 0) return "";
-  return `<script>window.__FARM_DEFERRED_DATA__=${serializeInlineValue(
+  return `<script data-farm-refresh-state>window.__FARM_DEFERRED_DATA__=${serializeInlineValue(
     snapshotDeferredData(records),
   )};</script>`;
 }
@@ -367,6 +414,52 @@ function toMiddlewareMap(input: unknown): Map<string, any> {
     return new Map(Object.entries(input as Record<string, any>));
   }
   return new Map<string, any>();
+}
+
+/**
+ * GETs a page from this HTTPS dev server. The connection goes to the server's
+ * own socket address, while SNI and certificate verification use the hostname
+ * the page was requested under, which is the name the dev certificate covers.
+ */
+function requestOwnHttpsServer(
+  request: Request,
+  address: { host: string; port: number },
+): Promise<Response> {
+  const url = new URL(request.url);
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  return new Promise((resolve, reject) => {
+    const outgoing = https.request(
+      {
+        host: address.host,
+        port: address.port,
+        method: "GET",
+        path: `${url.pathname}${url.search}`,
+        headers: { ...Object.fromEntries(request.headers), host: url.host },
+        // SNI carries names only, never IP addresses.
+        ...(isIP(hostname) ? {} : { servername: hostname }),
+        checkServerIdentity: (_, certificate) => tls.checkServerIdentity(hostname, certificate),
+      },
+      (incoming) => {
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(incoming.headers)) {
+          for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+            headers.append(name, item);
+          }
+        }
+        const status = incoming.statusCode ?? 502;
+        const hasBody = ![204, 205, 304].includes(status);
+        if (!hasBody) incoming.resume();
+        resolve(
+          new Response(hasBody ? (Readable.toWeb(incoming) as ReadableStream) : null, {
+            status,
+            headers,
+          }),
+        );
+      },
+    );
+    outgoing.on("error", reject);
+    outgoing.end();
+  });
 }
 
 function isWebResponse(value: unknown): value is Response {
@@ -468,6 +561,7 @@ export class ServerRenderer {
   private i18nRuntime?: FarmI18nRuntime;
   private viteServer?: ViteDevServer;
   private rendererRuntime!: FarmServerRendererRuntime;
+  private security: ResolvedFarmSecurityConfig;
 
   constructor(
     config: Required<FarmConfig>,
@@ -479,6 +573,7 @@ export class ServerRenderer {
     this.routeManager = routeManager;
     this.i18nRuntime = i18nRuntime;
     this.viteServer = viteServer;
+    this.security = resolveFarmSecurityConfig(config.security);
     this.loadSSGManifest();
   }
 
@@ -511,17 +606,12 @@ export class ServerRenderer {
       }
     }
 
-    const capabilities = getFarmRendererCapabilities(this.config.renderer);
-    if (capabilities.streaming.node && typeof runtime.renderToPipeableStream !== "function") {
-      throw new Error(
-        `Renderer \`${this.config.renderer.name}\` advertises Node streaming but its server module does not export renderToPipeableStream().`,
-      );
-    }
-    if (capabilities.streaming.web && typeof runtime.renderToReadableStream !== "function") {
-      throw new Error(
-        `Renderer \`${this.config.renderer.name}\` advertises Web streaming but its server module does not export renderToReadableStream().`,
-      );
-    }
+    assertFarmRendererStreamingRuntime(
+      this.config.renderer.name,
+      this.config.renderer,
+      runtime,
+      "node",
+    );
 
     this.rendererRuntime = runtime as FarmServerRendererRuntime;
     this.routeManager.setRendererRuntime?.(this.rendererRuntime);
@@ -588,8 +678,8 @@ export class ServerRenderer {
   }
 
   private async renderElementToCompleteHTML(element: unknown): Promise<string> {
-    const capabilities = getFarmRendererCapabilities(this.config.renderer);
-    const renderToPipeableStream = capabilities.streaming.node
+    const streaming = getFarmRendererStreamingCapabilitiesForRuntime(this.config.renderer, "node");
+    const renderToPipeableStream = streaming.node
       ? this.rendererRuntime.renderToPipeableStream
       : undefined;
 
@@ -621,7 +711,7 @@ export class ServerRenderer {
       });
     }
 
-    if (capabilities.streaming.web && this.rendererRuntime.renderToReadableStream) {
+    if (streaming.web && this.rendererRuntime.renderToReadableStream) {
       const stream = await this.rendererRuntime.renderToReadableStream(element);
       return await readFarmRendererWebStream(stream);
     }
@@ -833,6 +923,10 @@ export class ServerRenderer {
     middlewareContext: Map<string, any>,
     pluginExposedContext: Map<string, any>,
   ): string | undefined {
+    if (this.security.csp && this.security.csp.nonce) {
+      return "csp-nonce";
+    }
+
     const method = (req.method || "GET").toUpperCase();
     if (method !== "GET" && method !== "HEAD") {
       return "method";
@@ -1043,6 +1137,12 @@ export class ServerRenderer {
     await this.initialize();
     setFarmBasePath(this.config.basePath);
     setFarmTrailingSlashPreference(this.config.trailingSlash);
+    const cspNonce = createFarmCspNonce(this.security);
+    if (cspNonce) {
+      (req as any).__FARM_CSP_NONCE__ = cspNonce;
+      const header = getFarmSecurityHeader(this.security, cspNonce)!;
+      res.setHeader(header.key, header.value);
+    }
     const request = createWebRequestFromFarmRequest(req, {
       trustProxy: this.config.server?.trustProxy,
     });
@@ -1107,6 +1207,13 @@ export class ServerRenderer {
         return;
       }
 
+      const generatedLlmsKind = this.getGeneratedLlmsKind(pathname);
+      if (generatedLlmsKind) {
+        await this.renderGeneratedLlmsTxt(req, res, generatedLlmsKind);
+        completeRender(res.statusCode || 200, pathname);
+        return;
+      }
+
       const metadataImageMatch = this.routeManager.matchMetadataImage(pathname);
       if (metadataImageMatch) {
         await this.renderMetadataImage(req, res, {
@@ -1134,7 +1241,10 @@ export class ServerRenderer {
 
       // Pre-rendered HTML only represents retrieval requests. Other methods must
       // continue through the live route so their request semantics are preserved.
-      if (shouldServePrerenderedPage(process.env.NODE_ENV, req.method)) {
+      if (
+        !(req as any).__FARM_CSP_NONCE__ &&
+        shouldServePrerenderedPage(process.env.NODE_ENV, req.method)
+      ) {
         const ssgPage = await this.shouldServeSSG(pathname);
         if (ssgPage) {
           const served = await this.serveSSGPage(req, res, ssgPage);
@@ -1977,6 +2087,13 @@ export class ServerRenderer {
         trustProxy: this.config.server?.trustProxy,
       });
       const url = new URL(request.url);
+      const llmsContext: Partial<Awaited<ReturnType<ServerRenderer["createLlmsTxtContext"]>>> =
+        match.metadata.kind === "llms" || match.metadata.kind === "llms-full"
+          ? await this.createLlmsTxtContext(request, {
+              full: match.metadata.kind === "llms-full",
+              req,
+            })
+          : {};
       const value =
         typeof routeModule.default === "function"
           ? await (routeModule.default as any)({
@@ -1984,9 +2101,18 @@ export class ServerRenderer {
               params: match.params,
               searchParams: url.searchParams,
               path: match.routePath,
+              ...llmsContext,
             })
           : routeModule.default;
-      const response = createFarmMetadataRouteResponse(match.metadata.kind, value, routeModule, {
+      // llms-full objects need each page's Markdown, which only this side can fetch.
+      const body =
+        match.metadata.kind === "llms-full" && !(value instanceof Response)
+          ? await renderFarmLlmsFullTxt(value, {
+              origin: url.origin,
+              readMarkdown: llmsContext.markdown!,
+            })
+          : value;
+      const response = createFarmMetadataRouteResponse(match.metadata.kind, body, routeModule, {
         method,
       });
       await sendWebResponse(res as any, response);
@@ -2000,6 +2126,129 @@ export class ServerRenderer {
         }),
       );
     }
+  }
+
+  /** `/llms.txt` and `/llms-full.txt` from `agent.llmsTxt` when no file route owns them. */
+  private getGeneratedLlmsKind(pathname: string): "llms" | "llms-full" | null {
+    const config = resolveFarmLlmsTxtConfig(this.config.agent?.llmsTxt);
+    if (!config.enabled) return null;
+    if (pathname === "/llms.txt") return "llms";
+    return pathname === "/llms-full.txt" && config.full ? "llms-full" : null;
+  }
+
+  private async renderGeneratedLlmsTxt(
+    req: FarmRequest,
+    res: FarmResponse,
+    kind: "llms" | "llms-full",
+  ): Promise<void> {
+    try {
+      const request = createWebRequestFromFarmRequest(req, {
+        trustProxy: this.config.server?.trustProxy,
+      });
+      const config = resolveFarmLlmsTxtConfig(this.config.agent?.llmsTxt);
+      const context = await this.createLlmsTxtContext(request, { full: kind === "llms-full", req });
+      const body =
+        kind === "llms-full"
+          ? await renderFarmLlmsFullTxt(context.defaults, {
+              origin: new URL(request.url).origin,
+              readMarkdown: context.markdown!,
+            })
+          : context.defaults;
+      await sendWebResponse(
+        res as any,
+        createFarmMetadataRouteResponse(
+          kind,
+          body,
+          { revalidate: config.revalidate },
+          { method: req.method },
+        ),
+      );
+    } catch (error) {
+      logger.error(`Generated ${kind}.txt failed: ${error}`);
+      await sendWebResponse(
+        res as any,
+        new Response("Internal Server Error", {
+          status: 500,
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        }),
+      );
+    }
+  }
+
+  /** Same inputs the production server gives llms.txt: static pages and root metadata. */
+  private async createLlmsTxtContext(
+    request: Request,
+    options: { full?: boolean; req?: FarmRequest } = {},
+  ): Promise<{
+    pages: ReturnType<typeof collectFarmLlmsTxtPages>;
+    defaults: ReturnType<typeof createFarmDefaultLlmsTxt>;
+    markdown?: (url: string) => Promise<string | null>;
+  }> {
+    const config = resolveFarmLlmsTxtConfig(this.config.agent?.llmsTxt);
+    const origin = new URL(request.url).origin;
+    const staticRoutes = [...this.routeManager.getRoutes()].filter(
+      ([pattern]) => !pattern.includes("["),
+    );
+    const sources = await Promise.all(
+      staticRoutes.map(async ([pattern, route]) => {
+        try {
+          const metadata = (await this.routeManager.loadRouteModule(route.modulePath)).metadata;
+          return { pattern, metadata: metadata as unknown };
+        } catch (error) {
+          // The page itself will surface this error; list it with its fallback title.
+          logger.warn(`Could not read metadata for ${pattern} in llms.txt: ${error}`);
+          return { pattern };
+        }
+      }),
+    );
+
+    const rootLayout = this.routeManager.getLayouts().get("/");
+    const rootMetadata = rootLayout
+      ? (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).metadata
+      : undefined;
+    const pages = collectFarmLlmsTxtPages(sources, {
+      origin,
+      basePath: this.config.basePath,
+      markdown: resolveMarkdownConfig(this.config.md as any),
+      include: config.include,
+      exclude: config.exclude,
+    });
+    return {
+      pages,
+      defaults: createFarmDefaultLlmsTxt({ origin, pages, config, rootMetadata }),
+      ...(options.full ? { markdown: this.createDevMarkdownReader(options.req) } : {}),
+    };
+  }
+
+  /**
+   * Reads page mirrors back through this dev server, the way its .md handler
+   * renders pages, so Markdown sources and agent overrides are included. Requests
+   * go to the server's own socket address: the page URLs carry the Host header,
+   * which a client controls, and fetching them would let anyone who can reach a
+   * network-exposed dev server point it at other hosts. Over HTTPS the certificate
+   * is still checked against the requested hostname. HEAD reads nothing, since its
+   * body is discarded.
+   */
+  private createDevMarkdownReader(req?: FarmRequest): (url: string) => Promise<string | null> {
+    const socket = req?.socket as
+      | { localAddress?: string; localPort?: number; encrypted?: boolean }
+      | undefined;
+    if (req?.method?.toUpperCase() === "HEAD" || !socket?.localAddress || !socket.localPort) {
+      return async () => null;
+    }
+    if (socket.encrypted) {
+      const address = { host: socket.localAddress, port: socket.localPort };
+      return createFarmLlmsMarkdownReader((page) => requestOwnHttpsServer(page, address));
+    }
+    const host = socket.localAddress.includes(":")
+      ? `[${socket.localAddress}]`
+      : socket.localAddress;
+    const localOrigin = `http://${host}:${socket.localPort}`;
+    const read = createFarmLlmsMarkdownReader((page) => fetch(page));
+    return (url) => {
+      const target = new URL(url);
+      return read(`${localOrigin}${target.pathname}${target.search}`);
+    };
   }
 
   private async renderMetadataImage(
@@ -2186,7 +2435,7 @@ export class ServerRenderer {
       if (typeof res.removeHeader === "function") {
         res.removeHeader("X-Farm-PPR");
       }
-      res.write(this.createFullHTML(html, false, options.pathname));
+      res.write(this.secureDocumentHTML(req, this.createFullHTML(html, false, options.pathname)));
       res.end();
       return true;
     } catch (renderError) {
@@ -2287,7 +2536,7 @@ export class ServerRenderer {
         ? toViteModuleId(pagePath, this.config.root)
         : "/src/app/page.tsx";
       const deploymentId = this.getDeploymentId();
-      const bootstrapScript = `<script>
+      const bootstrapScript = `<script data-farm-refresh-state>
 window.__FARM_PROPS__ = ${serializeInlineValue((deferredProps.data as any).page)};
 window.__FARM_ROUTE_SLOTS__ = ${serializeInlineValue((deferredProps.data as any).slots)};
 window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(deploymentId)};
@@ -2297,17 +2546,15 @@ window.__FARM_PAGE_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_PAGE_
 window.__FARM_LAYOUT_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ === true)};
 window.__FARM_LAYOUTS__ = ${JSON.stringify((req as any).__FARM_LAYOUTS__ || [])};
 window.__FARM_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_SHOULD_HYDRATE__ === true)};
-${
-  (req as any).__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true
-    ? "window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ = true;"
-    : ""
-}
+window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ = ${JSON.stringify(
+        (req as any).__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true,
+      )};
 window.__FARM_ISLAND_STRATEGY__ = ${JSON.stringify((req as any).__FARM_ISLAND_STRATEGY__ || "load")};
 window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
 window.__FARM_LOADING_MODULE__ = ${JSON.stringify((req as any).__FARM_LOADING_MODULE_PATH__ || null)};
 window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
-${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(getFarmI18nClientSnapshot())};` : ""}
+window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getFarmI18nClientSnapshot()) : "null"};
 </script>`;
       const deferredScript = createDeferredHydrationScript(deferredProps.records);
       const rendererHydrationScript = this.rendererRuntime.generateHydrationScript?.() || "";
@@ -2416,12 +2663,13 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         route,
         durationMs: Date.now() - startedAt,
       });
-      if ((req.method || "GET").toUpperCase() !== "HEAD") res.write(html);
+      const securedHtml = this.secureDocumentHTML(req, html);
+      if ((req.method || "GET").toUpperCase() !== "HEAD") res.write(securedHtml);
       res.end();
       // The buffered document is rendered per request and never split at a
       // static boundary, so a shell capture must not store it: caching it
       // would serve this visitor's data to everyone until revalidation.
-      if (!options.captureStaticShell) await options.onComplete?.(html);
+      if (!options.captureStaticShell) await options.onComplete?.(securedHtml);
       emitFarmEvent({
         type: "render.stream.complete",
         route,
@@ -2563,7 +2811,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         page: (req as any).__FARM_PROPS__ || {},
         slots: routeSlotPayload,
       });
-      const propsScript = `<script>
+      const propsScript = `<script data-farm-refresh-state>
 window.__FARM_PROPS__ = ${serializeInlineValue((deferredProps.data as any).page)};
 window.__FARM_ROUTE_SLOTS__ = ${serializeInlineValue((deferredProps.data as any).slots)};
 window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(deploymentId)};
@@ -2577,11 +2825,9 @@ window.__FARM_LAYOUT_SHOULD_HYDRATE__ = ${JSON.stringify(
       )};
 window.__FARM_LAYOUTS__ = ${JSON.stringify((req as any).__FARM_LAYOUTS__ || [])};
 window.__FARM_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_SHOULD_HYDRATE__ === true)};
-${
-  (req as any).__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true
-    ? "window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ = true;"
-    : ""
-}
+window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ = ${JSON.stringify(
+        (req as any).__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true,
+      )};
 window.__FARM_ISLAND_STRATEGY__ = ${JSON.stringify((req as any).__FARM_ISLAND_STRATEGY__ || "load")};
 window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
 window.__FARM_LOADING_MODULE__ = ${JSON.stringify(
@@ -2589,7 +2835,7 @@ window.__FARM_LOADING_MODULE__ = ${JSON.stringify(
       )};
 window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
-${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(getFarmI18nClientSnapshot())};` : ""}
+window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getFarmI18nClientSnapshot()) : "null"};
 </script>`;
       const hydrationClickQueueScript =
         isClientComponent ||
@@ -2624,7 +2870,11 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         element,
       );
       const devStyleLinks = this.collectDevStyleLinks();
+      const cspNonce = this.getCspNonce(req);
+      const secureDocumentHTML = (html: string) =>
+        cspNonce ? addFarmCspNonceToScriptTags(html, cspNonce) : html;
       const { pipe } = renderToPipeableStream(streamRoot, {
+        nonce: cspNonce,
         onShellReady() {
           const shellReadyMs = Date.now() - streamStartTime;
           emitFarmEvent({
@@ -2656,57 +2906,80 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
 </head>
 <body class="">
   <div id="root">`;
-          htmlParts.push(shell);
-          staticShellParts?.push(shell);
+          const securedShell = secureDocumentHTML(shell);
+          htmlParts.push(securedShell);
+          staticShellParts?.push(securedShell);
 
           let firstChunk = true;
           let checkedFullDocument = false;
+          const cspNonceRewriter = cspNonce ? createFarmCspNonceRewriter(cspNonce) : undefined;
+          const cspStreamDecoder = cspNonceRewriter ? new TextDecoder() : undefined;
+          const recordRenderedChunk = (chunkText: string) => {
+            if (!chunkText) return;
+            if (!checkedFullDocument) {
+              checkedFullDocument = true;
+              if (opensFarmFullDocument(chunkText)) {
+                fullDocumentRoutes.add(fullDocumentRouteKey);
+                warnFarmFullDocumentLayout();
+              }
+            }
+            htmlParts.push(chunkText);
+
+            if (staticShellParts && findStaticShellBoundary && !staticShellClosed) {
+              const dynamicIndex = findStaticShellBoundary(chunkText);
+              if (dynamicIndex >= 0) {
+                if (dynamicIndex > 0) {
+                  staticShellParts.push(chunkText.slice(0, dynamicIndex));
+                }
+                staticShellClosed = true;
+                if (!suspenseHoleEmitted) {
+                  suspenseHoleEmitted = true;
+                  options.onSuspenseHoleDetected?.();
+                }
+              } else {
+                staticShellParts.push(chunkText);
+              }
+            }
+          };
           const writableStream = new Writable({
             write(chunk, encoding, callback) {
               if (firstChunk && process.env.FARM_VERBOSE) {
                 console.log(`[FARM STREAM] first pipe chunk at ${Date.now() - streamStartTime}ms`);
                 firstChunk = false;
               }
-              const chunkText = Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk);
+              const chunkText = Buffer.isBuffer(chunk)
+                ? cspStreamDecoder
+                  ? cspStreamDecoder.decode(chunk, { stream: true })
+                  : chunk.toString()
+                : String(chunk);
+              const securedChunkText = cspNonceRewriter
+                ? cspNonceRewriter.write(chunkText)
+                : chunkText;
               // The shell was already flushed, so this response still nests the
               // document; record the route so later requests take the buffered
               // path (which composes it correctly) and warn the developer once.
-              if (!checkedFullDocument) {
-                checkedFullDocument = true;
-                if (opensFarmFullDocument(chunkText)) {
-                  fullDocumentRoutes.add(fullDocumentRouteKey);
-                  warnFarmFullDocumentLayout();
-                }
-              }
-              htmlParts.push(chunkText);
+              recordRenderedChunk(securedChunkText);
 
-              if (staticShellParts && findStaticShellBoundary && !staticShellClosed) {
-                const dynamicIndex = findStaticShellBoundary(chunkText);
-                if (dynamicIndex >= 0) {
-                  if (dynamicIndex > 0) {
-                    staticShellParts.push(chunkText.slice(0, dynamicIndex));
-                  }
-                  staticShellClosed = true;
-                  if (!suspenseHoleEmitted) {
-                    suspenseHoleEmitted = true;
-                    options.onSuspenseHoleDetected?.();
-                  }
-                } else {
-                  staticShellParts.push(chunkText);
-                }
-              }
-
-              res.write(chunk, encoding, () => {
+              const onWrite = () => {
                 if (typeof (res as any).flush === "function") (res as any).flush();
                 callback();
-              });
+              };
+              if (cspNonceRewriter) res.write(securedChunkText, onWrite);
+              else res.write(chunk, encoding, onWrite);
             },
             final(callback) {
+              if (cspNonceRewriter) {
+                const tail = cspNonceRewriter.write(cspStreamDecoder!.decode(), true);
+                recordRenderedChunk(tail);
+                if (tail) res.write(tail);
+              }
               const suspenseRevealFallback = `<script>(function(){function moveFragment(srcId,placeholderId){var src=document.getElementById(srcId),ph=document.getElementById(placeholderId);if(!src||!ph||!ph.parentNode)return false;while(src.firstChild)ph.parentNode.insertBefore(src.firstChild,ph);ph.parentNode.removeChild(ph);if(src.parentNode)src.parentNode.removeChild(src);return true}function revealBoundary(boundaryId,sectionId){var boundary=document.getElementById(boundaryId),section=document.getElementById(sectionId);if(!boundary||!section||!boundary.parentNode)return false;var start=boundary.previousSibling;if(!start||start.nodeType!==8)return false;var parent=boundary.parentNode;var node=boundary;var depth=0;while(node){if(node.nodeType===8){var data=node.data;if(data==="/$"||data==="/&"){if(depth===0)break;depth--;}else if(data==="$"||data==="$?"||data==="$~"||data==="$!"||data==="&"){depth++;}}var next=node.nextSibling;parent.removeChild(node);node=next;}while(section.firstChild)parent.insertBefore(section.firstChild,node);if(section.parentNode)section.parentNode.removeChild(section);start.data="$";return true}var tries=0;var timer=setInterval(function(){var changed=false;document.querySelectorAll('div[id^="S:"]').forEach(function(section){var suffix=section.id.slice(2);changed=moveFragment('S:'+suffix,'P:'+suffix)||changed;});document.querySelectorAll('template[id^="B:"]').forEach(function(boundary){var suffix=boundary.id.slice(2);changed=revealBoundary('B:'+suffix,'S:'+suffix)||changed;});tries++;if(tries>80||(!document.querySelector('template[id^="B:"]')&&!document.querySelector('template[id^="P:"]'))){clearInterval(timer);}},50);})();</script>`;
-              const footer = createDocumentFooter({
-                suspenseRevealFallback,
-                deferredHydrationScript: createDeferredHydrationScript(deferredProps.records),
-              });
+              const footer = secureDocumentHTML(
+                createDocumentFooter({
+                  suspenseRevealFallback,
+                  deferredHydrationScript: createDeferredHydrationScript(deferredProps.records),
+                }),
+              );
               htmlParts.push(footer);
               res.write(footer);
               res.end();
@@ -2751,7 +3024,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
           // Queue the shell immediately, then start piping the Suspense stream.
           // Waiting for the write callback can delay the fallback until the whole
           // response is ready under some dev-server wrappers.
-          res.write(shell);
+          res.write(securedShell);
           if (typeof (res as any).flush === "function") {
             (res as any).flush();
           }
@@ -2851,7 +3124,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
 
           const html = this.createFullHTML(content, false, pathname);
           res.setHeader("Content-Type", "text/html; charset=utf-8");
-          res.write(html);
+          res.write(this.secureDocumentHTML(req, html));
           res.end();
           return;
         }
@@ -2866,7 +3139,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
 
     const html = this.createFullHTML(defaultContent, false, pathname);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.write(html);
+    res.write(this.secureDocumentHTML(req, html));
     res.end();
   }
 
@@ -2917,7 +3190,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "private, no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    res.write(html);
+    res.write(this.secureDocumentHTML(req, html));
     res.end();
   }
 
@@ -3006,6 +3279,16 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
 ${clientScript}
 </body>
 </html>`;
+  }
+
+  private getCspNonce(req: FarmRequest): string | undefined {
+    const value = (req as any).__FARM_CSP_NONCE__;
+    return typeof value === "string" ? value : undefined;
+  }
+
+  private secureDocumentHTML(req: FarmRequest, html: string): string {
+    const nonce = this.getCspNonce(req);
+    return nonce ? addFarmCspNonceToScriptTags(html, nonce) : html;
   }
 
   private applyDeploymentHeaders(req: FarmRequest, res: FarmResponse): void {

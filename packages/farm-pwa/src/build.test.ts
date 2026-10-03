@@ -276,7 +276,9 @@ describe("generateServiceWorker", () => {
     expect(worker).toContain("await self.skipWaiting()");
     expect(worker).toContain("if (IMAGE_OPTIONS && request.destination");
     expect(worker).toContain('request.headers.has("authorization")');
-    expect(worker).toContain('policy.includes("no-cache")');
+    expect(worker).toContain('directives.has("no-cache")');
+    expect(worker).toContain('vary.includes("cookie")');
+    expect(worker).toContain('response.headers.has("last-modified")');
   });
 
   it("keeps a background image revalidation alive after returning a cached response", async () => {

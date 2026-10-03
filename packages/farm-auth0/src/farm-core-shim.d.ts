@@ -1,3 +1,5 @@
+export {};
+
 declare module "@farm.js/core" {
   export type FarmIntegrationCategory =
     | "auth"

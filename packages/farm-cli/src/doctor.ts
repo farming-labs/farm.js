@@ -1,11 +1,14 @@
 import {
+  generateFarmTypeArtifacts,
   getFarmSourceRoots,
+  getFarmDocsRouteTypeEntries,
   loadConfig,
   resolveConfig,
   type FarmCronJob,
   type ResolvedFarmConfig,
 } from "@farm.js/core";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { createHttpLocalUrl } from "./local-url";
 import pc from "picocolors";
@@ -66,6 +69,8 @@ export interface FarmDoctorOptions {
   fetch?: typeof globalThis.fetch;
   env?: Record<string, string | undefined>;
   now?: () => Date;
+  /** Verify the public beta dist-tags against the npm registry. */
+  registry?: boolean;
   /** Apply only additive corrections that never overwrite application files. */
   fix?: boolean;
 }
@@ -100,6 +105,25 @@ type LiveSnapshot = {
   }>;
 };
 
+type ProjectPackageManifest = {
+  name?: unknown;
+  version?: unknown;
+  packageManager?: unknown;
+  workspaces?: unknown;
+  dependencies?: Record<string, unknown>;
+  devDependencies?: Record<string, unknown>;
+  optionalDependencies?: Record<string, unknown>;
+  peerDependencies?: Record<string, unknown>;
+};
+
+type FarmPackageManager = "npm" | "pnpm" | "yarn" | "bun";
+
+type WorkspaceContext = {
+  root: string;
+  patterns: string[];
+  packages: Map<string, string>;
+};
+
 const ROUTE_EXTENSIONS = ["ts", "tsx", "js", "jsx", "vue", "md", "mdx"];
 const CONFIG_FILES = [
   "farm.config.ts",
@@ -111,6 +135,28 @@ const CONFIG_FILES = [
   "config.js",
   "config.mjs",
 ];
+const PACKAGE_MANAGER_LOCKFILES: ReadonlyArray<readonly [FarmPackageManager, readonly string[]]> = [
+  ["pnpm", ["pnpm-lock.yaml"]],
+  ["yarn", ["yarn.lock"]],
+  ["bun", ["bun.lock", "bun.lockb"]],
+  ["npm", ["package-lock.json", "npm-shrinkwrap.json"]],
+];
+const DEPENDENCY_SECTIONS = [
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+  "peerDependencies",
+] as const;
+const WORKSPACE_SCAN_IGNORES = new Set([
+  ".farm",
+  ".git",
+  ".output",
+  ".turbo",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+]);
 
 export async function runFarmDoctor(options: FarmDoctorOptions = {}): Promise<FarmDoctorReport> {
   const root = path.resolve(options.root || process.cwd());
@@ -120,7 +166,12 @@ export async function runFarmDoctor(options: FarmDoctorOptions = {}): Promise<Fa
   if (!options.offline && !options.fix) {
     try {
       const snapshot = await fetchLiveSnapshot(liveTarget, options);
-      return createLiveReport(snapshot, liveTarget, options.now);
+      const report = createLiveReport(snapshot, liveTarget, options.now);
+      if (options.registry) {
+        await collectRegistryChecks(readProjectManifestSafe(root), options, report.checks);
+        finalizeReport(report);
+      }
+      return report;
     } catch (error) {
       liveError = formatError(error);
     }
@@ -305,7 +356,7 @@ async function createProjectReport(
   };
 
   collectNodeCheck(checks);
-  collectPackageCheck(root, checks);
+  const packageManifest = collectPackageChecks(root, options.env || process.env, checks);
 
   let config: ResolvedFarmConfig | undefined;
   let userConfig: Awaited<ReturnType<typeof loadConfig>>;
@@ -344,8 +395,14 @@ async function createProjectReport(
 
   if (config && userConfig) {
     collectRouterChecks(config, checks);
+    await collectGeneratedArtifactChecks(config, options.configPath, root, checks);
+    collectEntrypointChecks(config, root, checks);
     report.target = collectDeploymentChecks(config, userConfig, checks);
     collectCronChecks(config, options.env || process.env, checks);
+  }
+
+  if (options.registry) {
+    await collectRegistryChecks(packageManifest, options, checks);
   }
 
   if (config && options.fix) {
@@ -424,7 +481,11 @@ function collectNodeCheck(checks: FarmDoctorCheck[]): void {
   );
 }
 
-function collectPackageCheck(root: string, checks: FarmDoctorCheck[]): void {
+function collectPackageChecks(
+  root: string,
+  env: Record<string, string | undefined>,
+  checks: FarmDoctorCheck[],
+): ProjectPackageManifest | undefined {
   const packagePath = path.join(root, "package.json");
   if (!existsSync(packagePath)) {
     checks.push({
@@ -434,16 +495,13 @@ function collectPackageCheck(root: string, checks: FarmDoctorCheck[]): void {
       message: `No package manifest exists under ${root}.`,
       action: "Run the command from a Farm application root.",
     });
-    return;
+    return undefined;
   }
 
   try {
-    const manifest = JSON.parse(readFileSync(packagePath, "utf8")) as Record<string, unknown>;
-    const dependencies = {
-      ...asRecord(manifest.dependencies),
-      ...asRecord(manifest.devDependencies),
-      ...asRecord(manifest.peerDependencies),
-    };
+    const manifest = readProjectManifest(root);
+    if (!manifest) return undefined;
+    const dependencies = getProjectDependencies(manifest);
     const version = dependencies["@farm.js/core"];
     checks.push(
       typeof version === "string"
@@ -461,6 +519,10 @@ function collectPackageCheck(root: string, checks: FarmDoctorCheck[]): void {
             action: "Install @farm.js/core and add it to the application dependencies.",
           },
     );
+    const workspace = findWorkspaceContext(root);
+    collectPackageManagerChecks(root, manifest, workspace, env, checks);
+    collectLocalPackageChecks(root, dependencies, workspace, checks);
+    return manifest;
   } catch (error) {
     checks.push({
       status: "fail",
@@ -469,7 +531,541 @@ function collectPackageCheck(root: string, checks: FarmDoctorCheck[]): void {
       message: formatError(error),
       action: "Fix the package manifest JSON.",
     });
+    return undefined;
   }
+}
+
+function readProjectManifest(root: string): ProjectPackageManifest | undefined {
+  const packagePath = path.join(root, "package.json");
+  if (!existsSync(packagePath)) return undefined;
+  return JSON.parse(readFileSync(packagePath, "utf8")) as ProjectPackageManifest;
+}
+
+function readProjectManifestSafe(root: string): ProjectPackageManifest | undefined {
+  try {
+    return readProjectManifest(root);
+  } catch {
+    return undefined;
+  }
+}
+
+function getProjectDependencies(manifest: ProjectPackageManifest): Record<string, unknown> {
+  return Object.assign({}, ...DEPENDENCY_SECTIONS.map((section) => asRecord(manifest[section])));
+}
+
+function collectPackageManagerChecks(
+  root: string,
+  manifest: ProjectPackageManifest,
+  workspace: WorkspaceContext | undefined,
+  env: Record<string, string | undefined>,
+  checks: FarmDoctorCheck[],
+): void {
+  const workspaceManifest = workspace ? readProjectManifestSafe(workspace.root) : undefined;
+  const packageManagerField =
+    typeof manifest.packageManager === "string"
+      ? manifest.packageManager
+      : typeof workspaceManifest?.packageManager === "string"
+        ? workspaceManifest.packageManager
+        : undefined;
+  const declared = parsePackageManager(packageManagerField);
+  const lockfileRoot = workspace?.root || root;
+  const lockfileManagers = PACKAGE_MANAGER_LOCKFILES.filter(([, files]) =>
+    files.some((file) => existsSync(path.join(lockfileRoot, file))),
+  ).map(([manager]) => manager);
+  const manager = declared?.name || lockfileManagers[0] || "npm";
+  const conflicts = new Set<FarmPackageManager>();
+  if (lockfileManagers.length > 1) lockfileManagers.forEach((entry) => conflicts.add(entry));
+  if (declared && lockfileManagers.some((entry) => entry !== declared.name)) {
+    conflicts.add(declared.name);
+    lockfileManagers.forEach((entry) => conflicts.add(entry));
+  }
+
+  if (conflicts.size > 0) {
+    checks.push({
+      status: "warn",
+      code: "PACKAGE_MANAGER_CONFLICT",
+      title: "Package-manager signals disagree",
+      message: `Farm found conflicting package-manager signals: ${[...conflicts].sort().join(", ")}.`,
+      action: "Keep one lockfile and align the packageManager field with it.",
+    });
+  } else {
+    checks.push({
+      status: "pass",
+      code: "PACKAGE_MANAGER_RESOLVED",
+      title: "Package manager is resolved",
+      message: `${manager}${declared?.version ? ` ${declared.version}` : ""} is selected${workspace ? ` from workspace ${toPosix(path.relative(root, workspace.root)) || "."}` : ""}.`,
+    });
+  }
+
+  if (manager !== "pnpm") return;
+  const userAgentVersion = parsePnpmUserAgent(env.npm_config_user_agent);
+  const version = userAgentVersion || declared?.version;
+  if (!version) {
+    checks.push({
+      status: "warn",
+      code: "PNPM_VERSION_UNKNOWN",
+      title: "pnpm version could not be verified",
+      message:
+        "Farm selected pnpm, but neither packageManager nor the current user agent includes its version.",
+      action: "Declare packageManager as pnpm@8 or newer in package.json.",
+    });
+    return;
+  }
+
+  const supported = isVersionAtLeast(version, 8, 0);
+  checks.push(
+    supported
+      ? {
+          status: "pass",
+          code: "PNPM_SUPPORTED",
+          title: "pnpm is supported",
+          message: `pnpm ${version} satisfies Farm's pnpm 8+ baseline.`,
+        }
+      : {
+          status: "fail",
+          code: "PNPM_UNSUPPORTED",
+          title: "pnpm is too old",
+          message: `pnpm ${version} does not satisfy Farm's pnpm 8+ baseline.`,
+          action: "Upgrade pnpm to version 8 or newer and reinstall the workspace.",
+        },
+  );
+}
+
+function parsePackageManager(
+  value: string | undefined,
+): { name: FarmPackageManager; version?: string } | undefined {
+  if (!value) return undefined;
+  const match = /^(npm|pnpm|yarn|bun)(?:@([^+\s]+))?/.exec(value.trim());
+  if (!match) return undefined;
+  return {
+    name: match[1] as FarmPackageManager,
+    ...(match[2] ? { version: match[2] } : {}),
+  };
+}
+
+function parsePnpmUserAgent(value: string | undefined): string | undefined {
+  const match = /(?:^|\s)pnpm\/([^\s]+)/.exec(value || "");
+  return match?.[1];
+}
+
+function isVersionAtLeast(value: string, minimumMajor: number, minimumMinor: number): boolean {
+  const match = /^(\d+)\.(\d+)/.exec(value);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major > minimumMajor || (major === minimumMajor && minor >= minimumMinor);
+}
+
+function collectLocalPackageChecks(
+  root: string,
+  dependencies: Record<string, unknown>,
+  workspace: WorkspaceContext | undefined,
+  checks: FarmDoctorCheck[],
+): void {
+  const resolved: string[] = [];
+  const missing: string[] = [];
+  const unverifiedCatalogs: string[] = [];
+
+  for (const [name, rawSpecifier] of Object.entries(dependencies)) {
+    if (typeof rawSpecifier !== "string") continue;
+    if (rawSpecifier.startsWith("workspace:")) {
+      const target = getWorkspaceTargetName(name, rawSpecifier);
+      if (workspace?.packages.has(target)) resolved.push(name);
+      else missing.push(`${name} (${rawSpecifier})`);
+      continue;
+    }
+    if (rawSpecifier.startsWith("catalog:")) {
+      if (workspace) unverifiedCatalogs.push(name);
+      else missing.push(`${name} (${rawSpecifier})`);
+      continue;
+    }
+    const localPrefix = ["file:", "link:", "portal:"].find((prefix) =>
+      rawSpecifier.startsWith(prefix),
+    );
+    if (!localPrefix) continue;
+    const target = rawSpecifier.slice(localPrefix.length);
+    const targetPath = path.resolve(root, target);
+    if (!existsSync(targetPath)) {
+      missing.push(`${name} (${rawSpecifier})`);
+      continue;
+    }
+    const localManifest = readProjectManifestSafe(targetPath);
+    if (localManifest && typeof localManifest.name === "string" && localManifest.name !== name) {
+      missing.push(`${name} (${rawSpecifier} points to ${localManifest.name})`);
+      continue;
+    }
+    resolved.push(name);
+  }
+
+  if (missing.length > 0) {
+    checks.push({
+      status: "fail",
+      code: "LOCAL_PACKAGES_MISSING",
+      title: "Local package references are unresolved",
+      message: missing.sort().join(", "),
+      action: "Add the missing package to the workspace or replace the local dependency specifier.",
+    });
+  } else if (resolved.length > 0) {
+    checks.push({
+      status: "pass",
+      code: "LOCAL_PACKAGES_RESOLVED",
+      title: "Local package references resolve",
+      message: resolved.sort().join(", "),
+    });
+  }
+
+  if (unverifiedCatalogs.length > 0) {
+    checks.push({
+      status: "info",
+      code: "WORKSPACE_CATALOG_USED",
+      title: "Workspace catalog dependencies are delegated to pnpm",
+      message: unverifiedCatalogs.sort().join(", "),
+    });
+  }
+}
+
+function getWorkspaceTargetName(name: string, specifier: string): string {
+  const target = specifier.slice("workspace:".length);
+  if (!target.startsWith("@")) return name;
+  const versionSeparator = target.indexOf("@", 1);
+  return versionSeparator === -1 ? target : target.slice(0, versionSeparator);
+}
+
+function findWorkspaceContext(start: string): WorkspaceContext | undefined {
+  let current = path.resolve(start);
+  while (true) {
+    const patterns = readWorkspacePatterns(current);
+    if (patterns.length > 0) {
+      return {
+        root: current,
+        patterns,
+        packages: discoverWorkspacePackages(current, patterns),
+      };
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
+function readWorkspacePatterns(root: string): string[] {
+  const workspaceFile = path.join(root, "pnpm-workspace.yaml");
+  if (existsSync(workspaceFile)) {
+    const patterns: string[] = [];
+    let packagesIndent: number | undefined;
+    for (const line of readFileSync(workspaceFile, "utf8").split(/\r?\n/)) {
+      const key = /^(\s*)packages\s*:\s*(?:#.*)?$/.exec(line);
+      if (key) {
+        packagesIndent = key[1].length;
+        continue;
+      }
+      if (packagesIndent === undefined) continue;
+      const indentation = /^(\s*)/.exec(line)?.[1].length || 0;
+      if (line.trim() && indentation <= packagesIndent) break;
+      const pattern = /^\s*-\s*["']?([^"'#]+?)["']?\s*(?:#.*)?$/.exec(line)?.[1]?.trim();
+      if (pattern) patterns.push(pattern);
+    }
+    if (patterns.length > 0) return patterns;
+  }
+
+  const manifest = readProjectManifestSafe(root);
+  const workspaces = manifest?.workspaces;
+  if (Array.isArray(workspaces)) {
+    return workspaces.filter((value): value is string => typeof value === "string");
+  }
+  if (workspaces && typeof workspaces === "object") {
+    const packages = (workspaces as { packages?: unknown }).packages;
+    if (Array.isArray(packages)) {
+      return packages.filter((value): value is string => typeof value === "string");
+    }
+  }
+  return [];
+}
+
+function discoverWorkspacePackages(root: string, patterns: readonly string[]): Map<string, string> {
+  const packages = new Map<string, string>();
+  const pending: Array<{ directory: string; depth: number }> = [{ directory: root, depth: 0 }];
+
+  while (pending.length > 0) {
+    const entry = pending.pop();
+    if (!entry) continue;
+    const relative = toPosix(path.relative(root, entry.directory)) || ".";
+    const manifest = readProjectManifestSafe(entry.directory);
+    if (manifest && typeof manifest.name === "string" && matchesWorkspacePath(relative, patterns)) {
+      packages.set(manifest.name, entry.directory);
+    }
+    if (entry.depth >= 8) continue;
+    for (const child of readdirSync(entry.directory, { withFileTypes: true })) {
+      if (!child.isDirectory() || WORKSPACE_SCAN_IGNORES.has(child.name)) continue;
+      if (child.name.startsWith(".") && entry.depth > 0) continue;
+      pending.push({ directory: path.join(entry.directory, child.name), depth: entry.depth + 1 });
+    }
+  }
+
+  return packages;
+}
+
+function matchesWorkspacePath(relative: string, patterns: readonly string[]): boolean {
+  let matched = false;
+  for (const rawPattern of patterns) {
+    const excluded = rawPattern.startsWith("!");
+    const pattern = excluded ? rawPattern.slice(1) : rawPattern;
+    if (!globPatternToRegExp(pattern).test(relative)) continue;
+    matched = !excluded;
+  }
+  return matched;
+}
+
+function globPatternToRegExp(value: string): RegExp {
+  const pattern = toPosix(value).replace(/^\.\//, "").replace(/\/$/, "");
+  let source = "^";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index]!;
+    if (character === "*" && pattern[index + 1] === "*") {
+      source += ".*";
+      index += 1;
+    } else if (character === "*") {
+      source += "[^/]*";
+    } else if (character === "?") {
+      source += "[^/]";
+    } else {
+      source += character.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+    }
+  }
+  return new RegExp(`${source}$`);
+}
+
+async function collectGeneratedArtifactChecks(
+  config: ResolvedFarmConfig,
+  configPath: string | undefined,
+  reportRoot: string,
+  checks: FarmDoctorCheck[],
+): Promise<void> {
+  try {
+    const result = await generateFarmTypeArtifacts({
+      root: config.root,
+      srcDir: config.srcDir,
+      configPath,
+      layers: config.layers,
+      plugins: config.plugins,
+      extraRoutes: [
+        ...(config.openapi?.enabled && config.openapi.route ? [config.openapi.route] : []),
+        ...getFarmDocsRouteTypeEntries(config.docs),
+      ],
+      suppressLintOnLink: config.suppressLintOnLink,
+      componentExtensions: config.renderer.componentExtensions,
+      i18nConfig: config.i18n,
+      check: true,
+    });
+    const stalePaths = [...new Set(result.stalePaths)]
+      .map((filePath) => toPosix(path.relative(reportRoot, filePath)))
+      .sort();
+    checks.push(
+      stalePaths.length === 0
+        ? {
+            status: "pass",
+            code: "GENERATED_ARTIFACTS_CURRENT",
+            title: "Generated framework types are current",
+            message: "Route, API, environment, content, and i18n declarations match the project.",
+          }
+        : {
+            status: "fail",
+            code: "GENERATED_ARTIFACTS_STALE",
+            title: "Generated framework types are stale",
+            message: stalePaths.join(", "),
+            action: "Run farm generate and commit the updated generated files.",
+          },
+    );
+  } catch (error) {
+    checks.push({
+      status: "fail",
+      code: "GENERATED_ARTIFACTS_CHECK_FAILED",
+      title: "Generated framework types could not be checked",
+      message: formatError(error),
+      action: "Run farm generate to reproduce and fix the generation error.",
+    });
+  }
+}
+
+function collectEntrypointChecks(
+  config: ResolvedFarmConfig,
+  root: string,
+  checks: FarmDoctorCheck[],
+): void {
+  const rendererRequire = createRequire(path.join(config.root, "package.json"));
+  const entrypoints = [config.renderer.vite, config.renderer.server, config.renderer.client].filter(
+    (value, index, values): value is string =>
+      typeof value === "string" && value.length > 0 && values.indexOf(value) === index,
+  );
+  const missing = entrypoints.filter((specifier) => {
+    if (config.renderer.name === "react" && specifier.startsWith("@farm.js/core/renderer/react/")) {
+      return false;
+    }
+    try {
+      rendererRequire.resolve(specifier);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+
+  checks.push(
+    missing.length === 0
+      ? {
+          status: "pass",
+          code: "RENDERER_ENTRYPOINTS_READY",
+          title: `${config.renderer.name} renderer entrypoints resolve`,
+          message: entrypoints.join(", "),
+        }
+      : {
+          status: "fail",
+          code: "RENDERER_ENTRYPOINTS_MISSING",
+          title: `${config.renderer.name} renderer entrypoints are missing`,
+          message: missing.join(", "),
+          action: `Install the ${config.renderer.name} renderer package and verify its vite, server, and client exports.`,
+        },
+  );
+
+  const integrations = Object.entries(config.integrations || {})
+    .filter(([, integration]) => Boolean(integration))
+    .map(
+      ([key, integration]) =>
+        `${key} (${String((integration as { type?: unknown }).type || "unknown")})`,
+    )
+    .sort();
+  if (integrations.length > 0) {
+    checks.push({
+      status: "pass",
+      code: "INTEGRATION_ENTRYPOINTS_READY",
+      title: "Configured integration entrypoints loaded",
+      message: integrations.join(", "),
+    });
+  }
+
+  const packageRequire = createRequire(path.join(root, "package.json"));
+  const dependencies = getProjectDependencies(readProjectManifestSafe(root) || {});
+  const missingFarmPackages = Object.entries(dependencies)
+    .filter(
+      ([name, specifier]) =>
+        name.startsWith("@farm.js/") &&
+        name !== "@farm.js/core" &&
+        typeof specifier === "string" &&
+        !specifier.startsWith("workspace:") &&
+        !specifier.startsWith("file:") &&
+        !specifier.startsWith("link:") &&
+        !specifier.startsWith("portal:"),
+    )
+    .map(([name]) => name)
+    .filter((name) => {
+      try {
+        packageRequire.resolve(name);
+        return false;
+      } catch {
+        return true;
+      }
+    });
+  if (missingFarmPackages.length > 0) {
+    checks.push({
+      status: "warn",
+      code: "FARM_PACKAGES_NOT_INSTALLED",
+      title: "Declared Farm packages are not installed",
+      message: missingFarmPackages.sort().join(", "),
+      action: "Run the selected package manager's install command.",
+    });
+  }
+}
+
+type RegistryPackageMetadata = {
+  "dist-tags"?: Record<string, unknown>;
+  versions?: Record<string, unknown>;
+};
+
+async function collectRegistryChecks(
+  manifest: ProjectPackageManifest | undefined,
+  options: FarmDoctorOptions,
+  checks: FarmDoctorCheck[],
+): Promise<void> {
+  const packageNames = ["@farm.js/core", "@farm.js/create-app"];
+  const fetchRegistry = options.fetch || globalThis.fetch;
+  const resolved: Array<{ name: string; beta: string }> = [];
+
+  try {
+    for (const name of packageNames) {
+      const response = await fetchRegistry(
+        `https://registry.npmjs.org/${encodeURIComponent(name)}`,
+        { headers: { accept: "application/json" } },
+      );
+      if (!response.ok) {
+        throw new Error(`${name} returned ${response.status}.`);
+      }
+      const metadata = (await response.json()) as RegistryPackageMetadata;
+      const beta = metadata["dist-tags"]?.beta;
+      if (typeof beta !== "string") {
+        checks.push({
+          status: "fail",
+          code: "REGISTRY_BETA_MISSING",
+          title: `${name} has no beta dist-tag`,
+          message: "The registry cannot resolve the beta release channel.",
+          action: `Publish or repair the beta dist-tag for ${name}.`,
+        });
+        continue;
+      }
+      if (!metadata.versions || !Object.prototype.hasOwnProperty.call(metadata.versions, beta)) {
+        checks.push({
+          status: "fail",
+          code: "REGISTRY_BETA_INVALID",
+          title: `${name}@beta points to a missing version`,
+          message: `${name}@beta resolves to ${beta}, but that version is absent from the registry metadata.`,
+          action: `Repair the beta dist-tag for ${name}.`,
+        });
+        continue;
+      }
+      resolved.push({ name, beta });
+    }
+  } catch (error) {
+    checks.push({
+      status: "warn",
+      code: "REGISTRY_UNREACHABLE",
+      title: "The npm registry could not be checked",
+      message: formatError(error),
+      action: "Verify registry connectivity and run farm doctor --registry again.",
+    });
+    return;
+  }
+
+  if (resolved.length === packageNames.length) {
+    checks.push({
+      status: "pass",
+      code: "REGISTRY_BETA_RESOLVED",
+      title: "Farm beta dist-tags resolve",
+      message: resolved.map(({ name, beta }) => `${name}@beta -> ${beta}`).join(", "),
+    });
+  }
+
+  const dependencies = manifest ? getProjectDependencies(manifest) : {};
+  const stale = resolved.filter(({ name, beta }) => {
+    const declared = dependencies[name];
+    return typeof declared === "string" && isExactVersion(declared) && declared !== beta;
+  });
+  if (stale.length > 0) {
+    checks.push({
+      status: "warn",
+      code: "FARM_BETA_STALE",
+      title: "Installed Farm beta declarations are stale",
+      message: stale
+        .map(
+          ({ name, beta }) =>
+            `${name} declares ${String(dependencies[name])}; registry beta is ${beta}`,
+        )
+        .join(", "),
+      action:
+        "Run farm upgrade --beta, or refresh the scaffold command with PNPM_CONFIG_DLX_CACHE_MAX_AGE=0.",
+    });
+  }
+}
+
+function isExactVersion(value: string): boolean {
+  return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value);
 }
 
 function collectRouterChecks(config: ResolvedFarmConfig, checks: FarmDoctorCheck[]): void {

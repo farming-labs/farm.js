@@ -1,6 +1,8 @@
 import { defineConfig } from "vitest/config";
+import solidPlugin from "vite-plugin-solid";
 
 export default defineConfig({
+  plugins: [solidPlugin({ ssr: false })],
   css: {
     postcss: {
       plugins: [],
@@ -17,7 +19,7 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    include: ["src/**/client.test.ts"],
+    include: ["src/**/client.test.ts", "src/**/client-route.test.tsx"],
     server: {
       deps: {
         inline: ["solid-js"],

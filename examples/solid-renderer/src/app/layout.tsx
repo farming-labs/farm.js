@@ -1,4 +1,7 @@
+"use client";
+
 import type { LayoutProps, Metadata } from "@farm.js/core";
+import { createSignal } from "solid-js";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -10,5 +13,20 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout(props: LayoutProps) {
-  return <>{props.children}</>;
+  const [count, setCount] = createSignal(0);
+
+  return (
+    <>
+      <header class="layout-state">
+        <button type="button" data-layout-counter onClick={() => setCount((value) => value + 1)}>
+          Layout count: {count()}
+        </button>
+        <nav aria-label="Example pages">
+          <a href="/">Home</a>
+          <a href="/about">About</a>
+        </nav>
+      </header>
+      {props.children}
+    </>
+  );
 }

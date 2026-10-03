@@ -861,19 +861,26 @@ export default function Layout({ children }) { return <><One /><Two /><Three />{
   });
 
   describe("application metadata routes", () => {
-    it("discovers sitemap, robots, and manifest conventions in route segments", async () => {
+    it("discovers sitemap, robots, manifest, llms, and llms-full conventions", async () => {
       const { globFiles } = await import("../utils");
       vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
         if (pattern.includes("page")) return ["page.tsx", "shops/[shop]/page.tsx"];
         if (pattern.includes("sitemap")) {
-          return ["sitemap.ts", "robots.js", "manifest.ts", "shops/[shop]/sitemap.ts"];
+          return [
+            "sitemap.ts",
+            "robots.js",
+            "manifest.ts",
+            "llms.ts",
+            "llms-full.ts",
+            "shops/[shop]/sitemap.ts",
+          ];
         }
         return [];
       });
 
       await routeManager.discoverRoutes();
 
-      expect(routeManager.getMetadataRoutes().size).toBe(4);
+      expect(routeManager.getMetadataRoutes().size).toBe(6);
       expect(routeManager.matchMetadataRoute("/sitemap.xml")).toMatchObject({
         metadata: { kind: "sitemap", pattern: "/" },
         params: {},
@@ -883,6 +890,14 @@ export default function Layout({ children }) { return <><One /><Two /><Three />{
       expect(routeManager.matchMetadataRoute("/manifest.webmanifest")?.metadata.kind).toBe(
         "manifest",
       );
+      expect(routeManager.matchMetadataRoute("/llms.txt")?.metadata).toMatchObject({
+        kind: "llms",
+        outputName: "llms.txt",
+      });
+      expect(routeManager.matchMetadataRoute("/llms-full.txt")?.metadata).toMatchObject({
+        kind: "llms-full",
+        outputName: "llms-full.txt",
+      });
 
       const shopSitemap = routeManager.matchMetadataRoute("/shops/acme/sitemap.xml");
       expect(shopSitemap).toMatchObject({

@@ -183,11 +183,18 @@ export default middleware().rateLimit({
   requests: 100,
   window: "1m",
   storage: rateLimits,
-  keyGenerator: (ctx) => {
-    return ctx.request.socket.remoteAddress ?? "unknown";
-  },
 });
 ```
+
+The default bucket is the caller's address and the request path. A built app
+takes that address from the server's own connection, as the development server
+does. Behind a reverse proxy or a platform load balancer that connection belongs
+to the proxy, so set `server.trustProxy` to key on the proxy's `x-forwarded-for`
+instead. When the runtime reports no address at all, the limiter refuses rather
+than putting every caller in one bucket, so set `trustProxy` or supply a
+`keyGenerator` that uses an identity you do have. Do not fall back to a constant
+such as `"unknown"`: that is the shared bucket the limiter refuses, and one
+caller then exhausts the window for everyone.
 
 The Redis adapter uses one Lua operation to increment the counter and establish its expiry. A generic `get()` followed by `set()` adapter is rejected because concurrent requests can read the same count and overwrite each other. Limited responses include `Retry-After`; all responses include the [`RateLimit` and `RateLimit-Policy` fields from the current IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/).
 
@@ -199,7 +206,12 @@ export default middleware().rateLimit({
   window: "1m",
   keyGenerator: (ctx) => {
     const userId = ctx.data.get("userId") as string | undefined;
-    return userId ? `user:${userId}` : `ip:${ctx.request.socket.remoteAddress ?? "unknown"}`;
+    if (userId) return `user:${userId}`;
+    const address = ctx.request.socket?.remoteAddress;
+    // No identity and no address means this request cannot be bucketed on its
+    // own, so reject it rather than sharing a bucket with every other caller.
+    if (!address) throw new Error("Rate limit identity is unavailable for this request.");
+    return `ip:${address}`;
   },
 });
 ```

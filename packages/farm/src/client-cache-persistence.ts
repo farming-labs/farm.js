@@ -137,6 +137,8 @@ type PersistenceEngine = {
   pendingDeletes: Set<string>;
   flushTimer: ReturnType<typeof setTimeout> | undefined;
   hydrating: boolean;
+  /** Invalidates adapter reads that began before the latest cache clear. */
+  hydrationGeneration: number;
   disabled: boolean;
   clearing: boolean;
   /** The in-flight flush, so overlapping flushes serialize instead of racing. */
@@ -224,20 +226,23 @@ async function flushEngine(engine: PersistenceEngine): Promise<void> {
 }
 
 async function hydrateEngine(engine: PersistenceEngine): Promise<void> {
+  const generation = engine.hydrationGeneration;
   const now = Date.now();
   const keys = await engine.adapter.keys();
+  if (engine.disabled || generation !== engine.hydrationGeneration) return;
   if (keys.length === 0) return;
 
   const persisted = engine.adapter.getMany
     ? await engine.adapter.getMany(keys)
     : await Promise.all(keys.map((key) => engine.adapter.get(key)));
+  if (engine.disabled || generation !== engine.hydrationGeneration) return;
 
   engine.hydrating = true;
   try {
     for (let index = 0; index < keys.length; index += 1) {
       const key = keys[index]!;
       const entry = persisted[index];
-      if (engine.disabled) return;
+      if (engine.disabled || generation !== engine.hydrationGeneration) return;
 
       if (
         !entry ||
@@ -295,6 +300,7 @@ function createSink(engine: PersistenceEngine): FarmClientCachePersistenceSink {
       // clearPersistedCache awaits the adapter itself; skip the fire-and-forget
       // clear so one logout does not race two clears (and two error reports).
       if (engine.disabled || engine.clearing) return;
+      engine.hydrationGeneration += 1;
       engine.pendingSets.clear();
       engine.pendingDeletes.clear();
       void engine.adapter.clear().catch((error) => disableEngine(engine, error));
@@ -326,6 +332,7 @@ export function initPersistedClientCache(
     pendingDeletes: new Set(),
     flushTimer: undefined,
     hydrating: false,
+    hydrationGeneration: 0,
     disabled: false,
     clearing: false,
     flushing: undefined,
@@ -401,6 +408,10 @@ export async function clearPersistedCache(): Promise<void> {
   // the in-memory cache.clear() below and makes flushEngine bail, so no flush
   // scheduled during the clear can write the signed-out user's data back.
   engine.clearing = true;
+  // Adapter reads cannot be cancelled by the persistence contract. Establish
+  // a generation boundary before the first await so hydration that started
+  // under the previous user cannot commit after this clear completes.
+  engine.hydrationGeneration += 1;
   try {
     engine.pendingSets.clear();
     engine.pendingDeletes.clear();

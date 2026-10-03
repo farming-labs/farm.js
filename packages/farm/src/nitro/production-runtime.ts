@@ -20,6 +20,9 @@ export {
   getFarmDataCache,
   normalizeRevalidatePath,
 } from "../cache";
+// Server-only, unlike `@farm.js/core/i18n`: `../i18n/config` imports `node:path`
+// and the generated client hydration entry imports that public entry.
+export { resolveFarmI18nConfig } from "../i18n/config";
 export { createFarmLocaleCookie, getFarmLocaleVaryHeaders } from "../i18n/resolver";
 export {
   localizeFarmHref,
@@ -28,6 +31,12 @@ export {
 } from "../i18n/routing";
 export { addMetadataImageReference, mergeMetadata, renderMetadataHead } from "../metadata";
 export { createFarmMetadataRouteResponse } from "../metadata-route";
+export {
+  collectFarmLlmsTxtPages,
+  createFarmDefaultLlmsTxt,
+  createFarmLlmsMarkdownReader,
+  renderFarmLlmsFullTxt,
+} from "../llms-txt";
 export {
   applyProductionMiddlewareHeaders,
   createProductionMiddlewareRunner,
@@ -76,6 +85,7 @@ export {
 } from "../trailing-slash";
 export { applyFarmBasePath, setFarmBasePath, stripFarmBasePath } from "../base-path";
 export { appendFarmRedirectQuery } from "../redirect-query";
+export { applyFarmCspNonceToResponse, resolveFarmSecurityConfig } from "../security";
 
 export function appendFarmLinkHeader(headers: Headers, value: string): void {
   const current = headers.get("Link");

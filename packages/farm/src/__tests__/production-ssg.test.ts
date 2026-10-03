@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
@@ -306,6 +307,70 @@ export default {
   return root;
 }
 
+async function createStaticCspFixture(): Promise<string> {
+  const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-production-ssg-csp-"));
+  await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
+  await fs.mkdir(path.join(root, "src", "app", "static"), { recursive: true });
+  await fs.mkdir(path.join(root, "src", "app", "dynamic"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({ private: true, type: "module" }, null, 2),
+  );
+  await fs.writeFile(path.join(root, "src", "app", "globals.css"), "");
+  await fs.writeFile(
+    path.join(root, "farm.config.ts"),
+    `
+export default {
+  srcDir: "src",
+  images: { provider: "none" },
+  security: {
+    csp: {
+      policy: "script-src 'self'; object-src 'none'",
+      nonce: true,
+    },
+  },
+  routeRules: {
+    "/dynamic": { render: "dynamic" },
+  },
+};
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "layout.tsx"),
+    `
+export default function Layout({ children }) {
+  return (
+    <html>
+      <body>
+        {children}
+        <script dangerouslySetInnerHTML={{ __html: "globalThis.__farmStaticCsp = true;" }} />
+      </body>
+    </html>
+  );
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "static", "page.tsx"),
+    `
+export const ssg = true;
+export default function StaticPage() {
+  return <main data-rendered-at={Date.now()}>static-csp-page</main>;
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "dynamic", "page.tsx"),
+    `
+export default function DynamicPage() {
+  return <main data-rendered-at={Date.now()}>dynamic-csp-page</main>;
+}
+`.trim(),
+  );
+  return root;
+}
+
 async function loadFixtureConfig(root: string) {
   const userConfig = await loadConfig(root, undefined, "production");
   return resolveConfig({ ...userConfig, root }, "production");
@@ -415,7 +480,90 @@ function renderedAt(html: string): string {
   return match[1];
 }
 
+function inlineScriptHashes(html: string): string[] {
+  return [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
+    .filter((match) => !/(?:^|\s)src\s*=/i.test(match[1]!))
+    .map((match) => `sha256-${createHash("sha256").update(match[2]!).digest("base64")}`);
+}
+
 describe("production SSG output", () => {
+  it("emits per-page CSP hashes for static HTML and keeps nonces dynamic", async () => {
+    const root = await createStaticCspFixture();
+    let production: Awaited<ReturnType<typeof startProductionServer>> | undefined;
+
+    try {
+      const config = await loadFixtureConfig(root);
+      await build(config, { root, preset: "node-server" });
+
+      const outputDir = path.join(root, ".farm", ".output");
+      const staticArtifact = await fs.readFile(
+        path.join(outputDir, "public", "static", "index.html"),
+        "utf8",
+      );
+      expect(staticArtifact).toContain("static-csp-page");
+      expect(staticArtifact).not.toMatch(/<script\b[^>]*\bnonce\s*=/i);
+      await expect(
+        fs.access(path.join(outputDir, "public", "dynamic", "index.html")),
+      ).rejects.toThrow();
+
+      production = await startProductionServer(path.join(outputDir, "server"));
+      const staticResponse = await fetch(`${production.origin}/static`);
+      const staticPolicy = staticResponse.headers.get("content-security-policy");
+      const staticHtml = await staticResponse.text();
+      expect(staticHtml).toBe(staticArtifact);
+      expect(staticPolicy).toContain("script-src 'self'");
+      expect(staticPolicy).not.toContain("'nonce-");
+      for (const hash of inlineScriptHashes(staticHtml)) {
+        expect(staticPolicy).toContain(`'${hash}'`);
+      }
+
+      const dynamicResponse = await fetch(`${production.origin}/dynamic`);
+      const dynamicPolicy = dynamicResponse.headers.get("content-security-policy");
+      const dynamicHtml = await dynamicResponse.text();
+      const nonce = dynamicPolicy?.match(/'nonce-([^']+)'/)?.[1];
+      expect(nonce).toBeTruthy();
+      expect(dynamicPolicy).not.toContain("'sha256-");
+      expect(dynamicHtml).toContain(`nonce="${nonce}"`);
+    } finally {
+      await production?.stop();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("preserves per-page CSP hash headers in Vercel output", async () => {
+    const root = await createStaticCspFixture();
+
+    try {
+      const userConfig = await loadConfig(root, undefined, "production");
+      const config = await resolveConfig(
+        { ...userConfig, root, deploy: { target: "vercel" } },
+        "production",
+      );
+      await build(config, { root, preset: config.deploy.preset });
+
+      const outputDir = path.join(root, ".vercel", "output");
+      const staticArtifact = await fs.readFile(
+        path.join(outputDir, "static", "static", "index.html"),
+        "utf8",
+      );
+      const outputConfig = JSON.parse(
+        await fs.readFile(path.join(outputDir, "config.json"), "utf8"),
+      );
+      const staticHashes = inlineScriptHashes(staticArtifact);
+      const cspRoute = outputConfig.routes.find((route: { headers?: Record<string, string> }) =>
+        route.headers?.["Content-Security-Policy"]?.includes("'sha256-"),
+      );
+
+      expect(cspRoute).toBeTruthy();
+      expect(cspRoute.src).toMatch(/static/);
+      for (const hash of staticHashes) {
+        expect(cspRoute.headers["Content-Security-Policy"]).toContain(`'${hash}'`);
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("emits and serves pure SSG HTML while keeping revalidated pages dynamic", async () => {
     const upstream = await startRewriteUpstream();
     const root = await createFixture(upstream.origin);

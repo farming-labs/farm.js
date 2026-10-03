@@ -141,6 +141,12 @@ export default defineConfig({
 Explicit `page.md` and `page.mdx` sources use `mdx.markdownRoutes`; set that option to `false` when
 their raw routes must also be disabled.
 
+## llms.txt
+
+Set `agent: { llmsTxt: true }` to publish `/llms.txt`, an index that points language models at these
+mirrors, and `/llms-full.txt`, which inlines them. See
+[Agent readiness](/docs/configuration#agent-readiness).
+
 ## Per-route options
 
 Routes can include a display title and cache override.
@@ -163,7 +169,7 @@ export default defineConfig({
 
 ## What gets returned
 
-Markdown mirrors call the rendered page, strip scripts/styles, convert HTML headings, paragraphs, lists, blockquotes, and code blocks into markdown, then return `text/markdown`.
+Markdown mirrors call the rendered page, strip scripts/styles and elements hidden by an attribute (`aria-hidden="true"`, or `hidden` except `hidden="until-found"`, which the browser can reveal), convert HTML headings, paragraphs, lists, blockquotes, and code blocks into markdown, then return `text/markdown`. The mirror is built without CSS, so text hidden only by a stylesheet (`display: none`, a collapsed menu) still appears. Mark decorative text `aria-hidden` to keep it out of the mirror as well as out of screen readers.
 
 **Terminal**
 

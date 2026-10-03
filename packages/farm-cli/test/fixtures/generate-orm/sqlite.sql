@@ -24,6 +24,12 @@ CREATE INDEX IF NOT EXISTS "members_org_id_idx" ON "members" ("org_id");
 
 CREATE UNIQUE INDEX IF NOT EXISTS "members_org_id_role_unique" ON "members" ("org_id", "role");
 
+-- Owner "beta" model "tickets"
+CREATE TABLE IF NOT EXISTS "tickets" (
+  "id" TEXT PRIMARY KEY,
+  "ticketBody" TEXT
+);
+
 -- Owner "beta" model "projects"
 CREATE TABLE IF NOT EXISTS "projects" (
   "id" TEXT PRIMARY KEY,
@@ -33,12 +39,6 @@ CREATE TABLE IF NOT EXISTS "projects" (
 );
 
 CREATE INDEX IF NOT EXISTS "projects_ownerId_idx" ON "projects" ("ownerId");
-
--- Owner "beta" model "tickets"
-CREATE TABLE IF NOT EXISTS "tickets" (
-  "id" TEXT PRIMARY KEY,
-  "ticketBody" TEXT
-);
 
 -- Owner "widgets" model "widgets"
 CREATE TABLE IF NOT EXISTS "widgets" (

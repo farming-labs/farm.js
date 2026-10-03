@@ -1,4 +1,8 @@
-export type FarmCacheInvalidationListener = (key: string) => void;
+export type FarmCacheInvalidationSource = "local" | "broadcast" | "live";
+export type FarmCacheInvalidationListener = (
+  key: string,
+  source: FarmCacheInvalidationSource,
+) => void;
 export type FarmCacheTaskListener = (task: Promise<void>) => void;
 
 export const FARM_CACHE_INVALIDATION_HEADER = "x-farm-cache-invalidations";
@@ -25,7 +29,10 @@ function warnFarmCacheListenerError(scope: string, error: unknown): void {
   console.warn(`[farm:cache] ${scope} listener failed: ${detail}`);
 }
 
-export function notifyFarmCacheInvalidation(key: string): void {
+export function notifyFarmCacheInvalidation(
+  key: string,
+  source: FarmCacheInvalidationSource = "local",
+): void {
   if (typeof key !== "string" || key.length === 0) return;
 
   for (const listener of getFarmCacheInvalidationState().listeners) {
@@ -33,7 +40,7 @@ export function notifyFarmCacheInvalidation(key: string): void {
     // listeners (or the rest of a multi-key batch in applyFarmCacheInvalidations)
     // and must not surface as a 500 when invalidation runs inside a request.
     try {
-      listener(key);
+      listener(key, source);
     } catch (error) {
       warnFarmCacheListenerError("invalidation", error);
     }
@@ -50,12 +57,15 @@ export function notifyFarmCacheTask(task: Promise<void>): void {
   }
 }
 
-export function applyFarmCacheInvalidations(keys: unknown): void {
+export function applyFarmCacheInvalidations(
+  keys: unknown,
+  source: FarmCacheInvalidationSource = "local",
+): void {
   if (!Array.isArray(keys)) return;
 
   for (const key of keys) {
     if (typeof key === "string") {
-      notifyFarmCacheInvalidation(key);
+      notifyFarmCacheInvalidation(key, source);
     }
   }
 }

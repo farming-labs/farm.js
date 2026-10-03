@@ -1,0 +1,508 @@
+.farm-agents {
+  color: #ededed;
+}
+.farm-agents ::selection {
+  background: #ededed;
+  color: #000;
+}
+.farm-agents :is(a, button, input, summary):focus-visible {
+  outline: 2px solid #ededed;
+  outline-offset: 4px;
+}
+.farm-agents #agents-content:focus {
+  outline: none;
+}
+.agents-skip-link {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 100;
+  padding: 12px 20px;
+  background: #ededed;
+  color: #000;
+  transform: translateY(-180%);
+}
+.agents-skip-link:focus {
+  transform: translateY(0);
+}
+.agents-hero {
+  position: relative;
+}
+/* Same flickering grid as the landing hero. The wrapper has no height, so the hero keeps its size;
+   the field reaches up behind the bottom of the copy (the copy stays on top), invisible at the top,
+   strongest where it meets the illustration, and soft at the sides. */
+.agents-hero-flicker {
+  position: relative;
+  height: 0;
+  pointer-events: none;
+}
+.agents-hero-flicker-field {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 150px;
+  -webkit-mask-image:
+    linear-gradient(180deg, transparent, rgb(0 0 0 / 0.25) 40%, #000),
+    linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(180deg, transparent, rgb(0 0 0 / 0.25) 40%, #000),
+    linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+  mask-composite: intersect;
+}
+.agents-hero-copy {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  max-width: 58rem;
+  margin-inline: auto;
+  padding: 72px 40px 32px;
+  text-align: center;
+}
+.agents-eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: #b7b7b7;
+}
+.agents-hero h1 {
+  margin: 32px 0 24px;
+  font-size: clamp(40px, 5vw, 64px);
+  font-weight: 450;
+  line-height: 1.07;
+  letter-spacing: -0.055em;
+  text-wrap: balance;
+}
+.agents-hero h1 > span {
+  color: #8f8f8f;
+}
+.agents-intro {
+  max-width: 32rem;
+  margin-inline: auto;
+  color: #aaa;
+  font-size: 17px;
+  font-weight: 300;
+  line-height: 1.75;
+}
+/* Hero signup: the email field and button share one bordered bar in the page's mono style. */
+.agents-signup {
+  max-width: 30rem;
+  margin: 32px auto 0;
+  scroll-margin-top: 80px;
+}
+.agents-signup .agent-waitlist {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  text-align: left;
+}
+.agents-signup .agent-waitlist label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.agents-signup .agent-waitlist-row {
+  flex-direction: row;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--farm-line);
+  background: #050505;
+  transition: border-color 160ms;
+}
+.agents-signup .agent-waitlist-row:focus-within {
+  border-color: rgb(255 255 255 / 0.4);
+}
+.agents-signup .agent-waitlist input {
+  border: 0;
+  background: transparent;
+  font-size: 15px;
+}
+.agents-signup .agent-waitlist input:focus-visible {
+  outline: none;
+}
+.agents-signup .agent-waitlist button {
+  min-width: 0;
+  padding: 0 18px;
+}
+.agents-signup :is(.agent-waitlist-note, .agent-waitlist-status) {
+  text-align: center;
+}
+.agent-artwork {
+  position: relative;
+  min-width: 0;
+  min-height: 320px;
+  isolation: isolate;
+  overflow: hidden;
+  border-top: 1px solid var(--farm-line);
+  background: #000;
+  font-family: var(--font-geist-mono), monospace;
+}
+/* The Farm.js diagram sits on the clear centre of the lattice, between the captions:
+   side by side on wide screens, stacked on phones so the type stays legible. */
+.agent-flow {
+  position: relative;
+  z-index: 1;
+  width: min(660px, calc(100% - 48px));
+  margin-inline: auto;
+  padding: 88px 24px;
+  box-sizing: content-box;
+}
+.agent-flow--stacked {
+  display: none;
+  width: min(400px, calc(100% - 48px));
+}
+@media (max-width: 640px) {
+  .agent-flow--wide {
+    display: none;
+  }
+  .agent-flow--stacked {
+    display: block;
+    padding: 72px 24px;
+  }
+}
+/* Every illustration on this page: soft 1px borders, one radius, a gentle active state. */
+.farm-agents .bf-panel {
+  border-color: rgb(255 255 255 / 0.12);
+  border-radius: 6px;
+}
+.farm-agents .bf-panel[data-state="hot"] {
+  border-color: rgb(255 255 255 / 0.3);
+}
+.agent-art-caption {
+  position: absolute;
+  z-index: 2;
+  top: 32px;
+  left: 48px;
+  right: 48px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: #929292;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.agent-art-caption--bottom {
+  top: auto;
+  bottom: 32px;
+}
+.agent-ascii-field {
+  position: absolute;
+  /* Quiet enough that the Farm.js diagram in front of it leads. */
+  opacity: 0.42;
+  z-index: -1;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  color: #9b9b9b;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 10px;
+  user-select: none;
+  pointer-events: none;
+  mask-image:
+    linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent),
+    linear-gradient(0deg, transparent, #000 18%, #000 82%, transparent),
+    radial-gradient(ellipse clamp(140px, 26vw, 300px) 220px at 50% 50%, transparent 15%, #000);
+  mask-composite: intersect;
+}
+.agent-ascii-row {
+  display: block;
+  flex-shrink: 0;
+  animation: agent-mesh-breathe 12s ease-in-out infinite;
+  animation-play-state: paused;
+}
+.agent-artwork[data-motion="running"] .agent-ascii-row {
+  animation-play-state: running;
+}
+.agents-section-heading {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  gap: 64px;
+  padding: 64px 48px;
+  color: #bbb;
+}
+.agents-section-heading h2 {
+  margin-top: 28px;
+  color: #ededed;
+  font-size: clamp(28px, 3vw, 36px);
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.035em;
+}
+.agents-section-heading > p {
+  max-width: 26rem;
+  color: #aaa;
+  font-size: 16px;
+  font-weight: 300;
+  line-height: 1.85;
+}
+.agents-capabilities,
+.agents-now {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.agents-capabilities article,
+.agents-now article {
+  min-width: 0;
+  padding: 48px 48px 56px;
+  color: #929292;
+}
+.agents-capabilities article:nth-child(even),
+.agents-now article:nth-child(even) {
+  border-left: 1px solid var(--farm-line);
+}
+.agents-capabilities article:nth-child(n + 3),
+.agents-now article:nth-child(n + 3) {
+  border-top: 1px solid var(--farm-line);
+}
+/* Each card's illustration sits in the landing page's feature spotlight, bleeding to the card edges. */
+.agents-card-visual {
+  margin: 36px -48px -56px;
+  padding: 40px 48px 48px;
+  overflow: hidden;
+}
+.agents-card-figure {
+  position: relative;
+  z-index: 1;
+}
+/* The landing spotlight, centred behind each illustration instead of the card's top-left corner. */
+.agents-card-visual.farm-feature-spotlight {
+  background-image: radial-gradient(
+    ellipse 72% 58% at 50% 50%,
+    rgb(255 255 255 / 0.05),
+    rgb(255 255 255 / 0.015) 45%,
+    transparent 78%
+  );
+}
+.agents-card-visual.farm-feature-spotlight::before {
+  inset: 16% 12%;
+  transform: none;
+}
+.agents-card-visual.farm-feature-spotlight::after {
+  display: none;
+}
+/* Every card description holds three lines, so the illustrations below line up across the grid. */
+.agents-capabilities article > p {
+  min-height: calc(1.85em * 3);
+}
+.agents-capabilities h3,
+.agents-now h3 {
+  margin: 36px 0 18px;
+  color: #ededed;
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.agents-capabilities p,
+.agents-now p,
+.agents-open-copy p {
+  max-width: 28rem;
+  font-size: 16px;
+  font-weight: 300;
+  line-height: 1.85;
+}
+.agents-open-web {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 64px;
+  padding: 64px 48px;
+  color: #aaa;
+}
+.agents-open-web h2 {
+  margin-top: 24px;
+  color: #ededed;
+  font-size: 30px;
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.04em;
+}
+.agents-open-copy .agents-availability {
+  margin-top: 16px;
+  color: #929292;
+  font-size: 12px;
+}
+.agents-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  margin-top: 24px;
+}
+.agents-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  color: #ededed;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+@media (hover: hover) and (pointer: fine) {
+  .agents-links a:hover {
+    text-decoration: underline;
+    text-underline-offset: 5px;
+  }
+}
+@keyframes agent-mesh-breathe {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+@media (max-width: 900px) {
+  .agents-hero-copy {
+    padding: 56px 24px 24px;
+  }
+  .agents-hero-flicker-field {
+    height: 110px;
+  }
+  .agent-artwork {
+    min-height: 300px;
+  }
+  .agent-art-caption {
+    left: 32px;
+    right: 32px;
+  }
+  .agents-open-web {
+    grid-template-columns: 1fr;
+    gap: 28px;
+    padding: 48px 32px;
+  }
+  .agents-section-heading {
+    gap: 32px;
+    padding: 48px 32px;
+  }
+  .agents-capabilities article,
+  .agents-now article {
+    padding: 40px 32px 48px;
+  }
+  .agents-card-visual {
+    margin: 32px -32px -48px;
+    padding: 32px 32px 40px;
+  }
+  .agents-capabilities h3,
+  .agents-now h3 {
+    font-size: 25px;
+  }
+}
+@media (max-width: 600px) {
+  .agents-hero h1 {
+    font-size: clamp(32px, 8.5vw, 48px);
+  }
+  .agents-intro {
+    font-size: 16px;
+  }
+  .agent-art-caption {
+    left: 24px;
+    right: 24px;
+    font-size: 8px;
+  }
+  .agents-capabilities,
+  .agents-now {
+    grid-template-columns: 1fr;
+  }
+  .agents-section-heading,
+  .agents-open-web {
+    grid-template-columns: 1fr;
+    padding: 40px 24px;
+    gap: 24px;
+  }
+  .agents-capabilities article,
+  .agents-now article {
+    padding: 36px 24px 40px;
+  }
+  .agents-card-visual {
+    margin: 28px -24px -40px;
+    padding: 28px 24px 32px;
+  }
+  .agents-capabilities article + article,
+  .agents-now article + article {
+    border-left: 0;
+    border-top: 1px solid var(--farm-line);
+  }
+  .agents-capabilities h3,
+  .agents-now h3 {
+    margin-top: 28px;
+  }
+  .agents-open-web h2 {
+    font-size: 27px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-ascii-row {
+    animation: none;
+    opacity: 0.65;
+  }
+}
+
+/* 06.1 Available today: shipped agent features, each with a status, one line of code, and a guide */
+.agents-now-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.agents-now-status {
+  color: #6e6e6e;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.agents-now h3 {
+  margin-bottom: 16px;
+}
+.agents-now-code {
+  display: block;
+  max-width: 100%;
+  margin-bottom: 18px;
+  overflow-x: auto;
+  padding: 10px 14px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.04);
+  color: rgb(255 255 255 / 0.78);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 12px;
+  font-weight: 350;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+.agents-now-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin-top: 12px;
+  color: #ededed;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+@media (hover: hover) and (pointer: fine) {
+  .agents-now-link:hover {
+    text-decoration: underline;
+    text-underline-offset: 5px;
+  }
+}

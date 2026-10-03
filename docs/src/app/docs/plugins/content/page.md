@@ -442,35 +442,52 @@ const sanity = createClient({
   useCdn: false, // builds want the freshest documents
 });
 
+// The collection's read set and its id mapping, shared with the write
+// callbacks below.
+const postsQuery = `*[_type == "post"]{ _id, slug, title, publishedAt }`;
+const entryId = (doc) => doc.slug?.current ?? doc._id;
+
+// Mutations address `_id`, entry ids are slugs: resolve the bridge against the
+// same query the collection reads, so a write can only ever land on a document
+// this collection owns. A bare `*[slug.current == $id][0]._id` would happily
+// resolve an unrelated `_type` that shares the slug - and then `delete` it.
+const resolveDocumentId = async (id) => {
+  const docs = await sanity.fetch(postsQuery);
+  const match = docs.find((doc) => entryId(doc) === id);
+  if (!match) throw new Error(`sanity:posts has no document for ${id}`);
+  return match._id;
+};
+
 const sanityPosts = remote({
   name: "sanity:posts",
 
   fetch: async () => {
-    const docs = await sanity.fetch(`*[_type == "post"]{ _id, slug, title, publishedAt }`);
-    return docs.map((doc) => ({ id: doc.slug?.current ?? doc._id, data: doc }));
+    const docs = await sanity.fetch(postsQuery);
+    return docs.map((doc) => ({ id: entryId(doc), data: doc }));
   },
 
   update: async (id, patch) => {
-    // Mutations address _id, entry ids are slugs: one GROQ lookup bridges them.
-    const documentId = await sanity.fetch(`*[slug.current == $id][0]._id`, { id });
-    const updated = await sanity.patch(documentId).set(patch.data).commit();
+    const updated = await sanity
+      .patch(await resolveDocumentId(id))
+      .set(patch.data)
+      .commit();
     return { id, data: updated };
   },
 
   create: async ({ data }) => {
     const doc = await sanity.create({ _type: "post", ...data });
-    return { id: doc.slug?.current ?? doc._id, data: doc };
+    return { id: entryId(doc), data: doc };
   },
 
   delete: async (id) => {
-    await sanity.delete(await sanity.fetch(`*[slug.current == $id][0]._id`, { id }));
+    await sanity.delete(await resolveDocumentId(id));
   },
 });
 ```
 
 This is, almost line for line, what `sanitySource` does for you - it only adds the env
-conventions, the id-mapping cache, and the error naming. The same also works with no SDK at all,
-over Sanity's plain HTTP API:
+conventions, this write-target resolution, and the error naming. The same also works with no SDK
+at all, over Sanity's plain HTTP API:
 
 ```ts
 const sanityApi = `https://${process.env.SANITY_PROJECT_ID}.api.sanity.io/v2026-03-01`;
@@ -498,7 +515,15 @@ const sanityPosts = remote({
       },
       body: JSON.stringify({
         mutations: [
-          { patch: { query: `*[slug.current == $id][0]`, params: { id }, set: patch.data } },
+          // Constrained to the collection's own `_type`, for the same reason
+          // the SDK version resolves against its read query.
+          {
+            patch: {
+              query: `*[_type == "post" && slug.current == $id][0]`,
+              params: { id },
+              set: patch.data,
+            },
+          },
         ],
       }),
     });

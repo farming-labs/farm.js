@@ -1,15 +1,14 @@
-import type { FarmSchema, FarmSchemaField, FarmSchemaModel, FarmSchemaReference } from "./schema";
+import type { FarmSchema, FarmSchemaReference } from "./schema";
+import { assertNoSchemaListField } from "./schema-capabilities";
+import { isDatabaseEnforcedReference } from "./schema-reference";
+import { resolveSchemaModels } from "./schema-resolve";
+import type { ResolvedSchemaField, ResolvedSchemaModel } from "./schema-resolve";
+
+export { assertNoSchemaListField } from "./schema-capabilities";
+export { resolveSchemaModels } from "./schema-resolve";
+export type { ResolvedSchemaField, ResolvedSchemaModel } from "./schema-resolve";
 
 export type FarmSqlDialect = "postgres" | "mysql" | "sqlite";
-
-export type ResolvedSchemaField = FarmSchemaField & {
-  name: string;
-};
-
-export type ResolvedSchemaModel = Omit<FarmSchemaModel, "fields"> & {
-  name: string;
-  fields: Record<string, ResolvedSchemaField>;
-};
 
 export type CollectedSchemaModel = {
   /** Namespace that owns the model: an integration key or a plugin name. */
@@ -27,125 +26,6 @@ const SQL_ON_DELETE_ACTIONS = {
   setNull: "SET NULL",
   noAction: "NO ACTION",
 } satisfies Record<NonNullable<FarmSchemaReference["onDelete"]>, string>;
-
-/**
- * Resolve a schema's extensions, overrides, and name mappings.
- *
- * Table and column names fall back to the schema's own keys, which is what the
- * runtime orm uses (`createIntegrationOrm` reads `model.name ?? modelKey`). Any
- * other default would generate artifacts describing tables the app cannot
- * actually read.
- */
-export function resolveSchemaModels(
-  ownerKey: string,
-  schema: FarmSchema,
-): Record<string, ResolvedSchemaModel> {
-  const models: Record<string, FarmSchemaModel> = Object.fromEntries(
-    Object.entries(schema.models).map(([modelKey, model]) => [modelKey, cloneSchemaModel(model)]),
-  );
-
-  for (const [modelKey, extension] of Object.entries(schema.extend || {})) {
-    const existing = models[modelKey];
-    models[modelKey] = {
-      ...(existing || { fields: {} }),
-      ...(extension.name ? { name: extension.name } : {}),
-      ...(extension.description ? { description: extension.description } : {}),
-      fields: {
-        ...existing?.fields,
-        ...extension.fields,
-      },
-      constraints: [...(existing?.constraints || []), ...(extension.constraints || [])],
-      meta: {
-        ...existing?.meta,
-        ...extension.meta,
-      },
-    };
-  }
-
-  for (const [modelKey, override] of Object.entries(schema.override || {})) {
-    const existing = models[modelKey];
-
-    if (!existing) {
-      throw new Error(
-        `Schema override for "${ownerKey}.${modelKey}" is invalid because that model does not exist.`,
-      );
-    }
-
-    const fields = {
-      ...existing.fields,
-    };
-
-    for (const [fieldKey, fieldOverride] of Object.entries(override.fields || {})) {
-      const existingField = fields[fieldKey];
-
-      if (!existingField && !fieldOverride.type) {
-        throw new Error(
-          `Schema override for "${ownerKey}.${modelKey}.${fieldKey}" is missing a field type.`,
-        );
-      }
-
-      fields[fieldKey] = {
-        ...existingField,
-        ...fieldOverride,
-      } as FarmSchemaField;
-    }
-
-    models[modelKey] = {
-      ...existing,
-      ...(override.name ? { name: override.name } : {}),
-      ...(override.description ? { description: override.description } : {}),
-      fields,
-      constraints: override.constraints || existing.constraints,
-      meta: {
-        ...existing.meta,
-        ...override.meta,
-      },
-    };
-  }
-
-  const resolvedModels: Record<string, ResolvedSchemaModel> = {};
-
-  for (const [modelKey, model] of Object.entries(models)) {
-    const modelName = model.name || modelKey;
-    const fieldNames = new Set<string>();
-    const resolvedFields: Record<string, ResolvedSchemaField> = {};
-
-    for (const [fieldKey, field] of Object.entries(model.fields)) {
-      const fieldName = field.name || fieldKey;
-
-      if (fieldNames.has(fieldName)) {
-        throw new Error(
-          `Schema model "${ownerKey}.${modelKey}" contains duplicate field name "${fieldName}".`,
-        );
-      }
-
-      fieldNames.add(fieldName);
-      resolvedFields[fieldKey] = {
-        ...field,
-        name: fieldName,
-      };
-    }
-
-    resolvedModels[modelKey] = {
-      ...model,
-      name: modelName,
-      fields: resolvedFields,
-    };
-  }
-
-  return resolvedModels;
-}
-
-function cloneSchemaModel(model: FarmSchemaModel): FarmSchemaModel {
-  return {
-    ...model,
-    fields: Object.fromEntries(
-      Object.entries(model.fields).map(([fieldKey, field]) => [fieldKey, { ...field }]),
-    ),
-    constraints: model.constraints ? [...model.constraints] : undefined,
-    meta: model.meta ? { ...model.meta } : undefined,
-  };
-}
 
 /**
  * Flatten owners' schemas into one list, rejecting two models that would
@@ -209,9 +89,10 @@ export function generateSqlStatements(
   dialect: FarmSqlDialect,
 ): FarmSqlStatement[] {
   const modelLookup = createModelLookup(models);
+  const orderedModels = orderSchemaModelsByReferences(models, modelLookup);
   const statements: FarmSqlStatement[] = [];
 
-  for (const model of models) {
+  for (const model of orderedModels) {
     statements.push({
       kind: "table",
       target: model.modelName,
@@ -233,8 +114,9 @@ export function renderSqlSchemaFile(
 ): string {
   const lines = ["-- Generated by Farm.js CLI. Review before applying.", ""];
   const modelLookup = createModelLookup(models);
+  const orderedModels = orderSchemaModelsByReferences(models, modelLookup);
 
-  for (const model of models) {
+  for (const model of orderedModels) {
     lines.push(
       `-- Owner "${model.ownerKey}" model "${model.modelKey}"`,
       renderSqlTable(model, dialect, modelLookup),
@@ -260,6 +142,12 @@ function renderSqlTable(
   const internalReferences = createInternalReferenceLookup(model, dialect, modelLookup);
 
   for (const [fieldKey, field] of Object.entries(model.model.fields)) {
+    assertNoSchemaListField(
+      field,
+      `${model.ownerKey}.${model.modelKey}.${fieldKey}`,
+      `${dialect} SQL generation`,
+    );
+
     const parts = [
       `  ${quoteSqlIdentifier(dialect, field.name)}`,
       getSqlColumnType(field, dialect),
@@ -373,7 +261,7 @@ function createInternalReferenceLookup(
   const lookup = new Map<string, string>();
 
   for (const [fieldKey, field] of Object.entries(model.model.fields)) {
-    if (!field.reference) {
+    if (!field.reference || !isDatabaseEnforcedReference(field.reference)) {
       continue;
     }
 
@@ -485,6 +373,68 @@ export function quoteSqlIdentifier(dialect: FarmSqlDialect, value: string) {
 
 function createModelLookup(models: readonly CollectedSchemaModel[]) {
   return new Map(models.map((model) => [`${model.ownerKey}.${model.modelKey}`, model]));
+}
+
+function orderSchemaModelsByReferences(
+  models: readonly CollectedSchemaModel[],
+  modelLookup: Map<string, CollectedSchemaModel>,
+): CollectedSchemaModel[] {
+  const ordered: CollectedSchemaModel[] = [];
+  const states = new Map<string, "visiting" | "visited">();
+  const stack: CollectedSchemaModel[] = [];
+
+  const visit = (model: CollectedSchemaModel): void => {
+    const modelKey = getCollectedModelKey(model);
+    if (states.get(modelKey) === "visited") {
+      return;
+    }
+
+    states.set(modelKey, "visiting");
+    stack.push(model);
+
+    const dependencies = new Set<string>();
+    for (const field of Object.values(model.model.fields)) {
+      if (field.reference && isDatabaseEnforcedReference(field.reference)) {
+        dependencies.add(`${model.ownerKey}.${field.reference.model}`);
+      }
+    }
+
+    for (const dependencyKey of dependencies) {
+      const dependency = modelLookup.get(dependencyKey);
+      if (!dependency || dependency === model) {
+        continue;
+      }
+
+      if (states.get(dependencyKey) === "visiting") {
+        const cycleStart = stack.findIndex(
+          (candidate) => getCollectedModelKey(candidate) === dependencyKey,
+        );
+        const cycle = [...stack.slice(cycleStart), dependency]
+          .map((candidate) => `"${getCollectedModelKey(candidate)}"`)
+          .join(" -> ");
+
+        throw new Error(
+          `Schema table references contain a cycle: ${cycle}. Database-enforced cross-table cycles cannot be created inline; remove one edge or manage that constraint separately.`,
+        );
+      }
+
+      visit(dependency);
+    }
+
+    stack.pop();
+    states.set(modelKey, "visited");
+    ordered.push(model);
+  };
+
+  for (const model of models) {
+    visit(model);
+  }
+
+  return ordered;
+}
+
+function getCollectedModelKey(model: CollectedSchemaModel) {
+  return `${model.ownerKey}.${model.modelKey}`;
 }
 
 export function toSnakeCase(value: string) {

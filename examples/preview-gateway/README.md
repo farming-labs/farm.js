@@ -4,7 +4,7 @@ This is the Vercel gateway behind `farm preview`.
 
 This example is for Farming Labs maintainers or teams self-hosting their own gateway. Regular Farm app developers do not need to copy, deploy, or configure this app. The default `farm preview` command is backed by the hosted Farming Labs gateway.
 
-It accepts public requests on `*.preview.farming-labs.dev`, hands them to the local `farm preview` CLI over its persistent outbound WebSocket, and returns the local app response to the public caller. The existing outbound HTTPS polling gateway remains available as a compatibility fallback.
+It accepts public requests on `*.preview.farmjs.dev`, hands them to the local `farm preview` CLI over its persistent outbound WebSocket, and returns the local app response to the public caller. The existing outbound HTTPS polling gateway remains available as a compatibility fallback.
 
 The hosted relay uses Redis to coordinate WebSocket agents and HTTP requests across Vercel Function instances. Requests that reach the Function holding the agent socket stay on the direct in-memory path; requests that reach another instance cross the shared Redis queue.
 
@@ -21,8 +21,8 @@ Configure the Vercel project root directory as `examples/preview-gateway`. Deplo
 Attach both domains to the Vercel project:
 
 ```txt
-preview.farming-labs.dev
-*.preview.farming-labs.dev
+preview.farmjs.dev
+*.preview.farmjs.dev
 ```
 
 Vercel will show the DNS records it expects. After DNS is verified, Vercel handles HTTPS certificates for the apex and wildcard preview domains.
@@ -44,6 +44,9 @@ vercel integration add upstash/upstash-kv \
 ```
 
 The integration injects `REDIS_URL`. Without it, the WebSocket relay uses only the current Function's memory, which is suitable for local development but not multi-instance Vercel traffic.
+The same Redis connection enforces a shared per-client limit on managed login exchanges. A production
+deployment with managed authentication enabled refuses to start without `REDIS_URL`, `KV_URL`, or
+`UPSTASH_REDIS_URL` so GitHub token verification cannot be exposed without shared abuse control.
 
 ### Compatibility polling storage
 
@@ -72,9 +75,26 @@ KV_REST_API_TOKEN
 Set:
 
 ```txt
-FARM_PREVIEW_DOMAIN=preview.farming-labs.dev
-FARM_PREVIEW_GATEWAY_URL=https://preview.farming-labs.dev
+FARM_PREVIEW_DOMAIN=preview.farmjs.dev
+FARM_PREVIEW_GATEWAY_URL=https://preview.farmjs.dev
 ```
+
+### Managed developer login
+
+Create a GitHub OAuth app with Device Flow enabled. Configure its public client id and a private Farm
+signing secret:
+
+```bash
+openssl rand -hex 32
+vercel env add FARM_PREVIEW_GITHUB_CLIENT_ID production
+vercel env add FARM_PREVIEW_AUTH_SECRET production
+```
+
+The signing secret must contain at least 32 bytes and must not be distributed to CLI users. When
+both variables are present, the gateway exchanges a verified GitHub device login for an opaque Farm
+account token, then issues a name-bound, expiring grant for each preview. Set
+`FARM_PREVIEW_DEFAULT_TTL_MS` and `FARM_PREVIEW_MAX_TTL_MS` to override the default one-hour and
+maximum 24-hour lifetimes. Set both auth variables or neither; a partial setup fails at startup.
 
 Without Blob or Redis REST env vars, compatibility polling falls back to in-memory storage. That is useful for local development, but not reliable for production Vercel traffic because requests can be handled by different Function instances.
 
@@ -84,13 +104,13 @@ After the gateway is deployed:
 
 ```bash
 farm dev
-farm preview --name stripe-webhook
+farm preview --name stripe-webhook --expires 2h
 ```
 
 The CLI prints:
 
 ```txt
-Public: https://stripe-webhook.preview.farming-labs.dev
+Public: https://stripe-webhook.preview.farmjs.dev
 ```
 
 ## Local gateway development

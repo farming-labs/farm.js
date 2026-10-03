@@ -1,10 +1,12 @@
 // @vitest-environment node
+import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import { createIntegrationOrm } from "../integration-orm";
 import { defineSchema } from "../schema";
 import {
   applySchemaMigration,
   createSchemaExecutor,
+  describeSchemaDrift,
   formatSchemaMigration,
   planSchemaMigration,
   type FarmSchemaExecutor,
@@ -43,6 +45,9 @@ const schema = defineSchema({
 });
 
 const models = (only?: readonly string[]) => collectSchemaModels([["sync", schema, only]]);
+const requireModule = createRequire(import.meta.url);
+const postgresTestUrl = process.env.FARM_TEST_POSTGRES_URL;
+const itWithPostgres = postgresTestUrl ? it : it.skip;
 
 describe("schema name resolution", () => {
   /**
@@ -70,6 +75,190 @@ describe("schema name resolution", () => {
     expect(resolved.tasks!.fields.listId!.name).toBe("list_id");
   });
 
+  it("rejects models with multiple field-level primary keys", () => {
+    expect(() =>
+      collectSchemaModels([
+        [
+          "organizations",
+          {
+            models: {
+              memberships: {
+                fields: {
+                  organizationId: { type: "uuid", primaryKey: true },
+                  userId: { type: "uuid", primaryKey: true },
+                },
+              },
+            },
+          },
+        ],
+      ]),
+    ).toThrow(
+      'Schema model "organizations.memberships" defines multiple primary-key fields: "organizationId", "userId". Composite primary keys are not supported.',
+    );
+  });
+
+  it("validates primary keys after applying field overrides", () => {
+    const resolved = resolveSchemaModels("organizations", {
+      models: {
+        memberships: {
+          fields: {
+            organizationId: { type: "uuid", primaryKey: true },
+            userId: { type: "uuid", primaryKey: true },
+          },
+        },
+      },
+      override: {
+        memberships: {
+          fields: { userId: { primaryKey: false } },
+        },
+      },
+    });
+
+    expect(resolved.memberships!.fields.organizationId!.primaryKey).toBe(true);
+    expect(resolved.memberships!.fields.userId!.primaryKey).toBe(false);
+  });
+
+  it("rejects internal references to missing target field keys", () => {
+    expect(() =>
+      resolveSchemaModels("billing", {
+        models: {
+          accounts: {
+            fields: { id: { type: "uuid", primaryKey: true } },
+          },
+          invoices: {
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              accountId: {
+                type: "uuid",
+                reference: { model: "accounts", field: "missing" },
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow(
+      'Schema reference "billing.invoices.accountId" targets missing field "billing.accounts.missing".',
+    );
+  });
+
+  it("resolves extension and override target fields before validating references", () => {
+    const extended = defineSchema({
+      models: {
+        accounts: {
+          fields: { id: { type: "uuid", primaryKey: true } },
+        },
+        invoices: {
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            accountId: {
+              type: "uuid",
+              reference: { model: "accounts", field: "externalId" },
+            },
+          },
+        },
+      },
+      extend: {
+        accounts: {
+          fields: { externalId: { type: "uuid" } },
+        },
+      },
+      override: {
+        accounts: {
+          fields: { externalId: { name: "external_id" } },
+        },
+      },
+    });
+    const resolved = resolveSchemaModels("billing", extended);
+    const sql = generateSqlStatements(collectSchemaModels([["billing", extended]]), "postgres")
+      .map((statement) => statement.sql)
+      .join("\n");
+
+    expect(resolved.accounts!.fields.externalId!.name).toBe("external_id");
+    expect(sql).toContain('REFERENCES "accounts" ("external_id")');
+  });
+
+  it("allows references to models managed outside the schema owner", () => {
+    const external = defineSchema({
+      models: {
+        invoices: {
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            customerId: {
+              type: "uuid",
+              reference: { model: "customers", field: "externalId" },
+            },
+          },
+        },
+      },
+    });
+
+    const sql = generateSqlStatements(collectSchemaModels([["billing", external]]), "postgres")[0]!
+      .sql;
+
+    expect(sql).toContain("/* references customers.externalId */");
+  });
+
+  it("rejects constraints that reference missing field keys", () => {
+    expect(() =>
+      resolveSchemaModels("billing", {
+        models: {
+          invoices: {
+            fields: { id: { type: "uuid", primaryKey: true } },
+            constraints: [{ type: "index", fields: ["missing"] }],
+          },
+        },
+      }),
+    ).toThrow('Schema index constraint on "billing.invoices" references missing field "missing".');
+  });
+
+  it("validates extension and override constraints against resolved field keys", () => {
+    const extended = resolveSchemaModels("billing", {
+      models: {
+        invoices: {
+          fields: { id: { type: "uuid", primaryKey: true } },
+        },
+      },
+      extend: {
+        invoices: {
+          fields: { accountId: { type: "uuid", name: "account_id" } },
+          constraints: [{ type: "index", fields: ["accountId"] }],
+        },
+      },
+    });
+
+    expect(extended.invoices!.constraints).toEqual([{ type: "index", fields: ["accountId"] }]);
+    expect(extended.invoices!.fields.accountId!.name).toBe("account_id");
+
+    expect(() =>
+      resolveSchemaModels("billing", {
+        models: {
+          invoices: {
+            fields: { id: { type: "uuid", primaryKey: true } },
+          },
+        },
+        override: {
+          invoices: {
+            constraints: [{ type: "unique", fields: ["missing"] }],
+          },
+        },
+      }),
+    ).toThrow('Schema unique constraint on "billing.invoices" references missing field "missing".');
+  });
+
+  it("rejects primary-key field types the runtime ORM cannot represent", () => {
+    expect(() =>
+      resolveSchemaModels("config", {
+        models: {
+          flags: {
+            fields: { enabled: { type: "boolean", primaryKey: true } },
+          },
+        },
+      }),
+    ).toThrow(
+      'Schema primary-key field "config.flags.enabled" uses unsupported type "boolean". Supported types are id, uuid, string, and integer.',
+    );
+  });
+
   it("rejects two models that would claim the same table", () => {
     expect(() =>
       collectSchemaModels([
@@ -94,6 +283,28 @@ describe("schema name resolution", () => {
 });
 
 describe("sql generation", () => {
+  it.each(["postgres", "sqlite", "mysql"] as FarmSqlDialect[])(
+    "rejects list fields instead of emitting a scalar column for %s",
+    (dialect) => {
+      const listSchema = defineSchema({
+        models: {
+          tasks: {
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              tags: { type: "string", list: true },
+            },
+          },
+        },
+      });
+
+      expect(() =>
+        generateSqlStatements(collectSchemaModels([["sync", listSchema]]), dialect),
+      ).toThrow(
+        `Schema field "sync.tasks.tags" declares list: true, but ${dialect} SQL generation does not support list fields. Use type: "json" for an array value or model the values in a related table.`,
+      );
+    },
+  );
+
   it("uses the mapped table and column names, not the model keys", () => {
     const sql = generateSqlStatements(models(), "postgres")
       .map((statement) => statement.sql)
@@ -208,6 +419,220 @@ describe("sql generation", () => {
     },
   );
 
+  it.each(["postgres", "sqlite", "mysql"] as FarmSqlDialect[])(
+    "creates referenced tables before dependents for %s",
+    (dialect) => {
+      const forwardReference = defineSchema({
+        models: {
+          children: {
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              parentId: {
+                type: "uuid",
+                reference: { model: "parents", field: "id" },
+              },
+            },
+          },
+          parents: {
+            fields: { id: { type: "uuid", primaryKey: true } },
+          },
+        },
+      });
+      const collected = collectSchemaModels([["references", forwardReference]]);
+
+      expect(
+        generateSqlStatements(collected, dialect)
+          .filter((statement) => statement.kind === "table")
+          .map((statement) => statement.target),
+      ).toEqual(["parents", "children"]);
+
+      const file = renderSqlSchemaFile(collected, dialect);
+      expect(file.indexOf('model "parents"')).toBeLessThan(file.indexOf('model "children"'));
+    },
+  );
+
+  itWithPostgres(
+    "applies a forward-reference schema against Postgres",
+    async () => {
+      type PostgresTestClient = {
+        connect(): Promise<void>;
+        end(): Promise<void>;
+        query(sql: string): Promise<unknown>;
+      };
+      const { Client } = requireModule("pg") as {
+        Client: new (options: { connectionString: string }) => PostgresTestClient;
+      };
+      const suffix = `${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
+      const parentTable = `farm_schema_parent_${suffix}`;
+      const childTable = `farm_schema_child_${suffix}`;
+      const client = new Client({ connectionString: postgresTestUrl! });
+      const forwardReference = defineSchema({
+        models: {
+          children: {
+            name: childTable,
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              parentId: {
+                type: "uuid",
+                reference: { model: "parents", field: "id" },
+              },
+            },
+          },
+          parents: {
+            name: parentTable,
+            fields: { id: { type: "uuid", primaryKey: true } },
+          },
+        },
+      });
+
+      await client.connect();
+      try {
+        for (const statement of generateSqlStatements(
+          collectSchemaModels([["references", forwardReference]]),
+          "postgres",
+        )) {
+          await client.query(statement.sql);
+        }
+
+        await client.query(`INSERT INTO "${parentTable}" ("id") VALUES ('parent_1')`);
+        await client.query(
+          `INSERT INTO "${childTable}" ("id", "parentId") VALUES ('child_1', 'parent_1')`,
+        );
+      } finally {
+        await client.query(`DROP TABLE IF EXISTS "${childTable}"`);
+        await client.query(`DROP TABLE IF EXISTS "${parentTable}"`);
+        await client.end();
+      }
+    },
+    30_000,
+  );
+
+  it("allows a table to reference itself", () => {
+    const selfReference = defineSchema({
+      models: {
+        categories: {
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            parentId: {
+              type: "uuid",
+              nullable: true,
+              reference: { model: "categories", field: "id" },
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      generateSqlStatements(collectSchemaModels([["references", selfReference]]), "postgres")[0]!
+        .sql,
+    ).toContain('REFERENCES "categories" ("id")');
+  });
+
+  it("rejects cross-table reference cycles before emitting SQL", () => {
+    const cycle = defineSchema({
+      models: {
+        authors: {
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            profileId: {
+              type: "uuid",
+              reference: { model: "profiles", field: "id" },
+            },
+          },
+        },
+        profiles: {
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            authorId: {
+              type: "uuid",
+              reference: { model: "authors", field: "id" },
+            },
+          },
+        },
+      },
+    });
+    const collected = collectSchemaModels([["accounts", cycle]]);
+    const message =
+      'Schema table references contain a cycle: "accounts.authors" -> "accounts.profiles" -> "accounts.authors".';
+
+    expect(() => generateSqlStatements(collected, "postgres")).toThrow(message);
+    expect(() => renderSqlSchemaFile(collected, "postgres")).toThrow(message);
+  });
+
+  it.each(["app", "none"] as const)(
+    "allows a cycle closed by an enforced: %s reference",
+    (enforced) => {
+      const cycle = defineSchema({
+        models: {
+          authors: {
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              profileId: {
+                type: "uuid",
+                reference: { model: "profiles", field: "id", enforced },
+              },
+            },
+          },
+          profiles: {
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              authorId: {
+                type: "uuid",
+                reference: { model: "authors", field: "id" },
+              },
+            },
+          },
+        },
+      });
+      const statements = generateSqlStatements(
+        collectSchemaModels([["accounts", cycle]]),
+        "postgres",
+      ).map((statement) => statement.sql);
+
+      expect(statements[0]).toContain('CREATE TABLE IF NOT EXISTS "authors"');
+      expect(statements[0]).not.toContain("REFERENCES");
+      expect(statements[1]).toContain('REFERENCES "authors" ("id")');
+    },
+  );
+
+  it.each([
+    ["the default", undefined, true],
+    ['enforced: "db"', "db", true],
+    ['enforced: "app"', "app", false],
+    ['enforced: "none"', "none", false],
+  ] as const)("uses database references for %s", (_label, enforced, expected) => {
+    const reference = defineSchema({
+      models: {
+        parents: {
+          fields: { id: { type: "uuid", primaryKey: true } },
+        },
+        children: {
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            parentId: {
+              type: "uuid",
+              reference: {
+                model: "parents",
+                field: "id",
+                ...(enforced ? { enforced } : {}),
+              },
+            },
+          },
+        },
+      },
+    });
+    const table = generateSqlStatements(
+      collectSchemaModels([["references", reference]]),
+      "postgres",
+    ).find((statement) => statement.target === "children")!;
+
+    expect(table.sql.includes('REFERENCES "parents" ("id")')).toBe(expected);
+    if (!expected) {
+      expect(table.sql).toContain("/* references parents.id */");
+    }
+  });
+
   it.each([
     ["postgres", "TIMESTAMPTZ", '"todo_items"'],
     ["sqlite", "TEXT", '"todo_items"'],
@@ -289,6 +714,183 @@ describe("migration planning", () => {
     const columns = await executor.query("pragma table_info('todo_items')");
     expect(columns.map((row) => row.name)).toContain("legacy_note");
   });
+
+  it("reports definition and index drift even when every column name matches", async () => {
+    const { database, executor } = await sqliteExecutor();
+    database.exec(`
+      create table todo_items (
+        id INTEGER,
+        title INTEGER,
+        status TEXT NOT NULL,
+        priority INTEGER NOT NULL DEFAULT 0,
+        list_id TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+
+    const plan = await planSchemaMigration(models(), "sqlite", executor);
+
+    expect(plan.statements).toEqual([]);
+    expect(plan.upToDate).toEqual([]);
+    expect(plan.drift).toHaveLength(1);
+    expect(plan.drift[0]).toMatchObject({
+      missingColumns: [],
+      extraColumns: [],
+      changedColumns: [
+        {
+          column: "id",
+          differences: expect.arrayContaining(["type", "nullability", "primaryKey"]),
+        },
+        {
+          column: "title",
+          differences: ["type", "nullability"],
+        },
+        {
+          column: "status",
+          differences: ["default"],
+        },
+      ],
+      missingIndexes: expect.arrayContaining([
+        expect.objectContaining({ columns: ["list_id"], unique: false }),
+        expect.objectContaining({ columns: ["slug"], unique: true }),
+        expect.objectContaining({ columns: ["list_id", "status"], unique: false }),
+      ]),
+    });
+
+    expect(describeSchemaDrift(plan.drift)).toContain(
+      'changed column status: default expected "open", found none',
+    );
+    expect(describeSchemaDrift(plan.drift)).toContain("missing indexes:");
+  });
+
+  it("reports an index removed from an otherwise matching table", async () => {
+    const { database, executor } = await sqliteExecutor();
+    await applySchemaMigration(await planSchemaMigration(models(), "sqlite", executor), executor);
+    database.exec(`drop index "todo_items_list_id_idx"`);
+    database.exec(`create index "legacy_title_idx" on "todo_items" ("title")`);
+
+    const plan = await planSchemaMigration(models(), "sqlite", executor);
+
+    expect(plan.upToDate).toEqual([]);
+    expect(plan.drift).toHaveLength(1);
+    expect(plan.drift[0]!.changedColumns).toEqual([]);
+    expect(plan.drift[0]!.missingIndexes).toEqual([
+      {
+        name: "todo_items_list_id_idx",
+        columns: ["list_id"],
+        unique: false,
+      },
+    ]);
+    expect(plan.drift[0]!.extraIndexes).toEqual([
+      {
+        name: "legacy_title_idx",
+        columns: ["title"],
+        unique: false,
+      },
+    ]);
+  });
+
+  it("reports changed foreign-key actions without altering the table", async () => {
+    const references = collectSchemaModels([
+      [
+        "app",
+        defineSchema({
+          models: {
+            parents: { fields: { id: { type: "uuid", primaryKey: true } } },
+            children: {
+              fields: {
+                id: { type: "uuid", primaryKey: true },
+                parentId: {
+                  type: "uuid",
+                  name: "parent_id",
+                  reference: { model: "parents", field: "id", onDelete: "cascade" },
+                },
+              },
+            },
+          },
+        }),
+      ],
+    ]);
+    const { database, executor } = await sqliteExecutor();
+    const generated = await sqliteExecutor();
+    await applySchemaMigration(
+      await planSchemaMigration(references, "sqlite", generated.executor),
+      generated.executor,
+    );
+
+    const matching = await planSchemaMigration(references, "sqlite", generated.executor);
+    expect(matching.upToDate).toEqual(["parents", "children"]);
+    expect(matching.drift).toEqual([]);
+
+    database.exec(`
+      create table parents (id TEXT primary key);
+      create table children (
+        id TEXT primary key,
+        parent_id TEXT NOT NULL references parents (id) on delete restrict
+      );
+    `);
+
+    const plan = await planSchemaMigration(references, "sqlite", executor);
+
+    expect(plan.upToDate).toEqual(["parents"]);
+    expect(plan.drift).toHaveLength(1);
+    expect(plan.drift[0]).toMatchObject({
+      table: "children",
+      missingReferences: [
+        {
+          column: "parent_id",
+          referencedTable: "parents",
+          referencedColumn: "id",
+          onDelete: "cascade",
+        },
+      ],
+      extraReferences: [
+        {
+          column: "parent_id",
+          referencedTable: "parents",
+          referencedColumn: "id",
+          onDelete: "restrict",
+        },
+      ],
+    });
+  });
+
+  it.each(["app", "none"] as const)(
+    "does not expect a foreign key for an enforced: %s reference",
+    async (enforced) => {
+      const references = collectSchemaModels([
+        [
+          "app",
+          defineSchema({
+            models: {
+              parents: { fields: { id: { type: "uuid", primaryKey: true } } },
+              children: {
+                fields: {
+                  id: { type: "uuid", primaryKey: true },
+                  parentId: {
+                    type: "uuid",
+                    name: "parent_id",
+                    reference: { model: "parents", field: "id", enforced },
+                  },
+                },
+              },
+            },
+          }),
+        ],
+      ]);
+      const { executor } = await sqliteExecutor();
+      await applySchemaMigration(
+        await planSchemaMigration(references, "sqlite", executor),
+        executor,
+      );
+
+      const plan = await planSchemaMigration(references, "sqlite", executor);
+
+      expect(plan.upToDate).toEqual(["parents", "children"]);
+      expect(plan.drift).toEqual([]);
+    },
+  );
 
   it("only creates the tables that are missing, leaving the rest alone", async () => {
     const { database, executor } = await sqliteExecutor();
@@ -523,17 +1125,27 @@ describe("a third-party plugin", () => {
 });
 
 describe("dialect-specific introspection", () => {
-  function recordingExecutor(rows: Record<string, unknown>[] = []) {
+  function recordingExecutor(resolveRows: (sql: string) => Record<string, unknown>[] = () => []) {
     const queries: Array<{ sql: string; params?: unknown[] }> = [];
     const executor: FarmSchemaExecutor = {
       async execute() {},
       async query(sql, params) {
         queries.push({ sql, params });
-        return rows;
+        return resolveRows(sql);
       },
     };
     return { executor, queries };
   }
+
+  const primaryKeyModels = () =>
+    collectSchemaModels([
+      [
+        "app",
+        defineSchema({
+          models: { records: { fields: { id: { type: "uuid", primaryKey: true } } } },
+        }),
+      ],
+    ]);
 
   it("binds $1 and scopes to the current schema on Postgres", async () => {
     // pg rejects `?` outright, so introspection threw and migrate could not
@@ -554,6 +1166,73 @@ describe("dialect-specific introspection", () => {
     const lookup = queries.find((entry) => entry.sql.includes("information_schema.columns"));
     expect(lookup?.sql).toContain("table_name = ?");
     expect(lookup?.sql).toContain("table_schema = database()");
+  });
+
+  it("normalizes Postgres column and primary-key metadata", async () => {
+    const { executor, queries } = recordingExecutor((sql) => {
+      if (sql.includes("information_schema.columns")) {
+        return [
+          {
+            column_name: "id",
+            data_type: "text",
+            udt_name: "text",
+            is_nullable: "NO",
+            column_default: null,
+          },
+        ];
+      }
+      if (sql.includes("pg_catalog.pg_index")) {
+        return [
+          {
+            index_name: "records_pkey",
+            is_unique: true,
+            is_primary: true,
+            column_name: "id",
+            column_position: 1,
+          },
+        ];
+      }
+      return [];
+    });
+
+    const plan = await planSchemaMigration(primaryKeyModels(), "postgres", executor);
+
+    expect(plan.upToDate).toEqual(["records"]);
+    expect(plan.drift).toEqual([]);
+    expect(queries.some((entry) => entry.sql.includes("referential_constraints"))).toBe(true);
+  });
+
+  it("normalizes MySQL column and primary-key metadata", async () => {
+    const { executor, queries } = recordingExecutor((sql) => {
+      if (sql.includes("information_schema.columns")) {
+        return [
+          {
+            column_name: "id",
+            data_type: "varchar",
+            column_type: "varchar(255)",
+            is_nullable: "NO",
+            column_default: null,
+          },
+        ];
+      }
+      if (sql.includes("information_schema.statistics")) {
+        return [
+          {
+            index_name: "PRIMARY",
+            non_unique: 0,
+            column_name: "id",
+            seq_in_index: 1,
+          },
+        ];
+      }
+      return [];
+    });
+
+    const plan = await planSchemaMigration(primaryKeyModels(), "mysql", executor);
+
+    expect(plan.upToDate).toEqual(["records"]);
+    expect(plan.drift).toEqual([]);
+    expect(queries.some((entry) => entry.sql.includes("referential_constraints"))).toBe(true);
   });
 
   it("escapes backslashes in MySQL string literals, and only there", () => {

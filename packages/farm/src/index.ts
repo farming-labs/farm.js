@@ -5,7 +5,9 @@ export type {
   FarmRenderer,
   FarmRendererCapabilities,
   FarmRendererCapabilitiesInput,
+  FarmRendererRuntime,
   FarmRendererStreamingCapabilities,
+  FarmRendererStreamingPrimitives,
 } from "./renderer";
 export * from "./utils";
 export * from "./storage";
@@ -172,6 +174,19 @@ export type {
   FarmAuthUserConfig,
   ResolvedFarmAuthConfig,
 } from "./auth-config";
+export type {
+  FarmMCPAuthorization,
+  FarmMCPEndpoint,
+  FarmMCPToolDefinition,
+  FarmMCPStandaloneTool,
+  FarmMCPExecuteContext,
+  FarmMCPTool,
+  FarmMCPServer,
+  FarmMCPAuthorizeContext,
+  FarmMCPConfig,
+  FarmMCPUserConfig,
+  ResolvedFarmMCPConfig,
+} from "./mcp-config";
 export * from "./deferred";
 export * from "./after";
 export {

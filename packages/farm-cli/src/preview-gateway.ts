@@ -6,11 +6,17 @@ export interface PreviewGatewayPlan {
   provider: "farm-gateway";
   gatewayUrl: string;
   relayUrl: string;
+  /** Credential transport negotiated with the gateway control API. */
+  controlAuth?: "bearer" | "query";
   /**
    * Credential for the native relay, when one is configured. Kept off
    * `relayUrl` so the displayed and logged relay endpoint stays clean.
    */
   relayToken?: string;
+  /** Absolute hosted expiry returned with a session-scoped tunnel grant. */
+  expiresAt?: number;
+  /** Requested duration sent to compatibility gateways without managed auth. */
+  expiresInMs?: number;
   target: PreviewTarget;
   requestedName: string;
   requestedHostname: string;
@@ -58,14 +64,15 @@ export interface ForwardGatewayRequestOptions {
   maxResponseBodyBytes?: number;
 }
 
-const DEFAULT_GATEWAY_URL = "https://preview.farming-labs.dev";
-const DEFAULT_PREVIEW_DOMAIN = "preview.farming-labs.dev";
+const DEFAULT_GATEWAY_URL = "https://preview.farmjs.dev";
+const DEFAULT_PREVIEW_DOMAIN = "preview.farmjs.dev";
 const DEFAULT_POLL_TIMEOUT_MS = 15000;
 const DEFAULT_LOCAL_PROBE_INTERVAL_MS = 2000;
 const DEFAULT_LOCAL_PROBE_TIMEOUT_MS = 1000;
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 25;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RESPONSE_BODY_BYTES = 5 * 1024 * 1024;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "content-length",
@@ -147,7 +154,23 @@ export async function runPreviewGateway(
 
   logger.success("Preview URL ready.");
   logger.info(`Public: ${session.publicUrl}`);
+  if (session.expiresAt) {
+    logger.info(`Expires: ${new Date(session.expiresAt).toLocaleString()}`);
+  }
   logger.info("Forwarding requests until Ctrl+C. Remote traffic will be logged below.");
+  let expirationTimer: NodeJS.Timeout | undefined;
+  const scheduleExpiration = () => {
+    if (!session.expiresAt) return;
+    const remainingMs = session.expiresAt - Date.now();
+    if (remainingMs <= 0) {
+      logger.info("Preview expired. Closing the tunnel.");
+      controller.abort();
+      return;
+    }
+    expirationTimer = setTimeout(scheduleExpiration, Math.min(remainingMs, MAX_TIMER_DELAY_MS));
+    expirationTimer.unref();
+  };
+  scheduleExpiration();
 
   const waitForAvailableRequestSlot = async () => {
     while (!controller.signal.aborted && inFlightRequests.size >= maxConcurrentRequests) {
@@ -228,6 +251,7 @@ export async function runPreviewGateway(
   } finally {
     process.removeListener("SIGINT", cleanup);
     process.removeListener("SIGTERM", cleanup);
+    if (expirationTimer) clearTimeout(expirationTimer);
     controller.abort();
     for (const requestController of requestControllers.values()) requestController.abort();
     requestControllers.clear();
@@ -287,11 +311,13 @@ export async function createGatewaySession(
     method: "POST",
     headers: {
       "content-type": "application/json",
+      ...(plan.relayToken ? { authorization: `Bearer ${plan.relayToken}` } : {}),
     },
     body: JSON.stringify({
       name: plan.requestedName,
       hostname: plan.requestedHostname,
       localUrl: plan.target.localUrl,
+      ...(plan.expiresInMs ? { expiresInMs: plan.expiresInMs } : {}),
     }),
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -431,17 +457,18 @@ async function pollGatewayRequests(
   options: { signal: AbortSignal; pollTimeoutMs: number },
 ) {
   try {
-    const response = await fetch(
-      `${plan.gatewayUrl}/api/sessions/${session.id}/requests?token=${encodeURIComponent(
-        session.token,
-      )}&wait=${options.pollTimeoutMs}`,
-      {
-        headers: {
-          accept: "application/json",
-        },
-        signal: options.signal,
-      },
+    const control = createGatewayControlRequest(
+      `${plan.gatewayUrl}/api/sessions/${session.id}/requests?wait=${options.pollTimeoutMs}`,
+      plan,
+      session,
     );
+    const response = await fetch(control.url, {
+      headers: {
+        accept: "application/json",
+        ...control.headers,
+      },
+      signal: options.signal,
+    });
 
     if (response.status === 204) {
       return [];
@@ -465,19 +492,20 @@ async function sendGatewayResponse(
   responseBody: PreviewGatewayResponse,
   signal: AbortSignal,
 ) {
-  const response = await fetch(
-    `${plan.gatewayUrl}/api/sessions/${session.id}/responses/${requestId}?token=${encodeURIComponent(
-      session.token,
-    )}`,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(responseBody),
-      signal,
-    },
+  const control = createGatewayControlRequest(
+    `${plan.gatewayUrl}/api/sessions/${session.id}/responses/${requestId}`,
+    plan,
+    session,
   );
+  const response = await fetch(control.url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...control.headers,
+    },
+    body: JSON.stringify(responseBody),
+    signal,
+  });
 
   if (!response.ok) {
     throw new Error(
@@ -487,12 +515,31 @@ async function sendGatewayResponse(
 }
 
 async function closeGatewaySession(plan: PreviewGatewayPlan, session: PreviewGatewaySession) {
-  await fetch(
-    `${plan.gatewayUrl}/api/sessions/${session.id}?token=${encodeURIComponent(session.token)}`,
-    {
-      method: "DELETE",
-    },
+  const control = createGatewayControlRequest(
+    `${plan.gatewayUrl}/api/sessions/${session.id}`,
+    plan,
+    session,
   );
+  await fetch(control.url, {
+    method: "DELETE",
+    headers: control.headers,
+  });
+}
+
+function createGatewayControlRequest(
+  endpoint: string,
+  plan: PreviewGatewayPlan,
+  session: PreviewGatewaySession,
+): { url: string; headers: Record<string, string> } {
+  if (plan.controlAuth === "query") {
+    const url = new URL(endpoint);
+    url.searchParams.set("token", session.token);
+    return { url: url.toString(), headers: {} };
+  }
+  return {
+    url: endpoint,
+    headers: { authorization: `Bearer ${session.token}` },
+  };
 }
 
 export function formatGatewayPlan(plan: PreviewGatewayPlan) {
@@ -501,7 +548,14 @@ export function formatGatewayPlan(plan: PreviewGatewayPlan) {
     `Relay:   ${plan.relayUrl}`,
     `Local:   ${plan.target.localUrl}`,
     `Public:  ${plan.requestedPublicUrl}`,
+    ...(plan.expiresInMs ? [`Expires: after ${formatCompactDuration(plan.expiresInMs)}`] : []),
   ].join("\n");
+}
+
+function formatCompactDuration(durationMs: number) {
+  if (durationMs % 86_400_000 === 0) return `${durationMs / 86_400_000}d`;
+  if (durationMs % 3_600_000 === 0) return `${durationMs / 3_600_000}h`;
+  return `${Math.ceil(durationMs / 60_000)}m`;
 }
 
 function formatRequestPath(path: string) {

@@ -10,6 +10,7 @@ const SOLID_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   optimizeDeps: ["solid-js", "solid-js/web", "solid-js/store", "@farm.js/solid/client"],
   capabilities: {
     reconcilesRerenders: false,
+    functionComponents: true,
     streaming: { node: true, web: true },
   },
 });
@@ -22,6 +23,7 @@ export function solid(): FarmRenderer {
     optimizeDeps: [...(SOLID_RENDERER.optimizeDeps || [])],
     capabilities: {
       reconcilesRerenders: false,
+      functionComponents: true,
       streaming: { ...SOLID_RENDERER.capabilities?.streaming },
     },
   };

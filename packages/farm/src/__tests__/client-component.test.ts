@@ -1028,6 +1028,27 @@ export function Chart() {}
     expect(source).not.toContain("Could not preload layout:");
   });
 
+  it("lets renderer-owned roots apply shared-layout route updates in development and production", () => {
+    const sources = [
+      fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8"),
+      fs.readFileSync(path.join(process.cwd(), "src", "nitro", "universal-build.ts"), "utf-8"),
+    ];
+
+    for (const source of sources) {
+      expect(source).toContain("function hydrateFarmRoute(container, route)");
+      expect(source).toContain("function renderFarmRoute(root, route)");
+      expect(source).toMatch(/typeof root\.renderRoute === ["']function["']/);
+      expect(source).toContain("hydrateRoot(container, route.element, route)");
+      expect(source).toMatch(/layouts(?:,|:\s*loadedLayouts)/);
+      expect(source).toMatch(/page(?:,|:\s*pageElement)/);
+      expect(source).toContain("params,");
+      expect(source).toMatch(/wrap(?:,|:\s*wrapFarmClientRouteGraph)/);
+    }
+
+    expect(sources[0]).toContain("function wrapFarmClientRouteGraph(element)");
+    expect(sources[0]).toContain("return wrapFarmIsolatedClientGraph(React, wrapped);");
+  });
+
   it("scopes isolated root disposal and hydration to SPA navigation subtrees", () => {
     const developmentSource = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
     const productionSource = fs.readFileSync(

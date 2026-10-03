@@ -7,15 +7,21 @@ const { test } = require("node:test");
 const { packPublicPackages } = require("./pack-public-packages");
 const { readPublicPackages } = require("./public-packages");
 
-const independentRendererDirectories = ["farm-preact", "farm-solid", "farm-svelte", "farm-vue"];
+const independentRendererDirectories = [
+  "farm-react",
+  "farm-preact",
+  "farm-solid",
+  "farm-svelte",
+  "farm-vue",
+];
 
-test("independently released renderers accept compatible core betas", () => {
+test("independently released renderers require compatible stable core", () => {
   for (const directory of independentRendererDirectories) {
     const manifest = JSON.parse(
       fs.readFileSync(path.resolve(__dirname, "..", "packages", directory, "package.json"), "utf8"),
     );
 
-    assert.equal(manifest.peerDependencies["@farm.js/core"], ">=0.1.0-beta.58 <0.2.0");
+    assert.equal(manifest.peerDependencies["@farm.js/core"], ">=0.1.0 <0.2.0", directory);
   }
 });
 

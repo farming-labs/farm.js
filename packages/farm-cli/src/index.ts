@@ -35,6 +35,7 @@ export {
   resolvePreviewTarget,
   runPreviewTunnel,
   type PreviewFarmOptions,
+  type PreviewFarmGatewayPlan,
   type PreviewFarmResult,
   type PreviewTarget,
   type PreviewTunnelPlan,
@@ -54,6 +55,16 @@ export {
   type NativeTunnelRuntime,
   type RunNativePreviewTunnelOptions,
 } from "./preview-native";
+export {
+  authorizePreviewGatewayPlan,
+  formatPreviewExpiration,
+  loadPreviewAuthConfig,
+  parsePreviewDuration,
+  type AuthorizePreviewPlanOptions,
+  type PreviewAuthPublicConfig,
+  type PreviewAuthRuntime,
+  type PreviewCredentialStore,
+} from "./preview-auth";
 export {
   escapeDoubleQuoted,
   escapeSqlString,

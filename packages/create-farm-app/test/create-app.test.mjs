@@ -1111,7 +1111,7 @@ test("generates every official integration starter", async () => {
         );
       }
       if (template.name === "clerk") {
-        assert.equal(packageJson.dependencies["@clerk/react"], "^6.1.0");
+        assert.equal(packageJson.dependencies["@clerk/react"], "^6.4.3");
       }
 
       assert.match(output, new RegExp(`Open /integrations/${template.route}`));

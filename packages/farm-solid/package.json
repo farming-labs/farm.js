@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/solid",
-  "version": "0.1.0-beta.27",
+  "version": "0.1.0-beta.29",
   "description": "Solid renderer for FARMJS applications",
   "keywords": [
     "farmjs",
@@ -72,7 +72,7 @@
     "vitest": "^3.2.7"
   },
   "peerDependencies": {
-    "@farm.js/core": ">=0.1.0-beta.58 <0.2.0",
+    "@farm.js/core": ">=0.1.0 <0.2.0",
     "solid-js": "^1.9.14"
   },
   "engines": {

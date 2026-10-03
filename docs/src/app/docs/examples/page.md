@@ -22,6 +22,7 @@ Use the examples folder as executable docs for routing, RSC, agents, docs, markd
 | examples/svelte-renderer        | Svelte 5 routes, SSR, hydration, runes, and a typed FARMJS server call.                         |
 | examples/i18n                   | Typed ICU messages, locale routing, detection, client switching, API context, and RTL.          |
 | examples/docs-integration       | Docs runtime and /api/docs machine routes.                                                      |
+| examples/api-mcp                | Authenticated MCP tools declared directly on opted-in typed API routes.                         |
 | examples/federation-demo        | Separate producer and host builds with a federated browser component.                           |
 | examples/search-demo            | Static Pagefind indexing, route selection, and a headless React search interface.               |
 | examples/stripe-integration     | Stripe checkout, portal, session, webhooks.                                                     |

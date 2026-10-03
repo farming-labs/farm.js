@@ -42,6 +42,32 @@ from the generated router. Both callers reuse this route definition: `api` dispa
 the server and `apiClient` sends HTTP requests. Endpoint middleware runs for both; outer HTTP
 middleware is not replayed by direct calls. Never import endpoint modules into the shared caller file.
 
+## MCP tool opt-in
+
+When `@farm.js/mcp` is installed, a typed endpoint can opt into the authenticated MCP transport
+with `mcp: true` or explicit tool metadata:
+
+```ts
+export const GET = createEndpoint(
+  {
+    method: "GET",
+    mcp: {
+      name: "list_projects",
+      description: "List projects visible to the current user.",
+      readOnlyHint: true,
+    },
+  },
+  async () => ({ projects: await listProjects() }),
+);
+```
+
+The route still owns validation and endpoint middleware. The top-level `mcp` config separately owns
+transport authentication in `farm.config.ts`. Alternatively, select explicitly pathed endpoint
+instances in `mcp.tools` and return allowed tool names from `mcp.authorize` to control discovery
+and invocation per caller. The same list can include standalone `defineTool()` definitions from
+`@farm.js/mcp` for operations without an HTTP route. See the [API MCP guide](/docs/plugins/mcp)
+for mixed composition, generated names, and security boundaries.
+
 ## Next-style exports
 
 You can also manually export GET, POST, PATCH, and other handlers from the route file. Farm keeps this familiar while layering typed helpers around it.
@@ -122,8 +148,14 @@ Defaulted fields may be omitted by the caller. The same distinction applies to m
 from `createApiClients()`. Validation still runs on the server; this does not send schemas or
 transforms to the browser. Existing endpoints without transforms retain their input types.
 
-Malformed `application/json` and `application/*+json` bodies also return `400` before endpoint
-middleware or handler code executes, including when the endpoint does not declare a body schema.
+Malformed `application/json` and `application/*+json` bodies return `400` before endpoint middleware
+or handler code executes, including when the endpoint does not declare a body schema. Empty declared
+JSON receives the same response for non-QUERY methods. A bodyless `QUERY` remains valid
+because QUERY requires `Content-Type` and generated clients attach `application/json` even when the
+endpoint declares no body. Malformed `multipart/form-data` also returns `400` instead of becoming an
+absent body; an empty `application/x-www-form-urlencoded` body is a valid empty form and parses as an
+empty object. Callers that omit `Content-Type` retain the permissive JSON parsing path for
+compatibility.
 If an upload is aborted while Farm is buffering its body, Farm rejects it before invoking the
 endpoint. This does not roll back work in a handler that has already started.
 On Node, finishing an upload is not an abort: only an interrupted upload or an early response

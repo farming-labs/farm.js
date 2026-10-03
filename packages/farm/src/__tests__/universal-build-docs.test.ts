@@ -58,4 +58,15 @@ describe("universal docs build", () => {
       }),
     ).toBe("null");
   });
+
+  it("removes build-machine paths from precompiled edge config", () => {
+    const expression = generateFarmDocsRuntimeConfigExpression(docsConfig, true);
+    expect(expression).not.toContain("/workspace/docs");
+    expect(expression).not.toContain("src/app/docs");
+    expect(JSON.parse(expression)).toMatchObject({
+      enabled: true,
+      entry: "/docs",
+      config: { entry: "docs", docsPath: "/docs" },
+    });
+  });
 });

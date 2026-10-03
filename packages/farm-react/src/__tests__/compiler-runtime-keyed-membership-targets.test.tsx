@@ -1,7 +1,7 @@
 import React, { StrictMode, useState } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyCompilerKeyedCollectionMutation,
   createCompiledComponent,
@@ -60,7 +60,11 @@ function hintedSetMutation(
   return createCompilerKeyedCollectionUpdate(previous, next, "set");
 }
 
-function createMembershipHarness(initialItems: Item[], initialMembership: Set<unknown>) {
+function createMembershipHarness(
+  initialItems: Item[],
+  initialMembership: Set<unknown>,
+  options?: { throwOnMarkedKey: unknown },
+) {
   const counters: Counters = { bindingReads: 0, executions: 0, targetReads: 0 };
   let updateItems: (next: CompilerStateUpdater) => void = () => undefined;
   let updateMembership: (next: CompilerStateUpdater) => void = () => undefined;
@@ -90,7 +94,11 @@ function createMembershipHarness(initialItems: Item[], initialMembership: Set<un
                 path: [],
                 read: (item) => {
                   counters.bindingReads += 1;
-                  return membership().has((item as Item).id);
+                  const marked = membership().has((item as Item).id);
+                  if (marked && options && Object.is((item as Item).id, options.throwOnMarkedKey)) {
+                    throw new Error("later targeted binding failed");
+                  }
+                  return marked;
                 },
               },
               {
@@ -267,6 +275,52 @@ describe("compiled keyed membership targets", () => {
     });
     expect(harness.counters.bindingReads).toBe(0);
     expect(harness.counters.executions).toBe(1);
+  });
+
+  it("keeps multi-key membership refreshes atomic when a later binding fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    class Boundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+      state = { failed: false };
+
+      static getDerivedStateFromError() {
+        return { failed: true };
+      }
+
+      render() {
+        return this.state.failed ? <p>Recovered by boundary</p> : this.props.children;
+      }
+    }
+
+    const harness = createMembershipHarness(items(2), new Set(), {
+      throwOnMarkedKey: "row-1",
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () =>
+      root.render(
+        <Boundary>
+          <harness.Rows />
+        </Boundary>,
+      ),
+    );
+    const firstRow = container.querySelector('[data-key="row-0"]')!;
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(firstRow, { attributes: true });
+
+    await act(async () => {
+      harness.setMembership(new Set(["row-0", "row-1"]));
+      await flushCompilerUpdates();
+    });
+    mutations.push(...observer.takeRecords());
+    observer.disconnect();
+
+    expect(container.textContent).toBe("Recovered by boundary");
+    expect(firstRow.isConnected).toBe(false);
+    expect(mutations).toEqual([]);
   });
 
   it("preserves Set equality when different primitive values share one React key string", async () => {

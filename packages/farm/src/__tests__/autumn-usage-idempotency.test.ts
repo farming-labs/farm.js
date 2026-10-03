@@ -172,4 +172,47 @@ describe("autumn usage-report idempotency", () => {
     expect(response.status).toBe(400);
     expect(sdk.balances.update).not.toHaveBeenCalled();
   });
+  it.each([
+    ["a negative quantity", -1_000_000],
+    ["a small negative quantity", -1],
+    ["zero", 0],
+  ])("rejects %s without touching the provider balance", async (_label, quantity) => {
+    const sdk = createFakeSdk({
+      id: "cus_3",
+      balances: { credits: { usage: 100, granted: 100 } },
+      subscriptions: [],
+    });
+    const integration = createIntegration(sdk, "negative-user");
+
+    // Usage is an increment, and the projection is written back as the
+    // customer's absolute balance, so a negative quantity let a signed-in
+    // customer lower or invert their own metered usage. The hard-limit guard
+    // compares `projected > hardLimit`, which a negative always passes.
+    const response = await report(integration, {
+      key: "credits",
+      quantity,
+      idempotencyKey: `neg-${quantity}`,
+    });
+
+    expect(response.status).toBe(400);
+    expect(sdk.balances.update).not.toHaveBeenCalled();
+  });
+
+  it("still accepts an ordinary positive report", async () => {
+    const sdk = createFakeSdk({
+      id: "cus_4",
+      balances: { credits: { usage: 0, granted: 100 } },
+      subscriptions: [],
+    });
+    const integration = createIntegration(sdk, "positive-user");
+
+    const response = await report(integration, {
+      key: "credits",
+      quantity: 10,
+      idempotencyKey: "pos-1",
+    });
+
+    expect(response.status).toBe(200);
+    expect(sdk.balances.update).toHaveBeenCalled();
+  });
 });

@@ -1852,8 +1852,18 @@ export function autumn<TInput extends AutumnIntegrationInput>(
           if (!body.key) {
             return new Response("An Autumn meter key is required.", { status: 400 });
           }
-          if (typeof body.quantity !== "number" || !Number.isFinite(body.quantity)) {
-            return new Response("A numeric quantity is required.", { status: 400 });
+          if (
+            typeof body.quantity !== "number" ||
+            !Number.isFinite(body.quantity) ||
+            body.quantity <= 0
+          ) {
+            // Usage is reported as an increment, and the projection is written
+            // back as the customer's absolute balance, so a negative quantity
+            // lets a caller lower their own metered usage. The hard-limit check
+            // compares `projected > hardLimit`, which a negative always passes.
+            return new Response("Autumn reported quantity must be a positive number.", {
+              status: 400,
+            });
           }
           if (!body.idempotencyKey) {
             return new Response("An idempotencyKey is required for Autumn usage reporting.", {

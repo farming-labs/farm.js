@@ -119,7 +119,7 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
   return async (ctx: MiddlewareContext, next) => {
     const key = config.keyGenerator
       ? config.keyGenerator(ctx)
-      : `${ctx.request.socket.remoteAddress}:${ctx.pathname}`;
+      : `${requireRateLimitClientAddress(ctx)}:${ctx.pathname}`;
 
     const current = await storage.increment(key, windowMs);
     assertRateLimitIncrementResult(current);
@@ -147,6 +147,26 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
 
     return next();
   };
+}
+
+/**
+ * The client address the default key generator buckets on.
+ *
+ * A web Request has no socket, so outside a Node server this is only known when
+ * a trusted proxy supplied it. Bucketing every caller together would make one
+ * client's traffic exhaust the window for everyone, so refuse instead: a rate
+ * limiter that cannot tell callers apart is not enforcing anything, and failing
+ * loudly is the only outcome that cannot be mistaken for working.
+ */
+function requireRateLimitClientAddress(ctx: MiddlewareContext): string {
+  const address = ctx.request.socket?.remoteAddress;
+  if (address) return address;
+
+  throw new Error(
+    "Rate limiting could not identify the caller: this runtime reports no client address. " +
+      "Set `server.trustProxy` so a proxy's x-forwarded-for is trusted, or pass a `keyGenerator` " +
+      "that derives the bucket from something you do have, such as a session or an API key.",
+  );
 }
 
 function assertAtomicRateLimitStorage(storage: RateLimitStorage): void {

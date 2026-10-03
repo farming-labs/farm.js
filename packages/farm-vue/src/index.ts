@@ -13,6 +13,7 @@ const VUE_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   buildConcurrency: "serial",
   capabilities: {
     reconcilesRerenders: true,
+    functionComponents: true,
     streaming: { node: true, web: true },
   },
 });
@@ -27,6 +28,7 @@ export function vue(): FarmRenderer {
     buildConcurrency: VUE_RENDERER.buildConcurrency,
     capabilities: {
       reconcilesRerenders: true,
+      functionComponents: true,
       streaming: { ...VUE_RENDERER.capabilities?.streaming },
     },
   };

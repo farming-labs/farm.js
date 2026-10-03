@@ -1,4 +1,11 @@
-import { resolvePluginRoutes, type PluginRoutesFactory } from "./route";
+import {
+  resolvePluginRoutes,
+  type PluginLocalAPI,
+  type PluginLocalAPIEndpoint,
+  type PluginRoutesFactory,
+  type RouteMethod,
+} from "./route";
+import { invokeAPIRouteEndpoint } from "./runtime";
 import { registerAPIRouteShape } from "./route-shape";
 
 interface MountedRoute {
@@ -14,6 +21,7 @@ export function mergePluginAPIRoutes(
   existing: readonly MountedRoute[],
   plugins: readonly { name: string; routes?: PluginRoutesFactory }[],
   expected?: readonly { path: string; methods: readonly string[] }[],
+  options: { bodySizeLimit?: number } = {},
 ): Array<MountedRoute & { filePath: string }> {
   const routes = new Map<string, MountedRoute & { filePath: string }>();
   const shapes = new Map();
@@ -26,7 +34,8 @@ export function mergePluginAPIRoutes(
       endpoints: { ...route.endpoints },
     });
   }
-  for (const definition of resolvePluginRoutes(plugins)) {
+  const api = createPluginLocalAPI(existing, options.bodySizeLimit);
+  for (const definition of resolvePluginRoutes(plugins, { api })) {
     registerAPIRouteShape(shapes, definition.path, `plugin:${definition.path}`, "app");
     let route = routes.get(definition.path);
     if (route?.methods.includes(definition.method)) {
@@ -49,11 +58,60 @@ export function mergePluginAPIRoutes(
         .map(({ path, methods }) => `${path}:${[...methods].sort().join(",")}`)
         .sort()
         .join("\n");
-    if (signature(result) !== signature(expected)) {
+    const actualSignature = signature(result);
+    const expectedSignature = signature(expected);
+    if (actualSignature !== expectedSignature) {
       throw new Error(
-        "Plugin API routes changed between build and runtime. Route paths and methods must be stable across environments; rebuild the app.",
+        "Plugin API routes changed between build and runtime. Route paths and methods must be stable across environments; rebuild the app.\n" +
+          `Expected:\n${expectedSignature || "(none)"}\nReceived:\n${actualSignature || "(none)"}`,
       );
     }
   }
   return result;
+}
+
+function createPluginLocalAPI(
+  routes: readonly MountedRoute[],
+  bodySizeLimit?: number,
+): PluginLocalAPI {
+  const endpoints = new Map<string, PluginLocalAPIEndpoint>();
+  for (const route of routes) {
+    for (const method of route.methods) {
+      const normalizedMethod = method.toUpperCase() as RouteMethod;
+      const endpoint = route.endpoints[normalizedMethod];
+      if (typeof endpoint !== "function") continue;
+      const descriptor: PluginLocalAPIEndpoint = Object.freeze({
+        path: route.path,
+        method: normalizedMethod,
+        input: Object.freeze({
+          body: endpoint.__types?.body,
+          query: endpoint.__types?.query,
+          params: endpoint.__types?.params,
+          headers: endpoint.__types?.headers,
+        }),
+        output: endpoint.__output,
+        mcp:
+          endpoint.__mcp === true
+            ? true
+            : endpoint.__mcp
+              ? Object.freeze({ ...endpoint.__mcp })
+              : undefined,
+        invoke(request: Request, params: Readonly<Record<string, string | string[]>> = {}) {
+          return invokeAPIRouteEndpoint(endpoint, request, { ...params }, bodySizeLimit);
+        },
+      });
+      endpoints.set(`${normalizedMethod} ${route.path}`, descriptor);
+    }
+  }
+  const listedEndpoints = Object.freeze(Array.from(endpoints.values()));
+
+  return Object.freeze({
+    available: true,
+    get(method: RouteMethod, path: string) {
+      return endpoints.get(`${method.toUpperCase()} ${path}`);
+    },
+    list() {
+      return listedEndpoints;
+    },
+  });
 }

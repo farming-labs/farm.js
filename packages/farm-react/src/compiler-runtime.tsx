@@ -3664,11 +3664,7 @@ function applyStaticRangeBindings(
   values: unknown[],
 ): boolean {
   const activeBindings = bindings || [];
-  if (values.length === 0 && activeBindings.length > 0) {
-    values.push(...activeBindings.map(() => UNSET_STATIC_RANGE_BINDING));
-  }
-  if (values.length !== activeBindings.length) return false;
-
+  const targets: Element[] = [];
   for (let index = 0; index < activeBindings.length; index += 1) {
     const binding = activeBindings[index];
     if (
@@ -3681,19 +3677,38 @@ function applyStaticRangeBindings(
     }
     const sibling = segments[binding.segment]?.[binding.sibling];
     const target = sibling && findCompilerHostTarget(sibling, binding.path);
-    if (!target) return false;
-    const rawValue = binding.read();
-    const value = normalizedStaticRangeBindingValue(binding, rawValue);
-    if (Object.is(values[index], value)) continue;
+    if (
+      !target ||
+      (binding.kind !== "text" &&
+        ((binding.kind !== "style" && binding.kind !== "attribute") || !binding.name))
+    ) {
+      return false;
+    }
+    targets[index] = target;
+  }
+
+  const initializesValues = values.length === 0 && activeBindings.length > 0;
+  if (!initializesValues && values.length !== activeBindings.length) return false;
+
+  const nextValues: unknown[] = [];
+  for (let index = 0; index < activeBindings.length; index += 1) {
+    const binding = activeBindings[index];
+    nextValues[index] = normalizedStaticRangeBindingValue(binding, binding.read());
+  }
+
+  for (let index = 0; index < activeBindings.length; index += 1) {
+    const binding = activeBindings[index];
+    const value = nextValues[index];
+    const previous = initializesValues ? UNSET_STATIC_RANGE_BINDING : values[index];
+    if (Object.is(previous, value)) continue;
     values[index] = value;
+    const target = targets[index];
     if (binding.kind === "text") {
       target.textContent = value as string;
-    } else if (binding.kind === "style" && binding.name) {
-      updateStyle(target, binding.name, rawValue);
-    } else if (binding.kind === "attribute" && binding.name) {
-      updateAttribute(target, binding.name, rawValue);
+    } else if (binding.kind === "style") {
+      updateStyle(target, binding.name!, value);
     } else {
-      return false;
+      updateAttribute(target, binding.name!, value);
     }
   }
   return true;
@@ -4095,8 +4110,31 @@ function applyKeyedRowBindings(
   item: unknown,
   index: number,
 ): void {
+  if (props.bindings.length < 2) {
+    if (props.bindings.length === 1) applyKeyedRowBinding(props, instance, item, index, 0);
+    return;
+  }
+  const nextValues = readKeyedRowBindingValues(props, item, index);
+  let targets: Array<Element | null> | undefined;
   for (let bindingIndex = 0; bindingIndex < props.bindings.length; bindingIndex += 1) {
-    applyKeyedRowBinding(props, instance, item, index, bindingIndex);
+    if (Object.is(instance.values[bindingIndex], nextValues[bindingIndex])) continue;
+    targets ||= [];
+    targets[bindingIndex] = findCompilerHostTarget(
+      instance.element,
+      props.bindings[bindingIndex].path,
+    );
+  }
+  if (!targets) return;
+  for (let bindingIndex = 0; bindingIndex < props.bindings.length; bindingIndex += 1) {
+    const value = nextValues[bindingIndex];
+    if (Object.is(instance.values[bindingIndex], value)) continue;
+    commitKeyedRowBinding(
+      props.bindings[bindingIndex],
+      instance,
+      bindingIndex,
+      value,
+      targets[bindingIndex],
+    );
   }
 }
 
@@ -4108,26 +4146,55 @@ function applyKeyedRowBinding(
   bindingIndex: number,
 ): void {
   const binding = props.bindings[bindingIndex];
-  const rawValue = binding.read(item, index);
-  const value = normalizedKeyedRowBindingValue(binding, rawValue);
+  const value = normalizedKeyedRowBindingValue(binding, binding.read(item, index));
   if (Object.is(instance.values[bindingIndex], value)) return;
-  instance.values[bindingIndex] = value;
   const target = findCompilerHostTarget(instance.element, binding.path);
+  commitKeyedRowBinding(binding, instance, bindingIndex, value, target);
+}
+
+function commitKeyedRowBinding(
+  binding: CompilerKeyedRowBinding,
+  instance: CompilerKeyedRowInstance,
+  bindingIndex: number,
+  value: unknown,
+  target: Element | null | undefined,
+): void {
+  instance.values[bindingIndex] = value;
   if (!target) return;
   if (binding.kind === "text") {
     target.textContent = value as string;
   } else if (binding.kind === "style" && binding.name) {
-    updateStyle(target, binding.name, rawValue);
+    updateStyle(target, binding.name, value);
   } else if (binding.kind === "attribute" && binding.name) {
-    updateAttribute(target, binding.name, rawValue);
+    updateAttribute(target, binding.name, value);
   }
 }
 
 type CompilerPreparedKeyedRowBindingUpdate = readonly [
   bindingIndex: number,
-  rawValue: unknown,
   target: Element,
   value: unknown,
+];
+
+function prepareKeyedRowBindingUpdate(
+  props: CompilerKeyedRowBindingSource,
+  instance: CompilerKeyedRowInstance,
+  item: unknown,
+  index: number,
+  bindingIndex: number,
+): CompilerPreparedKeyedRowBindingUpdate | null | undefined {
+  const binding = props.bindings[bindingIndex];
+  const rawValue = binding.read(item, index);
+  const value = normalizedKeyedRowBindingValue(binding, rawValue);
+  if (Object.is(instance.values[bindingIndex], value)) return null;
+  const target = findCompilerHostTarget(instance.element, binding.path);
+  if (!target || (binding.kind !== "text" && !binding.name)) return undefined;
+  return [bindingIndex, target, value];
+}
+
+type CompilerPreparedKeyedRowBindingCommit = readonly [
+  instance: CompilerKeyedRowInstance,
+  update: CompilerPreparedKeyedRowBindingUpdate,
 ];
 
 function prepareKeyedRowBindingUpdates(
@@ -4138,13 +4205,9 @@ function prepareKeyedRowBindingUpdates(
 ): CompilerPreparedKeyedRowBindingUpdate[] | undefined {
   const updates: CompilerPreparedKeyedRowBindingUpdate[] = [];
   for (let bindingIndex = 0; bindingIndex < props.bindings.length; bindingIndex += 1) {
-    const binding = props.bindings[bindingIndex];
-    const rawValue = binding.read(item, index);
-    const value = normalizedKeyedRowBindingValue(binding, rawValue);
-    if (Object.is(instance.values[bindingIndex], value)) continue;
-    const target = findCompilerHostTarget(instance.element, binding.path);
-    if (!target || (binding.kind !== "text" && !binding.name)) return undefined;
-    updates.push([bindingIndex, rawValue, target, value]);
+    const update = prepareKeyedRowBindingUpdate(props, instance, item, index, bindingIndex);
+    if (update === undefined) return undefined;
+    if (update) updates.push(update);
   }
   return updates;
 }
@@ -4154,17 +4217,27 @@ function applyPreparedKeyedRowBindingUpdates(
   instance: CompilerKeyedRowInstance,
   updates: readonly CompilerPreparedKeyedRowBindingUpdate[],
 ): void {
-  for (const [bindingIndex, rawValue, target, value] of updates) {
-    const binding = props.bindings[bindingIndex];
-    instance.values[bindingIndex] = value;
-    if (binding.kind === "text") {
-      target.textContent = value as string;
-    } else if (binding.kind === "style") {
-      updateStyle(target, binding.name!, rawValue);
-    } else {
-      updateAttribute(target, binding.name!, rawValue);
-    }
+  for (const [bindingIndex, target, value] of updates) {
+    commitKeyedRowBinding(props.bindings[bindingIndex], instance, bindingIndex, value, target);
   }
+}
+
+type CompilerPreparedKeyedRowBindingSet = CompilerPreparedKeyedRowBindingUpdate[][];
+
+function prepareKeyedRowBindingSetUpdates(
+  props: CompilerKeyedRowBindingSource,
+  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  rows: { items: unknown[]; keys: string[] },
+): CompilerPreparedKeyedRowBindingSet | undefined {
+  const preparedUpdates: CompilerPreparedKeyedRowBindingUpdate[][] = [];
+  for (let index = 0; index < rows.items.length; index += 1) {
+    const instance = instances.get(rows.keys[index]);
+    if (!instance) return undefined;
+    const updates = prepareKeyedRowBindingUpdates(props, instance, rows.items[index], index);
+    if (!updates) return undefined;
+    preparedUpdates.push(updates);
+  }
+  return preparedUpdates;
 }
 
 function keyedRowConditionalSnapshot(
@@ -4268,6 +4341,47 @@ function applyHostConditionalBindings(
       updateStyle(target, binding.name, rawValue);
     } else if (binding.kind === "attribute" && binding.name) {
       updateAttribute(target, binding.name, rawValue);
+    }
+  }
+}
+
+function prepareHostConditionalBindings(
+  branch: CompilerHostConditionalBranch,
+  instance: CompilerHostInstance,
+): boolean {
+  for (let bindingIndex = 0; bindingIndex < branch.bindings.length; bindingIndex += 1) {
+    const binding = branch.bindings[bindingIndex];
+    const rawValue = binding.read();
+    const target = findCompilerHostTarget(instance.element, binding.path);
+    if (
+      !target ||
+      (binding.kind !== "text" &&
+        ((binding.kind !== "style" && binding.kind !== "attribute") || !binding.name))
+    ) {
+      return false;
+    }
+    instance.values[bindingIndex] = [
+      target,
+      normalizedHostConditionalBindingValue(binding, rawValue),
+    ];
+  }
+  return true;
+}
+
+function applyPreparedHostConditionalBindings(
+  branch: CompilerHostConditionalBranch,
+  instance: CompilerHostInstance,
+): void {
+  for (let bindingIndex = 0; bindingIndex < branch.bindings.length; bindingIndex += 1) {
+    const binding = branch.bindings[bindingIndex];
+    const [target, value] = instance.values[bindingIndex] as readonly [Element, unknown];
+    instance.values[bindingIndex] = value;
+    if (binding.kind === "text") {
+      target.textContent = value as string;
+    } else if (binding.kind === "style") {
+      updateStyle(target, binding.name!, value);
+    } else {
+      updateAttribute(target, binding.name!, value);
     }
   }
 }
@@ -4378,6 +4492,7 @@ function mountCompilerHostInstance(
   descriptor: CompilerHostElement,
   branch: Pick<CompilerHostConditionalBranch, "bindings">,
   onFallback: () => void,
+  applyBindingsImmediately = true,
 ): CompilerHostInstance | null {
   const scope = mountCompilerHostTree(owner, element, descriptor, onFallback);
   if (!scope) return null;
@@ -4386,6 +4501,7 @@ function mountCompilerHostInstance(
     scope,
     values: branch.bindings.map(() => UNSET_HOST_CONDITIONAL_BINDING),
   };
+  if (!applyBindingsImmediately) return instance;
   try {
     applyHostConditionalBindings(branch as CompilerHostConditionalBranch, instance);
   } catch (error) {
@@ -4487,12 +4603,17 @@ class CompilerNestedConditionalRanges implements CompilerHostTreeScope {
         descriptor,
         selection.branch,
         this.onFallback,
+        false, // Commit only after every sibling range validates.
       );
       if (!host) {
         this.cleanup();
         return false;
       }
       this.instances.push({ key: selection.key, host });
+      if (!prepareHostConditionalBindings(selection.branch, host)) {
+        this.cleanup();
+        return false;
+      }
       cursor += 1;
     }
 
@@ -4508,6 +4629,13 @@ class CompilerNestedConditionalRanges implements CompilerHostTreeScope {
     if (!applyStaticRangeBindings(this.block.bindings, this.staticSegments, this.staticValues)) {
       this.cleanup();
       return false;
+    }
+    for (let index = 0; index < selections.length; index += 1) {
+      const selection = selections[index];
+      const instance = this.instances[index];
+      if (selection.kind === "branch" && instance) {
+        applyPreparedHostConditionalBindings(selection.branch, instance.host);
+      }
     }
     this.unsubscribe = this.owner.subscribe(this.block.id, this.refresh);
     return true;
@@ -4711,6 +4839,7 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
     const elements = [...this.root.children];
     const descriptors = flattenCompilerHostElements(materializeCompilerHostChildren(this.host));
     if (elements.length !== descriptors.length) return false;
+    const preparedBindings: CompilerPreparedKeyedRowBindingUpdate[][][] = [];
     let cursor = 0;
 
     for (let rangeIndex = 0; rangeIndex < this.block.ranges.length; rangeIndex += 1) {
@@ -4732,6 +4861,8 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
       cursor = staticEnd;
 
       const instances = new Map<string, CompilerKeyedRowInstance>();
+      this.instances.push(instances);
+      const rangeBindingUpdates: CompilerPreparedKeyedRowBindingUpdate[][] = [];
       for (let index = 0; index < rows.items.length; index += 1) {
         const element = elements[cursor + index];
         if (!element) {
@@ -4744,7 +4875,7 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
           this.cleanup();
           return false;
         }
-        instances.set(rows.keys[index], {
+        const instance: CompilerKeyedRowInstance = {
           key: rows.keys[index],
           element,
           scope,
@@ -4752,10 +4883,23 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
           item: rows.items[index],
           index,
           conditionalValues: new Map(),
-        });
-        applyKeyedRowBindings(range, instances.get(rows.keys[index])!, rows.items[index], index);
+        };
+        let bindingUpdates: CompilerPreparedKeyedRowBindingUpdate[] | undefined;
+        try {
+          bindingUpdates = prepareKeyedRowBindingUpdates(range, instance, rows.items[index], index);
+        } catch (error) {
+          scope.cleanup();
+          throw error;
+        }
+        if (!bindingUpdates) {
+          scope.cleanup();
+          this.cleanup();
+          return false;
+        }
+        instances.set(rows.keys[index], instance);
+        rangeBindingUpdates.push(bindingUpdates);
       }
-      this.instances.push(instances);
+      preparedBindings.push(rangeBindingUpdates);
       cursor += rows.items.length;
     }
 
@@ -4771,6 +4915,18 @@ class CompilerNestedKeyedRanges implements CompilerHostTreeScope {
     if (!applyStaticRangeBindings(this.block.bindings, this.staticSegments, this.staticValues)) {
       this.cleanup();
       return false;
+    }
+    for (let rangeIndex = 0; rangeIndex < this.block.ranges.length; rangeIndex += 1) {
+      const range = this.block.ranges[rangeIndex];
+      let rowIndex = 0;
+      for (const instance of this.instances[rangeIndex].values()) {
+        applyPreparedKeyedRowBindingUpdates(
+          range,
+          instance,
+          preparedBindings[rangeIndex][rowIndex],
+        );
+        rowIndex += 1;
+      }
     }
     this.unsubscribe = this.owner.subscribe(this.block.id, this.refresh);
     return true;
@@ -5013,6 +5169,9 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
     const elements = [...this.root.children];
     const descriptors = flattenCompilerHostElements(this.host.children);
     if (elements.length !== descriptors.length) return false;
+    const preparedKeyedBindings: Array<
+      readonly (readonly CompilerPreparedKeyedRowBindingUpdate[])[] | undefined
+    > = [];
     let cursor = 0;
 
     for (let rangeIndex = 0; rangeIndex < this.block.ranges.length; rangeIndex += 1) {
@@ -5050,6 +5209,7 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
           descriptor,
           snapshot.selection.branch,
           this.onFallback,
+          false, // Commit only after every sibling range validates.
         );
         if (!host) {
           this.cleanup();
@@ -5059,6 +5219,10 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
           kind: "conditional",
           value: { key: snapshot.selection.key, host },
         });
+        if (!prepareHostConditionalBindings(snapshot.selection.branch, host)) {
+          this.cleanup();
+          return false;
+        }
         cursor += 1;
         continue;
       }
@@ -5068,6 +5232,8 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
         return false;
       }
       const keyedInstances = new Map<string, CompilerKeyedRowInstance>();
+      this.instances.push({ kind: "keyed", value: keyedInstances });
+      const keyedBindingUpdates: CompilerPreparedKeyedRowBindingUpdate[][] = [];
       for (let index = 0; index < snapshot.rows.items.length; index += 1) {
         const element = elements[cursor + index];
         if (!element) {
@@ -5089,15 +5255,27 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
           index,
           conditionalValues: new Map(),
         };
+        let bindingUpdates: CompilerPreparedKeyedRowBindingUpdate[] | undefined;
         try {
-          applyKeyedRowBindings(range, instance, snapshot.rows.items[index], index);
+          bindingUpdates = prepareKeyedRowBindingUpdates(
+            range,
+            instance,
+            snapshot.rows.items[index],
+            index,
+          );
         } catch (error) {
           scope.cleanup();
           throw error;
         }
+        if (!bindingUpdates) {
+          scope.cleanup();
+          this.cleanup();
+          return false;
+        }
         keyedInstances.set(snapshot.rows.keys[index], instance);
+        keyedBindingUpdates.push(bindingUpdates);
       }
-      this.instances.push({ kind: "keyed", value: keyedInstances });
+      preparedKeyedBindings[rangeIndex] = keyedBindingUpdates;
       cursor += snapshot.rows.items.length;
     }
 
@@ -5113,6 +5291,27 @@ class CompilerNestedMixedRanges implements CompilerHostTreeScope {
     if (!applyStaticRangeBindings(this.block.bindings, this.staticSegments, this.staticValues)) {
       this.cleanup();
       return false;
+    }
+    for (let index = 0; index < snapshots.length; index += 1) {
+      const snapshot = snapshots[index];
+      const instance = this.instances[index];
+      if (
+        snapshot.kind === "conditional" &&
+        snapshot.selection.kind === "branch" &&
+        instance?.kind === "conditional" &&
+        instance.value
+      ) {
+        applyPreparedHostConditionalBindings(snapshot.selection.branch, instance.value.host);
+      } else if (snapshot.kind === "keyed" && instance?.kind === "keyed") {
+        const range = this.block.ranges[index];
+        const bindingUpdates = preparedKeyedBindings[index]!;
+        if (range.kind !== "keyed") continue;
+        let rowIndex = 0;
+        for (const row of instance.value.values()) {
+          applyPreparedKeyedRowBindingUpdates(range, row, bindingUpdates[rowIndex]);
+          rowIndex += 1;
+        }
+      }
     }
     this.unsubscribe = this.owner.subscribe(this.block.id, this.refresh);
     return true;
@@ -5788,6 +5987,7 @@ function createConditionalRangesBlockComponent(
           descriptor,
           selection.branch,
           this.requestNestedFallback,
+          false, // Commit only after every sibling range validates.
         );
         if (!host) {
           cleanupInstances();
@@ -5797,6 +5997,15 @@ function createConditionalRangesBlockComponent(
           key: selection.key,
           host,
         });
+        try {
+          if (!prepareHostConditionalBindings(selection.branch, host)) {
+            cleanupInstances();
+            return false;
+          }
+        } catch (error) {
+          cleanupInstances();
+          throw error;
+        }
         cursor += 1;
       }
 
@@ -5805,9 +6014,21 @@ function createConditionalRangesBlockComponent(
         return false;
       }
       staticSegments.push(elements.slice(cursor));
-      if (!applyStaticRangeBindings(props.bindings, staticSegments, staticValues)) {
+      try {
+        if (!applyStaticRangeBindings(props.bindings, staticSegments, staticValues)) {
+          cleanupInstances();
+          return false;
+        }
+        for (let index = 0; index < selections.length; index += 1) {
+          const selection = selections[index];
+          const instance = instances[index];
+          if (selection.kind === "branch" && instance) {
+            applyPreparedHostConditionalBindings(selection.branch, instance.host);
+          }
+        }
+      } catch (error) {
         cleanupInstances();
-        return false;
+        throw error;
       }
       for (const instance of this.rangeInstances) instance?.host.scope?.cleanup();
       this.staticSegments = staticSegments;
@@ -9069,6 +9290,7 @@ function createKeyedRowsBlockComponent(
         }
       }
 
+      let preparedBindingUpdates: CompilerPreparedKeyedRowBindingCommit[] | undefined;
       for (const bindingIndex of affectedBindingIndices) {
         const binding = this.currentProps.bindings[bindingIndex];
         const identityTarget = binding.identityTarget;
@@ -9105,52 +9327,33 @@ function createKeyedRowsBlockComponent(
           nextMapLookupTarget?.eligible,
         );
 
+        let selectedKeys: Iterable<string>;
+        let selectedCount: number;
         if (canTargetMapLookup && previousMapLookupTarget && nextMapLookupTarget) {
           const keys = keyedMapLookupChangedKeys(previousMapLookupTarget, nextMapLookupTarget);
-          for (const key of keys) {
-            const instance = this.instances.get(key);
-            if (instance) {
-              applyKeyedRowBinding(
-                this.currentProps,
-                instance,
-                instance.item,
-                instance.index,
-                bindingIndex,
-              );
-            }
-          }
+          selectedKeys = keys;
+          selectedCount = keys.size;
         } else if (canTargetMembership && previousMembershipTarget && nextMembershipTarget) {
           const keys = keyedMembershipChangedKeys(previousMembershipTarget, nextMembershipTarget);
-          for (const key of keys) {
-            const instance = this.instances.get(key);
-            if (instance) {
-              applyKeyedRowBinding(
-                this.currentProps,
-                instance,
-                instance.item,
-                instance.index,
-                bindingIndex,
-              );
-            }
-          }
+          selectedKeys = keys;
+          selectedCount = keys.size;
         } else if (canTargetIdentity && previousIdentityTarget && nextIdentityTarget) {
           const keys = new Set<string>();
           if (previousIdentityTarget.key !== undefined) keys.add(previousIdentityTarget.key);
           if (nextIdentityTarget.key !== undefined) keys.add(nextIdentityTarget.key);
-          for (const key of keys) {
-            const instance = this.instances.get(key);
-            if (instance) {
-              applyKeyedRowBinding(
-                this.currentProps,
-                instance,
-                instance.item,
-                instance.index,
-                bindingIndex,
-              );
-            }
-          }
+          selectedKeys = keys;
+          selectedCount = keys.size;
         } else {
-          for (const instance of this.instances.values()) {
+          selectedKeys = this.instances.keys();
+          selectedCount = this.instances.size;
+        }
+
+        const prepare = affectedBindingIndices.length > 1 || selectedCount > 1;
+        if (prepare) preparedBindingUpdates ||= [];
+        for (const key of selectedKeys) {
+          const instance = this.instances.get(key);
+          if (!instance) continue;
+          if (!prepare) {
             applyKeyedRowBinding(
               this.currentProps,
               instance,
@@ -9158,9 +9361,38 @@ function createKeyedRowsBlockComponent(
               instance.index,
               bindingIndex,
             );
+            continue;
           }
+          const update = prepareKeyedRowBindingUpdate(
+            this.currentProps,
+            instance,
+            instance.item,
+            instance.index,
+            bindingIndex,
+          );
+          if (update === undefined) {
+            this.activateFallback(afterCommit);
+            return true;
+          }
+          if (update) preparedBindingUpdates!.push([instance, update]);
         }
+      }
 
+      if (preparedBindingUpdates) {
+        for (const [instance, [bindingIndex, target, value]] of preparedBindingUpdates) {
+          commitKeyedRowBinding(
+            this.currentProps.bindings[bindingIndex],
+            instance,
+            bindingIndex,
+            value,
+            target,
+          );
+        }
+      }
+      for (const bindingIndex of affectedBindingIndices) {
+        const nextIdentityTarget = nextIdentityTargets.get(bindingIndex);
+        const nextMembershipTarget = nextMembershipTargets.get(bindingIndex);
+        const nextMapLookupTarget = nextMapLookupTargets.get(bindingIndex);
         if (nextIdentityTarget) this.identityTargets.set(bindingIndex, nextIdentityTarget);
         else this.identityTargets.delete(bindingIndex);
         if (nextMembershipTarget) {
@@ -9190,6 +9422,20 @@ function createKeyedRowsBlockComponent(
         index += 1;
       }
 
+      // Host scopes can replace binding targets during their update, so only
+      // static row structures can safely resolve the whole row set up front.
+      const shouldPrepareBindings =
+        rows.items.length > 1 &&
+        this.currentProps.bindings.length > 0 &&
+        !this.currentProps.hostBlocks;
+      const preparedBindings = shouldPrepareBindings
+        ? prepareKeyedRowBindingSetUpdates(this.currentProps, this.instances, rows)
+        : undefined;
+      if (shouldPrepareBindings && !preparedBindings) {
+        this.activateFallback(afterCommit);
+        return true;
+      }
+
       const conditionalChanges: Array<{
         key: string;
         id: number;
@@ -9207,7 +9453,12 @@ function createKeyedRowsBlockComponent(
             return true;
           }
         }
-        applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
+        const bindingUpdates = preparedBindings?.[index];
+        if (bindingUpdates) {
+          applyPreparedKeyedRowBindingUpdates(this.currentProps, existing, bindingUpdates);
+        } else {
+          applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
+        }
         const conditionalValues = this.readConditionalValues(
           this.currentProps,
           rows.items[index],
@@ -9232,27 +9483,30 @@ function createKeyedRowsBlockComponent(
       return true;
     }
 
-    private reconcileSingleRemoval(
+    private reconcileRemovals(
       rows: { items: unknown[]; keys: string[] },
       afterCommit?: () => void,
       dirtyState?: ReadonlySet<number>,
     ): boolean {
-      if (this.hasReactOwnedRows() || rows.keys.length + 1 !== this.instances.size) return false;
-      const previousKeys = [...this.instances.keys()];
-      let removedIndex = 0;
-      while (
-        removedIndex < rows.keys.length &&
-        previousKeys[removedIndex] === rows.keys[removedIndex]
-      ) {
-        removedIndex += 1;
+      if (this.hasReactOwnedRows() || rows.keys.length >= this.instances.size) return false;
+      const removed: CompilerKeyedRowInstance[] = [];
+      let nextIndex = 0;
+      for (const [key, instance] of this.instances) {
+        if (key === rows.keys[nextIndex]) nextIndex += 1;
+        else removed.push(instance);
       }
-      for (let index = removedIndex; index < rows.keys.length; index += 1) {
-        if (previousKeys[index + 1] !== rows.keys[index]) return false;
+      if (nextIndex !== rows.keys.length) return false;
+      const shouldPrepareBindings =
+        rows.items.length > 1 &&
+        this.currentProps.bindings.length > 0 &&
+        !this.currentProps.hostBlocks;
+      const preparedBindings = shouldPrepareBindings
+        ? prepareKeyedRowBindingSetUpdates(this.currentProps, this.instances, rows)
+        : undefined;
+      if (shouldPrepareBindings && !preparedBindings) {
+        this.activateFallback(afterCommit);
+        return true;
       }
-
-      const removedKey = previousKeys[removedIndex];
-      const removed = this.instances.get(removedKey);
-      if (!removed) return false;
       const conditionalChanges: Array<{
         key: string;
         id: number;
@@ -9270,7 +9524,12 @@ function createKeyedRowsBlockComponent(
             return true;
           }
         }
-        applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
+        const bindingUpdates = preparedBindings?.[index];
+        if (bindingUpdates) {
+          applyPreparedKeyedRowBindingUpdates(this.currentProps, existing, bindingUpdates);
+        } else {
+          applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
+        }
         const conditionalValues = this.readConditionalValues(
           this.currentProps,
           rows.items[index],
@@ -9291,11 +9550,13 @@ function createKeyedRowsBlockComponent(
         existing.index = index;
       }
 
-      removed.scope?.cleanup();
-      removed.element.remove();
-      this.instances.delete(removedKey);
-      this.eventHandlers.delete(removedKey);
-      this.conditionalListeners.delete(removedKey);
+      for (const instance of removed) {
+        instance.scope?.cleanup();
+        instance.element.remove();
+        this.instances.delete(instance.key);
+        this.eventHandlers.delete(instance.key);
+        this.conditionalListeners.delete(instance.key);
+      }
       this.commitCurrentCollection(dirtyState);
       this.notifyConditionalChanges(conditionalChanges, afterCommit);
       return true;
@@ -9360,10 +9621,21 @@ function createKeyedRowsBlockComponent(
       }
 
       if (this.reconcileStableRows(rows, afterCommit, dirtyState)) return;
-      if (this.reconcileSingleRemoval(rows, afterCommit, dirtyState)) return;
+      if (this.reconcileRemovals(rows, afterCommit, dirtyState)) return;
 
       const nextKeys = new Set(rows.keys);
       const hasSurvivingRows = rows.keys.some((key) => this.instances.has(key));
+      const preparedBindings =
+        nextKeys.size < this.instances.size &&
+        this.currentProps.bindings.length > 0 &&
+        !this.currentProps.hostBlocks &&
+        rows.keys.every((key) => this.instances.has(key))
+          ? prepareKeyedRowBindingSetUpdates(this.currentProps, this.instances, rows)
+          : null;
+      if (preparedBindings === undefined) {
+        this.activateFallback(afterCommit);
+        return;
+      }
       const oldIndices = new Map<string, number>();
       if (hasSurvivingRows) {
         [...this.instances].forEach(([key], index) => oldIndices.set(key, index));
@@ -9396,7 +9668,15 @@ function createKeyedRowsBlockComponent(
               return;
             }
           }
-          applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
+          if (preparedBindings) {
+            applyPreparedKeyedRowBindingUpdates(
+              this.currentProps,
+              existing,
+              preparedBindings[index],
+            );
+          } else {
+            applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
+          }
           const conditionalValues = this.readConditionalValues(
             this.currentProps,
             rows.items[index],

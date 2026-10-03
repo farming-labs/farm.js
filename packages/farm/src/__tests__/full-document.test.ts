@@ -28,6 +28,19 @@ describe("full-document detection", () => {
     );
   });
 
+  it("keeps React Suspense reveal payloads emitted after the document wrappers", () => {
+    const reveal = '<div hidden id="S:0"><p>streamed</p></div><script>$RC("B:0","S:0")</script>';
+    const markup =
+      '<div style="display:contents"><html><head></head><body><template id="B:0"></template>' +
+      "<p>loading</p></body></html></div>" +
+      reveal;
+
+    expect(extractFarmFullDocument(markup)).toBe(
+      '<html><head></head><body><template id="B:0"></template><p>loading</p>' +
+        `${reveal}</body></html>`,
+    );
+  });
+
   it("treats a fragment layout as not-a-document", () => {
     expect(extractFarmFullDocument(fragmentMarkup)).toBeNull();
     expect(isFarmFullDocument(fragmentMarkup)).toBe(false);

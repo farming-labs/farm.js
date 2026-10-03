@@ -5,7 +5,7 @@ import * as clientRuntime from "../client";
 import * as serverRuntime from "../server";
 
 defineRendererClientConformance({
-  reconcilesRerenders: false,
+  reconcilesRerenders: true,
   name: "svelte",
   client: clientRuntime,
   server: serverRuntime,

@@ -4,15 +4,20 @@
     Fragment,
     Suspense,
     createElement,
-    getFarmFunctionComponentProps,
     getFarmSvelteChildren,
     getFarmSvelteInnerHtml,
     isFarmFunctionComponent,
     isFarmSvelteElement,
     normalizeFarmSvelteProps,
+    renderFarmFunctionComponent,
   } from "../runtime";
 
-  let { element } = $props();
+  let { element: initialElement } = $props();
+  let element = $state(initialElement);
+
+  export function render(nextElement) {
+    element = nextElement;
+  }
 </script>
 
 {#snippet renderNode(value)}
@@ -54,7 +59,7 @@
         </svelte:element>
       {/if}
     {:else if isFarmFunctionComponent(type)}
-      {@render renderNode(type(getFarmFunctionComponentProps(value)))}
+      {@render renderNode(renderFarmFunctionComponent(type, value))}
     {:else}
       {@const Component = type}
       {@const props = normalizeFarmSvelteProps(value)}

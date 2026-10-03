@@ -58,9 +58,9 @@ Use `"use client"` when a component uses React hooks, browser APIs, or client-on
 Follow the current beta channel for beta apps and use `pnpm create`, not `pnpm add`:
 
 ```bash
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic --typescript
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic --renderer vue --typescript
-pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta --list-templates
+pnpm --config.minimumReleaseAge=0 create @farm.js/app my-app --template basic --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app my-app --template basic --renderer vue --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app --list-templates
 ```
 
 React is the default renderer. The Basic and Better Auth starters support `react`, `preact`,
@@ -114,6 +114,8 @@ Common config fields:
 - `experimental.serverComponents`: enables server component behavior
 - `integrations`: provider integrations object
 - `auth`: built-in email/password auth and sessions
+- `mcp`: authenticated MCP transport for opted-in typed API routes
+- `agent`: opt-in agent readiness: an `llmsTxt` index of static pages and schema.org `jsonLd`
 - `theme`: light, dark, and system behavior
 - `storage.mounts`: named storage instances
 - `migrations`: one-shot schema and provider commands
@@ -144,6 +146,8 @@ Read `docs/src/app/docs/configuration/page.md` before adding an unfamiliar optio
 - Farm writes typed `Link href` declarations into `src/farm.d.ts`
 - Typed `href` supports query strings and hashes, for example `/users/123?tab=profile`
 - File boundaries include `loading`, `error`, and `not-found`
+- Metadata route files `sitemap.ts`, `robots.ts`, `manifest.ts`, `llms.ts`, and `llms-full.ts`
+  serve `/sitemap.xml`, `/robots.txt`, `/manifest.webmanifest`, `/llms.txt`, and `/llms-full.txt`
 - Route exports or route rules select dynamic, static, ISR, PPR, runtime, and cache behavior
 
 Page shape:
@@ -442,6 +446,10 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
 - Configure `theme` for no-flash light/dark/system rendering and typed client/server access.
 - Use Farm image helpers plus the `images` allowlist and format policy for optimization.
 - Use `docs` for human docs, shared search, markdown, `llms.txt`, sitemap, robots, and agent APIs.
+- Use `agent.llmsTxt` for an app's own `/llms.txt` and `/llms-full.txt` (`full: false` skips the
+  second). A static `public/llms.txt` or `public/llms-full.txt` overrides each, and so do
+  `src/app/llms.ts` and `src/app/llms-full.ts`, which return the whole file as a string or the
+  structured format and receive the generated `pages` and `defaults`.
 - Use `md`/`mdx` for page mirrors and content routes; use `openapi` for API references.
 - Use `after()` only for short post-response work and a jobs integration for durable work.
 - Configure OpenTelemetry and Farm runtime events for correlated traces.

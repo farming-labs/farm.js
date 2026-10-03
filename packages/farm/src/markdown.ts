@@ -203,6 +203,22 @@ export function applyMarkdownNegotiationHeaders(
   });
 }
 
+// Wraps the index of a code block set aside during conversion. NUL is not
+// valid in HTML text, so rendered pages do not produce this placeholder.
+const CODE_BLOCK_MARK = "\u0000";
+const CODE_BLOCK_PLACEHOLDER = /\u0000(\d+)\u0000/g;
+
+// Elements that start a new block. Their text belongs on its own line.
+const BLOCK_TAGS =
+  /<\/?(ul|ol|main|section|article|header|footer|nav|aside|div|form|fieldset|legend|figure|figcaption|table|thead|tbody|tfoot|tr|dl|dt|dd|details|summary|address)\b[^>]*>/gi;
+
+// Elements a browser always lays out as their own box, so they never sit inside
+// a word and a separator is safe. Without one, `<label>Token</label><button>Open
+// </button>` read as "TokenOpen". Inline wrappers such as span, a, or em stay
+// joined because animations and markup split single words across them.
+const BOX_TAGS =
+  /<\/?(label|button|input|select|textarea|option|output|meter|progress|td|th)\b[^>]*>/gi;
+
 export function htmlToMarkdown(
   html: string,
   options: {
@@ -212,18 +228,39 @@ export function htmlToMarkdown(
   } = {},
 ): string {
   const title = options.title ?? extractHtmlTitle(html);
-  let source = extractHtmlBody(html)
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, "")
-    .replace(/<!--[\s\S]*?-->/g, "");
+  // Hidden elements go before the body is extracted, since extraction drops the
+  // <main> or <body> tag whose own attributes may hide it, and after scripts go,
+  // so markup quoted in a script string is never read as an element.
+  let source = extractHtmlBody(
+    removeHiddenElements(
+      html
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, "")
+        .replace(/<!--[\s\S]*?-->/g, ""),
+    ),
+  );
 
-  source = source.replace(/<pre\b[^>]*><code\b[^>]*>([\s\S]*?)<\/code><\/pre>/gi, (_, code) => {
-    return `\n\n\`\`\`\n${decodeHtml(stripTags(code)).trim()}\n\`\`\`\n\n`;
-  });
-  source = source.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_, code) => {
-    return `\n\n\`\`\`\n${decodeHtml(stripTags(code)).trim()}\n\`\`\`\n\n`;
-  });
+  // Code blocks are set aside behind placeholders so the tidying below never
+  // touches them, and each gets a fence longer than any backtick run inside it,
+  // so code that itself shows ``` fences cannot close the block early.
+  const codeBlocks: string[] = [];
+  const setAsideCodeBlock = (_: string, code: string) => {
+    const content = decodeHtml(stripTags(code)).trim();
+    // A reduce, not Math.max(...runs): a large block can exceed the argument limit.
+    const longestRun = (content.match(/`+/g) ?? []).reduce(
+      (longest, run) => Math.max(longest, run.length),
+      0,
+    );
+    const fence = "`".repeat(Math.max(3, longestRun + 1));
+    codeBlocks.push(`${fence}\n${content}\n${fence}`);
+    return `\n\n${CODE_BLOCK_MARK}${codeBlocks.length - 1}${CODE_BLOCK_MARK}\n\n`;
+  };
+  source = source.replace(
+    /<pre\b[^>]*><code\b[^>]*>([\s\S]*?)<\/code><\/pre>/gi,
+    setAsideCodeBlock,
+  );
+  source = source.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, setAsideCodeBlock);
   source = source.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_, level, content) => {
     return `\n\n${"#".repeat(Number(level))} ${toInlineMarkdown(content).trim()}\n\n`;
   });
@@ -231,10 +268,28 @@ export function htmlToMarkdown(
     return `\n\n${toInlineMarkdown(content).trim()}\n\n`;
   });
   source = source.replace(/<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, content) => {
+    // The nested call returns decoded text, so it is escaped again before
+    // rejoining this pass, which decodes once at the end. Code blocks inside
+    // were already set aside by this call and the nested call leaves their
+    // placeholders alone; each is quoted line by line, blank lines included,
+    // and set aside again so the rest of this pass leaves it untouched.
     const quote = htmlToMarkdown(content, { includeMetadata: false })
       .split("\n")
       .filter((line) => line.trim().length > 0)
-      .map((line) => `> ${line}`)
+      .map((line) => {
+        const code =
+          line.startsWith(CODE_BLOCK_MARK) && line.endsWith(CODE_BLOCK_MARK)
+            ? codeBlocks[Number(line.slice(1, -1))]
+            : undefined;
+        if (code === undefined) return `> ${escapeHtmlText(line)}`;
+        codeBlocks.push(
+          code
+            .split("\n")
+            .map((codeLine) => (codeLine ? `> ${codeLine}` : ">"))
+            .join("\n"),
+        );
+        return `${CODE_BLOCK_MARK}${codeBlocks.length - 1}${CODE_BLOCK_MARK}`;
+      })
       .join("\n");
     return `\n\n${quote}\n\n`;
   });
@@ -242,16 +297,24 @@ export function htmlToMarkdown(
     return `\n- ${toInlineMarkdown(content).trim()}`;
   });
   source = source
-    .replace(/<\/?(ul|ol|main|section|article|header|footer|nav|aside|div)\b[^>]*>/gi, "\n")
+    .replace(BLOCK_TAGS, "\n")
+    .replace(BOX_TAGS, " ")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<hr\s*\/?>/gi, "\n\n---\n\n");
 
-  let markdown = stripTags(source)
+  // Text keeps its HTML entities through every pass above, so an escaped
+  // `&lt;div&gt;` is never mistaken for a tag; it is decoded exactly once, here,
+  // after the last tags are gone. Then collapse the spacing that tag separators
+  // and indented source HTML leave behind (four leading spaces would read as a
+  // code block), and restore the code blocks set aside above, untouched.
+  let markdown = decodeHtml(stripTags(source))
     .split("\n")
-    .map((line) => line.replace(/[ \t]+$/g, ""))
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .trim()
+    // Placeholders this call did not create belong to an outer call (a blockquote).
+    .replace(CODE_BLOCK_PLACEHOLDER, (match, index: string) => codeBlocks[Number(index)] ?? match);
 
   if (options.includeMetadata !== false) {
     const metadata: string[] = [];
@@ -357,6 +420,25 @@ function getMarkdownAlternatePath(pathname: string): string {
   return pathname === "/" ? "/index.md" : `${pathname}.md`;
 }
 
+/** @internal The `.md` URL that serves a page's Markdown mirror. */
+export function getFarmMarkdownMirrorPath(pathname: string): string {
+  return getMarkdownAlternatePath(pathname);
+}
+
+/** @internal Whether `pathname` has a Markdown mirror under `config`. */
+export function isFarmMarkdownMirrorExposed(
+  config: FarmMarkdownResolvedConfig | undefined,
+  pathname: string,
+): boolean {
+  if (!config?.enabled) return false;
+  return config.expose === true || findExposedMarkdownRoute(config, pathname) !== null;
+}
+
+/** @internal Matches a page pathname against a route pattern such as `/docs/[...slug]`. */
+export function matchesFarmMarkdownRoutePattern(pattern: string, pathname: string): boolean {
+  return routeMatches(pattern, pathname);
+}
+
 function appendHeaderToken(headers: Headers, name: string, token: string): void {
   const current = headers.get(name);
   if (!current) {
@@ -386,20 +468,24 @@ function routeMatches(pattern: string, pathname: string): boolean {
     return true;
   }
 
-  const escaped = pattern
-    .split("/")
-    .map((segment) => {
-      if (/^\[\.\.\.[^\]]+\]$/.test(segment)) {
-        return ".*";
-      }
-      if (/^\[[^\]]+\]$/.test(segment)) {
-        return "[^/]+";
-      }
-      return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    })
-    .join("/");
+  let source = "";
+  pattern.split("/").forEach((segment, index) => {
+    // [[...name]] is optional: it matches the base path and anything below it.
+    if (/^\[\[\.\.\.[^\]]+\]\]$/.test(segment)) {
+      source += "(?:/.*)?";
+      return;
+    }
+    const prefix = index === 0 ? "" : "/";
+    if (/^\[\.\.\.[^\]]+\]$/.test(segment)) {
+      source += `${prefix}.*`;
+    } else if (/^\[[^\]]+\]$/.test(segment)) {
+      source += `${prefix}[^/]+`;
+    } else {
+      source += prefix + segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+  });
 
-  return new RegExp(`^${escaped}$`).test(pathname);
+  return new RegExp(`^${source}$`).test(pathname);
 }
 
 function isHtmlResponse(response: Response): boolean {
@@ -440,16 +526,20 @@ function extractFirstElementContent(html: string, tagNames: string[]): string | 
   return undefined;
 }
 
+/**
+ * Converts inline HTML to Markdown. The result keeps its HTML entities:
+ * htmlToMarkdown decodes once, after every tag is gone.
+ */
 function toInlineMarkdown(html: string): string {
   let source = html
     .replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href, text) => {
       const label: string = toInlineMarkdown(text).trim() || href;
-      return `[${label}](${decodeHtml(href)})`;
+      return `[${label}](${href})`;
     })
     .replace(
       /<img\b[^>]*src=["']([^"']+)["'][^>]*alt=["']([^"']*)["'][^>]*\/?>/gi,
       (_, src, alt) => {
-        return `![${decodeHtml(alt)}](${decodeHtml(src)})`;
+        return `![${alt}](${src})`;
       },
     )
     .replace(/<strong\b[^>]*>([\s\S]*?)<\/strong>/gi, (_, content) => {
@@ -465,16 +555,112 @@ function toInlineMarkdown(html: string): string {
       return `_${toInlineMarkdown(content).trim()}_`;
     })
     .replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_, content) => {
-      return `\`${decodeHtml(stripTags(content)).trim()}\``;
+      return `\`${stripTags(content).trim()}\``;
     })
-    .replace(/<br\s*\/?>/gi, "\n");
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(BLOCK_TAGS, " ")
+    .replace(BOX_TAGS, " ");
 
-  source = stripTags(source);
-  return decodeHtml(source).replace(/\s+/g, " ");
+  return stripTags(source).replace(/\s+/g, " ");
+}
+
+// Elements with no closing tag, which an attribute can hide on their own.
+const VOID_TAGS = new Set([
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "source",
+  "track",
+  "wbr",
+]);
+
+/**
+ * Removes elements hidden from assistive technology, with everything inside
+ * them: `aria-hidden="true"`, which marks decoration such as separators and the
+ * duplicated copy of a marquee, and the `hidden` attribute. A reader of the
+ * Markdown mirror should get what a screen reader gets. `hidden="until-found"`
+ * stays, since that content can still be found and revealed.
+ */
+function removeHiddenElements(html: string): string {
+  const openingTag = /<([a-zA-Z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+  let result = "";
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = openingTag.exec(html))) {
+    const [tag, name, attributes] = match;
+    if (!isHiddenElement(attributes)) continue;
+    const start = match.index;
+    let end = start + tag.length;
+    if (!VOID_TAGS.has(name.toLowerCase()) && !isSelfClosingTag(tag)) {
+      // Unclosed, it is left in place rather than taking the rest of the page with it.
+      const close = findClosingTagEnd(html, name, end);
+      if (close === undefined) continue;
+      end = close;
+    }
+    result += html.slice(cursor, start);
+    cursor = end;
+    openingTag.lastIndex = end;
+  }
+  return result + html.slice(cursor);
+}
+
+function isHiddenElement(attributes: string): boolean {
+  const attribute = /([^\s"'=<>/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+  let match: RegExpExecArray | null;
+  while ((match = attribute.exec(attributes))) {
+    const name = match[1]!.toLowerCase();
+    const value = (match[2] ?? match[3] ?? match[4] ?? "").trim().toLowerCase();
+    if (name === "aria-hidden" && value === "true") return true;
+    if (name === "hidden" && value !== "until-found") return true;
+  }
+  return false;
+}
+
+/**
+ * `<path d="M0" />`, but not `<a href=/docs/>`, whose slash ends an unquoted
+ * value. HTML ignores the flag on other elements, but honoring it where it is
+ * written keeps a self-closed SVG child from pairing with a later close tag.
+ */
+function isSelfClosingTag(tag: string): boolean {
+  return /(?:^<[a-zA-Z][\w:-]*|[\s"'])\/>$/.test(tag);
+}
+
+/**
+ * The end of the tag that closes the element opened before `from`, counting
+ * nesting. Every tag is matched whole, quoted attribute values included, so a
+ * tag written inside an attribute value is never taken for a real one.
+ */
+function findClosingTagEnd(html: string, name: string, from: number): number | undefined {
+  const tags = /<(\/?)([a-zA-Z][\w:-]*)(?:[^>"']|"[^"]*"|'[^']*')*>/g;
+  tags.lastIndex = from;
+  const target = name.toLowerCase();
+  let depth = 1;
+  let match: RegExpExecArray | null;
+  while ((match = tags.exec(html))) {
+    if (match[2]!.toLowerCase() !== target) continue;
+    if (match[1]) {
+      depth -= 1;
+      if (depth === 0) return match.index + match[0].length;
+    } else if (!isSelfClosingTag(match[0])) {
+      depth += 1;
+    }
+  }
+  return undefined;
 }
 
 function stripTags(input: string): string {
   return input.replace(/<[^>]+>/g, "");
+}
+
+function escapeHtmlText(input: string): string {
+  return input.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function decodeHtml(input: string): string {

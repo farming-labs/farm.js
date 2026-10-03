@@ -2,7 +2,7 @@ import { access, readFile, mkdir, mkdtemp, symlink, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { assertEveNodeVersion, eve, findEveServerOrigin } from "../index";
 import { writeEveVercelOutput } from "../vercel";
 
@@ -30,6 +30,61 @@ describe("eve integration", () => {
     expect(findEveServerOrigin("remote https://agent.example.com:443")).toBeUndefined();
     expect(() => assertEveNodeVersion("23.11.0")).toThrow("Node.js 24 or newer");
     expect(() => assertEveNodeVersion("24.0.0")).not.toThrow();
+  });
+});
+
+describe("Eve production builds", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function buildHook(integration: ReturnType<typeof eve>) {
+    const plugin = integration.plugins?.find(
+      (candidate) => typeof candidate === "object" && candidate.name === "farm:agent-runtime:eve",
+    );
+    if (!plugin || typeof plugin !== "object" || !plugin.afterBundle) {
+      throw new Error("Eve integration did not register its build hook");
+    }
+    const afterBundle = plugin.afterBundle;
+    // The agent-runtime build hook reads only the bundle result, never the plugin context.
+    const context = {} as never;
+    return (preset: string) =>
+      afterBundle(
+        {
+          success: true,
+          preset,
+          root: tmpdir(),
+          universal: true,
+          distDir: join(tmpdir(), "dist"),
+        },
+        context,
+      );
+  }
+
+  it("refuses a non-Vercel build that would ship without the Eve service", async () => {
+    vi.stubEnv("EVE_BASE_URL", "");
+    const build = buildHook(eve({ dev: false }));
+
+    // Without this, the build succeeded and every /eve request answered 503.
+    await expect(build("node-server")).rejects.toThrow(
+      /only composed into Vercel output[\s\S]*origin[\s\S]*vercel: false/,
+    );
+  });
+
+  it("allows non-Vercel builds when Eve is deployed separately", async () => {
+    vi.stubEnv("EVE_BASE_URL", "");
+
+    // An origin known at build time, or a runtime EVE_BASE_URL behind
+    // vercel: false, both reach a separately deployed Eve service.
+    await expect(
+      buildHook(eve({ dev: false, origin: "https://agent.example.com" }))("node-server"),
+    ).resolves.toBeUndefined();
+    await expect(
+      buildHook(eve({ dev: false, vercel: false }))("node-server"),
+    ).resolves.toBeUndefined();
+
+    vi.stubEnv("EVE_BASE_URL", "https://agent.example.com");
+    await expect(buildHook(eve({ dev: false }))("node-server")).resolves.toBeUndefined();
   });
 });
 

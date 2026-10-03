@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { test } = require("node:test");
+const ts = require("typescript");
 
 const root = path.resolve(__dirname, "..");
 const packagesRoot = path.join(root, "packages");
@@ -59,6 +60,29 @@ function packageDirectoriesWithShims() {
     .map((entry) => path.join(packagesRoot, entry.name))
     .filter((directory) => fs.existsSync(path.join(directory, "src", "farm-core-shim.d.ts")));
 }
+
+test("core declaration shims augment the resolved module instead of replacing it", () => {
+  const failures = [];
+
+  for (const packageDirectory of packageDirectoriesWithShims()) {
+    const shimPath = path.join(packageDirectory, "src", "farm-core-shim.d.ts");
+    const source = ts.createSourceFile(
+      shimPath,
+      fs.readFileSync(shimPath, "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+
+    if (!ts.isExternalModule(source)) {
+      failures.push(
+        `${path.relative(root, shimPath)} is an ambient script and replaces the resolved core module`,
+      );
+    }
+  }
+
+  assert.deepEqual(failures, [], failures.join("\n"));
+});
 
 test("package root-core imports are represented by their declaration shim", () => {
   const failures = [];

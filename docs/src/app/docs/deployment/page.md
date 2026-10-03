@@ -27,12 +27,12 @@ export default defineConfig({
 
 ## First-class targets
 
-| Target     | Preset           | Default output |
-| ---------- | ---------------- | -------------- |
-| vercel     | vercel           | .vercel/output |
-| cloudflare | cloudflare-pages | .output        |
-| netlify    | netlify          | .output        |
-| node       | node-server      | .output        |
+| Target     | Preset           | Default output                  |
+| ---------- | ---------------- | ------------------------------- |
+| vercel     | vercel           | `.vercel/output`                |
+| cloudflare | cloudflare-pages | `.farm/.output`                 |
+| netlify    | netlify          | `dist` + `.farm/.output/server` |
+| node       | node-server      | `.farm/.output`                 |
 
 These targets get the most polished Farm defaults. They map `deploy.target` to a Nitro preset, output directory, and the matching `farm deploy` command when Farm has a deploy wrapper for that platform.
 
@@ -56,12 +56,12 @@ are still served directly from the CDN and never enter the Farm server function.
 
 Use `deploy.target` when you want one config file to control the platform output. Farm maps that target to the Nitro preset, default output directory, and deploy command shape.
 
-| Platform         | Config                 | Build command                              | Deploy command                  | Output to inspect |
-| ---------------- | ---------------------- | ------------------------------------------ | ------------------------------- | ----------------- |
-| Vercel           | `target: "vercel"`     | `FARM_DEPLOY_TARGET=vercel farm build`     | `farm deploy --vercel --prod`   | `.vercel/output`  |
-| Cloudflare Pages | `target: "cloudflare"` | `FARM_DEPLOY_TARGET=cloudflare farm build` | `farm deploy --cloudflare`      | `.output/public`  |
-| Netlify          | `target: "netlify"`    | `FARM_DEPLOY_TARGET=netlify farm build`    | `farm deploy --netlify`         | `.output`         |
-| Self-hosted Node | `target: "node"`       | `FARM_DEPLOY_TARGET=node farm build`       | `node .output/server/index.mjs` | `.output`         |
+| Platform         | Config                 | Build command                              | Deploy command                        | Output to inspect               |
+| ---------------- | ---------------------- | ------------------------------------------ | ------------------------------------- | ------------------------------- |
+| Vercel           | `target: "vercel"`     | `FARM_DEPLOY_TARGET=vercel farm build`     | `farm deploy --vercel --prod`         | `.vercel/output`                |
+| Cloudflare Pages | `target: "cloudflare"` | `FARM_DEPLOY_TARGET=cloudflare farm build` | `farm deploy --cloudflare`            | `.farm/.output`                 |
+| Netlify          | `target: "netlify"`    | `FARM_DEPLOY_TARGET=netlify farm build`    | `farm deploy --netlify`               | `dist` + `.farm/.output/server` |
+| Self-hosted Node | `target: "node"`       | `FARM_DEPLOY_TARGET=node farm build`       | `node .farm/.output/server/index.mjs` | `.farm/.output`                 |
 
 **farm.config.ts**
 
@@ -93,7 +93,7 @@ export default defineConfig({
     "build:cloudflare": "FARM_DEPLOY_TARGET=cloudflare farm build",
     "build:netlify": "FARM_DEPLOY_TARGET=netlify farm build",
     "build:self-host": "FARM_DEPLOY_TARGET=node farm build",
-    "start:self-host": "node .output/server/index.mjs",
+    "start:self-host": "node .farm/.output/server/index.mjs",
     "deploy:vercel": "farm deploy --vercel --prod",
     "deploy:cloudflare": "farm deploy --cloudflare",
     "deploy:netlify": "farm deploy --netlify"
@@ -267,6 +267,10 @@ When `target` is `vercel`, Farm uses the Vercel Nitro preset and writes Build Ou
 for `--prebuilt` uploads. Keep the default output for Farm-managed Vercel deploys. A custom Vercel
 output directory is only suitable when another deployment workflow uploads the build itself.
 
+For Netlify, Nitro writes static assets to `dist` and the server function to
+`.farm/.output/server`. `farm deploy --netlify` uploads both directories with `--no-build`, so the
+provider deploys the exact artifact Farm just verified instead of starting a second build.
+
 ## Override output
 
 Use `output` for the compact form or `outputDir` when you want the explicit option name.
@@ -287,15 +291,15 @@ pages with `dynamic = "force-static"` or `routeRules` as described in
 
 ## Platform deploys
 
-| Command                                | What it expects                                         |
-| -------------------------------------- | ------------------------------------------------------- |
-| `FARM_DEPLOY_TARGET=vercel farm build` | Builds `.vercel/output` for Vercel prebuilt deploys.    |
-| `FARM_DEPLOY_TARGET=node farm build`   | Builds `.output/server/index.mjs` for self-hosted Node. |
-| `farm build --preset <nitro-preset>`   | Builds with any Nitro preset that Nitro can resolve.    |
-| `farm deploy --vercel`                 | Uses `vercel deploy --prebuilt`.                        |
-| `farm deploy --cloudflare`             | Deploys the Cloudflare Pages output with Wrangler.      |
-| `farm deploy --netlify`                | Deploys the Netlify output with Netlify CLI.            |
-| `farm deploy --plan`                   | Prints the resolved build and deploy operations only.   |
+| Command                                | What it expects                                               |
+| -------------------------------------- | ------------------------------------------------------------- |
+| `FARM_DEPLOY_TARGET=vercel farm build` | Builds `.vercel/output` for Vercel prebuilt deploys.          |
+| `FARM_DEPLOY_TARGET=node farm build`   | Builds `.farm/.output/server/index.mjs` for self-hosted Node. |
+| `farm build --preset <nitro-preset>`   | Builds with any Nitro preset that Nitro can resolve.          |
+| `farm deploy --vercel`                 | Uses `vercel deploy --prebuilt`.                              |
+| `farm deploy --cloudflare`             | Deploys the Cloudflare Pages output with Wrangler.            |
+| `farm deploy --netlify`                | Deploys the Netlify output with Netlify CLI.                  |
+| `farm deploy --plan`                   | Prints the resolved build and deploy operations only.         |
 
 For other Nitro presets, use the host's documented deploy command or CI workflow after `farm build` writes the Nitro output.
 

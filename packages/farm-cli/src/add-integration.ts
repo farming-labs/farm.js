@@ -222,7 +222,7 @@ export const auth0Integration = auth0({
     description: "Clerk auth provider and protected route middleware",
     env: ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"],
     dependencies: {
-      "@clerk/react": "^6.1.0",
+      "@clerk/react": "^6.4.3",
     },
     ui: clerkAuthUIFeature(),
     template: () => `import { clerk } from "@farm.js/clerk";

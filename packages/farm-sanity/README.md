@@ -4,7 +4,7 @@ Sanity CMS integration for Farm.js applications. It resolves the Sanity client c
 validates it at startup, and receives Sanity webhooks so cached content is invalidated the moment
 an editor publishes.
 
-Farm.js is currently in beta.
+See [Stability and Support](https://farmjs.dev/docs/stability) for what this package guarantees.
 
 ## Install
 

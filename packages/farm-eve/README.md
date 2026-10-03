@@ -2,10 +2,10 @@
 
 First-class Eve agent runtime integration for Farm.js
 
-Farm.js is currently in beta.
+See [Stability and Support](https://farmjs.dev/docs/stability) for what this package guarantees.
 
 ```bash
-npm install @farm.js/eve@beta
+npm install @farm.js/eve
 ```
 
 See the [Farm.js repository](https://github.com/farming-labs/farm.js) for documentation, examples, and support.

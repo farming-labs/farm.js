@@ -72,6 +72,12 @@ import {
   type FarmAuthUserConfig,
   type ResolvedFarmAuthConfig,
 } from "./auth-config";
+import {
+  resolveFarmMCPConfig,
+  resolveFarmMCPPlugin,
+  type FarmMCPUserConfig,
+  type ResolvedFarmMCPConfig,
+} from "./mcp-config";
 import { resolveFarmPerformanceConfig, type ResolvedFarmPerformanceConfig } from "./preload";
 import { validateConfigRouteSource } from "./plugins/route-pattern";
 import {
@@ -184,6 +190,19 @@ export type {
   ResolvedFarmAuthConfig,
 } from "./auth-config";
 export type {
+  FarmMCPAuthorization,
+  FarmMCPEndpoint,
+  FarmMCPToolDefinition,
+  FarmMCPStandaloneTool,
+  FarmMCPExecuteContext,
+  FarmMCPTool,
+  FarmMCPServer,
+  FarmMCPAuthorizeContext,
+  FarmMCPConfig,
+  FarmMCPUserConfig,
+  ResolvedFarmMCPConfig,
+} from "./mcp-config";
+export type {
   FarmCspConfig,
   FarmCspDirectives,
   FarmCspDirectiveValue,
@@ -196,7 +215,9 @@ export type {
   FarmRenderer,
   FarmRendererCapabilities,
   FarmRendererCapabilitiesInput,
+  FarmRendererRuntime,
   FarmRendererStreamingCapabilities,
+  FarmRendererStreamingPrimitives,
 } from "./renderer";
 export { defineRenderer } from "./renderer";
 export type {
@@ -319,6 +340,8 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
    * `@farm.js/auth/client`.
    */
   auth?: FarmAuthUserConfig;
+  /** Compose opted-in API routes and standalone tools through an authenticated MCP transport. */
+  mcp?: FarmMCPUserConfig;
   /** Shared application data, route, ISR, and PPR cache. */
   cache?: FarmCacheUserConfig;
   migrations?: FarmMigrationsUserConfig;
@@ -391,6 +414,7 @@ export interface ResolvedFarmConfig extends Required<
     | "images"
     | "i18n"
     | "auth"
+    | "mcp"
     | "performance"
     | "security"
     | "theme"
@@ -422,6 +446,7 @@ export interface ResolvedFarmConfig extends Required<
   images: ResolvedFarmImageConfig;
   i18n: ResolvedFarmI18nConfig;
   auth: ResolvedFarmAuthConfig;
+  mcp: ResolvedFarmMCPConfig;
   performance: ResolvedFarmPerformanceConfig;
   security: ResolvedFarmSecurityConfig;
   theme: ResolvedFarmThemeConfig;
@@ -953,10 +978,10 @@ export async function resolveConfig(
   const securityHeader = getFarmSecurityHeader(security);
   if (farmCspBlocksFrameworkInlineScripts(security)) {
     logger.warn(
-      "security.csp restricts inline scripts (no 'unsafe-inline', nonce, or hash in " +
-        "script-src/default-src), which blocks the inline scripts Farm injects for theming " +
-        "and hydration. Add 'unsafe-inline' or the scripts' hashes until nonce support lands " +
-        "(https://github.com/farming-labs/farm.js/issues/1275).",
+      "security.csp blocks the inline scripts Farm injects for theming and hydration. " +
+        "Set security.csp.nonce to true for managed dynamic nonces and prerendered hashes, " +
+        "or make the governing script directive allow 'unsafe-inline' without a nonce, " +
+        "hash, or 'strict-dynamic' source.",
     );
   }
 
@@ -970,6 +995,7 @@ export async function resolveConfig(
   setEnv(env);
   const api = await resolveFarmAPIConfig(userConfig.api, { root, mode, env });
   const auth = resolveFarmAuthConfig(userConfig.auth);
+  const mcp = resolveFarmMCPConfig(userConfig.mcp);
   if (auth.enabled && userConfig.integrations?.auth) {
     throw new Error(
       "Choose either the top-level `auth` config or `integrations.auth`; they cannot both own the auth route.",
@@ -979,6 +1005,12 @@ export async function resolveConfig(
     root,
     mode,
   });
+  const nativeMCPPlugin = await resolveFarmMCPPlugin(mcp, { root });
+  if (nativeMCPPlugin && userConfig.plugins?.some((plugin) => plugin?.name === "farm:api-mcp")) {
+    throw new Error(
+      "Choose either the top-level `mcp` config or `apiMcp()` in `plugins`; they configure the same MCP transport.",
+    );
+  }
   const integrations = nativeAuthIntegration
     ? { ...userConfig.integrations, auth: nativeAuthIntegration }
     : userConfig.integrations || {};
@@ -1027,6 +1059,7 @@ export async function resolveConfig(
     storage: userConfig.storage || {},
     cache: userConfig.cache || {},
     auth,
+    mcp,
     suppressLintOnLink: userConfig.suppressLintOnLink ?? false,
     experimental: {
       serverComponents: false,
@@ -1036,7 +1069,11 @@ export async function resolveConfig(
       ...userConfig.experimental,
     },
     agent: resolveFarmAgentConfig(userConfig.agent),
-    plugins: [...resolveIntegrationPlugins(integrations), ...(userConfig.plugins || [])],
+    plugins: [
+      ...resolveIntegrationPlugins(integrations),
+      ...(nativeMCPPlugin ? [nativeMCPPlugin] : []),
+      ...(userConfig.plugins || []),
+    ],
     integrations,
     trailingSlash: userConfig.trailingSlash ?? false,
     redirects: () => [...redirects, ...routeRuleRedirects],
@@ -1071,6 +1108,24 @@ export async function resolveConfig(
   };
 
   return resolved;
+}
+
+function formatConfigLoadError(error: unknown): string {
+  if (error && (typeof error === "object" || typeof error === "function")) {
+    for (const property of ["message", "stack", "name"] as const) {
+      try {
+        const value = Reflect.get(error, property);
+        if (typeof value === "string" && value) return value;
+      } catch {
+        // Continue to the next diagnostic when an exotic getter throws.
+      }
+    }
+  }
+  try {
+    return String(error);
+  } catch {
+    return "Unknown config loader error";
+  }
 }
 
 export async function loadConfig(
@@ -1129,9 +1184,12 @@ export async function loadConfig(
 
       const loadedConfig = await loadFarmConfigFile<FarmUserConfig>(normalizedPath, { root });
       return loadedConfig.root === undefined ? { ...loadedConfig, root } : loadedConfig;
-    } catch (error: any) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to load config from ${relativePath}: ${message}`);
+    } catch (error) {
+      const configError = new Error(
+        `Failed to load config from ${relativePath}: ${formatConfigLoadError(error)}`,
+      );
+      (configError as Error & { cause?: unknown }).cause = error;
+      throw configError;
     }
   }
   return undefined;

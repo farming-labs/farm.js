@@ -1530,9 +1530,9 @@ function getIntegrationRuntimeEnv(): Record<string, string | undefined> {
   return typeof process !== "undefined" ? process.env : {};
 }
 
-function isIntegrationConfigDefinition(
-  value: unknown,
-): value is FarmIntegrationConfigDefinition<unknown> {
+function isIntegrationConfigDefinition<TConfig, TSchema extends FarmIntegrationSchema | undefined>(
+  value: FarmIntegrationConfigInput<TConfig, TSchema>,
+): value is FarmIntegrationConfigDefinition<TConfig, TSchema> {
   return (
     !!value &&
     typeof value === "object" &&

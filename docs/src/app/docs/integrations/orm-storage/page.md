@@ -162,6 +162,22 @@ export const billingSchema = defineSchema({
 keeps working without changes; new code should use `defineSchema` and the
 `FarmSchema*` types.
 
+Farm resolves `extend` and `override` before it generates tables or creates the
+integration ORM. Models and fields added through `extend` appear on
+`ctx.args.db`, while overridden table names, column names, field properties, and
+constraints are used by both the generated artifacts and runtime queries. The
+inferred ORM type follows that same resolved shape.
+
+### List fields and storage targets
+
+`list: true` is preserved as an array by generated Sync declarations and Prisma
+schema output. MongoDB documents can also store arrays without a separate column
+shape. Farm's portable runtime ORM, SQL generators, and Drizzle generators do
+not have one list representation that works across their supported clients and
+dialects, so they reject a list field instead of silently creating a scalar
+column. Use a `json` field for an array value or model the values in a related
+table when the schema must work through those targets.
+
 ### Query through `ctx.args.db`
 
 **src/integrations/billing.ts**
@@ -294,6 +310,12 @@ export default defineConfig({
 ```
 
 `farm migrate` orchestrates the configured command; it does not replace Prisma, Drizzle, SQL, Better Auth, or provider-specific migration tools. Run the migration process owned by each schema owner.
+
+Prisma and Drizzle artifacts use schema model and field keys as generated code
+identifiers. Keep those keys valid for the selected target. Farm rejects empty,
+punctuated, leading-digit, reserved, or colliding generated identifiers before
+writing an artifact. Use a model or field's `name` property when its physical
+table or column name needs characters that are not valid in generated code.
 
 ## Failure modes
 

@@ -154,4 +154,36 @@ describe("msw Farm plugin", () => {
       "must export a handlers array",
     );
   });
+  it("removes itself in production even when an integration re-created the plugin", async () => {
+    const plugin = msw({ handlers: "src/mocks/handlers.ts" });
+
+    // This is what withIntegrationPluginOwner does when an integration takes
+    // ownership of a contributed plugin: a new object with the same prototype
+    // and the same own property descriptors. It is not `plugin`, so an identity
+    // filter used to match nothing and leave farm:msw in the production config,
+    // which ships the dev runtime to the browser or dies on the unresolvable
+    // virtual handlers module.
+    const owned = Object.create(
+      Object.getPrototypeOf(plugin),
+      Object.getOwnPropertyDescriptors(plugin),
+    );
+    expect(owned).not.toBe(plugin);
+
+    const configured = await plugin.configure?.(
+      { root: "/app", plugins: [owned], vite: {} } as never,
+      context(false),
+    );
+
+    expect((configured as any).plugins).toEqual([]);
+  });
+
+  it("refuses to continue in production when it cannot remove itself", async () => {
+    const plugin = msw({ handlers: "src/mocks/handlers.ts" });
+
+    // A plugin list that does not contain this plugin at all means removal
+    // silently did nothing, which is the failure mode worth shouting about.
+    expect(() =>
+      plugin.configure?.({ root: "/app", plugins: [], vite: {} } as never, context(false)),
+    ).toThrow(/could not remove itself/);
+  });
 });

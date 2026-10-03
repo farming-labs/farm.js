@@ -83,10 +83,30 @@ function requireRuntime(): SyncRuntimeState {
   );
 }
 
+const scheduledReloads = new Set<string>();
+
+/**
+ * A store cleared by clearSyncedRows() reloads on its next use, under whichever
+ * session is current by then. Deferred so the reload's status change never
+ * fires while a component is rendering, and so loadModel's own lookup of the
+ * store does not schedule it again.
+ */
+function scheduleReload(model: string, store: SyncModelStore): void {
+  if (scheduledReloads.has(model)) return;
+  scheduledReloads.add(model);
+  queueMicrotask(() => {
+    if (store.status === "idle") void loadModel(model);
+    scheduledReloads.delete(model);
+  });
+}
+
 export function getSyncStore(model: string): SyncModelStore {
   const state = requireRuntime();
   let store = state.stores.get(model);
-  if (store) return store;
+  if (store) {
+    if (store.status === "idle" && isBrowser()) scheduleReload(model, store);
+    return store;
+  }
 
   const descriptor = state.config.models[model];
   if (!descriptor) {
@@ -125,10 +145,12 @@ async function request(body: unknown): Promise<any> {
 /** Fetch rows for a model, incrementally when the schema supports a cursor. */
 export async function loadModel(model: string): Promise<void> {
   const store = getSyncStore(model);
+  const generation = store.generation;
   if (store.status === "idle") store.setStatus("loading");
 
   try {
     const result = await request({ model, operation: "list", since: store.cursor });
+    if (store.generation !== generation) return;
     store.applyServerRows(result.rows ?? [], {
       full: result.full !== false,
       cursor: result.cursor ?? null,
@@ -136,6 +158,7 @@ export async function loadModel(model: string): Promise<void> {
     // Keep the warm-start copy current even when the session performs no writes.
     persistModel(model);
   } catch (cause) {
+    if (store.generation !== generation) return;
     store.setStatus("error", cause instanceof Error ? cause : new Error(String(cause)));
   }
 }
@@ -216,18 +239,22 @@ function runMutation(
 
   store.addLayer(layer);
   store.trackPending(1);
+  const generation = store.generation;
 
   let handleState: SyncMutationState = "pending";
   const isPersisted = (async () => {
     try {
       const result = await dispatchWrite(store, { model, operation, input }, state.options);
-      store.commitLayer(layer, operation === "delete" ? null : (result as SyncRow));
       handleState = "completed";
+      // The store was cleared for a new session while this was in flight.
+      if (store.generation !== generation) return result as SyncRow;
+      store.commitLayer(layer, operation === "delete" ? null : (result as SyncRow));
       persistModel(model);
       return result as SyncRow;
     } catch (error) {
-      store.removeLayer(layer);
       handleState = "failed";
+      if (store.generation !== generation) throw error;
+      store.removeLayer(layer);
       store.recordFailure({
         operation,
         input,
@@ -298,6 +325,7 @@ export function runSyncAction(
       : null;
   if (layer) store.addLayer(layer);
   store.trackPending(1);
+  const generation = store.generation;
 
   let handleState: SyncMutationState = "pending";
   const isPersisted = (async () => {
@@ -313,6 +341,10 @@ export function runSyncAction(
 
       const result = await invoke(input);
       const rows = Array.isArray(result) ? result : [result];
+      if (store.generation !== generation) {
+        handleState = "completed";
+        return (rows[0] ?? null) as SyncRow;
+      }
       let committed = false;
       for (const row of rows) {
         if (row && typeof row === "object" && (row as SyncRow)[keyField] !== undefined) {
@@ -337,8 +369,9 @@ export function runSyncAction(
       persistModel(model);
       return (rows[0] ?? null) as SyncRow;
     } catch (error) {
-      if (layer) store.removeLayer(layer);
       handleState = "failed";
+      if (store.generation !== generation) throw error;
+      if (layer) store.removeLayer(layer);
       store.recordFailure({
         operation: action,
         input,
@@ -545,9 +578,15 @@ export function setSyncPersistence(store: SyncPersistence | null): void {
   persistence = store;
 }
 
-/** Remove every persisted row. Call on logout so a shared device stays clean. */
+/**
+ * Forget every synced row, on disk and in memory. Call it when the session
+ * changes (sign out, sign in as someone else, switch organization) so the next
+ * account never sees the previous one's rows. Each model reloads in full on its
+ * next use, scoped to the session current at that point.
+ */
 export function clearSyncedRows(): void {
   getPersistence()?.clear();
+  for (const store of runtime?.stores.values() ?? []) store.reset();
 }
 
 function persistModel(model: string): void {

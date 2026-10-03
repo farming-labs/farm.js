@@ -25,6 +25,9 @@ export type RouteSchemaOutput<T> = T extends { _output: infer O }
       : unknown;
 
 export async function parseRouteSchema(schema: RouteSchema, value: unknown): Promise<unknown> {
+  // Prefer an explicitly asynchronous parser. Some Standard Schema adapters try
+  // a synchronous parse first, then repeat async refinements when it fails.
+  if (schema.parseAsync) return schema.parseAsync(value);
   if (schema["~standard"]) {
     const result = (await schema["~standard"].validate(value)) as {
       value?: unknown;
@@ -34,7 +37,6 @@ export async function parseRouteSchema(schema: RouteSchema, value: unknown): Pro
       throw Object.assign(new Error("Validation failed"), { issues: result.issues });
     return result.value;
   }
-  if (schema.parseAsync) return schema.parseAsync(value);
   if (schema.parse) return schema.parse(value);
   throw new TypeError("Route validators must implement Standard Schema or parse().");
 }

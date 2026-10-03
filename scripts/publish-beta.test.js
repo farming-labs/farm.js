@@ -1,7 +1,15 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 
-const { parsePublishBetaArgs, isRetryableStagedPublishError } = require("./publish-beta");
+const {
+  distTagForVersion,
+  findStableCoreDependencyMismatches,
+  groupPackagesByDistTag,
+  isMissingRegistryVersion,
+  isRetryableStagedPublishError,
+  parsePublishBetaArgs,
+  publishArgs,
+} = require("./publish-beta");
 
 test("publishes and verifies by default", () => {
   assert.deepEqual(parsePublishBetaArgs([]), { help: false, verifyOnly: false, dryRun: false });
@@ -56,5 +64,123 @@ test("does not retry unrelated publish failures", () => {
   assert.equal(
     isRetryableStagedPublishError("npm error 404 Not Found - PUT https://registry.npmjs.org/x"),
     false,
+  );
+});
+
+test("only falls back to local metadata when the registry reports a missing version", () => {
+  assert.equal(isMissingRegistryVersion({ stderr: "npm error E404 No match found" }), true);
+  assert.equal(isMissingRegistryVersion({ stderr: "npm error ECONNRESET" }), false);
+});
+
+test("derives each package's dist-tag from its version", () => {
+  assert.equal(distTagForVersion("0.1.0"), "latest");
+  assert.equal(distTagForVersion("1.2.3"), "latest");
+  assert.equal(distTagForVersion("0.1.0-beta.108"), "beta");
+  assert.equal(distTagForVersion("0.1.1-beta.0"), "beta");
+  assert.equal(distTagForVersion("0.2.0-canary.4"), "canary");
+});
+
+test("publishes a stable shared group next to independent betas", () => {
+  const groups = groupPackagesByDistTag([
+    { name: "@farm.js/core", version: "0.1.0", dir: "/w/packages/farm" },
+    { name: "@farm.js/vue", version: "0.1.0-beta.29", dir: "/w/packages/farm-vue" },
+    { name: "@farm.js/cli", version: "0.1.0", dir: "/w/packages/farm-cli" },
+  ]);
+  assert.deepEqual([...groups.keys()], ["latest", "beta"]);
+  assert.deepEqual(publishArgs(groups.get("latest"), "latest", ["--dry-run"]), [
+    "-r",
+    "--filter",
+    "@farm.js/core",
+    "--filter",
+    "@farm.js/cli",
+    "publish",
+    "--access",
+    "public",
+    "--tag",
+    "latest",
+    "--publish-branch",
+    "main",
+    "--dry-run",
+  ]);
+  assert.deepEqual(
+    groups.get("beta").map((pkg) => pkg.name),
+    ["@farm.js/vue"],
+  );
+});
+
+test("detects beta packages that still resolve a prerelease core", () => {
+  const packages = [
+    { name: "@farm.js/core", version: "0.1.0", manifest: {} },
+    { name: "@farm.js/otel", version: "0.1.0-beta.27", manifest: {} },
+    { name: "@farm.js/vue", version: "0.1.0-beta.27", manifest: {} },
+  ];
+  const manifests = {
+    "@farm.js/otel": { dependencies: { "@farm.js/core": "0.1.0-beta.109" } },
+    "@farm.js/vue": { peerDependencies: { "@farm.js/core": "^0.1.0-beta.109" } },
+  };
+  assert.deepEqual(
+    findStableCoreDependencyMismatches(packages, (name) => manifests[name]),
+    [
+      {
+        package: "@farm.js/otel@0.1.0-beta.27",
+        dependency: "0.1.0-beta.109",
+        stableCore: "0.1.0",
+      },
+      {
+        package: "@farm.js/vue@0.1.0-beta.27",
+        dependency: "^0.1.0-beta.109",
+        stableCore: "0.1.0",
+      },
+    ],
+  );
+});
+
+test("checks peer dependencies even when a stable runtime dependency is present", () => {
+  const packages = [
+    { name: "@farm.js/core", version: "0.1.0", manifest: {} },
+    {
+      name: "@farm.js/webmcp",
+      version: "0.1.0-beta.0",
+      manifest: {
+        dependencies: { "@farm.js/core": "^0.1.0" },
+        peerDependencies: { "@farm.js/core": "^0.1.0-beta.109" },
+      },
+    },
+  ];
+
+  assert.deepEqual(
+    findStableCoreDependencyMismatches(packages, () => packages[1].manifest),
+    [
+      {
+        package: "@farm.js/webmcp@0.1.0-beta.0",
+        dependency: "^0.1.0-beta.109",
+        stableCore: "0.1.0",
+      },
+    ],
+  );
+});
+
+test("uses the local manifest before a beta version is visible on the registry", () => {
+  const packages = [
+    { name: "@farm.js/core", version: "0.1.0", manifest: {} },
+    {
+      name: "@farm.js/new-tool",
+      version: "0.1.0-beta.0",
+      manifest: { dependencies: { "@farm.js/core": "0.1.0-beta.109" } },
+    },
+  ];
+
+  assert.deepEqual(
+    findStableCoreDependencyMismatches(packages, (_name, _version, localManifest) => {
+      if (!localManifest) throw new Error("not visible yet");
+      return localManifest;
+    }),
+    [
+      {
+        package: "@farm.js/new-tool@0.1.0-beta.0",
+        dependency: "0.1.0-beta.109",
+        stableCore: "0.1.0",
+      },
+    ],
   );
 });

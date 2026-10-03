@@ -90,6 +90,23 @@ export function getFarmFunctionComponentProps(element: FarmSvelteElement): Recor
   return props;
 }
 
+export function renderFarmFunctionComponent(
+  component: (props: Record<string, unknown>) => unknown,
+  element: FarmSvelteElement,
+): unknown {
+  const rendered = component(getFarmFunctionComponentProps(element));
+  if (
+    rendered !== null &&
+    (typeof rendered === "object" || typeof rendered === "function") &&
+    typeof (rendered as { then?: unknown }).then === "function"
+  ) {
+    throw new TypeError(
+      "FARMJS Svelte renderer does not support async function components. Resolve async data before rendering the component.",
+    );
+  }
+  return rendered;
+}
+
 export function getFarmSvelteChildren(element: FarmSvelteElement): unknown[] {
   if (element.children.length > 0) return [...element.children];
   const propChildren = element.props?.children;

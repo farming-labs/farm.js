@@ -25,6 +25,7 @@ export interface TypeScriptPreviewAgentOptions {
 export interface TypeScriptPreviewAgent {
   sessionId: string;
   publicUrl: string;
+  expiresAt?: number;
   close(): Promise<void>;
 }
 
@@ -86,6 +87,7 @@ export async function startTypeScriptPreviewAgent(
   return {
     sessionId: ready.sessionId,
     publicUrl: ready.publicUrl,
+    ...(ready.expiresAt ? { expiresAt: ready.expiresAt } : {}),
     async close() {
       stopWatchingTarget();
       abortInFlight();

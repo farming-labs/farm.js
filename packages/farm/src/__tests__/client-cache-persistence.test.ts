@@ -133,6 +133,105 @@ describe("client cache persistence engine", () => {
     expect(store.has("user:secret")).toBe(false);
   });
 
+  it("does not restore hydration that started before the cache was cleared", async () => {
+    let releaseGet!: () => void;
+    const getGate = new Promise<void>((resolve) => {
+      releaseGet = resolve;
+    });
+    let getStarted!: () => void;
+    const getInFlight = new Promise<void>((resolve) => {
+      getStarted = resolve;
+    });
+    const stale = persisted({ email: "alice@example.com" });
+    const adapter: FarmClientCacheAdapter = {
+      keys: async () => ["user:profile"],
+      get: async () => {
+        getStarted();
+        await getGate;
+        return stale;
+      },
+      set: async () => {},
+      delete: async () => {},
+      clear: async () => {},
+    };
+
+    initPersistedClientCache(adapter, { flushDelayMs: 0 });
+    await getInFlight;
+
+    await clearPersistedCache();
+    expect(getFarmClientDataCache().get("user:profile")).toBeUndefined();
+
+    releaseGet();
+    await microtasks();
+
+    expect(getFarmClientDataCache().get("user:profile")).toBeUndefined();
+
+    disposePersistedClientCache();
+    const { adapter: nextAdapter } = memoryAdapter({
+      "user:profile": persisted({ email: "bob@example.com" }),
+    });
+    initPersistedClientCache(nextAdapter, { flushDelayMs: 0 });
+    await microtasks();
+
+    expect(getFarmClientDataCache().get<{ email: string }>("user:profile")?.data.email).toBe(
+      "bob@example.com",
+    );
+  });
+
+  it("does not restore hydration after the client cache is cleared directly", async () => {
+    let releaseGet!: () => void;
+    const getGate = new Promise<void>((resolve) => {
+      releaseGet = resolve;
+    });
+    let getStarted!: () => void;
+    const getInFlight = new Promise<void>((resolve) => {
+      getStarted = resolve;
+    });
+    const adapter: FarmClientCacheAdapter = {
+      keys: async () => ["user:profile"],
+      get: async () => {
+        getStarted();
+        await getGate;
+        return persisted({ email: "alice@example.com" });
+      },
+      set: async () => {},
+      delete: async () => {},
+      clear: async () => {},
+    };
+
+    initPersistedClientCache(adapter, { flushDelayMs: 0 });
+    await getInFlight;
+
+    const cache = getFarmClientDataCache();
+    cache.clear();
+    releaseGet();
+    await microtasks();
+
+    expect(cache.get("user:profile")).toBeUndefined();
+  });
+
+  it("stops hydration when a synchronous subscriber clears the cache", async () => {
+    const { adapter } = memoryAdapter({
+      "user:first": persisted({ email: "alice@example.com" }),
+      "user:second": persisted({ email: "bob@example.com" }),
+    });
+    const cache = getFarmClientDataCache();
+    let cleared = false;
+    const unsubscribe = cache.subscribe("user:first", () => {
+      if (cleared) return;
+      cleared = true;
+      cache.clear();
+    });
+
+    initPersistedClientCache(adapter, { flushDelayMs: 0 });
+    await microtasks();
+    unsubscribe();
+
+    expect(cleared).toBe(true);
+    expect(cache.get("user:first")).toBeUndefined();
+    expect(cache.get("user:second")).toBeUndefined();
+  });
+
   it("clears in-memory entries on logout when no adapter is configured", async () => {
     disposePersistedClientCache();
     const cache = getFarmClientDataCache();

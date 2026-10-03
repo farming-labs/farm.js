@@ -85,6 +85,7 @@ export async function writeSearchIndex(input: SearchBuildInput): Promise<SearchB
       indexedRoutes.push(route);
     }
 
+    await assertOutputPathIsOwned(outputPath);
     await rm(outputPath, { recursive: true, force: true });
     await mkdir(path.dirname(outputPath), { recursive: true });
     const written = await index.writeFiles({ outputPath });
@@ -217,6 +218,53 @@ function resolveOutputPath(publicDir: string, bundlePath: string): string {
     throw new Error("[farm:search] Search output must stay inside the public output directory");
   }
   return outputPath;
+}
+
+/**
+ * Refuse to delete prerendered pages that happen to live where the index goes.
+ *
+ * The index directory is wiped before it is rewritten, and it comes from the
+ * `output` option, so `output: "search"` on a site that also prerenders a
+ * `/search` page pointed the wipe at the app's own pages. `collectHtmlFiles`
+ * skips this directory, so those pages were left out of the index and then
+ * deleted from the deploy output, with a success log and a zero exit.
+ *
+ * Only HTML is treated as the app's: a previous bundle leaves non-HTML files
+ * behind, and clearing those is this function's normal job.
+ */
+async function assertOutputPathIsOwned(outputPath: string): Promise<void> {
+  const pages = await findHtmlFile(outputPath);
+  if (!pages) return;
+
+  throw new Error(
+    `The search index directory ${outputPath} contains a prerendered page (${path.relative(outputPath, pages)}), ` +
+      `so it will not be replaced. Give \`search({ output })\` a directory of its own, ` +
+      `or move the conflicting route, then build again.`,
+  );
+}
+
+/** The first HTML file at any depth, or undefined when there is none. */
+async function findHtmlFile(directory: string): Promise<string | undefined> {
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    // Nothing there yet is the ordinary first build.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+
+  for (const entry of entries) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      const nested = await findHtmlFile(entryPath);
+      if (nested) return nested;
+    } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".html")) {
+      return entryPath;
+    }
+  }
+
+  return undefined;
 }
 
 async function assertOutputPathInside(publicDir: string, outputPath: string): Promise<void> {

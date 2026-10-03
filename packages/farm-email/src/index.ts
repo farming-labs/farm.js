@@ -167,6 +167,22 @@ async function guardEmailRoute(
   return Response.json({ error: MISSING_EMAIL_AUTHORIZE_ERROR }, { status: 401 });
 }
 
+async function readEmailRouteJson(request: Request): Promise<Record<string, unknown> | Response> {
+  try {
+    const body = await request.json();
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      return body as Record<string, unknown>;
+    }
+  } catch {
+    // Report malformed input below without leaking the parser error.
+  }
+
+  return Response.json(
+    { error: "Email request body must be a valid JSON object." },
+    { status: 400 },
+  );
+}
+
 function normalizeBasePath(path: string | undefined) {
   if (!path) {
     return "/api/email";
@@ -379,7 +395,9 @@ export function resend<const TTemplates extends EmailTemplates>(
           const denied = await guardEmailRoute(request, "send", input);
           if (denied) return denied;
 
-          const body = (await request.json()) as ResendEmailSendInput<TTemplates>;
+          const parsedBody = await readEmailRouteJson(request);
+          if (parsedBody instanceof Response) return parsedBody;
+          const body = parsedBody as unknown as ResendEmailSendInput<TTemplates>;
           const resolved = await resolveTemplate(body.templateId);
 
           if (!resolved) {
@@ -487,7 +505,9 @@ export function resend<const TTemplates extends EmailTemplates>(
           const denied = await guardEmailRoute(request, "schedule", input);
           if (denied) return denied;
 
-          const body = (await request.json()) as ResendEmailScheduleInput<TTemplates>;
+          const parsedBody = await readEmailRouteJson(request);
+          if (parsedBody instanceof Response) return parsedBody;
+          const body = parsedBody as unknown as ResendEmailScheduleInput<TTemplates>;
           let when: string;
 
           try {
@@ -612,7 +632,9 @@ export function resend<const TTemplates extends EmailTemplates>(
           const denied = await guardEmailRoute(request, "preview", input);
           if (denied) return denied;
 
-          const body = (await request.json()) as ResendEmailPreviewInput<TTemplates>;
+          const parsedBody = await readEmailRouteJson(request);
+          if (parsedBody instanceof Response) return parsedBody;
+          const body = parsedBody as unknown as ResendEmailPreviewInput<TTemplates>;
           const resolved = await resolveTemplate(body.templateId);
 
           if (!resolved) {

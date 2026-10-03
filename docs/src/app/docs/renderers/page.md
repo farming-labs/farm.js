@@ -26,11 +26,39 @@ storage, integrations, observability, and deployment output.
 
 ## Feature support
 
+The first two tables are checked against the renderer descriptors and their server/client exports,
+so entry-point or capability changes cannot silently leave the documentation stale.
+
+<!-- renderer-capability-matrix:start -->
+
+| Renderer | Vite entry                          | Server entry                          | Client entry                          | Route module extensions                 |
+| -------- | ----------------------------------- | ------------------------------------- | ------------------------------------- | --------------------------------------- |
+| React    | `@farm.js/core/renderer/react/vite` | `@farm.js/core/renderer/react/server` | `@farm.js/core/renderer/react/client` | `.ts`, `.tsx`, `.js`, `.jsx`            |
+| Preact   | `@farm.js/preact/vite`              | `@farm.js/preact/server`              | `@farm.js/preact/client`              | `.ts`, `.tsx`, `.js`, `.jsx`            |
+| Solid    | `@farm.js/solid/vite`               | `@farm.js/solid/server`               | `@farm.js/solid/client`               | `.ts`, `.tsx`, `.js`, `.jsx`            |
+| Vue      | `@farm.js/vue/vite`                 | `@farm.js/vue/server`                 | `@farm.js/vue/client`                 | `.ts`, `.tsx`, `.js`, `.jsx`, `.vue`    |
+| Svelte   | `@farm.js/svelte/vite`              | `@farm.js/svelte/server`              | `@farm.js/svelte/client`              | `.ts`, `.tsx`, `.js`, `.jsx`, `.svelte` |
+
+| Renderer | SSR | Streaming                                                                                                                | Hydration | Component head output | Route updates                         | Plain functions |
+| -------- | --- | ------------------------------------------------------------------------------------------------------------------------ | --------- | --------------------- | ------------------------------------- | --------------- |
+| React    | Yes | Node (Web on edge targets)                                                                                               | Yes       | Framework metadata    | Reconciles                            | Yes             |
+| Preact   | Yes | Node + Web                                                                                                               | Yes       | Framework metadata    | Reconciles                            | Yes             |
+| Solid    | Yes | Node + Web                                                                                                               | Yes       | Framework metadata    | Remounts ([why](#re-render-behavior)) | Yes             |
+| Vue      | Yes | Node + Web                                                                                                               | Yes       | Framework metadata    | Reconciles                            | Yes             |
+| Svelte   | Yes | Buffered ([test](https://github.com/farming-labs/farm.js/blob/main/packages/farm-svelte/src/__tests__/renderer.test.ts)) | Yes       | Native + framework    | Reconciles                            | Yes             |
+
+<!-- renderer-capability-matrix:end -->
+
+“Component head output” means markup emitted from inside the renderer's component model. All five
+renderers support FARMJS static metadata; Svelte additionally carries `<svelte:head>` output through
+its server adapter. “Route updates” describes what happens when FARMJS hands an existing browser
+root a freshly materialized route tree, not ordinary reactive updates inside a mounted component.
+
+The higher-level framework features below use those adapter primitives:
+
 | Capability                                       | React                    | Preact                          | Solid                | Vue                  | Svelte               |
 | ------------------------------------------------ | ------------------------ | ------------------------------- | -------------------- | -------------------- | -------------------- |
 | File pages and nested layouts                    | Available                | Available                       | Available            | Available            | Available            |
-| Server rendering and browser hydration           | Available                | Available                       | Available            | Available            | Available            |
-| Streaming SSR                                    | Node                     | Node and Web                    | Node and Web         | Node and Web         | Buffered today       |
 | Loading, error, not-found, and slot files        | Available                | Available                       | Available            | Available            | Available            |
 | Static metadata and favicon configuration        | Available                | Available                       | Available            | Available            | Available            |
 | API routes and generated typed API clients       | Available                | Available                       | Available            | Available            | Available            |
@@ -47,6 +75,11 @@ storage, integrations, observability, and deployment output.
 | Generated JSX metadata images                    | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
 | React Server Components and optimized boundaries | Available experimentally | Not applicable                  | Not applicable       | Not applicable       | Not applicable       |
 | Other integration UI providers and starters      | Available                | Provider-specific compatibility | React-oriented today | React-oriented today | React-oriented today |
+
+Follow the focused compatibility notes for [Preact](/docs/renderers/preact#react-compatibility),
+[Solid](/docs/renderers/solid#current-boundaries), [Vue](/docs/renderers/vue#current-boundaries), and
+[Svelte](/docs/renderers/svelte#current-boundaries) before choosing a non-React renderer for a
+React-oriented UI surface.
 
 In experimental React Server Components, synchronous page and layout components are rendered through React, including supported server hooks such as `useId()`. A string or variable containing `async` does not make a component asynchronous. Stateful hooks and effects still belong in Client Components.
 
@@ -95,8 +128,11 @@ export const customRenderer = defineRenderer({
   client: "@example/renderer/client",
   capabilities: {
     streaming: {
-      node: false,
-      web: true,
+      node: true,
+      web: false,
+      runtimes: {
+        edge: { node: false, web: true },
+      },
     },
     reconcilesRerenders: false,
     functionComponents: false,
@@ -104,24 +140,63 @@ export const customRenderer = defineRenderer({
 });
 ```
 
+The top-level streaming values are the fallback when no runtime override exists and for presets
+whose runtime is unknown. Local development resolves as `node`; production resolves from the
+deployment preset. A `runtimes.node` or `runtimes.edge` entry overrides the pair once FARMJS knows
+the runtime. Existing renderers that support the same primitives everywhere can keep using only
+the two booleans.
+
+| Renderer | Node target        | Edge target        |
+| -------- | ------------------ | ------------------ |
+| React    | Node stream        | Web stream         |
+| Preact   | Node + Web streams | Node + Web streams |
+| Solid    | Node + Web streams | Node + Web streams |
+| Vue      | Node + Web streams | Node + Web streams |
+| Svelte   | Buffered           | Buffered           |
+
 ### Re-render behavior
 
 `reconcilesRerenders` states whether re-rendering an existing root diffs the new tree against the
 live DOM or rebuilds it.
 
-Virtual-DOM renderers (React, Preact, Vue) compare the incoming tree with what is mounted, so a
-client navigation that re-renders a shared layout keeps the matching DOM nodes along with their
-focus and component state.
+Virtual-DOM renderers (React, Preact, Vue) compare the incoming tree with what is mounted. Svelte's
+FARMJS compatibility root likewise applies a new element description through one mounted reactive
+root. In both cases, a client navigation keeps matching DOM nodes, focus, and component state.
 
-Compile-time fine-grained renderers (Solid, Svelte) have no virtual DOM to diff against. Their
-updates flow through bindings created when the elements were constructed, so a freshly materialized
-tree replaces the nodes. That is a property of those runtimes rather than a gap in their adapters.
-On those renderers, client state that must survive a navigation belongs in a root the navigation
-does not re-render, not in a shared layout.
+Solid remains a compile-time fine-grained renderer: handing `root.render()` a freshly materialized
+tree replaces its nodes because there is no virtual DOM to diff. FARMJS therefore does not use
+ordinary root re-rendering for a shared Solid layout. The client runtime supplies route state to the
+adapter's optional `renderRoute()` method instead; the Solid adapter keeps the matching layout chain
+mounted and updates its page slot and params through signals. Changing the layout chain still mounts
+the new chain, as it does in the other renderers.
 
 Renderers that do not declare the field are treated as rebuilding, so nothing silently depends on
 reconciliation it will not get. The shared renderer conformance suite asserts the behavior each
 renderer declares, so the flag cannot drift away from what the adapter actually does.
+
+Custom fine-grained renderers can implement the same optional route-update contract:
+
+```ts
+import type { FarmRendererClientRoot, FarmRendererRouteState } from "@farm.js/core/renderer";
+
+interface CustomRoot extends FarmRendererClientRoot {
+  renderRoute(state: FarmRendererRouteState): void;
+}
+
+export function hydrateRoot(
+  container: Element,
+  element: unknown,
+  initialRoute?: FarmRendererRouteState,
+): CustomRoot {
+  // Establish native reactive bindings from initialRoute during hydration.
+  // Later navigations call root.renderRoute(nextRoute).
+}
+```
+
+`layouts` arrive outermost first with stable route patterns, `page` is the innermost route slot, and
+`params` is the current route-param snapshot. `element` is the fully composed fallback tree, while
+`wrap()` reapplies framework-owned outer wrappers such as integration providers. Renderers that omit
+`renderRoute()` continue through `render(element)` unchanged.
 
 ### Function components
 
@@ -129,9 +204,10 @@ renderer declares, so the flag cannot drift away from what the adapter actually 
 takes props and returns an element tree rather than a component built by the renderer's own
 compiler. FARMJS gates integration provider components on this capability.
 
-React-shaped renderers do this natively. A compile-time renderer needs its adapter to recognize such
-a component and call it, because its own components are functions too and the two are otherwise
-indistinguishable at runtime.
+All official renderers support synchronous plain function components. React and Preact handle them
+through their native element model, while Vue and Solid materialize their returned element tree in
+the adapter. A compile-time renderer such as Svelte also needs its adapter to distinguish a plain
+function from one of its own compiled components, because both are functions at runtime.
 
 FARMJS resolves the ambiguity at build time rather than guessing. A provider component in a
 production build must be an importable module reference, so the module's extension answers the
@@ -141,6 +217,10 @@ a function component. The check uses the extensions the renderer itself declares
 Components that are not renderer-compiled are marked so the adapter calls them instead of
 instantiating them.
 
+Async plain function components are not part of this contract. Official adapters reject them with
+an actionable error instead of rendering a promise, an empty string, or `[object Object]`. Resolve
+the data before creating the element tree or use the renderer's native asynchronous primitives.
+
 The field defaults to `false`, so a renderer whose adapter has not been taught to handle function
 components fails with a clear error naming the renderer rather than rendering something broken.
 
@@ -149,11 +229,15 @@ plugin uses process-global mutable caches, set `buildConcurrency: "serial"` on i
 official Vue renderer does this because `@vitejs/plugin-vue` shares SFC descriptor and script caches
 between plugin instances.
 
-A renderer advertising `node` streaming must export `renderToPipeableStream()` from its server
-entry. A renderer advertising `web` streaming must export `renderToReadableStream()` returning a
-WHATWG `ReadableStream`. FARMJS validates those declarations when the server renderer starts and
-uses buffered `renderToString()` when neither capability is enabled. Descriptors without a
-`capabilities` field remain buffered for compatibility.
+A renderer advertising `node` streaming for the active runtime must export
+`renderToPipeableStream()` from its server entry. A renderer advertising `web` streaming must
+export `renderToReadableStream()` returning a WHATWG `ReadableStream`. FARMJS validates those
+declarations when the development server renderer starts and again in the generated production
+runtime. Production still checks the function before calling it, but only a primitive enabled by
+the resolved descriptor can be selected. This keeps the declaration and runtime export in
+agreement instead of treating an accidental export as support. FARMJS uses buffered
+`renderToString()` when neither capability is enabled. Descriptors without a `capabilities` field
+remain buffered for compatibility.
 
 ## Renderer-neutral server code
 
@@ -193,7 +277,7 @@ renderers; rewrite component and client-state code using the selected renderer's
 The Basic and Better Auth templates support every renderer directly:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-auth-app --template better-auth --renderer vue --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-auth-app --template better-auth --renderer vue --typescript
 ```
 
 Other integration starter templates currently target React. Add their renderer-neutral server

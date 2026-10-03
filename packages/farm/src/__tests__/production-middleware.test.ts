@@ -18,6 +18,10 @@ async function readJavaScriptOutput(dir: string): Promise<string> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   const contents = await Promise.all(
     entries.map(async (entry) => {
+      // Runtime packages are staged alongside the Nitro bundle. Inspect only
+      // generated server chunks here; package internals may legitimately
+      // mention their optional native package names (Sharp 0.35+ does this).
+      if (entry.name === "node_modules") return "";
       const entryPath = path.join(dir, entry.name);
       if (entry.isDirectory()) return readJavaScriptOutput(entryPath);
       return entry.name.endsWith(".mjs") ? fs.readFile(entryPath, "utf8") : "";
@@ -78,6 +82,14 @@ describe("production middleware runtime", () => {
         createFarmVercelImmutableAssetRoute(),
       );
       expect(vercelOutputConfig.routes[filesystemIndex]).toEqual({ handle: "filesystem" });
+      // public/llms.txt ships as a static file, which the filesystem phase serves before
+      // the function's generated agent.llmsTxt index.
+      expect(
+        await fs.readFile(path.join(root, ".vercel", "output", "static", "llms.txt"), "utf8"),
+      ).toBe("# Static fixture index\n");
+      expect(
+        await fs.readFile(path.join(root, ".vercel", "output", "static", "llms-full.txt"), "utf8"),
+      ).toBe("# Static fixture index, in full\n");
       // At least one preset source route (a redirect or header route) is
       // preserved ahead of the immutable route; the old wholesale rebuild
       // dropped every one of them on Vercel.
@@ -188,6 +200,8 @@ describe("production middleware runtime", () => {
 
       expect(response.status).toBe(200);
       expect(response.headers.get("x-farm-middleware")).toBe("yes");
+      // Config middleware from a layer runs in the built app as it does in dev.
+      expect(response.headers.get("x-layer-middleware")).toBe("yes");
       expect(response.headers.get("cache-control")).toBe("private, no-store");
       // Agent JSON-LD from the resolved agent config is baked into the document head.
       expect(html).toContain('<script type="application/ld+json">');
@@ -240,7 +254,11 @@ describe("production middleware runtime", () => {
       expect(html).toContain('<meta property="og:image:width" content="2">');
       expect(html).toContain('<meta property="og:image:height" content="1">');
       expect(html).toContain('<meta property="og:image:alt" content="Dashboard preview">');
+      // The guard layer's config middleware, the project's config middleware,
+      // then the dashboard file middleware.
       expect((globalThis as any).__farmMiddlewareEvents.map((event: any) => event.type)).toEqual([
+        "middleware.start",
+        "middleware.complete",
         "middleware.start",
         "middleware.complete",
         "middleware.start",
@@ -296,6 +314,90 @@ describe("production middleware runtime", () => {
       const sitemapXml = await sitemapResponse.text();
       expect(sitemapXml).toContain("<loc>https://example.test/?campaign=spring&amp;summer</loc>");
       expect(sitemapXml).toContain("<lastmod>2026-08-16T12:00:00.000Z</lastmod>");
+
+      // agent.llmsTxt with no root llms.ts: the generated index of static pages.
+      const llmsResponse = await serverModule.default.fetch(
+        new Request("https://example.test/llms.txt"),
+      );
+      expect(llmsResponse.status).toBe(200);
+      expect(llmsResponse.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+      const llmsText = await llmsResponse.text();
+      expect(
+        llmsText.startsWith(
+          "# Farm production fixture\n\n> Pages served by the production fixture.\n\n## Pages\n\n",
+        ),
+      ).toBe(true);
+      expect(llmsText).toContain(
+        "- [Explicit image](https://example.test/dashboard/explicit.md)\n",
+      );
+      expect(llmsText).toContain("- [Dashboard notes](https://example.test/dashboard/notes.md)\n");
+      expect(llmsText).toContain("- [Public notes](https://example.test/public-notes.md)\n");
+      expect(llmsText).not.toContain("rewrite-target");
+      expect(llmsText).not.toContain("[id]");
+      // Listed even though it answers 401: the index only names pages.
+      expect(llmsText).toContain(
+        "- [Private notes](https://example.test/dashboard/private-notes.md)\n",
+      );
+
+      // llms-full.txt inlines each listed page's .md mirror, read through the same server.
+      const llmsFullResponse = await serverModule.default.fetch(
+        new Request("https://example.test/llms-full.txt"),
+      );
+      expect(llmsFullResponse.status).toBe(200);
+      expect(llmsFullResponse.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+      const llmsFull = await llmsFullResponse.text();
+      expect(
+        llmsFull.startsWith(
+          "# Farm production fixture\n\n> Pages served by the production fixture.\n\n## ",
+        ),
+      ).toBe(true);
+      // A Markdown page contributes its source; a React page its rendered mirror.
+      expect(llmsFull).toContain(
+        "## Public notes\n\nURL: https://example.test/public-notes.md\n\n# Public notes\n\npublic-notes-source\n",
+      );
+      expect(llmsFull).toContain(
+        "## Explicit image\n\nURL: https://example.test/dashboard/explicit.md\n\n# Explicit image\n\nSource: /dashboard/explicit\n\nexplicit image page",
+      );
+      // /dashboard/private-notes answers 401 without credentials. Its block stays,
+      // but the body is never read into a file anyone can fetch.
+      expect(llmsFull).toContain(
+        "## Private notes\n\nURL: https://example.test/dashboard/private-notes.md\n\n---",
+      );
+      expect(llmsFull).not.toContain("dashboard-private-notes-source");
+      expect(llmsFull).not.toContain("rewrite-target");
+
+      // A nested llms-full.ts that returns a string is served exactly as written.
+      const notesFullResponse = await serverModule.default.fetch(
+        new Request("https://example.test/public-notes/llms-full.txt"),
+      );
+      expect(notesFullResponse.status).toBe(200);
+      expect(await notesFullResponse.text()).toBe(
+        "# Fixture notes, in full\n\npublic-notes-source\n",
+      );
+
+      // A nested llms.ts receives the same pages and defaults and wins under its segment.
+      const notesLlmsResponse = await serverModule.default.fetch(
+        new Request("https://example.test/public-notes/llms.txt"),
+      );
+      expect(notesLlmsResponse.status).toBe(200);
+      expect(await notesLlmsResponse.text()).toBe(
+        [
+          "# Fixture notes",
+          "",
+          "> Pages served by the production fixture.",
+          "",
+          "## Notes",
+          "",
+          "- [Dashboard notes](https://example.test/dashboard/notes.md)",
+          "- [Private notes](https://example.test/dashboard/private-notes.md)",
+          "- [Public notes](https://example.test/public-notes.md)",
+          "",
+          "## Optional",
+          "",
+          "- [Status](https://status.example.test)",
+          "",
+        ].join("\n"),
+      );
 
       const userSitemapResponse = await serverModule.default.fetch(
         new Request("https://example.test/users/42/sitemap.xml"),
@@ -479,6 +581,25 @@ describe("production middleware runtime", () => {
         expect(pprResponse.headers.get("cache-control")).toBe("private, no-store");
         expect(pprResponse.headers.get("x-farm-ppr")).toBe("bypass");
         await expect(pprResponse.text()).resolves.toContain("configured context PPR route");
+      }
+
+      // The pattern page router drops empty segments, so a repeated slash
+      // still renders this dynamic page and must pass the same config matcher.
+      // The runtime keeps a leading `//` in the pathname rather than reading
+      // it as a host.
+      for (const spelling of [
+        "/dashboard/projects/7",
+        "//dashboard/projects/7",
+        "/dashboard//projects/7",
+      ]) {
+        const projectResponse = await serverModule.default.fetch(
+          new Request(`https://example.test${spelling}`),
+        );
+        expect({
+          spelling,
+          status: projectResponse.status,
+          body: (await projectResponse.text()).includes("project: 7 / dashboard"),
+        }).toEqual({ spelling, status: 200, body: true });
       }
 
       // Raw markdown-source routes serve page content, so app middleware must

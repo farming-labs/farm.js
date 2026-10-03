@@ -2,10 +2,10 @@
 
 CLI for Farm.js framework
 
-Farm.js is currently in beta.
+See [Stability and Support](https://farmjs.dev/docs/stability) for what this package guarantees.
 
 ```bash
-npm install @farm.js/cli@beta
+npm install @farm.js/cli
 ```
 
 Upgrade every published `@farm.js/*` dependency in an app to one release channel:

@@ -33,6 +33,7 @@ interface Model {
   title: string;
   accent: boolean;
   staticFail?: boolean;
+  lateStaticFail?: boolean;
   loading: boolean;
   error: boolean;
   items: Item[];
@@ -321,7 +322,12 @@ function mixedDescriptor(readModel: () => Model, prefix = ""): CompilerHostEleme
           sibling: 0,
           path: [],
           name: "width",
-          read: () => (readModel().accent ? 24 : 12),
+          read: () => {
+            if (readModel().lateStaticFail) {
+              throw new Error("late static sibling binding failed");
+            }
+            return readModel().accent ? 24 : 12;
+          },
         },
       ],
     },
@@ -704,6 +710,184 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
     expect(surface.querySelector('[data-key="a"]')).toBe(alpha);
     expect(alpha.querySelector("strong")?.textContent).toBe("Alpha updated");
     expect(surface.querySelector('[data-key="b"]')).toBe(beta);
+  });
+
+  it("validates every refreshed mixed range before applying conditional bindings", async () => {
+    const hmrId = `mixed-ranges-atomic-conditional-refresh-${Math.random()}`;
+    const definePanel = (version: string) =>
+      createCompiledComponent({
+        displayName: "AtomicConditionalRefreshMixedRanges",
+        hmrId,
+        stateSignature: "stable",
+        initialize: () => [],
+        render(_props: Record<string, never>, _state, blocks) {
+          const MixedRanges = blocks.MixedRanges;
+          const firstBranch: CompilerHostConditionalBranch = {
+            create: () => host("p", [host("span", [version])]),
+            bindings: [{ kind: "text", path: [0], read: () => version }],
+          };
+          const secondBranch = branch(() => host("aside", [host("span", ["Stable"])]));
+          const create = (): CompilerHostElement => ({
+            ...host("section", [firstBranch.create(), secondBranch.create()]),
+            block: {
+              kind: "mixed-ranges",
+              id: 0,
+              ranges: [
+                {
+                  kind: "conditional",
+                  before: 0,
+                  test: () => true,
+                  truthy: firstBranch,
+                },
+                {
+                  kind: "conditional",
+                  before: 0,
+                  test: () => true,
+                  truthy: secondBranch,
+                },
+              ],
+              trailing: 0,
+            },
+          });
+          return (
+            <MixedRanges
+              id={0}
+              create={create}
+              render={() => (
+                <section>
+                  <p>
+                    <span>{version}</span>
+                  </p>
+                  <aside>
+                    <span>Stable</span>
+                  </aside>
+                </section>
+              )}
+            />
+          );
+        },
+        bindings: [{ kind: "block" as const, id: 0, dependencies: [] }],
+      });
+
+    const InitialPanel = definePanel("v1");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<InitialPanel />));
+
+    const firstBranchTarget = container.querySelector("p span")!;
+    const invalidTarget = document.createElement("em");
+    invalidTarget.textContent = "Stable";
+    container.querySelector("aside span")!.replaceWith(invalidTarget);
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(firstBranchTarget, { childList: true, characterData: true, subtree: true });
+
+    let RefreshedPanel = InitialPanel;
+    await act(async () => {
+      RefreshedPanel = definePanel("v2");
+      root.render(<RefreshedPanel />);
+      await flushCompilerUpdates();
+    });
+    mutations.push(...observer.takeRecords());
+    observer.disconnect();
+
+    expect(RefreshedPanel).toBe(InitialPanel);
+    expect(container.querySelector("p span")?.textContent).toBe("v2");
+    expect(container.querySelector("aside span")?.textContent).toBe("Stable");
+    expect(firstBranchTarget.isConnected).toBe(false);
+    expect(mutations.filter((record) => record.type === "childList")).toEqual([]);
+  });
+
+  it("validates every refreshed mixed range before applying keyed bindings", async () => {
+    const hmrId = `mixed-ranges-atomic-keyed-refresh-${Math.random()}`;
+    const definePanel = (version: string) =>
+      createCompiledComponent({
+        displayName: "AtomicKeyedRefreshMixedRanges",
+        hmrId,
+        stateSignature: "stable",
+        initialize: () => [],
+        render(_props: Record<string, never>, _state, blocks) {
+          const MixedRanges = blocks.MixedRanges;
+          const items = [{ id: "a" }];
+          const createRow = () => host("article", [host("span", [version])]);
+          const laterBranch = branch(() => host("aside", [host("span", ["Stable"])]));
+          const create = (): CompilerHostElement => ({
+            ...host("section", [createRow(), laterBranch.create()]),
+            block: {
+              kind: "mixed-ranges",
+              id: 0,
+              ranges: [
+                {
+                  kind: "keyed",
+                  before: 0,
+                  items: () => items,
+                  rowKey: (item) => (item as (typeof items)[number]).id,
+                  create: createRow,
+                  bindings: [{ kind: "text", path: [0], read: () => version }],
+                },
+                {
+                  kind: "conditional",
+                  before: 0,
+                  test: () => true,
+                  truthy: laterBranch,
+                },
+              ],
+              trailing: 0,
+            },
+          });
+          return (
+            <MixedRanges
+              id={0}
+              create={create}
+              render={() => (
+                <section>
+                  {items.map((item) => (
+                    <article key={item.id}>
+                      <span>{version}</span>
+                    </article>
+                  ))}
+                  <aside>
+                    <span>Stable</span>
+                  </aside>
+                </section>
+              )}
+            />
+          );
+        },
+        bindings: [{ kind: "block" as const, id: 0, dependencies: [] }],
+      });
+
+    const InitialPanel = definePanel("v1");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<InitialPanel />));
+
+    const firstRowTarget = container.querySelector("article span")!;
+    const invalidTarget = document.createElement("em");
+    invalidTarget.textContent = "Stable";
+    container.querySelector("aside span")!.replaceWith(invalidTarget);
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(firstRowTarget, { childList: true, characterData: true, subtree: true });
+
+    let RefreshedPanel = InitialPanel;
+    await act(async () => {
+      RefreshedPanel = definePanel("v2");
+      root.render(<RefreshedPanel />);
+      await flushCompilerUpdates();
+    });
+    mutations.push(...observer.takeRecords());
+    observer.disconnect();
+
+    expect(RefreshedPanel).toBe(InitialPanel);
+    expect(container.querySelector("article span")?.textContent).toBe("v2");
+    expect(container.querySelector("aside span")?.textContent).toBe("Stable");
+    expect(firstRowTarget.isConnected).toBe(false);
+    expect(mutations.filter((record) => record.type === "childList")).toEqual([]);
   });
 
   it("converges a parent prop commit with local conditional and keyed updates", async () => {
@@ -1111,6 +1295,50 @@ describe("compiler-owned mixed conditional and keyed ranges runtime", () => {
     expect(container.querySelector("[data-error]")?.textContent).toBe(
       "static sibling binding failed",
     );
+  });
+
+  it("evaluates every static-sibling binding before applying updates", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fixture = createMixedFixture();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () =>
+      root.render(
+        <Boundary>
+          <fixture.View />
+        </Boundary>,
+      ),
+    );
+
+    const header = container.querySelector("header")!;
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(header, {
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+
+    await act(async () => {
+      fixture.setModel((value) => ({
+        ...(value as Model),
+        title: "Inventory updated",
+        accent: true,
+        lateStaticFail: true,
+      }));
+      await flushCompilerUpdates();
+    });
+    mutations.push(...observer.takeRecords());
+    observer.disconnect();
+
+    expect(container.querySelector("[data-error]")?.textContent).toBe(
+      "late static sibling binding failed",
+    );
+    expect(header.isConnected).toBe(false);
+    expect(mutations).toEqual([]);
   });
 
   it("matches normal React through 3,000 deterministic mixed updates", async () => {

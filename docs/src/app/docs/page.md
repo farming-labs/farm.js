@@ -85,6 +85,7 @@ Docs runtime, markdown mirrors, and OpenAPI.
 Plugin system and lifecycle hooks.
 
 - [Plugin Ecosystem](/docs/plugins): Extend server and browser behavior across config, requests, routing, rendering, hydration, navigation, builds, and HMR.
+- [API MCP Plugin](/docs/plugins/mcp): Expose opted-in typed API routes as authenticated MCP tools over Streamable HTTP.
 - [Hints Plugin](/docs/plugins/hints): Find accessibility, Web Vitals, HTML, and third-party script problems on the route you are developing.
 - [Content Plugin](/docs/plugins/content): Validate local Markdown, MDX, JSON, and YAML as typed server collections without a second config file.
 - [Federation Plugin](/docs/plugins/federation): Publish and load independently deployed browser modules while Farm keeps server code and credentials isolated.

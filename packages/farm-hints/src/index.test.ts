@@ -58,4 +58,30 @@ describe("hints Farm plugin", () => {
     expect(state.scan).toHaveBeenNthCalledWith(1, "hydration", "/account");
     expect(state.scan).toHaveBeenNthCalledWith(2, "navigation", "/settings");
   });
+  it("removes itself in production even when an integration re-created the plugin", async () => {
+    const plugin = hints();
+
+    // withIntegrationPluginOwner rebuilds a contributed plugin as a new object
+    // with the same prototype and own descriptors, so an identity filter used to
+    // match nothing and leave farm:hints in the production config.
+    const owned = Object.create(
+      Object.getPrototypeOf(plugin),
+      Object.getOwnPropertyDescriptors(plugin),
+    );
+    expect(owned).not.toBe(plugin);
+
+    const configured = await plugin.configure?.(
+      { root: "/app", plugins: [owned], vite: {} } as never,
+      context(false),
+    );
+
+    expect((configured as any).plugins).toEqual([]);
+  });
+
+  it("refuses to continue in production when it cannot remove itself", () => {
+    const plugin = hints();
+    expect(() =>
+      plugin.configure?.({ root: "/app", plugins: [], vite: {} } as never, context(false)),
+    ).toThrow(/could not remove itself/);
+  });
 });

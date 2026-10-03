@@ -2,6 +2,7 @@ import {
   createEndpoint,
   type TypedEndpoint,
   type AnyEndpointMiddleware,
+  type EndpointMCPOptions,
   type EndpointMiddlewareResult,
   type InferEndpointMiddlewareContext,
 } from "./endpoint";
@@ -105,6 +106,8 @@ export type RouteOptions<
   input?: I & ParamsCheck<P, I>;
   /** Validate plain JSON handler results. Raw Response/stream results are never buffered. */
   output?: O;
+  /** Opt this app-owned endpoint into an installed MCP transport. */
+  mcp?: EndpointMCPOptions;
   middleware?: RouteMiddlewares<MiddlewareResults>;
   handler(
     request: Request,
@@ -152,9 +155,42 @@ export type RouteFactory<P extends string = ""> = {
 };
 
 export type PluginRoutes = readonly RouteDefinition[];
+export interface PluginLocalAPIEndpoint {
+  readonly path: string;
+  readonly method: RouteMethod;
+  readonly input: Readonly<RouteInputSchemas>;
+  readonly output?: RouteSchema;
+  readonly mcp?: EndpointMCPOptions;
+  invoke(request: Request, params?: Readonly<Record<string, string | string[]>>): Promise<Response>;
+}
+
+/**
+ * Read-only access to app-owned API endpoints while plugin routes are mounted.
+ * Plugin routes are intentionally excluded so a plugin cannot recurse through
+ * itself or depend on plugin registration order.
+ */
+export interface PluginLocalAPI {
+  /** False during type-only route discovery, where app endpoint modules are unavailable. */
+  readonly available: boolean;
+  get(method: RouteMethod, path: string): PluginLocalAPIEndpoint | undefined;
+  /** Enumerate app-owned endpoints. Plugin routes are excluded. */
+  list(): readonly PluginLocalAPIEndpoint[];
+}
+
 export type PluginRoutesFactory<R extends PluginRoutes = PluginRoutes> = (context: {
   route: RouteFactory;
+  api: PluginLocalAPI;
 }) => R;
+
+const unavailablePluginLocalAPI: PluginLocalAPI = Object.freeze({
+  available: false,
+  get() {
+    return undefined;
+  },
+  list() {
+    return [];
+  },
+});
 
 export function createRouteFactory(): RouteFactory {
   return createRouteFactoryAt("");
@@ -190,6 +226,7 @@ function createRouteFactoryAt(prefix: string): RouteFactory {
           query: input.query,
           headers: input.headers,
           middleware: options.middleware,
+          mcp: options.mcp,
         },
         (ctx) =>
           options.handler(ctx.request, {
@@ -258,10 +295,14 @@ export type PluginAPIRouter<C> = C extends { plugins: readonly (infer P)[] }
 
 export function resolvePluginRoutes(
   plugins: readonly { name: string; routes?: PluginRoutesFactory }[] = [],
+  context: { api?: PluginLocalAPI } = {},
 ): PluginRoutes {
   return plugins.flatMap((plugin) => {
     if (!plugin.routes) return [];
-    const routes = plugin.routes({ route: createRouteFactory() });
+    const routes = plugin.routes({
+      route: createRouteFactory(),
+      api: context.api ?? unavailablePluginLocalAPI,
+    });
     if (!Array.isArray(routes))
       throw new TypeError(`Plugin "${plugin.name}" routes must return an array synchronously.`);
     for (const route of routes) {

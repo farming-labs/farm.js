@@ -11,13 +11,13 @@ Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and
 ## Create an app
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-app --template basic --typescript
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta stripe-app --template stripe --typescript
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta --list-templates
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-app --template basic --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-preact-app --template basic --renderer preact --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-solid-app --template basic --renderer solid --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-vue-app --template basic --renderer vue --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-svelte-app --template basic --renderer svelte --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app stripe-app --template stripe --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app --list-templates
 ```
 
 The create-app CLI includes Basic, Farm.js Auth, Better Auth, and one ready-to-configure starter
@@ -39,6 +39,7 @@ React is the default renderer. `--renderer preact`, `--renderer solid`, `--rende
 | farm upgrade --beta              | Upgrade installed Farm packages to the latest beta release.          |
 | farm doctor                      | Inspect a running app, or fall back to project configuration checks. |
 | farm doctor --offline            | Check project files and config without probing a dev server.         |
+| farm doctor --registry           | Verify the public Farm beta tags against the npm registry.           |
 | farm doctor --fix                | Apply safe, additive project corrections.                            |
 | farm explain /products/42        | Explain the files and runtime behavior for one URL.                  |
 | farm preview                     | Create a public URL for a running local app.                         |
@@ -175,7 +176,7 @@ farm preview --dry-run
 
 `farm preview` exposes the app that is already running locally. It does not build or deploy the app. Use it when a teammate, webhook provider, OAuth provider, mobile device, or browser automation tool needs a public URL for the current `farm dev` session.
 
-Farm detects the running app on common local ports, or you can pass `--port` / `--url` when the app is running somewhere specific. By default `@farm.js/tunnel` tries to open one outbound WebSocket to the hosted Farm Preview relay and returns a URL such as `https://stripe-webhook.preview.farming-labs.dev`. During the relay rollout, the CLI falls back to compatibility gateway polling if the native connection is unavailable.
+Farm detects the running app on common local ports, or you can pass `--port` / `--url` when the app is running somewhere specific. By default `@farm.js/tunnel` tries to open one outbound WebSocket to the hosted Farm Preview relay and returns a URL such as `https://stripe-webhook.preview.farmjs.dev`. During the relay rollout, the CLI falls back to compatibility gateway polling if the native connection is unavailable.
 
 The preview terminal logs forwarded traffic:
 
@@ -195,15 +196,18 @@ farm doctor
 farm doctor --port 4319
 farm doctor --url http://localhost:4319
 farm doctor --offline
+farm doctor --offline --registry
 farm doctor --fix
 farm doctor --json
 ```
 
 `farm doctor` first probes the running app at `http://localhost:3000`. A live app provides the most accurate result because Farm can report its resolved routes, API methods, middleware, integrations, storage mounts, schedules, workflows, layers, and deployment runtime. When no app is running, the command falls back to config and filesystem checks.
 
-Pass `--port` or `--url` when the app runs somewhere else. An explicitly requested runtime that cannot be reached is reported as a warning before the project checks. Use `--offline` to skip the network probe entirely.
+Pass `--port` or `--url` when the app runs somewhere else. An explicitly requested runtime that cannot be reached is reported as a warning before the project checks. Use `--offline` to skip the runtime probe. Add `--registry` to verify that the public `@farm.js/core` and `@farm.js/create-app` beta tags resolve and to warn when an exact Farm dependency is stale.
 
-The command exits with a non-zero status only when a check fails. Warnings keep a zero exit status, so CI can distinguish broken configuration from production-readiness advice. `--json` prints the complete report without terminal formatting.
+Project checks cover Node and pnpm support, package-manager and workspace resolution, generated type freshness, selected renderer and integration entrypoints, routing, deployment, storage, and schedules. The command is read-only by default: it does not install dependencies, run package-manager scripts, update generated files, or contact providers. Registry access is opt-in.
+
+The command exits with a non-zero status only when a check fails. Warnings keep a zero exit status, so CI can distinguish broken configuration from production-readiness advice. `--json` prints the complete report without terminal formatting and preserves the same exit-code contract.
 
 `farm doctor --fix` applies only corrections Farm can make without replacing application code. Today that means creating a missing `src/app/layout.tsx`; an existing file is never overwritten. The command reruns diagnostics after each correction and reports exactly which files it created.
 

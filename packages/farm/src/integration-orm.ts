@@ -13,6 +13,10 @@ import type {
   FarmIntegrationSchemaField,
   FarmIntegrationSchemaModel,
 } from "./integrations";
+import { assertNoSchemaListField } from "./schema-capabilities";
+import { assertSupportedPrimaryKeyField } from "./schema-primary-key";
+import { isDatabaseEnforcedReference } from "./schema-reference";
+import { resolveSchemaModels } from "./schema-resolve";
 import { resolveStorageRuntimeClient } from "./storage";
 import type { FarmStorageUserConfig } from "./storage/types";
 import type { FarmConfig } from "./types";
@@ -23,11 +27,13 @@ export type FarmIntegrationOrmSchema = SchemaDefinition<Record<string, AnyModelD
 
 export type FarmIntegrationOrmClient<TSchema extends FarmIntegrationOrmSchema> = OrmClient<TSchema>;
 
-type FarmIntegrationOrmFieldKind<TField extends FarmIntegrationSchemaField> = TField["type"] extends
-  | "id"
-  | "uuid"
-  ? "id"
-  : TField["type"] extends "text"
+type FarmIntegrationOrmFieldKind<TField extends FarmIntegrationSchemaField> = TField extends {
+  primaryKey: true;
+}
+  ? TField["type"] extends "id" | "uuid" | "string" | "integer"
+    ? "id"
+    : never
+  : TField["type"] extends "id" | "uuid" | "text"
     ? "string"
     : TField["type"] extends "number"
       ? "decimal"
@@ -70,17 +76,76 @@ export type InferFarmIntegrationOrmField<TField extends FarmIntegrationSchemaFie
   FarmIntegrationOrmFieldValue<TField>
 >;
 
-export type InferFarmIntegrationOrmFields<TModel extends FarmIntegrationSchemaModel> = {
+type FarmIntegrationOrmModelShape = {
+  fields: Record<string, unknown>;
+};
+
+export type InferFarmIntegrationOrmFields<TModel extends FarmIntegrationOrmModelShape> = {
   [TFieldKey in keyof TModel["fields"] & string]: InferFarmIntegrationOrmField<
     Extract<TModel["fields"][TFieldKey], FarmIntegrationSchemaField>
   >;
 };
 
+type ReplaceRecord<TBase, TReplacement> = Omit<TBase, keyof TReplacement> & TReplacement;
+
+type SchemaExtensions<TSchema extends FarmIntegrationSchema> = NonNullable<TSchema["extend"]>;
+
+type SchemaOverrides<TSchema extends FarmIntegrationSchema> = NonNullable<TSchema["override"]>;
+
+type SchemaModelFields<TModel> = TModel extends { fields: infer TFields }
+  ? TFields
+  : TModel extends { fields?: infer TFields }
+    ? NonNullable<TFields>
+    : {};
+
+type ExtendedSchemaModelFields<
+  TSchema extends FarmIntegrationSchema,
+  TModelKey extends PropertyKey,
+> = ReplaceRecord<
+  TModelKey extends keyof TSchema["models"] ? SchemaModelFields<TSchema["models"][TModelKey]> : {},
+  TModelKey extends keyof SchemaExtensions<TSchema>
+    ? SchemaModelFields<SchemaExtensions<TSchema>[TModelKey]>
+    : {}
+>;
+
+type OverrideSchemaModelFields<
+  TSchema extends FarmIntegrationSchema,
+  TModelKey extends PropertyKey,
+> = TModelKey extends keyof SchemaOverrides<TSchema>
+  ? SchemaModelFields<SchemaOverrides<TSchema>[TModelKey]>
+  : {};
+
+type ResolvedSchemaModelFields<
+  TSchema extends FarmIntegrationSchema,
+  TModelKey extends PropertyKey,
+  TExtendedFields = ExtendedSchemaModelFields<TSchema, TModelKey>,
+  TOverrideFields = OverrideSchemaModelFields<TSchema, TModelKey>,
+> = {
+  [TFieldKey in
+    | keyof TExtendedFields
+    | keyof TOverrideFields]: TFieldKey extends keyof TOverrideFields
+    ? TFieldKey extends keyof TExtendedFields
+      ? ReplaceRecord<TExtendedFields[TFieldKey], TOverrideFields[TFieldKey]>
+      : TOverrideFields[TFieldKey]
+    : TFieldKey extends keyof TExtendedFields
+      ? TExtendedFields[TFieldKey]
+      : never;
+};
+
+type ResolvedFarmIntegrationSchemaModels<TSchema extends FarmIntegrationSchema> = {
+  [TModelKey in (keyof TSchema["models"] | keyof SchemaExtensions<TSchema>) & string]: {
+    fields: ResolvedSchemaModelFields<TSchema, TModelKey>;
+  };
+};
+
 export type InferFarmIntegrationOrmSchema<TSchema extends FarmIntegrationSchema> =
   SchemaDefinition<{
-    [TModelKey in keyof TSchema["models"] & string]: ModelDefinition<
+    [TModelKey in keyof ResolvedFarmIntegrationSchemaModels<TSchema> & string]: ModelDefinition<
       InferFarmIntegrationOrmFields<
-        Extract<TSchema["models"][TModelKey], FarmIntegrationSchemaModel>
+        Extract<
+          ResolvedFarmIntegrationSchemaModels<TSchema>[TModelKey],
+          FarmIntegrationOrmModelShape
+        >
       >,
       {}
     >;
@@ -138,13 +203,24 @@ export async function resolveIntegrationOrmRuntimeClient<TClient = unknown>(
 export async function farmIntegrationSchemaToOrmSchema(
   schema: FarmIntegrationSchema,
 ): Promise<FarmIntegrationOrmSchema> {
+  for (const [modelKey, modelSchema] of Object.entries(schema.models)) {
+    for (const [fieldKey, fieldSchema] of Object.entries(modelSchema.fields)) {
+      assertNoSchemaListField(
+        fieldSchema,
+        `${modelKey}.${fieldKey}`,
+        "the Farm integration runtime ORM",
+      );
+    }
+  }
+
   const orm = await import("@farming-labs/orm");
   const models: Record<string, AnyModelDefinition> = {};
+  const resolvedModels = resolveSchemaModels("integration", schema);
 
-  for (const [modelKey, modelSchema] of Object.entries(schema.models)) {
+  for (const [modelKey, modelSchema] of Object.entries(resolvedModels)) {
     models[modelKey] = orm.model({
       table: modelSchema.name ?? modelKey,
-      fields: createOrmModelFields(orm, modelSchema),
+      fields: createOrmModelFields(orm, modelKey, modelSchema),
       constraints: createOrmModelConstraints(modelSchema),
       description: modelSchema.description,
     }) as AnyModelDefinition;
@@ -155,28 +231,31 @@ export async function farmIntegrationSchemaToOrmSchema(
 
 function createOrmModelFields(
   orm: typeof import("@farming-labs/orm"),
+  modelKey: string,
   modelSchema: FarmIntegrationSchemaModel,
 ): Record<string, AnyFieldBuilder> {
   return Object.fromEntries(
     Object.entries(modelSchema.fields).map(([fieldKey, fieldSchema]) => [
       fieldKey,
-      createOrmField(orm, fieldKey, fieldSchema),
+      createOrmField(orm, modelKey, fieldKey, fieldSchema),
     ]),
   );
 }
 
 function createOrmField(
   orm: typeof import("@farming-labs/orm"),
+  modelKey: string,
   fieldKey: string,
   field: FarmIntegrationSchemaField,
 ): AnyFieldBuilder {
+  assertSupportedPrimaryKeyField(`integration.${modelKey}.${fieldKey}`, field);
   let builder = createOrmFieldBuilder(orm, fieldKey, field) as AnyFieldBuilder;
 
-  if (field.unique) {
+  if (!field.primaryKey && field.unique) {
     builder = builder.unique();
   }
 
-  if (field.nullable || field.required === false) {
+  if (!field.primaryKey && (field.nullable || field.required === false)) {
     builder = builder.nullable();
   }
 
@@ -187,7 +266,7 @@ function createOrmField(
         : builder.default(field.default as never);
   }
 
-  if (field.reference) {
+  if (field.reference && isDatabaseEnforcedReference(field.reference)) {
     builder = builder.references(`${field.reference.model}.${field.reference.field}`);
   }
 
@@ -207,10 +286,25 @@ function createOrmFieldBuilder(
   fieldKey: string,
   field: FarmIntegrationSchemaField,
 ): AnyFieldBuilder {
+  if (field.primaryKey) {
+    if (field.type === "integer") {
+      return orm.id({ type: "integer" });
+    }
+    if (field.type === "string") {
+      return new orm.FieldBuilder({
+        kind: "id",
+        nullable: false,
+        unique: true,
+        idType: "string",
+      });
+    }
+    return orm.id();
+  }
+
   switch (field.type) {
     case "id":
     case "uuid":
-      return orm.id();
+      return orm.string();
     case "string":
     case "text":
       return orm.string();

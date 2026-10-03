@@ -268,6 +268,109 @@ describe("compiled recursive host-block runtime", () => {
     expect(ownerRenders).toBe(rendersAfterMount);
   });
 
+  it("validates every nested keyed range before applying bindings", async () => {
+    let setVersion: ((value: unknown) => void) | undefined;
+    const Panel = createCompiledComponent({
+      displayName: "AtomicNestedKeyedRanges",
+      initialize: () => ["v1"],
+      render(_props: Record<string, never>, state, blocks) {
+        setVersion = state[0].set;
+        const HostConditional = blocks.HostConditional;
+        const firstItems = [{ id: "a" }];
+        const laterItems = [{ id: "b" }];
+        const version = () => String(state[0].get());
+        const createFirstRow = () => host("li", [host("span", [version()])]);
+        const createLaterRow = () => host("li", [host("span", ["Stable"])]);
+        const branch: CompilerHostConditionalBranch = {
+          create: () => ({
+            ...host("section", [
+              {
+                ...host("ul", [createFirstRow(), createLaterRow()]),
+                block: {
+                  kind: "keyed-ranges",
+                  id: 1,
+                  ranges: [
+                    {
+                      before: 0,
+                      items: () => firstItems,
+                      rowKey: (item) => (item as (typeof firstItems)[number]).id,
+                      create: createFirstRow,
+                      bindings: [{ kind: "text", path: [0], read: version }],
+                    },
+                    {
+                      before: 0,
+                      items: () => laterItems,
+                      rowKey: (item) => (item as (typeof laterItems)[number]).id,
+                      create: createLaterRow,
+                      bindings: [],
+                    },
+                  ],
+                  trailing: 0,
+                },
+              },
+            ]),
+          }),
+          bindings: [],
+        };
+        return (
+          <main>
+            <HostConditional
+              id={0}
+              render={() => (
+                <div>
+                  <section>
+                    <ul>
+                      <li>
+                        <span>{version()}</span>
+                      </li>
+                      <li>
+                        <span>Stable</span>
+                      </li>
+                    </ul>
+                  </section>
+                </div>
+              )}
+              test={() => true}
+              truthy={branch}
+            />
+          </main>
+        );
+      },
+      bindings: [
+        { kind: "block" as const, id: 0, dependencies: [0] },
+        { kind: "block" as const, id: 1, parent: 0, dependencies: [] },
+      ],
+    });
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Panel />));
+
+    const firstRowTarget = container.querySelector("li span")!;
+    const invalidRow = document.createElement("article");
+    const stableTarget = document.createElement("span");
+    stableTarget.textContent = "Stable";
+    invalidRow.append(stableTarget);
+    container.querySelectorAll("li")[1].replaceWith(invalidRow);
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(firstRowTarget, { childList: true, characterData: true, subtree: true });
+
+    await act(async () => {
+      setVersion?.("v2");
+      await flushCompilerUpdates();
+    });
+    mutations.push(...observer.takeRecords());
+    observer.disconnect();
+
+    expect(container.querySelector("li span")?.textContent).toBe("v2");
+    expect(firstRowTarget.isConnected).toBe(false);
+    expect(container.querySelectorAll("li span")[1]?.textContent).toBe("Stable");
+    expect(mutations.filter((record) => record.type === "childList")).toEqual([]);
+  });
+
   it("updates nested conditions and LIS-keyed rows without rerunning the component", async () => {
     let ownerRenders = 0;
     const Panel = createCompiledComponent({

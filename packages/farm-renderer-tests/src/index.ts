@@ -26,6 +26,7 @@ export interface RendererServerFixture {
   Suspense: unknown;
   createElement(type: unknown, props?: unknown, ...children: unknown[]): unknown;
   isValidElement(value: unknown): boolean;
+  markFunctionComponent?<T>(component: T): T;
   renderToString(element: unknown): string | Promise<string>;
   renderToStringWithHead?(
     element: unknown,
@@ -106,6 +107,38 @@ export function defineRendererServerConformance(runtime: RendererServerFixture):
       expect(html).toContain("&amp; content");
       expect(html).not.toContain("<unsafe>");
       expect(html.indexOf("<h1")).toBeLessThan(html.indexOf("<p"));
+    });
+
+    it("renders plain function components through the compatibility layer", async () => {
+      const FunctionComponent = (props: Record<string, unknown>) =>
+        runtime.createElement("section", { "data-label": props.label }, props.children);
+      const Component = runtime.markFunctionComponent?.(FunctionComponent) ?? FunctionComponent;
+      const html = await runtime.renderToString(
+        runtime.createElement(
+          Component,
+          { label: "function-component" },
+          runtime.createElement("span", null, "compat child"),
+        ),
+      );
+
+      expect(html).toContain('data-label="function-component"');
+      expect(html).toContain("<span");
+      expect(html).toContain("compat child");
+      expect(html).toContain("</span>");
+      expect(html).not.toContain("[object Object]");
+    });
+
+    it("rejects unsupported async function components instead of rendering garbage", async () => {
+      const AsyncFunctionComponent = async () =>
+        runtime.createElement("p", null, "async component");
+      const Component =
+        runtime.markFunctionComponent?.(AsyncFunctionComponent) ?? AsyncFunctionComponent;
+
+      await expect(
+        Promise.resolve().then(() =>
+          runtime.renderToString(runtime.createElement(Component, null)),
+        ),
+      ).rejects.toThrow(/async|promise|suspend/i);
     });
 
     it("returns a deterministic hydration bootstrap", () => {

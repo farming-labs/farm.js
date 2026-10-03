@@ -31,7 +31,7 @@ SUMMARY  2 passed / 1 warning / 0 failed / 1 info
 DEVTOOLS http://localhost:3000/__farm/devtools
 ```
 
-When the dev server is not running, or when DevTools is disabled, Doctor automatically falls back to project inspection. It loads `farm.config.*`, validates the package manifest, checks the app router and root layout, resolves the deployment target, and inspects KV storage and cron configuration.
+When the dev server is not running, or when DevTools is disabled, Doctor automatically falls back to project inspection. It loads `farm.config.*`, validates the package manager and workspace links, checks generated types and renderer entrypoints, checks the app router and root layout, resolves the deployment target, and inspects integrations, KV storage, and cron configuration.
 
 ## Target another server
 
@@ -61,7 +61,12 @@ Offline mode checks:
 
 - Node.js satisfies Farm's supported baseline.
 - `package.json` exists and declares `@farm.js/core`.
+- The selected package manager is unambiguous, and pnpm satisfies Farm's supported baseline.
+- `workspace:`, `file:`, `link:`, and `portal:` dependencies resolve locally.
 - Farm config loads and resolves for development.
+- Generated route, API, environment, content, and i18n declarations are current.
+- The selected renderer's Vite, server, and client entrypoints resolve.
+- Configured integration entrypoints load, and declared Farm packages are installed.
 - The app directory or programmatic router contains page routes.
 - A root layout is available from the app or an extended layer.
 - Deployment target, preset, and output directory resolve.
@@ -70,6 +75,18 @@ Offline mode checks:
 - Serverless targets do not depend on explicitly configured in-memory root KV storage.
 
 Live mode is more complete because it sees generated and programmatic API routes, inherited runtime settings, loaded middleware, and discovered workflows after Farm initializes the app.
+
+Doctor is read-only by default. It does not install packages, run package-manager scripts, contact integration providers, or update generated artifacts. Config loading follows the same behavior as other Farm CLI commands, so only run it in a project whose configuration you trust. The separate `--fix` option remains an explicit opt-in for the safe additive corrections described below.
+
+## Check the beta release channel
+
+Registry checks are opt-in because ordinary Doctor runs do not contact npm:
+
+```bash
+farm doctor --offline --registry
+```
+
+This verifies that `@farm.js/core@beta` and `@farm.js/create-app@beta` point to published versions. When the project declares an exact Farm version, Doctor also warns when that version is behind the current beta tag. A registry outage produces a warning instead of hiding the local project results.
 
 ## JSON and CI
 
@@ -111,9 +128,15 @@ Common diagnostic codes include:
 | `EPHEMERAL_PRODUCTION_STORAGE` | A serverless deployment uses in-memory root KV storage.      |
 | `ROUTE_RUNTIME_UNRESOLVED`     | Farm could not resolve a page's inherited runtime controls.  |
 | `LIVE_RUNTIME_UNREACHABLE`     | An explicitly selected running app did not answer the probe. |
+| `PACKAGE_MANAGER_CONFLICT`     | The package-manager field and workspace lockfiles disagree.  |
+| `LOCAL_PACKAGES_MISSING`       | A local or workspace dependency cannot be resolved.          |
+| `GENERATED_ARTIFACTS_STALE`    | Committed generated declarations need `farm generate`.       |
+| `RENDERER_ENTRYPOINTS_MISSING` | A configured renderer export cannot be resolved.             |
+| `REGISTRY_BETA_MISSING`        | A required Farm package has no usable npm beta tag.          |
+| `FARM_BETA_STALE`              | An exact Farm dependency is behind the npm beta tag.         |
 
 Warnings identify behavior that can be valid locally but needs attention before production. Failures mean the project cannot satisfy a basic framework contract.
 
 ## Security
 
-Doctor reads the development snapshot described in [Runtime JSON](/docs/devtools#runtime-json). A report contains project paths, route structure, integration names, and environment key names, but never environment values, provider credentials, storage connection details, request data, cookies, or application records. `farm doctor --json` follows the same rule.
+Doctor reads the development snapshot described in [Runtime JSON](/docs/devtools#runtime-json). A report contains project paths, route structure, integration names, package versions, and environment key names, but never environment values, provider credentials, storage connection details, request data, cookies, or application records. `farm doctor --json` follows the same rule. `--registry` contacts only the public npm registry; provider services are never probed.

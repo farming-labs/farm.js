@@ -1,0 +1,735 @@
+/* Launch-post illustrations: square panels, icon nodes, hairline connectors, travelling pulses. */
+.blog-figure {
+  margin: 2.6rem 0;
+  /* Narrow screens keep a legible stage and scroll it sideways instead of shrinking the type away. */
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  /* The stage's type is sized against the figure's width (cqw), so text scales with the column. */
+  container-type: inline-size;
+}
+.bf-stage {
+  position: relative;
+  aspect-ratio: 760 / 400;
+  min-width: 600px;
+  margin-top: 12px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: clamp(9px, calc(1.62cqw * var(--bf-scale, 1)), 13px);
+  color: #9a9a9a;
+}
+/* Landing cards: scale with the card, no sideways scrolling, and the figure fills its slot. */
+.blog-figure--fit {
+  margin: 0;
+  width: 100%;
+  overflow: visible;
+}
+.blog-figure--fit .bf-stage {
+  min-width: 0;
+  margin-top: 0;
+  font-size: clamp(6px, calc(1.62cqw * var(--bf-scale, 1)), 13px);
+}
+.blog-figure--fit figcaption {
+  display: none;
+}
+.bf-panel {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 3px;
+  background: #070707;
+  transition:
+    border-color 160ms,
+    background-color 160ms,
+    opacity 200ms;
+}
+.bf-panel[data-state="hot"] {
+  border-color: rgb(255 255 255 / 0.28);
+}
+.bf-panel[data-state="dim"] {
+  opacity: 0.38;
+}
+.bf-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
+  height: 2.8em;
+  align-items: center;
+  padding: 0 1.1em;
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
+  font-size: 0.86em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7d7d7d;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.bf-head > span:last-child {
+  color: #cfcfcf;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.bf-body {
+  padding: 1em 1.2em;
+  line-height: 1.6;
+  overflow: hidden;
+}
+
+/* icon nodes */
+.bf-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45em;
+  text-align: center;
+}
+.bf-node .bf-body {
+  padding: 0;
+  min-height: 1.4em;
+}
+.bf-icon {
+  display: inline-flex;
+  width: 2.6em;
+  height: 2.6em;
+  color: #ededed;
+}
+.bf-icon svg,
+.bf-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.bf-icon img {
+  border-radius: 4px;
+}
+.bf-label {
+  color: #e6e6e6;
+  font-family: var(--font-geist-sans), ui-sans-serif, sans-serif;
+  font-size: 1em;
+  letter-spacing: -0.01em;
+}
+.bf-sub {
+  margin-top: -0.3em;
+  font-size: 0.82em;
+  color: #6e6e6e;
+}
+.bf-panel[data-state="hot"] .bf-icon {
+  color: #fff;
+}
+
+/* shared bits */
+.bf-dim {
+  color: #666;
+}
+.bf-hi {
+  color: #f1f1f1;
+}
+.bf-mini {
+  display: block;
+  font-size: 0.78em;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* integration rows + env keys */
+.bf-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  height: 2.5em;
+  margin: 0 -0.5em;
+  padding: 0 0.5em;
+  border-radius: 2px;
+  font-family: var(--font-geist-sans), ui-sans-serif, sans-serif;
+  font-size: 1em;
+  color: #d6d6d6;
+}
+/* A matched row is outlined in white over a faint fill, not filled solid. */
+.bf-row.bf-hot {
+  background: rgb(255 255 255 / 0.05);
+  box-shadow: inset 0 0 0 1.5px rgb(255 255 255 / 0.85);
+  color: #fff;
+}
+.bf-dot {
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  border: 1px solid #555;
+}
+.bf-dot--on {
+  border-color: currentColor;
+  background: currentColor;
+}
+.bf-flag {
+  margin-left: auto;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.72em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8a8a8a;
+}
+.bf-hot .bf-flag {
+  color: #ededed;
+}
+.bf-key {
+  display: block;
+  margin-bottom: 0.6em;
+  font-size: 0.86em;
+  color: #e6e6e6;
+  word-break: break-all;
+}
+
+/* chat */
+.bf-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+  padding: 0 0.4em;
+}
+/* Message bubbles: dark, hairline border, a small curved tail on the sender's side. */
+.bf-bubble {
+  position: relative;
+  align-self: flex-start;
+  max-width: 78%;
+  padding: 0.5em 0.95em;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 1.3em;
+  background: #121212;
+  font-family: var(--font-geist-sans), ui-sans-serif, sans-serif;
+  font-size: 0.88em;
+  line-height: 1.4;
+  color: #cfcfcf;
+}
+.bf-bubble--you {
+  align-self: flex-end;
+  color: #e4e4e4;
+}
+/* The tail sits on the sender's bottom corner; that corner is tightened so the tail covers it. */
+.bf-bubble:not(.bf-bubble--you) {
+  padding-left: 1.25em;
+  border-bottom-left-radius: 5px;
+}
+.bf-bubble--you {
+  padding-right: 1.25em;
+  border-bottom-right-radius: 5px;
+}
+.bf-tail {
+  position: absolute;
+  left: -11px;
+  bottom: -6.3px;
+  width: 22px;
+  height: 25px;
+  overflow: visible;
+}
+.bf-bubble--you .bf-tail {
+  left: auto;
+  right: -11px;
+  transform: scaleX(-1);
+}
+.bf-tail-fill {
+  fill: #121212;
+}
+.bf-tail-line {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.16);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.bf-note {
+  font-size: 0.78em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6e6e6e;
+}
+.bf-tool {
+  align-self: flex-start;
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  column-gap: 1.2em;
+  row-gap: 0.2em;
+  padding: 0.45em 0.75em;
+  border: 1px dashed rgb(255 255 255 / 0.24);
+  border-radius: 0.7em;
+  font-size: 0.76em;
+}
+.bf-tool-name {
+  color: #fff;
+}
+.bf-tool-name::before {
+  content: "tool ";
+  color: #6e6e6e;
+}
+.bf-tool-state {
+  justify-self: end;
+  color: #9a9a9a;
+}
+.bf-tool-result {
+  grid-column: 1 / -1;
+  color: #cfcfcf;
+}
+.bf-tool-result::before {
+  content: "↳ ";
+  color: #6e6e6e;
+}
+.bf-tool--tag {
+  margin-bottom: 0.9em;
+}
+
+/* WebMCP product grid */
+.bf-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6em;
+}
+.bf-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  padding: 0.5em 0.6em;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 3px;
+  font-family: var(--font-geist-sans), ui-sans-serif, sans-serif;
+  font-size: 0.84em;
+  color: #cfcfcf;
+}
+.bf-card.bf-hot {
+  border-color: rgb(255 255 255 / 0.28);
+}
+.bf-ph {
+  height: 3.4em;
+  border-radius: 2px;
+  background: repeating-linear-gradient(135deg, #171717 0 5px, #101010 5px 10px);
+}
+
+/* code panels and the file tree (integration figure) */
+.bf-panel--code {
+  padding-top: 0.6em;
+}
+.bf-panel--code .bf-body {
+  white-space: pre;
+  line-height: 1.75;
+}
+.bf-legend {
+  position: absolute;
+  top: -0.8em;
+  left: 1.2em;
+  padding: 0 0.6em;
+  background: #000;
+  line-height: 1.6em;
+  color: #8f8f8f;
+}
+.bf-line {
+  display: block;
+  min-height: 1.75em;
+}
+.bf-caret {
+  display: inline-block;
+  width: 0.6em;
+  height: 1.05em;
+  margin-left: 1px;
+  margin-right: -0.6em;
+  vertical-align: -0.18em;
+  background: #ededed;
+}
+.bf-file {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  height: 1.9em;
+  margin: 0 -0.5em;
+  padding-right: 0.5em;
+  border-radius: 2px;
+  color: #a8a8a8;
+}
+.bf-file.bf-hot {
+  background: #ededed;
+  color: #000;
+}
+.bf-glyph {
+  width: 0.8em;
+  color: #6a6a6a;
+}
+.bf-env {
+  display: inline-block;
+  margin-right: 1.4em;
+  color: #e4e4e4;
+}
+
+/* verbatim code inside merged figures */
+.bf-add {
+  margin: 0 -1.3em;
+  padding: 0 1.3em;
+  background: rgb(255 255 255 / 0.06);
+  box-shadow: inset 2px 0 0 #ededed;
+  color: #fff;
+}
+.bf-k {
+  color: #6b6b6b;
+}
+.bf-s {
+  color: #d4d4d4;
+}
+.bf-mark {
+  display: inline-block;
+  min-width: 1.55em;
+  height: 1.55em;
+  margin-left: 0.9em;
+  padding: 0 0.35em;
+  border-radius: 2px;
+  background: #2e2e2e;
+  color: #ececec;
+  font-size: 0.86em;
+  line-height: 1.55em;
+  text-align: center;
+  vertical-align: 0.1em;
+}
+.blog-figure[data-figure="agents-code"] [data-panel="config"] .bf-body {
+  font-size: 0.9em;
+}
+.bf-copy {
+  width: auto !important;
+  padding: 0 0.6rem !important;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* connectors */
+.bf-wires {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.bf-wire {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.28);
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+[data-wire][data-dim] {
+  opacity: 0.3;
+}
+.bf-end {
+  fill: #6a6a6a;
+}
+.bf-end.bf-flash {
+  fill: #fff;
+}
+.bf-pulse {
+  fill: #fff;
+  opacity: 0;
+}
+.bf-glow {
+  fill: rgb(255 255 255 / 0.14);
+  opacity: 0;
+}
+
+/* controls */
+/* The verbatim source stays readable by screen readers; `.blog-prose pre` would otherwise outrank `.sr-only`. */
+.blog-figure pre[data-figure-source] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: pre;
+}
+.bf-controls {
+  display: none;
+  position: sticky;
+  left: 0;
+  justify-content: center;
+  gap: 0.4rem;
+  margin-top: 0.8rem;
+}
+.blog-figure[data-ready] .bf-controls {
+  display: flex;
+}
+.bf-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--blog-muted, #929292);
+  cursor: pointer;
+}
+.bf-controls button:hover {
+  color: #ededed;
+}
+.bf-controls svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  fill: currentColor;
+}
+.bf-replay svg {
+  fill: none;
+}
+.blog-figure[data-state="playing"] .bf-toggle .bf-icon-play,
+.blog-figure:not([data-state="playing"]) .bf-toggle .bf-icon-pause {
+  display: none;
+}
+.blog-figure figcaption {
+  margin-top: 0.4rem;
+  text-align: center;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--blog-muted, #929292);
+}
+
+/* Merged code figures split the stage in halves; slightly smaller code keeps each line whole. */
+.blog-figure[data-figure$="-code"] .bf-panel--code .bf-body {
+  font-size: 0.88em;
+}
+
+/* Viby (landing): chat, workspace tools, locked versions, and a sandbox preview wireframe */
+.blog-figure[data-figure="viby"] .bf-head > span:last-child {
+  color: #6b6b6b;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.blog-figure[data-figure="viby"] .bf-panel[data-state="hot"] .bf-head > span:last-child {
+  color: #f1f1f1;
+}
+.bf-vtext {
+  display: block;
+  color: #9a9a9a;
+}
+.bf-vgap {
+  display: block;
+  margin-top: 0.7em;
+}
+.bf-vrow {
+  display: flex;
+  gap: 0.7em;
+  margin: 0 -0.4em;
+  padding: 0.2em 0.4em;
+  border-radius: 2px;
+  white-space: nowrap;
+  transition: background-color 0.2s;
+}
+.bf-vrow.bf-von {
+  background: rgb(255 255 255 / 0.07);
+}
+.bf-vrow .bf-r {
+  margin-left: auto;
+  color: #777;
+}
+.bf-vprev {
+  position: relative;
+  display: block;
+  height: 6.6em;
+}
+.bf-vblock {
+  position: absolute;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 3px;
+  background: repeating-linear-gradient(135deg, #171717 0 6px, #101010 6px 12px);
+}
+.bf-vblock--on {
+  background: #ededed;
+}
+.blog-figure[data-figure="viby"] .bf-vrow {
+  gap: 0.55em;
+  font-size: 0.86em;
+}
+/* The MCP client log reads as code, like the route beside it. */
+.blog-figure[data-figure="mcp-code"] [data-panel="client"] .bf-body {
+  font-size: 0.88em;
+  line-height: 1.75;
+  white-space: pre;
+}
+
+/* Agents-page figures share one system: pills and list rows with the same icon tile, type,
+   radius, and status marks; active items brighten their border slightly instead of filling. */
+.bf-flow {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  padding: 0 0.85em;
+}
+.bf-flow-icon,
+.bf-item-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.2em;
+  height: 2.2em;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 5px;
+  background: #0d0d0d;
+  color: #cfcfcf;
+}
+.bf-flow-icon svg,
+.bf-flow-icon img,
+.bf-item-icon svg {
+  display: block;
+  width: 1.1em;
+  height: 1.1em;
+}
+/* The Farm.js mark has its own padding, so it sits a little larger in the same tile. */
+.bf-flow-icon img {
+  width: 1.35em;
+  height: 1.35em;
+}
+.bf-flow-text,
+.bf-item-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.2em;
+}
+.bf-flow-kicker {
+  color: #6e6e6e;
+  font-size: 0.68em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.bf-flow-title,
+.bf-item-name {
+  overflow: hidden;
+  color: #ededed;
+  font-family: var(--font-geist-sans), ui-sans-serif, sans-serif;
+  font-size: 0.92em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bf-item-sub {
+  overflow: hidden;
+  color: #777;
+  font-size: 0.72em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bf-flow .bf-body {
+  margin-left: auto;
+  padding: 0;
+  overflow: visible;
+}
+.bf-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  margin: 0 -0.5em;
+  padding: 0.4em 0.5em;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  transition:
+    background-color 0.3s,
+    border-color 0.3s,
+    opacity 0.3s;
+}
+.bf-item + .bf-item {
+  margin-top: 0.2em;
+}
+.bf-item.bf-von {
+  border-color: rgb(255 255 255 / 0.14);
+  background: rgb(255 255 255 / 0.03);
+}
+.bf-item--wait {
+  opacity: 0.45;
+}
+.bf-item-meta {
+  margin-left: auto;
+  color: #8a8a8a;
+  font-size: 0.72em;
+  white-space: nowrap;
+}
+.bf-item-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.4em;
+}
+.bf-item-text + .bf-item-state {
+  margin-left: auto;
+}
+/* Status marks: waiting dot, spinning ring, live dot, or a check circle; always the same size. */
+.bf-st {
+  display: inline-block;
+  width: 0.45em;
+  height: 0.45em;
+  border-radius: 50%;
+  background: #3a3a3a;
+}
+.bf-st--run {
+  width: 1.05em;
+  height: 1.05em;
+  border: 1.5px solid rgb(255 255 255 / 0.18);
+  border-top-color: #d8d8d8;
+  background: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .bf-st--run {
+    animation: bf-spin 0.9s linear infinite;
+  }
+}
+@keyframes bf-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+.bf-st--live {
+  background: #d8d8d8;
+}
+.bf-st--ok {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3em;
+  height: 1.3em;
+  border: 1px solid rgb(255 255 255 / 0.3);
+  background: none;
+  color: #d8d8d8;
+  font-size: 0.78em;
+  line-height: 1;
+}
+/* Logo badges in a step title: each mark sits beside its name at text height. */
+.bf-flow-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+}
+.bf-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+}
+.bf-badge svg {
+  flex: none;
+  width: auto;
+  height: 0.95em;
+  color: #ededed;
+}
+
+/* Phones: figures with a phone layout swap to it, a single column of the same panels and
+   connectors at a legible size, instead of a 600px stage that scrolls sideways. */
+.bf-stage--narrow {
+  display: none;
+  min-width: 0;
+}
+.bf-stage--narrow .bf-panel--code .bf-body {
+  white-space: pre-wrap;
+}
+@media (max-width: 640px) {
+  .bf-stage--wide {
+    display: none;
+  }
+  .bf-stage--narrow {
+    display: block;
+  }
+}

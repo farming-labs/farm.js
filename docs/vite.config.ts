@@ -1,7 +1,16 @@
 import { defineConfig } from "vite";
 import { fileURLToPath } from "node:url";
+import { docsMdx } from "@farming-labs/farmjs/vite";
 
 export default defineConfig({
+  plugins: [
+    docsMdx({
+      codeBlockThemes: {
+        light: "github-light-default",
+        dark: "vesper",
+      },
+    }),
+  ],
   resolve: {
     alias: [
       {

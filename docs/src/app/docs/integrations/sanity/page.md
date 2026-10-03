@@ -122,8 +122,10 @@ posts: collection({
 ```
 
 - credentials resolve from `SANITY_PROJECT_ID` and `SANITY_DATASET`, or pass an existing client.
-- entry IDs default to `slug.current`, falling back to `_id`; writes resolve the slug back to the
-  Sanity `_id` automatically.
+- entry IDs default to `slug.current`, falling back to `_id`; writes resolve the entry ID back to
+  the Sanity `_id` automatically by re-running the collection's own `query`, so a write can only
+  ever address a document this collection reads. Project `_id` in that query, or the write cannot
+  address the document.
 - the CDN is skipped by default so a build sees the freshest documents.
 - writes need `writeToken` (or `SANITY_API_WRITE_TOKEN`) plus `createType` for creation; without a
   token the source is read-only.

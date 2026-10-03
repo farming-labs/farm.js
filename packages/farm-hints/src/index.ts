@@ -62,15 +62,35 @@ export function hints(options: HintsOptions = {}) {
     },
   });
 
+  // Stamped as an own property so it survives the descriptor copy an
+  // integration performs when it takes ownership of a contributed plugin.
+  Object.defineProperty(plugin, HINTS_PLUGIN_MARKER, { value: true });
+
   return plugin;
 }
 
+/**
+ * Marks this plugin so production removal can find it by identity-independent
+ * means. An integration that contributes the plugin re-creates it with
+ * `Object.create(prototype, ownDescriptors)`, which produces a different object
+ * with the same own properties, so a `!==` filter silently matched nothing and
+ * left `farm:hints` in the production config.
+ */
+const HINTS_PLUGIN_MARKER = Symbol.for("farm.hints.plugin");
+
 function withoutPlugin(config: any, plugin: FarmPlugin<any, any, any, any>): any {
-  if (!config.plugins?.includes(plugin)) return;
-  return {
-    ...config,
-    plugins: config.plugins.filter(
-      (candidate: FarmPlugin<any, any, any, any>) => candidate !== plugin,
-    ),
-  };
+  const plugins: FarmPlugin<any, any, any, any>[] = config.plugins ?? [];
+  const remaining = plugins.filter(
+    (candidate) => candidate !== plugin && !(candidate as any)?.[HINTS_PLUGIN_MARKER],
+  );
+  if (remaining.length === plugins.length) {
+    // Failing loudly beats shipping a dev-only plugin: its vite plugin is not
+    // registered in production, so the build either dies on an unresolvable
+    // virtual module or ships the dev runtime to the browser.
+    throw new Error(
+      "farm:hints could not remove itself from the production config. " +
+        "Report this with the integration that contributed it.",
+    );
+  }
+  return { ...config, plugins: remaining };
 }

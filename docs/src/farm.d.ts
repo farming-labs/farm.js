@@ -14,6 +14,9 @@ import "@farm.js/core/css";
  */
 export type RoutePath =
   | "/"
+  | "/agents"
+  | "/blog"
+  | "/blog/0.1.0"
   | "/docs"
   | `/docs/${string}`
   | "/docs/after"
@@ -76,6 +79,7 @@ export type RoutePath =
   | "/docs/plugins/devtools"
   | "/docs/plugins/federation"
   | "/docs/plugins/hints"
+  | "/docs/plugins/mcp"
   | "/docs/plugins/msw"
   | "/docs/plugins/partytown"
   | "/docs/plugins/pwa"
@@ -101,13 +105,18 @@ export type RoutePath =
   | "/docs/routing"
   | "/docs/server-queries"
   | "/docs/server-rendering"
+  | "/docs/stability"
   | "/docs/storage"
   | "/docs/telemetry"
   | "/docs/testing"
   | "/docs/themes"
+  | "/docs/upgrading"
   | "/telemetry";
 export type RoutePattern =
   | "/"
+  | "/agents"
+  | "/blog"
+  | "/blog/0.1.0"
   | "/docs"
   | "/docs/[...docs]"
   | "/docs/after"
@@ -170,6 +179,7 @@ export type RoutePattern =
   | "/docs/plugins/devtools"
   | "/docs/plugins/federation"
   | "/docs/plugins/hints"
+  | "/docs/plugins/mcp"
   | "/docs/plugins/msw"
   | "/docs/plugins/partytown"
   | "/docs/plugins/pwa"
@@ -195,13 +205,18 @@ export type RoutePattern =
   | "/docs/routing"
   | "/docs/server-queries"
   | "/docs/server-rendering"
+  | "/docs/stability"
   | "/docs/storage"
   | "/docs/telemetry"
   | "/docs/testing"
   | "/docs/themes"
+  | "/docs/upgrading"
   | "/telemetry";
 export type RouteModulePattern =
   | "/"
+  | "/agents"
+  | "/blog"
+  | "/blog/0.1.0"
   | "/docs"
   | "/docs/[...docs]"
   | "/docs/after"
@@ -264,6 +279,7 @@ export type RouteModulePattern =
   | "/docs/plugins/devtools"
   | "/docs/plugins/federation"
   | "/docs/plugins/hints"
+  | "/docs/plugins/mcp"
   | "/docs/plugins/msw"
   | "/docs/plugins/partytown"
   | "/docs/plugins/pwa"
@@ -289,10 +305,12 @@ export type RouteModulePattern =
   | "/docs/routing"
   | "/docs/server-queries"
   | "/docs/server-rendering"
+  | "/docs/stability"
   | "/docs/storage"
   | "/docs/telemetry"
   | "/docs/testing"
   | "/docs/themes"
+  | "/docs/upgrading"
   | "/telemetry";
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {

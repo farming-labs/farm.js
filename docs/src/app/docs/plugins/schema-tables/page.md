@@ -71,8 +71,15 @@ A table that exists but no longer matches the schema is reported, not altered:
   tasks
     missing in the database: priority
     not in the schema: legacy_note
+    changed column status: default expected "open", found none
+    missing indexes: tasks_list_id_idx (list_id)
 ⚠️  Tables that differ from the schema were left unchanged.
 ```
+
+Farm compares the parts of the table contract it can declare: column types,
+nullability, defaults, primary and unique constraints, indexes, and internal
+foreign keys. Matching column names alone are not treated as proof that a table
+is up to date.
 
 A create is derivable from the schema alone. A change is not: a rename and a
 drop-plus-add look identical from here, and one of them destroys data. That call
@@ -169,21 +176,35 @@ Postgres — the shape alone cannot tell Postgres and MySQL apart.
 Everything comes from schema metadata, so the SQL is derivable and reviewable
 before it runs:
 
-| Declaration                      | What it emits                                              |
-| -------------------------------- | ---------------------------------------------------------- |
-| `name` on a model or field       | the real table or column name                              |
-| `type`                           | the column type for the target dialect                     |
-| `primaryKey: true`               | `PRIMARY KEY`                                              |
-| `unique: true`                   | `UNIQUE` on the column                                     |
-| `index: true`                    | `CREATE INDEX "<table>_<column>_idx"`                      |
-| `constraints: [...]`             | `CREATE [UNIQUE] INDEX "<table>_<columns>_<type>"`         |
-| `default`                        | a literal, for strings, numbers, and booleans              |
-| `default: "now"` on a `datetime` | `DEFAULT CURRENT_TIMESTAMP`                                |
-| `reference`                      | `REFERENCES <table> (<column>)`, with `ON DELETE` when set |
+| Declaration                      | What it emits                                                      |
+| -------------------------------- | ------------------------------------------------------------------ |
+| `name` on a model or field       | the real table or column name                                      |
+| `type`                           | the column type for the target dialect                             |
+| `primaryKey: true`               | `PRIMARY KEY`                                                      |
+| `unique: true`                   | `UNIQUE` on the column                                             |
+| `index: true`                    | `CREATE INDEX "<table>_<column>_idx"`                              |
+| `constraints: [...]`             | `CREATE [UNIQUE] INDEX "<table>_<columns>_<type>"`                 |
+| `default`                        | a literal, for strings, numbers, and booleans                      |
+| `default: "now"` on a `datetime` | `DEFAULT CURRENT_TIMESTAMP`                                        |
+| `reference`                      | Relationship metadata; database enforcement is the default         |
+| `reference.enforced: "db"`       | A SQL/Drizzle foreign key or Prisma relation, including `onDelete` |
+| `reference.enforced: "app"`      | Keeps relationship metadata without a database foreign key         |
+| `reference.enforced: "none"`     | Keeps the declaration without a database foreign key               |
 
-Postgres, SQLite, and MySQL are supported. A `reference` to a model outside this
-owner's schema is left as a comment rather than a foreign key, since the other
-table may not exist yet.
+Postgres, SQLite, and MySQL are supported. Prisma and Drizzle output preserves
+database-enforced internal references instead of reducing them to comments. A
+`reference` to a model outside this owner's schema is left as a comment rather
+than a foreign key, since the other table may not exist yet. Omitting `enforced`
+is equivalent to `enforced: "db"`. Application and unenforced references stay
+available in schema metadata, but SQL/ORM generation and the runtime ORM do not
+create a database constraint for them.
+
+Database-enforced internal references are dependency ordered so parent tables
+are created before their dependents, and a table can reference itself. Farm
+rejects cross-table cycles of database-enforced references before emitting SQL
+because inline foreign keys cannot create either table first; mark one edge
+`enforced: "app"` or manage that constraint separately when a schema needs that
+shape.
 
 ### Two things worth knowing
 
@@ -199,3 +220,8 @@ updatedAt: { type: "datetime", required: false } // nullable
 reads, so the tables this creates are the tables your queries find. A model
 `tasks` with a field `listId` becomes `tasks("listId")`, not `tasks("list_id")`.
 Set `name` on a model or field to point at a different one.
+
+**Primary keys follow `primaryKey`, not the field type.** `id` and `uuid` fields
+without `primaryKey: true` remain ordinary string fields. Farm supports primary
+keys on `id`, `uuid`, `string`, and `integer` fields; other field types fail
+during schema resolution before SQL or ORM artifacts are generated.

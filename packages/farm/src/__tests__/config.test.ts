@@ -91,6 +91,7 @@ describe("config helpers", () => {
         cache: {
           adapter,
           namespace: "catalog",
+          maxEntries: 2_048,
         },
       },
       "production",
@@ -99,6 +100,7 @@ describe("config helpers", () => {
     expect(config.cache).toEqual({
       adapter,
       namespace: "catalog",
+      maxEntries: 2_048,
     });
   });
 
@@ -255,6 +257,36 @@ describe("loadConfig", () => {
     );
   });
 
+  it("preserves messages from structured config loader errors", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-config-error-"));
+
+    await fs.writeFile(
+      path.join(root, "farm.config.mjs"),
+      'throw { name: "Error", message: "structured config failure" };',
+    );
+
+    const error = await loadConfig(root, undefined, "development").catch((error) => error);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toMatchObject({
+      message: "Failed to load config from farm.config.mjs: structured config failure",
+      cause: { name: "Error", message: "structured config failure" },
+    });
+  });
+
+  it("uses a structured config loader stack when its message is empty", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-config-error-"));
+
+    await fs.writeFile(
+      path.join(root, "farm.config.mjs"),
+      'throw { name: "Error", message: "", stack: "serialized config stack" };',
+    );
+
+    await expect(loadConfig(root, undefined, "development")).rejects.toThrow(
+      "Failed to load config from farm.config.mjs: serialized config stack",
+    );
+  });
+
   it("loads farm.config.ts when it transitively imports local tsx modules", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-config-tsx-"));
 
@@ -355,9 +387,27 @@ describe("resolveConfig", () => {
     expect((disabled.openapi as any).specRoute).toBe(false);
   });
 
-  it("resolves the agent config with JSON-LD off by default", async () => {
+  it("resolves the agent config with JSON-LD and llms.txt off by default", async () => {
     const defaults = await resolveConfig({}, "production");
     expect(defaults.agent.jsonLd).toBe(false);
+    expect(defaults.agent.llmsTxt).toEqual({
+      enabled: false,
+      include: [],
+      exclude: [],
+      full: false,
+    });
+
+    const llms = await resolveConfig(
+      { agent: { llmsTxt: { title: "Acme", exclude: ["/admin/[...path]"] } } },
+      "production",
+    );
+    expect(llms.agent.llmsTxt).toEqual({
+      enabled: true,
+      title: "Acme",
+      include: [],
+      exclude: ["/admin/[...path]"],
+      full: true,
+    });
 
     const enabled = await resolveConfig({ agent: { jsonLd: true } }, "production");
     expect(enabled.agent.jsonLd).toEqual({});
@@ -897,6 +947,7 @@ describe("resolveConfig", () => {
     expect(config.security.csp).toEqual({
       value: "default-src 'self'; object-src 'none'",
       reportOnly: false,
+      nonce: false,
     });
     expect((await config.headers()).at(-1)).toEqual({
       source: "/*",
@@ -907,6 +958,32 @@ describe("resolveConfig", () => {
         },
       ],
     });
+  });
+
+  it("defers nonce-enabled CSP headers to the dynamic HTML response", async () => {
+    const config = await resolveConfig(
+      {
+        root: process.cwd(),
+        security: {
+          csp: {
+            nonce: true,
+            directives: { scriptSrc: ["'self'"], objectSrc: ["'none'"] },
+          },
+        },
+      },
+      "production",
+    );
+
+    expect(config.security.csp).toEqual({
+      value: "script-src 'self'; object-src 'none'",
+      reportOnly: false,
+      nonce: true,
+    });
+    expect(
+      (await config.headers()).some((entry) =>
+        entry.headers.some((header) => header.key.toLowerCase() === "content-security-policy"),
+      ),
+    ).toBe(false);
   });
 });
 

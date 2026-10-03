@@ -237,10 +237,10 @@ function createDeployCommand(
     };
   }
   if (platform === "netlify") {
-    const args = createNetlifyDeployArgs(deployConfig.netlify?.site);
+    const args = createNetlifyDeployArgs(root, outputDir, deployConfig.netlify?.site);
     return {
       command: formatCommand("netlify", args),
-      cwd: outputDir,
+      cwd: path.resolve(root),
       executable: "netlify",
       args,
     };
@@ -270,8 +270,15 @@ function createDeployCommand(
   };
 }
 
-function createNetlifyDeployArgs(site?: string): string[] {
-  return ["deploy", "--prod", "--dir=.", ...(site ? [`--site=${site}`] : [])];
+function createNetlifyDeployArgs(root: string, outputDir: string, site?: string): string[] {
+  return [
+    "deploy",
+    "--prod",
+    "--no-build",
+    "--dir=dist",
+    `--functions=${path.relative(root, path.join(outputDir, "server")).split(path.sep).join(path.posix.sep)}`,
+    ...(site ? [`--site=${site}`] : []),
+  ];
 }
 
 /**
@@ -702,9 +709,9 @@ async function deployNetlify(root: string, outputDir: string, site?: string) {
   }
 
   try {
-    runDeployCli("netlify", createNetlifyDeployArgs(site), root, {
+    runDeployCli("netlify", createNetlifyDeployArgs(root, outputDir, site), root, {
       stdio: "inherit",
-      cwd: outputDir,
+      cwd: root,
     });
     logger.success("✅ Deployed to Netlify successfully!");
   } catch (error: unknown) {

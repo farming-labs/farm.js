@@ -12,7 +12,7 @@ do not need a renderer option or an additional adapter package.
 ## Create an app
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-app --template basic --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-app --template basic --typescript
 ```
 
 Omitting `renderer` keeps React active:
@@ -134,7 +134,7 @@ Start from the focused experimental starter when you want the compiler flag, sha
 UI, a live AOT-versus-React comparison, and a reproducible browser check already wired together:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta compiler-app --template react-compiler --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app compiler-app --template react-compiler --typescript
 ```
 
 You can also clone the standalone
@@ -901,6 +901,12 @@ dependencies, React-owned rows, nested blocks, and structural key dependencies d
 path. A failed runtime guard returns that keyed boundary to React before compiled bindings run.
 No option or component primitive is required. The report exposes the emitted binding count as
 `keyedMapLookupTargets`.
+
+When a key-directed identity, Set-membership, or Map-lookup refresh selects multiple binding
+updates, the runtime prepares every selected value and resolves every selected DOM target before
+committing the batch. A reader failure in a later selected row therefore leaves earlier rows
+untouched, while an invalid target uses the complete React fallback. Preparation retains the same
+changed-key set; it does not scan unaffected rows. Single-binding refreshes retain the direct path.
 
 #### Producer-side Set and Map deltas
 
@@ -2478,8 +2484,24 @@ while preserving matching branch, range, and keyed DOM identity. React-owned con
 boundaries move their retained root registration with the same ID change, so neighboring path-based
 bindings continue to skip the branch React preserved. Interactive keyed rows validate the complete
 refreshed row set before Farm reapplies bindings; a later invalid row therefore returns the
-container to React without first patching an earlier row. If the compiler-owned state layout
-changes, the identity is not reused and React remounts it instead of preserving incompatible state.
+container to React without first patching an earlier row. Conditional, keyed, and mixed range
+owners likewise validate every static binding target before applying any binding update, so a
+later invalid target cannot partially change an earlier static sibling before React takes over.
+They also evaluate and normalize every static binding value before the first DOM write, so a later
+throwing reader reaches the nearest React error boundary without exposing an earlier sibling update.
+An ordinary surviving keyed row likewise evaluates and normalizes every binding in that row before
+updating its binding cache or the DOM. A later throwing reader therefore leaves that row untouched;
+single-row refreshes with one binding retain the direct single-binding path. Stable multi-row
+refreshes whose row structure is unchanged additionally prepare every row's binding updates before
+committing any row, so a reader failure in a later row leaves earlier rows untouched.
+Single-removal refreshes with multiple static survivors use the same preflight before committing
+survivor bindings or detaching the removed row. Other removal-only refreshes with static survivors
+also preflight the complete surviving row set before detaching any stale row.
+Conditional branch bindings and keyed-row bindings inside nested keyed or mixed ranges are also
+read and prepared without DOM writes until every sibling range has passed adoption. A later invalid
+range therefore cannot partially patch an earlier branch or keyed row before React takes over. If
+the compiler-owned state layout changes, the identity is not reused and React remounts it instead
+of preserving incompatible state.
 
 If a direct binding evaluation throws, the runtime schedules a React update and rethrows from the
 component render. This lets the nearest React error boundary handle the failure through React's
@@ -2817,9 +2839,11 @@ deployment use the same contracts described in the renderer overview.
 
 ## Production rendering
 
-The React adapter supports string rendering and streaming when the active production runtime can
-use `renderToPipeableStream`. Static generation, ISR, PPR, and ordinary dynamic rendering continue
-to follow route configuration rather than the component extension.
+The React adapter uses `renderToPipeableStream` on Node deployment targets and
+`renderToReadableStream` on edge targets. FARMJS resolves the matching React DOM server entry while
+building the target and validates that the promised primitive is present. Static generation, ISR,
+PPR, and ordinary dynamic rendering continue to follow route configuration rather than the
+component extension.
 
 See [Rendering Model](/docs/server-rendering) for rendering modes and
 [Renderers](/docs/renderers) for the cross-renderer support matrix.

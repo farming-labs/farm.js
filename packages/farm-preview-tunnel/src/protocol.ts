@@ -13,6 +13,7 @@ export interface ReadyMessage {
   type: "ready";
   sessionId: string;
   publicUrl: string;
+  expiresAt?: number;
   maxResponseBodyBytes?: number;
 }
 
@@ -68,6 +69,8 @@ export function isRelayToAgentMessage(value: unknown): value is RelayToAgentMess
     return (
       typeof value.sessionId === "string" &&
       typeof value.publicUrl === "string" &&
+      (value.expiresAt === undefined ||
+        (typeof value.expiresAt === "number" && Number.isSafeInteger(value.expiresAt))) &&
       (value.maxResponseBodyBytes === undefined ||
         (typeof value.maxResponseBodyBytes === "number" &&
           Number.isSafeInteger(value.maxResponseBodyBytes) &&

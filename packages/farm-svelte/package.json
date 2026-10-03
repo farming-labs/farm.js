@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/svelte",
-  "version": "0.1.0-beta.30",
+  "version": "0.1.0-beta.32",
   "description": "Svelte renderer for FARMJS applications",
   "keywords": [
     "farmjs",
@@ -73,7 +73,7 @@
     "vitest": "^3.2.7"
   },
   "peerDependencies": {
-    "@farm.js/core": ">=0.1.0-beta.58 <0.2.0",
+    "@farm.js/core": ">=0.1.0 <0.2.0",
     "svelte": "^5.0.0"
   },
   "engines": {

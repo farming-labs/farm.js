@@ -9,8 +9,10 @@ import {
 } from "@farm.js/renderer-tests";
 import { describe, expect, it } from "vitest";
 import {
+  assertFarmRendererStreamingRuntime,
   getFarmRendererCapabilities,
   getFarmRendererComponentExtensions,
+  getFarmRendererStreamingCapabilitiesForRuntime,
   loadFarmRendererVitePlugins,
   readFarmRendererWebStream,
   REACT_RENDERER,
@@ -26,7 +28,13 @@ defineRendererDescriptorConformance({
     server: "@farm.js/core/renderer/react/server",
     client: "@farm.js/core/renderer/react/client",
     jsxImportSource: "react",
-    capabilities: { streaming: { node: true, web: false } },
+    capabilities: {
+      streaming: {
+        node: true,
+        web: false,
+        runtimes: { edge: { node: false, web: true } },
+      },
+    },
   },
 });
 
@@ -42,7 +50,13 @@ describe("renderer configuration", () => {
       client: "@farm.js/core/renderer/react/client",
       jsxImportSource: "react",
       buildConcurrency: "parallel",
-      capabilities: { streaming: { node: true, web: false } },
+      capabilities: {
+        streaming: {
+          node: true,
+          web: false,
+          runtimes: { edge: { node: false, web: true } },
+        },
+      },
     });
     expect(renderer).not.toBe(REACT_RENDERER);
   });
@@ -73,6 +87,90 @@ describe("renderer configuration", () => {
       reconcilesRerenders: true,
       functionComponents: false,
     });
+  });
+
+  it("resolves target-dependent streaming without changing legacy booleans", () => {
+    expect(getFarmRendererStreamingCapabilitiesForRuntime(REACT_RENDERER, "node")).toEqual({
+      node: true,
+      web: false,
+    });
+    expect(getFarmRendererStreamingCapabilitiesForRuntime(REACT_RENDERER, "edge")).toEqual({
+      node: false,
+      web: true,
+    });
+    expect(getFarmRendererStreamingCapabilitiesForRuntime(REACT_RENDERER, "unknown")).toEqual({
+      node: true,
+      web: false,
+    });
+    expect(
+      getFarmRendererStreamingCapabilitiesForRuntime(
+        { capabilities: { streaming: { node: true, web: true } } },
+        "edge",
+      ),
+    ).toEqual({ node: true, web: true });
+    expect(
+      getFarmRendererStreamingCapabilitiesForRuntime(
+        {
+          capabilities: {
+            streaming: {
+              node: true,
+              web: false,
+              runtimes: { edge: { web: true } },
+            },
+          },
+        },
+        "edge",
+      ),
+    ).toEqual({ node: true, web: true });
+  });
+
+  it("rejects drift between a descriptor and its loaded server binding", () => {
+    expect(() =>
+      assertFarmRendererStreamingRuntime(
+        "test",
+        { capabilities: { streaming: { node: true, web: false } } },
+        {
+          capabilities: { streaming: { node: false, web: true } },
+          renderToPipeableStream: (() => ({ pipe() {} })) as any,
+          renderToReadableStream: (() => new ReadableStream()) as any,
+        },
+        "node",
+      ),
+    ).toThrow(/server module advertises.*does not satisfy its descriptor/);
+  });
+
+  it("allows a descriptor to disable an available streaming primitive", () => {
+    expect(() =>
+      assertFarmRendererStreamingRuntime(
+        "test",
+        { capabilities: { streaming: { node: false, web: false } } },
+        {
+          capabilities: { streaming: { node: true, web: true } },
+          renderToPipeableStream: (() => ({ pipe() {} })) as any,
+          renderToReadableStream: (() => new ReadableStream()) as any,
+        },
+        "node",
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects a target capability when the loaded binding lacks its primitive", () => {
+    expect(() =>
+      assertFarmRendererStreamingRuntime(
+        "test",
+        {
+          capabilities: {
+            streaming: {
+              node: true,
+              web: false,
+              runtimes: { edge: { node: false, web: true } },
+            },
+          },
+        },
+        {},
+        "edge",
+      ),
+    ).toThrow(/Web streaming for the edge runtime.*renderToReadableStream/);
   });
 
   it("defaults functionComponents off until a renderer opts in", () => {

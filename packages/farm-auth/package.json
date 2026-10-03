@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/auth",
-  "version": "0.1.0-beta.106",
+  "version": "0.1.1-beta.1",
   "description": "Farm-native authentication with email/password, server helpers, and React hooks",
   "license": "MIT",
   "repository": {
@@ -47,7 +47,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "better-auth": "1.5.5",
+    "better-auth": "1.7.7",
     "pg": "8.20.0"
   },
   "devDependencies": {

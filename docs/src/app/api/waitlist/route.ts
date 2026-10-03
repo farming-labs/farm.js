@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createEndpoint } from "@farm.js/core/api";
 import { z } from "zod";
-import { getPrisma } from "../../../lib/prisma";
+import { getWaitlistPrisma } from "../../../lib/prisma";
 import { createRateLimiter } from "../../../lib/rate-limit";
 
 // Public, unauthenticated, and it writes to the database, so one caller must
@@ -43,10 +43,12 @@ export const POST = createEndpoint(
     }
 
     try {
-      const prisma = await getPrisma();
+      const prisma = await getWaitlistPrisma();
+      // Anyone can submit any address, so a repeat submission must not replace
+      // what the address's owner wrote. The first description is kept.
       const entry = await prisma.waitlistEntry.upsert({
         where: { email },
-        update: { description },
+        update: {},
         create: { email, description },
         select: { id: true },
       });
@@ -57,9 +59,10 @@ export const POST = createEndpoint(
 
       return {
         ok: false,
-        error: process.env.DATABASE_URL
-          ? "Could not join the waitlist yet. Please try again in a moment."
-          : "Waitlist database is not configured yet.",
+        error:
+          process.env.WAITLIST_DATABASE_URL || process.env.DATABASE_URL
+            ? "Could not join the waitlist yet. Please try again in a moment."
+            : "Waitlist database is not configured yet.",
       };
     }
   },

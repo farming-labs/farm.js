@@ -7,6 +7,7 @@ type Row = Record<string, unknown> & { id: string };
 
 function createFakeOrm() {
   const rows: Row[] = [];
+  const checkoutSessionRows: Row[] = [];
   let nextId = 1;
 
   const matches = (row: Row, where: Record<string, unknown>) =>
@@ -14,6 +15,7 @@ function createFakeOrm() {
 
   return {
     rows,
+    checkoutSessionRows,
     orm: {
       billingAccount: {
         async findFirst({ where }: { where: Record<string, unknown> }) {
@@ -34,6 +36,29 @@ function createFakeOrm() {
           const row = rows.find((candidate) => matches(candidate, where));
           if (row) Object.assign(row, data);
           return row ?? null;
+        },
+      },
+      billingCheckoutSession: {
+        async findFirst({ where }: { where: Record<string, unknown> }) {
+          return checkoutSessionRows.find((row) => matches(row, where)) ?? null;
+        },
+        async create({ data }: { data: Record<string, unknown> }) {
+          if (checkoutSessionRows.some((row) => row.sessionId === data.sessionId)) {
+            throw new Error("duplicate session id");
+          }
+          const row: Row = { id: String(data.sessionId), ...data };
+          checkoutSessionRows.push(row);
+          return row;
+        },
+        async update() {
+          return null;
+        },
+        async deleteMany({ where }: { where: Record<string, unknown> }) {
+          const before = checkoutSessionRows.length;
+          for (let index = checkoutSessionRows.length - 1; index >= 0; index -= 1) {
+            if (matches(checkoutSessionRows[index]!, where)) checkoutSessionRows.splice(index, 1);
+          }
+          return before - checkoutSessionRows.length;
         },
       },
     },
@@ -117,5 +142,40 @@ describe("stripe ensureCustomer race", () => {
 
     expect(again.customerId).toBe(created.customerId);
     expect(fakeStripe.created).toHaveLength(1);
+  });
+
+  it("claims each checkout session once", async () => {
+    const fakeOrm = createFakeOrm();
+    const adapter = ormStorageAdapter({ orm: fakeOrm.orm });
+    const claim = {
+      sessionId: "cs_once",
+      owner: { kind: "user" as const, id: "user_3" },
+      stripeCustomerId: "cus_3",
+    };
+
+    await expect(adapter.claimCheckoutSession?.(claim)).resolves.toBe(true);
+    await expect(adapter.claimCheckoutSession?.(claim)).resolves.toBe(false);
+    await expect(
+      adapter.claimCheckoutSession?.({ ...claim, sessionId: "cs_distinct" }),
+    ).resolves.toBe(true);
+    expect(fakeOrm.checkoutSessionRows.map((row) => row.sessionId)).toEqual([
+      "cs_once",
+      "cs_distinct",
+    ]);
+  });
+
+  it("releases a checkout session claim so a retry can claim it again", async () => {
+    const fakeOrm = createFakeOrm();
+    const adapter = ormStorageAdapter({ orm: fakeOrm.orm });
+    const claim = {
+      sessionId: "cs_retry",
+      owner: { kind: "user" as const, id: "user_4" },
+      stripeCustomerId: "cus_4",
+    };
+
+    await expect(adapter.claimCheckoutSession?.(claim)).resolves.toBe(true);
+    await adapter.releaseCheckoutSession?.("cs_retry");
+    expect(fakeOrm.checkoutSessionRows).toHaveLength(0);
+    await expect(adapter.claimCheckoutSession?.(claim)).resolves.toBe(true);
   });
 });

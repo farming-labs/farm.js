@@ -1,3 +1,5 @@
+export {};
+
 declare module "@farm.js/core/plugin" {
   export interface FarmPlugin {
     name: string;

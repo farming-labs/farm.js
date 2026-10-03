@@ -1,0 +1,436 @@
+/**
+ * llms.txt (https://llmstxt.org): a Markdown index at `/llms.txt` that tells
+ * language models what a site is and where its readable pages live, plus
+ * `/llms-full.txt`, the same index with each page's Markdown inlined.
+ *
+ * `agent.llmsTxt` in farm.config.ts serves a generated index of the app's static
+ * pages. A `src/app/llms.ts` metadata route replaces it with whatever it returns,
+ * and receives the generated pages and defaults to build on. The development
+ * renderer and the generated production server both call into this module, so
+ * the two serve the same file.
+ */
+import { applyFarmBasePath } from "./base-path";
+import {
+  getFarmMarkdownMirrorPath,
+  isFarmMarkdownMirrorExposed,
+  matchesFarmMarkdownRoutePattern,
+  type FarmMarkdownResolvedConfig,
+} from "./markdown";
+
+export interface FarmLlmsTxtLink {
+  title: string;
+  url: string;
+  description?: string;
+}
+
+export interface FarmLlmsTxtSection {
+  title: string;
+  links: FarmLlmsTxtLink[];
+}
+
+export interface FarmLlmsTxt {
+  /** Site or project name, rendered as the `# H1`. Required by the format. */
+  title: string;
+  /** One-sentence summary, rendered as a `> blockquote`. */
+  summary?: string;
+  /** Free-form Markdown placed after the summary. */
+  details?: string;
+  /** `## H2` sections of links. A section titled "Optional" marks skippable links. */
+  sections?: FarmLlmsTxtSection[];
+}
+
+/** A static page of the app, ready to use as an llms.txt link. */
+export interface FarmLlmsTxtPage extends FarmLlmsTxtLink {
+  /** The page's route path, such as `/docs/install`. */
+  path: string;
+}
+
+export interface FarmLlmsTxtUserConfig {
+  /** Set to `false` to turn llms.txt off while keeping these options. */
+  enabled?: boolean;
+  /** Site name for the `# H1`. Defaults to the root layout's metadata title. */
+  title?: string;
+  /** Summary for the `> blockquote`. Defaults to the root layout's metadata description. */
+  summary?: string;
+  /** Markdown placed after the summary. */
+  details?: string;
+  /**
+   * Route patterns to list, using the same syntax as `md.expose`
+   * (`/docs/[...slug]`). Defaults to every static page.
+   */
+  include?: string[];
+  /** Route patterns to leave out, such as `/admin/[...path]`. */
+  exclude?: string[];
+  /**
+   * Also serve `/llms-full.txt`, the index with each page's Markdown mirror inlined.
+   *
+   * @default true
+   */
+  full?: boolean;
+  /**
+   * Seconds a CDN may cache the generated files. Rendering llms-full.txt renders
+   * every listed page, so cache it on busy sites. Defaults to no caching.
+   */
+  revalidate?: number;
+}
+
+export interface ResolvedFarmLlmsTxtConfig {
+  enabled: boolean;
+  title?: string;
+  summary?: string;
+  details?: string;
+  include: string[];
+  exclude: string[];
+  full: boolean;
+  revalidate?: number;
+}
+
+export interface FarmLlmsTxtPageSource {
+  pattern: string;
+  metadata?: unknown;
+}
+
+export function resolveFarmLlmsTxtConfig(
+  input: boolean | FarmLlmsTxtUserConfig | undefined,
+): ResolvedFarmLlmsTxtConfig {
+  if (!input) return { enabled: false, include: [], exclude: [], full: false };
+  if (input === true) return { enabled: true, include: [], exclude: [], full: true };
+  if (typeof input !== "object") {
+    throw new TypeError("agent.llmsTxt must be true, false, or an options object.");
+  }
+  // Also accepts its own output, so already-resolved config passes through unchanged.
+  if (input.enabled === false) return { enabled: false, include: [], exclude: [], full: false };
+
+  for (const key of ["title", "summary", "details"] as const) {
+    if (input[key] !== undefined && typeof input[key] !== "string") {
+      throw new TypeError(`agent.llmsTxt.${key} must be a string.`);
+    }
+  }
+  if (input.full !== undefined && typeof input.full !== "boolean") {
+    throw new TypeError("agent.llmsTxt.full must be a boolean.");
+  }
+  if (
+    input.revalidate !== undefined &&
+    (typeof input.revalidate !== "number" ||
+      !Number.isFinite(input.revalidate) ||
+      input.revalidate < 0)
+  ) {
+    throw new TypeError("agent.llmsTxt.revalidate must be a number of seconds.");
+  }
+
+  return {
+    enabled: true,
+    ...(input.title ? { title: input.title } : {}),
+    ...(input.summary ? { summary: input.summary } : {}),
+    ...(input.details ? { details: input.details } : {}),
+    include: resolveRoutePatterns(input.include, "include"),
+    exclude: resolveRoutePatterns(input.exclude, "exclude"),
+    full: input.full !== false,
+    ...(input.revalidate !== undefined ? { revalidate: input.revalidate } : {}),
+  };
+}
+
+function resolveRoutePatterns(value: unknown, key: "include" | "exclude"): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new TypeError(`agent.llmsTxt.${key} must be an array of route patterns.`);
+  }
+  return value.map((pattern, index) => {
+    if (typeof pattern !== "string" || !pattern.startsWith("/")) {
+      throw new TypeError(
+        `agent.llmsTxt.${key}[${index}] must be a route pattern starting with "/", such as "/docs/[...slug]".`,
+      );
+    }
+    return pattern;
+  });
+}
+
+export function collectFarmLlmsTxtPages(
+  sources: Iterable<FarmLlmsTxtPageSource>,
+  options: {
+    origin: string;
+    basePath?: string;
+    markdown?: FarmMarkdownResolvedConfig;
+    include?: string[];
+    exclude?: string[];
+  },
+): FarmLlmsTxtPage[] {
+  const include = options.include ?? [];
+  const exclude = options.exclude ?? [];
+  const pages = new Map<string, FarmLlmsTxtPage>();
+
+  for (const source of sources) {
+    const path = source.pattern;
+    // Dynamic routes have no single URL to list; an llms.ts can add their pages.
+    if (path.includes("[") || pages.has(path)) continue;
+    if (
+      include.length &&
+      !include.some((pattern) => matchesFarmMarkdownRoutePattern(pattern, path))
+    ) {
+      continue;
+    }
+    if (exclude.some((pattern) => matchesFarmMarkdownRoutePattern(pattern, path))) continue;
+
+    // llmstxt.org prefers links to Markdown; use the page's mirror when it has one.
+    const target = isFarmMarkdownMirrorExposed(options.markdown, path)
+      ? getFarmMarkdownMirrorPath(path)
+      : path;
+    const description = readMetadataString(source.metadata, "description");
+    pages.set(path, {
+      path,
+      title: readMetadataTitle(source.metadata) ?? fallbackPageTitle(path),
+      url: `${options.origin}${applyFarmBasePath(target, options.basePath)}`,
+      ...(description ? { description } : {}),
+    });
+  }
+
+  return [...pages.values()].sort((left, right) => left.path.localeCompare(right.path));
+}
+
+export function createFarmDefaultLlmsTxt(options: {
+  origin: string;
+  pages: FarmLlmsTxtPage[];
+  config: ResolvedFarmLlmsTxtConfig;
+  rootMetadata?: unknown;
+}): FarmLlmsTxt {
+  const { config, pages } = options;
+  const summary = config.summary ?? readMetadataString(options.rootMetadata, "description");
+
+  return {
+    title:
+      config.title ??
+      readMetadataTitle(options.rootMetadata) ??
+      pages.find((page) => page.path === "/")?.title ??
+      new URL(options.origin).host,
+    ...(summary ? { summary } : {}),
+    ...(config.details ? { details: config.details } : {}),
+    sections: pages.length
+      ? [
+          {
+            title: "Pages",
+            links: pages.map(({ title, url, description }) => ({
+              title,
+              url,
+              ...(description ? { description } : {}),
+            })),
+          },
+        ]
+      : [],
+  };
+}
+
+export function serializeFarmLlmsTxt(value: unknown): string {
+  // A string is the complete file, written by hand; serve it as-is.
+  if (typeof value === "string") {
+    if (!value.trim()) throw new TypeError("llms.ts returned an empty llms.txt");
+    return value.endsWith("\n") ? value : `${value}\n`;
+  }
+  if (!isRecord(value)) {
+    throw new TypeError("llms.ts must return llms.txt text, an llms.txt object, or a Response");
+  }
+  const title = requireText(value.title, "llms.ts must return a non-empty title");
+  const summary = optionalText(value.summary, "llms.ts summary must be a string");
+  const details = optionalText(value.details, "llms.ts details must be a string");
+  if (value.sections !== undefined && !Array.isArray(value.sections)) {
+    throw new TypeError("llms.ts sections must be an array");
+  }
+
+  const blocks = [`# ${toSingleLine(title)}`];
+  if (summary?.trim()) blocks.push(`> ${toSingleLine(summary)}`);
+  if (details?.trim()) blocks.push(details.trim());
+
+  for (const [sectionIndex, section] of ((value.sections as unknown[]) ?? []).entries()) {
+    if (!isRecord(section)) {
+      throw new TypeError(`llms.ts section ${sectionIndex} must be an object`);
+    }
+    const sectionTitle = requireText(
+      section.title,
+      `llms.ts section ${sectionIndex} must include a non-empty title`,
+    );
+    if (!Array.isArray(section.links)) {
+      throw new TypeError(`llms.ts section "${sectionTitle}" must include a links array`);
+    }
+
+    const links = section.links.map((link, linkIndex) => {
+      const where = `llms.ts section "${sectionTitle}" link ${linkIndex}`;
+      if (!isRecord(link)) throw new TypeError(`${where} must be an object`);
+      const linkTitle = requireText(link.title, `${where} must include a non-empty title`);
+      const url = requireText(link.url, `${where} must include a non-empty url`);
+      const description = optionalText(link.description, `${where} description must be a string`);
+      return `- [${escapeLinkText(linkTitle)}](${escapeLinkUrl(url)})${
+        description?.trim() ? `: ${toSingleLine(description)}` : ""
+      }`;
+    });
+    blocks.push(`## ${toSingleLine(sectionTitle)}`, links.join("\n"));
+  }
+
+  return `${blocks.filter(Boolean).join("\n\n")}\n`;
+}
+
+/**
+ * Reads a page's Markdown the way an agent would: a fresh `.md` request with no
+ * cookies or credentials, so a page behind auth answers 401 and is left out of
+ * a file that CDNs may cache, instead of leaking into it.
+ */
+export function createFarmLlmsMarkdownReader(
+  fetchMarkdown: (request: Request) => Promise<Response>,
+): (url: string) => Promise<string | null> {
+  return async (url) => {
+    try {
+      const response = await fetchMarkdown(
+        new Request(url, { headers: { accept: "text/markdown" } }),
+      );
+      const type = response.headers.get("content-type") ?? "";
+      if (!response.ok || !type.toLowerCase().startsWith("text/markdown")) {
+        await response.body?.cancel();
+        return null;
+      }
+      return await response.text();
+    } catch {
+      return null;
+    }
+  };
+}
+
+/**
+ * Renders llms-full.txt: the llms.txt header, then one block per linked page with
+ * its Markdown inlined, in the layout the docs engine uses. A string passes
+ * through unchanged. Only same-origin links are fetched.
+ */
+export async function renderFarmLlmsFullTxt(
+  value: unknown,
+  options: {
+    origin: string;
+    readMarkdown: (url: string) => Promise<string | null>;
+    concurrency?: number;
+  },
+): Promise<string> {
+  // Validates the value, and returns strings unchanged apart from the final newline.
+  const index = serializeFarmLlmsTxt(value);
+  if (typeof value === "string") return index;
+
+  const llms = value as FarmLlmsTxt;
+  const links: FarmLlmsTxtLink[] = [];
+  const seen = new Set<string>();
+  for (const section of llms.sections ?? []) {
+    for (const link of section.links) {
+      if (seen.has(link.url)) continue;
+      seen.add(link.url);
+      links.push(link);
+    }
+  }
+
+  const contents = await mapWithConcurrency(links, options.concurrency ?? 4, (link) =>
+    shouldInlineLlmsLink(link.url, options.origin) ? options.readMarkdown(link.url) : null,
+  );
+
+  const blocks = [`# ${toSingleLine(llms.title)}`];
+  if (llms.summary?.trim()) blocks.push(`> ${toSingleLine(llms.summary)}`);
+  if (llms.details?.trim()) blocks.push(llms.details.trim());
+  const pages = links.map((link, index) => {
+    const parts = [`## ${toSingleLine(link.title)}`, `URL: ${escapeLinkUrl(link.url)}`];
+    if (link.description?.trim()) parts.push(toSingleLine(link.description));
+    const content = stripFrontmatter(contents[index] ?? "").trim();
+    if (content) parts.push(content);
+    return parts.join("\n\n");
+  });
+  if (pages.length) blocks.push(pages.join("\n\n---\n\n"));
+  return `${blocks.join("\n\n")}\n`;
+}
+
+// Markdown sources keep their YAML frontmatter, whose --- lines would read as page
+// separators. The block header already carries the title and description.
+function stripFrontmatter(markdown: string): string {
+  const match = /^\uFEFF?---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/.exec(markdown);
+  return match ? markdown.slice(match[0].length) : markdown;
+}
+
+function shouldInlineLlmsLink(url: string, origin: string): boolean {
+  let target: URL;
+  try {
+    target = new URL(url, origin);
+  } catch {
+    return false;
+  }
+  // Inlining llms.txt or llms-full.txt itself would recurse.
+  return target.origin === origin && !/\/llms(-full)?\.txt$/.test(target.pathname);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  run: (item: T) => Promise<R> | R,
+): Promise<R[]> {
+  const results: R[] = [];
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await run(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(limit, 1), items.length) }, worker));
+  return results;
+}
+
+function readMetadataTitle(metadata: unknown): string | undefined {
+  if (!isRecord(metadata)) return undefined;
+  const { title } = metadata;
+  if (typeof title === "string") return title.trim() || undefined;
+  if (isRecord(title)) {
+    for (const key of ["absolute", "default"] as const) {
+      const value = title[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function readMetadataString(metadata: unknown, key: string): string | undefined {
+  if (!isRecord(metadata)) return undefined;
+  const value = metadata[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function fallbackPageTitle(path: string): string {
+  if (path === "/") return "Home";
+  const segments = path.split("/").filter(Boolean);
+  const segment = segments[segments.length - 1] ?? path;
+  const words = segment.replace(/[-_]+/g, " ").trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : path;
+}
+
+// Headings, quotes, and list items are single lines; newlines in a value would
+// otherwise start new Markdown blocks.
+function toSingleLine(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function escapeLinkText(value: string): string {
+  return toSingleLine(value).replace(/[\\[\]]/g, "\\$&");
+}
+
+// encodeURIComponent writes UTF-8 and escapes whitespace and angle brackets, but
+// leaves "(" and ")" alone, and ")" would end the Markdown link early.
+function escapeLinkUrl(value: string): string {
+  return value
+    .trim()
+    .replace(/[\s()<>]/g, (character) =>
+      character === "(" ? "%28" : character === ")" ? "%29" : encodeURIComponent(character),
+    );
+}
+
+function requireText(value: unknown, message: string): string {
+  if (typeof value !== "string" || !value.trim()) throw new TypeError(message);
+  return value;
+}
+
+function optionalText(value: unknown, message: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw new TypeError(message);
+  return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}

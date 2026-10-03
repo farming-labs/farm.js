@@ -11,6 +11,11 @@ import {
 } from "./preview-gateway";
 import { runNativePreviewTunnel } from "./preview-native";
 import { createHttpLocalUrl } from "./local-url";
+import {
+  authorizePreviewGatewayPlan,
+  parsePreviewDuration,
+  PREVIEW_EXPIRY_CLOCK_SKEW_MS,
+} from "./preview-auth";
 
 export interface PreviewFarmOptions {
   root?: string;
@@ -24,6 +29,8 @@ export interface PreviewFarmOptions {
   noProbe?: boolean;
   timeoutMs?: number;
   provider?: "farm" | "local";
+  expires?: string | number;
+  login?: boolean;
 }
 
 export interface PreviewTarget {
@@ -45,10 +52,13 @@ export interface PreviewTunnelPlan {
 
 export interface PreviewFarmResult {
   target: PreviewTarget;
-  plan: PreviewTunnelPlan | PreviewGatewayPlan;
+  plan: PreviewTunnelPlan | PreviewFarmGatewayPlan;
   publicUrl?: string;
   session?: PreviewAgentSession | PreviewGatewaySession;
 }
+
+/** The managed plan exposed to callers, without its internal relay credential. */
+export type PreviewFarmGatewayPlan = Omit<PreviewGatewayPlan, "relayToken">;
 
 const MAX_TUNNEL_SCAN_CHARS = 64 * 1024;
 const DEFAULT_PREVIEW_PORTS = [3000, 4319, 5173, 4173, 8080];
@@ -61,27 +71,53 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
   logger.info(`Local:  ${target.localUrl}`);
 
   if (shouldUseManagedGateway(options)) {
-    const plan = createPreviewGatewayPlan(target, options);
+    const expiresInMs = parsePreviewDuration(options.expires);
+    const plan = {
+      ...createPreviewGatewayPlan(target, options),
+      ...(expiresInMs ? { expiresInMs } : {}),
+    };
 
     if (options.dryRun) {
       logger.info(formatGatewayPlan(plan));
       logger.success("Preview gateway dry run completed.");
-      return { target, plan };
+      return { target, plan: redactPreviewGatewayPlan(plan) };
     }
 
-    logger.info(`Relay: ${plan.relayUrl}`);
+    const authorizedPlan = await authorizePreviewGatewayPlan(plan, {
+      expiresInMs,
+      forceLogin: options.login,
+    });
+    logger.info(`Relay: ${authorizedPlan.relayUrl}`);
     logger.info("Opening native Farm preview tunnel...");
     try {
-      const session = await runNativePreviewTunnel(plan);
-      return { target, plan, publicUrl: session.publicUrl, session };
+      const session = await runNativePreviewTunnel(authorizedPlan);
+      return {
+        target,
+        plan: redactPreviewGatewayPlan(authorizedPlan),
+        publicUrl: session.publicUrl,
+        session,
+      };
     } catch (error) {
+      if (
+        authorizedPlan.expiresAt &&
+        authorizedPlan.expiresAt <= Date.now() + PREVIEW_EXPIRY_CLOCK_SKEW_MS
+      ) {
+        throw new Error(
+          "The native preview relay stopped at or near the hosted expiry; the expiring grant was not reused for polling fallback.",
+        );
+      }
       logger.warn(
         `Native preview relay unavailable; using compatibility gateway polling.${formatPreviewError(error)}`,
       );
-      const session = await runPreviewGateway(plan, {
+      const session = await runPreviewGateway(authorizedPlan, {
         timeoutMs: options.timeoutMs,
       });
-      return { target, plan, publicUrl: session.publicUrl, session };
+      return {
+        target,
+        plan: redactPreviewGatewayPlan(authorizedPlan),
+        publicUrl: session.publicUrl,
+        session,
+      };
     }
   }
 
@@ -96,6 +132,11 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
   logger.info("Opening public tunnel...");
   const publicUrl = await runPreviewTunnel(plan, options.timeoutMs ?? 30000);
   return { target, plan, publicUrl };
+}
+
+function redactPreviewGatewayPlan(plan: PreviewGatewayPlan): PreviewFarmGatewayPlan {
+  const { relayToken: _relayToken, ...publicPlan } = plan;
+  return publicPlan;
 }
 
 function formatPreviewError(error: unknown) {
@@ -202,9 +243,7 @@ export function createPreviewTunnelPlan(
 ): PreviewTunnelPlan {
   const requestedName =
     sanitizePreviewName(options.name || process.env.FARM_PREVIEW_NAME) || randomPreviewName();
-  const domain = normalizePreviewDomain(
-    process.env.FARM_PREVIEW_DOMAIN || "preview.farming-labs.dev",
-  );
+  const domain = normalizePreviewDomain(process.env.FARM_PREVIEW_DOMAIN || "preview.farmjs.dev");
   const requestedHostname = `${requestedName}.${domain}`;
   const template = process.env.FARM_PREVIEW_TUNNEL_COMMAND;
 
@@ -288,6 +327,7 @@ export function parsePreviewPublicUrl(
       host.endsWith(".ngrok-free.app") ||
       host.endsWith(".ngrok.dev") ||
       host.endsWith(".ngrok.io") ||
+      host.endsWith(".preview.farmjs.dev") ||
       host.endsWith(".preview.farming-labs.dev")
     );
   });

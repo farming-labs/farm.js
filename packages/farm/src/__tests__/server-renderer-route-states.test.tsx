@@ -1,7 +1,10 @@
 // @vitest-environment node
 
 import React from "react";
+import { generateKeyPairSync, sign } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import https from "node:https";
+import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { imageSize } from "image-size";
@@ -41,6 +44,67 @@ afterEach(async () => {
 });
 
 describe("file route loading.tsx and error.tsx", () => {
+  it("uses one fresh CSP nonce for the response header and every framework script", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          default: function DashboardPage() {
+            return React.createElement(
+              "main",
+              null,
+              "Nonce protected",
+              React.createElement("script", { nonce: "stale-app-nonce" }, "window.appReady=true"),
+            );
+          },
+        },
+      },
+      {
+        clientMetadata: { isClientComponent: true, shouldHydrate: true },
+        security: {
+          csp: { nonce: true, policy: "default-src 'self'; script-src 'self'" },
+        },
+      },
+    );
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    const policy = String(response.headers.get("content-security-policy"));
+    const nonce = policy.match(/'nonce-([^']+)'/)?.[1];
+    const document = new JSDOM(response.body).window.document;
+    expect(nonce).toBeTruthy();
+    expect(document.querySelectorAll("script").length).toBeGreaterThan(0);
+    expect(
+      Array.from(document.querySelectorAll("script")).every((script) => script.nonce === nonce),
+    ).toBe(true);
+    expect(policy).not.toContain("unsafe-inline");
+  });
+
+  it("bypasses reusable PPR shells when CSP nonces are enabled", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          ppr: true,
+          default: function DashboardPage() {
+            return React.createElement("main", null, "Nonce protected PPR route");
+          },
+        },
+      },
+      {
+        security: {
+          csp: { nonce: true, policy: "default-src 'self'; script-src 'self'" },
+        },
+      },
+    );
+    (renderer as any).config.experimental.ppr = true;
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    expect(response.headers.get("x-farm-ppr")).toBe("bypass");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
   it("renders the nearest loading.tsx while a file route suspends", async () => {
     const release = createDeferred<void>();
     const response = createMockResponse();
@@ -298,6 +362,332 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain("<loc>https://farm.test/dashboard?locale=am</loc>");
   });
 
+  describe("llms.txt", () => {
+    const pricingModulePath = "/test/src/app/pricing/page.tsx";
+    const postModulePath = "/test/src/app/blog/[slug]/page.tsx";
+    const llmsModulePath = "/test/src/app/dashboard/llms.ts";
+    const pages = {
+      [layoutModulePath]: {
+        default: ({ children }: any) => children,
+        metadata: { title: { default: "Acme", template: "%s | Acme" }, description: "Billing." },
+      },
+      [routeModulePath]: { default: () => null, metadata: { title: "Dashboard" } },
+      [pricingModulePath]: {
+        default: () => null,
+        metadata: { title: "Pricing", description: "Plans and limits" },
+      },
+      [postModulePath]: { default: () => null, metadata: { title: "Post" } },
+    };
+    const routes = {
+      "/dashboard": routeModulePath,
+      "/pricing": pricingModulePath,
+      "/blog/[slug]": postModulePath,
+    };
+
+    it("serves the generated index when agent.llmsTxt is on", async () => {
+      const response = createMockResponse();
+      const renderer = createRenderer(pages, {
+        routes,
+        layouts: { "/": layoutModulePath },
+        agent: { llmsTxt: true },
+      });
+
+      await renderer.renderPage(createMockRequest("/llms.txt"), response);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+      expect(response.body).toBe(
+        [
+          "# Acme",
+          "",
+          "> Billing.",
+          "",
+          "## Pages",
+          "",
+          "- [Dashboard](http://farm.test/dashboard.md)",
+          "- [Pricing](http://farm.test/pricing.md): Plans and limits",
+          "",
+        ].join("\n"),
+      );
+    });
+
+    it("leaves /llms.txt alone when agent.llmsTxt is off", async () => {
+      const response = createMockResponse();
+      const renderer = createRenderer(pages, { routes, layouts: { "/": layoutModulePath } });
+
+      await renderer.renderPage(createMockRequest("/llms.txt"), response);
+
+      // This mock matches every path to the dashboard page, so "off" means the
+      // request fell through to page rendering instead of an llms.txt response.
+      expect(response.headers.get("content-type")).not.toBe("text/plain; charset=utf-8");
+      expect(response.body).not.toContain("## Pages");
+    });
+
+    // Development reads each page's Markdown back through the dev server, like its
+    // .md handler does, at the server's own socket address; stand in for it, with
+    // /pricing behind auth.
+    function stubMarkdownFetch() {
+      return vi.spyOn(globalThis, "fetch").mockImplementation(async (input: any) => {
+        const request = input instanceof Request ? input : new Request(input);
+        expect(request.headers.get("cookie")).toBeNull();
+        expect(new URL(request.url).origin).toBe("http://127.0.0.1:4317");
+        if (new URL(request.url).pathname === "/dashboard.md") {
+          return new Response("# Dashboard\n\ndashboard-markdown-body\n", {
+            headers: { "content-type": "text/markdown; charset=utf-8" },
+          });
+        }
+        return new Response("Unauthorized", { status: 401 });
+      });
+    }
+
+    function createDevRequest(url: string, extra: Partial<FarmRequest> = {}): FarmRequest {
+      return {
+        ...createMockRequest(url),
+        socket: { localAddress: "127.0.0.1", localPort: 4317 },
+        ...extra,
+      } as FarmRequest;
+    }
+
+    it("serves a generated llms-full.txt with each page's Markdown", async () => {
+      const fetchSpy = stubMarkdownFetch();
+      const response = createMockResponse();
+      const renderer = createRenderer(pages, {
+        routes,
+        layouts: { "/": layoutModulePath },
+        agent: { llmsTxt: { revalidate: 300 } },
+      });
+
+      await renderer.renderPage(createDevRequest("/llms-full.txt"), response);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers.get("cache-control")).toBe(
+        "public, s-maxage=300, stale-while-revalidate=300",
+      );
+      expect(response.body).toBe(
+        [
+          "# Acme",
+          "",
+          "> Billing.",
+          "",
+          "## Dashboard",
+          "",
+          "URL: http://farm.test/dashboard.md",
+          "",
+          "# Dashboard",
+          "",
+          "dashboard-markdown-body",
+          "",
+          "---",
+          "",
+          "## Pricing",
+          "",
+          "URL: http://farm.test/pricing.md",
+          "",
+          "Plans and limits",
+          "",
+        ].join("\n"),
+      );
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("never fetches from the host a client names in the Host header", async () => {
+      const fetchSpy = stubMarkdownFetch();
+      const response = createMockResponse();
+      const renderer = createRenderer(pages, {
+        routes,
+        layouts: { "/": layoutModulePath },
+        agent: { llmsTxt: true },
+      });
+      const request = createDevRequest("/llms-full.txt");
+      request.headers = { host: "metadata.internal:8080" };
+
+      await renderer.renderPage(request, response);
+
+      // Links still name the requested host; reads go to the dev server itself.
+      expect(response.body).toContain("URL: http://metadata.internal:8080/dashboard.md");
+      expect(response.body).toContain("dashboard-markdown-body");
+      for (const [input] of fetchSpy.mock.calls) {
+        expect(new URL(String(input instanceof Request ? input.url : input)).host).toBe(
+          "127.0.0.1:4317",
+        );
+      }
+    });
+
+    it("reads pages from an HTTPS dev server, verifying the requested hostname", async () => {
+      // The certificate names farm.test and no IP address.
+      const { cert, key } = createSelfSignedCertificate("farm.test");
+      const hosts: Array<string | undefined> = [];
+      const server = https.createServer({ cert, key }, (request, response) => {
+        hosts.push(request.headers.host);
+        if (request.url === "/dashboard.md") {
+          response.writeHead(200, { "content-type": "text/markdown; charset=utf-8" });
+          response.end("# Dashboard\n\ndashboard-markdown-body\n");
+          return;
+        }
+        response.writeHead(401).end("Unauthorized");
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const { port } = server.address() as AddressInfo;
+      const previousCa = https.globalAgent.options.ca;
+      https.globalAgent.options.ca = cert;
+      const renderFull = async (host: string) => {
+        const response = createMockResponse();
+        const renderer = createRenderer(pages, {
+          routes,
+          layouts: { "/": layoutModulePath },
+          agent: { llmsTxt: true },
+        });
+        const request = createDevRequest("/llms-full.txt", {
+          socket: { localAddress: "127.0.0.1", localPort: port, encrypted: true },
+        } as Partial<FarmRequest>);
+        request.headers = { host };
+        await renderer.renderPage(request, response);
+        return response.body;
+      };
+
+      try {
+        // Connects to 127.0.0.1, which the certificate does not name, and still
+        // verifies it, against farm.test.
+        expect(await renderFull(`farm.test:${port}`)).toContain("dashboard-markdown-body");
+        expect(hosts).toContain(`farm.test:${port}`);
+        // A hostname the certificate does not cover still fails verification.
+        hosts.length = 0;
+        expect(await renderFull(`other.test:${port}`)).not.toContain("dashboard-markdown-body");
+        expect(hosts).toEqual([]);
+      } finally {
+        https.globalAgent.options.ca = previousCa;
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
+      }
+    });
+
+    it("answers HEAD /llms-full.txt without reading any page", async () => {
+      const fetchSpy = stubMarkdownFetch();
+      const response = createMockResponse();
+      const renderer = createRenderer(pages, {
+        routes,
+        layouts: { "/": layoutModulePath },
+        agent: { llmsTxt: true },
+      });
+
+      await renderer.renderPage(createDevRequest("/llms-full.txt", { method: "HEAD" }), response);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+      expect(response.body).toBe("");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("leaves /llms-full.txt alone when agent.llmsTxt.full is false", async () => {
+      const fetchSpy = stubMarkdownFetch();
+      const response = createMockResponse();
+      const renderer = createRenderer(pages, {
+        routes,
+        layouts: { "/": layoutModulePath },
+        agent: { llmsTxt: { full: false } },
+      });
+
+      await renderer.renderPage(createDevRequest("/llms-full.txt"), response);
+
+      expect(response.body).not.toContain("URL: http://farm.test/dashboard.md");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("inlines pages for an llms-full.ts that returns the llms structure", async () => {
+      stubMarkdownFetch();
+      const fullModulePath = "/test/src/app/dashboard/llms-full.ts";
+      const response = createMockResponse();
+      const renderer = createRenderer(
+        {
+          ...pages,
+          [fullModulePath]: {
+            default: ({ defaults }: any) => ({
+              title: "Acme handbook",
+              sections: [{ title: "Pages", links: defaults.sections[0].links.slice(0, 1) }],
+            }),
+          },
+        },
+        {
+          routes,
+          layouts: { "/": layoutModulePath },
+          applicationMetadata: {
+            kind: "llms-full",
+            modulePath: fullModulePath,
+            outputName: "llms-full.txt",
+          },
+        },
+      );
+
+      await renderer.renderPage(createDevRequest("/dashboard/llms-full.txt"), response);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toBe(
+        [
+          "# Acme handbook",
+          "",
+          "## Dashboard",
+          "",
+          "URL: http://farm.test/dashboard.md",
+          "",
+          "# Dashboard",
+          "",
+          "dashboard-markdown-body",
+          "",
+        ].join("\n"),
+      );
+    });
+
+    it("lets llms.ts extend the generated pages and defaults", async () => {
+      const response = createMockResponse();
+      const renderer = createRenderer(
+        {
+          ...pages,
+          [llmsModulePath]: {
+            default: ({ defaults, pages: staticPages }: any) => ({
+              ...defaults,
+              title: "Acme docs",
+              sections: [
+                {
+                  title: "Product",
+                  links: staticPages.filter((page: any) => page.path !== "/dashboard"),
+                },
+                {
+                  title: "Optional",
+                  links: [{ title: "Status", url: "https://status.acme.test" }],
+                },
+              ],
+            }),
+          },
+        },
+        {
+          routes,
+          layouts: { "/": layoutModulePath },
+          applicationMetadata: { kind: "llms", modulePath: llmsModulePath, outputName: "llms.txt" },
+        },
+      );
+
+      await renderer.renderPage(createMockRequest("/dashboard/llms.txt"), response);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toBe(
+        [
+          "# Acme docs",
+          "",
+          "> Billing.",
+          "",
+          "## Product",
+          "",
+          "- [Pricing](http://farm.test/pricing.md): Plans and limits",
+          "",
+          "## Optional",
+          "",
+          "- [Status](https://status.acme.test)",
+          "",
+        ].join("\n"),
+      );
+    });
+  });
+
   it("automatically links the nearest manifest.ts from rendered pages", async () => {
     const response = createMockResponse();
     const renderer = createRenderer(
@@ -424,6 +814,7 @@ describe("file route loading.tsx and error.tsx", () => {
 
     expect(response.body).toContain("Excellent");
     expect(response.body).toContain('window.__FARM_DEFERRED_DATA__={"d0"');
+    expect(response.body.match(/data-farm-refresh-state/g)).toHaveLength(2);
     expect(response.body).toContain('"status":"fulfilled"');
     expect(response.headers.get("x-farm-deployment-id")).toBe("release-2");
     expect(response.body).toContain('window.__FARM_DEPLOYMENT_ID__ = "release-2"');
@@ -444,6 +835,9 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.headers.get("x-farm-deployment-id")).toBe("release-2");
     expect(response.headers.get("set-cookie")).toContain("__farm_deployment=release-2");
     expect(response.body).toContain('window.__FARM_DEPLOYMENT_ID__ = "release-2"');
+    expect(response.body).toContain("window.__FARM_DEFERRED_DATA__={};");
+    expect(response.body).toContain("window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ = false;");
+    expect(response.body).toContain("window.__FARM_I18N__ = null;");
     expect(response.body).toContain('<meta name="farm-deployment-id" content="release-2">');
   });
 
@@ -810,10 +1204,19 @@ function createRenderer(
     opengraphImage?: boolean;
     staticImage?: { modulePath: string; staticInfo: any };
     applicationMetadata?: {
-      kind: "sitemap" | "robots" | "manifest";
+      kind: "sitemap" | "robots" | "manifest" | "llms" | "llms-full";
       modulePath: string;
-      outputName: "sitemap.xml" | "robots.txt" | "manifest.webmanifest";
+      outputName:
+        | "sitemap.xml"
+        | "robots.txt"
+        | "manifest.webmanifest"
+        | "llms.txt"
+        | "llms-full.txt";
     };
+    /** Page and layout route patterns mapped to module paths, for llms.txt. */
+    routes?: Record<string, string>;
+    layouts?: Record<string, string>;
+    agent?: FarmConfig["agent"];
     clientMetadata?: {
       isClientComponent: boolean;
       shouldHydrate: boolean;
@@ -828,6 +1231,7 @@ function createRenderer(
     integrations?: FarmConfig["integrations"];
     basePath?: string;
     root?: string;
+    security?: FarmConfig["security"];
   } = {},
 ) {
   const metadataImageEntry = {
@@ -867,7 +1271,13 @@ function createRenderer(
         },
       }
     : null;
+  const toRouteEntries = (entries: Record<string, string> = {}) =>
+    new Map(
+      Object.entries(entries).map(([pattern, modulePath]) => [pattern, { pattern, modulePath }]),
+    );
   const routeManager = {
+    getRoutes: () => toRouteEntries(options.routes),
+    getLayouts: () => toRouteEntries(options.layouts),
     matchMetadataRoute(pathname: string) {
       if (
         !applicationMetadataEntry ||
@@ -1005,6 +1415,8 @@ function createRenderer(
       ...createConfig(options.root),
       integrations: options.integrations ?? {},
       basePath: options.basePath ?? "/",
+      security: options.security,
+      ...(options.agent ? { agent: options.agent } : {}),
     },
     routeManager as any,
   );
@@ -1045,6 +1457,56 @@ function createConfig(root = "/test"): Required<FarmConfig> {
     },
     vite: {},
   } as Required<FarmConfig>;
+}
+
+/**
+ * A throwaway self-signed certificate for `hostname`, built at test time so no
+ * key material lives in the repository: a minimal X.509 v3 certificate in DER,
+ * with a subjectAltName, signed by a fresh P-256 key.
+ */
+function createSelfSignedCertificate(hostname: string): { cert: string; key: string } {
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const der = (tag: number, ...parts: Buffer[]) => {
+    const body = Buffer.concat(parts);
+    const length =
+      body.length < 0x80
+        ? [body.length]
+        : body.length < 0x100
+          ? [0x81, body.length]
+          : [0x82, body.length >> 8, body.length & 0xff];
+    return Buffer.concat([Buffer.from([tag, ...length]), body]);
+  };
+  const oid = (hex: string) => der(0x06, Buffer.from(hex, "hex"));
+  const utcTime = (date: Date) =>
+    der(0x17, Buffer.from(`${date.toISOString().replace(/\D/g, "").slice(2, 14)}Z`));
+  const name = der(0x30, der(0x31, der(0x30, oid("550403"), der(0x0c, Buffer.from(hostname)))));
+  const ecdsaWithSha256 = der(0x30, oid("2a8648ce3d040302"));
+  const now = Date.now();
+  const tbs = der(
+    0x30,
+    der(0xa0, der(0x02, Buffer.from([2]))),
+    der(0x02, Buffer.from([1])),
+    ecdsaWithSha256,
+    name,
+    der(0x30, utcTime(new Date(now - 86_400_000)), utcTime(new Date(now + 86_400_000))),
+    name,
+    publicKey.export({ type: "spki", format: "der" }),
+    der(
+      0xa3,
+      der(0x30, der(0x30, oid("551d11"), der(0x04, der(0x30, der(0x82, Buffer.from(hostname)))))),
+    ),
+  );
+  const certificate = der(
+    0x30,
+    tbs,
+    ecdsaWithSha256,
+    der(0x03, Buffer.from([0]), sign("sha256", tbs, privateKey)),
+  );
+  const lines = certificate.toString("base64").match(/.{1,64}/g) ?? [];
+  return {
+    cert: `-----BEGIN CERTIFICATE-----\n${lines.join("\n")}\n-----END CERTIFICATE-----\n`,
+    key: privateKey.export({ type: "pkcs8", format: "pem" }) as string,
+  };
 }
 
 function createMockRequest(url: string): FarmRequest {

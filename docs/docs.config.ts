@@ -13,6 +13,7 @@ import {
   siSolid,
   siSvelte,
   siTanstack,
+  siV0,
   siVuedotjs,
 } from "simple-icons";
 
@@ -42,6 +43,11 @@ const resolveGeistFontsDirectory = () => {
     throw new Error("Could not resolve Geist fonts for the Farm.js docs social image.");
   return directory;
 };
+
+// T3 Chat has no published mark, so its menu entry uses a neutral chat glyph (Lucide).
+const chatIcon = brandSvg(
+  '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>',
+);
 
 const geistFontsDirectory = resolveGeistFontsDirectory();
 const embeddedWoff2 = (...segments: string[]) =>
@@ -166,6 +172,8 @@ const sidebar = [
     children: [
       { label: "Why?", slug: "", icon: "sparkles" },
       { label: "Getting Started", slug: "getting-started", icon: "rocket" },
+      { label: "Stability and Support", slug: "stability", icon: "shield" },
+      { label: "Upgrading to 0.1", slug: "upgrading", icon: "rocket" },
       { label: "Project Structure", slug: "project-structure", icon: "folder" },
       { label: "Configuration", slug: "configuration", icon: "settings" },
       { label: "Layers", slug: "layers", icon: "box" },
@@ -343,6 +351,7 @@ const sidebar = [
         icon: "plug",
         children: [
           { label: "Analyzer", slug: "plugins/analyzer", icon: "gauge" },
+          { label: "API MCP", slug: "plugins/mcp", icon: "sparkles" },
           { label: "Content", slug: "plugins/content", icon: "file" },
           { label: "DevTools", slug: "plugins/devtools", icon: "monitor" },
           { label: "Federation", slug: "plugins/federation", icon: "network" },
@@ -447,8 +456,27 @@ const config = {
     openDocs: {
       enabled: true,
       target: "markdown",
+      prompt: "Read {url} so I can ask questions about this Farm.js documentation page.",
+      providers: [
+        "chatgpt",
+        "claude",
+        {
+          name: "T3 Chat",
+          urlTemplate: "https://t3.chat/new?q={prompt}",
+          icon: chatIcon,
+        },
+        "cursor",
+        {
+          name: "v0",
+          urlTemplate: "https://v0.app/chat?q={prompt}",
+          icon: brandPath(siV0.path),
+        },
+        "perplexity",
+        "gemini",
+        "copilot",
+      ],
     },
-    alignment: "right",
+    alignment: "left",
   },
   icons,
   navigation: {

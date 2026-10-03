@@ -1,3 +1,4 @@
+import { canonicalizeRequestPathSegments } from "@farm.js/core/middleware";
 import type { CookieOptions } from "./index.js";
 
 /**
@@ -6,9 +7,8 @@ import type { CookieOptions } from "./index.js";
  * A single request cookie whose value is not valid UTF-8 percent-encoding
  * (a latin-1 value from an old link, a crawler, or a bare `%`) must not take
  * the whole map down: an unguarded `decodeURIComponent` throws `URIError`,
- * which — because the middleware runner swallows the throw and calls `next()` —
- * would silently skip every middleware for that request (a dev-time auth
- * bypass). Decoding falls back to the raw value per entry instead.
+ * which fails the request before any middleware runs. Decoding falls back to
+ * the raw value per entry instead.
  */
 export function parseCookies(cookieHeader?: string): Record<string, string> {
   if (!cookieHeader) return {};
@@ -40,11 +40,19 @@ function decodeCookieValue(value: string): string {
  * Matching is by path segment, not raw string prefix: middleware at `/admin`
  * covers `/admin` and everything under `/admin/`, but not sibling routes like
  * `/administrator` or `/admin-public` that merely share a textual prefix.
+ *
+ * The request is compared as the router sees it: each segment decoded once and
+ * empty segments dropped. Comparing the raw pathname let `/api/%61dmin/users`,
+ * `/api//admin/users` and `//api/admin/users` skip middleware at `/api/admin`
+ * while the API router, which decodes segments and ignores empty ones, still
+ * served `/api/admin/users`.
  */
 export function middlewareMatchesPath(pathname: string, middlewarePath: string): boolean {
-  if (middlewarePath === "/") return true;
-  if (pathname === middlewarePath) return true;
-  return pathname.startsWith(`${middlewarePath}/`);
+  const middlewareSegments = middlewarePath.split("/").filter(Boolean);
+  if (middlewareSegments.length === 0) return true;
+  const requestSegments = canonicalizeRequestPathSegments(pathname);
+  if (requestSegments.length < middlewareSegments.length) return false;
+  return middlewareSegments.every((segment, index) => requestSegments[index] === segment);
 }
 
 /**

@@ -335,13 +335,15 @@ async function runProductionRequest(
   }
 }
 
-async function readJavaScriptOutput(dir: string): Promise<string> {
+async function readJavaScriptOutput(dir: string, extensions = [".mjs"]): Promise<string> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   const contents = await Promise.all(
     entries.map(async (entry) => {
       const entryPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) return readJavaScriptOutput(entryPath);
-      return entry.name.endsWith(".mjs") ? fs.readFile(entryPath, "utf8") : "";
+      if (entry.isDirectory()) return readJavaScriptOutput(entryPath, extensions);
+      return extensions.some((extension) => entry.name.endsWith(extension))
+        ? fs.readFile(entryPath, "utf8")
+        : "";
     }),
   );
   return contents.join("\n");
@@ -377,6 +379,76 @@ async function expectNitroFallback(root: string): Promise<void> {
 }
 
 describe("production prebuilt SSR output", () => {
+  it("adds a fresh CSP nonce to production HTML and every script tag", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+export default function Page() {
+  return (
+    <main data-csp-nonce-page>
+      Nonce-protected production output
+      <script nonce="stale-build-nonce">window.appReady=true</script>
+    </main>
+  );
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "production-csp-nonce-test",
+          security: {
+            csp: {
+              nonce: true,
+              policy: "default-src 'self'; script-src 'self'",
+            },
+          },
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const firstPolicy = response.headers.get("content-security-policy") ?? "";
+          const firstNonce = firstPolicy.match(/'nonce-([^']+)'/)?.[1];
+          const firstHtml = await response.text();
+          const firstScripts = Array.from(firstHtml.matchAll(/<script\b[^>]*>/gi), ([tag]) => tag);
+
+          expect(firstNonce).toBeTruthy();
+          expect(firstPolicy).not.toContain("'unsafe-inline'");
+          expect(firstScripts.length).toBeGreaterThan(0);
+          expect(firstScripts.every((tag) => tag.includes(`nonce="${firstNonce}"`))).toBe(true);
+
+          const secondResponse = await fetch(response.url);
+          const secondPolicy = secondResponse.headers.get("content-security-policy") ?? "";
+          const secondNonce = secondPolicy.match(/'nonce-([^']+)'/)?.[1];
+          const secondHtml = await secondResponse.text();
+          const secondScripts = Array.from(
+            secondHtml.matchAll(/<script\b[^>]*>/gi),
+            ([tag]) => tag,
+          );
+
+          expect(secondNonce).toBeTruthy();
+          expect(secondNonce).not.toBe(firstNonce);
+          expect(secondScripts.length).toBeGreaterThan(0);
+          expect(secondScripts.every((tag) => tag.includes(`nonce="${secondNonce}"`))).toBe(true);
+        },
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("matches application routes beneath the configured basePath", async () => {
     const root = await createProductionFixture();
 
@@ -3544,6 +3616,70 @@ export default function OpenGraphImage() {
       );
       expect(serverOutput).not.toContain(".wasm?module");
       expect(serverOutput).toContain("Cloudflare metadata image");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("bundles React DOM's edge server build for the Cloudflare Pages worker", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "react-edge-server-build-test",
+          deploy: { target: "cloudflare" },
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "cloudflare-pages" });
+
+      const workerOutput = await readJavaScriptOutput(
+        path.join(root, config.deploy.outputDir, "_worker.js"),
+        [".js", ".mjs"],
+      );
+      expect(workerOutput).toContain("renderToReadableStream");
+      // Only React DOM's Node server build exports these.
+      expect(workerOutput).not.toContain("prerenderToNodeStream");
+      expect(workerOutput).not.toContain("resumeToPipeableStream");
+      // React 19's browser server build creates a MessageChannel at module
+      // load, which fails in Workers on older compatibility dates. The edge
+      // build does not.
+      expect(workerOutput).not.toContain("MessageChannel");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("bundles React into the Cloudflare module worker", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "react-cloudflare-module-test",
+          deploy: { target: "cloudflare", preset: "cloudflare-module" },
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "cloudflare-module" });
+
+      // A Worker has no node_modules, so a bare React import fails at startup
+      // with `No such module "react"`.
+      const serverOutput = await readJavaScriptOutput(
+        path.join(root, config.deploy.outputDir, "server"),
+      );
+      expect(serverOutput).toContain("renderToReadableStream");
+      expect(serverOutput).not.toMatch(/\bfrom\s*["']react(?:-dom(?:\/server)?)?["']/);
+      expect(serverOutput).not.toMatch(/\bimport\s*\(?\s*["']react(?:-dom(?:\/server)?)?["']/);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

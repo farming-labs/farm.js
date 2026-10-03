@@ -21,11 +21,11 @@ describe("generated after lifecycle", () => {
     const entry = generateRscEntry(context);
 
     expect(entry).toContain("import { _runWithAfterRequest } from '@farm.js/core/after'");
-    expect(entry).toContain("async function handleFarmRequest(request)");
+    expect(entry).toContain("async function handleFarmRequest(request, context)");
     expect(entry).toContain("async function handler(request, context)");
     expect(entry).toContain("return _runWithAPIRequestRuntime({");
     expect(entry).toContain(
-      "}, () => _runWithCurrentRequest(request, () =>\n    _runWithAfterRequest(request, () => handleFarmRequest(request), context)",
+      "}, () => _runWithCurrentRequest(request, () =>\n    _runWithAfterRequest(request, () => handleFarmRequest(request, context), context)",
     );
     expect(entry).toContain("export default { fetch: handler }");
   });

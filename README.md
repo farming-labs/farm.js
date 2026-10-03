@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  Farm.js combines Vite's instant development experience with typed app-directory routing, secure Server Actions, streaming SSR, and production-ready deployment output. React is the default renderer, with first-class Preact, Solid, Vue, and Svelte support behind the same routing and server contracts.
+  Farm.js combines Vite's instant development experience with typed app-directory routing, secure Server Actions, streaming SSR, and production-ready deployment output. React is the default renderer, and beta Preact, Solid, Vue, and Svelte adapters use the same routing and server contracts. See <a href="https://farmjs.dev/docs/stability">Stability and Support</a> for what 0.1 covers.
 </p>
 
 <p align="center">
@@ -57,7 +57,7 @@ No install needed: [open the playground on StackBlitz](https://stackblitz.com/gi
 ### Create a New App
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-app --template basic --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-app --template basic --typescript
 cd my-app
 pnpm dev
 ```
@@ -70,11 +70,11 @@ Trigger.dev, Polar, Resend, Stripe, Supabase, Unkey, WorkOS, or AI starter.
 ### Manual Installation
 
 ```bash
-npm install @farm.js/core@beta react react-dom
+npm install @farm.js/core react react-dom
 # or
-pnpm add @farm.js/core@beta react react-dom
+pnpm add @farm.js/core react react-dom
 # or
-yarn add @farm.js/core@beta react react-dom
+yarn add @farm.js/core react react-dom
 ```
 
 Create a `farm.config.ts`:

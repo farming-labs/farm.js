@@ -13,6 +13,20 @@ Use shared runtime cache helpers, tag/path invalidation, ISR-style revalidation,
 Farm uses its process-local memory cache when `cache.adapter` is not configured. For multiple
 servers or ephemeral deployments, configure one shared adapter in `farm.config.ts`:
 
+The memory cache retains at most 1,024 entries by default and evicts the least recently used entry
+when it reaches that limit. Set `cache.maxEntries` to a larger positive integer when one process
+must keep a larger working set:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  cache: {
+    maxEntries: 4_096,
+  },
+});
+```
+
 ```bash
 pnpm add @farm.js/cache-redis ioredis
 ```
@@ -162,6 +176,22 @@ export default function DashboardPage() {
 Farm's own `export const ppr = true` and a top-of-file `"use ppr"` (or `"use ppr; 60"`)
 directive are equivalent opt-ins; `experimental_ppr` matches the Next.js export name.
 `farm explain <path>` reports whether a route's PPR declaration is active or ignored.
+
+When Farm serves a cached shell with dynamic holes, the browser refresh request bypasses browser and
+shared HTTP caches. The completed response is private and is not stored, so the refresh cannot
+receive the same cached shell again.
+
+The client waits for a shell's background refresh before hydrating. Farm applies the completed
+response's page props, route slots, manifests, locale, and deferred values first, so hydration sees
+the same data that produced the refreshed HTML.
+
+The background refresh reconciles the completed response into the existing shell. Stable elements
+keep their DOM identity, focus, text selection, form values, and scroll position while server-owned
+attributes and content update.
+
+If the background refresh fails, hydration still proceeds after the first attempt. Farm retries a
+failed refresh with backoff, at most three times and only while the browser is online, and stops as
+soon as hydration starts, so a retry never replaces DOM the client has taken over.
 
 ## Cache keys and tags
 

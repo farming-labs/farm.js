@@ -19,6 +19,20 @@ describe("middleware cookie serialization", () => {
     expect(parseMiddlewareCookieHeader("session=a%20b").session).toBe("a b");
   });
 
+  it("selects the first duplicate cookie in wire order", () => {
+    const cookies = parseMiddlewareCookieHeader("session=path-specific; session=broader");
+
+    expect(cookies.session).toBe("path-specific");
+  });
+
+  it("keeps explicitly supplied prototype-named cookies on a null-prototype map", () => {
+    const cookies = parseMiddlewareCookieHeader("__proto__=proto; constructor=ctor");
+
+    expect(Object.getPrototypeOf(cookies)).toBeNull();
+    expect(cookies["__proto__"]).toBe("proto");
+    expect(cookies.constructor).toBe("ctor");
+  });
+
   it("forces the attributes a __Host- prefix requires", () => {
     // A browser rejects a __Host- cookie without Secure, or with a Domain, or
     // with a Path other than "/" - a rejected header is silently discarded.

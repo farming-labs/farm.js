@@ -123,6 +123,22 @@ agent: eve({
 
 `EVE_BASE_URL` is also read automatically when `origin` is omitted.
 
+### Other deployment targets
+
+Farm composes Eve only into Vercel output. For any other target, deploy Eve as its own service and
+point Farm at it. If the address is known when you build, set `origin` or `EVE_BASE_URL`. If the
+server receives `EVE_BASE_URL` only at runtime, set `vercel: false` so the build does not expect to
+compose Eve:
+
+```ts
+agent: eve({
+  vercel: false, // EVE_BASE_URL is read when each request arrives
+});
+```
+
+A non-Vercel build that sets none of these fails with an error that names these options, instead of
+deploying an app whose `/eve` routes answer `503`.
+
 Eve runs as a separate service rather than an in-process SDK, so `origin` is the equivalent of an
 `instance` option. Supplying it selects the application-owned runtime path and takes precedence over
 managed startup. The application continues to own Eve's agent and model configuration in both
@@ -138,7 +154,7 @@ modes.
 | `dev.name`             | Development agent label passed to Eve.                                        |
 | `dev.logs`             | Forward Eve output through the Farm logger. Defaults to `true`.               |
 | `dev.timeoutMs`        | Maximum startup wait. Defaults to 180 seconds.                                |
-| `vercel: false`        | Disable automatic Vercel composition.                                         |
+| `vercel: false`        | Disable automatic Vercel composition, for Eve deployed elsewhere.             |
 | `vercel.servicePrefix` | Internal Vercel service mount. Public routes remain unchanged.                |
 | `vercel.buildCommand`  | Override the command used to build the Eve service.                           |
 

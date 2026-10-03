@@ -13,6 +13,7 @@ import {
   resolveIntegrationPlugins,
 } from "../integrations";
 import { PluginManager } from "../plugin";
+import { collectSchemaModels, generateSqlStatements } from "../schema-sql";
 
 type SqliteDatabase = {
   exec(sql: string): unknown;
@@ -97,9 +98,228 @@ describe("integration ORM storage", () => {
 
     expect(schema._tag).toBe("schema");
     expect(schema.models.billingAccount.table).toBe("billing_account");
+    expect(schema.models.billingAccount.fields.id.config).toMatchObject({
+      kind: "id",
+      idType: "string",
+      generated: "id",
+      unique: true,
+      nullable: false,
+    });
     expect(schema.models.billingAccount.fields.ownerId.config.mappedName).toBe("owner_id");
     expect(schema.models.billingAccount.constraints.unique).toEqual([["ownerId"]]);
   });
+
+  it("rejects list fields instead of exposing a scalar runtime field", async () => {
+    await expect(
+      farmIntegrationSchemaToOrmSchema({
+        models: {
+          tasks: {
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              tags: { type: "string", list: true },
+            },
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      'Schema field "tasks.tags" declares list: true, but the Farm integration runtime ORM does not support list fields. Use type: "json" for an array value or model the values in a related table.',
+    );
+  });
+
+  it("only creates ORM references when database enforcement is selected", async () => {
+    const schema = await farmIntegrationSchemaToOrmSchema(
+      defineIntegrationSchema({
+        models: {
+          parents: {
+            fields: { id: { type: "uuid", primaryKey: true } },
+          },
+          children: {
+            fields: {
+              defaultParentId: {
+                type: "uuid",
+                reference: { model: "parents", field: "id" },
+              },
+              databaseParentId: {
+                type: "uuid",
+                reference: { model: "parents", field: "id", enforced: "db" },
+              },
+              applicationParentId: {
+                type: "uuid",
+                reference: { model: "parents", field: "id", enforced: "app" },
+              },
+              unenforcedParentId: {
+                type: "uuid",
+                reference: { model: "parents", field: "id", enforced: "none" },
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    const fields = schema.models.children.fields;
+    expect(fields.defaultParentId.config.references).toBe("parents.id");
+    expect(fields.databaseParentId.config.references).toBe("parents.id");
+    expect(fields.applicationParentId.config.references).toBeUndefined();
+    expect(fields.unenforcedParentId.config.references).toBeUndefined();
+  });
+
+  it("keeps runtime primary keys aligned with generated SQL", async () => {
+    const customKeys = defineIntegrationSchema({
+      models: {
+        sessions: {
+          fields: {
+            legacyId: { type: "uuid" },
+            token: { type: "string", primaryKey: true },
+          },
+        },
+        counters: {
+          fields: {
+            sequence: { type: "integer", primaryKey: true },
+          },
+        },
+      },
+    });
+    const runtimeSchema = await farmIntegrationSchemaToOrmSchema(customKeys);
+    const { createManifest } = await import("@farming-labs/orm");
+    const manifest = createManifest(runtimeSchema);
+    const sql = generateSqlStatements(collectSchemaModels([["auth", customKeys]]), "sqlite")
+      .map((statement) => statement.sql)
+      .join("\n");
+
+    expect(manifest.models.sessions.fields.legacyId).toMatchObject({
+      kind: "string",
+      unique: false,
+      generated: undefined,
+    });
+    expect(manifest.models.sessions.fields.token).toMatchObject({
+      kind: "id",
+      idType: "string",
+      unique: true,
+      generated: undefined,
+    });
+    expect(manifest.models.counters.fields.sequence).toMatchObject({
+      kind: "id",
+      idType: "integer",
+      unique: true,
+      generated: undefined,
+    });
+    expect(sql).toContain('"legacyId" TEXT NOT NULL');
+    expect(sql).toContain('"token" TEXT PRIMARY KEY');
+    expect(sql).toContain('"sequence" INTEGER PRIMARY KEY');
+  });
+
+  it("rejects unsupported runtime primary-key field types", async () => {
+    await expect(
+      farmIntegrationSchemaToOrmSchema(
+        defineIntegrationSchema({
+          models: {
+            flags: {
+              fields: { enabled: { type: "boolean", primaryKey: true } },
+            },
+          },
+        }),
+      ),
+    ).rejects.toThrow(
+      'Schema primary-key field "integration.flags.enabled" uses unsupported type "boolean".',
+    );
+  });
+
+  it.skipIf(!supportsNodeSqlite)(
+    "uses extensions and overrides in generated tables and the runtime ORM",
+    async () => {
+      const customizedSchema = defineIntegrationSchema({
+        models: {
+          accounts: {
+            name: "legacy_accounts",
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              displayName: { type: "string", name: "legacy_display_name" },
+            },
+          },
+        },
+        extend: {
+          accounts: {
+            fields: {
+              handle: { type: "string", required: true },
+              createdAt: { type: "datetime", default: "now" },
+            },
+            constraints: [{ type: "unique", fields: ["handle"] }],
+          },
+          profiles: {
+            name: "legacy_profiles",
+            fields: {
+              id: { type: "uuid", primaryKey: true },
+              accountId: {
+                type: "uuid",
+                reference: { model: "accounts", field: "id" },
+              },
+              bio: { type: "text", nullable: true },
+            },
+          },
+        },
+        override: {
+          accounts: {
+            name: "accounts",
+            fields: {
+              displayName: { name: "display_name" },
+              handle: { name: "user_handle" },
+            },
+          },
+          profiles: {
+            name: "user_profiles",
+          },
+        },
+      });
+      const dir = await createTempDir("farm-integration-orm-resolved-");
+      const db = await createSqliteDatabase(path.join(dir, "integration.sqlite"));
+
+      try {
+        const statements = generateSqlStatements(
+          collectSchemaModels([["custom", customizedSchema]]),
+          "sqlite",
+        );
+        db.exec(statements.map((statement) => statement.sql).join("\n"));
+
+        const runtimeSchema = await farmIntegrationSchemaToOrmSchema(customizedSchema);
+        expect(Object.keys(runtimeSchema.models)).toEqual(["accounts", "profiles"]);
+        expect(runtimeSchema.models.accounts.table).toBe("accounts");
+        expect(runtimeSchema.models.accounts.fields.displayName.config.mappedName).toBe(
+          "display_name",
+        );
+        expect(runtimeSchema.models.accounts.fields.handle.config.mappedName).toBe("user_handle");
+        expect(runtimeSchema.models.accounts.constraints.unique).toEqual([["handle"]]);
+        expect(runtimeSchema.models.profiles.table).toBe("user_profiles");
+
+        const orm = await createIntegrationOrm({ schema: customizedSchema, client: db });
+        await orm.accounts.create({
+          data: {
+            id: "account_1",
+            displayName: "Ada",
+            handle: "ada",
+          },
+        });
+        await orm.profiles.create({
+          data: {
+            id: "profile_1",
+            accountId: "account_1",
+            bio: "First programmer",
+          },
+        });
+
+        const account = await orm.accounts.findFirst({ where: { handle: "ada" } });
+        const profile = await orm.profiles.findFirst({ where: { accountId: "account_1" } });
+
+        expectTypeOf(account?.handle).toEqualTypeOf<string | undefined>();
+        expectTypeOf(profile?.bio).toEqualTypeOf<string | null | undefined>();
+        expect(account).toMatchObject({ displayName: "Ada", handle: "ada" });
+        expect(account?.createdAt).toBeInstanceOf(Date);
+        expect(profile).toMatchObject({ accountId: "account_1", bio: "First programmer" });
+      } finally {
+        db.close();
+      }
+    },
+  );
 
   it.skipIf(!supportsNodeSqlite)(
     "uses storage.client as the unified ORM runtime client with real sqlite data",

@@ -1,6 +1,7 @@
 /* Preserve farmjs.dev's established Pixel Border presentation while the
  * current theme runtime owns browser navigation and hydration behavior. */
 @import "@farming-labs/theme-production/pixel-border/css";
+@import "./docs-overrides.css";
 
 @tailwind base;
 @tailwind components;
@@ -397,14 +398,17 @@
     vertical-align: bottom;
   }
 
+  /* The launch film's code palette, matching the docs code panels: keywords and punctuation dim,
+     plain code soft grey, names a step brighter, strings brightest, nothing bold. */
   .farm-highlighted-code {
-    --sh-class: rgb(255 255 255 / 0.86);
-    --sh-identifier: rgb(255 255 255 / 0.64);
-    --sh-string: rgb(255 255 255 / 0.94);
-    --sh-keyword: #fff;
+    --sh-class: #d4d4d4;
+    --sh-entity: #d4d4d4;
+    --sh-identifier: #a1a1a1;
+    --sh-string: #e8e8e8;
+    --sh-keyword: #6b6b6b;
     --sh-comment: rgb(255 255 255 / 0.3);
-    --sh-property: rgb(255 255 255 / 0.78);
-    --sh-sign: rgb(255 255 255 / 0.42);
+    --sh-property: #a1a1a1;
+    --sh-sign: #6b6b6b;
     --sh-space: inherit;
     counter-reset: farm-code-line;
   }
@@ -451,7 +455,25 @@
   }
 
   .farm-highlighted-code .sh__token--keyword {
-    font-weight: 650;
+    font-weight: 400;
+  }
+
+  /* Hand-coloured panels (the renderer switcher) mark tokens with text-white opacities; give them the
+     same palette as the highlighter's tokens. */
+  .farm-highlighted-code .text-white {
+    color: var(--sh-keyword);
+  }
+  .farm-highlighted-code .text-white\/64 {
+    color: var(--sh-identifier);
+  }
+  .farm-highlighted-code .text-white\/78 {
+    color: var(--sh-property);
+  }
+  .farm-highlighted-code .text-white\/94 {
+    color: var(--sh-string);
+  }
+  .farm-highlighted-code .text-white\/42 {
+    color: var(--sh-sign);
   }
 
   .farm-highlighted-code .sh__token--comment {
@@ -1321,4 +1343,15 @@ html[data-farm-docs-runtime="true"] .fd-llms-txt-links {
     align-items: flex-start;
     text-align: left;
   }
+}
+
+/* Landing type matches the docs: titles at 400 (the pixel-font feature titles keep their face) and
+   body copy at 300. Body paragraphs share text-sm; the 8px mono labels do not. */
+.farm-home main h1,
+.farm-home main h2:not(.font-geist-pixel),
+.farm-home main p.font-medium {
+  font-weight: 400;
+}
+.farm-home main p.text-sm {
+  font-weight: 300;
 }

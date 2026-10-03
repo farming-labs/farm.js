@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/cli",
-  "version": "0.1.0-beta.106",
+  "version": "0.1.1-beta.1",
   "description": "CLI for Farm.js framework",
   "keywords": [
     "@farm.js/cli",
@@ -71,6 +71,8 @@
   },
   "devDependencies": {
     "@types/node": "^20.10.5",
+    "drizzle-orm": "0.44.7",
+    "prisma": "6.7.0",
     "tsdown": "^0.15.7",
     "typescript": "^5.3.3"
   },

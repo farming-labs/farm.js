@@ -71,7 +71,7 @@ dedicated [React](/docs/renderers/react), [Preact](/docs/renderers/preact),
 Install Preact and its FARMJS renderer adapter:
 
 ```bash
-pnpm add @farm.js/preact@beta preact
+pnpm add @farm.js/preact preact
 ```
 
 ```ts
@@ -90,7 +90,7 @@ aliases, server rendering and streaming, and browser hydration. See the
 Create a ready-to-run Preact application from the CLI:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-preact-app --template basic --renderer preact --typescript
 ```
 
 ### Svelte
@@ -98,7 +98,7 @@ PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm
 Install the Svelte adapter and runtime:
 
 ```bash
-pnpm add @farm.js/svelte@beta svelte
+pnpm add @farm.js/svelte svelte
 ```
 
 ```ts
@@ -124,7 +124,7 @@ typed server calls, and current compatibility boundaries.
 Create a ready-to-run Svelte application from the CLI:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-svelte-app --template basic --renderer svelte --typescript
 ```
 
 ### Vue
@@ -132,7 +132,7 @@ PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm
 Install Vue and its FARMJS renderer adapter:
 
 ```bash
-pnpm add @farm.js/vue@beta vue
+pnpm add @farm.js/vue vue
 ```
 
 ```ts
@@ -163,7 +163,7 @@ current compatibility boundaries.
 Create a ready-to-run Vue application from the CLI:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-vue-app --template basic --renderer vue --typescript
 ```
 
 ### Solid
@@ -171,7 +171,7 @@ PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm
 Install the Solid adapter and runtime:
 
 ```bash
-pnpm add @farm.js/solid@beta solid-js
+pnpm add @farm.js/solid solid-js
 ```
 
 ```ts
@@ -194,7 +194,7 @@ calls, and current compatibility boundaries.
 Create a ready-to-run Solid application directly from the CLI:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
+PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-solid-app --template basic --renderer solid --typescript
 ```
 
 Omitting `renderer` selects React. The renderer option is currently available for the Basic starter;
@@ -253,6 +253,8 @@ mount, and shortcut together.
 | api           | Configuring the public root used by Farm's typed browser API client.                  |
 | integrations  | Registering built-in or custom integrations.                                          |
 | auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.           |
+| mcp           | Composing API routes and standalone tools in one authenticated MCP server.            |
+| agent         | Opt-in agent readiness: an llms.txt index and schema.org JSON-LD.                     |
 | theme         | Enabling light, dark, and system modes with client and server APIs.                   |
 | storage       | Configuring KV drivers/mounts and, in the current beta, an integration DB client.     |
 | migrations    | Running one-shot schema/provider commands with `farm migrate`.                        |
@@ -344,6 +346,80 @@ This also applies to RSC builds and their Nitro servers, including apps configur
 `defineConfig` from `@farm.js/plugin/rsc`. API requests at the custom prefix stay on the API
 pipeline rather than being decoded as server actions. The canonical `/api` routes remain available;
 an external API URL changes the client destination only, not the local server mount.
+
+## MCP transport
+
+Install `@farm.js/mcp`, then configure one authenticated transport directly—no plugin array is
+needed:
+
+```ts title="farm.config.ts"
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  mcp: {
+    authorize: async ({ request }) => {
+      const session = await getSession(request);
+      return session ? { subject: session.user.id } : false;
+    },
+  },
+});
+```
+
+This mounts `/api/mcp`. Typed API routes are not exposed as MCP tools unless their endpoint config sets
+`mcp: true` or supplies MCP metadata, or you explicitly select endpoint instances in `mcp.tools`.
+`authorize` receives `{ request, tool, tools, server }`; return `{ subject, tools: ["tool_name"] }`
+to limit both discovery and invocation for that caller. You can also add standalone `defineTool()`
+definitions from `@farm.js/mcp` to the same list; these validate their own input and receive the
+authorized principal without creating separate HTTP routes. Optional `outputSchema` validates
+standalone results; endpoint-backed tools reuse a route factory's `output` validator. Both advertise
+the validated result shape to MCP clients. See [API MCP](/docs/plugins/mcp) for
+mixed declarations, the resolved catalog, and permission checks.
+
+## Agent readiness
+
+`agent` holds opt-in features that help AI agents and crawlers understand a public site. Both are
+off by default, so internal tools and private dashboards are unaffected.
+
+```ts title="farm.config.ts"
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  agent: {
+    llmsTxt: {
+      title: "Acme",
+      summary: "Billing for small teams.",
+      exclude: ["/admin/[...path]"],
+    },
+    jsonLd: true,
+  },
+});
+```
+
+`llmsTxt: true` serves [`/llms.txt`](https://llmstxt.org): a Markdown index of every static page,
+with each page's metadata title and description, linking to its [Markdown mirror](/docs/markdown)
+when one is exposed. An options object sets the `title` and `summary` (the root layout's metadata by
+default), adds `details` Markdown, and narrows the list with `include` and `exclude` route patterns,
+which use the same syntax as `md.expose`. Dynamic routes are left out because they have no single
+URL.
+
+It also serves `/llms-full.txt`: the same header, then a block per listed page with its title, URL,
+and description, separated by `---`. Pages with an exposed Markdown mirror get it inlined; a page
+without one keeps its block but no body. Pages are read with a fresh request that carries no cookies
+or credentials, so a page behind auth is left out rather than copied into a file anyone can fetch.
+`full: false` turns off the generated `/llms-full.txt` (a `public/llms-full.txt` or `llms-full.ts`
+still serves that path). Rendering llms-full.txt renders every listed page, so set `revalidate`
+(seconds) to let a CDN cache both generated files on busy sites.
+
+Each file can be overridden on its own. A static `public/llms.txt` or `public/llms-full.txt` is
+served as-is. An [`llms.ts` or `llms-full.ts` metadata route](/docs/routing#application-metadata-routes)
+replaces the generated file with whatever it returns, either the complete file as a string or the
+structured format, and receives the generated pages and defaults to build on. When the
+[docs engine](/docs/docs-engine) is enabled too, the app's own files take `/llms.txt` and
+`/llms-full.txt`.
+
+`jsonLd: true` adds a schema.org `Organization` to page heads, built from the site's metadata: the
+site name or title, `metadataBase`, and description. A page with none of those gets no JSON-LD. An
+object sets the `type` (emitted as `@type`) and fields such as `name`, `url`, `logo`, and `sameAs`.
 
 ## Isolated client hydration
 
@@ -539,7 +615,38 @@ security: {
 
 You can also pass an already serialized policy as `csp: "default-src 'self'; object-src 'none'"`. The longer `contentSecurityPolicy` config name is intentionally unsupported; use `csp`.
 
-Farm currently emits small inline hydration and route-state bootstraps, so the compatible example allows inline scripts and styles. A stricter policy must supply correct hashes or renderer-generated nonces for every trusted inline bootstrap. Start with `reportOnly`, inspect violations, and enforce only after the deployed HTML and every third-party integration satisfy the policy.
+Farm emits small inline hydration, theme, and route-state bootstraps. The first example uses the
+compatibility path, so it permits inline scripts. For a strict script policy, enable Farm's managed
+script authorization and remove `'unsafe-inline'`:
+
+```ts
+security: {
+  csp: {
+    nonce: true,
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+    },
+  },
+}
+```
+
+For dynamic HTML, Farm generates a fresh nonce for every response, adds it to the directive that
+governs script elements (`script-src-elem`, then `script-src`, then `default-src`), and stamps every
+script element in the streamed document. Any existing script `nonce` attribute is normalized to the
+fresh response nonce so application-authored inline scripts follow the same policy.
+
+For fully prerendered HTML, the same option keeps the page static. Farm removes the build-time nonce,
+hashes the exact contents of every inline script with SHA-256, and emits a route-specific policy with
+those hashes. External scripts still need their origin in `script-src` or `script-src-elem`. Dynamic
+responses and PPR shells continue to use fresh nonces, so a nonce is never cached or reused. Keep
+`reportOnly` on while auditing and verify every third-party script and connection before enforcing the
+policy.
+
+Without `nonce: true`, Farm warns when a configured policy would block its inline framework scripts.
 
 ## Server HTTP policy
 

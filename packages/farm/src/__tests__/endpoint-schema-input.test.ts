@@ -24,6 +24,11 @@ it("validates raw input once for both HTTP and local paired callers", async () =
           204: { body: "empty" },
         },
       },
+      mcp: {
+        name: "create_count",
+        description: "Create a parsed count.",
+        destructiveHint: false,
+      },
     },
     ({ body, query }) => ({ ...body, page: query.page }),
   );
@@ -36,6 +41,11 @@ it("validates raw input once for both HTTP and local paired callers", async () =
       },
       204: { body: "empty" },
     },
+  });
+  expect(endpoint.__mcp).toEqual({
+    name: "create_count",
+    description: "Create a parsed count.",
+    destructiveHint: false,
   });
   const dispatch = (request: Request) => invokeAPIRouteEndpoint(endpoint, request);
   const { api, apiClient } = createApiClients<{ count: { post: typeof endpoint } }>({

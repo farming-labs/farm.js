@@ -35,6 +35,7 @@ import {
 } from "./routes-shared";
 import type { FarmDocsAPIHandler } from "./docs";
 import { createMarkdownMirrorResponse, resolveMarkdownMirrorTarget } from "./markdown";
+import { resolveFarmLlmsTxtConfig } from "./llms-txt";
 import {
   FARM_MARKDOWN_CONTENT_TYPE,
   createFarmMarkdownErrorBody,
@@ -78,7 +79,7 @@ import { createDeferredDataResponse } from "./deferred";
 import { _withAfterNodeMiddleware } from "./after";
 import { _runWithAPIRequestRuntime } from "./api/server-context";
 import type { APIRequestRuntime } from "./api/server-client-bridge";
-import { shouldBypassFarmRouterForDottedPath } from "./dev-static";
+import { farmAppOwnsLlmsPath, shouldBypassFarmRouterForDottedPath } from "./dev-static";
 import { findClientServerFnViolation, formatServerFnBoundaryError } from "./server-query-boundary";
 import {
   analyzeClientBoundary,
@@ -137,6 +138,13 @@ import { mergeMetadata } from "./metadata";
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
 import { resolveFarmRequestURL } from "./server/request";
 import { reportOpenAPIDevGenerationResult } from "./openapi/dev-status";
+
+/** Paths `agent.llmsTxt` serves without a route file. */
+function farmLlmsTxtGeneratedPaths(config: { agent?: { llmsTxt?: unknown } }): string[] {
+  const llms = resolveFarmLlmsTxtConfig(config.agent?.llmsTxt as never);
+  if (!llms.enabled) return [];
+  return llms.full ? ["/llms.txt", "/llms-full.txt"] : ["/llms.txt"];
+}
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -970,12 +978,10 @@ function warnClientBoundaryOnce(
  * `"use client"` module.
  *
  * Re-rendering the whole root on every edit only makes sense for a renderer
- * that diffs the result against the live DOM. On Solid and Svelte `render()`
- * tears the tree down and rebuilds it, so a one character change in any client
- * component would wipe the page's state. Those renderers ship their own HMR
- * integration (solid-refresh, svelte's hot API) which preserves component
- * state, and appending an `import.meta.hot.accept` here would swallow the
- * update before theirs could run.
+ * that diffs the result against the live DOM. Rebuilding renderers such as
+ * Solid would otherwise wipe the page's state for a one-character edit. They
+ * ship their own HMR integration, which can only preserve component state if
+ * Farm leaves the module unaccepted.
  */
 export function shouldEmitFarmClientRootHmr(renderer?: FarmRenderer): boolean {
   return getFarmRendererCapabilities(resolveFarmRenderer(renderer)).reconcilesRerenders;
@@ -1824,7 +1830,14 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               docsHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
             }
           }
-          if (farmDocsHandler) {
+          // An app's own llms.txt and llms-full.txt (agent.llmsTxt, llms.ts, llms-full.ts,
+          // or a public file) take those paths from the docs engine, as in production.
+          const appOwnsLlmsTxt = farmAppOwnsLlmsPath(requestPathname, {
+            generatedPaths: farmLlmsTxtGeneratedPaths(farmConfig),
+            routeManager: farmApp.getRouteManager(),
+            publicDir: server.config.publicDir,
+          });
+          if (farmDocsHandler && !appOwnsLlmsTxt) {
             const docsRequest = new Request(fullUrl, {
               method: requestMethod,
               headers: docsHeaders,
@@ -2345,10 +2358,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // request maps to a real file on disk or nothing in the app matches
           // the pathname.
           if (
-            shouldBypassFarmRouterForDottedPath(requestPathname, farmApp?.getRouteManager(), [
-              server.config.publicDir,
-              server.config.root,
-            ])
+            shouldBypassFarmRouterForDottedPath(
+              requestPathname,
+              farmApp?.getRouteManager(),
+              [server.config.publicDir, server.config.root],
+              farmLlmsTxtGeneratedPaths(farmConfig),
+            )
           ) {
             return next();
           }
@@ -3996,7 +4011,7 @@ ${isolatedHydrationImport}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
 import { isFarmRouteActive } from '@farm.js/core/router'
-import { scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
+import { replayFarmQueuedInteraction, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -4044,6 +4059,11 @@ ${providerClientCode.runtime}
 
 window.__FARM_WRAP_PROVIDERS__ = wrapWithIntegrationProviders;
 ${isolatedHydrationEnabled ? "window.__FARM_WRAP_CLIENT_GRAPH__ = (element) => wrapFarmIsolatedClientGraph(React, element);" : ""}
+
+function wrapFarmClientRouteGraph(element) {
+  const wrapped = wrapWithIntegrationProviders(element);
+  ${isolatedHydrationEnabled ? "return wrapFarmIsolatedClientGraph(React, wrapped);" : "return wrapped;"}
+}
 
 // Get manifest from window (inlined by server in HTML)
 // Fallback to empty manifest if not available yet
@@ -4578,9 +4598,9 @@ function replayPreHydrationClicks(container = null) {
   queue.splice(0, queue.length, ...remainingClicks);
   for (const queuedClick of queuedClicks) {
     const target = queuedClick?.target;
-    if (!target || typeof target.click !== 'function') continue;
-    if (target.isConnected === false) continue;
-    setTimeout(() => target.click(), 0);
+    if (!(target instanceof Element) || target.isConnected === false) continue;
+    // A held submit is replayed as a submit; click() on a form does nothing.
+    setTimeout(() => replayFarmQueuedInteraction(target, queuedClick.kind), 0);
   }
 }
 
@@ -4733,7 +4753,23 @@ async function buildWrappedHydrationElement(PageComponent, pageProps, layouts = 
     loadedLayouts,
     pageProps?.params || {},
   );
-  return wrapWithIntegrationProviders(wrappedTree);
+  return wrapFarmClientRouteGraph(wrappedTree);
+}
+
+function hydrateFarmRoute(container, route) {
+  ${
+    isReactRenderer(renderer)
+      ? "return hydrateRoot(container, route.element);"
+      : "return route.layouts.length > 0 ? hydrateRoot(container, route.element, route) : hydrateRoot(container, route.element);"
+  }
+}
+
+function renderFarmRoute(root, route) {
+  if (route?.layouts?.length > 0 && typeof root.renderRoute === 'function') {
+    root.renderRoute(route);
+  } else {
+    root.render(route.element);
+  }
 }
 
 function createLayoutPageBoundary(
@@ -4829,15 +4865,23 @@ async function tryHydrateImportedPage(
   if (signal?.aborted || !container?.isConnected || !pageElement) return false;
 
   let wrappedElement;
+  let routeState = null;
   if (layoutShouldHydrate) {
     const loadedLayouts = await loadLayoutComponents(layouts);
     if (pageShouldHydrate) {
       pageElement = createLayoutPageBoundary(true, islandStrategy, pageElement);
     }
     const wrappedTree = wrapWithLoadedLayouts(pageElement, loadedLayouts, params);
-    wrappedElement = wrapWithIntegrationProviders(wrappedTree);
+    wrappedElement = wrapFarmClientRouteGraph(wrappedTree);
+    routeState = {
+      element: wrappedElement,
+      layouts: loadedLayouts,
+      page: pageElement,
+      params,
+      wrap: wrapFarmClientRouteGraph,
+    };
   } else if (useHydrate && container?.id === '__farm_page__') {
-    wrappedElement = wrapWithIntegrationProviders(pageElement);
+    wrappedElement = wrapFarmClientRouteGraph(pageElement);
   } else {
     wrappedElement = await buildWrappedHydrationElement(
       currentPageComponent,
@@ -4847,16 +4891,19 @@ async function tryHydrateImportedPage(
   }
   if (signal?.aborted || !container?.isConnected) return false;
 
-  ${isolatedHydrationEnabled ? "wrappedElement = wrapFarmIsolatedClientGraph(React, wrappedElement);" : ""}
+  if (routeState) routeState.element = wrappedElement;
 
   if (useHydrate) {
     try {
-      reactRoot = hydrateRoot(container, wrappedElement);
+      reactRoot = routeState
+        ? hydrateFarmRoute(container, routeState)
+        : hydrateRoot(container, wrappedElement);
       window.__FARM_REACT_ROOT__ = reactRoot;
       return true;
     } catch (error) {
       appRoot = createRoot(container);
-      appRoot.render(wrappedElement);
+      if (routeState) renderFarmRoute(appRoot, routeState);
+      else appRoot.render(wrappedElement);
       window.__FARM_REACT_ROOT__ = appRoot;
       hasClientTakenOver = true;
       return true;
@@ -4866,7 +4913,7 @@ async function tryHydrateImportedPage(
   hasClientTakenOver = true;
   const existingRoot = appRoot || reactRoot;
   if (existingRoot && layoutShouldHydrate) {
-    existingRoot.render(wrappedElement);
+    renderFarmRoute(existingRoot, routeState);
     appRoot = existingRoot;
     reactRoot = null;
     window.__FARM_REACT_ROOT__ = appRoot;
@@ -4876,7 +4923,8 @@ async function tryHydrateImportedPage(
   if (appRoot) { try { appRoot.unmount(); } catch (e) {} appRoot = null; }
   appRoot = createRoot(container);
   window.__FARM_REACT_ROOT__ = appRoot;
-  appRoot.render(wrappedElement);
+  if (routeState) renderFarmRoute(appRoot, routeState);
+  else appRoot.render(wrappedElement);
   return true;
 }
 
@@ -5164,6 +5212,9 @@ async function renderPage(pageData) {
 spaRouter.setNavigationHandler(renderPage);
 
 async function hydrate() {
+  await window.__FARM_PPR_REFRESH_PROMISE__;
+  // A PPR refresh that is still retrying must not replace DOM once hydration starts.
+  window.__FARM_PPR_HYDRATING__ = true;
   await farmClientRuntime.start();
 
   if (isFarmDocsSearchPage()) {

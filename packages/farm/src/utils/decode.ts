@@ -43,21 +43,29 @@ export function canonicalizeRequestPathSegments(pathname: string): string[] {
  *
  * A decoded `/` is re-encoded as `%2F` so it stays inside its segment for a
  * matcher that treats `/` as a separator, and so a capture that a redirect or
- * rewrite reuses keeps the encoding it arrived with. Separators, leading and
- * trailing slashes, empty segments, and case are otherwise left exactly as they
- * arrived: this changes which pathname a pattern is compared against, never what
- * the pattern means.
+ * rewrite reuses keeps the encoding it arrived with.
+ *
+ * A run of slashes collapses to one, because every route matcher drops empty
+ * segments: `//dashboard` renders `/dashboard`, so a guard comparing `//dashboard`
+ * against `/dashboard` let the protected page through. A trailing slash and case
+ * are otherwise left exactly as they arrived: this changes which pathname a
+ * pattern is compared against, never what the pattern means.
  *
  * Decoding happens once. A path that still contains `%` after decoding, such as
  * `%2541BC` decoding to `%41BC`, keeps it; decoding a second time would resolve
  * a different route than the request asked for.
  */
 export function canonicalizeRequestPathname(pathname: string): string {
-  // The overwhelmingly common case is a pathname with nothing to decode, so
-  // keep it off the split/join path entirely.
-  if (!pathname.includes("%")) return pathname;
+  // The overwhelmingly common case is a pathname with nothing to decode or
+  // collapse, so keep it off the split/join path entirely.
+  const encoded = pathname.includes("%");
+  if (!encoded && !pathname.includes("//")) return pathname;
 
-  return pathname
+  // Collapse before decoding, so a decoded `%2F` can never form a new run.
+  const collapsed = pathname.replace(/\/{2,}/g, "/");
+  if (!encoded) return collapsed;
+
+  return collapsed
     .split("/")
     .map((segment) => {
       const decoded = decodeRouteSegment(segment);
