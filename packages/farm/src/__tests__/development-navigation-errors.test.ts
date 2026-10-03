@@ -98,6 +98,7 @@ export default async function Page() { ${wait} notFound(); }`,
   for (const [name, call] of [
     ["late-missing", "notFound()"],
     ["late-redirect", 'redirect("/")'],
+    ["late-script-redirect", 'redirect("java\\tscript:alert(1)")'],
   ]) {
     await writeModule(
       root,
@@ -173,9 +174,15 @@ describe("development redirect() and notFound()", () => {
       /<template id="__farm_late_not_found__"><main>custom not found: (<!-- -->)?\/late-missing<\/main><\/template>/,
     );
     expect(lateMissingBody).toContain('m.content="noindex"');
+    expect(lateMissingBody).toContain('dataset.farmLateNotFound="true"');
 
     const lateRedirect = await get("/late-redirect");
     expect(lateRedirect.status).toBe(200);
     expect(await lateRedirect.text()).toContain('window.location.replace("/")');
+
+    // A late redirect never becomes script: only http(s) targets recover.
+    const lateScriptRedirect = await get("/late-script-redirect");
+    expect(lateScriptRedirect.status).toBe(200);
+    expect(await lateScriptRedirect.text()).not.toContain("window.location.replace");
   }, 60_000);
 });

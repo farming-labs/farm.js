@@ -3771,6 +3771,10 @@ export default function OpenGraphImage() {
         "sync-missing/page.tsx",
         `${navigation}\nexport default function Page() { notFound(); }`,
       );
+      await write(
+        "sync-redirect/page.tsx",
+        `${navigation}\nexport default function Page() { redirect("/"); }`,
+      );
       // Production awaits an async page before rendering, so its notFound() is
       // early. A nested async component behind its own boundary is late.
       await write(
@@ -3827,6 +3831,16 @@ export default function OpenGraphImage() {
           expect(await response.text()).toMatch(/custom not found: (<!-- -->)?\/sync-missing/);
         },
         "/sync-missing",
+      );
+
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(307);
+          expect(response.headers.get("location")).toBe("/");
+        },
+        "/sync-redirect",
+        manual,
       );
 
       await runProductionRequest(

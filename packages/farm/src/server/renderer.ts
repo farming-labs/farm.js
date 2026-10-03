@@ -3169,14 +3169,22 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     const pathname = resolveFarmRequestURL(req, {
       trustProxy: this.config.server?.trustProxy,
     }).pathname;
+    // The layouts are already in the streamed shell, so only the page area is
+    // replaced. A not-found page that needs context from its layout cannot
+    // render on its own; recover with the built-in page instead.
+    let content = this.defaultNotFoundContent();
     const NotFoundComponent = await this.loadNotFoundComponent();
-    const content = NotFoundComponent
-      ? await this.rendererRuntime.renderToString(
+    if (NotFoundComponent) {
+      try {
+        content = await this.rendererRuntime.renderToString(
           await this.wrapWithIntegrationProviders(
             this.rendererRuntime.createElement(NotFoundComponent, { pathname }),
           ),
-        )
-      : this.defaultNotFoundContent();
+        );
+      } catch (error) {
+        logger.warn(`not-found page could not render outside its layout, using Farm's: ${error}`);
+      }
+    }
     return createLateNotFoundRecovery(content);
   }
 

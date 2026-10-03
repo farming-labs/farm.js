@@ -7824,8 +7824,12 @@ async function handleFarmRequestInContext(
                   )
                 ) + streamSuffix;
               } catch (error) {
-                console.error("404 render error:", error);
-                return createLateNotFoundRecovery("") + streamSuffix;
+                // The layouts are already in the shell; a not-found page that
+                // needs their context cannot render alone, so use Farm's.
+                console.warn("not-found page could not render outside its layout, using Farm's:", error);
+                return createLateNotFoundRecovery(
+                  await ReactDOMServer.renderToString(React.createElement(FarmDefault404Page))
+                ) + streamSuffix;
               }
             },
             function() {

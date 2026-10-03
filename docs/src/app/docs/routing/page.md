@@ -1135,14 +1135,16 @@ export default async function ProductPage({ params }: PageProps<"/products/[id]"
 ```
 
 While the response has not started, Farm answers with the real status: `307` or `308` with a
-`Location` header, or `404` with the nearest `not-found.tsx`. That includes a synchronous page
+`Location` header, or `404` with the app's configured not-found page. That includes a synchronous page
 under a `loading.tsx` boundary, and an async page in production, which Farm awaits before rendering.
 
 When the call happens after a loading boundary already streamed the `200` shell (a component behind
 `<Suspense>` that finishes later, or an async page in development), the status can no longer
-change. Like Next.js, Farm finishes the document so it recovers in the browser: a redirect replaces
-the location, and `notFound()` swaps the page for `not-found.tsx` and marks the document
-`noindex`.
+change. Like Next.js, Farm finishes the document so it recovers in the browser: an `http(s)`
+redirect replaces the location, and `notFound()` swaps the page for the app's not-found page,
+marks the document `noindex`, and skips hydrating the page that threw. The layouts are already on
+screen, so the not-found page renders without them; if it needs context a layout provides, Farm
+shows its built-in not-found page instead.
 
 With experimental RSC enabled, failures before the HTML shell is sent render the nearest
 `error.tsx` through RSC and SSR with status `500` and `Cache-Control: private, no-store`.

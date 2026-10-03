@@ -5313,16 +5313,20 @@ async function hydrate() {
     let pageProps = normalizeServerProps(window.__FARM_PROPS__);
     applyCanonicalPathFromProps(pageProps);
 
+    // A notFound() after the streamed shell swapped the page for the
+    // not-found UI (late-navigation-recovery): never hydrate the page that
+    // threw. Islands outside the page still hydrate.
+    const lateNotFound = document.documentElement.dataset.farmLateNotFound === 'true';
     const pageShouldHydrate =
-      typeof window.__FARM_PAGE_SHOULD_HYDRATE__ === 'boolean'
+      !lateNotFound &&
+      (typeof window.__FARM_PAGE_SHOULD_HYDRATE__ === 'boolean'
         ? window.__FARM_PAGE_SHOULD_HYDRATE__
         : isClientComponent ||
-          findRoute(window.location.pathname)?.route?.shouldHydrate === true;
-    const layoutShouldHydrate = window.__FARM_LAYOUT_SHOULD_HYDRATE__ === true;
+          findRoute(window.location.pathname)?.route?.shouldHydrate === true);
+    const layoutShouldHydrate = !lateNotFound && window.__FARM_LAYOUT_SHOULD_HYDRATE__ === true;
     const shouldHydrate =
-      window.__FARM_SHOULD_HYDRATE__ === true ||
-      pageShouldHydrate ||
-      layoutShouldHydrate;
+      !lateNotFound &&
+      (window.__FARM_SHOULD_HYDRATE__ === true || pageShouldHydrate || layoutShouldHydrate);
     const hydratedSlots = await hydrateInitialRouteSlots();
     ${
       isolatedHydrationEnabled
