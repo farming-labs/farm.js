@@ -184,6 +184,17 @@
 }
 
 /* Gaps reuse the 06.1 cards; the summary is the card title. */
+/* The 06.1 grid draws only left and top lines, which leaves a lone last card
+   open when the count is odd. Gaps come in any count, so each card is closed. */
+.agent-check-gaps article:nth-child(even) {
+  border-left: 0;
+}
+.agent-check-gaps article:nth-child(odd) {
+  border-right: 1px solid var(--farm-line);
+}
+.agent-check-gaps article:nth-child(even):nth-last-child(2) {
+  border-bottom: 1px solid var(--farm-line);
+}
 .agent-check-gaps h3 {
   font-size: 22px;
 }
@@ -319,6 +330,12 @@
   }
 }
 @media (max-width: 600px) {
+  .agent-check-gaps article:nth-child(odd) {
+    border-right: 0;
+  }
+  .agent-check-gaps article:nth-child(even):nth-last-child(2) {
+    border-bottom: 0;
+  }
   .agent-check-hero {
     padding: 40px 24px 32px;
   }
