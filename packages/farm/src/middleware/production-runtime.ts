@@ -10,6 +10,11 @@ import type {
   MiddlewareResult,
 } from "./types";
 import { emitFarmEvent } from "../observability";
+import {
+  getFarmRedirectError,
+  isFarmNotFoundError,
+  isFarmRedirectError,
+} from "../navigation-errors";
 import { canonicalizeRequestPathname } from "../utils/decode";
 import { normalizeMiddlewareModule } from "./module";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
@@ -51,6 +56,8 @@ export interface ProductionMiddlewareResult {
   context: Map<string, any>;
   headers: Headers;
   handled: boolean;
+  /** Middleware called notFound(): answer with the app's not-found page. */
+  notFound?: true;
 }
 
 interface ProductionMiddlewareEntry {
@@ -923,6 +930,39 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
           durationMs: Date.now() - middlewareStartTime,
         });
       } catch (error) {
+        // redirect() and notFound() are control flow, as they are in pages.
+        if (isFarmRedirectError(error)) {
+          const redirect = getFarmRedirectError(error)!;
+          const response = applyProductionMiddlewareHeaders(
+            new Response(null, { status: redirect.status, headers: { Location: redirect.url } }),
+            mapToHeaders(contextState.headers),
+          );
+          emitFarmEvent({
+            type: "middleware.shortCircuit",
+            ...middlewareEvent,
+            status: response.status,
+          });
+          return {
+            request: currentRequest,
+            response,
+            data: new Map(ctx.data),
+            context: new Map(ctx.locals),
+            headers: mapToHeaders(contextState.headers),
+            handled: true,
+          };
+        }
+        if (isFarmNotFoundError(error)) {
+          emitFarmEvent({ type: "middleware.shortCircuit", ...middlewareEvent, status: 404 });
+          return {
+            request: currentRequest,
+            response: null,
+            data: new Map(ctx.data),
+            context: new Map(ctx.locals),
+            headers: mapToHeaders(contextState.headers),
+            handled: true,
+            notFound: true,
+          };
+        }
         emitFarmEvent({
           type: "middleware.error",
           ...middlewareEvent,

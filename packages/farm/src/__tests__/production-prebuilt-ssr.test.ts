@@ -3746,4 +3746,153 @@ export default function OpenGraphImage() {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 180_000);
+  it("answers redirect() and notFound() from pages, streams and middleware", async () => {
+    const root = await createProductionFixture();
+    const write = async (relativePath: string, source: string) => {
+      const filePath = path.join(root, "src", "app", relativePath);
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(filePath, source.trim());
+    };
+    const navigation = 'import { notFound, redirect } from "@farm.js/core/navigation";';
+    const wait = "await new Promise((resolve) => setTimeout(resolve, 50));";
+
+    try {
+      // A fragment layout and a root loading boundary: pages stream behind Suspense.
+      await write(
+        "layout.tsx",
+        "export default function Layout({ children }) { return <>{children}</>; }",
+      );
+      await write("loading.tsx", "export default function Loading() { return <p>loading</p>; }");
+      await write(
+        "not-found.tsx",
+        "export default function NotFound({ pathname }) { return <main>custom not found: {pathname}</main>; }",
+      );
+      await write(
+        "sync-missing/page.tsx",
+        `${navigation}\nexport default function Page() { notFound(); }`,
+      );
+      // Production awaits an async page before rendering, so its notFound() is
+      // early. A nested async component behind its own boundary is late.
+      await write(
+        "async-missing/page.tsx",
+        `${navigation}\nexport default async function Page() { ${wait} notFound(); }`,
+      );
+      for (const [name, call] of [
+        ["late-missing", "notFound()"],
+        ["late-redirect", 'redirect("/")'],
+      ]) {
+        await write(
+          `${name}/page.tsx`,
+          `import { Suspense } from "react";\n${navigation}\n` +
+            `async function Late() { ${wait} ${call}; }\n` +
+            "export default function Page() { return <Suspense fallback={<p>loading</p>}><Late /></Suspense>; }",
+        );
+      }
+      for (const [name, call] of [
+        ["middleware-missing", "notFound()"],
+        ["middleware-redirect", 'redirect("/")'],
+      ]) {
+        await write(
+          `${name}/middleware.ts`,
+          `${navigation}\nexport function middleware() { ${call}; }`,
+        );
+        await write(
+          `${name}/page.tsx`,
+          "export default function Page() { return <main>should not render</main>; }",
+        );
+      }
+      // A page that hydrates ships its root-entry notFound import to the browser.
+      await write(
+        "hydrated/counter.tsx",
+        '"use client";\nexport function Counter() { return <button>count</button>; }',
+      );
+      await write(
+        "hydrated/page.tsx",
+        'import { notFound } from "@farm.js/core";\nimport { Counter } from "./counter";\n' +
+          "export default function Page({ params }) { if (params.missing) notFound(); return <Counter />; }",
+      );
+
+      const config = await resolveConfig(
+        { root, srcDir: "src", images: { provider: "none" }, telemetry: false },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      const manual: RequestInit = { redirect: "manual" };
+
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(404);
+          expect(await response.text()).toMatch(/custom not found: (<!-- -->)?\/sync-missing/);
+        },
+        "/sync-missing",
+      );
+
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(404);
+          expect(await response.text()).toMatch(/custom not found: (<!-- -->)?\/async-missing/);
+        },
+        "/async-missing",
+      );
+
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(404);
+          const html = await response.text();
+          expect(html).toContain("custom not found");
+          expect(html).not.toContain("should not render");
+        },
+        "/middleware-missing",
+      );
+
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(307);
+          expect(response.headers.get("location")).toBe("/");
+        },
+        "/middleware-redirect",
+        manual,
+      );
+
+      // After the 200 shell, the document recovers in the browser.
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          expect(html).toMatch(
+            /<template id="__farm_late_not_found__"><main>custom not found: (<!-- -->)?\/late-missing<\/main><\/template>/,
+          );
+          expect(html).toContain('m.content="noindex"');
+        },
+        "/late-missing",
+      );
+
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(await response.text()).toContain('window.location.replace("/")');
+        },
+        "/late-redirect",
+        manual,
+      );
+
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(await response.text()).toContain("<button>count</button>");
+        },
+        "/hydrated",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 180_000);
 });

@@ -78,6 +78,10 @@ import {
 } from "../i18n/server";
 import { createFarmLocaleCookie, getFarmLocaleVaryHeaders } from "../i18n/resolver";
 import { localizeFarmHref, localizeFarmPathname } from "../i18n/routing";
+import {
+  createLateNotFoundRecovery,
+  createLateRedirectRecovery,
+} from "../navigation/late-navigation-recovery";
 import { sendWebResponse } from "./response";
 import { matchesFarmIfNoneMatch } from "../server-http";
 import { renderFarmFontDevHead } from "../font-vite";
@@ -2729,6 +2733,13 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       let staticShellClosed = false;
       let suspenseHoleEmitted = false;
       let didError = false;
+      // redirect() and notFound() thrown while React renders the shell's first
+      // pass (a synchronous page under a loading boundary) still decide the
+      // response, because nothing has been sent. One thrown after the shell
+      // went out can only be recovered in the document.
+      let shellFlushed = false;
+      let pendingNavigationError: unknown = null;
+      let lateNavigationError: unknown = null;
 
       // Get the page path for client-side hydration
       const pagePath = (req as any).__FARM_PAGE_PATH__;
@@ -2873,9 +2884,20 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       const cspNonce = this.getCspNonce(req);
       const secureDocumentHTML = (html: string) =>
         cspNonce ? addFarmCspNonceToScriptTags(html, cspNonce) : html;
-      const { pipe } = renderToPipeableStream(streamRoot, {
+      const createLateNavigationRecovery = (navigationError: unknown) =>
+        this.createLateNavigationRecoveryHTML(req, navigationError);
+      const { pipe, abort } = renderToPipeableStream(streamRoot, {
         nonce: cspNonce,
         onShellReady() {
+          if (pendingNavigationError) {
+            abort?.(pendingNavigationError);
+            if (clearMiddlewareData) {
+              clearMiddlewareData();
+            }
+            reject(pendingNavigationError);
+            return;
+          }
+          shellFlushed = true;
           const shellReadyMs = Date.now() - streamStartTime;
           emitFarmEvent({
             type: "render.stream.shellReady",
@@ -2967,59 +2989,77 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
               if (cspNonceRewriter) res.write(securedChunkText, onWrite);
               else res.write(chunk, encoding, onWrite);
             },
-            final(callback) {
-              if (cspNonceRewriter) {
-                const tail = cspNonceRewriter.write(cspStreamDecoder!.decode(), true);
-                recordRenderedChunk(tail);
-                if (tail) res.write(tail);
+            final: (callback) => {
+              if (lateNavigationError) {
+                const navigationError = lateNavigationError;
+                lateNavigationError = null;
+                createLateNavigationRecovery(navigationError).then(
+                  (recovery: string) => {
+                    const secured = secureDocumentHTML(recovery);
+                    htmlParts.push(secured);
+                    res.write(secured);
+                    finishStream(callback);
+                  },
+                  (error: unknown) => {
+                    logger.error(`Could not recover from a late navigation error: ${error}`);
+                    finishStream(callback);
+                  },
+                );
+                return;
               }
-              const suspenseRevealFallback = `<script>(function(){function moveFragment(srcId,placeholderId){var src=document.getElementById(srcId),ph=document.getElementById(placeholderId);if(!src||!ph||!ph.parentNode)return false;while(src.firstChild)ph.parentNode.insertBefore(src.firstChild,ph);ph.parentNode.removeChild(ph);if(src.parentNode)src.parentNode.removeChild(src);return true}function revealBoundary(boundaryId,sectionId){var boundary=document.getElementById(boundaryId),section=document.getElementById(sectionId);if(!boundary||!section||!boundary.parentNode)return false;var start=boundary.previousSibling;if(!start||start.nodeType!==8)return false;var parent=boundary.parentNode;var node=boundary;var depth=0;while(node){if(node.nodeType===8){var data=node.data;if(data==="/$"||data==="/&"){if(depth===0)break;depth--;}else if(data==="$"||data==="$?"||data==="$~"||data==="$!"||data==="&"){depth++;}}var next=node.nextSibling;parent.removeChild(node);node=next;}while(section.firstChild)parent.insertBefore(section.firstChild,node);if(section.parentNode)section.parentNode.removeChild(section);start.data="$";return true}var tries=0;var timer=setInterval(function(){var changed=false;document.querySelectorAll('div[id^="S:"]').forEach(function(section){var suffix=section.id.slice(2);changed=moveFragment('S:'+suffix,'P:'+suffix)||changed;});document.querySelectorAll('template[id^="B:"]').forEach(function(boundary){var suffix=boundary.id.slice(2);changed=revealBoundary('B:'+suffix,'S:'+suffix)||changed;});tries++;if(tries>80||(!document.querySelector('template[id^="B:"]')&&!document.querySelector('template[id^="P:"]'))){clearInterval(timer);}},50);})();</script>`;
-              const footer = secureDocumentHTML(
-                createDocumentFooter({
-                  suspenseRevealFallback,
-                  deferredHydrationScript: createDeferredHydrationScript(deferredProps.records),
-                }),
-              );
-              htmlParts.push(footer);
-              res.write(footer);
-              res.end();
-              callback();
-              if (clearMiddlewareData) {
-                clearMiddlewareData();
-              }
-              // A shell capture without a renderer-owned boundary detector has
-              // nothing safe to store: falling back to the full streamed
-              // response would cache one visitor's rendered data as the shared
-              // shell. Cache only what was actually split out as static.
-              if (
-                !didError &&
-                options.onComplete &&
-                (!options.captureStaticShell || staticShellParts)
-              ) {
-                if (staticShellParts) {
-                  staticShellParts.push(
-                    createDocumentFooter({
-                      suspenseRevealFallback,
-                      refreshPPR: staticShellClosed,
-                    }),
-                  );
-                }
-
-                const cachedHtml = staticShellParts
-                  ? staticShellParts.join("")
-                  : htmlParts.join("");
-                Promise.resolve(options.onComplete(cachedHtml)).catch((error) => {
-                  logger.warn(`Failed to cache PPR shell: ${error}`);
-                });
-              }
-              emitFarmEvent({
-                type: "render.stream.complete",
-                route: observabilityRoute,
-                durationMs: Date.now() - streamStartTime,
-              });
-              resolve();
+              finishStream(callback);
             },
           });
+          const finishStream = (callback: (error?: Error | null) => void) => {
+            if (cspNonceRewriter) {
+              const tail = cspNonceRewriter.write(cspStreamDecoder!.decode(), true);
+              recordRenderedChunk(tail);
+              if (tail) res.write(tail);
+            }
+            const suspenseRevealFallback = `<script>(function(){function moveFragment(srcId,placeholderId){var src=document.getElementById(srcId),ph=document.getElementById(placeholderId);if(!src||!ph||!ph.parentNode)return false;while(src.firstChild)ph.parentNode.insertBefore(src.firstChild,ph);ph.parentNode.removeChild(ph);if(src.parentNode)src.parentNode.removeChild(src);return true}function revealBoundary(boundaryId,sectionId){var boundary=document.getElementById(boundaryId),section=document.getElementById(sectionId);if(!boundary||!section||!boundary.parentNode)return false;var start=boundary.previousSibling;if(!start||start.nodeType!==8)return false;var parent=boundary.parentNode;var node=boundary;var depth=0;while(node){if(node.nodeType===8){var data=node.data;if(data==="/$"||data==="/&"){if(depth===0)break;depth--;}else if(data==="$"||data==="$?"||data==="$~"||data==="$!"||data==="&"){depth++;}}var next=node.nextSibling;parent.removeChild(node);node=next;}while(section.firstChild)parent.insertBefore(section.firstChild,node);if(section.parentNode)section.parentNode.removeChild(section);start.data="$";return true}var tries=0;var timer=setInterval(function(){var changed=false;document.querySelectorAll('div[id^="S:"]').forEach(function(section){var suffix=section.id.slice(2);changed=moveFragment('S:'+suffix,'P:'+suffix)||changed;});document.querySelectorAll('template[id^="B:"]').forEach(function(boundary){var suffix=boundary.id.slice(2);changed=revealBoundary('B:'+suffix,'S:'+suffix)||changed;});tries++;if(tries>80||(!document.querySelector('template[id^="B:"]')&&!document.querySelector('template[id^="P:"]'))){clearInterval(timer);}},50);})();</script>`;
+            const footer = secureDocumentHTML(
+              createDocumentFooter({
+                suspenseRevealFallback,
+                deferredHydrationScript: createDeferredHydrationScript(deferredProps.records),
+              }),
+            );
+            htmlParts.push(footer);
+            res.write(footer);
+            res.end();
+            callback();
+            if (clearMiddlewareData) {
+              clearMiddlewareData();
+            }
+            // A shell capture without a renderer-owned boundary detector has
+            // nothing safe to store: falling back to the full streamed
+            // response would cache one visitor's rendered data as the shared
+            // shell. Cache only what was actually split out as static.
+            if (
+              !didError &&
+              options.onComplete &&
+              (!options.captureStaticShell || staticShellParts)
+            ) {
+              if (staticShellParts) {
+                staticShellParts.push(
+                  createDocumentFooter({
+                    suspenseRevealFallback,
+                    refreshPPR: staticShellClosed,
+                  }),
+                );
+              }
+
+              const cachedHtml = staticShellParts ? staticShellParts.join("") : htmlParts.join("");
+              Promise.resolve(options.onComplete(cachedHtml)).catch((error) => {
+                logger.warn(`Failed to cache PPR shell: ${error}`);
+              });
+            }
+            emitFarmEvent({
+              type: "render.stream.complete",
+              route: observabilityRoute,
+              durationMs: Date.now() - streamStartTime,
+            });
+            resolve();
+          };
 
           // Queue the shell immediately, then start piping the Suspense stream.
           // Waiting for the write callback can delay the fallback until the whole
@@ -3049,7 +3089,12 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         },
         onError(error) {
           didError = true;
-          if (!isWebResponse(error) && !isFarmRedirectError(error) && !isFarmNotFoundError(error)) {
+          if (isFarmRedirectError(error) || isFarmNotFoundError(error)) {
+            if (!shellFlushed) pendingNavigationError ??= error;
+            else lateNavigationError ??= error;
+            return;
+          }
+          if (!isWebResponse(error)) {
             logger.error(`SSR streaming error: ${error}`);
             emitFarmEvent({
               type: "render.error",
@@ -3060,6 +3105,79 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         },
       });
     });
+  }
+
+  /**
+   * Answer a redirect() or notFound() thrown before anything was sent, such as
+   * from middleware. Returns false for any other error.
+   */
+  async respondToNavigationError(
+    req: FarmRequest,
+    res: FarmResponse,
+    error: unknown,
+  ): Promise<boolean> {
+    if (isFarmRedirectError(error)) {
+      const redirect = getFarmRedirectError(error)!;
+      res.statusCode = redirect.status;
+      res.setHeader("Location", this.localizeRedirectUrl(redirect.url));
+      res.end();
+      return true;
+    }
+    if (isFarmNotFoundError(error)) {
+      await this.render404(req, res);
+      return true;
+    }
+    return false;
+  }
+
+  private localizeRedirectUrl(url: string): string {
+    const snapshot = getFarmI18nClientSnapshot();
+    return snapshot && url.startsWith("/") && !url.startsWith("//")
+      ? localizeFarmHref(url, snapshot.locale, snapshot)
+      : url;
+  }
+
+  /** The app's not-found component, or null when it relies on the built-in page. */
+  private async loadNotFoundComponent(): Promise<unknown> {
+    const notFoundPath = resolveFarmNotFoundComponentPath(
+      this.config,
+      getFarmAppDirectories(this.config),
+    );
+    if (!notFoundPath) return null;
+    const notFoundModule = await this.routeManager.loadRouteModule(notFoundPath);
+    return notFoundModule.default ?? null;
+  }
+
+  private defaultNotFoundContent(): string {
+    const homeHref = escapeHtmlAttribute(applyFarmBasePath("/", this.config.basePath));
+    return `<style>${DEFAULT_NOT_FOUND_STYLES}</style><main class="farm-default-not-found" aria-labelledby="farm-default-not-found-title" aria-describedby="farm-default-not-found-description"><div class="farm-default-not-found__content"><h1 id="farm-default-not-found-title" class="farm-default-not-found__code">404</h1><p id="farm-default-not-found-description" class="farm-default-not-found__description">Not found</p><a class="farm-default-not-found__home" href="${homeHref}">GO HOME</a></div></main>`;
+  }
+
+  /**
+   * A redirect() or notFound() thrown after the shell was sent can no longer
+   * change the status. Like Next.js, finish the document so it recovers:
+   * redirect in the browser, or swap the page for the not-found UI and mark
+   * the document noindex.
+   */
+  private async createLateNavigationRecoveryHTML(
+    req: FarmRequest,
+    error: unknown,
+  ): Promise<string> {
+    if (isFarmRedirectError(error)) {
+      return createLateRedirectRecovery(this.localizeRedirectUrl(getFarmRedirectError(error)!.url));
+    }
+    const pathname = resolveFarmRequestURL(req, {
+      trustProxy: this.config.server?.trustProxy,
+    }).pathname;
+    const NotFoundComponent = await this.loadNotFoundComponent();
+    const content = NotFoundComponent
+      ? await this.rendererRuntime.renderToString(
+          await this.wrapWithIntegrationProviders(
+            this.rendererRuntime.createElement(NotFoundComponent, { pathname }),
+          ),
+        )
+      : this.defaultNotFoundContent();
+    return createLateNotFoundRecovery(content);
   }
 
   private async render404(req: FarmRequest, res: FarmResponse): Promise<void> {
@@ -3091,9 +3209,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       );
 
       if (notFoundPath) {
-        // Use routeManager to load the module (uses Vite's ssrLoadModule in dev)
-        const notFoundModule = await this.routeManager.loadRouteModule(notFoundPath);
-        const NotFoundComponent = notFoundModule.default;
+        const NotFoundComponent = await this.loadNotFoundComponent();
 
         if (NotFoundComponent) {
           // Look for root layout
@@ -3134,8 +3250,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     }
 
     // Render the shared adaptive fallback when the app does not provide its own page.
-    const homeHref = escapeHtmlAttribute(applyFarmBasePath("/", this.config.basePath));
-    const defaultContent = `<style>${DEFAULT_NOT_FOUND_STYLES}</style><main class="farm-default-not-found" aria-labelledby="farm-default-not-found-title" aria-describedby="farm-default-not-found-description"><div class="farm-default-not-found__content"><h1 id="farm-default-not-found-title" class="farm-default-not-found__code">404</h1><p id="farm-default-not-found-description" class="farm-default-not-found__description">Not found</p><a class="farm-default-not-found__home" href="${homeHref}">GO HOME</a></div></main>`;
+    const defaultContent = this.defaultNotFoundContent();
 
     const html = this.createFullHTML(defaultContent, false, pathname);
     res.setHeader("Content-Type", "text/html; charset=utf-8");

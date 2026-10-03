@@ -334,7 +334,11 @@ export interface FarmServerRendererRuntime {
       /** CSP nonce forwarded to renderer-owned inline streaming scripts. */
       nonce?: string;
     },
-  ) => { pipe(destination: NodeJS.WritableStream): void };
+  ) => {
+    pipe(destination: NodeJS.WritableStream): void;
+    /** Stop rendering; pending boundaries report `reason` to `onError`. */
+    abort?(reason?: unknown): void;
+  };
   /** WHATWG streaming primitive used by Web-stream-capable renderers. */
   renderToReadableStream?: (
     element: unknown,

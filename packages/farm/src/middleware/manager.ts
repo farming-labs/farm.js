@@ -23,6 +23,11 @@ import { normalizeMiddlewareModule } from "./module";
 import { logger } from "../utils";
 import { sendWebResponse } from "../server/response";
 import { emitFarmEvent } from "../observability";
+import {
+  getFarmRedirectError,
+  isFarmNotFoundError,
+  isFarmRedirectError,
+} from "../navigation-errors";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { createCliColors } from "../cli-colors";
@@ -337,11 +342,16 @@ export class MiddlewareManager {
           durationMs: Date.now() - middlewareStartTime,
         });
       } catch (error) {
-        emitFarmEvent({
-          type: "middleware.error",
-          ...middlewareEvent,
-          error,
-        });
+        // redirect() and notFound() are control flow: the caller answers them.
+        emitFarmEvent(
+          isFarmRedirectError(error) || isFarmNotFoundError(error)
+            ? {
+                type: "middleware.shortCircuit",
+                ...middlewareEvent,
+                status: isFarmRedirectError(error) ? getFarmRedirectError(error)!.status : 404,
+              }
+            : { type: "middleware.error", ...middlewareEvent, error },
+        );
         throw error;
       }
 

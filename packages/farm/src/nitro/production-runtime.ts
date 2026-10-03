@@ -12,6 +12,10 @@ export {
   resolveFarmServerConfig,
 } from "../server-http";
 export { createFarmProductionLifecycle } from "../production-lifecycle";
+export {
+  createLateNotFoundRecovery,
+  createLateRedirectRecovery,
+} from "../navigation/late-navigation-recovery";
 export { _runWithCurrentRequest, getCurrentRequest } from "../server/request";
 export { _runWithAPIRequestRuntime } from "../api/server-context";
 export {

@@ -1711,6 +1711,8 @@ async function buildClient(
                 'export { Link } from "@farm.js/core/client";',
                 'export { useRouter } from "@farm.js/core/client";',
                 'export { usePathname, useSearchParams } from "@farm.js/core/navigation";',
+                // A page that hydrates ships to the browser with its notFound()/redirect() calls.
+                'export { getFarmRedirectError, isFarmNotFoundError, isFarmRedirectError, notFound, permanentRedirect, redirect } from "@farm.js/core/navigation";',
                 'export { createAPIClient } from "@farm.js/core/client";',
                 'export { localFont, remoteFont } from "@farm.js/core/font";',
               ].join("\n");
@@ -5012,6 +5014,8 @@ function generateVirtualEntryCode(
   stripFarmBasePath,
   stripFarmLocaleFromPathname,
   withFarmRouteContext,
+  createLateNotFoundRecovery,
+  createLateRedirectRecovery,
 } from "@farm.js/core/internal/production-runtime";`;
   const productionSiteTelemetryImport = config.telemetry
     ? `import { createFarmProductionSiteReporter } from "@farm.js/core/internal/product-telemetry-runtime";`
@@ -5304,6 +5308,38 @@ const farmUserConfig = ${
   };
 const farmRuntimeConfigs = [${[...layerConfigValues, "farmUserConfig"].join(", ")}].filter(Boolean);
 const farmResolvedRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs);
+
+function FarmDefault404Page() {
+  return React.createElement(React.Fragment, null,
+    React.createElement("style", null, ${JSON.stringify(DEFAULT_NOT_FOUND_STYLES)}),
+    React.createElement("main", {
+      className: "farm-default-not-found",
+      "aria-labelledby": "farm-default-not-found-title",
+      "aria-describedby": "farm-default-not-found-description",
+    },
+      React.createElement("div", { className: "farm-default-not-found__content" },
+        React.createElement("h1", {
+          id: "farm-default-not-found-title",
+          className: "farm-default-not-found__code",
+        }, "404"),
+        React.createElement("p", {
+          id: "farm-default-not-found-description",
+          className: "farm-default-not-found__description",
+        }, "Not found"),
+        React.createElement("a", {
+          className: "farm-default-not-found__home",
+          href: applyFarmBasePath("/", farmResolvedRuntimeConfig.basePath),
+        }, "GO HOME")
+      )
+    )
+  );
+}
+
+/** The app's not-found page, or Farm's, without layouts. */
+function createFarmNotFoundElement(pathname) {
+  const NotFoundPage = hasCustomNotFound && CustomNotFoundComponent ? CustomNotFoundComponent : FarmDefault404Page;
+  return React.createElement(NotFoundPage, { pathname: pathname });
+}
 ${nativeMCP.registerSource}
 // Config middleware from layers is appended in layer order ahead of the
 // project's, the same merge development applies (mergeFarmLayerConfig).
@@ -5672,6 +5708,14 @@ async function renderFarmElement(ReactDOMServer, element) {
   const throwStreamError = function() {
     if (streamErrors.length > 0) throw streamErrors[0];
   };
+  // redirect()/notFound() reported while React rendered the shell (a
+  // synchronous page under a loading boundary) still decide the response:
+  // nothing has been sent, so stop instead of streaming an empty boundary.
+  const takeNavigationError = function() {
+    return streamErrors.find(function(error) {
+      return isFarmRedirectError(error) || isFarmNotFoundError(error);
+    });
+  };
 
   if (farmRendererStreamingCapabilities.web &&
       typeof ReactDOMServer.renderToReadableStream === "function") {
@@ -5718,6 +5762,12 @@ async function renderFarmElement(ReactDOMServer, element) {
       throwStreamError();
       const html = decodeChunks(chunks);
       return { html, shellHtml: html, streamErrors };
+    }
+
+    const earlyNavigationError = takeNavigationError();
+    if (earlyNavigationError) {
+      reader.cancel(earlyNavigationError).catch(function() {});
+      throw earlyNavigationError;
     }
 
     let replayFirstChunk = true;
@@ -5840,6 +5890,12 @@ async function renderFarmElement(ReactDOMServer, element) {
       return { html, shellHtml: html, streamErrors };
     }
 
+    const earlyNavigationError = takeNavigationError();
+    if (earlyNavigationError) {
+      if (typeof pipeableStream.abort === "function") pipeableStream.abort(earlyNavigationError);
+      throw earlyNavigationError;
+    }
+
     streamStarted = true;
     for (const chunk of chunks) streamController.enqueue(chunk);
     if (streamClosed) streamController.close();
@@ -5882,7 +5938,8 @@ function createFarmDocumentStream(contentStream, prefix, suffix, onComplete) {
       try {
         const result = await reader.read();
         if (result.done) {
-          controller.enqueue(encoder.encode(suffix));
+          const tail = typeof suffix === "function" ? await suffix() : suffix;
+          controller.enqueue(encoder.encode(tail));
           if (onComplete) onComplete();
           controller.close();
           return;
@@ -7028,6 +7085,7 @@ async function handleFarmRequestInContext(
   // request store so pages, layouts, and route context observe that rewritten
   // request instead of the original outer-handler value.
   const runResolvedRequest = async () => {
+    if (middlewareResult.notFound) return renderFarmNotFoundResponse();
   `
       : `
   const middlewareData = undefined;
@@ -7747,7 +7805,29 @@ async function handleFarmRequestInContext(
           const streamedDocument = createFarmDocumentStream(
             renderedPage.stream,
             themedStreamPrefix,
-            streamSuffix,
+            async function() {
+              // A redirect()/notFound() after the 200 shell went out can only
+              // be recovered in the document.
+              const lateNavigationError = renderedPage.streamErrors.find(function(error) {
+                return isFarmRedirectError(error) || isFarmNotFoundError(error);
+              });
+              if (!lateNavigationError) return streamSuffix;
+              if (isFarmRedirectError(lateNavigationError)) {
+                return createLateRedirectRecovery(
+                  getFarmRedirectError(lateNavigationError).url
+                ) + streamSuffix;
+              }
+              try {
+                return createLateNotFoundRecovery(
+                  await ReactDOMServer.renderToString(
+                    wrapWithFarmIntegrationProviders(createFarmNotFoundElement(pathname))
+                  )
+                ) + streamSuffix;
+              } catch (error) {
+                console.error("404 render error:", error);
+                return createLateNotFoundRecovery("") + streamSuffix;
+              }
+            },
             function() {
               if (pprBypassReason === "refresh") {
                 emitFarmEvent({
@@ -7940,18 +8020,7 @@ async function handleFarmRequestInContext(
       }
 
       if (isFarmNotFoundError(error)) {
-        emitFarmEvent({ type: "route.notFound", pathname });
-        emitFarmEvent({
-          type: "render.complete",
-          route: pathname,
-          pathname,
-          status: 404,
-          durationMs: Date.now() - requestStartTime,
-        });
-        return applyProductionMiddlewareHeaders(new Response("Not Found", {
-          status: 404,
-          headers: { "Content-Type": "text/plain; charset=utf-8" },
-        }), middlewareHeaders);
+        return renderFarmNotFoundResponse();
       }
 
       emitFarmEvent({ type: "render.error", route: pathname, error });
@@ -8062,6 +8131,10 @@ async function handleFarmRequestInContext(
   }
 
   // 404 fallback - render proper HTML page
+  return renderFarmNotFoundResponse();
+
+  // Hoisted: page and middleware notFound() answer with the same page.
+  async function renderFarmNotFoundResponse() {
   emitFarmEvent({ type: "route.notFound", pathname });
 
   // Agents that navigate in Markdown (a \`.md\` URL or \`Accept: text/markdown\`)
@@ -8088,39 +8161,8 @@ async function handleFarmRequestInContext(
   }
 
   try {
-    const defaultNotFoundHomeHref = applyFarmBasePath("/", farmResolvedRuntimeConfig.basePath);
-    // Default 404 page component
-    function Default404Page() {
-      return React.createElement(React.Fragment, null,
-        React.createElement("style", null, ${JSON.stringify(DEFAULT_NOT_FOUND_STYLES)}),
-        React.createElement("main", {
-          className: "farm-default-not-found",
-          "aria-labelledby": "farm-default-not-found-title",
-          "aria-describedby": "farm-default-not-found-description",
-        },
-          React.createElement("div", { className: "farm-default-not-found__content" },
-            React.createElement("h1", {
-              id: "farm-default-not-found-title",
-              className: "farm-default-not-found__code",
-            }, "404"),
-            React.createElement("p", {
-              id: "farm-default-not-found-description",
-              className: "farm-default-not-found__description",
-            }, "Not found"),
-            React.createElement("a", {
-              className: "farm-default-not-found__home",
-              href: defaultNotFoundHomeHref,
-            }, "GO HOME")
-          )
-        )
-      );
-    }
-    
-    // Use custom 404 page if provided, otherwise use default
-    const NotFoundPage = hasCustomNotFound && CustomNotFoundComponent ? CustomNotFoundComponent : Default404Page;
-    
     // Wrap 404 page with root layout if available
-    let notFoundElement = React.createElement(NotFoundPage, { pathname: pathname });
+    let notFoundElement = createFarmNotFoundElement(pathname);
     const applicableLayouts = getApplicableLayouts("/");
     
     // Wrap with layouts (from innermost to outermost)
@@ -8208,6 +8250,7 @@ async function handleFarmRequestInContext(
         headers: { "Content-Type": "text/html", "x-farm-preload-buffered": "1" },
       }
     ), middlewareHeaders);
+  }
   }
   ${
     hasMiddlewareRuntime

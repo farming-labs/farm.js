@@ -97,6 +97,60 @@ function pipeableStreamServer(boundaryError: unknown) {
   };
 }
 
+// A tree that is still suspended when the shell is ready. `shellError` is
+// reported while React renders the shell (a synchronous page under a loading
+// boundary); `lateError` after the stream has been handed back.
+function pendingReadableServer(options: { shellError?: unknown; lateError?: unknown }) {
+  return {
+    renderToReadableStream: async (
+      _element: unknown,
+      renderOptions: { onError: (error: unknown) => void },
+    ) => {
+      const encoder = new TextEncoder();
+      let pulls = 0;
+      if (options.shellError) renderOptions.onError(options.shellError);
+      const stream = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          pulls++;
+          if (pulls === 1) {
+            controller.enqueue(encoder.encode("<div>shell</div>"));
+            return;
+          }
+          // The suspended boundary settles later, after the response started.
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          if (options.lateError) renderOptions.onError(options.lateError);
+          controller.enqueue(encoder.encode("<!--late-->"));
+          controller.close();
+        },
+      });
+      return Object.assign(stream, { allReady: new Promise(() => {}) });
+    },
+  };
+}
+
+function pendingPipeableServer(shellError: unknown) {
+  const aborted: unknown[] = [];
+  return {
+    aborted,
+    renderToPipeableStream: (
+      _element: unknown,
+      renderOptions: { onShellReady: () => void; onError: (error: unknown) => void },
+    ) => {
+      renderOptions.onError(shellError);
+      queueMicrotask(() => renderOptions.onShellReady());
+      return {
+        pipe(destination: { write: (chunk: unknown) => boolean }) {
+          destination.write("<div>shell</div>");
+          return destination;
+        },
+        abort(reason: unknown) {
+          aborted.push(reason);
+        },
+      };
+    },
+  };
+}
+
 describe("generated production stream renderer control-flow errors", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -164,6 +218,33 @@ describe("generated production stream renderer control-flow errors", () => {
       "boom",
     );
     expect(consoleError).toHaveBeenCalledWith("[Farm SSR stream]", expect.any(Error));
+  });
+
+  it("does not stream a suspended tree after notFound() or redirect() in the shell pass", async () => {
+    for (const thrown of [
+      captureThrown(() => notFound()),
+      captureThrown(() => redirect("/login")),
+    ]) {
+      const web = instantiateStreamRenderer({ node: false, web: true });
+      await expect(
+        web.renderFarmElement(pendingReadableServer({ shellError: thrown }), null),
+      ).rejects.toBe(thrown);
+
+      const node = instantiateStreamRenderer({ node: true, web: false });
+      const server = pendingPipeableServer(thrown);
+      await expect(node.renderFarmElement(server, null)).rejects.toBe(thrown);
+      expect(server.aborted).toEqual([thrown]);
+    }
+  });
+
+  it("keeps streaming when notFound() arrives after the shell was handed back", async () => {
+    const { renderFarmElement } = instantiateStreamRenderer({ node: false, web: true });
+    const late = captureThrown(() => notFound());
+    const rendered = await renderFarmElement(pendingReadableServer({ lateError: late }), null);
+
+    expect(rendered.stream).toBeDefined();
+    expect(await new Response(rendered.stream).text()).toBe("<div>shell</div><!--late-->");
+    expect(rendered.streamErrors).toEqual([late]);
   });
 
   it("takes only the stream primitive the resolved runtime declares", async () => {
