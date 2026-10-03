@@ -771,9 +771,14 @@ test("waitlist demo preserves its accessible name and releases its held width", 
   page,
 }) => {
   let finishResponse!: () => void;
+  let signalRouteStarted!: () => void;
+  const routeStarted = new Promise<void>((resolve) => {
+    signalRouteStarted = resolve;
+  });
   await page.route("**/api/waitlist", async (route) => {
     await new Promise<void>((resolve) => {
       finishResponse = resolve;
+      signalRouteStarted();
     });
     await route.fulfill({ json: { ok: true, id: "demo-label-test-only" } });
   });
@@ -794,6 +799,7 @@ test("waitlist demo preserves its accessible name and releases its held width", 
   await form.evaluate((element) => (element as HTMLFormElement).requestSubmit());
   await expect(label).toHaveText("Joining…");
   await expect(submit).toHaveAccessibleName("Joining…");
+  await routeStarted;
   finishResponse();
   await expect(label).toHaveText("Join the waitlist");
   await expect(submit).toHaveAccessibleName("Join the waitlist");
