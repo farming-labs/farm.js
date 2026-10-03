@@ -7,7 +7,7 @@ const root = path.resolve(__dirname, "..");
 
 // Every pnpm scaffold command in docs, READMEs, templates, UI, and skills uses the plain stable
 // form. Config prefixes and dist-tags drifted across copies during the beta, so pin the one form.
-const canonical = /(?:^|[^\w-])pnpm create @farm\.js\/app(?![@\w])/;
+const canonical = /(?:^|[^\w-])pnpm create @farm\.js\/app(?![@\w-])/;
 
 function scaffoldLines() {
   const output = execFileSync(

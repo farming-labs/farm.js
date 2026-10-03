@@ -28,8 +28,23 @@ resolves the `@farm.js/app` initializer name to the published `@farm.js/create-a
 scaffolder installs React and all other starter dependencies automatically. Use `--skip-install` if
 you only want it to generate the project files.
 
-If pnpm starts an older initializer right after a release, its one-day `create` cache is still
-serving it. Put `PNPM_CONFIG_DLX_CACHE_MAX_AGE=0` in front of the command once to refresh it.
+Right after a release, pnpm can still start the previous initializer: its `create` cache lasts a
+day, and pnpm 11's default release-age policy holds back packages published in the last day. Set
+both for the shell, then run the command again:
+
+```bash
+export PNPM_CONFIG_DLX_CACHE_MAX_AGE=0
+export PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]'
+pnpm create @farm.js/app my-app --template basic --typescript
+```
+
+In PowerShell:
+
+```powershell
+$env:PNPM_CONFIG_DLX_CACHE_MAX_AGE = "0"
+$env:PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE = '["@farm.js/*"]'
+pnpm create @farm.js/app my-app --template basic --typescript
+```
 
 React is the default renderer. The Basic starter can instead use Preact, Solid, Vue, or Svelte:
 
