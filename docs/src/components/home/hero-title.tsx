@@ -35,7 +35,7 @@ export function HeroTitle({
   linkLabel,
 }: HeroTitleProps) {
   return (
-    <div className="farm-hero-title relative mt-7 w-fit max-w-full px-4 py-4 sm:px-5 sm:py-5">
+    <div className="farm-hero-title relative mt-3 w-fit max-w-full px-4 pb-4 pt-2 sm:px-5 sm:pb-5 sm:pt-2">
       {/* The label keeps the heading's name steady while its visible word changes. */}
       <h1 aria-label={`${lead} ${word} ${after}`} className={className}>
         <span className="block">{lead}</span>{" "}
