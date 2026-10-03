@@ -3553,7 +3553,8 @@ if (import.meta.hot) {
         // A component that gained or lost island ownership needs a fresh transform.
         for (const boundary of new Set([...previous.boundaries, ...next.boundaries])) {
           if (previous.boundaries.has(boundary) === next.boundaries.has(boundary)) continue;
-          for (const mod of server.moduleGraph.getModulesByFile(boundary) ?? []) {
+          // The plan resolves platform paths; Vite keys files by POSIX paths.
+          for (const mod of server.moduleGraph.getModulesByFile(toPosixPath(boundary)) ?? []) {
             server.moduleGraph.invalidateModule(mod);
           }
         }

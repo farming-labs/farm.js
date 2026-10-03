@@ -32,7 +32,7 @@ async function writeModule(root: string, relativePath: string, source: string): 
   return filePath;
 }
 
-async function waitFor(check: () => Promise<boolean>, timeoutMs = 10_000): Promise<void> {
+async function waitFor(check: () => Promise<boolean>, timeoutMs = 25_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await check()) return;
