@@ -686,8 +686,8 @@ function Hero() {
           word="product-integrated"
         />
         <p className="mt-5 max-w-[38rem] text-balance text-sm leading-6 text-white/56 sm:text-[15px] sm:leading-6">
-          Bring the stack you already use. Farm.js connects your app router, typed APIs, middleware,
-          integrations, docs, and deployment so they work together as one product.
+          Bring the stack you already use. Farm.js connects your app router, typed APIs,
+          integrations, docs, and deployment into one product that people and agents can both use.
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           <ButtonLink href="/docs/getting-started" glyph=">_" size="compact">
