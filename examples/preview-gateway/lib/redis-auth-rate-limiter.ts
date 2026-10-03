@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isIP } from "node:net";
 
 import type {
   PreviewAuthExchangeRateLimiter,
@@ -67,8 +68,10 @@ export function readVercelClientAddress(headers: Headers) {
   // Do not fall back to request-controlled forwarding headers outside that
   // platform guarantee or collapse unidentified callers into one bucket.
   const clientAddress = headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim();
-  if (!clientAddress) {
-    throw new Error("Vercel did not provide a client address for preview auth rate limiting.");
+  if (!clientAddress || isIP(clientAddress) === 0) {
+    throw new Error(
+      "Vercel did not provide a valid client address for preview auth rate limiting.",
+    );
   }
   return clientAddress;
 }
