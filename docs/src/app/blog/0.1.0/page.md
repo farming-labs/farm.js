@@ -155,7 +155,7 @@ Already have a CMS? A `remote()` source can feed the same pipeline from an API o
 
 ## Local-first data with Sync
 
-**`@farm.js/sync`** keeps rows in the browser: reads render from a local store, writes show up before the server answers, and offline edits queue until the connection returns. It runs on top of your own database, a server-side `where` filter decides which rows each device can hold, and it is in beta. The [Sync guide](https://farmjs.dev/docs/plugins/sync) covers setup.
+**`@farm.js/sync`** keeps rows in the browser: reads render from a local store, writes show up before the server answers, and offline edits queue until the connection returns. It runs on top of your own database: a server-side `where` filter decides which rows each device can hold, and it is in beta. The [Sync guide](https://farmjs.dev/docs/plugins/sync) covers setup.
 
 <span id="a-cli-that-explains-your-app" className="blog-heading-anchor" />
 
