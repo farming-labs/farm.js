@@ -19,14 +19,14 @@ function createRequest(url: string): IncomingMessage {
 
 type Seen = { path: string; params: Record<string, string | string[]> };
 
-async function runDev(paths: string[]) {
+async function runDev(paths: string[], matcher = "/dashboard/:path*") {
   const seen: Seen[] = [];
   const manager = new MiddlewareManager(
     "/tmp",
     undefined,
     [
       {
-        matcher: "/dashboard/:path*",
+        matcher,
         async handler(ctx: MiddlewareContext, next) {
           seen.push({ path: ctx.pathname, params: { ...ctx.params } });
           await next();
@@ -42,12 +42,12 @@ async function runDev(paths: string[]) {
   return seen;
 }
 
-async function runProduction(paths: string[]) {
+async function runProduction(paths: string[], matcher = "/dashboard/:path*") {
   const seen: Seen[] = [];
   const runner = createProductionMiddlewareRunner({
     config: [
       {
-        matcher: "/dashboard/:path*",
+        matcher,
         handler(ctx) {
           seen.push({ path: ctx.pathname, params: { ...ctx.params } });
         },
@@ -72,8 +72,8 @@ describe.each([
   });
 
   it("matches the basePath root as the app root", async () => {
-    const seen = await run(["/console", "/console/dashboard"]);
-    expect(seen.map((entry) => entry.path)).toEqual(["/console/dashboard"]);
+    const seen = await run(["/console", "/console/dashboard"], "/");
+    expect(seen.map((entry) => entry.path)).toEqual(["/console"]);
   });
 });
 
