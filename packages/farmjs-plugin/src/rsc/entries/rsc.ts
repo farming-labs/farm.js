@@ -1,6 +1,27 @@
 import type { EntryContext } from "../types.js";
 
 /**
+ * Generates the terminal middleware-result handling shared by the RSC entry
+ * and its executable contract tests.
+ */
+export function generateRscMiddlewareResultHandling(): string {
+  return `
+  // If middleware handled the request (e.g., redirect, auth), return the response
+  if (middlewareResult.response) {
+    return middlewareResult.response;
+  }
+  // notFound() in middleware stops the request before any route runs. It gets
+  // the same 404 as a page-level notFound(), plus headers middleware set.
+  if (middlewareResult.notFound) {
+    return applyProductionMiddlewareHeaders(
+      new Response('Not Found', { status: 404, headers: { 'cache-control': 'no-store' } }),
+      middlewareResult.headers,
+    );
+  }
+`;
+}
+
+/**
  * Generates the RSC environment entry file.
  *
  * This entry file:
@@ -557,11 +578,7 @@ async function handleFarmRequest(request, context) {
 
   // Execute middleware first
   const middlewareResult = await executeMiddleware(request, context);
-  
-  // If middleware handled the request (e.g., redirect, auth), return the response
-  if (middlewareResult.response) {
-    return middlewareResult.response;
-  }
+  ${generateRscMiddlewareResultHandling()}
 
   request = middlewareResult.request;
   url = new URL(request.url);
