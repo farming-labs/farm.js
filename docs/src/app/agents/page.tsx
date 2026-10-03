@@ -146,8 +146,11 @@ export default function AgentsPage() {
                   <span className="agents-hero-line">Connect your tools.</span>
                 </h1>
                 <p className="agents-intro">
-                  Your agents, MCP servers, and website. Connected, managed, and observable from the
-                  same Farm.js codebase.
+                  Your agents, MCP servers, and website in one Farm.js codebase
+                  <span className="hidden sm:inline">
+                    , connected, managed, and observable together
+                  </span>
+                  .
                 </p>
                 <div id="waitlist" className="agents-signup">
                   <AgentWaitlist source="agents" note={false} />

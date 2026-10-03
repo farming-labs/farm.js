@@ -85,6 +85,7 @@
   font-size: 13px;
   font-weight: 300;
   line-height: 1.65;
+  text-wrap: balance;
 }
 /* Hero signup: the email field and button share one bordered bar in the page's mono style. */
 .agents-signup {
