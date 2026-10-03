@@ -93,8 +93,8 @@ export default function AgentCheckPage() {
                   <span className="agents-hero-line">Find out in seconds.</span>
                 </h1>
                 <p className="agents-intro">
-                  One address in, a score out, and a concrete fix for every gap. Farm.js apps get
-                  the exact config to add.
+                  One address in, a score out, and a concrete fix for every gap. Works for any site,
+                  whatever it's built with.
                 </p>
                 <div className="agents-signup">
                   <AgentCheckForm />
