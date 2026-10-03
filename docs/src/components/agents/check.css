@@ -187,35 +187,21 @@
 .agent-check-gaps h3 {
   font-size: 22px;
 }
-.agent-check-fix code,
-.agent-check-row-summary code {
-  padding: 1px 5px;
-  border: 0.5px solid rgb(255 255 255 / 0.1);
-  background: #070707;
-  color: #c8c8c8;
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 0.82em;
-  overflow-wrap: anywhere;
-}
 .agent-check-fix {
   color: #aaa;
   font-size: 15px;
   font-weight: 300;
   line-height: 1.75;
 }
-.agent-check-fix strong {
-  color: #e0e0e0;
-  font-weight: 450;
-}
-/* What the check saw: a quiet list, not a code block. */
 .agent-check-evidence {
   display: grid;
   gap: 4px;
-  margin: 0;
-  padding: 0 0 0 14px;
-  border-left: 1px solid var(--farm-line);
+  margin: 0 0 20px;
+  padding: 10px 14px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.04);
   list-style: none;
-  color: #8f8f8f;
+  color: rgb(255 255 255 / 0.62);
   font-family: var(--font-geist-mono), monospace;
   font-size: 11.5px;
   line-height: 1.7;

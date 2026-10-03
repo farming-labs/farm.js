@@ -64,19 +64,6 @@ function StatusTag({ check }: { check: AgentCheckResult }) {
   );
 }
 
-// Paths, header values and HTML tags in the scanner's sentences read as code.
-const CODE_TOKEN = /(<[^<>]+>|Accept: text\/markdown|\B\/[\w.\-/]*[\w\-/])/g;
-
-function Text({ children }: { children: string }) {
-  return (
-    <>
-      {children
-        .split(CODE_TOKEN)
-        .map((part, index) => (index % 2 ? <code key={index}>{part}</code> : part))}
-    </>
-  );
-}
-
 function Evidence({ lines, collapsed = false }: { lines: string[]; collapsed?: boolean }) {
   if (!lines.length) return null;
   const list = (
@@ -107,9 +94,7 @@ function CheckRows({ checks }: { checks: AgentCheckResult[] }) {
                 icon={AGENT_CHECK_ICONS[check.id]}
                 label={check.title}
               />
-              <span className="agent-check-row-summary">
-                <Text>{check.summary}</Text>
-              </span>
+              <span className="agent-check-row-summary">{check.summary}</span>
               <span className="agent-check-row-end">
                 <StatusTag check={check} />
                 <ChevronDown className="agent-check-row-chevron" size={14} aria-hidden />
@@ -214,11 +199,7 @@ export default async function AgentCheckReportPage({ params }: PageProps<"/agent
                         <StatusTag check={check} />
                       </div>
                       <h3 className="font-geist-pixel">{check.summary}</h3>
-                      {check.fix ? (
-                        <p className="agent-check-fix">
-                          <strong>How to fix it.</strong> <Text>{check.fix.summary}</Text>
-                        </p>
-                      ) : null}
+                      {check.fix ? <p className="agent-check-fix">{check.fix.summary}</p> : null}
                       <Evidence lines={check.evidence} collapsed />
                     </article>
                   ))}
