@@ -154,7 +154,7 @@ export default function AgentCheckPage() {
                     <p>{description}</p>
                     <div className="agent-check-list-meta">
                       <code>{probe}</code>
-                      <span>[ {points ? `${points} pts` : "reported"} ]</span>
+                      <span>{points ? `${points} pts` : "Not scored"}</span>
                     </div>
                   </li>
                 ))}
