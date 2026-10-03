@@ -6,6 +6,11 @@ type BlogVideoProps = {
   /** Shown at the other end of the top border, such as "1:56". */
   duration?: string;
   caption?: string;
+  captions?: {
+    src: string;
+    srcLang: string;
+    label: string;
+  };
 };
 
 /**
@@ -13,7 +18,7 @@ type BlogVideoProps = {
  * corner squares and a legend in its top border. Only the poster loads until
  * someone presses play.
  */
-export function BlogVideo({ src, poster, title, duration, caption }: BlogVideoProps) {
+export function BlogVideo({ src, poster, title, duration, caption, captions }: BlogVideoProps) {
   return (
     <figure className="blog-video">
       <div className="bv-frame">
@@ -32,6 +37,15 @@ export function BlogVideo({ src, poster, title, duration, caption }: BlogVideoPr
           preload="none"
           src={src}
         >
+          {captions ? (
+            <track
+              default
+              kind="captions"
+              label={captions.label}
+              src={captions.src}
+              srcLang={captions.srcLang}
+            />
+          ) : null}
           <a href={src}>Download the video</a>
         </video>
       </div>
