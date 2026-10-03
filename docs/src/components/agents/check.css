@@ -192,8 +192,21 @@
 .agent-check-gaps article:nth-child(odd) {
   border-right: 1px solid var(--farm-line);
 }
-.agent-check-gaps article:nth-child(even):nth-last-child(2) {
-  border-bottom: 1px solid var(--farm-line);
+/* A lone last card carries its top rule across the empty cell beside it, so
+   the rule is one line instead of two borders a pixel apart. */
+.agent-check-gaps article:nth-child(n + 3):nth-child(odd):last-child {
+  position: relative;
+}
+.agent-check-gaps article:nth-child(n + 3):nth-child(odd):last-child::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  /* From this card's right border to the end of the next column. */
+  left: 100%;
+  width: calc(100% + 2px);
+  height: 1px;
+  background: var(--farm-line);
+  pointer-events: none;
 }
 .agent-check-gaps h3 {
   font-size: 22px;
@@ -264,8 +277,13 @@
   padding: 0;
   list-style: none;
 }
-.agent-check-rows li + li {
+.agent-check-rows > li + li {
   border-top: 1px solid var(--farm-line);
+}
+/* Evidence lines inside an open row get a quieter divider than the rows. */
+.agent-check-rows .agent-check-evidence li + li {
+  padding-top: 4px;
+  border-top: 1px solid rgb(255 255 255 / 0.05);
 }
 .agent-check-rows summary {
   display: grid;
@@ -333,8 +351,8 @@
   .agent-check-gaps article:nth-child(odd) {
     border-right: 0;
   }
-  .agent-check-gaps article:nth-child(even):nth-last-child(2) {
-    border-bottom: 0;
+  .agent-check-gaps article:nth-child(n + 3):nth-child(odd):last-child::after {
+    content: none;
   }
   .agent-check-hero {
     padding: 40px 24px 32px;
