@@ -1,5 +1,6 @@
 import {
   AmbiguousRouteError,
+  assertBrowserStableRoutePath,
   assertTerminalCatchAll,
   assertUniqueRouteParameters,
   compareRouteSpecificity,
@@ -181,8 +182,8 @@ function normalizeRouteInput<TMeta>(
   index: number,
 ): NormalizedRouterRoute<TMeta> {
   const route = typeof input === "string" ? { path: input } : input;
+  const segments = parseRoutePattern(route.path);
   const path = normalizeRoutePattern(route.path);
-  const segments = parseRoutePattern(path);
 
   return {
     route: {
@@ -196,6 +197,7 @@ function normalizeRouteInput<TMeta>(
 }
 
 function parseRoutePattern(pattern: string): RouterSegment[] {
+  assertBrowserStableRoutePath(pattern);
   assertTerminalCatchAll(pattern, "router");
   assertUniqueRouteParameters(pattern, "router");
   return splitRoutePattern(pattern)

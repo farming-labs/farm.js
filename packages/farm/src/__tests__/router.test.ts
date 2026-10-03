@@ -42,7 +42,7 @@ describe("createFarmRouter", () => {
     expect(() => matchFarmRoute("/docs/*slug/edit", "/docs/guide/edit")).toThrow(
       'Catch-all segment "*slug" must be the final segment',
     );
-    expect(() => buildFarmRoutePath("\\docs\\[...slug]\\edit", { slug: "guide" })).toThrow(
+    expect(() => buildFarmRoutePath("/docs/[...slug]/edit", { slug: "guide" })).toThrow(
       'Catch-all segment "[...slug]" must be the final segment',
     );
     expect(buildFarmRoutePath("/docs/[...slug]/()", { slug: "guide" })).toBe("/docs/guide");
@@ -72,17 +72,36 @@ describe("createFarmRouter", () => {
     );
   });
 
-  it("keeps literal bracket syntax and encoded segment boundaries distinct", () => {
-    const router = createFarmRouter([
-      "/docs/[not.valid]",
-      "/docs/[id]",
+  it("rejects browser-unstable static segments across router helpers", () => {
+    const patterns = [
+      "/%2e/admin",
+      "/%2E%2E/admin",
       "/files/a%2Fb",
-      "/files/a/b",
-    ]);
+      "/files/a%5Cb",
+      "/files/a%0Ab",
+      "/files\\private",
+    ];
+
+    for (const pattern of patterns) {
+      const operations = [
+        () => createFarmRouter([pattern]),
+        () => matchFarmRoute(pattern, "/files/private"),
+        () => buildFarmRoutePath(pattern),
+        () => isFarmRouteActive(pattern, "/files/private"),
+      ];
+
+      for (const operation of operations) {
+        expect(operation).toThrow(/browser-unstable|backslashes or control characters/);
+      }
+    }
+  });
+
+  it("keeps literal bracket syntax and stable encoded static segments working", () => {
+    const router = createFarmRouter(["/docs/[not.valid]", "/docs/[id]", "/files/hello%20farm"]);
 
     expect(router.match("/docs/%5Bnot.valid%5D")?.route.path).toBe("/docs/[not.valid]");
-    expect(router.match("/files/a%2Fb")?.route.path).toBe("/files/a%2Fb");
-    expect(router.match("/files/a/b")?.route.path).toBe("/files/a/b");
+    expect(router.match("/files/hello%20farm")?.route.path).toBe("/files/hello%20farm");
+    expect(router.build("/files/hello%20farm")).toBe("/files/hello%20farm");
   });
 });
 

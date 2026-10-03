@@ -173,6 +173,11 @@ const href = router.build("/docs/[[...slug]]", {
 
 This returns `/docs/core/routing`. Optional catch-all params can be omitted, static routes win over dynamic routes, and route groups such as `(marketing)` do not appear in the URL.
 
+Programmatic route patterns must remain stable when a browser parses their URLs. Farm rejects
+dot-only segments, encoded path separators or control characters, and raw backslashes instead of
+building a URL that the browser would canonicalize to a different route. Ordinary encoded static
+segments such as `/files/hello%20farm` remain supported.
+
 These matching rules also apply with experimental React Server Components enabled. Farm prepares page precedence when the route entry initializes, so filesystem discovery order cannot make `/users/[id]` hide `/users/new`. Optional catch-all pages match both their parent URL and deeper paths.
 
 Route matching decodes each URL path segment once before comparing static names or exposing
