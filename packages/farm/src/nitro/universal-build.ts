@@ -1336,6 +1336,9 @@ async function buildClient(
         hasIsolatedClientBoundaries: false,
         isolatedHydrationEligible: false,
         isolatedBoundaries: [],
+        asyncOwnerIslands: undefined,
+        suppressedAsyncHydration: undefined,
+        fallbackReason: undefined,
       };
     }
   });
@@ -1400,6 +1403,15 @@ async function buildClient(
     })),
     layoutAppliesToRoute,
   );
+
+  for (const layout of clientLayouts) {
+    const matchesBuiltRoute =
+      pageRoutes.some((route) => layoutAppliesToRoute(layout.pattern, route.pattern)) ||
+      Boolean(adapterDocsEntry && layoutAppliesToRoute(layout.pattern, adapterDocsEntry));
+    if (matchesBuiltRoute && layout.suppressedAsyncHydration) {
+      logger.warn(`⚠️  ${describeSuppressedAsyncHydration(layout.pattern, layout.fallbackReason)}`);
+    }
+  }
 
   if (isolatedMode === "analyze") {
     for (const { entry, metadata } of [
@@ -1475,7 +1487,9 @@ async function buildClient(
     const docsEntry =
       `/${config.docs.entry || "docs"}`.replace(/\/+/g, "/").replace(/\/$/, "") || "/";
     const applicableClientLayouts = clientLayouts.filter(
-      (layout) => layout.shouldHydrate && layoutAppliesToRoute(layout.pattern, docsEntry),
+      (layout) =>
+        (layout.shouldHydrate || layout.hasIsolatedClientBoundaries) &&
+        layoutAppliesToRoute(layout.pattern, docsEntry),
     );
     if (applicableClientLayouts.length > 0) {
       const hydrationStrategies = applicableClientLayouts.flatMap((layout) =>
@@ -1494,8 +1508,12 @@ async function buildClient(
         relativePath: "",
         pageShouldHydrate: false,
         islandStrategy,
-        hasIsolatedClientBoundaries: false,
-        isolatedBoundaries: [] as IsolatedClientBoundaryReference[],
+        hasIsolatedClientBoundaries: applicableClientLayouts.some(
+          (layout) => layout.hasIsolatedClientBoundaries,
+        ),
+        isolatedBoundaries: applicableClientLayouts
+          .filter((layout) => layout.hasIsolatedClientBoundaries)
+          .flatMap((layout) => layout.isolatedBoundaries),
       }));
 
       // Docs requests take precedence over app page routes on the server, so
@@ -1515,7 +1533,7 @@ async function buildClient(
   });
 
   logger.info(
-    `📱 Total hydratable routes detected: ${clientPages.length} pages, ${clientLayouts.filter((layout) => layout.shouldHydrate).length} layouts, and ${clientRouteSlots.length} slots`,
+    `📱 Total hydratable routes detected: ${clientPages.length} pages, ${clientLayouts.filter((layout) => layout.shouldHydrate || layout.hasIsolatedClientBoundaries).length} layouts, and ${clientRouteSlots.length} slots`,
   );
 
   // Generate client hydration entry code

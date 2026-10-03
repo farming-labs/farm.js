@@ -139,6 +139,9 @@ export interface FarmClientRouteManifest {
     islandStrategy: FarmIslandStrategy | null;
     hasIsolatedClientBoundaries?: true;
     isolatedBoundaries?: IsolatedClientBoundaryReference[];
+    suppressedAsyncHydration?: true;
+    /** Why an async layout's client-side hydration could not become islands. */
+    suppressedAsyncHydrationReason?: string;
   }>;
   slots: Array<{
     name: string;
@@ -741,6 +744,10 @@ export class RouteManager {
             })),
           }
         : {}),
+      suppressedAsyncHydration: metadata.suppressedAsyncHydration,
+      ...(metadata.suppressedAsyncHydration && metadata.fallbackReason
+        ? { suppressedAsyncHydrationReason: metadata.fallbackReason }
+        : {}),
     }));
 
     const slots = Array.from(this.routeSlots.values()).map((entry) => {
@@ -774,6 +781,24 @@ export class RouteManager {
       isolatedClientBoundaryModules,
     };
     return manifest;
+  }
+
+  /**
+   * Rebuild route metadata transactionally for HMR. If a file is temporarily
+   * invalid while it is being edited, keep the last usable plan so unrelated
+   * updates and the next repair can still compare against it.
+   *
+   * @internal
+   */
+  regenerateClientManifest(projectRoot: string = this.config.root): FarmClientRouteManifest {
+    const previousCache = this.clientManifestCache;
+    this.clientManifestCache = undefined;
+    try {
+      return this.generateClientManifest(projectRoot);
+    } catch (error) {
+      this.clientManifestCache = previousCache;
+      throw error;
+    }
   }
 
   /** @internal Client modules selected by the compiled hydration ownership plan. */

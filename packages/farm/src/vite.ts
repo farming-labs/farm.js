@@ -3490,58 +3490,60 @@ if (import.meta.hot) {
 
       const isolatedHydrationMode = currentFarmConfig?.experimental?.isolatedClientHydration;
       const planRouteManager = farmApp?.getRouteManager();
-      // Async server pages and layouts get islands without the experiment, so
-      // React apps replan when a page or layout changes (it may have become
-      // async) or once any island exists.
+      const isHydrationPlanSource =
+        currentSrcRoot !== null &&
+        normalizedFile.startsWith(`${currentSrcRoot}/`) &&
+        /\.[cm]?[jt]sx?$/.test(normalizedFile);
+      // Any source module can become an async owner's client boundary. Replan
+      // React source updates even when the previous plan had no islands, but
+      // keep CSS, generated output and files outside src off this static pass.
       const tracksAsyncOwnerIslands =
-        isReactRenderer(currentFarmConfig?.renderer) &&
-        planRouteManager !== undefined &&
-        (planRouteManager.getIsolatedClientBoundaryModules(currentFarmConfig.root).size > 0 ||
-          [
-            ...planRouteManager.getRoutes().values(),
-            ...planRouteManager.getLayouts().values(),
-          ].some((entry) => path.resolve(entry.modulePath) === path.resolve(file)));
+        isReactRenderer(currentFarmConfig?.renderer) && planRouteManager !== undefined;
       if (
-        currentSrcRoot &&
+        isHydrationPlanSource &&
         (isolatedHydrationMode === "enabled" ||
           isolatedHydrationMode === "analyze" ||
-          tracksAsyncOwnerIslands) &&
-        /\.[cm]?[jt]sx?$/.test(normalizedFile)
+          tracksAsyncOwnerIslands)
       ) {
         const routeManager = planRouteManager;
         if (routeManager) {
-          const previousPlan = JSON.stringify(
-            routeManager.generateClientManifest(currentFarmConfig.root),
-          );
-          const previousBoundaries = new Set(
-            routeManager.getIsolatedClientBoundaryModules(currentFarmConfig.root),
-          );
-          routeManager.invalidateClientManifest();
-          const nextPlan = JSON.stringify(
-            routeManager.generateClientManifest(currentFarmConfig.root),
-          );
-          const nextBoundaries = routeManager.getIsolatedClientBoundaryModules(
-            currentFarmConfig.root,
-          );
-          const planChanged = previousPlan !== nextPlan;
-          const manifestModule = server.moduleGraph.getModuleById("/@farm/manifest");
-          if (manifestModule) server.moduleGraph.invalidateModule(manifestModule);
-          if (planChanged) {
-            for (const mod of modules) server.moduleGraph.invalidateModule(mod);
-            // A component that gained or lost island ownership needs a fresh transform.
-            for (const boundary of new Set([...previousBoundaries, ...nextBoundaries])) {
-              if (previousBoundaries.has(boundary) === nextBoundaries.has(boundary)) continue;
-              for (const mod of server.moduleGraph.getModulesByFile(boundary) ?? []) {
-                server.moduleGraph.invalidateModule(mod);
+          try {
+            const previousPlan = JSON.stringify(
+              routeManager.generateClientManifest(currentFarmConfig.root),
+            );
+            const previousBoundaries = new Set(
+              routeManager.getIsolatedClientBoundaryModules(currentFarmConfig.root),
+            );
+            const nextPlan = JSON.stringify(
+              routeManager.regenerateClientManifest(currentFarmConfig.root),
+            );
+            const nextBoundaries = routeManager.getIsolatedClientBoundaryModules(
+              currentFarmConfig.root,
+            );
+            const planChanged = previousPlan !== nextPlan;
+            const manifestModule = server.moduleGraph.getModuleById("/@farm/manifest");
+            if (manifestModule) server.moduleGraph.invalidateModule(manifestModule);
+            if (planChanged) {
+              for (const mod of modules) server.moduleGraph.invalidateModule(mod);
+              // A component that gained or lost island ownership needs a fresh transform.
+              for (const boundary of new Set([...previousBoundaries, ...nextBoundaries])) {
+                if (previousBoundaries.has(boundary) === nextBoundaries.has(boundary)) continue;
+                for (const mod of server.moduleGraph.getModulesByFile(boundary) ?? []) {
+                  server.moduleGraph.invalidateModule(mod);
+                }
               }
+              // The client entry includes the island runtime only when a plan needs it.
+              for (const clientId of ["/@farm/client", "/@farm/client.js"]) {
+                const clientModule = server.moduleGraph.getModuleById(clientId);
+                if (clientModule) server.moduleGraph.invalidateModule(clientModule);
+              }
+              server.ws.send({ type: "full-reload", path: "*" });
+              return [];
             }
-            // The client entry includes the island runtime only when a plan needs it.
-            for (const clientId of ["/@farm/client", "/@farm/client.js"]) {
-              const clientModule = server.moduleGraph.getModuleById(clientId);
-              if (clientModule) server.moduleGraph.invalidateModule(clientModule);
-            }
-            server.ws.send({ type: "full-reload", path: "*" });
-            return [];
+          } catch (error) {
+            logger.warn(
+              `[Farm.js] Could not refresh the client hydration plan after ${file}: ${error instanceof Error ? error.message : String(error)}`,
+            );
           }
         }
       }

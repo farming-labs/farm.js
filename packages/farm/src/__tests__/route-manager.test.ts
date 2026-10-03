@@ -8,6 +8,7 @@ import {
   shouldSuggestStaticRenderingForI18n,
 } from "../routing/route-manager";
 import { defineIntegration } from "../integrations";
+import { REACT_RENDERER } from "../renderer";
 import type { FarmConfig } from "../types";
 
 /** "/test" is not an absolute path on Windows, so resolve it per platform. */
@@ -287,6 +288,88 @@ describe("RouteManager", () => {
       expect(new Set(refreshed.routes.map((route) => route.pattern))).toEqual(
         new Set(["/", "/about"]),
       );
+    });
+
+    it("keeps the previous client manifest when an HMR rebuild cannot inspect edited source", async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "farm-route-manifest-refresh-"));
+      temporaryDirectories.push(root);
+      await mkdir(path.join(root, "src", "app", "demo"), { recursive: true });
+      const pageFile = path.join(root, "src", "app", "demo", "page.tsx");
+      const clientFile = path.join(root, "src", "app", "demo", "button.tsx");
+      await writeFile(
+        clientFile,
+        `"use client";
+export default function Button() { return <button>count</button>; }`,
+      );
+      await writeFile(
+        pageFile,
+        `import Button from "./button";
+export default async function Page() { return <Button />; }`,
+      );
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) return ["demo/page.tsx"];
+        return [];
+      });
+      mockConfig.root = root;
+      mockConfig.renderer = REACT_RENDERER;
+      routeManager = new RouteManager(mockConfig);
+      await routeManager.discoverRoutes();
+
+      const initial = routeManager.generateClientManifest(root);
+      expect(initial.routes[0]).toMatchObject({ hasIsolatedClientBoundaries: true });
+
+      await writeFile(
+        clientFile,
+        `"use client";
+export const island = chooseStrategy();
+export default function Button() { return <button>count</button>; }`,
+      );
+      expect(() => routeManager.regenerateClientManifest(root)).toThrow(/must be a static/);
+      expect(routeManager.generateClientManifest(root)).toBe(initial);
+      expect(routeManager.getIsolatedClientBoundaryModules(root)).toEqual(new Set([clientFile]));
+    });
+
+    it("preserves suppression details for async layouts that cannot become islands", async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "farm-route-async-layout-"));
+      temporaryDirectories.push(root);
+      await mkdir(path.join(root, "src", "app"), { recursive: true });
+      const layoutFile = path.join(root, "src", "app", "layout.tsx");
+      await writeFile(
+        path.join(root, "src", "app", "widget.tsx"),
+        `"use client";
+function Widget() { return <button>count</button>; }
+export { Widget };`,
+      );
+      await writeFile(
+        layoutFile,
+        `import { Widget } from "./widget";
+export default async function Layout({ children }) {
+  return <><Widget />{children}</>;
+}`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        "export default function Page() { return <main>home</main>; }",
+      );
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) return ["page.tsx"];
+        if (pattern.includes("layout")) return ["layout.tsx"];
+        return [];
+      });
+      mockConfig.root = root;
+      mockConfig.renderer = REACT_RENDERER;
+      routeManager = new RouteManager(mockConfig);
+      await routeManager.discoverRoutes();
+
+      expect(routeManager.generateClientManifest(root).layouts[0]).toMatchObject({
+        shouldHydrate: false,
+        suppressedAsyncHydration: true,
+        suppressedAsyncHydrationReason: expect.stringMatching(
+          /widget\.tsx uses an unsupported export shape$/,
+        ),
+      });
     });
 
     it("keeps an isolated layout when a sibling page needs route-wide hydration", async () => {
