@@ -4240,17 +4240,6 @@ function prepareKeyedRowBindingSetUpdates(
   return preparedUpdates;
 }
 
-function hasValidKeyedRowBindingTargets(
-  props: CompilerKeyedRowBindingSource,
-  instance: CompilerKeyedRowInstance | undefined,
-): boolean {
-  if (!instance) return false;
-  return props.bindings.every((binding) => {
-    const target = findCompilerHostTarget(instance.element, binding.path);
-    return Boolean(target && (binding.kind === "text" || binding.name));
-  });
-}
-
 function keyedRowConditionalSnapshot(
   conditional: CompilerKeyedRowConditional,
   item: unknown,
@@ -9514,7 +9503,10 @@ function createKeyedRowsBlockComponent(
       if (
         shouldPrepareBindings &&
         rows.items.length === 1 &&
-        !hasValidKeyedRowBindingTargets(this.currentProps, this.instances.get(rows.keys[0]))
+        this.currentProps.bindings.some(
+          (binding) =>
+            !findCompilerHostTarget(this.instances.get(rows.keys[0])!.element, binding.path),
+        )
       ) {
         this.activateFallback(afterCommit);
         return true;
