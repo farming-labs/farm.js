@@ -628,10 +628,11 @@ export async function collectSSGPages(
           // Materialize every path before adding any of them. If one entry is
           // invalid, the outer error handler can safely fall the whole route
           // back to SSR without leaving a partial SSG manifest behind.
+          const optionalCatchAllParams = getOptionalCatchAllParameterNames(route.path);
           const materializedPages = paths.map((params) => ({
             urlPath: materializeSSGRoutePath(route.path, params),
             filePath: route.filePath,
-            params: normalizeStaticPathParams(params),
+            params: normalizeStaticPathParams(params, optionalCatchAllParams),
             revalidate: rendering.revalidate,
           }));
 
@@ -763,13 +764,40 @@ function readCatchAllSegments(
   return segments;
 }
 
-function normalizeStaticPathParams(params: StaticPathParams): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(params).map(([key, value]) => [
-      key,
-      isStaticPathArray(value) ? value.map(String).join("/") : String(value),
-    ]),
+function getOptionalCatchAllParameterNames(routePattern: string): ReadonlySet<string> {
+  return new Set(
+    routePattern
+      .split("/")
+      .map((segment) => segment.match(OPTIONAL_CATCH_ALL_SEGMENT)?.[1])
+      .filter((name): name is string => Boolean(name)),
   );
+}
+
+function normalizeStaticPathParams(
+  params: StaticPathParams,
+  optionalCatchAllParams: ReadonlySet<string>,
+): Record<string, string> {
+  const entries = Object.entries(params).map(([key, value]): [string, string] => {
+    const emptyOptionalCatchAll =
+      optionalCatchAllParams.has(key) &&
+      (isMissingPathValue(value) || (isStaticPathArray(value) && value.length === 0));
+    return [
+      key,
+      emptyOptionalCatchAll
+        ? ""
+        : isStaticPathArray(value)
+          ? value.map(String).join("/")
+          : String(value),
+    ];
+  });
+
+  for (const name of optionalCatchAllParams) {
+    if (!Object.prototype.hasOwnProperty.call(params, name)) {
+      entries.push([name, ""]);
+    }
+  }
+
+  return Object.fromEntries(entries);
 }
 
 function isMissingPathValue(value: unknown): value is "" | null | undefined {

@@ -10,7 +10,7 @@ import {
   parseRouteRenderingDirective,
   resolveRouteRenderingConfig,
 } from "../ssg";
-import type { RouteModule } from "../types";
+import type { RouteModule, StaticPathParams } from "../types";
 
 const tempDirs = new Set<string>();
 
@@ -392,14 +392,39 @@ describe("dynamic SSG path materialization", () => {
     pattern: pathPattern,
   });
 
-  it("removes an empty optional catch-all segment and populates non-empty segments", async () => {
+  it("normalizes every empty optional catch-all representation and preserves non-empty segments", async () => {
     const result = await collectSSGPages([route("/docs/[[...slug]]")], async () => ({
       ssg: true,
-      getStaticPaths: () => [{ slug: [] }, { slug: ["guides", "farm js", "café"] }],
+      getStaticPaths: () =>
+        [
+          {},
+          { slug: undefined },
+          { slug: null },
+          { slug: [] },
+          { slug: ["guides", "farm js", "café"] },
+        ] as unknown as StaticPathParams[],
     }));
 
     expect(result).toEqual({
       ssg: [
+        {
+          urlPath: "/docs",
+          filePath: "/virtual/docs/[[...slug]]/page.tsx",
+          params: { slug: "" },
+          revalidate: undefined,
+        },
+        {
+          urlPath: "/docs",
+          filePath: "/virtual/docs/[[...slug]]/page.tsx",
+          params: { slug: "" },
+          revalidate: undefined,
+        },
+        {
+          urlPath: "/docs",
+          filePath: "/virtual/docs/[[...slug]]/page.tsx",
+          params: { slug: "" },
+          revalidate: undefined,
+        },
         {
           urlPath: "/docs",
           filePath: "/virtual/docs/[[...slug]]/page.tsx",
@@ -428,6 +453,24 @@ describe("dynamic SSG path materialization", () => {
       params: { parts: "api/routing & links/v2" },
     });
     expect(result.ssr).toEqual([]);
+  });
+
+  it.each([
+    ["omitted", {}],
+    ["undefined", { parts: undefined }],
+    ["null", { parts: null }],
+    ["an empty array", { parts: [] }],
+  ])("rejects a required catch-all when its value is %s", async (_label, params) => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const result = await collectSSGPages([route("/manual/[...parts]")], async () => ({
+      ssg: true,
+      getStaticPaths: () => [params] as unknown as StaticPathParams[],
+    }));
+
+    expect(result).toEqual({ ssg: [], ssr: ["/manual/[...parts]"] });
+    expect(error.mock.calls.flat().map(String).join("\n")).toContain(
+      'required parameter "parts" is missing or empty',
+    );
   });
 
   it("encodes scalar values without allowing slashes to create path segments", async () => {
@@ -473,26 +516,20 @@ describe("dynamic SSG path materialization", () => {
     );
   });
 
-  it("rejects missing scalar and empty required catch-all params without partial SSG output", async () => {
+  it("rejects missing scalar params without partial SSG output", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const scalarFile = "/virtual/products/[id]/page.tsx";
-    const catchAllFile = "/virtual/docs/[...slug]/page.tsx";
 
-    const result = await collectSSGPages(
-      [route("/products/[id]", scalarFile), route("/docs/[...slug]", catchAllFile)],
-      async (filePath) => ({
-        ssg: true,
-        getStaticPaths:
-          filePath === scalarFile ? () => [{ id: "valid" }, {}] : () => [{ slug: [] }],
-      }),
-    );
+    const result = await collectSSGPages([route("/products/[id]", scalarFile)], async () => ({
+      ssg: true,
+      getStaticPaths: () => [{ id: "valid" }, {}],
+    }));
 
     expect(result).toEqual({
       ssg: [],
-      ssr: ["/products/[id]", "/docs/[...slug]"],
+      ssr: ["/products/[id]"],
     });
     const messages = error.mock.calls.flat().map(String).join("\n");
     expect(messages).toContain('required parameter "id" is missing or empty');
-    expect(messages).toContain('required parameter "slug" is missing or empty');
   });
 });

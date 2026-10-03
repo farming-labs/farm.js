@@ -110,6 +110,12 @@ export const generateStaticParams: GenerateStaticParams<"/users/[id]"> = async (
 ];
 ```
 
+For an optional catch-all such as `/docs/[[...slug]]`, omit `slug` or return `slug: []` to
+generate the parent `/docs` page. Farm exposes that empty capture as `params.slug === ""`, the
+same value produced by request-time routing. JavaScript callers that return `{ slug: undefined }`
+or `{ slug: null }` are normalized to the same empty value; typed callers should prefer omission
+or an empty array.
+
 ## Typed navigation
 
 Farm writes the route union into the consolidated `src/farm.d.ts` declaration file. Link hrefs and route component props accept real routes without widening everything to plain string. Link hrefs can also include query strings and hash fragments.
