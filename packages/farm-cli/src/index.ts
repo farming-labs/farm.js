@@ -36,6 +36,7 @@ export {
   runPreviewTunnel,
   type PreviewFarmOptions,
   type PreviewFarmGatewayPlan,
+  type PreviewFarmGatewaySession,
   type PreviewFarmResult,
   type PreviewTarget,
   type PreviewTunnelPlan,

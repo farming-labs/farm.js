@@ -975,6 +975,8 @@ test("falls back to gateway polling while the hosted native relay is unavailable
     ]);
 
     assert.equal(result.session.id, "sess_watch");
+    assert.equal("token" in result.session, false);
+    assert.ok(!JSON.stringify(result).includes("token_watch"));
     assert.equal(gateway.deletedSessions.length, 1);
   } finally {
     restoreEnv("FARM_PREVIEW_RELAY_URL", previousRelay);

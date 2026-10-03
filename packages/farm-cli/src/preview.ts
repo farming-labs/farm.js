@@ -54,11 +54,14 @@ export interface PreviewFarmResult {
   target: PreviewTarget;
   plan: PreviewTunnelPlan | PreviewFarmGatewayPlan;
   publicUrl?: string;
-  session?: PreviewAgentSession | PreviewGatewaySession;
+  session?: PreviewAgentSession | PreviewFarmGatewaySession;
 }
 
 /** The managed plan exposed to callers, without its internal relay credential. */
 export type PreviewFarmGatewayPlan = Omit<PreviewGatewayPlan, "relayToken">;
+
+/** The compatibility gateway session exposed to callers, without its control credential. */
+export type PreviewFarmGatewaySession = Omit<PreviewGatewaySession, "token">;
 
 const MAX_TUNNEL_SCAN_CHARS = 64 * 1024;
 const DEFAULT_PREVIEW_PORTS = [3000, 4319, 5173, 4173, 8080];
@@ -116,7 +119,7 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
         target,
         plan: redactPreviewGatewayPlan(authorizedPlan),
         publicUrl: session.publicUrl,
-        session,
+        session: redactPreviewGatewaySession(session),
       };
     }
   }
@@ -137,6 +140,11 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
 function redactPreviewGatewayPlan(plan: PreviewGatewayPlan): PreviewFarmGatewayPlan {
   const { relayToken: _relayToken, ...publicPlan } = plan;
   return publicPlan;
+}
+
+function redactPreviewGatewaySession(session: PreviewGatewaySession): PreviewFarmGatewaySession {
+  const { token: _token, ...publicSession } = session;
+  return publicSession;
 }
 
 function formatPreviewError(error: unknown) {
