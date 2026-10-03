@@ -50,6 +50,31 @@ const lerp = (from: number, to: number, amount: number) => from + (to - from) * 
 const progress = (t: number, step: Step) => clamp((t - AT[step]) / DURATION[step]);
 const randomGlyph = () => GLYPHS[Math.floor(Math.random() * GLYPHS.length)]!;
 
+/**
+ * Scrambles between two strings through GLYPHS. Each character settles at its
+ * own point (left to right, with jitter, reseeded every loop), and the string
+ * grows or shrinks a character at a time between the two lengths.
+ */
+function createScramble(a: string, b: string) {
+  const length = Math.max(a.length, b.length);
+  let settleAt: number[] = [];
+  const reseed = () => {
+    settleAt = Array.from({ length }, (_, index) => (index / length) * 0.7 + Math.random() * 0.3);
+  };
+  reseed();
+  const at = (from: string, to: string, amount: number) => {
+    if (amount <= 0) return from;
+    if (amount >= 1) return to;
+    const visible = Math.round(lerp(from.length, to.length, amount));
+    let next = "";
+    for (let index = 0; index < Math.min(length, visible); index += 1) {
+      next += amount >= settleAt[index]! ? (to[index] ?? "") : randomGlyph();
+    }
+    return next;
+  };
+  return { reseed, at };
+}
+
 type Point = [number, number];
 type Box = { left: number; top: number; right: number; bottom: number };
 
@@ -157,6 +182,13 @@ export type SelectionWireProps = {
   pauseWithin?: string;
   /** The selection's side padding, in em: tighter keeps neighbouring glyphs out. */
   padX?: number;
+  /**
+   * Scramble the target's label into `to` when the cursor clicks it, and back
+   * once the wire is gone. `text` selects the label inside the target. The
+   * label is only written while it still shows what this animation last wrote,
+   * so the page's own updates to it (such as "Joining…") always win.
+   */
+  targetLabel?: { text: string; to: string };
   /** The selection's right padding, in em, when it differs from `padX`. */
   padRight?: number;
   /**
@@ -188,6 +220,7 @@ export function SelectionWire({
   holdOnTarget = false,
   pauseWithin,
   padX = 0.16,
+  targetLabel,
   padRight = padX,
   fitInk = false,
   over,
@@ -201,6 +234,8 @@ export function SelectionWire({
   const endRef = useRef<SVGCircleElement>(null);
   const rippleARef = useRef<HTMLSpanElement>(null);
   const rippleBRef = useRef<HTMLSpanElement>(null);
+  const labelSelector = targetLabel?.text;
+  const labelTo = targetLabel?.to;
   const swapText = swap?.text;
   const swapFrom = swap?.from;
   const swapTo = swap?.to;
@@ -221,6 +256,7 @@ export function SelectionWire({
     const text = swapText ? root?.querySelector<HTMLElement>(swapText) : null;
     const pauseZone = pauseWithin ? root?.querySelector<HTMLElement>(pauseWithin) : null;
     const overLine = over ? root?.querySelector<HTMLElement>(over) : null;
+    const label = labelSelector ? target?.querySelector<HTMLElement>(labelSelector) : null;
     const cleared = [
       ...(overLine ? [overLine] : []),
       ...(clear ? [...(root?.querySelectorAll<HTMLElement>(clear) ?? [])] : []),
@@ -287,25 +323,34 @@ export function SelectionWire({
       wordBox.style.width = savedWidth;
     };
 
-    // Per-character settle points for the scramble, reseeded every loop.
-    const length = Math.max(fromText.length, toText.length);
-    let settleAt: number[] = [];
-    const reseed = () => {
-      settleAt = Array.from({ length }, (_, index) => (index / length) * 0.7 + Math.random() * 0.3);
-    };
-    reseed();
-    // Grow or shrink a character at a time, in step with the word's width.
-    const scrambled = (from: string, to: string, amount: number) => {
-      if (amount <= 0) return from;
-      if (amount >= 1) return to;
-      const visible = Math.round(lerp(from.length, to.length, amount));
-      let next = "";
-      for (let index = 0; index < Math.min(length, visible); index += 1) {
-        next += amount >= settleAt[index]! ? (to[index] ?? "") : randomGlyph();
-      }
-      return next;
-    };
+    const wordScramble = createScramble(fromText, toText);
     let shownText = text?.textContent ?? "";
+
+    // The target's label: its resting text, and what this animation last wrote.
+    const labelFrom = label?.textContent ?? "";
+    const labelScramble = label && labelTo ? createScramble(labelFrom, labelTo) : null;
+    let labelWritten = labelFrom;
+    const renderLabel = (t: number) => {
+      if (!label || !labelTo || !labelScramble) return;
+      // Someone else changed it: leave it alone until it is back at rest.
+      if (label.textContent !== labelWritten) {
+        if (label.textContent !== labelFrom) return;
+        labelWritten = labelFrom;
+      }
+      const next = still
+        ? labelFrom
+        : t < AT.unscramble
+          ? labelScramble.at(labelFrom, labelTo, clamp((t - AT.click) / DURATION.scramble))
+          : labelScramble.at(labelTo, labelFrom, progress(t, "unscramble"));
+      if (next === labelWritten) return;
+      // Hold the target's width while the label differs, so nothing beside it moves.
+      if (labelWritten === labelFrom) {
+        target.style.minWidth = `${target.getBoundingClientRect().width}px`;
+      }
+      label.textContent = next;
+      labelWritten = next;
+      if (next === labelFrom) target.style.removeProperty("min-width");
+    };
 
     // The box of an element's text itself, not of the element.
     const rangeRect = (element: Element) => {
@@ -328,8 +373,8 @@ export function SelectionWire({
         const nextText = still
           ? fromText
           : t < AT.unscramble
-            ? scrambled(fromText, toText, progress(t, "scramble"))
-            : scrambled(toText, fromText, progress(t, "unscramble"));
+            ? wordScramble.at(fromText, toText, progress(t, "scramble"))
+            : wordScramble.at(toText, fromText, progress(t, "unscramble"));
         if (nextText !== shownText) {
           text.textContent = nextText;
           shownText = nextText;
@@ -467,6 +512,7 @@ export function SelectionWire({
                   ? "press"
                   : "on";
       if (target.dataset.swState !== state) target.dataset.swState = state;
+      renderLabel(t);
       target.style.setProperty("--sw-fade", String(1 - unwire));
 
       // Cursor: glide in, drag the selection, move to the port, drag the wire, click, let go.
@@ -536,7 +582,8 @@ export function SelectionWire({
       }
       if (t >= LOOP_MS) {
         t -= LOOP_MS;
-        reseed();
+        wordScramble.reseed();
+        labelScramble?.reseed();
       }
       render(t);
       frame = visible ? requestAnimationFrame(tick) : 0;
@@ -609,6 +656,10 @@ export function SelectionWire({
       }
       wordBox.removeEventListener("click", followTarget);
       delete target.dataset.swState;
+      if (label && label.textContent === labelWritten && labelWritten !== labelFrom) {
+        label.textContent = labelFrom;
+        target.style.removeProperty("min-width");
+      }
       target.style.removeProperty("--sw-fade");
       if (!placeTargetUnderHeading) target.style.transform = "";
     };
@@ -625,6 +676,8 @@ export function SelectionWire({
     pauseWithin,
     padX,
     padRight,
+    labelSelector,
+    labelTo,
     fitInk,
     over,
     clear,

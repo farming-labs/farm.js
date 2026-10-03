@@ -163,6 +163,7 @@ export default function AgentsPage() {
                   pauseWithin=".agent-waitlist"
                   route="hug"
                   target=".agent-waitlist button[type=submit]"
+                  targetLabel={{ text: "[data-agent-waitlist-label]", to: "Join now" }}
                   word=".agents-hero-word"
                 />
               </div>
