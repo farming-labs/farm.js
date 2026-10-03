@@ -122,7 +122,7 @@ export default async function AgentCheckReportPage({ params }: PageProps<"/agent
   const scannedAt = new Date(scan.createdAt).toISOString().slice(0, 16).replace("T", " ");
 
   return (
-    <div className="farm-home farm-agents min-h-screen overflow-x-clip bg-black font-sans text-white">
+    <div className="farm-home farm-agents agent-check-report min-h-screen overflow-x-clip bg-black font-sans text-white">
       <a className="agents-skip-link" href="#agent-check-content">
         Skip to content
       </a>

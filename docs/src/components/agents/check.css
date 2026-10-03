@@ -183,6 +183,11 @@
   }
 }
 
+/* The report is long and dense, so its section rules are quieter than the site's. */
+.agent-check-report {
+  --farm-rule: rgb(255 255 255 / 0.06);
+}
+
 /* Gaps reuse the 06.1 cards; the summary is the card title. */
 /* The 06.1 grid draws only left and top lines, which leaves a lone last card
    open when the count is odd. Gaps come in any count, so each card is closed. */
@@ -277,9 +282,8 @@
   padding: 0;
   list-style: none;
 }
-/* Rows divide more quietly than the section rules around them. */
 .agent-check-rows > li + li {
-  border-top: 1px solid rgb(255 255 255 / 0.07);
+  border-top: 1px solid rgb(255 255 255 / 0.06);
 }
 /* Evidence lines inside an open row get a quieter divider than the rows. */
 .agent-check-rows .agent-check-evidence li + li {
