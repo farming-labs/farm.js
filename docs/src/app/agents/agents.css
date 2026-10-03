@@ -409,7 +409,18 @@
     font-size: clamp(32px, 8.5vw, 48px);
   }
   .agents-intro {
-    font-size: 16px;
+    font-size: 14px;
+    line-height: 1.65;
+  }
+  .agents-signup .agent-waitlist input {
+    min-height: 38px;
+    padding: 8px 10px;
+    font-size: 14px;
+  }
+  .agents-signup .agent-waitlist button {
+    min-height: 38px;
+    padding: 0 12px;
+    font-size: 9px;
   }
   .agent-art-caption {
     left: 24px;

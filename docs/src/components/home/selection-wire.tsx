@@ -268,9 +268,12 @@ export function SelectionWire({
       if (fitInk && metrics) {
         const style = getComputedStyle(wordBox);
         metrics.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-        const ink = metrics.measureText(wordBox.textContent ?? "");
-        wordInkTop = ink.fontBoundingBoxAscent - ink.actualBoundingBoxAscent;
-        wordInkBottom = ink.fontBoundingBoxAscent + ink.actualBoundingBoxDescent;
+        // Both words when swapping, so the selection keeps one height throughout.
+        const words = swapping ? [fromText, toText] : [wordBox.textContent ?? ""];
+        const inks = words.map((value) => metrics.measureText(value));
+        const fontAscent = inks[0]!.fontBoundingBoxAscent;
+        wordInkTop = fontAscent - Math.max(...inks.map((ink) => ink.actualBoundingBoxAscent));
+        wordInkBottom = fontAscent + Math.max(...inks.map((ink) => ink.actualBoundingBoxDescent));
       }
       if (!swapping || !text) return;
       const savedText = text.textContent;
@@ -304,6 +307,12 @@ export function SelectionWire({
     };
     let shownText = text?.textContent ?? "";
 
+    // The box of an element's text itself, not of the element.
+    const rangeRect = (element: Element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return range.getBoundingClientRect();
+    };
     const relative = (box: DOMRect, origin: DOMRect): Box => ({
       left: box.left - origin.left,
       top: box.top - origin.top,
@@ -331,12 +340,15 @@ export function SelectionWire({
       const wordRect = relative(wordBox.getBoundingClientRect(), origin);
       const headingRect = relative(heading.getBoundingClientRect(), origin);
       const x0 = wordRect.left - padX * fontSize;
+      // Ink offsets are from the text's own box (baseline minus font ascent), which a
+      // range over the text gives whatever the word's display is.
+      const textBox = fitInk ? relative(rangeRect(text ?? wordBox), origin) : wordRect;
       const y0 = fitInk
-        ? wordRect.top + wordInkTop - 0.08 * fontSize
+        ? textBox.top + wordInkTop - 0.08 * fontSize
         : wordRect.top - 0.06 * fontSize;
       const x1 = wordRect.right + padRight * fontSize;
       const y1 = fitInk
-        ? wordRect.top + wordInkBottom + 0.06 * fontSize
+        ? textBox.top + wordInkBottom + 0.06 * fontSize
         : wordRect.bottom + 0.04 * fontSize;
       const selection: Box = { left: x0, top: y0, right: x1, bottom: y1 };
 
@@ -369,14 +381,14 @@ export function SelectionWire({
       let gutterX = targetRect.right;
       if (route === "hug") {
         if (overLine) {
-          const inkTop = relative(overLine.getBoundingClientRect(), origin).top + overInkOffset;
+          const inkTop = relative(rangeRect(overLine), origin).top + overInkOffset;
           const gap = inkTop - selection.bottom;
           runY = gap >= 3 ? selection.bottom + gap / 2 : null;
         }
+        // Right of the copy and of the selection, so the drop never re-enters the box.
+        gutterX = Math.max(gutterX, selection.right);
         for (const element of cleared) {
-          const range = document.createRange();
-          range.selectNodeContents(element);
-          gutterX = Math.max(gutterX, range.getBoundingClientRect().right - origin.left);
+          gutterX = Math.max(gutterX, rangeRect(element).right - origin.left);
         }
         gutterX = Math.min(origin.width - 4, gutterX + 16);
       }
