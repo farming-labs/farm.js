@@ -47,7 +47,7 @@ export function HeroTitle({
           {after}
         </span>
       </h1>
-      <a aria-label={linkLabel} className="farm-hero-tag" data-sw-state="off" href={href}>
+      <a aria-label={linkLabel} className="farm-hero-tag" href={href}>
         {tag}
       </a>
       <SelectionWire

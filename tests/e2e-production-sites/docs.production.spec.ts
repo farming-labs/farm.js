@@ -757,6 +757,7 @@ test("agent waitlist keeps failures recoverable and fits narrow screens", async 
       expect(box!.x).toBeGreaterThanOrEqual(0);
       expect(box!.x + box!.width).toBeLessThanOrEqual(width);
     }
+    if (width <= 600) await expect(email).toHaveCSS("font-size", "16px");
   }
   result = "success";
   await submit.click();
@@ -976,6 +977,22 @@ test("agents page stays readable on mobile and without JavaScript", async ({
     const page = await context.newPage();
     try {
       await page.goto("/agents");
+      const form = page.getByRole("form", { name: "Agent infrastructure waitlist" });
+      if (javaScriptEnabled) {
+        const email = form.getByLabel("Email address");
+        const submit = form.getByRole("button");
+        await expect(submit).toHaveAttribute("data-sw-state", "on");
+        await submit.evaluate((button) => {
+          button.dataset.swState = "press";
+        });
+        await submit.hover();
+        await expect(submit).toHaveCSS("background-color", "rgb(204, 204, 204)");
+        await email.focus();
+        await expect(submit).toHaveAttribute("data-sw-state", "off");
+        await expect(page.locator(".farm-sw-wire")).toHaveCSS("opacity", "0");
+        await page.getByRole("link", { name: "Skip to content" }).focus();
+        await expect(submit).toHaveAttribute("data-sw-state", "on");
+      }
       for (const width of [320, 390, 768, 1024, 1440]) {
         await page.setViewportSize({ width, height: 900 });
         await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
@@ -1007,7 +1024,6 @@ test("agents page stays readable on mobile and without JavaScript", async ({
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
           true,
         );
-        const form = page.getByRole("form", { name: "Agent infrastructure waitlist" });
         if (javaScriptEnabled) {
           await expect(form).toBeVisible();
           for (const control of [form.getByLabel("Email address"), form.getByRole("button")]) {
@@ -1031,6 +1047,30 @@ test("agents page stays readable on mobile and without JavaScript", async ({
     } finally {
       await context.close();
     }
+  }
+});
+
+test("home keeps its agents link usable without JavaScript", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL, javaScriptEnabled: false });
+  const page = await context.newPage();
+  try {
+    await page.goto("/");
+    const agents = page.locator(".farm-hero-tag");
+    await expect(agents).toHaveAccessibleName("Agent infrastructure");
+    await expect(agents).toHaveAttribute("href", "/agents");
+    await expect(page.locator(".farm-hero-swap")).not.toHaveAttribute("tabindex");
+    for (const width of [320, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(agents).toBeVisible();
+      const box = await agents.boundingBox();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+    }
+  } finally {
+    await context.close();
   }
 });
 

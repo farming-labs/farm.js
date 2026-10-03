@@ -140,7 +140,7 @@
   outline: 1px solid #fff;
   outline-offset: 3px;
 }
-.agent-waitlist button[data-sw-state="press"] {
+.agent-waitlist button[data-sw-state="press"]:not(:disabled) {
   background: #ccc;
   outline: 1px solid #fff;
   outline-offset: 3px;

@@ -413,12 +413,12 @@
     line-height: 1.65;
   }
   .agents-signup .agent-waitlist input {
-    min-height: 38px;
+    min-height: 44px;
     padding: 8px 10px;
-    font-size: 14px;
+    font-size: 16px;
   }
   .agents-signup .agent-waitlist button {
-    min-height: 38px;
+    min-height: 44px;
     padding: 0 12px;
     font-size: 9px;
   }

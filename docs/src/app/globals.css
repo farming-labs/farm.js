@@ -131,7 +131,6 @@
   .farm-hero-swap {
     position: relative;
     display: inline-block;
-    cursor: pointer;
     text-align: left;
     white-space: nowrap;
     /* Scrambled signs run wider than letters; keep them inside the word's box
@@ -206,10 +205,10 @@
      outlined once it lands, hovered and clicked by the cursor, then lit. */
   .farm-hero-tag {
     position: absolute;
-    top: 0;
-    left: 0;
+    right: 1rem;
+    bottom: -8px;
     padding: 4px 6px;
-    border: 1px dashed transparent;
+    border: 1px solid rgb(255 255 255 / 0.34);
     color: rgb(255 255 255 / 0.5);
     font:
       400 10px/1 var(--font-geist-mono),
@@ -218,8 +217,8 @@
     letter-spacing: 0.04em;
     text-transform: uppercase;
     white-space: nowrap;
-    opacity: 0;
-    pointer-events: none;
+    opacity: 1;
+    pointer-events: auto;
     transform-origin: center;
     transition:
       background-color 200ms linear,
@@ -227,7 +226,19 @@
       color 200ms linear;
   }
 
-  .farm-hero-tag:not([data-sw-state="off"]) {
+  /* The server-rendered tag is a usable no-JavaScript fallback. Once the
+     animation initializes, its data state moves it into the animated layer. */
+  .farm-hero-tag[data-sw-state] {
+    top: 0;
+    right: auto;
+    bottom: auto;
+    left: 0;
+    border-color: transparent;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .farm-hero-tag[data-sw-state]:not([data-sw-state="off"]) {
     opacity: var(--sw-fade, 1);
   }
 

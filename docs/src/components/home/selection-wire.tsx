@@ -366,6 +366,29 @@ export function SelectionWire({
     });
 
     const render = (t: number) => {
+      if (pauseZone?.matches(":focus-within")) {
+        if (swapping && text) {
+          wordBox.style.width = `${fromWidth}px`;
+          text.textContent = fromText;
+          shownText = fromText;
+        }
+        select.style.opacity = "0";
+        wire.style.opacity = "0";
+        port.style.opacity = "0";
+        end.style.opacity = "0";
+        cursor.style.opacity = "0";
+        for (const ripple of ripples) ripple!.style.opacity = "0";
+        target.dataset.swState = "off";
+        target.style.removeProperty("--sw-fade");
+        if (!placeTargetUnderHeading) target.style.transform = "";
+        if (label && label.textContent === labelWritten) {
+          label.textContent = labelFrom;
+          labelWritten = labelFrom;
+          target.style.removeProperty("min-width");
+        }
+        return;
+      }
+
       if (swapping && text) {
         const swapIn = still ? 0 : ease(progress(t, "scramble"));
         const swapOut = still ? 0 : ease(progress(t, "unscramble"));
@@ -623,12 +646,6 @@ export function SelectionWire({
     const letGo = () => {
       held = Math.max(0, held - 1);
     };
-    // The swapped word links like its target.
-    const followTarget = (event: MouseEvent) => {
-      if (!holdOnTarget || t < AT.connect || t >= AT.unscramble) return;
-      event.preventDefault();
-      target.click();
-    };
     const hoverTargets = holdOnTarget ? [wordBox, target] : [wordBox];
     for (const element of hoverTargets) {
       element.addEventListener("pointerenter", hold);
@@ -638,7 +655,9 @@ export function SelectionWire({
       target.addEventListener("focus", hold);
       target.addEventListener("blur", letGo);
     }
-    wordBox.addEventListener("click", followTarget);
+    const renderPauseState = () => render(t);
+    pauseZone?.addEventListener("focusin", renderPauseState);
+    pauseZone?.addEventListener("focusout", renderPauseState);
     render(t);
 
     return () => {
@@ -654,7 +673,8 @@ export function SelectionWire({
         target.removeEventListener("focus", hold);
         target.removeEventListener("blur", letGo);
       }
-      wordBox.removeEventListener("click", followTarget);
+      pauseZone?.removeEventListener("focusin", renderPauseState);
+      pauseZone?.removeEventListener("focusout", renderPauseState);
       delete target.dataset.swState;
       if (label && label.textContent === labelWritten && labelWritten !== labelFrom) {
         label.textContent = labelFrom;
