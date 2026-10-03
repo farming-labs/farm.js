@@ -44,3 +44,8 @@ local polling agent proves it is still online.
 
 Current gateways advertise bearer-header authentication for polling session controls. The Farm CLI
 uses query-string session tokens only after it positively identifies a pre-auth compatibility gateway.
+Those legacy requests place the session credential in the URL, where reverse proxies, CDNs, platform
+access logs, and URL instrumentation can record it. The Farm CLI and preview gateway package do not
+log control URLs, but compatibility-gateway operators must redact the `token` query parameter from
+request logs and restrict access to existing logs. Upgrade the gateway to bearer authentication to
+keep session credentials out of control URLs.
