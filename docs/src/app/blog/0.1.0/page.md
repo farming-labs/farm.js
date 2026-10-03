@@ -7,6 +7,8 @@ description: "Our first stable release. Built for apps and agents."
 
 KinfeMichael Tariku · Oct 2026
 
+<BlogVideo src="/videos/farmjs-v0.1.0-launch.mp4" poster="/videos/farmjs-v0.1.0-launch-poster.jpg" title="Farm.js v0.1.0 · launch film" duration="1:56" caption="The v0.1.0 launch film, with sound" />
+
 Farm.js 0.1 is out. It is the first release with a compatibility promise, and the first one I am comfortable calling stable.
 
 It is also a good moment to show everything that landed during the betas, because Farm.js is a lot more than a router now. There is a DevTools workspace, an ecosystem of plugins and product integrations, five renderers, a CLI that explains and repairs your app, and apps that work for the agents reading and calling them.

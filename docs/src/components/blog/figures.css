@@ -733,3 +733,73 @@
     display: block;
   }
 }
+
+/* Launch film: the figures' hairline panel, with corner squares and a legend in its top border. */
+.blog-video {
+  margin: 2.6rem 0;
+}
+.bv-frame {
+  position: relative;
+  padding: 10px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 3px;
+  background: #070707;
+}
+.bv-legend {
+  position: absolute;
+  z-index: 1;
+  top: -0.75em;
+  left: 1.2em;
+  padding: 0 0.6em;
+  background: #000;
+  color: #8f8f8f;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+.bv-legend--end {
+  right: 1.2em;
+  left: auto;
+}
+.bv-corner {
+  position: absolute;
+  z-index: 1;
+  width: 7px;
+  height: 7px;
+  border: 1px solid rgb(255 255 255 / 0.42);
+  background: #000;
+}
+.bv-corner-tl {
+  top: -4px;
+  left: -4px;
+}
+.bv-corner-tr {
+  top: -4px;
+  right: -4px;
+}
+.bv-corner-bl {
+  bottom: -4px;
+  left: -4px;
+}
+.bv-corner-br {
+  right: -4px;
+  bottom: -4px;
+}
+.bv-video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 2px;
+  background: #000;
+}
+.blog-video figcaption {
+  margin-top: 0.8rem;
+  text-align: center;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--blog-muted, #929292);
+}
