@@ -229,8 +229,9 @@ function assertInstalledManifests(fixtureDirectory, packageNames) {
       if (!fs.existsSync(binaryPath)) {
         throw new Error(`${name} binary ${binary} points to missing packed file at ${target}.`);
       }
-      if (!fs.readFileSync(binaryPath, "utf8").startsWith("#!")) {
-        throw new Error(`${name} binary ${binary} has no executable shebang at ${target}.`);
+      const shebang = fs.readFileSync(binaryPath, "utf8").split(/\r?\n/, 1)[0];
+      if (shebang !== "#!/usr/bin/env node") {
+        throw new Error(`${name} binary ${binary} has no Node shebang at ${target}.`);
       }
     }
   }

@@ -49,6 +49,7 @@ export type {
   StrapiImageOptions,
   StrapiImageProps,
   StrapiMediaAsset,
+  StrapiMediaFile,
   StrapiMediaFormat,
 } from "./image.js";
 export { createStrapiCollection } from "./query.js";

@@ -7,6 +7,7 @@ import type {
   StrapiMedia,
   StrapiRelation,
 } from "./schema-types.js";
+import type { StrapiMediaFile } from "./image.js";
 
 declare global {
   namespace FarmJS {
@@ -47,7 +48,11 @@ describe("generated Strapi query types", () => {
     expectTypeOf<
       typeof article.category
     >().toEqualTypeOf<StrapiGeneratedDocument<"categories"> | null>();
-    expectTypeOf<typeof article.cover>().not.toBeAny();
+    expectTypeOf<typeof article.cover>().toEqualTypeOf<StrapiMediaFile | null>();
+    expectTypeOf<typeof article.cover>().toMatchTypeOf<{
+      width?: number | null;
+      height?: number | null;
+    } | null>();
     expectTypeOf<typeof article>().not.toHaveProperty("summary");
     expectTypeOf<typeof article>().not.toHaveProperty("related");
   });
@@ -61,6 +66,11 @@ describe("generated Strapi query types", () => {
       await articles.find({ populate: { category: { populate: ["owner"] } } })
     )[0]!;
     expectTypeOf<typeof deeplyPopulated.category>().toEqualTypeOf<unknown>();
+
+    const selectedNestedFields = (
+      await articles.find({ populate: { category: { fields: ["name"] } } })
+    )[0]!;
+    expectTypeOf<typeof selectedNestedFields.category>().toEqualTypeOf<unknown>();
 
     const deeplyPopulatedByPath = (
       await articles.find({ populate: ["category.owner", "cover"] })
@@ -87,5 +97,11 @@ describe("generated Strapi query types", () => {
     expectTypeOf<typeof article.category>().toEqualTypeOf<
       StrapiGeneratedDocument<"categories"> | null | undefined
     >();
+
+    const objectPopulate: Partial<Record<"category" | "cover", unknown>> = {
+      category: { fields: ["name"] },
+    };
+    const dynamicallyPopulated = (await articles.find({ populate: objectPopulate }))[0]!;
+    expectTypeOf<typeof dynamicallyPopulated.category>().toEqualTypeOf<unknown>();
   });
 });

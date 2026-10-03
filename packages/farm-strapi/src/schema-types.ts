@@ -1,5 +1,5 @@
 import type { API } from "@strapi/client";
-import type { StrapiMediaAsset } from "./image.js";
+import type { StrapiMediaFile } from "./image.js";
 
 declare global {
   namespace FarmJS {
@@ -103,14 +103,18 @@ type SelectedFields<TResource extends StrapiGeneratedResource, TQuery> = TQuery 
     ? Partial<FieldsFor<TResource>>
     : FieldsFor<TResource>;
 
-type IsDeepPopulate<TValue> = TValue extends { populate: unknown } ? true : false;
+type HasNestedPopulateOptions<TValue> = unknown extends TValue
+  ? true
+  : TValue extends object
+    ? true
+    : false;
 
 type RelationValue<TResource extends string> = TResource extends StrapiGeneratedResource
   ? StrapiGeneratedDocument<TResource>
   : unknown;
 
 type PopulateValue<TField extends StrapiPopulateField, TPopulateValue> =
-  IsDeepPopulate<TPopulateValue> extends true
+  HasNestedPopulateOptions<TPopulateValue> extends true
     ? unknown
     : TField extends StrapiRelation<infer TResource, infer TMany>
       ? TMany extends true
@@ -118,8 +122,8 @@ type PopulateValue<TField extends StrapiPopulateField, TPopulateValue> =
         : RelationValue<TResource> | null
       : TField extends StrapiMedia<infer TMany>
         ? TMany extends true
-          ? StrapiMediaAsset[]
-          : StrapiMediaAsset | null
+          ? StrapiMediaFile[]
+          : StrapiMediaFile | null
         : TField extends StrapiComponent<infer TValue, infer TMany>
           ? TMany extends true
             ? TValue[]
