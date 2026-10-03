@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { AgentArtwork } from "../../components/agents/artwork";
 import { AgentWaitlist } from "../../components/agents/waitlist";
+import { SelectionWire } from "../../components/home/selection-wire";
 import { BlogFigure } from "../../components/blog/figures";
 import { FlickeringGrid } from "../../components/ui/flickering-grid";
 import {
@@ -140,7 +141,7 @@ export default function AgentsPage() {
                   <IndexedLabel index="06" icon={Network} label="Agent infrastructure" />
                 </div>
                 <h1 id="agents-title">
-                  Deploy agents.
+                  Deploy <span className="agents-hero-word">agents</span>.
                   <br />
                   <span>Connect your tools.</span>
                 </h1>
@@ -151,6 +152,15 @@ export default function AgentsPage() {
                 <div id="waitlist" className="agents-signup">
                   <AgentWaitlist source="agents" note={false} />
                 </div>
+                {/* The landing hero's drag and wire, from "agents" into the waitlist button. */}
+                <SelectionWire
+                  clear="#agents-title, .agents-intro"
+                  heading="#agents-title"
+                  pauseWithin=".agent-waitlist"
+                  route="around-right"
+                  target=".agent-waitlist button[type=submit]"
+                  word=".agents-hero-word"
+                />
               </div>
               {/* The landing hero's flickering grid, behind the bottom of the hero copy (adds no height). */}
               <div aria-hidden className="agents-hero-flicker">

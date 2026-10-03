@@ -117,10 +117,17 @@
     background: rgb(255 255 255 / 0.16);
   }
 
-  /* The hero heading's animation (HeroTitle): a cursor drags a selection over
-     one word, the word swaps, and the cursor drags a wire into a link tag. The
-     component positions everything per frame; these rules only style it. The
-     wire matches the blog figures' connectors. */
+  /* SelectionWire (the home and agents heroes): a cursor drags a selection over
+     a word, drags a wire into a target and clicks it. The component positions
+     everything per frame in a layer over its parent; these rules only style it.
+     The wire matches the blog figures' connectors. */
+  .farm-sw-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+  }
+
   .farm-hero-swap {
     position: relative;
     display: inline-block;
@@ -132,7 +139,7 @@
     clip-path: inset(-0.3em 0 -0.3em 0);
   }
 
-  .farm-hero-select {
+  .farm-sw-select {
     position: absolute;
     top: 0;
     left: 0;
@@ -141,7 +148,7 @@
     pointer-events: none;
   }
 
-  .farm-hero-select-corner {
+  .farm-sw-corner {
     position: absolute;
     display: none;
     width: 7px;
@@ -150,31 +157,31 @@
     background: #000;
   }
 
-  .farm-hero-select[data-corners] .farm-hero-select-corner {
+  .farm-sw-select[data-corners] .farm-sw-corner {
     display: block;
   }
 
-  .farm-hero-select-corner-tl {
+  .farm-sw-corner-tl {
     top: -4px;
     left: -4px;
   }
 
-  .farm-hero-select-corner-tr {
+  .farm-sw-corner-tr {
     top: -4px;
     right: -4px;
   }
 
-  .farm-hero-select-corner-bl {
+  .farm-sw-corner-bl {
     bottom: -4px;
     left: -4px;
   }
 
-  .farm-hero-select-corner-br {
+  .farm-sw-corner-br {
     right: -4px;
     bottom: -4px;
   }
 
-  .farm-hero-wires {
+  .farm-sw-wires {
     position: absolute;
     inset: 0;
     width: 100%;
@@ -183,14 +190,14 @@
     pointer-events: none;
   }
 
-  .farm-hero-wire {
+  .farm-sw-wire {
     fill: none;
     stroke: rgb(255 255 255 / 0.28);
     stroke-width: 1.2;
     opacity: 0;
   }
 
-  .farm-hero-wire-end {
+  .farm-sw-end {
     fill: #6a6a6a;
     opacity: 0;
   }
@@ -220,29 +227,33 @@
       color 200ms linear;
   }
 
-  .farm-hero-tag[data-state="target"] {
+  .farm-hero-tag:not([data-sw-state="off"]) {
+    opacity: var(--sw-fade, 1);
+  }
+
+  .farm-hero-tag[data-sw-state="target"] {
     border-color: rgb(255 255 255 / 0.34);
   }
 
-  .farm-hero-tag[data-state="linked"] {
+  .farm-hero-tag[data-sw-state="linked"] {
     border: 1px solid rgb(255 255 255 / 0.6);
     color: #fff;
   }
 
-  .farm-hero-tag[data-state="hover"] {
+  .farm-hero-tag:is([data-sw-state="hover"], [data-sw-state="press"]) {
     border: 1px solid #fff;
     background: rgb(255 255 255 / 0.14);
     color: #fff;
   }
 
-  .farm-hero-tag[data-state="on"] {
+  .farm-hero-tag[data-sw-state="on"] {
     border: 1px solid #fff;
     background: #fff;
     color: #000;
     pointer-events: auto;
   }
 
-  .farm-hero-tag[data-state="on"]:hover {
+  .farm-hero-tag[data-sw-state="on"]:hover {
     border-color: rgb(255 255 255 / 0.84);
     background: rgb(255 255 255 / 0.84);
   }
@@ -253,7 +264,7 @@
   }
 
   /* The click's rings, centred on the point the component positions. */
-  .farm-hero-ripple {
+  .farm-sw-ripple {
     position: absolute;
     top: -14px;
     left: -14px;
@@ -266,7 +277,7 @@
   }
 
   /* The launch video's cursor; its tip is the point the component positions. */
-  .farm-hero-cursor {
+  .farm-sw-cursor {
     position: absolute;
     top: 0;
     left: 0;

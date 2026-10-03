@@ -75,7 +75,7 @@
   letter-spacing: -0.055em;
   text-wrap: balance;
 }
-.agents-hero h1 > span {
+.agents-hero h1 > span:not(.agents-hero-word) {
   color: #8f8f8f;
 }
 .agents-intro {

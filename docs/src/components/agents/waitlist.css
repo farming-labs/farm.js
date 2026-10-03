@@ -124,3 +124,24 @@
     background: #fff;
   }
 }
+
+/* The agents hero's SelectionWire demo: a wire is dragged into the button and the
+   cursor clicks it. These states are the demo's only; nothing is submitted. */
+.agent-waitlist button[data-sw-state="target"] {
+  outline: 1px dashed rgb(255 255 255 / 0.4);
+  outline-offset: 3px;
+}
+.agent-waitlist button:is([data-sw-state="linked"], [data-sw-state="on"]) {
+  outline: 1px solid rgb(255 255 255 / calc(0.6 * var(--sw-fade, 1)));
+  outline-offset: 3px;
+}
+.agent-waitlist button[data-sw-state="hover"] {
+  background: #fff;
+  outline: 1px solid #fff;
+  outline-offset: 3px;
+}
+.agent-waitlist button[data-sw-state="press"] {
+  background: #ccc;
+  outline: 1px solid #fff;
+  outline-offset: 3px;
+}
