@@ -64,3 +64,27 @@ test("reports the package and entrypoint for missing packed declarations", () =>
     fs.rmSync(fixture, { recursive: true, force: true });
   }
 });
+
+test("reports a missing packed binary target", () => {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "farm-packed-bin-test-"));
+  const packageDirectory = path.join(fixture, "node_modules", "@farm.js", "strapi");
+  fs.mkdirSync(path.join(packageDirectory, "dist"), { recursive: true });
+  fs.writeFileSync(
+    path.join(packageDirectory, "package.json"),
+    JSON.stringify({
+      name: "@farm.js/strapi",
+      exports: { ".": { types: "./dist/index.d.ts", import: "./dist/index.js" } },
+      bin: { "farm-strapi": "./dist/cli.js" },
+    }),
+  );
+  fs.writeFileSync(path.join(packageDirectory, "dist/index.d.ts"), "export {};\n");
+
+  try {
+    assert.throws(
+      () => assertInstalledManifests(fixture, ["@farm.js/strapi"]),
+      /@farm\.js\/strapi binary farm-strapi points to missing packed file at \.\/dist\/cli\.js/,
+    );
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
