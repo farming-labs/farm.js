@@ -11,6 +11,21 @@ import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 
 const require = createRequire(import.meta.url);
+const nativeTunnel = require("@farm.js/tunnel");
+const nativeTunnelOriginals = {
+  startPreviewAgent: nativeTunnel.startPreviewAgent,
+  stopPreviewAgent: nativeTunnel.stopPreviewAgent,
+  waitPreviewAgent: nativeTunnel.waitPreviewAgent,
+};
+// previewFarm loads the native package dynamically. Keep its ordinary behavior
+// for every test except the one high-level result-boundary fixture below.
+let nativeTunnelRuntimeOverride;
+nativeTunnel.startPreviewAgent = (...args) =>
+  (nativeTunnelRuntimeOverride || nativeTunnelOriginals).startPreviewAgent(...args);
+nativeTunnel.stopPreviewAgent = (...args) =>
+  (nativeTunnelRuntimeOverride || nativeTunnelOriginals).stopPreviewAgent(...args);
+nativeTunnel.waitPreviewAgent = (...args) =>
+  (nativeTunnelRuntimeOverride || nativeTunnelOriginals).waitPreviewAgent(...args);
 const {
   authorizePreviewGatewayPlan,
   createPreviewGatewayPlan,
@@ -431,6 +446,57 @@ test("keeps relay credentials out of public preview results", async () => {
     assert.ok(!JSON.stringify(result).includes("do-not-expose-this-relay-credential"));
   } finally {
     restoreEnv("FARM_PREVIEW_RELAY_TOKEN", previousToken);
+  }
+});
+
+test("keeps relay credentials out of native preview results", async () => {
+  const gateway = await createPreviewGatewayTestServer();
+  const previousRelay = process.env.FARM_PREVIEW_RELAY_URL;
+  const previousToken = process.env.FARM_PREVIEW_RELAY_TOKEN;
+  process.env.FARM_PREVIEW_RELAY_URL = "ws://native.preview.test/agent";
+  process.env.FARM_PREVIEW_RELAY_TOKEN = "do-not-expose-native-relay-token";
+  const calls = [];
+  nativeTunnelRuntimeOverride = {
+    async startPreviewAgent(...args) {
+      calls.push(["start", ...args]);
+      return {
+        sessionId: "native-result-session",
+        publicUrl: "https://native-result.preview.farmjs.dev",
+      };
+    },
+    async stopPreviewAgent(sessionId) {
+      calls.push(["stop", sessionId]);
+      return true;
+    },
+    async waitPreviewAgent(sessionId) {
+      calls.push(["wait", sessionId]);
+      return true;
+    },
+  };
+
+  try {
+    const result = await previewFarm({
+      provider: "farm",
+      port: 3000,
+      noProbe: true,
+      gatewayUrl: gateway.url,
+      name: "native-result",
+    });
+
+    assert.equal("relayToken" in result.plan, false);
+    assert.ok(!JSON.stringify(result).includes("do-not-expose-native-relay-token"));
+    assert.deepEqual(calls[0], [
+      "start",
+      "ws://native.preview.test/agent?token=do-not-expose-native-relay-token",
+      "native-result",
+      "http://localhost:3000",
+    ]);
+    assert.equal(result.session.sessionId, "native-result-session");
+  } finally {
+    nativeTunnelRuntimeOverride = undefined;
+    restoreEnv("FARM_PREVIEW_RELAY_URL", previousRelay);
+    restoreEnv("FARM_PREVIEW_RELAY_TOKEN", previousToken);
+    await gateway.close();
   }
 });
 
@@ -954,7 +1020,9 @@ test("falls back to gateway polling while the hosted native relay is unavailable
   const app = await createTestServer();
   const gateway = await createPreviewGatewayTestServer();
   const previousRelay = process.env.FARM_PREVIEW_RELAY_URL;
+  const previousToken = process.env.FARM_PREVIEW_RELAY_TOKEN;
   process.env.FARM_PREVIEW_RELAY_URL = "ws://127.0.0.1:1/agent";
+  process.env.FARM_PREVIEW_RELAY_TOKEN = "do-not-expose-fallback-relay-token";
 
   try {
     const preview = previewFarm({
@@ -975,11 +1043,14 @@ test("falls back to gateway polling while the hosted native relay is unavailable
     ]);
 
     assert.equal(result.session.id, "sess_watch");
+    assert.equal("relayToken" in result.plan, false);
     assert.equal("token" in result.session, false);
     assert.ok(!JSON.stringify(result).includes("token_watch"));
+    assert.ok(!JSON.stringify(result).includes("do-not-expose-fallback-relay-token"));
     assert.equal(gateway.deletedSessions.length, 1);
   } finally {
     restoreEnv("FARM_PREVIEW_RELAY_URL", previousRelay);
+    restoreEnv("FARM_PREVIEW_RELAY_TOKEN", previousToken);
     await app.close().catch(() => undefined);
     await gateway.close();
   }
