@@ -11,21 +11,26 @@ import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 
 const require = createRequire(import.meta.url);
-const nativeTunnel = require("@farm.js/tunnel");
-const nativeTunnelOriginals = {
-  startPreviewAgent: nativeTunnel.startPreviewAgent,
-  stopPreviewAgent: nativeTunnel.stopPreviewAgent,
-  waitPreviewAgent: nativeTunnel.waitPreviewAgent,
-};
 // previewFarm loads the native package dynamically. Keep its ordinary behavior
 // for every test except the one high-level result-boundary fixture below.
+let nativeTunnel;
 let nativeTunnelRuntimeOverride;
-nativeTunnel.startPreviewAgent = (...args) =>
-  (nativeTunnelRuntimeOverride || nativeTunnelOriginals).startPreviewAgent(...args);
-nativeTunnel.stopPreviewAgent = (...args) =>
-  (nativeTunnelRuntimeOverride || nativeTunnelOriginals).stopPreviewAgent(...args);
-nativeTunnel.waitPreviewAgent = (...args) =>
-  (nativeTunnelRuntimeOverride || nativeTunnelOriginals).waitPreviewAgent(...args);
+try {
+  nativeTunnel = require("@farm.js/tunnel");
+  const originals = {
+    startPreviewAgent: nativeTunnel.startPreviewAgent,
+    stopPreviewAgent: nativeTunnel.stopPreviewAgent,
+    waitPreviewAgent: nativeTunnel.waitPreviewAgent,
+  };
+  nativeTunnel.startPreviewAgent = (...args) =>
+    (nativeTunnelRuntimeOverride || originals).startPreviewAgent(...args);
+  nativeTunnel.stopPreviewAgent = (...args) =>
+    (nativeTunnelRuntimeOverride || originals).stopPreviewAgent(...args);
+  nativeTunnel.waitPreviewAgent = (...args) =>
+    (nativeTunnelRuntimeOverride || originals).waitPreviewAgent(...args);
+} catch {
+  // The optional native package intentionally falls back to gateway polling.
+}
 const {
   authorizePreviewGatewayPlan,
   createPreviewGatewayPlan,
@@ -449,7 +454,7 @@ test("keeps relay credentials out of public preview results", async () => {
   }
 });
 
-test("keeps relay credentials out of native preview results", async () => {
+test("keeps relay credentials out of native preview results", { skip: !nativeTunnel }, async () => {
   const gateway = await createPreviewGatewayTestServer();
   const previousRelay = process.env.FARM_PREVIEW_RELAY_URL;
   const previousToken = process.env.FARM_PREVIEW_RELAY_TOKEN;
