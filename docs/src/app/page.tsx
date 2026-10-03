@@ -677,7 +677,7 @@ function Hero() {
         </div>
         <HeroTitle
           after="apps"
-          className="max-w-full text-[1.125rem] font-medium leading-[1.02] tracking-normal text-white min-[360px]:text-[1.3125rem] min-[380px]:text-[1.4375rem] min-[400px]:text-[1.5rem] min-[420px]:text-[1.625rem] sm:text-[2.25rem] md:text-[2.625rem] lg:text-[3.25rem]"
+          className="max-w-full text-[clamp(1.375rem,7.6vw,2.125rem)] font-medium leading-[1.02] tracking-normal text-white sm:text-[2.25rem] md:text-[2.625rem] lg:text-[3.25rem]"
           href="/agents"
           lead="a framework for"
           linkLabel="Agent infrastructure"

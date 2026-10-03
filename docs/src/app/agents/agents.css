@@ -406,7 +406,7 @@
 }
 @media (max-width: 600px) {
   .agents-hero h1 {
-    font-size: clamp(32px, 8.5vw, 48px);
+    font-size: clamp(30px, 10vw, 40px);
   }
   .agents-intro {
     font-size: 14px;
