@@ -3003,6 +3003,8 @@ function wrapWithLayouts(pageElement, pathname, params) {
 function createLayoutPageBoundary(route, pageElement, serverHtml) {
   const props = {
     id: "__farm_page__",
+    // Same attributes as the server's page boundary, or React reports a mismatch.
+    "data-farm-segment": "page",
     "data-farm-client": route.pageShouldHydrate ? "true" : "false",
     "data-farm-layout-client": "true",
     "data-farm-island": "page",

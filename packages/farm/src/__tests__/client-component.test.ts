@@ -1197,6 +1197,30 @@ export function Chart() {}
     expect(source).not.toContain("Could not preload layout:");
   });
 
+  it("gives the hydrated page boundary every attribute the server renders on it", () => {
+    // A missing attribute is a hydration mismatch React reports in development.
+    const serverAttributes = [
+      "id",
+      "data-farm-segment",
+      "data-farm-client",
+      "data-farm-layout-client",
+      "data-farm-island",
+      "data-farm-island-strategy",
+    ];
+    for (const file of [
+      path.join("src", "vite.ts"),
+      path.join("src", "nitro", "universal-build.ts"),
+    ]) {
+      const source = fs.readFileSync(path.join(process.cwd(), file), "utf-8");
+      const start = source.indexOf("function createLayoutPageBoundary(");
+      const body = source.slice(start, source.indexOf("if (typeof serverHtml", start));
+      expect(start, file).toBeGreaterThan(-1);
+      for (const attribute of serverAttributes) {
+        expect(body, `${file} ${attribute}`).toMatch(new RegExp(`['"]?${attribute}['"]?:`));
+      }
+    }
+  });
+
   it("lets renderer-owned roots apply shared-layout route updates in development and production", () => {
     const sources = [
       fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8"),

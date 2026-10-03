@@ -897,6 +897,37 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain('"shouldHydrate":true');
   });
 
+  it("renders a hydrating layout tree directly in #root, matching the client tree", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          default: function DashboardPage() {
+            return React.createElement("main", null, "Server dashboard");
+          },
+        },
+        [layoutModulePath]: {
+          default: function RootLayout({ children }: { children: React.ReactNode }) {
+            return React.createElement("section", { "data-layout": "root" }, children);
+          },
+        },
+      },
+      {
+        layoutMetadata: { shouldHydrate: true, islandStrategy: "load" },
+      },
+    );
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    // The client hydrates #root with layout boundary > layout > page. Any extra element
+    // around the boundary makes React discard the server markup and render again.
+    const root = new JSDOM(response.body).window.document.getElementById("root")!;
+    const rendered = Array.from(root.children).filter((child) => child.tagName !== "LINK");
+    expect(rendered).toHaveLength(1);
+    expect(rendered[0].getAttribute("data-farm-layout-boundary")).toBe("true");
+    expect(rendered[0].firstElementChild?.getAttribute("data-layout")).toBe("root");
+  });
+
   it("keeps an async server page server-rendered and warns when hydration was suppressed", async () => {
     const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const response = createMockResponse();

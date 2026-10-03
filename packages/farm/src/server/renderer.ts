@@ -2882,12 +2882,13 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         getFarmTheme(),
       );
 
-      // React 19: ensure root is a single DOM node so streaming starts early (avoids Fragment delay)
-      const streamRoot = this.rendererRuntime.createElement(
-        "div",
-        { style: { display: "contents" } },
-        element,
-      );
+      // React 19: ensure root is a single DOM node so streaming starts early (avoids Fragment delay).
+      // A hydrating layout tree already starts with its layout boundary, and the client hydrates
+      // #root with exactly that tree (as production renders it), so it must not gain a wrapper.
+      const streamRoot =
+        (req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ === true
+          ? element
+          : this.rendererRuntime.createElement("div", { style: { display: "contents" } }, element);
       const devStyleLinks = this.collectDevStyleLinks();
       const cspNonce = this.getCspNonce(req);
       const secureDocumentHTML = (html: string) =>
