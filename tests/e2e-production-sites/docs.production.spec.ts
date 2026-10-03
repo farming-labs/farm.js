@@ -767,6 +767,39 @@ test("agent waitlist keeps failures recoverable and fits narrow screens", async 
   await expect(submit).toBeEnabled();
 });
 
+test("waitlist demo preserves its accessible name and releases its held width", async ({
+  page,
+}) => {
+  let finishResponse!: () => void;
+  await page.route("**/api/waitlist", async (route) => {
+    await new Promise<void>((resolve) => {
+      finishResponse = resolve;
+    });
+    await route.fulfill({ json: { ok: true, id: "demo-label-test-only" } });
+  });
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/agents");
+  const form = page.getByRole("form", { name: "Agent infrastructure waitlist" });
+  const email = form.getByLabel("Email address");
+  const submit = form.getByRole("button");
+  const label = submit.locator("[data-agent-waitlist-label]");
+  await expect(form).toBeVisible();
+  await expect(submit).toHaveAccessibleName("Join the waitlist");
+  await expect.poll(() => label.textContent(), { timeout: 10_000 }).not.toBe("Join the waitlist");
+  await expect(submit).toHaveAccessibleName("Join the waitlist");
+  await expect.poll(() => submit.evaluate((button) => button.style.minWidth)).not.toBe("");
+  await email.evaluate((input) => {
+    (input as HTMLInputElement).value = "demo-label@example.com";
+  });
+  await form.evaluate((element) => (element as HTMLFormElement).requestSubmit());
+  await expect(label).toHaveText("Joining…");
+  await expect(submit).toHaveAccessibleName("Joining…");
+  finishResponse();
+  await expect(label).toHaveText("Join the waitlist");
+  await expect(submit).toHaveAccessibleName("Join the waitlist");
+  await expect.poll(() => submit.evaluate((button) => button.style.minWidth)).toBe("");
+});
+
 test("agents page connects the blog, planned capabilities, Markdown, and shared waitlist", async ({
   page,
 }) => {
@@ -1065,6 +1098,10 @@ test("home keeps its agents link usable without JavaScript", async ({ browser, b
       const box = await agents.boundingBox();
       expect(box!.x).toBeGreaterThanOrEqual(0);
       expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+      const titleLine = page.locator(".farm-hero-swap").locator("..");
+      expect(await titleLine.evaluate((line) => line.scrollWidth <= line.clientWidth + 1)).toBe(
+        true,
+      );
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );

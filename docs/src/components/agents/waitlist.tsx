@@ -29,7 +29,7 @@ export function AgentWaitlist({
               note ? "agent-waitlist-note agent-waitlist-status" : "agent-waitlist-status"
             }
           />
-          <button type="submit">
+          <button aria-label="Join the waitlist" type="submit">
             <span className="agent-waitlist-button-content">
               <span className="agent-waitlist-loader" aria-hidden="true">
                 {Array.from({ length: 9 }, (_, index) => (
@@ -41,7 +41,9 @@ export function AgentWaitlist({
                   />
                 ))}
               </span>
-              <span data-agent-waitlist-label>Join the waitlist</span>
+              <span aria-hidden="true" data-agent-waitlist-label>
+                Join the waitlist
+              </span>
             </span>
           </button>
         </div>

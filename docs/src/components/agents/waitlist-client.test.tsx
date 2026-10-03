@@ -46,6 +46,7 @@ describe("waitlist button feedback", () => {
     expect(loader?.children).toHaveLength(9);
     expect(loader?.getAttribute("aria-hidden")).toBe("true");
     expect(button.textContent).toBe("Join the waitlist");
+    expect(button.getAttribute("aria-label")).toBe("Join the waitlist");
 
     submit();
     submit();
@@ -54,11 +55,13 @@ describe("waitlist button feedback", () => {
     expect(button.disabled).toBe(true);
     expect(email.readOnly).toBe(true);
     expect(button.textContent).toBe("Joining…");
+    expect(button.getAttribute("aria-label")).toBe("Joining…");
     expect(button.querySelector(".agent-waitlist-loader")).toBe(loader);
 
     finish(Response.json({ ok: true, id: "test-only" }));
     await vi.waitFor(() => expect(form.hasAttribute("aria-busy")).toBe(false));
     expect(button.textContent).toBe("Join the waitlist");
+    expect(button.getAttribute("aria-label")).toBe("Join the waitlist");
     expect(button.disabled).toBe(false);
     expect(email.readOnly).toBe(false);
     expect(email.value).toBe("");

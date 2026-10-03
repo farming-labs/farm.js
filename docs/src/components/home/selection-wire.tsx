@@ -336,6 +336,7 @@ export function SelectionWire({
       if (label.textContent !== labelWritten) {
         if (label.textContent !== labelFrom) return;
         labelWritten = labelFrom;
+        target.style.removeProperty("min-width");
       }
       const next = still
         ? labelFrom

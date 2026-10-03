@@ -21,6 +21,7 @@ export function enhanceAgentWaitlist(root: HTMLElement) {
       if (pending || !form.reportValidity()) return;
       pending = true;
       button.disabled = true;
+      button.setAttribute("aria-label", "Joining…");
       email.readOnly = true;
       label.textContent = "Joining…";
       status.textContent = "";
@@ -62,6 +63,7 @@ export function enhanceAgentWaitlist(root: HTMLElement) {
         if (!lifecycle.signal.aborted) {
           form.removeAttribute("aria-busy");
           button.disabled = false;
+          button.setAttribute("aria-label", "Join the waitlist");
           email.readOnly = false;
           label.textContent = "Join the waitlist";
         }
