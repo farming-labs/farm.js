@@ -244,6 +244,7 @@
 
   .farm-hero-tag[data-sw-state="target"] {
     border-color: rgb(255 255 255 / 0.34);
+    border-style: dashed;
   }
 
   .farm-hero-tag[data-sw-state="linked"] {

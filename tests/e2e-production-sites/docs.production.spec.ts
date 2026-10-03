@@ -1091,6 +1091,7 @@ test("home keeps its agents link usable without JavaScript", async ({ browser, b
     const agents = page.locator(".farm-hero-tag");
     await expect(agents).toHaveAccessibleName("Agent infrastructure");
     await expect(agents).toHaveAttribute("href", "/agents");
+    await expect(agents).toHaveCSS("border-top-style", "solid");
     await expect(page.locator(".farm-hero-swap")).not.toHaveAttribute("tabindex");
     for (const width of [320, 1440]) {
       await page.setViewportSize({ width, height: 900 });
@@ -1108,6 +1109,20 @@ test("home keeps its agents link usable without JavaScript", async ({ browser, b
     }
   } finally {
     await context.close();
+  }
+
+  const animatedContext = await browser.newContext({
+    baseURL,
+    reducedMotion: "no-preference",
+  });
+  const animatedPage = await animatedContext.newPage();
+  try {
+    await animatedPage.goto("/");
+    const animatedAgents = animatedPage.locator(".farm-hero-tag");
+    await expect(animatedAgents).toHaveAttribute("data-sw-state", "target", { timeout: 10_000 });
+    await expect(animatedAgents).toHaveCSS("border-top-style", "dashed");
+  } finally {
+    await animatedContext.close();
   }
 });
 
