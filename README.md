@@ -57,7 +57,7 @@ No install needed: [open the playground on StackBlitz](https://stackblitz.com/gi
 ### Create a New App
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-app --template basic --typescript
+pnpm create @farm.js/app my-app --template basic --typescript
 cd my-app
 pnpm dev
 ```

@@ -11,13 +11,13 @@ Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and
 ## Create an app
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-app --template basic --typescript
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-preact-app --template basic --renderer preact --typescript
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-solid-app --template basic --renderer solid --typescript
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-vue-app --template basic --renderer vue --typescript
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-svelte-app --template basic --renderer svelte --typescript
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app stripe-app --template stripe --typescript
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app --list-templates
+pnpm create @farm.js/app my-app --template basic --typescript
+pnpm create @farm.js/app my-preact-app --template basic --renderer preact --typescript
+pnpm create @farm.js/app my-solid-app --template basic --renderer solid --typescript
+pnpm create @farm.js/app my-vue-app --template basic --renderer vue --typescript
+pnpm create @farm.js/app my-svelte-app --template basic --renderer svelte --typescript
+pnpm create @farm.js/app stripe-app --template stripe --typescript
+pnpm create @farm.js/app --list-templates
 ```
 
 The create-app CLI includes Basic, Farm.js Auth, Better Auth, and one ready-to-configure starter

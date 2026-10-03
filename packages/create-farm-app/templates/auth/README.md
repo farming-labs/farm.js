@@ -20,7 +20,7 @@ This project was generated from the FARMJS Auth template included with `@farm.js
 ## Quick start
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-app --template auth
+pnpm create @farm.js/app my-app --template auth
 cd my-app
 pnpm dev
 ```

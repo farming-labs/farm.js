@@ -90,7 +90,7 @@ aliases, server rendering and streaming, and browser hydration. See the
 Create a ready-to-run Preact application from the CLI:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-preact-app --template basic --renderer preact --typescript
+pnpm create @farm.js/app my-preact-app --template basic --renderer preact --typescript
 ```
 
 ### Svelte
@@ -124,7 +124,7 @@ typed server calls, and current compatibility boundaries.
 Create a ready-to-run Svelte application from the CLI:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-svelte-app --template basic --renderer svelte --typescript
+pnpm create @farm.js/app my-svelte-app --template basic --renderer svelte --typescript
 ```
 
 ### Vue
@@ -163,7 +163,7 @@ current compatibility boundaries.
 Create a ready-to-run Vue application from the CLI:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-vue-app --template basic --renderer vue --typescript
+pnpm create @farm.js/app my-vue-app --template basic --renderer vue --typescript
 ```
 
 ### Solid
@@ -194,7 +194,7 @@ calls, and current compatibility boundaries.
 Create a ready-to-run Solid application directly from the CLI:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-solid-app --template basic --renderer solid --typescript
+pnpm create @farm.js/app my-solid-app --template basic --renderer solid --typescript
 ```
 
 Omitting `renderer` selects React. The renderer option is currently available for the Basic starter;

@@ -13,7 +13,7 @@ application selects Preact.
 ## Create an app
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-preact-app --template basic --renderer preact --typescript
+pnpm create @farm.js/app my-preact-app --template basic --renderer preact --typescript
 ```
 
 For an existing Basic app, install the adapter and Preact:
@@ -110,7 +110,7 @@ compatibility surfaces until their Preact paths are covered by dedicated tests.
 The Better Auth starter includes native Preact routes and forms:
 
 ```bash
-PNPM_CONFIG_DLX_CACHE_MAX_AGE=0 PNPM_CONFIG_MINIMUM_RELEASE_AGE_EXCLUDE='["@farm.js/*"]' pnpm create @farm.js/app my-auth-app --template better-auth --renderer preact --typescript
+pnpm create @farm.js/app my-auth-app --template better-auth --renderer preact --typescript
 ```
 
 Other integration starter templates currently target React, so add their renderer-neutral provider
