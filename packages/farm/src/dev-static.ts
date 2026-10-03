@@ -33,6 +33,34 @@ export function shouldBypassFarmRouterForDottedPath(
   return !matchesAppRoute || devServableFileExists(pathname, baseDirs);
 }
 
+/** Vite query flags that turn a file request into a module request. */
+const VITE_MODULE_QUERY_FLAGS = [
+  "import",
+  "raw",
+  "url",
+  "inline",
+  "worker",
+  "sharedworker",
+] as const;
+const SCRIPT_FETCH_DESTINATIONS = new Set(["script", "worker", "sharedworker", "serviceworker"]);
+
+/**
+ * Whether a dev request is Vite loading a module, not a visitor or an agent
+ * asking for a page. A `.md` file imported by app or dependency code (an
+ * eager `import.meta.glob` over Markdown, for example) arrives as
+ * `/README.md?import` from a module script; the Markdown mirror and its 404
+ * must leave it to Vite, or the import fails and the page never hydrates.
+ */
+export function isViteModuleRequest(
+  url: URL,
+  headers: Record<string, string | string[] | undefined>,
+): boolean {
+  if (VITE_MODULE_QUERY_FLAGS.some((flag) => url.searchParams.has(flag))) return true;
+  const destination = headers["sec-fetch-dest"];
+  const value = Array.isArray(destination) ? destination[0] : destination;
+  return value !== undefined && SCRIPT_FETCH_DESTINATIONS.has(value.toLowerCase());
+}
+
 /**
  * Whether the app serves /llms.txt or /llms-full.txt itself, through
  * `agent.llmsTxt`, an llms.ts or llms-full.ts route, or a file in the public
