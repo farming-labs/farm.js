@@ -96,6 +96,13 @@ account token, then issues a name-bound, expiring grant for each preview. Set
 `FARM_PREVIEW_DEFAULT_TTL_MS` and `FARM_PREVIEW_MAX_TTL_MS` to override the default one-hour and
 maximum 24-hour lifetimes. Set both auth variables or neither; a partial setup fails at startup.
 
+The included Redis limiter trusts `x-forwarded-for` only when Vercel's `VERCEL=1` runtime marker is
+present, because Vercel overwrites that header at the edge. If the marker or client address is
+missing, managed login fails closed with a retryable `503`. A port to another hosting platform must
+derive its rate-limit identity from the connection address or a proxy-authenticated header instead
+of enabling trust for client-supplied forwarding headers. Keep **Automatically expose System
+Environment Variables** enabled in the Vercel project so the runtime marker is available.
+
 Without Blob or Redis REST env vars, compatibility polling falls back to in-memory storage. That is useful for local development, but not reliable for production Vercel traffic because requests can be handled by different Function instances.
 
 ## CLI usage

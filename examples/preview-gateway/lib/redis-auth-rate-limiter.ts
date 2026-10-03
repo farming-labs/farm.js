@@ -43,9 +43,7 @@ class RedisPreviewAuthExchangeRateLimiter {
     )) as [number | string, number | string];
     const count = Number(result[0]);
     const retryAfterMs = Math.max(1, Number(result[1]));
-    return count <= MAX_EXCHANGES_PER_WINDOW
-      ? { allowed: true }
-      : { allowed: false, retryAfterMs };
+    return count <= MAX_EXCHANGES_PER_WINDOW ? { allowed: true } : { allowed: false, retryAfterMs };
   }
 }
 
@@ -58,13 +56,19 @@ export function createRedisPreviewAuthExchangeRateLimiter():
   return (request) => limiter.check(request);
 }
 
-function readVercelClientAddress(headers: Headers) {
-  // Vercel overwrites x-forwarded-for at the edge. Prefer it over the retained
-  // x-vercel-forwarded-for chain, then keep local/self-hosted development usable.
-  const value =
-    headers.get("x-forwarded-for") ||
-    headers.get("x-vercel-forwarded-for") ||
-    headers.get("x-real-ip") ||
-    "unknown";
-  return value.split(",", 1)[0]?.trim() || "unknown";
+export function readVercelClientAddress(headers: Headers) {
+  if (process.env.VERCEL !== "1") {
+    throw new Error(
+      "Preview auth exchange rate limiting requires a trusted Vercel runtime for client identity.",
+    );
+  }
+
+  // Vercel overwrites x-forwarded-for at the edge to prevent client spoofing.
+  // Do not fall back to request-controlled forwarding headers outside that
+  // platform guarantee or collapse unidentified callers into one bucket.
+  const clientAddress = headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim();
+  if (!clientAddress) {
+    throw new Error("Vercel did not provide a client address for preview auth rate limiting.");
+  }
+  return clientAddress;
 }
