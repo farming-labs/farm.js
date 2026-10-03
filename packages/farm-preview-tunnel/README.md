@@ -42,13 +42,28 @@ const relay = createPersistentPreviewRelay({
 Public relays should authorize each agent before allowing it to claim a preview name. The callback can validate a short-lived, name-bound grant and return its absolute expiry; the relay closes that agent route when the grant expires:
 
 ```ts
+const previewName = "my-preview";
 const relay = createPersistentPreviewRelay({
   authorizeAgent: async ({ token, name }) => {
     const grant = await verifyGrant(token, name);
     return grant ? { expiresAt: grant.expiresAt } : false;
   },
 });
+const address = await relay.listen();
+
+const grant = await mintGrant(previewName);
+const agent = await startTypeScriptPreviewAgent({
+  relayUrl: address.websocketUrl,
+  name: previewName,
+  token: grant.token,
+  targetUrl: "http://127.0.0.1:3000",
+});
+
+console.log(agent.publicUrl);
 ```
+
+`mintGrant` and `verifyGrant` are paired helpers supplied by the deployment; the agent must send the
+grant minted for its exact preview name through `token`.
 
 `registrationToken` is intended for simple self-hosted deployments that use one shared secret. The
 agent must pass that secret through its `token` option. Managed deployments should instead mint a
