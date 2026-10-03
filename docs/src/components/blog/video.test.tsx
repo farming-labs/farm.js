@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
+import postcss from "postcss";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { BlogVideo } from "./video";
@@ -16,6 +17,31 @@ function timestampToSeconds(timestamp: string) {
 }
 
 describe("BlogVideo", () => {
+  it("reserves the duration's space when the title is too wide", () => {
+    const html = renderToStaticMarkup(
+      <BlogVideo {...requiredProps} duration="1:56" title="Farm.js v0.1.0 · launch video" />,
+    );
+    const css = postcss.parse(readFileSync(new URL("./figures.css", import.meta.url), "utf8"));
+    const declarations = (selector: string) => {
+      const values = new Map<string, string>();
+      css.walkRules(selector, (rule) =>
+        rule.walkDecls((declaration) => values.set(declaration.prop, declaration.value)),
+      );
+      return values;
+    };
+
+    expect(html).toContain(
+      '<div class="bv-legends"><span class="bv-legend">Farm.js v0.1.0 · launch video</span><span class="bv-legend bv-legend--end">1:56</span></div>',
+    );
+    expect(declarations(".bv-legends").get("display")).toBe("flex");
+    expect(declarations(".bv-legends").get("gap")).toBe("0.75em");
+    expect(declarations(".bv-legend:first-child").get("min-width")).toBe("0");
+    expect(declarations(".bv-legend:first-child").get("overflow")).toBe("hidden");
+    expect(declarations(".bv-legend:first-child").get("text-overflow")).toBe("ellipsis");
+    expect(declarations(".bv-legend:first-child").get("white-space")).toBe("nowrap");
+    expect(declarations(".bv-legend--end").get("flex-shrink")).toBe("0");
+  });
+
   it("renders configured captions as the default track", () => {
     const html = renderToStaticMarkup(
       <BlogVideo

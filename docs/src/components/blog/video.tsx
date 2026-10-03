@@ -22,8 +22,10 @@ export function BlogVideo({ src, poster, title, duration, caption, captions }: B
   return (
     <figure className="blog-video">
       <div className="bv-frame">
-        <span className="bv-legend">{title}</span>
-        {duration ? <span className="bv-legend bv-legend--end">{duration}</span> : null}
+        <div className="bv-legends">
+          <span className="bv-legend">{title}</span>
+          {duration ? <span className="bv-legend bv-legend--end">{duration}</span> : null}
+        </div>
         <span aria-hidden className="bv-corner bv-corner-tl" />
         <span aria-hidden className="bv-corner bv-corner-tr" />
         <span aria-hidden className="bv-corner bv-corner-bl" />

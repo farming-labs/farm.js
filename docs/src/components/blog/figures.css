@@ -745,13 +745,16 @@
   border-radius: 3px;
   background: #070707;
 }
-.bv-legend {
+.bv-legends {
   position: absolute;
   z-index: 1;
   top: -0.75em;
+  right: 1.2em;
   left: 1.2em;
-  padding: 0 0.6em;
-  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75em;
   color: #8f8f8f;
   font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-size: 0.68rem;
@@ -759,9 +762,18 @@
   line-height: 1.5;
   text-transform: uppercase;
 }
+.bv-legend {
+  padding: 0 0.6em;
+  background: #000;
+}
+.bv-legend:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .bv-legend--end {
-  right: 1.2em;
-  left: auto;
+  flex-shrink: 0;
 }
 .bv-corner {
   position: absolute;
