@@ -659,6 +659,42 @@ test("rate limits managed auth exchange before contacting GitHub", async () => {
   }
 });
 
+test("fails managed auth exchange closed when its rate limiter is unavailable", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  let githubRequests = 0;
+  const gateway = await createGatewayServer(store, {
+    auth: {
+      signingSecret: "managed-preview-test-secret-that-is-long-enough",
+      githubClientId: "github-client-id",
+      rateLimitExchange: async () => {
+        throw new Error("private redis connection details");
+      },
+      fetch: async () => {
+        githubRequests += 1;
+        return Response.json({ id: 42, login: "farm-user" });
+      },
+    },
+  });
+
+  try {
+    const response = await fetch(`${gateway.url}/api/auth/exchange`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "github", accessToken: "provider-token" }),
+    });
+
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(response.headers.get("retry-after"), "1");
+    const body = await response.text();
+    assert.match(body, /Farm Preview login is temporarily unavailable/);
+    assert.ok(!body.includes("private redis connection details"));
+    assert.equal(githubRequests, 0);
+  } finally {
+    await gateway.close();
+  }
+});
+
 test("shows browser visitors a friendly expired preview page", async () => {
   const store = new MemoryPreviewGatewayStore();
   const gateway = await createGatewayServer(store);

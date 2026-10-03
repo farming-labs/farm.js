@@ -8,6 +8,7 @@ import {
   readPreviewBearerToken,
   verifyPreviewAccountToken,
   verifyPreviewTunnelGrant,
+  type PreviewAuthExchangeRateLimitResult,
   type PreviewManagedAuthOptions,
 } from "./auth.js";
 
@@ -269,7 +270,19 @@ export function createPreviewGatewayHandler(
 
 async function limitPreviewAccountExchange(request: Request, auth: PreviewManagedAuthOptions) {
   if (!auth.rateLimitExchange) return undefined;
-  const result = await auth.rateLimitExchange(request);
+  let result: PreviewAuthExchangeRateLimitResult;
+  try {
+    result = await auth.rateLimitExchange(request);
+  } catch {
+    return new Response("Farm Preview login is temporarily unavailable. Try again shortly.", {
+      status: 503,
+      headers: {
+        "cache-control": "no-store",
+        "content-type": "text/plain; charset=utf-8",
+        "retry-after": "1",
+      },
+    });
+  }
   if (result.allowed) return undefined;
 
   const retryAfterMs =

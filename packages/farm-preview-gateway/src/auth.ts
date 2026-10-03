@@ -12,7 +12,8 @@ export interface PreviewManagedAuthOptions {
   fetch?: typeof fetch;
   /**
    * Shared abuse-control hook for the provider-token exchange endpoint.
-   * Implementations must not consume the request body.
+   * Implementations must not consume the request body. Failures reject the
+   * exchange with a retryable 503 response instead of bypassing the limiter.
    */
   rateLimitExchange?: PreviewAuthExchangeRateLimiter;
 }
