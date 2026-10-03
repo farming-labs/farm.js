@@ -98,28 +98,44 @@ function partOf(points: Point[], amount: number): { points: Point[]; tip: Point 
  * How the wire runs from the selection to the target.
  * - "below": from the selection's bottom edge, down, then across into the
  *   target's left side (the target hangs below the line, to the right).
- * - "down": from the selection's bottom edge, down to just above the target,
- *   across, and down into its top: a short zigzag.
+ * - "hug": follows the copy without crossing it. From the selection's bottom
+ *   edge it drops into the gap above the next line (`over`), runs right along
+ *   its top, turns down once past the copy (`over` and `clear`), and enters the
+ *   target from its right side. Where that gap is too tight to run in (small
+ *   screens), it leaves from the selection's right side instead.
  */
-type Route = "below" | "down";
+type Route = "below" | "hug";
 
-function routeFor(route: Route, selection: Box, target: Box): Point[] {
+function routeFor(
+  route: Route,
+  selection: Box,
+  target: Box,
+  hug: { runY: number | null; gutterX: number },
+): Point[] {
   const portX = selection.right - Math.min(24, (selection.right - selection.left) / 4);
+  const targetY = (target.top + target.bottom) / 2;
   if (route === "below") {
-    const targetY = (target.top + target.bottom) / 2;
     return [
       [portX, selection.bottom],
       [portX, targetY],
       [target.left, targetY],
     ];
   }
-  const targetX = (target.left + target.right) / 2;
-  const turnY = Math.max(selection.bottom + 12, target.top - 16);
+  if (hug.runY === null) {
+    const sideY = (selection.top + selection.bottom) / 2;
+    return [
+      [selection.right, sideY],
+      [hug.gutterX, sideY],
+      [hug.gutterX, targetY],
+      [target.right, targetY],
+    ];
+  }
   return [
     [portX, selection.bottom],
-    [portX, turnY],
-    [targetX, turnY],
-    [targetX, target.top],
+    [portX, hug.runY],
+    [hug.gutterX, hug.runY],
+    [hug.gutterX, targetY],
+    [target.right, targetY],
   ];
 }
 
@@ -141,6 +157,17 @@ export type SelectionWireProps = {
   pauseWithin?: string;
   /** The selection's side padding, in em: tighter keeps neighbouring glyphs out. */
   padX?: number;
+  /** The selection's right padding, in em, when it differs from `padX`. */
+  padRight?: number;
+  /**
+   * Fit the selection's height to the word's ink (its letters' actual extent)
+   * instead of its line box, leaving room between it and the line below.
+   */
+  fitInk?: boolean;
+  /** For the "hug" route: the line under the selection whose top the wire runs along. */
+  over?: string;
+  /** For the "hug" route: more copy the wire must pass on its right, such as a paragraph. */
+  clear?: string;
 };
 
 /**
@@ -161,6 +188,10 @@ export function SelectionWire({
   holdOnTarget = false,
   pauseWithin,
   padX = 0.16,
+  padRight = padX,
+  fitInk = false,
+  over,
+  clear,
 }: SelectionWireProps) {
   const layerRef = useRef<HTMLDivElement>(null);
   const selectRef = useRef<HTMLDivElement>(null);
@@ -189,6 +220,11 @@ export function SelectionWire({
     const heading = root?.querySelector<HTMLElement>(headingSelector);
     const text = swapText ? root?.querySelector<HTMLElement>(swapText) : null;
     const pauseZone = pauseWithin ? root?.querySelector<HTMLElement>(pauseWithin) : null;
+    const overLine = over ? root?.querySelector<HTMLElement>(over) : null;
+    const cleared = [
+      ...(overLine ? [overLine] : []),
+      ...(clear ? [...(root?.querySelectorAll<HTMLElement>(clear) ?? [])] : []),
+    ];
     if (
       !layer ||
       !root ||
@@ -213,10 +249,29 @@ export function SelectionWire({
     let fromWidth = 0;
     let toWidth = 0;
     let fontSize = 16;
+    // How far below its box top the `over` line's ink starts (tallest glyph), from canvas metrics.
+    let overInkOffset = 0;
+    // The word's ink, as offsets from its box top, for `fitInk`.
+    let wordInkTop = 0;
+    let wordInkBottom = 0;
+    const metrics = document.createElement("canvas").getContext("2d");
     // Both words' widths, measured in place: the text is swapped and restored
     // within one task, so nothing paints in between.
     const measure = () => {
       fontSize = parseFloat(getComputedStyle(heading).fontSize) || 16;
+      if (overLine && metrics) {
+        const style = getComputedStyle(overLine);
+        metrics.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        const ink = metrics.measureText(overLine.textContent ?? "");
+        overInkOffset = ink.fontBoundingBoxAscent - ink.actualBoundingBoxAscent;
+      }
+      if (fitInk && metrics) {
+        const style = getComputedStyle(wordBox);
+        metrics.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        const ink = metrics.measureText(wordBox.textContent ?? "");
+        wordInkTop = ink.fontBoundingBoxAscent - ink.actualBoundingBoxAscent;
+        wordInkBottom = ink.fontBoundingBoxAscent + ink.actualBoundingBoxDescent;
+      }
       if (!swapping || !text) return;
       const savedText = text.textContent;
       const savedWidth = wordBox.style.width;
@@ -276,9 +331,13 @@ export function SelectionWire({
       const wordRect = relative(wordBox.getBoundingClientRect(), origin);
       const headingRect = relative(heading.getBoundingClientRect(), origin);
       const x0 = wordRect.left - padX * fontSize;
-      const y0 = wordRect.top - 0.06 * fontSize;
-      const x1 = wordRect.right + padX * fontSize;
-      const y1 = wordRect.bottom + 0.04 * fontSize;
+      const y0 = fitInk
+        ? wordRect.top + wordInkTop - 0.08 * fontSize
+        : wordRect.top - 0.06 * fontSize;
+      const x1 = wordRect.right + padRight * fontSize;
+      const y1 = fitInk
+        ? wordRect.top + wordInkBottom + 0.06 * fontSize
+        : wordRect.bottom + 0.04 * fontSize;
       const selection: Box = { left: x0, top: y0, right: x1, bottom: y1 };
 
       // The target, hung under the heading right of the selection when asked to.
@@ -304,7 +363,24 @@ export function SelectionWire({
             };
           })()
         : relative(target.getBoundingClientRect(), origin);
-      const path = routeFor(route, selection, targetRect);
+      // "hug": run midway between the selection and the next line's ink, and turn
+      // down just past the right edge of the copy's text (the text, not its box).
+      let runY: number | null = null;
+      let gutterX = targetRect.right;
+      if (route === "hug") {
+        if (overLine) {
+          const inkTop = relative(overLine.getBoundingClientRect(), origin).top + overInkOffset;
+          const gap = inkTop - selection.bottom;
+          runY = gap >= 3 ? selection.bottom + gap / 2 : null;
+        }
+        for (const element of cleared) {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          gutterX = Math.max(gutterX, range.getBoundingClientRect().right - origin.left);
+        }
+        gutterX = Math.min(origin.width - 4, gutterX + 16);
+      }
+      const path = routeFor(route, selection, targetRect, { runY, gutterX });
       const portPoint = path[0]!;
       const endPoint = path[path.length - 1]!;
       // Where the cursor clicks: on the target, a little right of centre, as in the video.
@@ -536,6 +612,10 @@ export function SelectionWire({
     holdOnTarget,
     pauseWithin,
     padX,
+    padRight,
+    fitInk,
+    over,
+    clear,
   ]);
 
   return (

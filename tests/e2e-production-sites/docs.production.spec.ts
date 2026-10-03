@@ -789,7 +789,7 @@ test("agents page connects the blog, planned capabilities, Markdown, and shared 
   ).toBe(true);
   await expect(page).toHaveTitle("Agent infrastructure — Farm.js");
   await expect(page.getByRole("heading", { level: 1 })).toHaveAccessibleName(
-    "Deploy agents. Connect your tools.",
+    "Deploy agents Connect your tools.",
   );
   await expect(page.getByText("Coming soon", { exact: true })).toHaveCount(0);
   await expect(page.locator(".agents-capabilities article")).toHaveCount(4);
@@ -918,7 +918,7 @@ test("agent hero stays typographic", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/agents");
   const title = page.getByRole("heading", { level: 1 });
-  await expect(title).toHaveText("Deploy agents.Connect your tools.");
+  await expect(title).toHaveText("Deploy agentsConnect your tools.");
   await expect(
     page.locator("[data-letter-title], [data-letter-reel], [data-title-replay]"),
   ).toHaveCount(0);

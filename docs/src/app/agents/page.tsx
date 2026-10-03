@@ -141,9 +141,9 @@ export default function AgentsPage() {
                   <IndexedLabel index="06" icon={Network} label="Agent infrastructure" />
                 </div>
                 <h1 id="agents-title">
-                  Deploy <span className="agents-hero-word">agents</span>.
+                  Deploy <span className="agents-hero-word">agents</span>
                   <br />
-                  <span>Connect your tools.</span>
+                  <span className="agents-hero-line">Connect your tools.</span>
                 </h1>
                 <p className="agents-intro">
                   Your agents, MCP servers, and website. Connected, managed, and observable from the
@@ -154,10 +154,14 @@ export default function AgentsPage() {
                 </div>
                 {/* The landing hero's drag and wire, from "agents" into the waitlist button. */}
                 <SelectionWire
+                  clear=".agents-intro"
+                  fitInk
                   heading="#agents-title"
+                  over=".agents-hero-line"
+                  padRight={0.14}
                   padX={0.03}
                   pauseWithin=".agent-waitlist"
-                  route="down"
+                  route="hug"
                   target=".agent-waitlist button[type=submit]"
                   word=".agents-hero-word"
                 />
