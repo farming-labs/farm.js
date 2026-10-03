@@ -108,6 +108,14 @@ export default function Page() { return <main>home</main>; }`,
     }
     await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
     await fs.writeFile(path.join(root, "README.md"), "# Project readme\n");
+    await writeModule(root, "docs/guide.md", "# Guide\n");
+    await fs.writeFile(
+      path.join(root, "farm.config.ts"),
+      `export default {
+  docs: { enabled: true, entry: "/docs", contentDir: "docs", adapter: false },
+  images: { provider: "none" },
+};`,
+    );
     await writeModule(
       root,
       "src/app/layout.tsx",
@@ -121,7 +129,7 @@ export default function Layout({ children }) { return <>{children}</>; }`,
 export default function Page() { return <main>home</main>; }`,
     );
 
-    const server = await createServer({ root, images: { provider: "none" } });
+    const server = await createServer({ root });
     servers.add(server);
     await server.listen(await getAvailablePort());
     const address = server.httpServer?.address();
@@ -130,9 +138,14 @@ export default function Page() { return <main>home</main>; }`,
 
     // Vite serves the file itself (an app's Markdown transform, such as the
     // docs adapter's, would compile it); Farm's Markdown handlers stay out.
-    for (const [label, request] of [
-      ["?import", fetch(`${origin}/README.md?import`)],
-      ["module script", fetch(`${origin}/README.md`, { headers: { "sec-fetch-dest": "script" } })],
+    for (const [label, request, source] of [
+      ["?import", fetch(`${origin}/README.md?import`), "# Project readme\n"],
+      [
+        "module script",
+        fetch(`${origin}/README.md`, { headers: { "sec-fetch-dest": "script" } }),
+        "# Project readme\n",
+      ],
+      ["docs entry ?import", fetch(`${origin}/docs/guide.md?import`), "# Guide\n"],
     ] as const) {
       const response = await request;
       // Vite may append an inline source map to a transformed module.
@@ -141,7 +154,7 @@ export default function Page() { return <main>home</main>; }`,
         label,
         status: response.status,
         markdownError: response.headers.get("x-farm-markdown-error"),
-        startsWithSource: body.startsWith("# Project readme\n"),
+        startsWithSource: body.startsWith(source),
       }).toEqual({ label, status: 200, markdownError: null, startsWithSource: true });
     }
 
@@ -149,5 +162,10 @@ export default function Page() { return <main>home</main>; }`,
     const agentRequest = await fetch(`${origin}/README.md`);
     expect(agentRequest.status).toBe(404);
     expect(agentRequest.headers.get("x-farm-markdown-error")).toBe("404");
+
+    // An ordinary docs request still belongs to the docs handler.
+    const docsRequest = await fetch(`${origin}/docs/guide.md`);
+    expect(docsRequest.status).toBe(200);
+    expect(docsRequest.headers.get("content-type")).toContain("text/markdown");
   }, 30_000);
 });

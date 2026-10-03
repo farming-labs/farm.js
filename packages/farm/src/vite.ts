@@ -1834,6 +1834,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               docsHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
             }
           }
+          // Vite loading a `.md` file as a module is not a request for docs or Markdown.
+          const viteModuleRequest = isViteModuleRequest(parsedRequestUrl, req.headers);
           // An app's own llms.txt and llms-full.txt (agent.llmsTxt, llms.ts, llms-full.ts,
           // or a public file) take those paths from the docs engine, as in production.
           const appOwnsLlmsTxt = farmAppOwnsLlmsPath(requestPathname, {
@@ -1841,7 +1843,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             routeManager: farmApp.getRouteManager(),
             publicDir: server.config.publicDir,
           });
-          if (farmDocsHandler && !appOwnsLlmsTxt) {
+          if (farmDocsHandler && !appOwnsLlmsTxt && !viteModuleRequest) {
             const docsRequest = new Request(fullUrl, {
               method: requestMethod,
               headers: docsHeaders,
@@ -1856,9 +1858,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               return;
             }
           }
-
-          // Vite loading a `.md` file as a module is not a request for Markdown.
-          const viteModuleRequest = isViteModuleRequest(parsedRequestUrl, req.headers);
 
           const markdownSourceResponse = viteModuleRequest
             ? null
