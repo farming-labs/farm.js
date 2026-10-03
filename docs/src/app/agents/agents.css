@@ -82,9 +82,9 @@
   max-width: 32rem;
   margin-inline: auto;
   color: #aaa;
-  font-size: 17px;
+  font-size: 13px;
   font-weight: 300;
-  line-height: 1.75;
+  line-height: 1.65;
 }
 /* Hero signup: the email field and button share one bordered bar in the page's mono style. */
 .agents-signup {
@@ -409,8 +409,7 @@
     font-size: clamp(30px, 10vw, 40px);
   }
   .agents-intro {
-    font-size: 14px;
-    line-height: 1.65;
+    font-size: 12px;
   }
   .agents-signup .agent-waitlist input {
     min-height: 44px;

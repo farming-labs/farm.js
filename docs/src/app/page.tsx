@@ -685,9 +685,12 @@ function Hero() {
           tag="/agents"
           word="product-integrated"
         />
-        <p className="mt-5 max-w-[38rem] text-balance text-sm leading-6 text-white/56 sm:text-[15px] sm:leading-6">
-          Bring the stack you already use. Farm.js connects your app router, typed APIs,
-          integrations, docs, and deployment into one product that people and agents can both use.
+        <p className="mt-5 max-w-[38rem] text-balance text-[12px] font-light leading-[1.65] text-white/56 sm:text-[13px]">
+          Bring the stack you already use. Farm.js turns it into one product for people and agents
+          <span className="hidden sm:inline">
+            , with typed APIs, integrations, docs, and deploys built in
+          </span>
+          .
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           <ButtonLink href="/docs/getting-started" glyph=">_" size="compact">
