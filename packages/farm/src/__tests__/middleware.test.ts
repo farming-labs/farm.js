@@ -1722,7 +1722,7 @@ describe("Named request middleware", () => {
     expect(ctx.locals.get("payload")).toEqual({ message: "hello" });
   });
 
-  it("uses the same named-export runtime through the standalone Vite plugin", async () => {
+  it("uses the same named-export runtime beneath basePath through the standalone Vite plugin", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-named-middleware-"));
     const middlewareFile = path.join(root, "src", "app", "dashboard", "middleware.ts");
     await fs.mkdir(path.dirname(middlewareFile), { recursive: true });
@@ -1742,17 +1742,17 @@ describe("Named request middleware", () => {
         moduleGraph: { invalidateModule: vi.fn() },
         ws: { send: vi.fn() },
       };
-      const plugin = farmMiddlewarePlugin();
+      const plugin = farmMiddlewarePlugin({ basePath: "/console" });
       (plugin.configureServer as (server: any) => void)(server);
       await (server as any).__farmMiddleware__.waitForDiscovery();
 
-      const req = createMockRequest("/dashboard/settings");
+      const req = createMockRequest("/console/dashboard/settings");
       const handled = await (server as any).__farmMiddleware__.execute(req, createMockResponse());
 
       expect(handled).toBe(false);
       expect((req as any).__FARM_MIDDLEWARE_CONTEXT__).toEqual(
         new Map([
-          ["requestPath", "/dashboard/settings"],
+          ["requestPath", "/console/dashboard/settings"],
           ["session", { userId: "vite-user" }],
         ]),
       );

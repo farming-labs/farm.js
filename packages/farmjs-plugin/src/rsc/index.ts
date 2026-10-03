@@ -61,9 +61,10 @@ import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 // Use API and middleware plugins from @farm.js/core (require so CJS build resolves when ESM .mjs is missing)
 const require_ = createRequire(import.meta.url);
-const { farmApiPlugin, farmMiddlewarePlugin } = require_(
-  "@farm.js/core",
-) as typeof import("@farm.js/core");
+const { farmApiPlugin } = require_("@farm.js/core") as typeof import("@farm.js/core");
+const { farmMiddlewarePlugin } = require_(
+  "@farm.js/core/middleware",
+) as typeof import("@farm.js/core/middleware");
 const {
   resolveServerActionsConfig,
   validateServerActionRequest,
@@ -190,7 +191,11 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
     },
 
     plugins: [
-      farmMiddlewarePlugin({ srcDir: config.srcDir ?? "src", debug }),
+      farmMiddlewarePlugin({
+        srcDir: config.srcDir ?? "src",
+        basePath: config.basePath ?? "/",
+        debug,
+      }),
       farmApiPlugin({
         srcDir: config.srcDir ?? "src",
         debug,

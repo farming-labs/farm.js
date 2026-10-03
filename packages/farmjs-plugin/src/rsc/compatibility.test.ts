@@ -1,7 +1,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { IncomingMessage, ServerResponse } from "node:http";
+import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { assertRscPackageCompatibility } from "./compatibility.js";
 import farmRsc, { defineConfig } from "./index.js";
 
@@ -62,6 +64,41 @@ describe("RSC package compatibility", () => {
       serverActions: false,
       optimizedBoundary: false,
     });
+  });
+
+  it("passes basePath to the standalone development middleware plugin", async () => {
+    const root = createProject({});
+    const middlewareFile = path.join(root, "src", "app", "dashboard", "middleware.ts");
+    mkdirSync(path.dirname(middlewareFile), { recursive: true });
+    writeFileSync(middlewareFile, "export {};\n");
+    const seen: string[] = [];
+    const server = {
+      config: { root, mode: "development" },
+      hot: undefined,
+      ssrLoadModule: vi.fn().mockResolvedValue({
+        default(context: { pathname: string }) {
+          seen.push(context.pathname);
+        },
+      }),
+      moduleGraph: { invalidateModule: vi.fn() },
+      ws: { send: vi.fn() },
+    };
+    const config = defineConfig({ basePath: "/console" });
+    const middlewarePlugin = (config.plugins as Array<{ name?: string }>).find(
+      (plugin) => plugin.name === "@farm.js/core:middleware",
+    ) as {
+      configureServer(server: unknown): void;
+    };
+
+    middlewarePlugin.configureServer(server);
+    await (server as any).__farmMiddleware__.waitForDiscovery();
+    const request = new IncomingMessage(new Socket());
+    request.url = "/console/dashboard";
+    request.method = "GET";
+    request.headers = { host: "localhost" };
+    await (server as any).__farmMiddleware__.execute(request, new ServerResponse(request));
+
+    expect(seen).toEqual(["/console/dashboard"]);
   });
 
   it("does not require the RSC package set when RSC is disabled", async () => {

@@ -6,11 +6,14 @@ import fs from "node:fs";
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin, ViteDevServer } from "vite";
+import { resolveFarmI18nConfig } from "../i18n/config";
 import { MiddlewareManager } from "./manager";
 
 export interface FarmMiddlewarePluginOptions {
   /** Source directory (default: `src`). */
   srcDir?: string;
+  /** Application base path (default: `/`). */
+  basePath?: string;
   /** Enable debug logging. */
   debug?: boolean;
 }
@@ -28,7 +31,17 @@ export function farmMiddlewarePlugin(options: FarmMiddlewarePluginOptions = {}):
   let discoveryPromise: Promise<void> | null = null;
 
   const discover = async (server: ViteDevServer): Promise<void> => {
-    manager = new MiddlewareManager(getMiddlewareAppDirectory(server.config.root, srcDir), server);
+    const i18n = resolveFarmI18nConfig(false, {
+      root: server.config.root,
+      mode: server.config.mode === "production" ? "production" : "development",
+      basePath: options.basePath ?? "/",
+    });
+    manager = new MiddlewareManager(
+      getMiddlewareAppDirectory(server.config.root, srcDir),
+      server,
+      undefined,
+      i18n,
+    );
     await manager.discover();
     discoveryComplete = true;
   };
