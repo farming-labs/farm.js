@@ -40,6 +40,28 @@ describe("generated middleware runner options", () => {
     expect(entry).toMatch(/i18n: \{"enabled":true/);
   });
 
+  it("carries basePath when i18n is disabled so middleware matches the app path", () => {
+    const entry = generateRscEntry({
+      ...context,
+      basePath: "/console",
+      i18n: {
+        enabled: false,
+        basePath: "/console",
+        locales: ["en"],
+        defaultLocale: "en",
+        messages: "/app/src/messages",
+        routing: "none",
+        detection: [],
+        fallbackLocale: "en",
+        strict: true,
+        cookie: { name: "farm_locale", maxAge: 31_536_000, path: "/", sameSite: "lax" },
+        direction: {},
+      },
+    });
+
+    expect(entry).toContain('i18n: {"enabled":false,"basePath":"/console"');
+  });
+
   it("carries trustProxy so middleware reads the forwarded client address", () => {
     const entry = generateRscEntry({ ...context, server: { trustProxy: true } });
     expect(entry).toContain('server: {"trustProxy":true}');
