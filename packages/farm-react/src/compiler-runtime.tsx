@@ -9496,10 +9496,10 @@ function createKeyedRowsBlockComponent(
         else removed.push(instance);
       }
       if (nextIndex !== rows.keys.length) return false;
+      // Validate every surviving binding before removing rows. Direct singleton
+      // updates cache a missing target and cannot recover on a later refresh.
       const shouldPrepareBindings =
-        rows.items.length > 1 &&
-        this.currentProps.bindings.length > 0 &&
-        !this.currentProps.hostBlocks;
+        this.currentProps.bindings.length > 0 && !this.currentProps.hostBlocks;
       const preparedBindings = shouldPrepareBindings
         ? prepareKeyedRowBindingSetUpdates(this.currentProps, this.instances, rows)
         : undefined;

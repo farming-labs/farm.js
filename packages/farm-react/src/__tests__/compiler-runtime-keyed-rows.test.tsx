@@ -1375,6 +1375,82 @@ describe("compiled keyed-row runtime", () => {
     expect(mutations).toEqual([]);
   });
 
+  it("falls back when multi-removal leaves one row with a missing binding target", async () => {
+    let setItems: (next: CompilerStateUpdater) => void = () => undefined;
+    let listRenders = 0;
+    const Inventory = createCompiledComponent({
+      displayName: "MissingSingleSurvivorBindingTarget",
+      initialize: () => [
+        [
+          { id: "a", label: "Alpha" },
+          { id: "b", label: "Beta" },
+          { id: "c", label: "Gamma" },
+        ],
+      ],
+      render(_props: Record<string, never>, state, blocks) {
+        setItems = (next) => state[0].set(next);
+        const items = () => state[0].get() as Item[];
+        const KeyedRows = blocks.KeyedRows;
+        return (
+          <section>
+            <KeyedRows
+              id={0}
+              render={() => {
+                listRenders += 1;
+                return (
+                  <ul>
+                    {items().map((item) => (
+                      <li key={item.id}>
+                        <span>{item.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                );
+              }}
+              items={items}
+              rowKey={(item) => (item as Item).id}
+              create={(item) => ({
+                kind: "element",
+                tag: "li",
+                attributes: [],
+                styles: [],
+                children: [
+                  {
+                    kind: "element",
+                    tag: "span",
+                    attributes: [],
+                    styles: [],
+                    children: [(item as Item).label],
+                  },
+                ],
+              })}
+              bindings={[{ kind: "text", path: [0], read: (item) => [(item as Item).label] }]}
+            />
+          </section>
+        );
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0] }],
+    });
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Inventory />));
+    const survivor = container.querySelector("li")!;
+    survivor.querySelector("span")!.remove();
+
+    await act(async () => {
+      setItems([{ id: "a", label: "Updated" }]);
+      await flushCompilerUpdates();
+    });
+
+    expect(container.querySelectorAll("li")).toHaveLength(1);
+    expect(container.querySelector("li")?.textContent).toBe("Updated");
+    expect(container.querySelector("li")).not.toBe(survivor);
+    expect(listRenders).toBe(2);
+  });
+
   it("matches React across 1,000 deterministic keyed operations", async () => {
     type Update = (items: Item[]) => Item[];
     let compiledSet: (next: CompilerStateUpdater) => void = () => undefined;

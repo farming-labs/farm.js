@@ -366,8 +366,7 @@ async function measureKeyedRemovalPreflight() {
       expectedBindingReads: totalUpdates * keyedRowCount - totalUpdates * (totalUpdates + 1),
       outputCorrect:
         rows.length === remainingRows &&
-        rows[0]?.getAttribute("data-key") === "row-0" &&
-        rows[rows.length - 1]?.getAttribute("data-key") === `row-${remainingRows - 1}`,
+        [...rows].every((row, index) => row.getAttribute("data-key") === `row-${index}`),
       preservedFirstRow: rows[0] === fixture.firstRow,
       remainingRows,
       renderPlans: fixture.renderPlans(),
