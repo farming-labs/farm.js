@@ -222,7 +222,7 @@ test("returns to the CLI after first-run device login with a scoped tunnel grant
   assert.ok(calls.some((call) => call.url.endsWith("/api/auth/exchange")));
 });
 
-test("accepts a fresh server grant when the client clock is slightly ahead", async () => {
+test("accepts server grants within clock skew and rejects older grants", async () => {
   const plan = {
     provider: "farm-gateway",
     gatewayUrl: "https://preview.example.com",
@@ -232,7 +232,7 @@ test("accepts a fresh server grant when the client clock is slightly ahead", asy
     requestedHostname: "clock-skew.preview.example.com",
     requestedPublicUrl: "https://clock-skew.preview.example.com",
   };
-  const serverExpiry = Date.now() - 60_000;
+  let serverExpiry = Date.now() - 60_000;
   const runtime = {
     async fetch(url) {
       if (url.endsWith("/api/auth/config")) {
@@ -268,6 +268,12 @@ test("accepts a fresh server grant when the client clock is slightly ahead", asy
   const authorized = await authorizePreviewGatewayPlan(plan, { runtime });
   assert.equal(authorized.relayToken, "clock-skew-grant");
   assert.equal(authorized.expiresAt, serverExpiry);
+
+  serverExpiry = Date.now() - 6 * 60_000;
+  await assert.rejects(
+    () => authorizePreviewGatewayPlan(plan, { runtime }),
+    /Farm Preview returned an invalid tunnel grant\./,
+  );
 });
 
 test("resolves a running local preview target", async () => {
