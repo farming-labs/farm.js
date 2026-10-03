@@ -1441,14 +1441,20 @@ describe("compiled keyed-row runtime", () => {
     survivor.querySelector("span")!.remove();
 
     await act(async () => {
-      setItems([{ id: "a", label: "Updated" }]);
+      setItems([{ id: "a", label: "Alpha" }]);
       await flushCompilerUpdates();
     });
 
     expect(container.querySelectorAll("li")).toHaveLength(1);
-    expect(container.querySelector("li")?.textContent).toBe("Updated");
+    expect(container.querySelector("li")?.textContent).toBe("Alpha");
     expect(container.querySelector("li")).not.toBe(survivor);
     expect(listRenders).toBe(2);
+
+    await act(async () => {
+      setItems([{ id: "a", label: "Updated" }]);
+      await flushCompilerUpdates();
+    });
+    expect(container.querySelector("li")?.textContent).toBe("Updated");
   });
 
   it("matches React across 1,000 deterministic keyed operations", async () => {

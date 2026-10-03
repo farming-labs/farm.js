@@ -4240,6 +4240,17 @@ function prepareKeyedRowBindingSetUpdates(
   return preparedUpdates;
 }
 
+function hasValidKeyedRowBindingTargets(
+  props: CompilerKeyedRowBindingSource,
+  instance: CompilerKeyedRowInstance | undefined,
+): boolean {
+  if (!instance) return false;
+  return props.bindings.every((binding) => {
+    const target = findCompilerHostTarget(instance.element, binding.path);
+    return Boolean(target && (binding.kind === "text" || binding.name));
+  });
+}
+
 function keyedRowConditionalSnapshot(
   conditional: CompilerKeyedRowConditional,
   item: unknown,
@@ -9496,10 +9507,18 @@ function createKeyedRowsBlockComponent(
         else removed.push(instance);
       }
       if (nextIndex !== rows.keys.length) return false;
-      // Validate every surviving binding before removing rows. Direct singleton
+      // Validate every singleton target before removing rows. Direct singleton
       // updates cache a missing target and cannot recover on a later refresh.
       const shouldPrepareBindings =
         this.currentProps.bindings.length > 0 && !this.currentProps.hostBlocks;
+      if (
+        shouldPrepareBindings &&
+        rows.items.length === 1 &&
+        !hasValidKeyedRowBindingTargets(this.currentProps, this.instances.get(rows.keys[0]))
+      ) {
+        this.activateFallback(afterCommit);
+        return true;
+      }
       const preparedBindings = shouldPrepareBindings
         ? prepareKeyedRowBindingSetUpdates(this.currentProps, this.instances, rows)
         : undefined;
