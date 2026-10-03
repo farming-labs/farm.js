@@ -624,198 +624,9 @@ test("article sidebar tracks native navigation, reading position, pointer, and k
   await expect(indicator).toHaveCSS("transition-duration", "0.22s");
 });
 
-test("agent waitlist validates input and confirms a saved signup after client navigation", async ({
-  page,
-}) => {
-  const submissions: unknown[] = [];
-  let finishResponse!: () => void;
-  const responseReady = new Promise<void>((resolve) => {
-    finishResponse = resolve;
-  });
-  await page.route("**/api/waitlist", async (route) => {
-    expect(route.request().method()).toBe("POST");
-    submissions.push(route.request().postDataJSON());
-    await responseReady;
-    await route.fulfill({ json: { ok: true, id: "browser-test-only" } });
-  });
-  await page.goto("/blog");
-  await page.locator(".blog-read-link").click();
-  await expect(page.locator(".blog-prose")).toContainText("It is not part of v0.1.0");
-  await expect(page.locator('input[type="email"]')).toHaveCount(0);
-  await page.getByRole("link", { name: "Explore agent infrastructure", exact: true }).click();
-  await expect(page).toHaveURL(/\/agents$/);
-  const form = page.getByRole("form", { name: "Agent infrastructure waitlist" });
-  const email = form.getByLabel("Email address");
-  const submit = form.getByRole("button");
-  await expect(form).toBeVisible();
-  const loader = submit.locator(".agent-waitlist-loader");
-  await expect(loader).toBeHidden();
-  const idleButtonSize = await submit.boundingBox();
-  await expect(page.locator("[data-agent-waitlist-unavailable]")).toBeHidden();
-  await submit.click();
-  await expect(email).toBeFocused();
-  expect(await email.evaluate((input: HTMLInputElement) => input.validity.valueMissing)).toBe(true);
-  expect(submissions).toEqual([]);
-  await email.fill("invalid-email");
-  await submit.click();
-  expect(await email.evaluate((input: HTMLInputElement) => input.validity.typeMismatch)).toBe(true);
-  expect(submissions).toEqual([]);
-  await email.fill("reader@example.com");
-  await email.press("Tab");
-  await expect(submit).toBeFocused();
-  await expect(submit).toHaveCSS("outline-style", "solid");
-  await submit.press("Enter");
-  await expect(form).toHaveAttribute("aria-busy", "true");
-  await expect(submit).toBeDisabled();
-  await expect(submit).toHaveText("Joining…");
-  await expect(loader).toBeVisible();
-  await expect(loader.locator("span")).toHaveCount(9);
-  await expect(loader.locator("span").first()).toHaveCSS(
-    "animation-name",
-    "agent-waitlist-pixel-on",
-  );
-  expect((await submit.boundingBox())!.width).toBeCloseTo(idleButtonSize!.width, 1);
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await expect(loader.locator("span").first()).toHaveCSS("animation-name", "none");
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await expect(email).toHaveAttribute("readonly", "");
-  await expect
-    .poll(() => submissions)
-    .toEqual([
-      {
-        email: "reader@example.com",
-        description: "Agent infrastructure early access — Farm.js agents page",
-      },
-    ]);
-  finishResponse();
-  // A confirmed signup resets the form: the field clears, no message lingers, and the button is
-  // ready for another address.
-  await expect(email).toHaveValue("");
-  await expect(email).not.toHaveAttribute("readonly");
-  await expect(form.getByRole("status")).toHaveText("");
-  await expect(submit).toHaveText("Join the waitlist");
-  await expect(submit).toBeEnabled();
-  await expect(form).not.toHaveAttribute("aria-busy");
-  await expect(loader).toBeHidden();
-  expect((await submit.boundingBox())!.width).toBeCloseTo(idleButtonSize!.width, 1);
-
-  // The site banner has its own "Read the announcement" link; use the agents page's section link.
-  await page
-    .getByRole("link", { name: "Read the announcement", exact: true })
-    .and(page.locator('[href$="#agent-infrastructure"]'))
-    .click();
-  await expect(form).toHaveCount(0);
-  await page.getByRole("link", { name: "Explore agent infrastructure", exact: true }).click();
-  await expect(submit).toBeEnabled();
-  await email.fill("returning-reader@example.com");
-  await submit.click();
-  await expect.poll(() => submissions.length).toBe(2);
-  await expect(email).toHaveValue("");
-  await expect(submit).toBeEnabled();
-  const markdown = await page.request.get("/blog/0.1.0.md");
-  expect(await markdown.text()).toContain("## Agent infrastructure");
-});
-
-test("agent waitlist keeps failures recoverable and fits narrow screens", async ({ page }) => {
-  let result = "unavailable";
-  await page.route("**/api/waitlist", async (route) => {
-    if (result === "network") return route.abort("failed");
-    if (result === "rate-limited") {
-      return route.fulfill({ status: 429, json: { ok: false } });
-    }
-    if (result === "malformed") return route.fulfill({ body: "not json" });
-    return route.fulfill({
-      json: result === "success" ? { ok: true, id: "browser-test-only" } : { ok: false },
-    });
-  });
-  await page.goto("/agents");
-  const form = page.getByRole("form", { name: "Agent infrastructure waitlist" });
-  const email = form.getByLabel("Email address");
-  const submit = form.getByRole("button");
-  await email.fill("reader@example.com");
-  for (const failure of ["unavailable", "malformed", "network", "rate-limited"]) {
-    result = failure;
-    await submit.click();
-    await expect(form.getByRole("status")).toHaveText(
-      failure === "rate-limited"
-        ? "Too many attempts. Please wait a minute and try again."
-        : "We couldn't save your signup. Please try again in a moment.",
-    );
-    await expect(submit).toBeEnabled();
-    await expect(email).toBeEditable();
-    await expect(email).toHaveValue("reader@example.com");
-  }
-  for (const width of [1440, 768, 390, 320]) {
-    await page.setViewportSize({ width, height: 900 });
-    await form.scrollIntoViewIfNeeded();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
-      true,
-    );
-    for (const control of [email, submit]) {
-      const box = await control.boundingBox();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
-      expect(box!.x).toBeGreaterThanOrEqual(0);
-      expect(box!.x + box!.width).toBeLessThanOrEqual(width);
-    }
-    if (width <= 600) await expect(email).toHaveCSS("font-size", "16px");
-  }
-  result = "success";
-  await submit.click();
-  // Success after failures clears the earlier error and resets the field.
-  await expect(email).toHaveValue("");
-  await expect(form.getByRole("status")).toHaveText("");
-  await expect(submit).toBeEnabled();
-});
-
-test("waitlist demo preserves its accessible name and releases its held width", async ({
-  page,
-}) => {
-  let finishResponse!: () => void;
-  let signalRouteStarted!: () => void;
-  const routeStarted = new Promise<void>((resolve) => {
-    signalRouteStarted = resolve;
-  });
-  await page.route("**/api/waitlist", async (route) => {
-    await new Promise<void>((resolve) => {
-      finishResponse = resolve;
-      signalRouteStarted();
-    });
-    await route.fulfill({ json: { ok: true, id: "demo-label-test-only" } });
-  });
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await page.goto("/agents");
-  const form = page.getByRole("form", { name: "Agent infrastructure waitlist" });
-  const email = form.getByLabel("Email address");
-  const submit = form.getByRole("button");
-  const label = submit.locator("[data-agent-waitlist-label]");
-  await expect(form).toBeVisible();
-  await expect(submit).toHaveAccessibleName("Join the waitlist");
-  await expect.poll(() => label.textContent(), { timeout: 10_000 }).not.toBe("Join the waitlist");
-  await expect(submit).toHaveAccessibleName("Join the waitlist");
-  await expect.poll(() => submit.evaluate((button) => button.style.minWidth)).not.toBe("");
-  await email.evaluate((input) => {
-    (input as HTMLInputElement).value = "demo-label@example.com";
-  });
-  await form.evaluate((element) => (element as HTMLFormElement).requestSubmit());
-  await expect(label).toHaveText("Joining…");
-  await expect(submit).toHaveAccessibleName("Joining…");
-  await routeStarted;
-  finishResponse();
-  await expect(label).toHaveText("Join the waitlist");
-  await expect(submit).toHaveAccessibleName("Join the waitlist");
-  await expect.poll(() => submit.evaluate((button) => button.style.minWidth)).toBe("");
-});
-
-test("agents page connects the blog, planned capabilities, Markdown, and shared waitlist", async ({
-  page,
-}) => {
+test("agents page connects the blog, planned capabilities, and Markdown", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  const submissions: unknown[] = [];
-  await page.route("**/api/waitlist", async (route) => {
-    submissions.push(route.request().postDataJSON());
-    await route.fulfill({ json: { ok: true, id: "agents-page-test-only" } });
-  });
   await page.goto("/blog/0.1.0");
   await page.evaluate(() => {
     (window as Window & { __agentsNavigation?: boolean }).__agentsNavigation = true;
@@ -855,41 +666,23 @@ test("agents page connects the blog, planned capabilities, Markdown, and shared 
       .getByRole("navigation", { name: "Primary navigation" })
       .getByRole("link", { name: /Agents/ }),
   ).toHaveAttribute("aria-current", "page");
-  const form = page.getByRole("form", { name: "Agent infrastructure waitlist" });
   expect(
     await page
       .getByRole("navigation", { name: "Primary navigation" })
       .locator(".truncate")
       .evaluateAll((labels) => labels.every((label) => label.scrollWidth <= label.clientWidth)),
   ).toBe(true);
-  await expect(form).toBeVisible();
-  await form.getByLabel("Email address").fill("agents-page@example.com");
-  await form.getByRole("button").click();
-  await expect(form.getByLabel("Email address")).toHaveValue("");
-  await expect(form.getByRole("status")).toHaveText("");
-  expect(submissions).toEqual([
-    {
-      email: "agents-page@example.com",
-      description: "Agent infrastructure early access — Farm.js agents page",
-    },
-  ]);
   // The site banner has its own "Read the announcement" link; use the agents page's section link.
   await page
     .getByRole("link", { name: "Read the announcement", exact: true })
     .and(page.locator('[href$="#agent-infrastructure"]'))
     .click();
   await expect(page).toHaveURL(/\/blog\/0\.1\.0#agent-infrastructure$/);
-  await expect(form).toHaveCount(0);
   await expect(
     page.getByRole("link", { name: "Explore agent infrastructure", exact: true }),
   ).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/agents$/);
-  await expect(form).toBeVisible();
-  await expect(form.getByRole("button")).toBeEnabled();
-  await page.getByRole("link", { name: "Join the waitlist", exact: true }).click();
-  await expect(page).toHaveURL(/#waitlist$/);
-  await expect(form).toBeInViewport();
   const mirror = await page.request.get("/agents.md");
   expect(mirror.ok()).toBe(true);
   expect(await mirror.text()).toContain("# Agent infrastructure");
@@ -1071,9 +864,6 @@ test("agents page stays readable on mobile and without JavaScript", async ({
             expect(box!.x).toBeGreaterThanOrEqual(0);
             expect(box!.x + box!.width).toBeLessThanOrEqual(width);
           }
-        } else {
-          await expect(page.locator("[data-agent-waitlist]")).toBeHidden();
-          await expect(page.locator("[data-agent-waitlist-unavailable]")).toBeVisible();
         }
       }
       await page.setViewportSize({ width: 390, height: 900 });
