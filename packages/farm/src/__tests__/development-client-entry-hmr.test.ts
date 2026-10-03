@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ViteDevServer } from "vite";
+import type { HmrContext, ViteDevServer } from "vite";
 import { createServer } from "../server/create-server";
 import { logger } from "../utils";
 import { getAvailablePort } from "./dev-server-port";
@@ -113,28 +113,42 @@ export default async function Page() { return <Counter />; }`,
     const initialResponse = await fetch(`http://localhost:${address.port}/@farm/client`);
     expect(initialResponse.status).toBe(200);
     expect(await initialResponse.text()).not.toContain("createFarmIsolatedHydrationRuntime");
+    const manifestResponse = await fetch(`http://localhost:${address.port}/@farm/manifest`);
+    expect(manifestResponse.status).toBe(200);
 
+    // Drive the hook directly so generated type writes and filesystem timing
+    // cannot race the two source states asserted below.
+    await server.watcher.close();
+    const handleHotUpdate = server.config.plugins.find(
+      (plugin) => plugin.name === "farm",
+    )?.handleHotUpdate;
+    if (typeof handleHotUpdate !== "function") throw new Error("Missing Farm HMR handler");
+    const runHotUpdate = () =>
+      handleHotUpdate({
+        file: boundaryPath,
+        timestamp: Date.now(),
+        modules: [...(server.moduleGraph.getModulesByFile(boundaryPath) ?? [])],
+        read: () => fs.readFile(boundaryPath, "utf8"),
+        server,
+      } as HmrContext);
     const send = vi.spyOn(server.ws, "send");
+    const invalidateModule = vi.spyOn(server.moduleGraph, "invalidateModule");
+    const clientModule = server.moduleGraph.getModuleById("/@farm/client");
+    const manifestModule = server.moduleGraph.getModuleById("/@farm/manifest");
+    expect(clientModule).toBeDefined();
+    expect(manifestModule).toBeDefined();
     await fs.writeFile(
       boundaryPath,
       `"use client";
 export function Counter() { return <button>count</button>; }`,
     );
-
-    await vi.waitFor(
-      () => {
-        expect(send).toHaveBeenCalledWith({ type: "full-reload", path: "*" });
-      },
-      { timeout: 10_000 },
-    );
-
-    const updatedResponse = await fetch(
-      `http://localhost:${address.port}/@farm/client?t=${Date.now()}`,
-    );
-    expect(updatedResponse.status).toBe(200);
-    expect(await updatedResponse.text()).toContain("createFarmIsolatedHydrationRuntime");
+    expect(await runHotUpdate()).toEqual([]);
+    expect(invalidateModule).toHaveBeenCalledWith(clientModule);
+    expect(send).toHaveBeenCalledWith({ type: "full-reload", path: "*" });
 
     const warn = vi.spyOn(logger, "warn");
+    invalidateModule.mockClear();
+    send.mockClear();
     await fs.writeFile(
       boundaryPath,
       `"use client";
@@ -142,20 +156,19 @@ const chosenStrategy = "load";
 export const island = chosenStrategy;
 export function Counter() { return <button>count</button>; }`,
     );
-    await vi.waitFor(
-      () => {
-        expect(warn).toHaveBeenCalledWith(
-          expect.stringContaining("Could not refresh the client hydration plan"),
-        );
-      },
-      { timeout: 10_000 },
+    const modules = [...(server.moduleGraph.getModulesByFile(boundaryPath) ?? [])];
+    expect(await runHotUpdate()).toEqual(modules);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Could not refresh the client hydration plan"),
     );
-
-    const preservedResponse = await fetch(
-      `http://localhost:${address.port}/@farm/client?t=${Date.now()}`,
+    expect(invalidateModule).not.toHaveBeenCalledWith(manifestModule);
+    expect(send).not.toHaveBeenCalled();
+    await fs.writeFile(
+      boundaryPath,
+      `"use client";
+export const island = "load";
+export function Counter() { return <button>count</button>; }`,
     );
-    expect(preservedResponse.status).toBe(200);
-    expect(await preservedResponse.text()).toContain("createFarmIsolatedHydrationRuntime");
     warn.mockRestore();
   }, 60_000);
 });
