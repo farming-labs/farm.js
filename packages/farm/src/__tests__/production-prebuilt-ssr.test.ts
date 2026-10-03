@@ -3905,6 +3905,8 @@ export default function OpenGraphImage() {
         },
         "/hydrated",
       );
+      // The browser bundle resolved notFound from the root entry.
+      expect(await readAllClientJavaScript(root)).toContain("FARM_NOT_FOUND");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

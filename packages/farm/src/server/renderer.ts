@@ -3108,8 +3108,8 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
   }
 
   /**
-   * Answer a redirect() or notFound() thrown before anything was sent, such as
-   * from middleware. Returns false for any other error.
+   * Answer a redirect() or notFound() thrown by middleware, before anything was
+   * sent. Returns false for any other error.
    */
   async respondToNavigationError(
     req: FarmRequest,
@@ -3119,7 +3119,9 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     if (isFarmRedirectError(error)) {
       const redirect = getFarmRedirectError(error)!;
       res.statusCode = redirect.status;
-      res.setHeader("Location", this.localizeRedirectUrl(redirect.url));
+      // Middleware runs before locale routing; like ctx.redirect(), the target
+      // goes out as written (the production runner does the same).
+      res.setHeader("Location", redirect.url);
       res.end();
       return true;
     }

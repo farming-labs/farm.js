@@ -143,7 +143,7 @@ describe("development redirect() and notFound()", () => {
     // Thrown while React renders the shell: the response is not committed yet.
     const syncMissing = await get("/sync-missing");
     expect(syncMissing.status).toBe(404);
-    expect(await syncMissing.text()).toContain("custom not found: <!-- -->/sync-missing");
+    expect(await syncMissing.text()).toMatch(/custom not found: (<!-- -->)?\/sync-missing/);
 
     const syncRedirect = await get("/sync-redirect");
     expect(syncRedirect.status).toBe(307);

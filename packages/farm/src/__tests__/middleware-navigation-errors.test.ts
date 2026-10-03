@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import { createProductionMiddlewareRunner } from "../middleware/production-runtime";
 import { notFound, permanentRedirect, redirect } from "../navigation-errors";
@@ -28,6 +30,26 @@ describe("production middleware navigation errors", () => {
     );
     expect(permanent.response?.status).toBe(308);
     expect(permanent.response?.headers.get("location")).toBe("/profile");
+  });
+
+  it("keeps a rewrite made before notFound() so the not-found page sees it", async () => {
+    const runner = createProductionMiddlewareRunner({
+      modules: [
+        {
+          path: "/account",
+          module: {
+            middleware(_request: Request, context: { rewrite(url: string): void }) {
+              context.rewrite("/es/account");
+              notFound();
+            },
+          },
+        },
+      ],
+    });
+    const result = await runner(new Request("https://example.com/account"));
+
+    expect(result.notFound).toBe(true);
+    expect(new URL(result.request.url).pathname).toBe("/es/account");
   });
 
   it("still fails the request for a real error", async () => {

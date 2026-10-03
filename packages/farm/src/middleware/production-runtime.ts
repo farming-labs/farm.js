@@ -931,6 +931,8 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
         });
       } catch (error) {
         // redirect() and notFound() are control flow, as they are in pages.
+        // A rewrite earlier in this middleware still decides the request.
+        currentRequest = contextState.getRequest();
         if (isFarmRedirectError(error)) {
           const redirect = getFarmRedirectError(error)!;
           const response = applyProductionMiddlewareHeaders(

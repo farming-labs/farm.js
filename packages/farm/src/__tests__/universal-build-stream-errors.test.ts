@@ -151,6 +151,31 @@ function pendingPipeableServer(shellError: unknown) {
   };
 }
 
+// A pipeable tree that is still suspended after onShellReady and reports
+// `lateError` once the stream has been handed back.
+function latePipeableServer(lateError: unknown) {
+  return {
+    renderToPipeableStream: (
+      _element: unknown,
+      renderOptions: { onShellReady: () => void; onError: (error: unknown) => void },
+    ) => {
+      queueMicrotask(() => renderOptions.onShellReady());
+      return {
+        pipe(destination: { write: (chunk: unknown) => boolean; end: () => void }) {
+          destination.write("<div>shell</div>");
+          setTimeout(() => {
+            renderOptions.onError(lateError);
+            destination.write("<!--late-->");
+            destination.end();
+          }, 10);
+          return destination;
+        },
+        abort() {},
+      };
+    },
+  };
+}
+
 describe("generated production stream renderer control-flow errors", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -235,6 +260,16 @@ describe("generated production stream renderer control-flow errors", () => {
       await expect(node.renderFarmElement(server, null)).rejects.toBe(thrown);
       expect(server.aborted).toEqual([thrown]);
     }
+  });
+
+  it("keeps streaming on the pipeable path when notFound() arrives after the shell", async () => {
+    const { renderFarmElement } = instantiateStreamRenderer({ node: true, web: false });
+    const late = captureThrown(() => notFound());
+    const rendered = await renderFarmElement(latePipeableServer(late), null);
+
+    expect(rendered.stream).toBeDefined();
+    expect(await new Response(rendered.stream).text()).toBe("<div>shell</div><!--late-->");
+    expect(rendered.streamErrors).toEqual([late]);
   });
 
   it("keeps streaming when notFound() arrives after the shell was handed back", async () => {
