@@ -1,13 +1,34 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
-import { readVercelClientAddress } from "../lib/redis-auth-rate-limiter.ts";
+import {
+  readVercelClientAddress,
+  RedisPreviewAuthExchangeRateLimiter,
+} from "../lib/redis-auth-rate-limiter.ts";
 
 const originalVercel = process.env.VERCEL;
+const originalConsoleError = console.error;
 
 afterEach(() => {
   if (originalVercel === undefined) delete process.env.VERCEL;
   else process.env.VERCEL = originalVercel;
+  console.error = originalConsoleError;
+});
+
+test("logs Redis client errors for operators", () => {
+  const logs: unknown[][] = [];
+  console.error = (...args) => logs.push(args);
+  const limiter = new RedisPreviewAuthExchangeRateLimiter("redis://127.0.0.1:6379");
+  const redis = Reflect.get(limiter, "redis") as {
+    disconnect(): void;
+    emit(event: "error", error: Error): boolean;
+  };
+  const error = new Error("Redis unavailable");
+
+  redis.emit("error", error);
+  redis.disconnect();
+
+  assert.deepEqual(logs, [["[farm preview] Auth exchange rate limiter Redis error.", error]]);
 });
 
 test("rejects client-supplied forwarding headers outside Vercel", () => {

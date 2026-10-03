@@ -19,7 +19,7 @@ const TAKE_AUTH_EXCHANGE_SLOT_SCRIPT = `
   return { count, redis.call("PTTL", KEYS[1]) }
 `;
 
-class RedisPreviewAuthExchangeRateLimiter {
+export class RedisPreviewAuthExchangeRateLimiter {
   private readonly redis: Redis;
 
   constructor(url: string) {
@@ -30,7 +30,9 @@ class RedisPreviewAuthExchangeRateLimiter {
       lazyConnect: true,
       maxRetriesPerRequest: 2,
     });
-    this.redis.on("error", () => undefined);
+    this.redis.on("error", (error) => {
+      console.error("[farm preview] Auth exchange rate limiter Redis error.", error);
+    });
   }
 
   async check(request: Request): Promise<PreviewAuthExchangeRateLimitResult> {
