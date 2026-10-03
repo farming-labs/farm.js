@@ -1511,8 +1511,16 @@ export class ServerRenderer {
               shouldHydrate?: boolean;
               islandStrategy?: "load" | "interaction" | "visible" | "idle" | null;
               hasIsolatedClientBoundaries?: boolean;
+              suppressedAsyncHydration?: true;
+              suppressedAsyncHydrationReason?: string;
             }
           | undefined;
+        if (manifestEntry?.suppressedAsyncHydration) {
+          warnSuppressedAsyncHydrationOnce(
+            layout.modulePath,
+            manifestEntry.suppressedAsyncHydrationReason,
+          );
+        }
         if (typeof manifestEntry?.shouldHydrate === "boolean") {
           return {
             isClientComponent: manifestEntry.isClientComponent === true,

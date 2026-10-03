@@ -139,6 +139,9 @@ export interface FarmClientRouteManifest {
     islandStrategy: FarmIslandStrategy | null;
     hasIsolatedClientBoundaries?: true;
     isolatedBoundaries?: IsolatedClientBoundaryReference[];
+    suppressedAsyncHydration?: true;
+    /** Why an async layout's client components could not become islands. */
+    suppressedAsyncHydrationReason?: string;
   }>;
   slots: Array<{
     name: string;
@@ -732,6 +735,14 @@ export class RouteManager {
       shouldHydrate: metadata.shouldHydrate,
       isClientComponent: metadata.isClientComponent,
       islandStrategy: metadata.islandStrategy,
+      ...(metadata.suppressedAsyncHydration
+        ? {
+            suppressedAsyncHydration: true as const,
+            ...(metadata.fallbackReason
+              ? { suppressedAsyncHydrationReason: metadata.fallbackReason }
+              : {}),
+          }
+        : {}),
       ...(metadata.hasIsolatedClientBoundaries
         ? {
             hasIsolatedClientBoundaries: true as const,

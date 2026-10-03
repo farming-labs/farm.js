@@ -349,6 +349,100 @@ describe("RouteManager", () => {
       );
     });
 
+    it("keeps an async layout's islands out of a synchronous page's budget", async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "farm-route-async-layout-budget-"));
+      temporaryDirectories.push(root);
+      await mkdir(path.join(root, "src", "app", "sync"), { recursive: true });
+      await mkdir(path.join(root, "src", "components"), { recursive: true });
+      const names = ["one", "two", "three", "four", "five", "page-widget"];
+      await Promise.all(
+        names.map((name) =>
+          writeFile(
+            path.join(root, "src", "components", `${name}.tsx`),
+            `'use client';\nexport default function Widget() { return <button>${name}</button>; }`,
+          ),
+        ),
+      );
+      await writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        `${names
+          .slice(0, 5)
+          .map((name, index) => `import W${index} from "../components/${name}";`)
+          .join("\n")}
+export default async function Layout({ children }) {
+  await Promise.resolve();
+  return <><W0 /><W1 /><W2 /><W3 /><W4 />{children}</>;
+}`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "sync", "page.tsx"),
+        `import Widget from "../../components/page-widget";\nexport default function Page() { return <Widget />; }`,
+      );
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) return ["sync/page.tsx"];
+        if (pattern.includes("layout")) return ["layout.tsx"];
+        return [];
+      });
+      mockConfig.root = root;
+      mockConfig.experimental = {
+        serverComponents: false,
+        serverActions: false,
+        isolatedClientHydration: "enabled",
+      };
+      routeManager = new RouteManager(mockConfig);
+      await routeManager.discoverRoutes();
+
+      const manifest = routeManager.generateClientManifest(root);
+      expect(manifest.layouts[0]).toMatchObject({
+        shouldHydrate: false,
+        hasIsolatedClientBoundaries: true,
+      });
+      // Five layout islands plus one page island exceed the limit of four, but
+      // the async layout's islands exist anyway, so the page keeps its own.
+      expect(manifest.routes.find((route) => route.pattern === "/sync")).toMatchObject({
+        shouldHydrate: false,
+        hasIsolatedClientBoundaries: true,
+      });
+    });
+
+    it("reports why an async layout's client components stay static", async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "farm-route-async-layout-suppressed-"));
+      temporaryDirectories.push(root);
+      await mkdir(path.join(root, "src", "app"), { recursive: true });
+      await mkdir(path.join(root, "src", "components"), { recursive: true });
+      await writeFile(
+        path.join(root, "src", "components", "shell.tsx"),
+        `'use client';\nexport default function Shell({ children }) { return <section>{children}</section>; }`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        `import Shell from "../components/shell";
+export default async function Layout({ children }) { return <><Shell><p>static</p></Shell>{children}</>; }`,
+      );
+      await writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `export default function Page() { return null; }`,
+      );
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) return ["page.tsx"];
+        if (pattern.includes("layout")) return ["layout.tsx"];
+        return [];
+      });
+      mockConfig.root = root;
+      mockConfig.experimental = { serverComponents: false, serverActions: false };
+      routeManager = new RouteManager(mockConfig);
+      await routeManager.discoverRoutes();
+
+      expect(routeManager.generateClientManifest(root).layouts[0]).toMatchObject({
+        shouldHydrate: false,
+        suppressedAsyncHydration: true,
+        suppressedAsyncHydrationReason:
+          "the client boundary imported from ../components/shell receives React elements, which cannot cross the boundary as serialized props",
+      });
+    });
+
     it("enforces the isolated-root budget across every layout in a matched route", async () => {
       const root = await mkdtemp(path.join(os.tmpdir(), "farm-route-hydration-budget-"));
       temporaryDirectories.push(root);

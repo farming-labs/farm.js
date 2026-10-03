@@ -229,8 +229,9 @@ export default async function RepoPage() {
 ```
 
 React cannot run an `async` component in the browser, so the page itself stays server-rendered and
-never ships to the client. Each client component it renders hydrates as its own island instead, with
-the props the server passed it. This works by default in React apps; it does not need
+never ships to the client. Each eligible client boundary it renders hydrates as its own island
+instead, with the props the server passed it (client components that boundary imports hydrate inside
+it). This works by default in React apps; it does not need
 `experimental.isolatedClientHydration`.
 
 Islands have the same limits as [isolated client leaves](#isolated-client-leaves-without-rsc):

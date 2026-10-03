@@ -703,15 +703,17 @@ export function enforceFarmIsolatedHydrationRouteBudget(
     );
     if (applicableLayouts.some((layout) => layout.metadata.shouldHydrate)) continue;
 
+    // An async owner's islands exist in every mode (it has no route-wide root
+    // to trade them for), so they never push a synchronous route off its own.
+    const countsTowardBudget = (metadata: FarmIsolatedHydrationRoutePlan) =>
+      metadata.hasIsolatedClientBoundaries && !metadata.asyncOwnerIslands;
     const layoutRootCount = applicableLayouts.reduce(
       (count, layout) =>
         count +
-        (layout.metadata.hasIsolatedClientBoundaries
-          ? layout.metadata.estimatedIsolatedRootCount
-          : 0),
+        (countsTowardBudget(layout.metadata) ? layout.metadata.estimatedIsolatedRootCount : 0),
       0,
     );
-    const routeRootCount = route.metadata.hasIsolatedClientBoundaries
+    const routeRootCount = countsTowardBudget(route.metadata)
       ? route.metadata.estimatedIsolatedRootCount
       : 0;
     const totalRootCount = layoutRootCount + routeRootCount;
@@ -719,14 +721,14 @@ export function enforceFarmIsolatedHydrationRouteBudget(
 
     let accumulatedLayoutRoots = 0;
     const overflowingLayout = applicableLayouts.find((layout) => {
-      if (layout.metadata.hasIsolatedClientBoundaries) {
+      if (countsTowardBudget(layout.metadata)) {
         accumulatedLayoutRoots += layout.metadata.estimatedIsolatedRootCount;
       }
       return accumulatedLayoutRoots > boundaryLimit;
     });
     const fallbackReason = `the matched route ${route.pattern} can create ${totalRootCount} isolated roots, above the measured limit of ${boundaryLimit}`;
 
-    if (overflowingLayout && !overflowingLayout.metadata.asyncOwnerIslands) {
+    if (overflowingLayout) {
       restoreRouteWideHydration(overflowingLayout.metadata, fallbackReason);
     } else if (route.metadata.hasIsolatedClientBoundaries && !route.metadata.asyncOwnerIslands) {
       restoreRouteWideHydration(route.metadata, fallbackReason);

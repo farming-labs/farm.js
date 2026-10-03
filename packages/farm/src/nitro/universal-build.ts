@@ -1336,6 +1336,9 @@ async function buildClient(
         hasIsolatedClientBoundaries: false,
         isolatedHydrationEligible: false,
         isolatedBoundaries: [],
+        asyncOwnerIslands: undefined,
+        suppressedAsyncHydration: undefined,
+        fallbackReason: undefined,
       };
     }
   });
@@ -1344,6 +1347,14 @@ async function buildClient(
     layoutPattern === "/" ||
     routePattern === layoutPattern ||
     routePattern.startsWith(`${layoutPattern}/`);
+
+  for (const layout of clientLayouts) {
+    if (layout.suppressedAsyncHydration) {
+      logger.warn(
+        `⚠️  ${describeSuppressedAsyncHydration(layout.modulePath, layout.fallbackReason)}`,
+      );
+    }
+  }
 
   const adapterOwnsDocsRuntime = Boolean(
     isReactRenderer(config.renderer) &&
