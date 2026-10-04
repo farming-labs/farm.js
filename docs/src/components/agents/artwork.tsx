@@ -1,4 +1,5 @@
 import { BlogFigure } from "../blog/figures";
+import { useArtworkMotion } from "../use-artwork-motion";
 
 // A curved, woven lattice, identical in SSR and the browser.
 // Motion is CSS-only and shares the blog's offscreen/background pause lifecycle.
@@ -18,8 +19,9 @@ const field = Array.from({ length: 54 }, (_, row) =>
 );
 
 export function AgentArtwork() {
+  const [ref, motion] = useArtworkMotion<HTMLDivElement>();
   return (
-    <div className="agent-artwork" aria-hidden="true">
+    <div ref={ref} className="agent-artwork" data-motion={motion} aria-hidden="true">
       <div className="agent-art-caption">
         <span>Farm.js / Agents</span>
         <span>[ Concept ]</span>
