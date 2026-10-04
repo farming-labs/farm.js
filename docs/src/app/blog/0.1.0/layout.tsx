@@ -3,24 +3,8 @@ import { ArrowLeft } from "lucide-react";
 import { BlogAuthor } from "../../../components/blog/author";
 import { BlogExplore } from "../../../components/blog/explore";
 import { ReleaseArtwork } from "../../../components/blog/release-artwork";
+import { BlogContents } from "../../../components/blog/contents";
 import { launchPost, launchSections } from "../../../lib/blog";
-
-function Contents() {
-  return (
-    <nav aria-label="On this page" className="blog-contents-links">
-      <span className="blog-contents-highlight" aria-hidden="true" />
-      <span className="blog-contents-indicator" aria-hidden="true" />
-      {launchSections.map(([id, label], index) => (
-        <a key={id} href={`#${id}`}>
-          <span className="blog-contents-index" aria-hidden="true">
-            {String(index + 1).padStart(2, "0")}
-          </span>
-          <span>{label}</span>
-        </a>
-      ))}
-    </nav>
-  );
-}
 
 export default function LaunchPostLayout({ children }: LayoutProps) {
   return (
@@ -52,7 +36,7 @@ export default function LaunchPostLayout({ children }: LayoutProps) {
             <p className="blog-contents-title">
               <span aria-hidden="true">00</span> In this article
             </p>
-            <Contents />
+            <BlogContents sections={launchSections} />
           </div>
         </aside>
         <div className="blog-reading-column">
@@ -60,7 +44,7 @@ export default function LaunchPostLayout({ children }: LayoutProps) {
             <summary>
               In this article <span>{launchSections.length} sections</span>
             </summary>
-            <Contents />
+            <BlogContents sections={launchSections} />
           </details>
           <div className="blog-prose">{children}</div>
           <div className="blog-article-end">
