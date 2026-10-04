@@ -4088,6 +4088,208 @@ function keyedMapLookupChangedKeys(
   return keys;
 }
 
+interface KeyedTargetSelection {
+  keys: Iterable<string>;
+  count: number;
+}
+
+interface KeyedTargetRuntime {
+  hasSafeTargets(props: CompilerKeyedRowsBlockProps, dirtyState?: ReadonlySet<number>): boolean;
+  commit(props: CompilerKeyedRowsBlockProps, dirtyState?: ReadonlySet<number>): void;
+  prepare(props: CompilerKeyedRowsBlockProps, bindingIndices: readonly number[]): boolean;
+  select(
+    props: CompilerKeyedRowsBlockProps,
+    bindingIndex: number,
+    dirtyState: ReadonlySet<number>,
+    fallbackKeys: Iterable<string>,
+    fallbackCount: number,
+  ): KeyedTargetSelection;
+  commitPrepared(bindingIndices: readonly number[]): void;
+  clear(): void;
+}
+
+function createKeyedTargetRuntime(
+  props: CompilerKeyedRowsBlockProps,
+): KeyedTargetRuntime | undefined {
+  if (
+    !props.bindings.some(
+      (binding) => binding.identityTarget || binding.membershipTarget || binding.mapLookupTarget,
+    )
+  ) {
+    return undefined;
+  }
+  const identityTargets = new Map<number, CompilerKeyedIdentityTargetSnapshot>();
+  const membershipTargets = new Map<number, CompilerKeyedMembershipTargetSnapshot>();
+  const mapLookupTargets = new Map<number, CompilerKeyedMapLookupTargetSnapshot>();
+  let nextIdentityTargets = new Map<number, CompilerKeyedIdentityTargetSnapshot>();
+  let nextMembershipTargets = new Map<number, CompilerKeyedMembershipTargetSnapshot>();
+  let nextMapLookupTargets = new Map<number, CompilerKeyedMapLookupTargetSnapshot>();
+
+  return {
+    hasSafeTargets(props, dirtyState) {
+      for (const binding of props.bindings) {
+        const membershipTarget = binding.membershipTarget;
+        if (
+          membershipTarget &&
+          (!dirtyState || dirtyState.has(membershipTarget.dependency)) &&
+          !keyedMembershipTargetSnapshot(membershipTarget.read()).eligible
+        ) {
+          return false;
+        }
+        const mapLookupTarget = binding.mapLookupTarget;
+        if (
+          mapLookupTarget &&
+          (!dirtyState || dirtyState.has(mapLookupTarget.dependency)) &&
+          !keyedMapLookupTargetSnapshot(mapLookupTarget.read()).eligible
+        ) {
+          return false;
+        }
+      }
+      return true;
+    },
+    commit(props, dirtyState) {
+      if (!dirtyState) {
+        identityTargets.clear();
+        membershipTargets.clear();
+        mapLookupTargets.clear();
+      }
+      for (let bindingIndex = 0; bindingIndex < props.bindings.length; bindingIndex += 1) {
+        const binding = props.bindings[bindingIndex];
+        const identityTarget = binding.identityTarget;
+        if (!identityTarget) {
+          identityTargets.delete(bindingIndex);
+        } else if (!dirtyState || dirtyState.has(identityTarget.dependency)) {
+          identityTargets.set(bindingIndex, keyedIdentityTargetSnapshot(identityTarget.read()));
+        }
+
+        const membershipTarget = binding.membershipTarget;
+        if (!membershipTarget) {
+          membershipTargets.delete(bindingIndex);
+        } else if (!dirtyState || dirtyState.has(membershipTarget.dependency)) {
+          membershipTargets.set(
+            bindingIndex,
+            keyedMembershipTargetSnapshot(membershipTarget.read()),
+          );
+        }
+
+        const mapLookupTarget = binding.mapLookupTarget;
+        if (!mapLookupTarget) {
+          mapLookupTargets.delete(bindingIndex);
+        } else if (!dirtyState || dirtyState.has(mapLookupTarget.dependency)) {
+          mapLookupTargets.set(bindingIndex, keyedMapLookupTargetSnapshot(mapLookupTarget.read()));
+        }
+      }
+    },
+    prepare(props, bindingIndices) {
+      nextIdentityTargets = new Map();
+      nextMembershipTargets = new Map();
+      nextMapLookupTargets = new Map();
+      for (const bindingIndex of bindingIndices) {
+        const binding = props.bindings[bindingIndex];
+        if (binding.identityTarget) {
+          nextIdentityTargets.set(
+            bindingIndex,
+            keyedIdentityTargetSnapshot(binding.identityTarget.read()),
+          );
+        }
+        if (binding.membershipTarget) {
+          const snapshot = keyedMembershipTargetSnapshot(
+            binding.membershipTarget.read(),
+            membershipTargets.get(bindingIndex),
+          );
+          if (!snapshot.eligible) return false;
+          nextMembershipTargets.set(bindingIndex, snapshot);
+        }
+        if (binding.mapLookupTarget) {
+          const snapshot = keyedMapLookupTargetSnapshot(
+            binding.mapLookupTarget.read(),
+            mapLookupTargets.get(bindingIndex),
+          );
+          if (!snapshot.eligible) return false;
+          nextMapLookupTargets.set(bindingIndex, snapshot);
+        }
+      }
+      return true;
+    },
+    select(props, bindingIndex, dirtyState, fallbackKeys, fallbackCount) {
+      const binding = props.bindings[bindingIndex];
+      const identityTarget = binding.identityTarget;
+      const previousIdentityTarget = identityTargets.get(bindingIndex);
+      const nextIdentityTarget = nextIdentityTargets.get(bindingIndex);
+      const canTargetIdentity = Boolean(
+        identityTarget &&
+        binding.dependencies?.length === 1 &&
+        binding.dependencies[0] === identityTarget.dependency &&
+        dirtyState.has(identityTarget.dependency) &&
+        previousIdentityTarget?.eligible &&
+        nextIdentityTarget?.eligible,
+      );
+      const membershipTarget = binding.membershipTarget;
+      const previousMembershipTarget = membershipTargets.get(bindingIndex);
+      const nextMembershipTarget = nextMembershipTargets.get(bindingIndex);
+      const canTargetMembership = Boolean(
+        membershipTarget &&
+        binding.dependencies?.length === 1 &&
+        binding.dependencies[0] === membershipTarget.dependency &&
+        dirtyState.has(membershipTarget.dependency) &&
+        previousMembershipTarget?.eligible &&
+        nextMembershipTarget?.eligible,
+      );
+      const mapLookupTarget = binding.mapLookupTarget;
+      const previousMapLookupTarget = mapLookupTargets.get(bindingIndex);
+      const nextMapLookupTarget = nextMapLookupTargets.get(bindingIndex);
+      const canTargetMapLookup = Boolean(
+        mapLookupTarget &&
+        binding.dependencies?.length === 1 &&
+        binding.dependencies[0] === mapLookupTarget.dependency &&
+        dirtyState.has(mapLookupTarget.dependency) &&
+        previousMapLookupTarget?.eligible &&
+        nextMapLookupTarget?.eligible,
+      );
+
+      if (canTargetMapLookup && previousMapLookupTarget && nextMapLookupTarget) {
+        const keys = keyedMapLookupChangedKeys(previousMapLookupTarget, nextMapLookupTarget);
+        return { keys, count: keys.size };
+      }
+      if (canTargetMembership && previousMembershipTarget && nextMembershipTarget) {
+        const keys = keyedMembershipChangedKeys(previousMembershipTarget, nextMembershipTarget);
+        return { keys, count: keys.size };
+      }
+      if (canTargetIdentity && previousIdentityTarget && nextIdentityTarget) {
+        const keys = new Set<string>();
+        if (previousIdentityTarget.key !== undefined) keys.add(previousIdentityTarget.key);
+        if (nextIdentityTarget.key !== undefined) keys.add(nextIdentityTarget.key);
+        return { keys, count: keys.size };
+      }
+      return { keys: fallbackKeys, count: fallbackCount };
+    },
+    commitPrepared(bindingIndices) {
+      for (const bindingIndex of bindingIndices) {
+        const nextIdentityTarget = nextIdentityTargets.get(bindingIndex);
+        const nextMembershipTarget = nextMembershipTargets.get(bindingIndex);
+        const nextMapLookupTarget = nextMapLookupTargets.get(bindingIndex);
+        if (nextIdentityTarget) identityTargets.set(bindingIndex, nextIdentityTarget);
+        else identityTargets.delete(bindingIndex);
+        if (nextMembershipTarget) {
+          membershipTargets.set(bindingIndex, nextMembershipTarget);
+        } else {
+          membershipTargets.delete(bindingIndex);
+        }
+        if (nextMapLookupTarget) {
+          mapLookupTargets.set(bindingIndex, nextMapLookupTarget);
+        } else {
+          mapLookupTargets.delete(bindingIndex);
+        }
+      }
+    },
+    clear() {
+      identityTargets.clear();
+      membershipTargets.clear();
+      mapLookupTargets.clear();
+    },
+  };
+}
+
 function normalizedKeyedRowBindingValue(binding: CompilerKeyedRowBinding, value: unknown): unknown {
   return binding.kind === "text" ? renderTextValue(value) : value;
 }
@@ -6546,6 +6748,7 @@ interface KeyedRowsRuntimeOptions {
   conditionals?: KeyedRowConditionalRuntime;
   hostBlocks?: KeyedRowHostRuntime;
   keyedUpdates?: KeyedUpdateRuntime;
+  keyedTargets?: (props: CompilerKeyedRowsBlockProps) => KeyedTargetRuntime | undefined;
 }
 
 function reconcileCompilerKeyedMapUpdate(
@@ -8769,7 +8972,7 @@ function createKeyedRowHostRuntime(): KeyedRowHostRuntime {
   };
 }
 
-function createKeyedRowsBlockComponent(
+function createKeyedRowsBlockComponentCore(
   owner: Pick<CompilerRuntimeFeatureOwner, "subscribe" | "getDefinitionVersion">,
   options: KeyedRowsRuntimeOptions = {},
 ): React.ComponentType<CompilerKeyedRowsBlockProps> {
@@ -8792,9 +8995,7 @@ function createKeyedRowsBlockComponent(
     declare private stop: (() => void) | undefined;
     declare private id: number | undefined;
     private instances = new Map<string, CompilerKeyedRowInstance>();
-    private identityTargets = new Map<number, CompilerKeyedIdentityTargetSnapshot>();
-    private membershipTargets = new Map<number, CompilerKeyedMembershipTargetSnapshot>();
-    private mapLookupTargets = new Map<number, CompilerKeyedMapLookupTargetSnapshot>();
+    private keyedTargets = options.keyedTargets?.(this.props);
     private collectionToken: object | undefined;
     private renderVersion = 0;
     private readonly eventHandlers = new Map<
@@ -9035,74 +9236,12 @@ function createKeyedRowsBlockComponent(
         this.currentProps.items(),
         this.instances,
       );
-      this.commitKeyedTargets(dirtyState);
-    }
-
-    private hasSafeMembershipTargets(dirtyState?: ReadonlySet<number>): boolean {
-      for (const binding of this.currentProps.bindings) {
-        const target = binding.membershipTarget;
-        if (!target || (dirtyState && !dirtyState.has(target.dependency))) continue;
-        if (!keyedMembershipTargetSnapshot(target.read()).eligible) return false;
-      }
-      return true;
-    }
-
-    private hasSafeMapLookupTargets(dirtyState?: ReadonlySet<number>): boolean {
-      for (const binding of this.currentProps.bindings) {
-        const target = binding.mapLookupTarget;
-        if (!target || (dirtyState && !dirtyState.has(target.dependency))) continue;
-        if (!keyedMapLookupTargetSnapshot(target.read()).eligible) return false;
-      }
-      return true;
-    }
-
-    private commitKeyedTargets(dirtyState?: ReadonlySet<number>): void {
-      if (!dirtyState) {
-        this.identityTargets.clear();
-        this.membershipTargets.clear();
-        this.mapLookupTargets.clear();
-      }
-      for (
-        let bindingIndex = 0;
-        bindingIndex < this.currentProps.bindings.length;
-        bindingIndex += 1
-      ) {
-        const binding = this.currentProps.bindings[bindingIndex];
-        const identityTarget = binding.identityTarget;
-        if (!identityTarget) {
-          this.identityTargets.delete(bindingIndex);
-        } else if (!dirtyState || dirtyState.has(identityTarget.dependency)) {
-          this.identityTargets.set(
-            bindingIndex,
-            keyedIdentityTargetSnapshot(identityTarget.read()),
-          );
-        }
-
-        const membershipTarget = binding.membershipTarget;
-        if (!membershipTarget) {
-          this.membershipTargets.delete(bindingIndex);
-        } else if (!dirtyState || dirtyState.has(membershipTarget.dependency)) {
-          this.membershipTargets.set(
-            bindingIndex,
-            keyedMembershipTargetSnapshot(membershipTarget.read()),
-          );
-        }
-
-        const mapLookupTarget = binding.mapLookupTarget;
-        if (!mapLookupTarget) {
-          this.mapLookupTargets.delete(bindingIndex);
-        } else if (!dirtyState || dirtyState.has(mapLookupTarget.dependency)) {
-          this.mapLookupTargets.set(
-            bindingIndex,
-            keyedMapLookupTargetSnapshot(mapLookupTarget.read()),
-          );
-        }
-      }
+      this.keyedTargets?.commit(this.currentProps, dirtyState);
     }
 
     private adopt(): boolean {
       if (!this.root) return false;
-      if (!this.hasSafeMembershipTargets() || !this.hasSafeMapLookupTargets()) return false;
+      if (this.keyedTargets && !this.keyedTargets.hasSafeTargets(this.currentProps)) return false;
       const rows = this.readRows(this.currentProps);
       const elements = [...this.root.children];
       if (!rows || rows.items.length !== elements.length) return false;
@@ -9255,98 +9394,23 @@ function createKeyedRowsBlockComponent(
         }
       }
 
-      const nextIdentityTargets = new Map<number, CompilerKeyedIdentityTargetSnapshot>();
-      const nextMembershipTargets = new Map<number, CompilerKeyedMembershipTargetSnapshot>();
-      const nextMapLookupTargets = new Map<number, CompilerKeyedMapLookupTargetSnapshot>();
-      for (const bindingIndex of affectedBindingIndices) {
-        const binding = this.currentProps.bindings[bindingIndex];
-        if (binding.identityTarget) {
-          nextIdentityTargets.set(
-            bindingIndex,
-            keyedIdentityTargetSnapshot(binding.identityTarget.read()),
-          );
-        }
-        if (binding.membershipTarget) {
-          const snapshot = keyedMembershipTargetSnapshot(
-            binding.membershipTarget.read(),
-            this.membershipTargets.get(bindingIndex),
-          );
-          if (!snapshot.eligible) {
-            this.activateFallback(afterCommit);
-            return true;
-          }
-          nextMembershipTargets.set(bindingIndex, snapshot);
-        }
-        if (binding.mapLookupTarget) {
-          const snapshot = keyedMapLookupTargetSnapshot(
-            binding.mapLookupTarget.read(),
-            this.mapLookupTargets.get(bindingIndex),
-          );
-          if (!snapshot.eligible) {
-            this.activateFallback(afterCommit);
-            return true;
-          }
-          nextMapLookupTargets.set(bindingIndex, snapshot);
-        }
+      const targetsPrepared = this.keyedTargets?.prepare(this.currentProps, affectedBindingIndices);
+      if (targetsPrepared === false) {
+        this.activateFallback(afterCommit);
+        return true;
       }
 
       let preparedBindingUpdates: CompilerPreparedKeyedRowBindingCommit[] | undefined;
       for (const bindingIndex of affectedBindingIndices) {
-        const binding = this.currentProps.bindings[bindingIndex];
-        const identityTarget = binding.identityTarget;
-        const previousIdentityTarget = this.identityTargets.get(bindingIndex);
-        const nextIdentityTarget = nextIdentityTargets.get(bindingIndex);
-        const canTargetIdentity = Boolean(
-          identityTarget &&
-          binding.dependencies?.length === 1 &&
-          binding.dependencies[0] === identityTarget.dependency &&
-          dirtyState.has(identityTarget.dependency) &&
-          previousIdentityTarget?.eligible &&
-          nextIdentityTarget?.eligible,
+        const selection = this.keyedTargets?.select(
+          this.currentProps,
+          bindingIndex,
+          dirtyState,
+          this.instances.keys(),
+          this.instances.size,
         );
-        const membershipTarget = binding.membershipTarget;
-        const previousMembershipTarget = this.membershipTargets.get(bindingIndex);
-        const nextMembershipTarget = nextMembershipTargets.get(bindingIndex);
-        const canTargetMembership = Boolean(
-          membershipTarget &&
-          binding.dependencies?.length === 1 &&
-          binding.dependencies[0] === membershipTarget.dependency &&
-          dirtyState.has(membershipTarget.dependency) &&
-          previousMembershipTarget?.eligible &&
-          nextMembershipTarget?.eligible,
-        );
-        const mapLookupTarget = binding.mapLookupTarget;
-        const previousMapLookupTarget = this.mapLookupTargets.get(bindingIndex);
-        const nextMapLookupTarget = nextMapLookupTargets.get(bindingIndex);
-        const canTargetMapLookup = Boolean(
-          mapLookupTarget &&
-          binding.dependencies?.length === 1 &&
-          binding.dependencies[0] === mapLookupTarget.dependency &&
-          dirtyState.has(mapLookupTarget.dependency) &&
-          previousMapLookupTarget?.eligible &&
-          nextMapLookupTarget?.eligible,
-        );
-
-        let selectedKeys: Iterable<string>;
-        let selectedCount: number;
-        if (canTargetMapLookup && previousMapLookupTarget && nextMapLookupTarget) {
-          const keys = keyedMapLookupChangedKeys(previousMapLookupTarget, nextMapLookupTarget);
-          selectedKeys = keys;
-          selectedCount = keys.size;
-        } else if (canTargetMembership && previousMembershipTarget && nextMembershipTarget) {
-          const keys = keyedMembershipChangedKeys(previousMembershipTarget, nextMembershipTarget);
-          selectedKeys = keys;
-          selectedCount = keys.size;
-        } else if (canTargetIdentity && previousIdentityTarget && nextIdentityTarget) {
-          const keys = new Set<string>();
-          if (previousIdentityTarget.key !== undefined) keys.add(previousIdentityTarget.key);
-          if (nextIdentityTarget.key !== undefined) keys.add(nextIdentityTarget.key);
-          selectedKeys = keys;
-          selectedCount = keys.size;
-        } else {
-          selectedKeys = this.instances.keys();
-          selectedCount = this.instances.size;
-        }
+        const selectedKeys = selection?.keys || this.instances.keys();
+        const selectedCount = selection?.count ?? this.instances.size;
 
         const prepare = affectedBindingIndices.length > 1 || selectedCount > 1;
         if (prepare) preparedBindingUpdates ||= [];
@@ -9389,23 +9453,7 @@ function createKeyedRowsBlockComponent(
           );
         }
       }
-      for (const bindingIndex of affectedBindingIndices) {
-        const nextIdentityTarget = nextIdentityTargets.get(bindingIndex);
-        const nextMembershipTarget = nextMembershipTargets.get(bindingIndex);
-        const nextMapLookupTarget = nextMapLookupTargets.get(bindingIndex);
-        if (nextIdentityTarget) this.identityTargets.set(bindingIndex, nextIdentityTarget);
-        else this.identityTargets.delete(bindingIndex);
-        if (nextMembershipTarget) {
-          this.membershipTargets.set(bindingIndex, nextMembershipTarget);
-        } else {
-          this.membershipTargets.delete(bindingIndex);
-        }
-        if (nextMapLookupTarget) {
-          this.mapLookupTargets.set(bindingIndex, nextMapLookupTarget);
-        } else {
-          this.mapLookupTargets.delete(bindingIndex);
-        }
-      }
+      this.keyedTargets?.commitPrepared(affectedBindingIndices);
       afterCommit?.();
       return true;
     }
@@ -9592,12 +9640,7 @@ function createKeyedRowsBlockComponent(
         return;
       }
 
-      if (!this.hasSafeMembershipTargets(dirtyState)) {
-        this.activateFallback(afterCommit);
-        return;
-      }
-
-      if (!this.hasSafeMapLookupTargets(dirtyState)) {
+      if (this.keyedTargets && !this.keyedTargets.hasSafeTargets(this.currentProps, dirtyState)) {
         this.activateFallback(afterCommit);
         return;
       }
@@ -9925,6 +9968,7 @@ function createKeyedRowsBlockComponent(
       const willBeReactOwned = this.hasReactOwnedRows(nextProps);
       const definitionChanged = this.definitionVersion !== owner.getDefinitionVersion?.();
       this.currentProps = nextProps;
+      this.keyedTargets ||= options.keyedTargets?.(nextProps);
       if (this.state.fallback && nextState.fallback) {
         const unsafeKeys = this.hasUnsafeFallbackKeys();
         if (unsafeKeys || this.fallbackKeysWereUnsafe) this.fallbackVersion += 1;
@@ -9975,9 +10019,7 @@ function createKeyedRowsBlockComponent(
       // captureRoot clears the element on a real unmount; retain it for replay adoption.
       this.cleanupHostScopes();
       this.instances.clear();
-      this.identityTargets.clear();
-      this.membershipTargets.clear();
-      this.mapLookupTargets.clear();
+      this.keyedTargets?.clear();
       this.instancesByElement = new WeakMap();
       this.eventHandlers.clear();
       this.conditionalListeners.clear();
@@ -10000,6 +10042,16 @@ function createKeyedRowsBlockComponent(
   }
 
   return FarmKeyedRowsBlock;
+}
+
+function createKeyedRowsBlockComponent(
+  owner: Pick<CompilerRuntimeFeatureOwner, "subscribe" | "getDefinitionVersion">,
+  options: KeyedRowsRuntimeOptions = {},
+): React.ComponentType<CompilerKeyedRowsBlockProps> {
+  return createKeyedRowsBlockComponentCore(owner, {
+    ...options,
+    keyedTargets: createKeyedTargetRuntime,
+  });
 }
 
 function createKeyedRangesBlockComponent(
@@ -10559,6 +10611,13 @@ export const keyedRowsRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows",
   create: (owner) => ({
     KeyedRows: createKeyedRowsBlockComponent(owner),
+  }),
+};
+
+export const keyedRowsPlainRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:plain",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponentCore(owner),
   }),
 };
 
