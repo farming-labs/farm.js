@@ -5424,13 +5424,9 @@ async function hydrate() {
 
           let hydrated = false;
           try {
-            if (hydrationController.signal.aborted || !pageContainer.isConnected) {
-              await farmClientRuntime.failHydration(
-                hydrationSession,
-                new DOMException('Route hydration was cancelled', 'AbortError'),
-              );
-              return;
-            }
+            // A navigation replaced this route before it hydrated. Like a superseded
+            // navigation, that is not a failure, so error hooks never see it.
+            if (hydrationController.signal.aborted || !pageContainer.isConnected) return;
             hydrated = await tryHydrateImportedPage(
               pageContainer,
               { modulePath },
@@ -5445,13 +5441,9 @@ async function hydrate() {
                 islandStrategy,
               },
             );
-            if (hydrationController.signal.aborted || !pageContainer.isConnected) {
-              await farmClientRuntime.failHydration(
-                hydrationSession,
-                new DOMException('Route hydration was cancelled', 'AbortError'),
-              );
-              return;
-            }
+            // A navigation replaced this route before it hydrated. Like a superseded
+            // navigation, that is not a failure, so error hooks never see it.
+            if (hydrationController.signal.aborted || !pageContainer.isConnected) return;
             await farmClientRuntime.completeHydration(hydrationSession);
           } catch (error) {
             await farmClientRuntime.failHydration(hydrationSession, error);
