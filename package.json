@@ -44,6 +44,7 @@
     "build:examples": "node scripts/build-examples.js",
     "benchmark:frameworks": "node benchmarks/frameworks/run.mjs",
     "benchmark:compiler": "node benchmarks/compiler/run.mjs",
+    "benchmark:react-optimizer": "node benchmarks/react-optimizer/run.mjs",
     "benchmark:isolated-hydration": "node benchmarks/isolated-hydration/run.mjs",
     "benchmark:preview": "pnpm --filter @farm.js/preview-tunnel build && node benchmarks/preview-tunnel/run.mjs",
     "lint": "oxlint . && oxfmt --check . && node scripts/check-synthetic-popstate.mjs",
