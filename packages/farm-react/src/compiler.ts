@@ -367,6 +367,7 @@ type CompilerRuntimeFeatureName =
   | "conditional-ranges"
   | "keyed-list"
   | "keyed-rows"
+  | "keyed-rows-plain"
   | "keyed-rows-hinted"
   | "keyed-rows-position-hinted"
   | "keyed-rows-batch-position-hinted"
@@ -449,6 +450,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "conditional-ranges": "conditionalRangesRuntimeFeature",
   "keyed-list": "keyedListRuntimeFeature",
   "keyed-rows": "keyedRowsRuntimeFeature",
+  "keyed-rows-plain": "keyedRowsPlainRuntimeFeature",
   "keyed-rows-hinted": "keyedRowsHintedRuntimeFeature",
   "keyed-rows-position-hinted": "keyedRowsPositionHintedRuntimeFeature",
   "keyed-rows-batch-position-hinted": "keyedRowsBatchPositionHintedRuntimeFeature",
@@ -564,10 +566,17 @@ function runtimeFeaturesForPlans(
   const features = new Set<CompilerRuntimeFeatureName>();
   let keyedRowsHaveConditionals = false;
   let keyedRowsHaveHostBlocks = false;
+  let keyedRowsHaveTargets = false;
   for (const plan of plans) {
     if (plan.kind === "keyed-rows") {
       keyedRowsHaveConditionals ||= plan.conditionals.length > 0;
       keyedRowsHaveHostBlocks ||= Boolean(plan.descriptorBlocks?.size);
+      keyedRowsHaveTargets ||= plan.bindings.some(
+        (binding) =>
+          binding.identityTarget !== undefined ||
+          binding.membershipTarget !== undefined ||
+          binding.mapLookupTarget !== undefined,
+      );
       continue;
     }
     if (plan.kind in COMPILER_RUNTIME_FEATURE_EXPORTS) {
@@ -632,7 +641,11 @@ function runtimeFeaturesForPlans(
                                   : keyedMapUpdateHints
                                     ? "-hinted"
                                     : "";
-    features.add(`${keyedRowsFeature}${hintSuffix}` as CompilerRuntimeFeatureName);
+    features.add(
+      !keyedRowsHaveTargets && keyedRowsFeature === "keyed-rows" && hintSuffix === ""
+        ? "keyed-rows-plain"
+        : (`${keyedRowsFeature}${hintSuffix}` as CompilerRuntimeFeatureName),
+    );
   }
   return [...features].sort();
 }

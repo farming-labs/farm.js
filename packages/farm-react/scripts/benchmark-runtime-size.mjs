@@ -53,6 +53,8 @@ const [
   directOn,
   keyedOff,
   keyedOn,
+  keyedPlainOff,
+  keyedPlainOn,
   keyedAppendOff,
   keyedAppendOn,
   keyedFilterOff,
@@ -93,6 +95,8 @@ const [
   bundle("direct.tsx", true),
   bundle("keyed.tsx", false),
   bundle("keyed.tsx", true),
+  bundle("keyed-plain.tsx", false),
+  bundle("keyed-plain.tsx", true),
   bundle("keyed-append.tsx", false),
   bundle("keyed-append.tsx", true),
   bundle("keyed-filter.tsx", false),
@@ -148,6 +152,23 @@ for (const marker of forbiddenDirectMarkers) {
 }
 if (!keyedOn.code.includes("FarmCompiledKeyedRows")) {
   throw new Error("Keyed fixture did not retain its keyed-row runtime.");
+}
+if (
+  !keyedPlainOn.code.includes("FarmCompiledKeyedRows") ||
+  !keyedPlainOn.code.includes("keyed-rows:plain")
+) {
+  throw new Error("Plain keyed fixture did not retain its isolated keyed-row runtime.");
+}
+for (const marker of [
+  "identityTarget",
+  "membershipTarget",
+  "mapLookupTarget",
+  '"set-add"',
+  '"map-set"',
+]) {
+  if (keyedPlainOn.code.includes(marker)) {
+    throw new Error(`Plain keyed fixture unexpectedly retained ${marker}.`);
+  }
 }
 if (keyedOn.code.includes("FarmCompiledKeyedRowConditional")) {
   throw new Error("Plain keyed fixture retained the optional row-conditional runtime.");
@@ -372,6 +393,23 @@ const results = {
         raw: keyedOn.raw - keyedOff.raw,
         gzip: keyedOn.gzip - keyedOff.gzip,
         brotli: keyedOn.brotli - keyedOff.brotli,
+      },
+    },
+    keyedPlain: {
+      compilerOff: {
+        raw: keyedPlainOff.raw,
+        gzip: keyedPlainOff.gzip,
+        brotli: keyedPlainOff.brotli,
+      },
+      compilerOn: {
+        raw: keyedPlainOn.raw,
+        gzip: keyedPlainOn.gzip,
+        brotli: keyedPlainOn.brotli,
+      },
+      compilerPremium: {
+        raw: keyedPlainOn.raw - keyedPlainOff.raw,
+        gzip: keyedPlainOn.gzip - keyedPlainOff.gzip,
+        brotli: keyedPlainOn.brotli - keyedPlainOff.brotli,
       },
     },
     keyedAppend: {
