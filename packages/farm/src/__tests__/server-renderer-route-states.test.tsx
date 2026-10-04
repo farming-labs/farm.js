@@ -18,6 +18,7 @@ import { defineIntegration } from "../integrations";
 import { REACT_RENDERER } from "../renderer";
 import { Link } from "../client/link";
 import { setFarmBasePath } from "../base-path";
+import { createFarmIsolatedClientBoundary } from "../client/isolated-boundary";
 
 type MockResponse = FarmResponse & {
   body: string;
@@ -897,6 +898,52 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain('"shouldHydrate":true');
   });
 
+  it("renders a server-only page's islands under a hydrating layout", async () => {
+    function Counter({ label }: { label: string }) {
+      return React.createElement("button", null, label);
+    }
+    const CounterIsland = createFarmIsolatedClientBoundary(
+      React,
+      Counter,
+      "/src/counter.tsx",
+      "default",
+      "load",
+    );
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          default: function DashboardPage() {
+            return React.createElement(
+              "main",
+              null,
+              React.createElement(CounterIsland, { label: "stars" }),
+            );
+          },
+        },
+        [layoutModulePath]: {
+          default: function RootLayout({ children }: { children: React.ReactNode }) {
+            return React.createElement("section", { "data-layout": "root" }, children);
+          },
+        },
+      },
+      {
+        clientMetadata: { isClientComponent: false, shouldHydrate: false },
+        layoutMetadata: { shouldHydrate: true, islandStrategy: "load" },
+        isolatedClientBoundaryModules: ["/test/src/counter.tsx"],
+      },
+    );
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    // The layout keeps this page as server HTML, so the client component must arrive as an island
+    // the client can start, not as plain markup inside the layout's React tree.
+    expect(response.body).toContain('data-farm-client="false"');
+    expect(response.body).toMatch(
+      /<farm-client-boundary[^>]*data-farm-client-boundary="\/src\/counter\.tsx"/,
+    );
+  });
+
   it("renders a hydrating layout tree directly in #root, matching the client tree", async () => {
     const response = createMockResponse();
     const renderer = createRenderer(
@@ -1259,6 +1306,8 @@ function createRenderer(
       islandStrategy?: string;
     };
     onGenerateClientManifest?: () => void;
+    /** Client modules the route plan compiled into islands. */
+    isolatedClientBoundaryModules?: string[];
     integrations?: FarmConfig["integrations"];
     basePath?: string;
     root?: string;
@@ -1309,6 +1358,7 @@ function createRenderer(
   const routeManager = {
     getRoutes: () => toRouteEntries(options.routes),
     getLayouts: () => toRouteEntries(options.layouts),
+    getIsolatedClientBoundaryModules: () => new Set(options.isolatedClientBoundaryModules ?? []),
     matchMetadataRoute(pathname: string) {
       if (
         !applicationMetadataEntry ||

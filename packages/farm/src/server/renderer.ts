@@ -758,6 +758,13 @@ export class ServerRenderer {
     }
     if (input.pageShouldHydrate && !input.layoutShouldHydrate) {
       element = this.wrapClientGraph(element);
+    } else if (
+      input.layoutShouldHydrate &&
+      !input.pageShouldHydrate &&
+      this.rendererRuntime.isolateServerPageGraph
+    ) {
+      // As in renderPage: the layout keeps this page as server HTML, so its islands stay islands.
+      element = this.rendererRuntime.isolateServerPageGraph(element);
     }
     element = this.createPageBoundary(element, {
       pageShouldHydrate: input.pageShouldHydrate,
@@ -1677,6 +1684,14 @@ export class ServerRenderer {
             // here even when an isolated layout also imports the same module.
             if ((isClientComponent || shouldHydrate) && !shouldHydrateLayout) {
               pageElement = this.wrapClientGraph(pageElement);
+            } else if (
+              shouldHydrateLayout &&
+              !(isClientComponent || shouldHydrate) &&
+              this.rendererRuntime.isolateServerPageGraph
+            ) {
+              // The hydrating layout keeps this page as server HTML, so its client components
+              // render as their own islands instead of joining the layout's React tree.
+              pageElement = this.rendererRuntime.isolateServerPageGraph(pageElement);
             }
 
             // Every route gets a stable HTML boundary. Server-only pages keep

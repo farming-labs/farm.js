@@ -2853,7 +2853,7 @@ document.addEventListener("click", function(e) {
   });
   const isolatedHydrationEnabled = isolatedBoundaryModules.size > 0;
   const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `import { createFarmIsolatedHydrationRuntime, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";`
+    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";`
     : "";
   const isolatedHydrationRuntime = isolatedHydrationEnabled
     ? `const farmIsolatedBoundaryLoaders = {
@@ -2875,6 +2875,9 @@ const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
   schedule: scheduleFarmIslandHydration,
   wrap: wrapWithIntegrationProviders,
 });
+
+// A hydrating layout keeps a non-hydrating page as server HTML; this wrapper runs its islands.
+const FarmServerPage = createFarmServerPageBoundary(React, farmIsolatedHydrationRuntime);
 
 function disposeFarmIsolatedClientBoundaries(scope) {
   farmIsolatedHydrationRuntime.dispose(scope);
@@ -3013,7 +3016,7 @@ function createLayoutPageBoundary(route, pageElement, serverHtml) {
   if (typeof serverHtml === "string") {
     props.suppressHydrationWarning = true;
     props.dangerouslySetInnerHTML = { __html: serverHtml };
-    return React.createElement("div", props);
+    return React.createElement(${isolatedHydrationEnabled ? "FarmServerPage" : '"div"'}, props);
   }
   return React.createElement("div", props, pageElement);
 }
@@ -4692,15 +4695,23 @@ function generateVirtualEntryCode(
   const rendererServerImports = isReactRenderer(config.renderer)
     ? `import * as React from "react";\nimport * as ReactDOMServer from "react-dom/server";${
         hasIsolatedClientGraphRuntime
-          ? '\nimport { wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";'
+          ? '\nimport { isolateFarmServerPageGraph, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";'
           : ""
       }`
     : `import React, * as ReactDOMServer from ${JSON.stringify(config.renderer.server)};`;
   const routeClientGraphServerRuntime = hasIsolatedClientGraphRuntime
     ? `function wrapFarmRouteClientGraph(element) {
   return wrapFarmIsolatedClientGraph(React, element);
+}
+
+// A hydrating layout keeps a page that does not hydrate as server HTML, so the page's client
+// components render as their own islands instead of joining the layout's React tree.
+function isolateFarmRouteServerPage(element) {
+  return isolateFarmServerPageGraph(React, element);
 }`
-    : `function wrapFarmRouteClientGraph(element) { return element; }`;
+    : `function wrapFarmRouteClientGraph(element) { return element; }
+
+function isolateFarmRouteServerPage(element) { return element; }`;
   const hasGeneratedMetadataImages = metadataImageRoutes.some(
     (image) => image.sourceType === "module",
   );
@@ -7658,6 +7669,8 @@ async function handleFarmRequestInContext(
 
             if (route.shouldHydrate && !shouldHydrateLayout) {
               pageElement = wrapFarmRouteClientGraph(pageElement);
+            } else if (shouldHydrateLayout && !route.shouldHydrate) {
+              pageElement = isolateFarmRouteServerPage(pageElement);
             }
 
             pageElement = React.createElement(

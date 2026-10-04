@@ -287,6 +287,8 @@ export interface FarmServerRendererRuntime {
   isValidElement(value: unknown): boolean;
   /** Wraps a route-owned client tree so compiled leaf boundaries stay inside that React root. */
   wrapClientGraph?(element: unknown): unknown;
+  /** Lets a server-only page under a route-owned client tree render its own isolated islands. */
+  isolateServerPageGraph?(element: unknown): unknown;
   /**
    * Optional: tag a plain function component so a renderer that compiles its
    * own components can tell the two apart. Renderers without the hook treat

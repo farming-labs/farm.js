@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFarmIsolatedClientBoundary,
   createFarmIsolatedHydrationRuntime,
+  createFarmServerPageBoundary,
   wrapFarmIsolatedClientGraph,
 } from "../client/isolated-boundary";
 import { scheduleFarmIslandHydration } from "../client/island-runtime";
@@ -762,5 +763,84 @@ describe("isolated client boundary", () => {
       expect.stringContaining("/src/broken.tsx#default"),
       expect.objectContaining({ message: "client render failed" }),
     );
+  });
+});
+
+describe("islands in a page a hydrating layout keeps as server HTML", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  function Counter({ label }: { label: string }) {
+    const [count, setCount] = useState(0);
+    return (
+      <button data-island={label} onClick={() => setCount((value) => value + 1)}>
+        {label} {count}
+      </button>
+    );
+  }
+  const CounterBoundary = createFarmIsolatedClientBoundary(
+    React,
+    Counter,
+    "/src/counter.tsx",
+    "default",
+    "load",
+  );
+  const pageHtml = (label: string) =>
+    renderToString(
+      <main>
+        <p>Server text</p>
+        <CounterBoundary label={label} />
+      </main>,
+    );
+
+  it("starts them after the layout hydrates, and swaps them when the page HTML changes", async () => {
+    const runtime = createRuntime({
+      "/src/counter.tsx": { __farm_client_boundary_originals__: { default: Counter } },
+    });
+    const ServerPage = createFarmServerPageBoundary(React, runtime);
+    const layout = (html: string) => (
+      <section data-layout>
+        <ServerPage id="__farm_page__" dangerouslySetInnerHTML={{ __html: html }} />
+      </section>
+    );
+
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(layout(pageHtml("first")));
+    document.body.append(container);
+    let root!: ReturnType<typeof hydrateRoot>;
+    await act(async () => {
+      root = hydrateRoot(container, layout(pageHtml("first")));
+    });
+    await act(async () => {});
+
+    const first = container.querySelector<HTMLButtonElement>('[data-island="first"]')!;
+    await act(async () => first.click());
+    expect(first.textContent).toBe("first 1");
+    expect(runtime.rootCount()).toBe(1);
+
+    // Client navigation inside the shared layout: React replaces the page HTML in place.
+    await act(async () => root.render(layout(pageHtml("second"))));
+    await act(async () => {});
+    expect(container.querySelector('[data-island="first"]')).toBeNull();
+    const second = container.querySelector<HTMLButtonElement>('[data-island="second"]')!;
+    await act(async () => second.click());
+    expect(second.textContent).toBe("second 1");
+    expect(runtime.rootCount()).toBe(1);
+
+    await act(async () => root.unmount());
+    expect(runtime.rootCount()).toBe(0);
+  });
+
+  it("does nothing for a page without islands", async () => {
+    const runtime = { hydrate: vi.fn(async () => {}), dispose: vi.fn() };
+    const ServerPage = createFarmServerPageBoundary(React, runtime);
+    const container = document.createElement("div");
+    const html = "<main>Server text</main>";
+    container.innerHTML = renderToString(<ServerPage dangerouslySetInnerHTML={{ __html: html }} />);
+    await act(async () => {
+      hydrateRoot(container, <ServerPage dangerouslySetInnerHTML={{ __html: html }} />);
+    });
+    expect(runtime.hydrate).not.toHaveBeenCalled();
   });
 });

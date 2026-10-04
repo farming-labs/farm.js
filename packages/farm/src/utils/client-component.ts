@@ -703,7 +703,6 @@ export function enforceFarmIsolatedHydrationRouteBudget(
     const applicableLayouts = sortedLayouts.filter((layout) =>
       layoutAppliesToRoute(layout.pattern, route.pattern),
     );
-    if (applicableLayouts.some((layout) => layout.metadata.shouldHydrate)) continue;
 
     const layoutRootCount = applicableLayouts.reduce(
       (count, layout) =>
@@ -768,15 +767,8 @@ export function enforceFarmIsolatedHydrationRouteBudget(
     }
   }
 
-  for (const route of routes) {
-    const hasRouteWideLayout = sortedLayouts.some(
-      (layout) =>
-        layout.metadata.shouldHydrate && layoutAppliesToRoute(layout.pattern, route.pattern),
-    );
-    if (hasRouteWideLayout && route.metadata.hasIsolatedClientBoundaries) {
-      restoreRouteWideHydration(route.metadata);
-    }
-  }
+  // A page's islands survive a route-wide layout: the layout keeps a page that does not hydrate
+  // as server HTML, and the client starts the islands inside it (createFarmServerPageBoundary).
 }
 
 /**

@@ -864,7 +864,7 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
       ).toMatchObject({ suppressedAsyncHydration: true, hasIsolatedClientBoundaries: false });
     });
 
-    it("returns an async page to server-only when a parent layout hydrates the whole route", () => {
+    it("keeps an async page's islands when a parent layout hydrates the whole route", () => {
       const { root, pageFile } = asyncPage("<StarButton count={stars} />");
       const page = getClientModuleHydrationPlan(pageFile, root, "off", islands);
       const layout = { ...page, shouldHydrate: true, hasIsolatedClientBoundaries: false };
@@ -876,13 +876,10 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
         () => true,
       );
 
-      expect(page).toMatchObject({
-        hasIsolatedClientBoundaries: false,
-        isolatedBoundaries: [],
-        suppressedAsyncHydration: true,
-        fallbackReason: "a parent layout hydrates the whole route",
-      });
-      expect(page.asyncOwnerIslands).toBeUndefined();
+      // The layout keeps the page as server HTML and the client starts its islands there.
+      expect(page).toMatchObject({ hasIsolatedClientBoundaries: true, asyncOwnerIslands: true });
+      expect(page.isolatedBoundaries.length).toBeGreaterThan(0);
+      expect(page.suppressedAsyncHydration).toBeUndefined();
     });
 
     it("suppresses an overflowing async layout before keeping a route island", () => {

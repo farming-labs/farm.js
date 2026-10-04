@@ -4042,7 +4042,7 @@ function generateClientCode(
     ? `import React from 'react'\nimport { hydrateRoot, createRoot } from 'react-dom/client'`
     : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
   const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `import { createFarmIsolatedHydrationRuntime, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'`
+    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'`
     : "";
   const docsAdapterImportBlock = docsAdapterReact
     ? `import * as FarmDocsAdapterReact from ${JSON.stringify(docsAdapterReact)};
@@ -4069,6 +4069,8 @@ async function hydrateFarmDocsAdapterRuntime() {
   wrap: wrapWithIntegrationProviders,
 });
 window.__FARM_ISOLATED_HYDRATION_RUNTIME__ = farmIsolatedHydrationRuntime;
+// A hydrating layout keeps a non-hydrating page as server HTML; this wrapper runs its islands.
+const FarmServerPage = createFarmServerPageBoundary(React, farmIsolatedHydrationRuntime);
 
 function disposeFarmIsolatedClientBoundaries(scope) {
   farmIsolatedHydrationRuntime.dispose(scope);
@@ -4864,7 +4866,7 @@ function createLayoutPageBoundary(
   if (typeof serverHtml === 'string') {
     props.suppressHydrationWarning = true;
     props.dangerouslySetInnerHTML = { __html: serverHtml };
-    return React.createElement('div', props);
+    return React.createElement(${isolatedHydrationEnabled ? "FarmServerPage" : "'div'"}, props);
   }
   return React.createElement('div', props, pageElement);
 }
