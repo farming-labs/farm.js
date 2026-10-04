@@ -277,6 +277,47 @@ describe("integrations runtime", () => {
     expect(dynamic?.params).toEqual({ id: "%E0" });
   });
 
+  it("compiles stable integration route definitions once and recompiles a replaced route list", () => {
+    let pathReads = 0;
+    const route = {
+      get path() {
+        pathReads += 1;
+        return "/items/[id]";
+      },
+      method: "GET" as const,
+      handler: async () => new Response("ok"),
+    };
+    const integration = defineIntegration({
+      category: "agent",
+      type: "compiled-routes",
+      instance: {},
+      routes: [route],
+    });
+    pathReads = 0;
+
+    expect(
+      matchIntegrationRoute({ agent: integration }, { pathname: "/items/first", method: "GET" })
+        ?.params,
+    ).toEqual({ id: "first" });
+    const readsAfterCompilation = pathReads;
+    expect(readsAfterCompilation).toBeGreaterThan(0);
+    expect(
+      matchIntegrationRoute({ agent: integration }, { pathname: "/items/second", method: "GET" })
+        ?.params,
+    ).toEqual({ id: "second" });
+    expect(pathReads).toBe(readsAfterCompilation);
+
+    (integration as { routes: ReturnType<typeof integrationRoute.get>[] }).routes = [
+      integrationRoute.get("/projects/[id]", {
+        handler: async () => new Response("project"),
+      }),
+    ];
+    expect(
+      matchIntegrationRoute({ agent: integration }, { pathname: "/projects/new", method: "GET" })
+        ?.params,
+    ).toEqual({ id: "new" });
+  });
+
   it("matches the most specific integration route regardless of declaration order", async () => {
     const integration = defineIntegration({
       category: "agent",

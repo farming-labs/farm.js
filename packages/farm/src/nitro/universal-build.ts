@@ -2912,7 +2912,7 @@ ${isolatedHydrationImport}
 ${providerClientCode.imports}
 import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
-import { isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
+import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
 ${clientCachePersistence.imports}
 ${i18nClientRuntime}
@@ -2933,6 +2933,9 @@ ${clientCachePersistence.init}
 const clientRoutes = [
 ${routeEntries.join(",\n")}
 ];
+const clientRouteMatcher = createFarmRouter(clientRoutes.map(function(route) {
+  return { path: route.pattern, meta: route };
+}));
 
 ${isolatedHydrationRuntime}
 ${routeClientGraphRuntime}
@@ -3019,12 +3022,10 @@ function createLayoutPageBoundary(route, pageElement, serverHtml) {
 
 // Match pathname to client route
 function matchRoute(pathname) {
-  pathname = getFarmRoutePathname(pathname);
-  for (const route of clientRoutes) {
-    const params = matchFarmRoute(route.pattern, pathname);
-    if (params !== null) return { route: route, params: params };
-  }
-  return null;
+  const matched = clientRouteMatcher.match(getFarmRoutePathname(pathname));
+  return matched
+    ? { route: matched.route.meta, params: matched.params }
+    : null;
 }
 
 async function loadRouteComponent(route) {

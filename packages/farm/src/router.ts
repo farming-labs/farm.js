@@ -89,14 +89,33 @@ export function createFarmRouter<TMeta = unknown>(
     patternsByShape.set(shape, entry.route.path);
   }
   normalizedRoutes.sort(compareRoutes);
+  const exactRoutes = new Map<string, NormalizedRouterRoute<TMeta>>();
+  for (const entry of normalizedRoutes) {
+    if (entry.segments.every((segment) => segment.type === "static")) {
+      const pathname = entry.segments.length
+        ? `/${entry.segments.map((segment) => encodePathSegment(segment.value)).join("/")}`
+        : "/";
+      exactRoutes.set(pathname, entry);
+    }
+  }
 
   return {
     routes: normalizedRoutes.map((entry) => entry.route),
     match(pathname) {
       const normalizedPathname = normalizePathname(pathname);
+      const exactRoute = exactRoutes.get(normalizedPathname);
+      if (exactRoute) {
+        return {
+          route: exactRoute.route,
+          pathname: normalizedPathname,
+          params: {},
+        };
+      }
+
+      const parts = splitNormalizedPathname(normalizedPathname);
 
       for (const entry of normalizedRoutes) {
-        const params = matchSegments(entry.segments, normalizedPathname);
+        const params = matchSegmentParts(entry.segments, parts);
         if (params) {
           return {
             route: entry.route,
@@ -169,12 +188,13 @@ export function isFarmRouteActive(
   options: FarmRouterActiveOptions = {},
 ): boolean {
   const normalizedPathname = normalizePathname(pathname);
-  if (matchFarmRoute(pattern, normalizedPathname)) return true;
+  const segments = parseRoutePattern(pattern);
+  const parts = splitNormalizedPathname(normalizedPathname);
+  if (matchSegmentParts(segments, parts)) return true;
   if (options.exact !== false) return false;
 
-  const segments = parseRoutePattern(pattern);
   if (segments.length === 0) return normalizedPathname === "/";
-  return matchSegments(segments, normalizedPathname, true) !== null;
+  return matchSegmentParts(segments, parts, true) !== null;
 }
 
 function normalizeRouteInput<TMeta>(
@@ -255,7 +275,14 @@ function matchSegments(
   pathname: string,
   allowTrailingSegments = false,
 ): FarmRouterParams | null {
-  const parts = splitPathname(pathname);
+  return matchSegmentParts(segments, splitPathname(pathname), allowTrailingSegments);
+}
+
+function matchSegmentParts(
+  segments: RouterSegment[],
+  parts: string[],
+  allowTrailingSegments = false,
+): FarmRouterParams | null {
   const params: FarmRouterParams = {};
 
   if (segments.length === 0) {
@@ -320,7 +347,11 @@ function normalizePathname(value: string) {
 }
 
 function splitPathname(pathname: string) {
-  return normalizePathname(pathname).split("/").filter(Boolean);
+  return splitNormalizedPathname(normalizePathname(pathname));
+}
+
+function splitNormalizedPathname(pathname: string) {
+  return pathname.split("/").filter(Boolean);
 }
 
 function normalizeRoutePattern(value: string) {

@@ -1431,6 +1431,12 @@ export function matchIntegrationRoute(
     return null;
   }
 
+  const method = normalizeIntegrationRequestMethod(input.method);
+  if (!method) {
+    return null;
+  }
+  const pathSegments = canonicalizeRequestPathSegments(input.pathname);
+
   for (const [key, integration] of Object.entries(integrations)) {
     if (!integration || !isFarmIntegration(integration)) {
       continue;
@@ -1439,11 +1445,11 @@ export function matchIntegrationRoute(
     const routes = normalizeIntegrationRoutes(integration.routes || []);
 
     for (const route of routes) {
-      if (!matchesMethod(route.methods, input.method)) {
+      if (!matchesMethod(route.methods, method)) {
         continue;
       }
 
-      const params = extractPathParams(route.path, input.pathname);
+      const params = matchPathSegments(route[INTEGRATION_ROUTE_SEGMENTS], pathSegments);
       if (!params) {
         continue;
       }
@@ -1944,6 +1950,8 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
       const fullUrl = `http://${req.headers.host || "localhost"}${req.url || "/"}`;
       const url = new URL(fullUrl);
       const pathname = url.pathname;
+      const pathSegments = canonicalizeRequestPathSegments(pathname);
+      const method = normalizeIntegrationRequestMethod(req.method);
       const requestId = getRequestId(req);
       let bodyLoaded = false;
       let requestBody: Buffer | undefined;
@@ -2088,9 +2096,10 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
       }
 
       for (const route of routes) {
-        const params = matchesMethod(route.methods, req.method)
-          ? extractPathParams(route.path, pathname)
-          : null;
+        const params =
+          method && matchesMethod(route.methods, method)
+            ? matchPathSegments(route[INTEGRATION_ROUTE_SEGMENTS], pathSegments)
+            : null;
         if (!params) {
           continue;
         }
@@ -2309,12 +2318,29 @@ function createIntegrationHandlerContext(input: {
 type NormalizedIntegrationRoute = Omit<FarmIntegrationRoute, "method" | "methods"> & {
   methods: readonly string[];
   __operation?: FarmIntegrationAPIOperation<any, any, any, any, any>;
+  [INTEGRATION_ROUTE_SEGMENTS]: readonly string[];
 };
+
+const INTEGRATION_ROUTE_SEGMENTS = Symbol("farm.integrationRouteSegments");
+const EMPTY_NORMALIZED_INTEGRATION_ROUTES: NormalizedIntegrationRoute[] = [];
+const normalizedIntegrationRoutesCache = new WeakMap<
+  readonly FarmIntegrationRoute[],
+  NormalizedIntegrationRoute[]
+>();
 
 function normalizeIntegrationRoutes(
   routes: readonly FarmIntegrationRoute[],
 ): NormalizedIntegrationRoute[] {
-  return routes
+  if (routes.length === 0) {
+    return EMPTY_NORMALIZED_INTEGRATION_ROUTES;
+  }
+
+  const cached = normalizedIntegrationRoutesCache.get(routes);
+  if (cached) {
+    return cached;
+  }
+
+  const normalized = routes
     .map((route, index) => {
       // Raw FarmIntegration objects and direct dispatch also pass through here.
       assertUniqueRouteParameters(route.path, "api");
@@ -2324,6 +2350,7 @@ function normalizeIntegrationRoutes(
           ...route,
           methods: normalizeIntegrationRouteMethods(route),
           input: normalizeIntegrationRouteInputSchemas(route),
+          [INTEGRATION_ROUTE_SEGMENTS]: splitPath(route.path),
         },
         specificity: getRoutePatternSpecificity(route.path, "api"),
       };
@@ -2333,6 +2360,9 @@ function normalizeIntegrationRoutes(
         compareRouteSpecificity(left.specificity, right.specificity) || left.index - right.index,
     )
     .map(({ route }) => route);
+
+  normalizedIntegrationRoutesCache.set(routes, normalized);
+  return normalized;
 }
 
 function normalizeIntegrationRouteMethods(route: Pick<FarmIntegrationRoute, "method" | "methods">) {
@@ -2852,6 +2882,8 @@ export async function dispatchIntegrationRequest(
     options.currentRequest?.headers.get("x-request-id") ||
     String(Date.now());
   const routes = normalizeIntegrationRoutes(integration.routes || []);
+  const pathSegments = canonicalizeRequestPathSegments(pathname);
+  const method = normalizeIntegrationRequestMethod(request.method);
   const middleware = [...(integration.middleware || [])];
 
   // Cookies an integration middleware forwards via forwardIntegrationSetCookies
@@ -2960,9 +2992,10 @@ export async function dispatchIntegrationRequest(
   }
 
   for (const route of routes) {
-    const params = matchesMethod(route.methods, request.method)
-      ? extractPathParams(route.path, pathname)
-      : null;
+    const params =
+      method && matchesMethod(route.methods, method)
+        ? matchPathSegments(route[INTEGRATION_ROUTE_SEGMENTS], pathSegments)
+        : null;
     if (!params) {
       continue;
     }
@@ -3359,16 +3392,12 @@ function createWebRequest(req: FarmRequest, fullUrl: string, body?: Buffer): Req
   });
 }
 
-function matchesMethod(methods: readonly string[], method: string | undefined): boolean {
-  if (!method) {
-    return false;
-  }
+function normalizeIntegrationRequestMethod(method: string | undefined): string | undefined {
+  return method ? method.toUpperCase() : undefined;
+}
 
-  const normalizedMethod = method.toUpperCase();
-  return methods.some((item) => {
-    const candidate = item.toUpperCase();
-    return candidate === "ALL" || candidate === normalizedMethod;
-  });
+function matchesMethod(methods: readonly string[], normalizedMethod: string): boolean {
+  return methods.some((candidate) => candidate === "ALL" || candidate === normalizedMethod);
 }
 
 function matchesMatcher(
@@ -3417,14 +3446,6 @@ function resolveMatcherParams(
   return null;
 }
 
-function matchesPath(pattern: string, pathname: string): boolean {
-  return extractPathParams(pattern, pathname) !== null;
-}
-
-function extractPathParams(pattern: string, pathname: string): FarmIntegrationRouteParams | null {
-  return matchPathSegments(splitPath(pattern), canonicalizeRequestPathSegments(pathname));
-}
-
 /**
  * Walk an integration route pattern against already-canonical request segments.
  *
@@ -3433,8 +3454,8 @@ function extractPathParams(pattern: string, pathname: string): FarmIntegrationRo
  * record the request never asked for.
  */
 function matchPathSegments(
-  routeSegments: string[],
-  pathSegments: string[],
+  routeSegments: readonly string[],
+  pathSegments: readonly string[],
 ): FarmIntegrationRouteParams | null {
   const params: FarmIntegrationRouteParams = {};
 
