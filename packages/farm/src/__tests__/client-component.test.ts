@@ -7,6 +7,7 @@ import {
   describeSuppressedAsyncHydration,
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
+  getMarkdownPageHydrationPlan,
   getClientModuleMetadata,
   getFarmClientHydrationPlanOptions,
   getIslandStrategyExport,
@@ -769,6 +770,88 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
       shouldHydrate: false,
       islandStrategy: null,
       suppressedAsyncHydration: true,
+    });
+  });
+
+  describe("Markdown pages", () => {
+    function markdownProject(componentsSource: string) {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-markdown-"));
+      tempDirs.push(root);
+      fs.mkdirSync(path.join(root, "src", "components"), { recursive: true });
+      fs.writeFileSync(
+        path.join(root, "src", "components", "copy-button.tsx"),
+        '"use client";\nexport function CopyButton({ text }) { return <button>{text}</button>; }\n',
+      );
+      const componentsFile = path.join(root, "src", "markdown-components.tsx");
+      fs.writeFileSync(componentsFile, componentsSource);
+      return { root, componentsFile };
+    }
+
+    it("hydrates the client components the MDX components module imports, in every mode", () => {
+      const { root, componentsFile } = markdownProject(
+        'import { CopyButton } from "./components/copy-button";\nexport const components = { CopyButton };\n',
+      );
+      for (const mode of ["off", "enabled"] as const) {
+        expect(
+          getMarkdownPageHydrationPlan(componentsFile, root, mode, { asyncOwnerIslands: true }),
+        ).toMatchObject({
+          shouldHydrate: false,
+          hasIsolatedClientBoundaries: true,
+          asyncOwnerIslands: true,
+          isolatedBoundaries: [
+            { modulePath: path.join(root, "src", "components", "copy-button.tsx") },
+          ],
+        });
+      }
+    });
+
+    it("keeps local islands and renders package client components as static HTML", () => {
+      const { root, componentsFile } = markdownProject(
+        'import { Icon } from "icon-kit";\nimport { CopyButton } from "./components/copy-button";\nexport const components = { Icon, CopyButton };\n',
+      );
+      const packageRoot = path.join(root, "node_modules", "icon-kit");
+      fs.mkdirSync(packageRoot, { recursive: true });
+      fs.writeFileSync(
+        path.join(packageRoot, "package.json"),
+        JSON.stringify({ name: "icon-kit", exports: "./index.js" }),
+      );
+      fs.writeFileSync(
+        path.join(packageRoot, "index.js"),
+        '"use client";\nexport function Icon() { return null; }\n',
+      );
+
+      const plan = getMarkdownPageHydrationPlan(componentsFile, root, "off", {
+        asyncOwnerIslands: true,
+      });
+      expect(plan).toMatchObject({
+        hasIsolatedClientBoundaries: true,
+        staticPackageBoundaries: ["icon-kit"],
+      });
+      expect(plan.fallbackReason).toBeUndefined();
+      // A page that can fall back to route-wide hydration still rejects the package.
+      const asyncPage = path.join(root, "src", "page.tsx");
+      fs.writeFileSync(
+        asyncPage,
+        'import { Icon } from "icon-kit";\nexport default async function Page() { return <Icon />; }\n',
+      );
+      expect(
+        getClientModuleHydrationPlan(asyncPage, root, "off", { asyncOwnerIslands: true })
+          .fallbackReason,
+      ).toBe("package client boundary icon-kit cannot yet be isolated");
+    });
+
+    it("has no islands without a components module or without island support", () => {
+      const { root, componentsFile } = markdownProject(
+        'import { CopyButton } from "./components/copy-button";\nexport const components = { CopyButton };\n',
+      );
+      expect(
+        getMarkdownPageHydrationPlan(undefined, root, "off", { asyncOwnerIslands: true })
+          .hasIsolatedClientBoundaries,
+      ).toBe(false);
+      expect(
+        getMarkdownPageHydrationPlan(componentsFile, root, "off", { asyncOwnerIslands: false })
+          .hasIsolatedClientBoundaries,
+      ).toBe(false);
     });
   });
 

@@ -100,6 +100,30 @@ export const components = {
 
 Set `mdx.markdownRoutes` to `false` when source-authored pages should render as HTML only.
 
+### Interactive components
+
+A `"use client"` component the components module imports hydrates as an island in React apps, so
+it works inside Markdown pages, including under a layout that hydrates as a whole route. The rest
+of the page stays server HTML. Island props must be serializable, the same limit as other islands.
+
+```tsx title="src/components/copy-button.tsx"
+"use client";
+
+import { useState } from "react";
+
+export function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button onClick={() => navigator.clipboard.writeText(text).then(() => setCopied(true))}>
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+```
+
+Islands need `mdx.components` to be a module path. Components from a package that marks itself
+`"use client"` render as static HTML on Markdown pages, and Farm logs which packages it left static.
+
 ## Restrict exposed pages
 
 Automatic mirrors include all application page routes. Restrict them when an application contains

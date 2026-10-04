@@ -13,6 +13,7 @@ import {
 
 export * from "./app-markdown-runtime";
 export {
+  resolveFarmMdxComponentsModulePath,
   resolveMdxConfig,
   type FarmMdxComponent,
   type FarmMdxComponents,

@@ -32,6 +32,7 @@ import {
   createFarmMarkdownRouteModuleFromFile,
   isFarmMarkdownPageFile,
   loadFarmMdxComponents,
+  resolveFarmMdxComponentsModulePath,
   resolveMdxConfig,
 } from "../app-markdown";
 import path from "path";
@@ -40,6 +41,7 @@ import { toFileModuleUrl } from "../utils/file-module";
 import {
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
+  getMarkdownPageHydrationPlan,
   getFarmClientHydrationPlanOptions,
   getClientModuleMetadata,
   resolveFarmIsolatedClientHydrationMode,
@@ -644,15 +646,45 @@ export class RouteManager {
       ),
     }));
 
+    // A Markdown page's client components come from the configured MDX components module.
+    const mdxComponentsModulePath = resolveFarmMdxComponentsModulePath(
+      resolveMdxConfig(this.config.mdx),
+      normalizedProjectRoot,
+    );
     const routeEntries = Array.from(this.routes.values()).map((entry) => ({
       entry,
-      metadata: getClientModuleHydrationPlan(
-        entry.modulePath,
-        normalizedProjectRoot,
-        isolatedMode,
-        planOptions,
-      ),
+      metadata: isFarmMarkdownPageFile(entry.modulePath)
+        ? getMarkdownPageHydrationPlan(
+            mdxComponentsModulePath,
+            normalizedProjectRoot,
+            isolatedMode,
+            planOptions,
+          )
+        : getClientModuleHydrationPlan(
+            entry.modulePath,
+            normalizedProjectRoot,
+            isolatedMode,
+            planOptions,
+          ),
     }));
+    // Every Markdown page shares the components module, so one warning covers them all.
+    const markdownFallback = routeEntries.find(
+      ({ entry, metadata }) => isFarmMarkdownPageFile(entry.modulePath) && metadata.fallbackReason,
+    );
+    if (markdownFallback) {
+      logger.warn(
+        `[Farm.js] client components in Markdown pages stay static: ${markdownFallback.metadata.fallbackReason}.`,
+      );
+    }
+    const markdownStaticPackages = routeEntries.find(
+      ({ entry, metadata }) =>
+        isFarmMarkdownPageFile(entry.modulePath) && metadata.staticPackageBoundaries,
+    )?.metadata.staticPackageBoundaries;
+    if (markdownStaticPackages) {
+      logger.info(
+        `[Farm.js] Markdown pages render client components from ${markdownStaticPackages.join(", ")} as static HTML: package client components cannot be isolated yet.`,
+      );
+    }
 
     enforceFarmIsolatedHydrationRouteBudget(
       layoutEntries.map(({ entry, metadata }) => ({

@@ -525,6 +525,74 @@ export default function Page() {
     }
   }, 120_000);
 
+  it("hydrates client components inside a Markdown page under a hydrating layout", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "layout-mark.tsx"),
+        `"use client";\nexport function LayoutMark() { return <span data-layout-mark>layout</span>; }`,
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        `import { LayoutMark } from "./layout-mark";
+export default function RootLayout({ children }) {
+  return <html><body><LayoutMark />{children}</body></html>;
+}`,
+      );
+      await fs.mkdir(path.join(root, "src", "components"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "components", "copy-button.tsx"),
+        `"use client";
+import { useState } from "react";
+export function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+  return <button data-copy-island onClick={() => setCopied(true)}>{copied ? "copied" : text}</button>;
+}`,
+      );
+      await fs.writeFile(
+        path.join(root, "src", "markdown-components.tsx"),
+        `import { CopyButton } from "./components/copy-button";\nexport const components = { CopyButton };`,
+      );
+      await fs.mkdir(path.join(root, "src", "app", "notes"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "notes", "page.md"),
+        `# Notes\n\nSome server-rendered text.\n\n<CopyButton text="copy me" />\n`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          mdx: { components: "./src/markdown-components.tsx" },
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "markdown-islands-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      const clientJavaScript = await readAllClientJavaScript(root);
+      expect(clientJavaScript).toContain("data-copy-island");
+      // The island loader is keyed by the module the server marker names.
+      expect(clientJavaScript).toContain('"/src/components/copy-button.tsx"');
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          expect(html).toContain("Some server-rendered text.");
+          expect(html).toContain('data-farm-layout-client="true"');
+          expect(html).toMatch(/<farm-client-boundary[^>]*copy-button/);
+        },
+        "/notes",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("preserves route-rule redirect status and explicit destination queries", async () => {
     const root = await createProductionFixture();
 

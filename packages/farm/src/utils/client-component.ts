@@ -95,6 +95,8 @@ export interface ClientModuleHydrationPlan extends ClientModuleMetadata {
    * as isolated islands. Set regardless of the experiment mode.
    */
   asyncOwnerIslands?: true;
+  /** Packages whose client components a Markdown page renders as static server HTML. */
+  staticPackageBoundaries?: string[];
 }
 
 export interface FarmClientHydrationPlanOptions {
@@ -647,6 +649,52 @@ export function getClientModuleHydrationPlan(
   return plan;
 }
 
+/**
+ * A Markdown page renders its configured MDX components into server HTML and has no route-wide
+ * client root. Like an async owner, the client components those MDX components import hydrate
+ * as isolated islands whatever the experiment mode is.
+ */
+export function getMarkdownPageHydrationPlan(
+  componentsModulePath: string | undefined,
+  root: string | undefined,
+  mode: FarmIsolatedClientHydrationMode = "off",
+  options: FarmClientHydrationPlanOptions = {},
+): ClientModuleHydrationPlan {
+  const plan: ClientModuleHydrationPlan = {
+    isClientComponent: false,
+    shouldHydrate: false,
+    islandStrategy: null,
+    mode,
+    legacyShouldHydrate: false,
+    legacyIslandStrategy: null,
+    estimatedIsolatedRootCount: 0,
+    isolatedHydrationEligible: false,
+    hasIsolatedClientBoundaries: false,
+    isolatedBoundaries: [],
+  };
+  if (!componentsModulePath || options.asyncOwnerIslands !== true) return plan;
+  const resolvedPath = resolveModuleSourcePath(componentsModulePath, root);
+  if (!resolvedPath) {
+    return { ...plan, fallbackReason: "the MDX components module could not be resolved" };
+  }
+  const inspection = collectIsolatedClientBoundaries(resolvedPath, root, {
+    allowDynamicCardinality: true,
+    staticPackageBoundaries: true,
+  });
+  if (inspection.fallbackReason) return { ...plan, fallbackReason: inspection.fallbackReason };
+  if (inspection.staticPackages.length > 0)
+    plan.staticPackageBoundaries = inspection.staticPackages;
+  if (inspection.boundaries.length === 0) return plan;
+  return {
+    ...plan,
+    estimatedIsolatedRootCount: inspection.estimatedBoundaryCount,
+    isolatedHydrationEligible: true,
+    hasIsolatedClientBoundaries: true,
+    isolatedBoundaries: inspection.boundaries,
+    asyncOwnerIslands: true,
+  };
+}
+
 interface FarmIsolatedHydrationRoutePlan {
   mode: FarmIsolatedClientHydrationMode;
   asyncOwnerIslands?: true;
@@ -1167,14 +1215,21 @@ function collectIsolatedClientBoundaries(
   options: {
     /** Accept boundaries rendered a data-dependent number of times. */
     allowDynamicCardinality?: boolean;
+    /**
+     * Render package client components as static server HTML instead of rejecting the owner.
+     * Only for owners with no route-wide fallback, where rejecting leaves everything static.
+     */
+    staticPackageBoundaries?: boolean;
   } = {},
 ): {
   boundaries: IsolatedClientBoundaryReference[];
   estimatedBoundaryCount: number;
+  staticPackages: string[];
   costGuardExceeded?: boolean;
   fallbackReason?: string;
 } {
   const boundaries = new Map<string, IsolatedClientBoundaryReference>();
+  const staticPackages = new Set<string>();
   const estimates = new Map<string, number>();
   const visiting = new Set<string>();
   let fallbackReason: string | undefined;
@@ -1221,6 +1276,10 @@ function collectIsolatedClientBoundaries(
       if (!specifier.startsWith(".") && !specifier.startsWith("/")) {
         const packageMetadata = inspectPackageClientBoundary(importedPath, root, new Set());
         if (packageMetadata.shouldHydrate) {
+          if (options.staticPackageBoundaries) {
+            staticPackages.add(specifier);
+            continue;
+          }
           fallbackReason = `package client boundary ${specifier} cannot yet be isolated`;
           return 0;
         }
@@ -1262,6 +1321,7 @@ function collectIsolatedClientBoundaries(
   return {
     boundaries: Array.from(boundaries.values()),
     estimatedBoundaryCount,
+    staticPackages: Array.from(staticPackages),
     costGuardExceeded,
     fallbackReason,
   };

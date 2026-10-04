@@ -37,6 +37,7 @@ import {
   getClientModuleHydrationPlan,
   getClientModuleMetadata,
   getFarmClientHydrationPlanOptions,
+  getMarkdownPageHydrationPlan,
   resolveFarmIsolatedClientHydrationMode,
   type ClientModuleHydrationPlan,
   type FarmClientHydrationPlanOptions,
@@ -44,6 +45,7 @@ import {
 } from "../utils/client-component";
 import type { FarmIsolatedClientHydrationMode } from "../types";
 import { isFarmMarkdownPageFile } from "../app-markdown";
+import { resolveFarmMdxComponentsModulePath, resolveMdxConfig } from "../app-markdown-config";
 import type { ProgrammaticRedirectRoute } from "../routes";
 import type { NitroConfig } from "nitro/types";
 import { applyFarmCspHashesToHtml } from "../security";
@@ -1388,18 +1390,12 @@ async function buildClient(
   const routePlans = pageRoutes.map((route) => ({
     route,
     metadata: isFarmMarkdownPageFile(route.modulePath)
-      ? {
-          isClientComponent: false,
-          shouldHydrate: false,
-          islandStrategy: null,
-          legacyShouldHydrate: false,
-          legacyIslandStrategy: null,
-          mode: isolatedMode,
-          estimatedIsolatedRootCount: 0,
-          hasIsolatedClientBoundaries: false,
-          isolatedBoundaries: [] as IsolatedClientBoundaryReference[],
-          suppressedAsyncHydration: undefined,
-        }
+      ? getMarkdownPageHydrationPlan(
+          resolveFarmMdxComponentsModulePath(resolveMdxConfig(config.mdx), root),
+          root,
+          isolatedMode,
+          planOptions,
+        )
       : getCachedClientModuleHydrationPlan(
           route.modulePath,
           root,
@@ -4777,19 +4773,28 @@ function isolateFarmRouteServerPage(element) { return element; }`;
       hydrationPlanOptions,
     ),
   }));
+  const mdxComponentsModulePath = resolveFarmMdxComponentsModulePath(
+    resolveMdxConfig(config.mdx),
+    config.root,
+  );
   const pageHydrationPlans = new Map(
-    pageRoutes
-      .filter((route) => !isFarmMarkdownPageFile(route.modulePath))
-      .map((route) => [
-        route.modulePath,
-        getCachedClientModuleHydrationPlan(
-          route.modulePath,
-          config.root,
-          isolatedHydrationMode,
-          hydrationPlanCache,
-          hydrationPlanOptions,
-        ),
-      ]),
+    pageRoutes.map((route) => [
+      route.modulePath,
+      isFarmMarkdownPageFile(route.modulePath)
+        ? getMarkdownPageHydrationPlan(
+            mdxComponentsModulePath,
+            config.root,
+            isolatedHydrationMode,
+            hydrationPlanOptions,
+          )
+        : getCachedClientModuleHydrationPlan(
+            route.modulePath,
+            config.root,
+            isolatedHydrationMode,
+            hydrationPlanCache,
+            hydrationPlanOptions,
+          ),
+    ]),
   );
 
   enforceFarmIsolatedHydrationRouteBudget(
@@ -4798,13 +4803,11 @@ function isolateFarmRouteServerPage(element) { return element; }`;
       depth: layout.pattern.split("/").filter(Boolean).length,
       metadata: layout.hydration,
     })),
-    pageRoutes
-      .filter((route) => !isFarmMarkdownPageFile(route.modulePath))
-      .map((route) => ({
-        pattern: route.pattern,
-        depth: route.pattern.split("/").filter(Boolean).length,
-        metadata: pageHydrationPlans.get(route.modulePath)!,
-      })),
+    pageRoutes.map((route) => ({
+      pattern: route.pattern,
+      depth: route.pattern.split("/").filter(Boolean).length,
+      metadata: pageHydrationPlans.get(route.modulePath)!,
+    })),
     layoutAppliesToRoute,
   );
   const providerServerImports = [
