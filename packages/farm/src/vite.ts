@@ -1988,6 +1988,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 method: requestMethod,
                 headers: docsHeaders,
                 body: toRequestBody(workflowBody),
+                signal: createFarmNodeRequestAbortSignal(req, res),
               }),
             );
             if (workflowResponse) {
@@ -2048,6 +2049,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 method: req.method,
                 headers,
                 body: toRequestBody(body),
+                signal: createFarmNodeRequestAbortSignal(req, res),
               });
 
               const dispatchIntegration = async (request: Request) => {
@@ -2201,10 +2203,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   body = await readNodeRequestBody(req as any, currentServerConfig.bodySizeLimit);
                 }
 
+                // Like production, the handler can see the client go away.
                 const request = new Request(url, {
                   method: req.method,
                   headers,
                   body: toRequestBody(body),
+                  signal: createFarmNodeRequestAbortSignal(req, res),
                 });
 
                 const apiLifecyclePayload = {
@@ -2297,6 +2301,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   method: req.method,
                   headers,
                   body: toRequestBody(body),
+                  signal: createFarmNodeRequestAbortSignal(req, res),
                 });
 
                 const apiLifecyclePayload = {
