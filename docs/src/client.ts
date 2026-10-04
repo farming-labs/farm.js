@@ -1,17 +1,11 @@
 import { defineClient } from "@farm.js/core/client/lifecycle";
-import { enhanceFigures } from "./components/blog/figure-player";
 import { enhanceAgentCheck, enhanceAgentCheckCopy } from "./components/agents/check-client";
 import { mountDocsAnnouncement } from "./components/docs-announcement";
 
 export default defineClient({
   setup() {
     const mounted = new Map<HTMLElement, () => void>();
-    // React hydrates the home page, so its figures wait for hydration before replaying. That
-    // hook can run before a concurrent hydration commits, so figures also keep every slot the
-    // player writes out of React's hydrated text (see BlogFigure). Blog Markdown is not hydrated.
-    let hydrated = false;
-    function refresh(afterRender = false) {
-      if (afterRender) hydrated = true;
+    function refresh() {
       for (const [element, dispose] of mounted) {
         if (!element.isConnected) {
           dispose();
@@ -19,21 +13,13 @@ export default defineClient({
         }
       }
       for (const element of document.querySelectorAll<HTMLElement>(
-        ".farm-blog .blog-reading-grid, [data-agent-check-root], [data-agent-check-copy], .farm-home .blog-figure",
+        "[data-agent-check-root], [data-agent-check-copy]",
       )) {
         if (mounted.has(element)) continue;
-        if (!hydrated && element.matches(".farm-home .blog-figure")) continue;
-        if (element.matches(".farm-home .blog-figure")) {
-          mounted.set(element, enhanceFigures(element));
-        } else if (element.matches("[data-agent-check-root]")) {
+        if (element.matches("[data-agent-check-root]")) {
           mounted.set(element, enhanceAgentCheck(element));
-        } else if (element.matches("[data-agent-check-copy]")) {
-          mounted.set(element, enhanceAgentCheckCopy(element as HTMLButtonElement));
         } else {
-          const disposeFigures = enhanceFigures(element);
-          mounted.set(element, () => {
-            disposeFigures();
-          });
+          mounted.set(element, enhanceAgentCheckCopy(element as HTMLButtonElement));
         }
       }
     }
@@ -46,8 +32,8 @@ export default defineClient({
     refresh();
     refreshDocs();
     return {
-      refresh(afterRender = false) {
-        refresh(afterRender);
+      refresh() {
+        refresh();
         refreshDocs();
       },
       dispose() {
@@ -58,12 +44,12 @@ export default defineClient({
   },
   hydration: {
     after({ state }) {
-      state.refresh(true);
+      state.refresh();
     },
   },
   navigation: {
     rendered({ state }) {
-      state.refresh(true);
+      state.refresh();
     },
   },
   close({ state }) {
