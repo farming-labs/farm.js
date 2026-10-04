@@ -124,11 +124,15 @@ const OVERLAY_STYLES = `
 
 .farm-runtime-error__viewport .farm-default-error__row {
   min-height: 48px;
+  grid-template-columns: 112px minmax(0, 1fr);
+  column-gap: 20px;
+  padding: 0 20px;
 }
 
 .farm-runtime-error__viewport .farm-default-error__details {
-  padding-top: 16px;
-  padding-bottom: 14px;
+  /* The overlay draws a box around the panel, so its content needs the same inset as the rows. */
+  padding: 16px 20px;
+  border-bottom: 0;
 }
 
 .farm-runtime-error__viewport .farm-default-error__details-header {
@@ -146,7 +150,7 @@ const OVERLAY_STYLES = `
 }
 
 .farm-runtime-error__viewport .farm-default-error__meta {
-  margin-top: 10px;
+  margin: 12px 0 0;
 }
 
 .farm-runtime-error__viewport .farm-default-error__actions {
@@ -227,6 +231,14 @@ const OVERLAY_STYLES = `
     width: 100%;
   }
 
+  .farm-runtime-error__viewport .farm-default-error__row {
+    padding: 12px 16px;
+  }
+
+  .farm-runtime-error__viewport .farm-default-error__details {
+    padding: 14px 16px;
+  }
+
   .farm-runtime-error__viewport .farm-default-error__action {
     min-width: 0;
   }
@@ -262,7 +274,7 @@ const OVERLAY_STYLES = `
 
   .farm-runtime-error__viewport .farm-default-error__details {
     padding-top: 12px;
-    padding-bottom: 10px;
+    padding-bottom: 12px;
   }
 
   .farm-runtime-error__viewport .farm-default-error__actions {
