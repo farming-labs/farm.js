@@ -1277,6 +1277,24 @@ export function Chart() {}
     expect(source).not.toContain("Could not preload layout:");
   });
 
+  it("imports hydrating layouts before the page so their CSS keeps its server order", () => {
+    // Vite injects a module's CSS when the module runs. Importing the page first put a root
+    // layout's global stylesheet after the page's, so global rules overrode page rules of
+    // equal specificity in development only.
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+    const start = source.indexOf("async function tryHydrateImportedPage(");
+    const end = source.indexOf("\n}\n", start);
+    expect(start).toBeGreaterThan(-1);
+    const emittedFunction = source.slice(start, end);
+
+    const layoutsLoaded = emittedFunction.indexOf("await loadLayoutComponents(layouts)");
+    const pageImported = emittedFunction.indexOf("import(/* @vite-ignore */ modulePath)");
+    expect(layoutsLoaded).toBeGreaterThan(-1);
+    expect(pageImported).toBeGreaterThan(-1);
+    expect(layoutsLoaded).toBeLessThan(pageImported);
+    expect(emittedFunction.match(/loadLayoutComponents\(/g)).toHaveLength(1);
+  });
+
   it("does not report hydration that a navigation cancelled as a failure", () => {
     // Client navigation aborts a route that is still hydrating. Reporting that abort sent it to
     // every client error hook, so the development overlay showed a 500 for a normal click.

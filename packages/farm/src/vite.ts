@@ -4895,6 +4895,10 @@ async function tryHydrateImportedPage(
   const layoutShouldHydrate = hydrationOptions.layoutShouldHydrate === true;
   const islandStrategy = hydrationOptions.islandStrategy || route.islandStrategy || 'load';
   let pageElement = null;
+  // Import layouts before the page, root first, so Vite injects their CSS in the same
+  // layout-then-page order as the server's stylesheet links and the production bundle.
+  const loadedLayouts = layoutShouldHydrate ? await loadLayoutComponents(layouts) : [];
+  if (signal?.aborted) return false;
 
   if (pageShouldHydrate) {
     let pageModule = pageModuleCache.get(modulePath);
@@ -4950,7 +4954,6 @@ async function tryHydrateImportedPage(
   let wrappedElement;
   let routeState = null;
   if (layoutShouldHydrate) {
-    const loadedLayouts = await loadLayoutComponents(layouts);
     if (pageShouldHydrate) {
       pageElement = createLayoutPageBoundary(true, islandStrategy, pageElement);
     }
