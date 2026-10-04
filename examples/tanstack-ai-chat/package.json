@@ -1,0 +1,29 @@
+{
+  "name": "farm-tanstack-ai-chat",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "farm dev",
+    "build": "farm build --preset node-server",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "@tanstack/ai": "0.64.0",
+    "@tanstack/ai-openai": "0.26.0",
+    "@tanstack/ai-react": "0.29.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@farm.js/cli": "workspace:*",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.18",
+    "typescript": "^5.5.3",
+    "vite": "^5.0.10",
+    "vitest": "^3.2.7"
+  }
+}
