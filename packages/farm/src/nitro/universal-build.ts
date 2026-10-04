@@ -3334,13 +3334,9 @@ async function hydrate() {
         });
 
         try {
-          if (hydrationController.signal.aborted || !container.isConnected) {
-            await farmClientRuntime.failHydration(
-              hydrationSession,
-              new DOMException("Route hydration was cancelled", "AbortError"),
-            );
-            return;
-          }
+          // A navigation replaced this route before it hydrated. Like a superseded
+          // navigation, that is not a failure, so error hooks never see it.
+          if (hydrationController.signal.aborted || !container.isConnected) return;
           if (shouldHydrate) {
             reactRoot = hydrateFarmRoute(container, routeState);
             reactRootContainer = container;

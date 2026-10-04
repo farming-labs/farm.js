@@ -1277,6 +1277,17 @@ export function Chart() {}
     expect(source).not.toContain("Could not preload layout:");
   });
 
+  it("does not report hydration that a navigation cancelled as a failure", () => {
+    // Client navigation aborts a route that is still hydrating. Reporting that abort sent it to
+    // every client error hook, so the development overlay showed a 500 for a normal click.
+    for (const file of [["vite.ts"], ["nitro", "universal-build.ts"]]) {
+      const source = fs.readFileSync(path.join(process.cwd(), "src", ...file), "utf-8");
+      expect(source).not.toContain("Route hydration was cancelled");
+      const reports = source.match(/farmClientRuntime\.failHydration\([^)]*\)/g) ?? [];
+      expect(reports).toEqual(["farmClientRuntime.failHydration(hydrationSession, error)"]);
+    }
+  });
+
   it("gives the hydrated page boundary every attribute the server renders on it", () => {
     // A missing attribute is a hydration mismatch React reports in development.
     const serverAttributes = [
