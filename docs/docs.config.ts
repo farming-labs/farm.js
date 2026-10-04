@@ -373,6 +373,11 @@ const sidebar = [
         ],
       },
       {
+        label: "Community Plugins",
+        icon: "plug",
+        children: [{ label: "Blyp", slug: "plugins/blyp", icon: "activity" }],
+      },
+      {
         label: "Plugin Authoring",
         icon: "wrench",
         children: [

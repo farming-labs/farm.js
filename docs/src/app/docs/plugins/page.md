@@ -33,6 +33,14 @@ Use an [integration](/docs/integrations) for a product or service such as authen
 
 Each published plugin has its own setup page in this section. Use [Create a Plugin](/docs/plugins/create-plugin) when the behavior is specific to your application or package.
 
+## Community plugins
+
+Community plugins are maintained by their authors outside the Farm project.
+
+| Plugin                     | Purpose                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------ |
+| [Blyp](/docs/plugins/blyp) | Record request-scoped logs, propagate traces, and collect lifecycle and browser telemetry. |
+
 ## Plugin authoring
 
 Start with [Create a Plugin](/docs/plugins/create-plugin) for the server and build lifecycle. Add the [Client Plugin API](/docs/plugins/client) only when the plugin also needs browser hydration, navigation, error, performance, or cleanup hooks. Client plugins are an authoring capability, not a separately installed package.
