@@ -232,6 +232,8 @@ const OVERLAY_STYLES = `
   }
 
   .farm-runtime-error__viewport .farm-default-error__row {
+    grid-template-columns: 1fr;
+    gap: 4px;
     padding: 12px 16px;
   }
 
