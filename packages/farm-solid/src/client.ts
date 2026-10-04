@@ -1,7 +1,8 @@
 import type { FarmRendererRouteState } from "@farm.js/core/renderer";
-import { createSignal, type Setter } from "solid-js";
+import { createSignal, sharedConfig, type Setter } from "solid-js";
 import { hydrate as solidHydrate, render as solidRender } from "solid-js/web";
 import SolidCompat, {
+  FARM_SOLID_RENDER_ID_ATTRIBUTE,
   Fragment,
   Suspense,
   ErrorBoundary,
@@ -82,6 +83,49 @@ function inferHydrationRenderId(firstHydratableElement: HTMLElement | null): str
   return hydrationKey?.endsWith("00") ? hydrationKey.slice(0, -2) : undefined;
 }
 
+interface SolidHydrationEvents {
+  events?: Array<[Element, Event]> | null;
+  completed?: WeakSet<Element> | null;
+}
+
+/**
+ * Solid's hydration script queues every delegated event whose nearest
+ * `data-hk` element has not hydrated, and replays the queue only as hydrated
+ * nodes complete. Nodes from a fallback render never complete, so clear what
+ * the fallback can no longer replay and stop queueing events inside it.
+ */
+function releaseSolidHydrationEvents(container: Element): void {
+  const { events, completed } = sharedConfig as typeof sharedConfig & SolidHydrationEvents;
+  if (!events) return;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const target = events[index]![0];
+    if (!target.isConnected || container.contains(target)) events.splice(index, 1);
+  }
+  const owner = container.closest("[data-hk]");
+  if (owner) completed?.add(owner);
+}
+
+function hydrateOrRender(factory: () => any, container: Element): () => void {
+  const firstHydratableElement = container.querySelector<HTMLElement>("[data-hk]");
+  const dispose = solidHydrate(factory, container, {
+    renderId:
+      container.getAttribute(FARM_SOLID_RENDER_ID_ATTRIBUTE) ??
+      inferHydrationRenderId(firstHydratableElement),
+  });
+
+  // Renderer-neutral FARMJS wrappers can introduce a hydration-context
+  // prefix that Solid cannot recover from a nested page container alone. If
+  // Solid replaced the first server node instead of claiming it, remount the
+  // subtree normally so it is interactive rather than leaving detached
+  // event handlers behind.
+  if (!firstHydratableElement || container.contains(firstHydratableElement)) return dispose;
+  dispose();
+  container.replaceChildren();
+  const disposeRender = solidRender(factory, container);
+  releaseSolidHydrationEvents(container);
+  return disposeRender;
+}
+
 function createManagedRoot(
   container: Element,
   element?: unknown,
@@ -101,21 +145,7 @@ function createManagedRoot(
       return;
     }
 
-    const firstHydratableElement = container.querySelector<HTMLElement>("[data-hk]");
-    dispose = solidHydrate(factory, container, {
-      renderId: inferHydrationRenderId(firstHydratableElement),
-    });
-
-    // Renderer-neutral FARMJS wrappers can introduce a hydration-context
-    // prefix that Solid cannot recover from a nested page container alone. If
-    // Solid replaced the first server node instead of claiming it, remount the
-    // subtree normally so it is interactive rather than leaving detached
-    // event handlers behind.
-    if (firstHydratableElement && !container.contains(firstHydratableElement)) {
-      dispose();
-      container.replaceChildren();
-      dispose = solidRender(factory, container);
-    }
+    dispose = hydrateOrRender(factory, container);
   };
 
   const mountRoute = (state: FarmRendererRouteState, shouldHydrate: boolean) => {
@@ -130,15 +160,7 @@ function createManagedRoot(
       return;
     }
 
-    const firstHydratableElement = container.querySelector<HTMLElement>("[data-hk]");
-    dispose = solidHydrate(factory, container, {
-      renderId: inferHydrationRenderId(firstHydratableElement),
-    });
-    if (firstHydratableElement && !container.contains(firstHydratableElement)) {
-      dispose();
-      container.replaceChildren();
-      dispose = solidRender(factory, container);
-    }
+    dispose = hydrateOrRender(factory, container);
   };
 
   if (initialRouteState) mountRoute(initialRouteState, hydration);

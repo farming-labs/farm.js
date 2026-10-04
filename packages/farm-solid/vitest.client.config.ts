@@ -2,7 +2,8 @@ import { defineConfig } from "vitest/config";
 import solidPlugin from "vite-plugin-solid";
 
 export default defineConfig({
-  plugins: [solidPlugin({ ssr: false })],
+  // Hydratable DOM output, as production builds use (see src/vite.ts).
+  plugins: [solidPlugin({ ssr: true })],
   css: {
     postcss: {
       plugins: [],
@@ -19,7 +20,7 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    include: ["src/**/client.test.ts", "src/**/client-route.test.tsx"],
+    include: ["src/**/client.test.ts", "src/**/client-*.test.tsx"],
     server: {
       deps: {
         inline: ["solid-js"],
