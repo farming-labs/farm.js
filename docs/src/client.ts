@@ -1,6 +1,5 @@
 import { defineClient } from "@farm.js/core/client/lifecycle";
 import { enhanceArtwork } from "./components/blog/artwork-motion";
-import { enhanceCodeBlocks } from "./components/blog/code-copy";
 import { enhanceContents } from "./components/blog/contents-navigation";
 import { enhanceFigures } from "./components/blog/figure-player";
 import { enhanceAgentCheck, enhanceAgentCheckCopy } from "./components/agents/check-client";
@@ -36,11 +35,9 @@ export default defineClient({
           mounted.set(element, enhanceAgentCheckCopy(element as HTMLButtonElement));
         } else {
           const disposeContents = enhanceContents(element);
-          const disposeCode = enhanceCodeBlocks(element);
           const disposeFigures = enhanceFigures(element);
           mounted.set(element, () => {
             disposeContents?.();
-            disposeCode();
             disposeFigures();
           });
         }
