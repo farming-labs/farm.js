@@ -4243,7 +4243,13 @@ class LegacyManifestSPARouter {
   constructor() {
     this.moduleCache = new Map();
     this.prefetchingUrls = new Set();
-    this.observers = new Map();
+    this.prefetchObserver = null;
+    this.observedPrefetchLinks = new Map();
+    this.prefetchTimers = new Map();
+    this.viewportPrefetchQueue = [];
+    this.viewportPrefetchTasksByHref = new Map();
+    this.viewportPrefetchTasksByElement = new Map();
+    this.activeViewportPrefetches = 0;
     
     if (typeof window !== 'undefined') {
       window.addEventListener('popstate', this.handlePopState.bind(this));
@@ -4376,28 +4382,101 @@ class LegacyManifestSPARouter {
     if (typeof IntersectionObserver === 'undefined') return;
     const href = element.getAttribute('href');
     if (!href || this.isExternalUrl(href)) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setTimeout(() => this.prefetch(href), 100);
-            observer.unobserve(element);
-            this.observers.delete(element);
-          }
-        }
-      },
-      { rootMargin: '200px' }
-    );
+    this.unobserveForPrefetch(element);
+    const observer = this.getPrefetchObserver();
+    this.observedPrefetchLinks.set(element, href);
     observer.observe(element);
-    this.observers.set(element, observer);
   }
 
   unobserveForPrefetch(element) {
-    const observer = this.observers.get(element);
-    if (observer) {
-      observer.unobserve(element);
-      this.observers.delete(element);
+    if (this.observedPrefetchLinks.delete(element)) {
+      this.prefetchObserver?.unobserve(element);
+    }
+    const timer = this.prefetchTimers.get(element);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.prefetchTimers.delete(element);
+    }
+    this.cancelViewportPrefetch(element);
+  }
+
+  getPrefetchObserver() {
+    if (this.prefetchObserver) return this.prefetchObserver;
+    this.prefetchObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const element = entry.target;
+        const href = this.observedPrefetchLinks.get(element);
+        if (!href) continue;
+        this.prefetchObserver.unobserve(element);
+        this.observedPrefetchLinks.delete(element);
+        const timer = setTimeout(() => {
+          if (this.prefetchTimers.get(element) !== timer) return;
+          this.prefetchTimers.delete(element);
+          this.enqueueViewportPrefetch(element, href);
+        }, 100);
+        this.prefetchTimers.set(element, timer);
+      }
+    }, { rootMargin: '200px' });
+    return this.prefetchObserver;
+  }
+
+  enqueueViewportPrefetch(element, href) {
+    let task = this.viewportPrefetchTasksByHref.get(href);
+    if (!task) {
+      task = { href, elements: new Set(), cancelled: false, started: false };
+      this.viewportPrefetchTasksByHref.set(href, task);
+      this.viewportPrefetchQueue.push(task);
+    }
+    task.elements.add(element);
+    this.viewportPrefetchTasksByElement.set(element, task);
+    this.drainViewportPrefetchQueue();
+  }
+
+  cancelViewportPrefetch(element) {
+    const task = this.viewportPrefetchTasksByElement.get(element);
+    if (!task) return;
+    this.viewportPrefetchTasksByElement.delete(element);
+    task.elements.delete(element);
+    if (task.elements.size > 0) return;
+    if (task.started) return;
+    task.cancelled = true;
+    if (this.viewportPrefetchTasksByHref.get(task.href) === task) {
+      this.viewportPrefetchTasksByHref.delete(task.href);
+    }
+  }
+
+  drainViewportPrefetchQueue() {
+    while (this.activeViewportPrefetches < 4 && this.viewportPrefetchQueue.length > 0) {
+      const task = this.viewportPrefetchQueue.shift();
+      if (task.cancelled || task.elements.size === 0) {
+        if (this.viewportPrefetchTasksByHref.get(task.href) === task) {
+          this.viewportPrefetchTasksByHref.delete(task.href);
+        }
+        continue;
+      }
+      task.started = true;
+      this.activeViewportPrefetches += 1;
+      let prefetchResult;
+      try {
+        prefetchResult = this.prefetch(task.href);
+      } catch {
+        prefetchResult = undefined;
+      }
+      Promise.resolve(prefetchResult)
+        .catch(() => undefined)
+        .finally(() => {
+          if (this.viewportPrefetchTasksByHref.get(task.href) === task) {
+            this.viewportPrefetchTasksByHref.delete(task.href);
+          }
+          for (const element of task.elements) {
+            if (this.viewportPrefetchTasksByElement.get(element) === task) {
+              this.viewportPrefetchTasksByElement.delete(element);
+            }
+          }
+          this.activeViewportPrefetches -= 1;
+          this.drainViewportPrefetchQueue();
+        });
     }
   }
 

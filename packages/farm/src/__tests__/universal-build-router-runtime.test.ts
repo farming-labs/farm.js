@@ -376,6 +376,83 @@ describe("generateUniversalRouterStateProperties", () => {
     expect(router.currentPath).toBe("/start?q=replaced");
   });
 
+  it("shares viewport observation and limits generated prefetch work", async () => {
+    let notifyVisibility: IntersectionObserverCallback | undefined;
+    let observerCount = 0;
+    class MockIntersectionObserver {
+      constructor(callback: IntersectionObserverCallback) {
+        observerCount += 1;
+        notifyVisibility = callback;
+      }
+      observe() {}
+      unobserve() {}
+    }
+    const createRouter = new Function(
+      "window",
+      "IDLE_NAVIGATION_STATE",
+      "IntersectionObserver",
+      `return ({${runtime}});`,
+    );
+    const router = createRouter(
+      { location: { pathname: "/", search: "" } },
+      { state: "idle" },
+      MockIntersectionObserver,
+    );
+    const releases: Array<() => void> = [];
+    router.prefetch = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releases.push(resolve);
+        }),
+    );
+    const links = Array.from({ length: 6 }, (_, index) => ({ index }));
+    const duplicateQueuedLink = { index: 6 };
+    const observer = router.getPrefetchObserver("50px");
+    for (const [index, link] of links.entries()) {
+      router.observedPrefetchLinks.set(link, `/route/${index}`);
+      observer.observe(link);
+    }
+    router.observedPrefetchLinks.set(duplicateQueuedLink, "/route/5");
+    observer.observe(duplicateQueuedLink);
+
+    notifyVisibility?.(
+      [...links, duplicateQueuedLink].map(
+        (target) => ({ isIntersecting: true, target }) as IntersectionObserverEntry,
+      ),
+      observer as IntersectionObserver,
+    );
+
+    expect(observerCount).toBe(1);
+    expect(router.prefetch).toHaveBeenCalledTimes(4);
+    router.cancelViewportPrefetch(links[4]);
+    releases[0]();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(router.prefetch).toHaveBeenCalledTimes(5);
+    expect(router.prefetch).not.toHaveBeenCalledWith("/route/4");
+    expect(router.prefetch).toHaveBeenLastCalledWith("/route/5");
+    expect(router.prefetch.mock.calls.filter(([href]) => href === "/route/5")).toHaveLength(1);
+  });
+
+  it("continues generated viewport prefetch work after a synchronous failure", async () => {
+    const createRouter = new Function("window", "IDLE_NAVIGATION_STATE", `return ({${runtime}});`);
+    const router = createRouter({ location: { pathname: "/", search: "" } }, { state: "idle" });
+    router.prefetch = vi.fn((href: string) => {
+      if (href === "/route/0") throw new Error("prefetch failed");
+      return new Promise<void>(() => undefined);
+    });
+
+    for (let index = 0; index < 5; index += 1) {
+      router.enqueueViewportPrefetch({ index }, `/route/${index}`);
+    }
+
+    expect(router.prefetch).toHaveBeenCalledTimes(4);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(router.prefetch).toHaveBeenCalledTimes(5);
+    expect(router.prefetch).toHaveBeenLastCalledWith("/route/4");
+  });
+
   it("checks blocker activity before prompting on unload", () => {
     expect(runtime).toContain("shouldBlockUnload: function()");
     expect(runtime).toContain("return result === true");

@@ -2067,11 +2067,93 @@ export function generateUniversalRouterStateProperties(): string {
   navigationState: IDLE_NAVIGATION_STATE,
   navigationSequence: 0,
   activeNavigation: null,
-  observers: new Map(),
+  prefetchObserver: null,
+  observedPrefetchLinks: new Map(),
+  viewportPrefetchQueue: [],
+  viewportPrefetchTasksByHref: new Map(),
+  viewportPrefetchTasksByElement: new Map(),
+  activeViewportPrefetches: 0,
   scrollElements: new Map(),
   currentPath: window.location.pathname + window.location.search,
   currentHistoryIndex: null,
   currentHistoryState: null,
+
+  getPrefetchObserver: function(rootMargin) {
+    if (this.prefetchObserver) return this.prefetchObserver;
+    const router = this;
+    this.prefetchObserver = new IntersectionObserver(function(entries) {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const element = entry.target;
+        const href = router.observedPrefetchLinks.get(element);
+        if (!href) continue;
+        router.prefetchObserver.unobserve(element);
+        router.observedPrefetchLinks.delete(element);
+        router.enqueueViewportPrefetch(element, href);
+      }
+    }, { rootMargin: rootMargin });
+    return this.prefetchObserver;
+  },
+
+  enqueueViewportPrefetch: function(element, href) {
+    let task = this.viewportPrefetchTasksByHref.get(href);
+    if (!task) {
+      task = { href: href, elements: new Set(), cancelled: false, started: false };
+      this.viewportPrefetchTasksByHref.set(href, task);
+      this.viewportPrefetchQueue.push(task);
+    }
+    task.elements.add(element);
+    this.viewportPrefetchTasksByElement.set(element, task);
+    this.drainViewportPrefetchQueue();
+  },
+
+  cancelViewportPrefetch: function(element) {
+    const task = this.viewportPrefetchTasksByElement.get(element);
+    if (!task) return;
+    this.viewportPrefetchTasksByElement.delete(element);
+    task.elements.delete(element);
+    if (task.elements.size > 0) return;
+    if (task.started) return;
+    task.cancelled = true;
+    if (this.viewportPrefetchTasksByHref.get(task.href) === task) {
+      this.viewportPrefetchTasksByHref.delete(task.href);
+    }
+  },
+
+  drainViewportPrefetchQueue: function() {
+    while (this.activeViewportPrefetches < 4 && this.viewportPrefetchQueue.length > 0) {
+      const task = this.viewportPrefetchQueue.shift();
+      if (task.cancelled || task.elements.size === 0) {
+        if (this.viewportPrefetchTasksByHref.get(task.href) === task) {
+          this.viewportPrefetchTasksByHref.delete(task.href);
+        }
+        continue;
+      }
+
+      task.started = true;
+      this.activeViewportPrefetches += 1;
+      let prefetchResult;
+      try {
+        prefetchResult = this.prefetch(task.href);
+      } catch {
+        prefetchResult = undefined;
+      }
+      Promise.resolve(prefetchResult)
+        .catch(() => undefined)
+        .finally(() => {
+          if (this.viewportPrefetchTasksByHref.get(task.href) === task) {
+            this.viewportPrefetchTasksByHref.delete(task.href);
+          }
+          for (const element of task.elements) {
+            if (this.viewportPrefetchTasksByElement.get(element) === task) {
+              this.viewportPrefetchTasksByElement.delete(element);
+            }
+          }
+          this.activeViewportPrefetches -= 1;
+          this.drainViewportPrefetchQueue();
+        });
+    }
+  },
 
   initializeHistory: function() {
     const existingIndex = readHistoryIndex(window.history.state);
@@ -2728,7 +2810,7 @@ ${generateUniversalRouterStateProperties()}
     const pathname = url.pathname + url.search;
     if (this.readFreshPrefetch(pathname) !== undefined) return;
     
-    this.fetchPage(pathname, false, false)
+    return this.fetchPage(pathname, false, false)
       .then(function(html) { spaRouter.storePrefetchedHtml(pathname, html); })
       .catch(function(error) {
         clearFarmPrefetchCacheOnDeploymentMismatch(spaRouter, error);
@@ -2744,27 +2826,17 @@ ${generateUniversalRouterStateProperties()}
 
     const href = element.getAttribute("href");
     if (!href) return;
-
-    const observer = new IntersectionObserver(function(entries) {
-      entries.forEach(function(entry) {
-        if (entry.isIntersecting) {
-          spaRouter.prefetch(href);
-          observer.disconnect();
-          spaRouter.observers.delete(element);
-        }
-      });
-    }, { rootMargin: "50px" });
-
+    this.unobserveForPrefetch(element);
+    const observer = this.getPrefetchObserver("50px");
+    this.observedPrefetchLinks.set(element, href);
     observer.observe(element);
-    this.observers.set(element, observer);
   },
 
   unobserveForPrefetch: function(element) {
-    const observer = this.observers.get(element);
-    if (!observer) return;
-    observer.unobserve(element);
-    observer.disconnect();
-    this.observers.delete(element);
+    if (this.observedPrefetchLinks.delete(element)) {
+      this.prefetchObserver?.unobserve(element);
+    }
+    this.cancelViewportPrefetch(element);
   }
 };
 
@@ -3818,7 +3890,7 @@ ${generateUniversalRouterStateProperties()}
     const pathname = url.pathname + url.search;
     if (this.readFreshPrefetch(pathname) !== undefined) return;
     
-    this.fetchPage(pathname, undefined, false, false)
+    return this.fetchPage(pathname, undefined, false, false)
       .catch(function(error) {
         clearFarmPrefetchCacheOnDeploymentMismatch(spaRouter, error);
       });
@@ -3829,27 +3901,17 @@ ${generateUniversalRouterStateProperties()}
 
     const href = element.getAttribute("href");
     if (!href) return;
-
-    const observer = new IntersectionObserver(function(entries) {
-      entries.forEach(function(entry) {
-        if (entry.isIntersecting) {
-          spaRouter.prefetch(href);
-          observer.disconnect();
-          spaRouter.observers.delete(element);
-        }
-      });
-    }, { rootMargin: "50px" });
-
+    this.unobserveForPrefetch(element);
+    const observer = this.getPrefetchObserver("50px");
+    this.observedPrefetchLinks.set(element, href);
     observer.observe(element);
-    this.observers.set(element, observer);
   },
 
   unobserveForPrefetch: function(element) {
-    const observer = this.observers.get(element);
-    if (!observer) return;
-    observer.unobserve(element);
-    observer.disconnect();
-    this.observers.delete(element);
+    if (this.observedPrefetchLinks.delete(element)) {
+      this.prefetchObserver?.unobserve(element);
+    }
+    this.cancelViewportPrefetch(element);
   }
 };
 
