@@ -2,8 +2,9 @@ import {
   ErrorBoundary as SolidErrorBoundary,
   Suspense as SolidSuspense,
   createComponent,
+  sharedConfig,
 } from "solid-js";
-import { Dynamic } from "solid-js/web";
+import { Dynamic, isServer } from "solid-js/web";
 
 const FARM_SOLID_ELEMENT = Symbol.for("farm.solid.element");
 const FARM_SOLID_FRAGMENT = Symbol.for("farm.solid.fragment");
@@ -14,6 +15,13 @@ export interface FarmSolidElement {
   readonly props: Record<string, unknown> | null;
   readonly children: readonly unknown[];
 }
+
+/**
+ * Written by the server on a FARMJS island container: the Solid hydration
+ * context id of the island's root component, which the client passes to
+ * `hydrate` as its `renderId`.
+ */
+export const FARM_SOLID_RENDER_ID_ATTRIBUTE = "data-farm-solid-render-id";
 
 export const Fragment = FARM_SOLID_FRAGMENT;
 export const Suspense = SolidSuspense;
@@ -210,12 +218,49 @@ function normalizeProps(element: FarmSolidElement): Record<string, unknown> {
   return props;
 }
 
+/**
+ * The client hydrates an island by calling its root component directly in a
+ * hydration context it must name up front (see `materializeSolidRoot`). Record
+ * the id Solid gives that component on the server and write it on the island
+ * container. Guessing it from the first hydration key breaks as soon as the
+ * component allocates an id before its first element, as `createUniqueId()`
+ * does, and a missed guess falls back to a non-hydrating render.
+ */
+function materializeServerIsland(tag: string, element: FarmSolidElement): unknown {
+  const root = element.children.length === 1 ? element.children[0] : undefined;
+  if (!isFarmSolidElement(root) || typeof root.type !== "function") return undefined;
+
+  const Component = root.type as (props: Record<string, unknown>) => unknown;
+  let renderId: string | undefined;
+  const recordingRoot = createElement(
+    (props: Record<string, unknown>) => {
+      const context = sharedConfig.context as { id: string; noHydrate?: boolean } | undefined;
+      if (context && !context.noHydrate) renderId = context.id;
+      return Component(props);
+    },
+    root.props,
+    ...root.children,
+  );
+  // Spreading evaluates the children getter, which runs the root component.
+  const props: Record<string, unknown> & { component: string } = {
+    ...normalizeProps(createElement(tag, element.props, recordingRoot)),
+    component: tag,
+  };
+  if (renderId !== undefined) props[FARM_SOLID_RENDER_ID_ATTRIBUTE] = renderId;
+  return createComponent(Dynamic, props);
+}
+
 export function materializeSolidElement(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(materializeSolidElement);
   if (!isFarmSolidElement(value)) return value;
 
   if (value.type === FARM_SOLID_FRAGMENT) {
     return value.children.map(materializeSolidElement);
+  }
+
+  if (isServer && typeof value.type === "string" && value.props?.["data-farm-island"] != null) {
+    const island = materializeServerIsland(value.type, value);
+    if (island !== undefined) return island;
   }
 
   const props = normalizeProps(value);

@@ -5,7 +5,8 @@ import {
   defineRendererDescriptorConformance,
   defineRendererServerConformance,
 } from "@farm.js/renderer-tests";
-import { escape, ssr } from "solid-js/web";
+import { createSignal, createUniqueId } from "solid-js";
+import { escape, ssr, ssrAttribute, ssrHydrationKey } from "solid-js/web";
 import { describe, expect, it } from "vitest";
 import { solid } from "../index";
 import * as serverRuntime from "../server";
@@ -16,6 +17,7 @@ import {
   renderToReadableStream,
   renderToString,
 } from "../server";
+import { UNIQUE_ID_ISLAND_HTML } from "./unique-id-island.fixture";
 
 defineRendererDescriptorConformance({
   name: "solid",
@@ -106,5 +108,36 @@ describe("Solid renderer", () => {
 
     expect(html).toMatch(/translate:\s*10px/);
     expect(html).toMatch(/rotate:\s*45px/);
+  });
+
+  it("writes the island root's render id when the root creates an id before its first element", async () => {
+    // vite-plugin-solid compiles the island in client-island.test.tsx to this
+    // ssr() shape. createUniqueId() takes the first id in the component's
+    // context, so its first element's key no longer ends in "00".
+    function UniqueIdIsland() {
+      const id = createUniqueId();
+      const [count] = createSignal(0);
+      return ssr(
+        [
+          "<button",
+          ' type="button"',
+          ">count: <!--$-->",
+          "<!--/--></button>",
+        ] as unknown as TemplateStringsArray,
+        ssrHydrationKey(),
+        ssrAttribute("id", escape(id, true), false),
+        escape(count()),
+      );
+    }
+
+    const html = await renderToString(
+      createElement(
+        "div",
+        { id: "__farm_page__", "data-farm-island": "page" },
+        createElement(UniqueIdIsland),
+      ),
+    );
+
+    expect(html).toBe(UNIQUE_ID_ISLAND_HTML);
   });
 });
