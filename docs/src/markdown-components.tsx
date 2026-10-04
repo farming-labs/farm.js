@@ -1,11 +1,11 @@
 import { Fragment, isValidElement, type ComponentPropsWithoutRef } from "react";
-import { Check, Copy } from "lucide-react";
 import { createHighlighterCoreSync } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import bash from "shiki/langs/bash.mjs";
 import typescript from "shiki/langs/typescript.mjs";
 import vesper from "shiki/themes/vesper.mjs";
 import { AgentWaitlist } from "./components/agents/waitlist";
+import { BlogCodeCopy } from "./components/blog/code-copy-button";
 import { BlogFigure } from "./components/blog/figures";
 import { BlogVideo } from "./components/blog/video";
 
@@ -58,9 +58,10 @@ function Code({ children, className, ...props }: ComponentPropsWithoutRef<"code"
 }
 
 function Pre({ children, ...props }: ComponentPropsWithoutRef<"pre">) {
-  const language = isValidElement<{ className?: string }>(children)
-    ? children.props.className?.match(/language-([^\s]+)/)?.[1]
+  const code = isValidElement<{ className?: string; children?: unknown }>(children)
+    ? children.props
     : undefined;
+  const language = code?.className?.match(/language-([^\s]+)/)?.[1];
   const label =
     language === "bash" || language === "sh"
       ? "Terminal"
@@ -75,19 +76,11 @@ function Pre({ children, ...props }: ComponentPropsWithoutRef<"pre">) {
           <span aria-hidden="true">
             {language === "typescript" || language === "ts" ? "TS" : language}
           </span>
-          <button
-            type="button"
-            className="blog-code-copy"
-            aria-label={`Copy ${label} code`}
-            title={`Copy ${label} code`}
-            hidden
-          >
-            <Copy className="blog-copy-icon" size={14} strokeWidth={1.8} aria-hidden />
-            <Check className="blog-copy-check" size={14} strokeWidth={1.8} aria-hidden />
-            <span data-copy-label>COPY</span>
-          </button>
+          <BlogCodeCopy
+            text={typeof code?.children === "string" ? code.children : ""}
+            label={label}
+          />
         </div>
-        <span className="sr-only" role="status" data-copy-status />
       </div>
       <pre tabIndex={0} aria-label={`${label} code`} {...props}>
         {children}
