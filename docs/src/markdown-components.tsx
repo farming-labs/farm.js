@@ -1,4 +1,10 @@
-import { Fragment, isValidElement, type ComponentPropsWithoutRef } from "react";
+import {
+  Children,
+  Fragment,
+  isValidElement,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+} from "react";
 import { createHighlighterCoreSync } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import bash from "shiki/langs/bash.mjs";
@@ -8,6 +14,7 @@ import { AgentWaitlist } from "./components/agents/waitlist";
 import { BlogCodeCopy } from "./components/blog/code-copy-button";
 import { BlogFigure } from "./components/blog/figures";
 import { BlogVideo } from "./components/blog/video";
+import { getLaunchSectionId } from "./lib/blog";
 
 // Farm loads this map only on the server for source-authored Markdown routes.
 // Load the blog's grammars once, with the same dark palette as the docs.
@@ -89,4 +96,32 @@ function Pre({ children, ...props }: ComponentPropsWithoutRef<"pre">) {
   );
 }
 
-export const components = { code: Code, pre: Pre, AgentWaitlist, BlogFigure, BlogVideo };
+const textOf = (node: ReactNode): string =>
+  Children.toArray(node)
+    .map((child) =>
+      typeof child === "string" || typeof child === "number"
+        ? String(child)
+        : isValidElement<{ children?: ReactNode }>(child)
+          ? textOf(child.props.children)
+          : "",
+    )
+    .join("");
+
+// A section heading links to its own anchor, the target the contents use, so a reader can click or
+// copy it to share the section. The heading text is the link; no "#" is shown.
+function H2({ children, ...props }: ComponentPropsWithoutRef<"h2">) {
+  const id = getLaunchSectionId(textOf(children));
+  return (
+    <h2 {...props}>
+      {id ? (
+        <a className="blog-heading-link" href={`#${id}`}>
+          {children}
+        </a>
+      ) : (
+        children
+      )}
+    </h2>
+  );
+}
+
+export const components = { code: Code, pre: Pre, h2: H2, AgentWaitlist, BlogFigure, BlogVideo };

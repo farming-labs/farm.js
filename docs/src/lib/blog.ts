@@ -22,7 +22,8 @@ export const launchSections = [
   ["local-first-data-with-sync", "Sync"],
   ["a-cli-that-explains-your-app", "The CLI"],
   ["built-for-agents-too", "Built for agents"],
-  ["api-routes-as-mcp-tools", "MCP composition"],
+  // Renamed heading; the anchor keeps its original id so shared links still work.
+  ["api-routes-as-mcp-tools", "MCP composition", "API routes and standalone MCP tools"],
   ["browser-tools-with-webmcp", "Browser WebMCP"],
   ["bring-your-agent-framework", "Agent frameworks"],
   ["agent-infrastructure", "Agent infrastructure"],
@@ -31,3 +32,17 @@ export const launchSections = [
   ["how-we-earned-stable", "Earning stable"],
   ["try-it", "Try it"],
 ] as const;
+
+const slug = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+
+/** The launch post section anchor a heading links to, or undefined for other headings. */
+export function getLaunchSectionId(heading: string): string | undefined {
+  const section = launchSections.find((entry) =>
+    entry.length > 2 ? entry[2] === heading : entry[0] === slug(heading),
+  );
+  return section?.[0];
+}

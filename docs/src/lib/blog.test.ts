@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { launchSections } from "./blog";
+import { getLaunchSectionId, launchSections } from "./blog";
 
 const post = readFileSync(new URL("../app/blog/0.1.0/page.md", import.meta.url), "utf8");
 
@@ -27,6 +27,14 @@ describe("launch post content", () => {
 
   it("keeps every contents link anchored in the article", () => {
     for (const [id] of launchSections) expect(post).toContain(`id="${id}"`);
+  });
+
+  it("links every section heading to the anchor placed before it", () => {
+    const headings = [
+      ...post.matchAll(/<span id="([^"]+)" className="blog-heading-anchor" \/>\s*\n\s*## (.+)/g),
+    ];
+    expect(headings).toHaveLength(launchSections.length);
+    for (const [, id, heading] of headings) expect(getLaunchSectionId(heading)).toBe(id);
   });
 
   it("points every documentation link at an existing guide", () => {

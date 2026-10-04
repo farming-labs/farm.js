@@ -1,6 +1,5 @@
 import { defineClient } from "@farm.js/core/client/lifecycle";
 import { enhanceArtwork } from "./components/blog/artwork-motion";
-import { enhanceContents } from "./components/blog/contents-navigation";
 import { enhanceFigures } from "./components/blog/figure-player";
 import { enhanceAgentCheck, enhanceAgentCheckCopy } from "./components/agents/check-client";
 import { mountDocsAnnouncement } from "./components/docs-announcement";
@@ -34,10 +33,8 @@ export default defineClient({
         } else if (element.matches("[data-agent-check-copy]")) {
           mounted.set(element, enhanceAgentCheckCopy(element as HTMLButtonElement));
         } else {
-          const disposeContents = enhanceContents(element);
           const disposeFigures = enhanceFigures(element);
           mounted.set(element, () => {
-            disposeContents?.();
             disposeFigures();
           });
         }
