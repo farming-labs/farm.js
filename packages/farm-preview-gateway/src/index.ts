@@ -1226,6 +1226,13 @@ function headerValue(headers: IncomingHttpHeaders, key: string) {
 }
 
 function createPublicUrl(request: Request, config: PreviewGatewayRuntimeConfig, name: string) {
+  // Each browser preview needs its own origin: a path prefix cannot relocate
+  // root-relative scripts, imports, fetches, or client-side navigation.
+  if (config.domain === "localhost" || config.domain.endsWith(".localhost")) {
+    const base = new URL(config.baseUrl || request.url);
+    base.hostname = `${name}.${config.domain}`;
+    return base.origin;
+  }
   if (config.baseUrl) {
     const base = new URL(config.baseUrl);
     if (isLocalHost(base.hostname)) {
@@ -1318,7 +1325,12 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function isLocalHost(hostname: string) {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  return (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1"
+  );
 }
 
 class GatewayHttpError extends Error {

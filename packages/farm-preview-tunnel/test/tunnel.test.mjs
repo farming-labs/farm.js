@@ -9,6 +9,38 @@ import { createPersistentPreviewRelay, startTypeScriptPreviewAgent } from "../di
 
 const RELAY_TOKEN = "relay-token-for-tests";
 
+test("localhost wildcard previews preserve their port for scripts and navigation", async () => {
+  const relay = createPersistentPreviewRelay({
+    registrationToken: RELAY_TOKEN,
+    publicDomain: "localhost",
+  });
+  const address = await relay.listen();
+  const target = createServer((request, response) => {
+    response.setHeader("content-type", "text/javascript");
+    response.end(request.url);
+  });
+  await listen(target);
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: address.websocketUrl,
+    token: RELAY_TOKEN,
+    name: "interactive",
+    targetUrl: `http://127.0.0.1:${target.address().port}`,
+  });
+  try {
+    assert.equal(agent.publicUrl, `http://interactive.localhost:${address.port}`);
+    const response = await requestWithHost(
+      `${address.httpUrl}/@farm/client.js`,
+      new URL(agent.publicUrl).host,
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.body, "/@farm/client.js");
+  } finally {
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
 test("forwards requests over one persistent websocket and closes with the agent", async () => {
   const activity = [];
   const sessions = [];
@@ -684,7 +716,7 @@ test("refuses an agent registration that does not present the relay credential",
       name: "victim",
       token: RELAY_TOKEN,
     });
-    assert.equal(accepted.ready.publicUrl, "http://victim.preview.example.com");
+    assert.equal(accepted.ready.publicUrl, `http://victim.preview.example.com:${address.port}`);
   } finally {
     await relay.close();
   }
@@ -831,7 +863,7 @@ test("keeps a name an authenticated gateway session owns out of relay claims", a
       name: "unclaimed",
       token: RELAY_TOKEN,
     });
-    assert.equal(accepted.ready.publicUrl, "http://unclaimed.preview.example.com");
+    assert.equal(accepted.ready.publicUrl, `http://unclaimed.preview.example.com:${address.port}`);
   } finally {
     await relay.close();
   }

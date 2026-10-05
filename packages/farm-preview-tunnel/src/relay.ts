@@ -794,7 +794,8 @@ async function handleFallback(
 function createPublicUrl(baseUrl: string, publicDomain: string | undefined, name: string) {
   if (!publicDomain) return `${baseUrl}/preview/${name}`;
   const url = new URL(baseUrl);
-  return `${url.protocol}//${name}.${publicDomain}`;
+  url.hostname = `${name}.${publicDomain}`;
+  return url.origin;
 }
 
 function normalizeDomain(value: string | undefined) {

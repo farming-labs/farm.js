@@ -177,11 +177,24 @@ Then point the CLI at it:
 farm preview --gateway http://localhost:3000 --name local-check
 ```
 
-For local gateway runs, the public URL uses the path fallback:
+By default, local gateway runs use the path fallback:
 
 ```txt
 http://localhost:3000/__preview/local-check
 ```
+
+For interactive websites, set `FARM_PREVIEW_DOMAIN=localhost` on the local gateway
+as well. The public URL becomes `http://local-check.localhost:3000`, preserving
+the gateway port. Each preview gets its own origin, so root-relative scripts,
+styles, API calls, and links reach that preview without rewriting the app. Use a
+browser that resolves `*.localhost` to loopback. The path fallback is useful for
+individual HTTP requests but does not relocate an app's root-relative URLs.
+
+When composing the Node adapters yourself, pass `domain: "localhost"` to
+`createNodePreviewGatewayHandler` and `publicDomain: "localhost"` to
+`createPersistentPreviewRelay`. Keep the CLI's gateway/relay endpoints on the
+gateway origin, not on a preview subdomain. Target WebSocket upgrades, including
+Vite HMR, remain subject to the limits below.
 
 ## Limits
 
