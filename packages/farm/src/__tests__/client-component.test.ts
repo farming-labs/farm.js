@@ -1502,7 +1502,9 @@ export function Chart() {}
         /const href = anchor\.getAttribute\("href"\);\s+if \(!href\) return;\s+if \(anchor\.hasAttribute\("download"\)\) return;/g,
       ),
     ).toHaveLength(2);
-    expect(source).toContain("this.observers.set(element, observer);");
+    expect(source).toContain("prefetchObserver: null");
+    expect(source).toContain("this.observedPrefetchLinks.set(element, href);");
+    expect(source).toContain("this.activeViewportPrefetches < 4");
     expect(source).toContain("createHistoryState(");
     expect(source).toContain("revertBlockedPopState: function(from)");
     expect(source).toContain('if (action === "pop") this.revertBlockedPopState(from)');

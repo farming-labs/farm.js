@@ -7,19 +7,23 @@ import { SPARouter } from "../client/spa-router";
 describe("SPA router viewport prefetch", () => {
   const callbacks: IntersectionObserverCallback[] = [];
   const disconnect = vi.fn();
+  const observe = vi.fn();
+  const unobserve = vi.fn();
 
   class MockIntersectionObserver {
     constructor(callback: IntersectionObserverCallback) {
       callbacks.push(callback);
     }
-    observe() {}
-    unobserve() {}
+    observe = observe;
+    unobserve = unobserve;
     disconnect = disconnect;
   }
 
   beforeEach(() => {
     callbacks.length = 0;
     disconnect.mockClear();
+    observe.mockClear();
+    unobserve.mockClear();
     vi.useFakeTimers();
     vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
     window.history.replaceState(null, "", "/");
@@ -31,9 +35,16 @@ describe("SPA router viewport prefetch", () => {
     vi.useRealTimers();
   });
 
-  function intersect(index = 0) {
+  function intersect(target: Element, index = 0) {
     callbacks[index]?.(
-      [{ isIntersecting: true } as IntersectionObserverEntry],
+      [{ isIntersecting: true, target } as IntersectionObserverEntry],
+      {} as IntersectionObserver,
+    );
+  }
+
+  function intersectMany(targets: Element[], index = 0) {
+    callbacks[index]?.(
+      targets.map((target) => ({ isIntersecting: true, target }) as IntersectionObserverEntry),
       {} as IntersectionObserver,
     );
   }
@@ -45,7 +56,7 @@ describe("SPA router viewport prefetch", () => {
     link.setAttribute("href", "/products");
 
     router.observeForPrefetch(link);
-    intersect();
+    intersect(link);
     vi.advanceTimersByTime(50);
 
     expect(prefetch).toHaveBeenCalledWith("/products");
@@ -59,7 +70,7 @@ describe("SPA router viewport prefetch", () => {
     link.setAttribute("href", "/removed");
 
     router.observeForPrefetch(link);
-    intersect();
+    intersect(link);
     router.unobserveForPrefetch(link);
     vi.advanceTimersByTime(50);
 
@@ -75,7 +86,7 @@ describe("SPA router viewport prefetch", () => {
 
     router.observeForPrefetch(link);
     router.unobserveForPrefetch(link);
-    intersect();
+    intersect(link);
     vi.advanceTimersByTime(50);
 
     expect(prefetch).not.toHaveBeenCalled();
@@ -91,12 +102,62 @@ describe("SPA router viewport prefetch", () => {
     observed.setAttribute("href", "/observed");
 
     router.observeForPrefetch(pending);
-    intersect(0);
+    intersect(pending);
     router.observeForPrefetch(observed);
     router.destroy();
     vi.advanceTimersByTime(50);
 
     expect(prefetch).not.toHaveBeenCalled();
     expect(disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares one observer across every viewport-prefetched link", () => {
+    const router = new SPARouter({ prefetchTimeout: 50, scrollRestoration: false });
+    const first = document.createElement("a");
+    first.setAttribute("href", "/first");
+    const second = document.createElement("a");
+    second.setAttribute("href", "/second");
+
+    router.observeForPrefetch(first);
+    router.observeForPrefetch(second);
+
+    expect(callbacks).toHaveLength(1);
+    expect(observe).toHaveBeenCalledTimes(2);
+    router.destroy();
+  });
+
+  it("limits viewport prefetch concurrency and drops an unmounted queued link", async () => {
+    const router = new SPARouter({ prefetchTimeout: 50, scrollRestoration: false });
+    const releases: Array<() => void> = [];
+    const prefetch = vi.spyOn(router, "prefetch").mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releases.push(resolve);
+        }),
+    );
+    const links = Array.from({ length: 6 }, (_, index) => {
+      const link = document.createElement("a");
+      link.setAttribute("href", `/products/${index}`);
+      router.observeForPrefetch(link);
+      return link;
+    });
+    const duplicateQueuedLink = document.createElement("a");
+    duplicateQueuedLink.setAttribute("href", "/products/5");
+    router.observeForPrefetch(duplicateQueuedLink);
+
+    intersectMany([...links, duplicateQueuedLink]);
+    vi.advanceTimersByTime(50);
+    expect(prefetch).toHaveBeenCalledTimes(4);
+
+    router.unobserveForPrefetch(links[4]);
+    releases[0]();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(prefetch).toHaveBeenCalledTimes(5);
+    expect(prefetch).not.toHaveBeenCalledWith("/products/4");
+    expect(prefetch).toHaveBeenLastCalledWith("/products/5");
+    expect(prefetch.mock.calls.filter(([href]) => href === "/products/5")).toHaveLength(1);
+    router.destroy();
   });
 });

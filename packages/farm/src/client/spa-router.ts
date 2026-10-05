@@ -79,6 +79,15 @@ interface CacheEntry {
   timestamp: number;
 }
 
+interface ViewportPrefetchTask {
+  href: string;
+  elements: Set<HTMLAnchorElement>;
+  cancelled: boolean;
+  started: boolean;
+}
+
+const MAX_CONCURRENT_VIEWPORT_PREFETCHES = 4;
+
 export interface FarmNavigationBlockerContext {
   from: string;
   to: string;
@@ -152,8 +161,14 @@ let routerInstance: SPARouter | null = null;
 export class SPARouter {
   private cache: Map<string, CacheEntry> = new Map();
   private prefetchingUrls: Set<string> = new Set();
-  private observers: Map<Element, IntersectionObserver> = new Map();
+  private prefetchObserver?: IntersectionObserver;
+  private observedPrefetchLinks: Map<HTMLAnchorElement, string> = new Map();
   private prefetchTimers: Map<Element, ReturnType<typeof setTimeout>> = new Map();
+  private viewportPrefetchQueue: ViewportPrefetchTask[] = [];
+  private viewportPrefetchTasksByHref: Map<string, ViewportPrefetchTask> = new Map();
+  private viewportPrefetchTasksByElement: Map<HTMLAnchorElement, ViewportPrefetchTask> = new Map();
+  private activeViewportPrefetches = 0;
+  private destroyed = false;
   private blockers: Set<FarmNavigationBlocker> = new Set();
   private unloadBlockers: Map<FarmNavigationBlocker, () => boolean> = new Map();
   private navigationListeners: Set<FarmNavigationListener> = new Set();
@@ -234,11 +249,17 @@ export class SPARouter {
   /** Remove global listeners. Intended for tests and teardown. */
   destroy(): void {
     if (typeof window === "undefined") return;
+    this.destroyed = true;
     this.cancelActiveNavigation();
-    for (const observer of this.observers.values()) observer.disconnect();
+    this.prefetchObserver?.disconnect();
+    this.prefetchObserver = undefined;
     for (const timer of this.prefetchTimers.values()) clearTimeout(timer);
-    this.observers.clear();
+    this.observedPrefetchLinks.clear();
     this.prefetchTimers.clear();
+    for (const task of this.viewportPrefetchQueue) task.cancelled = true;
+    this.viewportPrefetchQueue.length = 0;
+    this.viewportPrefetchTasksByHref.clear();
+    this.viewportPrefetchTasksByElement.clear();
     window.removeEventListener("popstate", this.onPopState);
     window.removeEventListener("beforeunload", this.onBeforeUnload);
   }
@@ -426,51 +447,119 @@ export class SPARouter {
    * Observe an element for viewport intersection (prefetch when visible)
    */
   observeForPrefetch(element: HTMLAnchorElement): void {
-    if (typeof IntersectionObserver === "undefined") return;
+    if (this.destroyed || typeof IntersectionObserver === "undefined") return;
 
     const href = element.getAttribute("href");
     if (!href || this.isExternalUrl(href)) return;
     this.unobserveForPrefetch(element);
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            if (this.observers.get(element) !== observer) continue;
-            // Delay prefetch slightly to avoid prefetching during scroll
-            const timer = setTimeout(() => {
-              if (this.prefetchTimers.get(element) !== timer) return;
-              this.prefetchTimers.delete(element);
-              void this.prefetch(href);
-            }, this.options.prefetchTimeout);
-            this.prefetchTimers.set(element, timer);
-
-            // Stop observing after first intersection
-            observer.unobserve(element);
-            this.observers.delete(element);
-          }
-        }
-      },
-      { rootMargin: "200px" }, // Start prefetching when 200px from viewport
-    );
-
+    const observer = this.getPrefetchObserver();
+    this.observedPrefetchLinks.set(element, href);
     observer.observe(element);
-    this.observers.set(element, observer);
   }
 
   /**
    * Stop observing an element
    */
   unobserveForPrefetch(element: HTMLAnchorElement): void {
-    const observer = this.observers.get(element);
-    if (observer) {
-      observer.unobserve(element);
-      this.observers.delete(element);
+    if (this.observedPrefetchLinks.delete(element)) {
+      this.prefetchObserver?.unobserve(element);
     }
     const timer = this.prefetchTimers.get(element);
     if (timer !== undefined) {
       clearTimeout(timer);
       this.prefetchTimers.delete(element);
+    }
+    this.cancelQueuedViewportPrefetch(element);
+  }
+
+  private getPrefetchObserver(): IntersectionObserver {
+    this.prefetchObserver ??= new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const element = entry.target as HTMLAnchorElement;
+          const href = this.observedPrefetchLinks.get(element);
+          if (!href) continue;
+
+          this.prefetchObserver?.unobserve(element);
+          this.observedPrefetchLinks.delete(element);
+          // Delay viewport work slightly so links passed during a scroll do not
+          // immediately compete with the active document for network slots.
+          const timer = setTimeout(() => {
+            if (this.prefetchTimers.get(element) !== timer) return;
+            this.prefetchTimers.delete(element);
+            this.enqueueViewportPrefetch(element, href);
+          }, this.options.prefetchTimeout);
+          this.prefetchTimers.set(element, timer);
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    return this.prefetchObserver;
+  }
+
+  private enqueueViewportPrefetch(element: HTMLAnchorElement, href: string): void {
+    if (this.destroyed) return;
+    let task = this.viewportPrefetchTasksByHref.get(href);
+    if (!task) {
+      task = { href, elements: new Set(), cancelled: false, started: false };
+      this.viewportPrefetchTasksByHref.set(href, task);
+      this.viewportPrefetchQueue.push(task);
+    }
+    task.elements.add(element);
+    this.viewportPrefetchTasksByElement.set(element, task);
+    this.drainViewportPrefetchQueue();
+  }
+
+  private cancelQueuedViewportPrefetch(element: HTMLAnchorElement): void {
+    const task = this.viewportPrefetchTasksByElement.get(element);
+    if (!task) return;
+    this.viewportPrefetchTasksByElement.delete(element);
+    task.elements.delete(element);
+    if (task.elements.size > 0) return;
+    if (task.started) return;
+    task.cancelled = true;
+    if (this.viewportPrefetchTasksByHref.get(task.href) === task) {
+      this.viewportPrefetchTasksByHref.delete(task.href);
+    }
+  }
+
+  private drainViewportPrefetchQueue(): void {
+    while (
+      !this.destroyed &&
+      this.activeViewportPrefetches < MAX_CONCURRENT_VIEWPORT_PREFETCHES &&
+      this.viewportPrefetchQueue.length > 0
+    ) {
+      const task = this.viewportPrefetchQueue.shift()!;
+      if (task.cancelled || task.elements.size === 0) {
+        if (this.viewportPrefetchTasksByHref.get(task.href) === task) {
+          this.viewportPrefetchTasksByHref.delete(task.href);
+        }
+        continue;
+      }
+
+      task.started = true;
+      this.activeViewportPrefetches += 1;
+      let prefetchResult: Promise<void> | void;
+      try {
+        prefetchResult = this.prefetch(task.href);
+      } catch {
+        prefetchResult = undefined;
+      }
+      void Promise.resolve(prefetchResult)
+        .catch(() => undefined)
+        .finally(() => {
+          if (this.viewportPrefetchTasksByHref.get(task.href) === task) {
+            this.viewportPrefetchTasksByHref.delete(task.href);
+          }
+          for (const element of task.elements) {
+            if (this.viewportPrefetchTasksByElement.get(element) === task) {
+              this.viewportPrefetchTasksByElement.delete(element);
+            }
+          }
+          this.activeViewportPrefetches -= 1;
+          this.drainViewportPrefetchQueue();
+        });
     }
   }
 
