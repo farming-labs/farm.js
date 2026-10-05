@@ -20,11 +20,11 @@ network work are included.
 Observed on macOS arm64, Node 24.21.0, Vitest 3.2.7:
 
 | Outstanding tags / dependency | Previous mean ms/write | Iterator mean ms/write |
-| --- | ---: | ---: |
-| 0 | 0.0043 | 0.0035 |
-| 1 / first | 0.0090 | 0.0036 |
-| 100 / first | 0.4616 | 0.0087 |
-| 100 / late | 2.5725 | 1.1779 |
+| ----------------------------- | ---------------------: | ---------------------: |
+| 0                             |                 0.0043 |                 0.0035 |
+| 1 / first                     |                 0.0090 |                 0.0036 |
+| 100 / first                   |                 0.4616 |                 0.0087 |
+| 100 / late                    |                 2.5725 |                 1.1779 |
 
 These are warmed CPU microbenchmarks, not application latency claims. Relative
 margin of error was 8–16%; rerun on a quiet machine before comparing small changes.
