@@ -135,6 +135,10 @@ navigation. Cancelling a waiting
 navigation does not cancel its background prefetch. Deferred streaming responses keep independent
 requests and cancellation ownership; a waiting navigation starts its own request once the
 prefetch response headers identify a deferred stream.
+Production HTML navigation also reuses matching in-flight prefetches. Different interception
+contexts and deployment identities stay separate; failed prefetches are retried by navigation.
+Refresh bypasses pending prefetches, and clearing the cache prevents their late responses from
+repopulating it. Cancelling navigation does not abort a shared background prefetch.
 Internal `Link` hrefs stay app-relative: when `basePath: "/console"` is configured, `href="/about"`
 renders and navigates to `/console/about`. Do not add the base path to route hrefs yourself.
 For a reusable custom-scheme type, use ``ExternalHref<`customapp:${string}`>`` (or declaration-merge
