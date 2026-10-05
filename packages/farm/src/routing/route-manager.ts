@@ -41,7 +41,7 @@ import { toFileModuleUrl } from "../utils/file-module";
 import {
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
-  getMarkdownPageHydrationPlan,
+  createMarkdownPageHydrationPlanner,
   getFarmClientHydrationPlanOptions,
   getClientModuleMetadata,
   resolveFarmIsolatedClientHydrationMode,
@@ -647,19 +647,16 @@ export class RouteManager {
     }));
 
     // A Markdown page's client components come from the configured MDX components module.
-    const mdxComponentsModulePath = resolveFarmMdxComponentsModulePath(
-      resolveMdxConfig(this.config.mdx),
+    const markdownPagePlan = createMarkdownPageHydrationPlanner(
+      resolveFarmMdxComponentsModulePath(resolveMdxConfig(this.config.mdx), normalizedProjectRoot),
       normalizedProjectRoot,
+      isolatedMode,
+      planOptions,
     );
     const routeEntries = Array.from(this.routes.values()).map((entry) => ({
       entry,
       metadata: isFarmMarkdownPageFile(entry.modulePath)
-        ? getMarkdownPageHydrationPlan(
-            mdxComponentsModulePath,
-            normalizedProjectRoot,
-            isolatedMode,
-            planOptions,
-          )
+        ? markdownPagePlan()
         : getClientModuleHydrationPlan(
             entry.modulePath,
             normalizedProjectRoot,

@@ -7,6 +7,7 @@ import {
   describeSuppressedAsyncHydration,
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
+  createMarkdownPageHydrationPlanner,
   getMarkdownPageHydrationPlan,
   getClientModuleMetadata,
   getFarmClientHydrationPlanOptions,
@@ -802,6 +803,38 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
             { modulePath: path.join(root, "src", "components", "copy-button.tsx") },
           ],
         });
+      }
+    });
+
+    it("inspects the MDX components module once and gives every page its own plan", () => {
+      const { root, componentsFile } = markdownProject(
+        'import { CopyButton } from "./components/copy-button";\nexport const components = { CopyButton };\n',
+      );
+      const planPage = createMarkdownPageHydrationPlanner(componentsFile, root, "enabled", {
+        asyncOwnerIslands: true,
+      });
+      const first = planPage();
+      // Later pages reuse the first inspection instead of walking the module graph again.
+      fs.rmSync(componentsFile);
+      const second = planPage();
+      expect(second).toEqual(first);
+      expect(second.hasIsolatedClientBoundaries).toBe(true);
+
+      // The route budget rewrites one page's plan in place; the others must keep theirs.
+      first.hasIsolatedClientBoundaries = false;
+      first.isolatedBoundaries = [];
+      expect(planPage().isolatedBoundaries).toHaveLength(1);
+      expect(second.isolatedBoundaries).toHaveLength(1);
+    });
+
+    it("plans Markdown pages from one inspection in the build and route manager", () => {
+      for (const file of [
+        ["nitro", "universal-build.ts"],
+        ["routing", "route-manager.ts"],
+      ]) {
+        const source = fs.readFileSync(path.join(process.cwd(), "src", ...file), "utf-8");
+        expect(source).toContain("createMarkdownPageHydrationPlanner(");
+        expect(source).not.toContain("getMarkdownPageHydrationPlan(");
       }
     });
 

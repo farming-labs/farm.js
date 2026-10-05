@@ -37,7 +37,7 @@ import {
   getClientModuleHydrationPlan,
   getClientModuleMetadata,
   getFarmClientHydrationPlanOptions,
-  getMarkdownPageHydrationPlan,
+  createMarkdownPageHydrationPlanner,
   resolveFarmIsolatedClientHydrationMode,
   type ClientModuleHydrationPlan,
   type FarmClientHydrationPlanOptions,
@@ -1387,15 +1387,16 @@ async function buildClient(
       : [syntheticDocsEntry, `${syntheticDocsEntry}/[...slug]`]
     : [];
 
+  const markdownPagePlan = createMarkdownPageHydrationPlanner(
+    resolveFarmMdxComponentsModulePath(resolveMdxConfig(config.mdx), root),
+    root,
+    isolatedMode,
+    planOptions,
+  );
   const routePlans = pageRoutes.map((route) => ({
     route,
     metadata: isFarmMarkdownPageFile(route.modulePath)
-      ? getMarkdownPageHydrationPlan(
-          resolveFarmMdxComponentsModulePath(resolveMdxConfig(config.mdx), root),
-          root,
-          isolatedMode,
-          planOptions,
-        )
+      ? markdownPagePlan()
       : getCachedClientModuleHydrationPlan(
           route.modulePath,
           root,
@@ -4832,20 +4833,17 @@ function isolateFarmRouteServerPage(element) { return element; }`;
       hydrationPlanOptions,
     ),
   }));
-  const mdxComponentsModulePath = resolveFarmMdxComponentsModulePath(
-    resolveMdxConfig(config.mdx),
+  const markdownPagePlan = createMarkdownPageHydrationPlanner(
+    resolveFarmMdxComponentsModulePath(resolveMdxConfig(config.mdx), config.root),
     config.root,
+    isolatedHydrationMode,
+    hydrationPlanOptions,
   );
   const pageHydrationPlans = new Map(
     pageRoutes.map((route) => [
       route.modulePath,
       isFarmMarkdownPageFile(route.modulePath)
-        ? getMarkdownPageHydrationPlan(
-            mdxComponentsModulePath,
-            config.root,
-            isolatedHydrationMode,
-            hydrationPlanOptions,
-          )
+        ? markdownPagePlan()
         : getCachedClientModuleHydrationPlan(
             route.modulePath,
             config.root,
