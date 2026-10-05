@@ -1,5 +1,6 @@
 import { type Metadata, type MetadataProps, notFound, type PageProps } from "@farm.js/core";
 import { ArrowRight, ChevronDown, ScanSearch } from "lucide-react";
+import { AgentCheckCopyLink } from "../../../../components/agents/check-copy-link";
 import { AGENT_CHECK_ICONS } from "../../../../components/agents/check-icons";
 import {
   AnnouncementBar,
@@ -163,9 +164,7 @@ export default async function AgentCheckReportPage({ params }: PageProps<"/agent
                 ))}
               </div>
               <div className="agent-check-actions">
-                <button type="button" hidden data-agent-check-copy>
-                  Copy link
-                </button>
+                <AgentCheckCopyLink />
                 <a href={`/agents/check?url=${encodeURIComponent(report.url)}`}>Scan again</a>
                 <a href="/agents/check">Check another site</a>
               </div>
