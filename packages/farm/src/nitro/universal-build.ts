@@ -2335,12 +2335,12 @@ export function generateUniversalRouterStateProperties(): string {
   },
 
   writePageState: function(action, state, href) {
-    const url = new URL(href || window.location.href, window.location.origin);
+    const url = new URL(href || window.location.href, window.location.href);
     this.writeHistoryEntry(action, url.pathname + url.search + url.hash, state, url, "page-state");
   },
 
   writeURLSearch: function(action, href) {
-    const url = new URL(href || window.location.href, window.location.origin);
+    const url = new URL(href || window.location.href, window.location.href);
     const currentState = window.history.state;
     const pageState = currentState && typeof currentState === "object"
       ? currentState[FARM_PAGE_STATE_KEY]
@@ -2634,7 +2634,7 @@ ${generateUniversalRouterStateProperties()}
   prefetchCache: new Map(),
   
   navigate: async function(href, options = {}) {
-    const url = new URL(href, window.location.origin);
+    const url = new URL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) {
       this.cancelActiveNavigation();
       if (options.replace || options.action === "replace") window.location.replace(href);
@@ -2804,7 +2804,7 @@ ${generateUniversalRouterStateProperties()}
     return true;
   },
   prefetch: function(href) {
-    const url = new URL(href, window.location.origin);
+    const url = new URL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (isFarmDocsPath(url.pathname)) return;
     
@@ -3516,7 +3516,7 @@ ${generateUniversalRouterStateProperties()}
   prefetchCache: new Map(),
   
   navigate: async function(href, options = {}) {
-    const url = new URL(href, window.location.origin);
+    const url = new URL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) {
       this.cancelActiveNavigation();
       if (options.replace || options.action === "replace") window.location.replace(href);
@@ -3881,7 +3881,7 @@ ${generateUniversalRouterStateProperties()}
     return true;
   },
   prefetch: function(href) {
-    const url = new URL(href, window.location.origin);
+    const url = new URL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
     if (isFarmDocsPath(url.pathname)) return;
     

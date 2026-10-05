@@ -121,6 +121,9 @@ or an empty array.
 Farm writes the route union into the consolidated `src/farm.d.ts` declaration file. Link hrefs and route component props accept real routes without widening everything to plain string. Link hrefs can also include query strings and hash fragments.
 Changing only the fragment preserves SPA state, honors push versus replace history, and does not
 request route data again.
+Relative navigation, prefetch, and shallow history URLs resolve against the current document in
+development and production. For example, `?tab=settings` from `/users/123?tab=profile` keeps
+`/users/123`, and `456` from `/users/123` resolves to `/users/456`.
 Native anchor behavior still takes precedence: for example, a `Link` with a `download` attribute is
 handled by the browser instead of Farm's SPA router. Absolute URI schemes such as `mailto:`, `tel:`,
 `sms:`, and same-origin `blob:` URLs are passed through unchanged and are never prefetched as app routes. Literal custom
