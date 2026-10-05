@@ -103,7 +103,7 @@ export function collectSchemaModels(
 }
 
 export type FarmSqlStatement = {
-  kind: "table" | "index";
+  kind: "table" | "index" | "column";
   /** The object this statement creates, for drift reporting. */
   target: string;
   sql: string;

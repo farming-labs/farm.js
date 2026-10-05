@@ -32,6 +32,7 @@ import { getFarmPluginIntegrationContext } from "./plugin-integration-context";
 import type { FarmSchema } from "./schema";
 import type { FarmSqlDialect } from "./schema-sql";
 import { declareSchemaTables, readSchemaTables } from "./schema-owner";
+import { collectSchemaExtensions } from "./schema-extend";
 import { resolveSchemaModels } from "./schema-resolve";
 import { normalizeFarmBasePath, stripFarmBasePath } from "./base-path";
 import {
@@ -1701,6 +1702,7 @@ function declarePluginSchema<
   const name = pluginSchemaName(plugin.name);
   // Fail while the config loads, not at the first migrate or query.
   const models = resolveSchemaModels(name, plugin.schema);
+  collectSchemaExtensions(name, plugin.schema);
   const database = plugin.database;
   return declareSchemaTables(plugin, {
     name,

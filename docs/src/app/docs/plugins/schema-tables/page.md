@@ -259,6 +259,64 @@ built from the renamed schema with `createIntegrationOrm` reads `user.id` from
 gets completion, and a model or field that does not exist fails when the config
 loads.
 
+### Adding columns to the app's tables
+
+Sometimes a plugin needs data on a row the app owns, such as points on each
+user. Describe the table as external and `extend` it with the columns:
+
+```ts title="src/index.ts"
+export const loyaltySchema = defineSchema({
+  models: {
+    user: { external: true, fields: { id: { type: "string", primaryKey: true } } },
+    pointsHistory: {
+      fields: {
+        /* ... */
+      },
+    },
+  },
+  extend: {
+    user: { fields: { points: { type: "integer", default: 0 } } },
+  },
+});
+```
+
+The app's table may already hold rows, so each column must have a `default` or
+be `nullable`. Unique, indexed, and primary-key columns cannot be added this
+way. Both fail when the config loads.
+
+Nothing changes in the app's table until the app allows it:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  plugins: [loyalty()],
+  schema: { allowExtend: { loyalty: ["user"] } },
+});
+```
+
+List the plugin's model names or your own table names. Without the entry,
+`farm loyalty migrate` prints the `ALTER TABLE` commented out with the entry to
+add, `--apply` creates the plugin's own tables but not the columns and exits
+with an error, and `farm schema check` reports each missing column. With it,
+`--apply` adds them:
+
+```sql
+ALTER TABLE "user" ADD COLUMN "points" INTEGER NOT NULL DEFAULT 0;
+```
+
+Farm only adds. A column that already exists is never changed, even with a
+different type: the check warns instead. If the table does not exist yet, the
+command says so and still creates the plugin's own tables.
+
+**When Prisma or Drizzle owns the table**, a column added behind its back is
+drift its next migration would undo. In a project with `prisma/schema.prisma`
+or a `drizzle.config.*`, Farm never alters the app's tables. `migrate` and
+`farm generate --orm` print the line to add to your schema instead:
+
+```
+// In the Prisma model mapped to "user":
+points Int @default(0)
+```
+
 ### When the app picks another database
 
 Where data lives is the app's decision. By default a plugin's tables go in the
