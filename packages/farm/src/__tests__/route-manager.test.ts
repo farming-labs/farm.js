@@ -10,6 +10,7 @@ import {
 import { defineIntegration } from "../integrations";
 import { REACT_RENDERER } from "../renderer";
 import type { FarmConfig } from "../types";
+import { splitRoutePath } from "../utils";
 
 /** "/test" is not an absolute path on Windows, so resolve it per platform. */
 const TEST_ROOT = path.resolve("/test");
@@ -17,10 +18,11 @@ const appPath = (...segments: string[]) => path.join(TEST_ROOT, "src", "app", ..
 
 // Mock the file system utilities
 vi.mock("../utils", async () => {
-  const actual = await vi.importActual("../utils");
+  const actual = await vi.importActual<typeof import("../utils")>("../utils");
   return {
     ...actual,
     globFiles: vi.fn(),
+    splitRoutePath: vi.fn(actual.splitRoutePath),
     resolveAppPath: vi.fn((root, ...paths) => `${root}/${paths.join("/")}`),
     logger: {
       info: vi.fn(),
@@ -119,6 +121,16 @@ describe("RouteManager", () => {
     it("should find matching layouts", () => {
       const result = routeManager.matchRoute("/users/123");
       expect(result.layouts.length).toBeGreaterThan(0);
+    });
+
+    it("decodes the request pathname once while scanning pages and layouts", () => {
+      vi.mocked(splitRoutePath).mockClear();
+
+      const result = routeManager.matchRoute("/users/hello%20farm");
+
+      expect(result.params).toEqual({ id: "hello farm" });
+      expect(result.layouts.length).toBeGreaterThan(0);
+      expect(splitRoutePath).toHaveBeenCalledTimes(1);
     });
 
     it("includes optional catch-all layouts, boundaries, and slot owners at the parent path", async () => {
