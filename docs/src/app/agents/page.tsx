@@ -12,6 +12,12 @@ import {
   Wrench,
 } from "lucide-react";
 import { AgentArtwork } from "../../components/agents/artwork";
+import {
+  CodebaseFigure,
+  DevFigure,
+  PermissionsFigure,
+  ReadinessFigure,
+} from "../../components/agents/iso-figures";
 import { AgentWaitlist } from "../../components/agents/waitlist";
 import { SelectionWire } from "../../components/home/selection-wire";
 import { BlogFigure } from "../../components/blog/figures";
@@ -22,6 +28,7 @@ import {
   SiteFooter,
   SiteHeader,
 } from "../../components/site-chrome";
+import "../../components/agents/iso-figures.css";
 import "../../components/agents/waitlist.css";
 import "../../components/blog/figures.css";
 import "./agents.css";
@@ -183,7 +190,12 @@ export default function AgentsPage() {
                   />
                 </div>
               </div>
-              <AgentArtwork />
+              <div className="agents-iso-row farm-full-rule">
+                <CodebaseFigure />
+                <ReadinessFigure />
+                <DevFigure />
+                <PermissionsFigure />
+              </div>
             </section>
 
             <section aria-labelledby="agents-now-title">
@@ -220,6 +232,7 @@ export default function AgentsPage() {
                   ),
                 )}
               </div>
+              <AgentArtwork />
             </section>
 
             <section aria-labelledby="agents-capabilities-title">
