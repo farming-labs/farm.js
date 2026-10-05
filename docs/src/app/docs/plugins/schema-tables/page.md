@@ -104,6 +104,64 @@ Two setups need nothing, and say so rather than guessing:
   });
   ```
 
+## Checking everything at once
+
+`migrate` looks at one plugin. `farm schema check` looks at every integration
+and plugin that declares tables, against the database each one uses, and at the
+tables they point to that Farm does not manage, such as your ORM's `users` or the
+tables Better Auth creates:
+
+```bash
+pnpm farm schema check
+```
+
+```
+✗ loyalty (plugin, postgres)
+    error   Table "points" does not exist.
+            Run `farm loyalty migrate` to see the SQL, then `--apply` it.
+    error   "points.userId" references "users.id", but "users" does not exist.
+            Farm does not manage that table. Run the migration that creates it (your ORM's, or a library's such as Better Auth) first.
+
+2 error(s), 0 warning(s)
+```
+
+Errors are things that break at runtime:
+
+- a table, or a column, the owner needs is missing, or a column's type changed
+- a referenced table or column does not exist. When the table belongs to another
+  plugin, the message names it so you know which `migrate` to run first, and it
+  is looked up in that plugin's database
+- two owners claim the same table in the same database
+- an owner's database cannot be reached. The other owners are still checked
+
+Warnings do not fail the check:
+
+- other drift, such as defaults, indexes, and foreign keys
+- a reference whose column types differ, such as text pointing at a Postgres
+  `uuid`. Lookups by value work, but a SQL join needs a cast and a foreign key is
+  not possible. SQLite compares across types, so it is not flagged there
+- a client Farm cannot inspect, such as a Prisma client. That ORM's migrations
+  own those tables. Drizzle databases are read through the driver they wrap
+
+A referenced table is found the way your app's queries find it: through the
+connection's search path on Postgres, or as `schema.table` when the reference is
+dotted, such as `auth.users` in Supabase. Tables a plugin creates are looked up
+in the current schema, because that is where `migrate` creates them.
+
+Connecting, and each query, has 10 seconds to answer, so an unreachable
+database fails the check instead of hanging it. Pass `--timeout <ms>` to change
+it.
+
+It only reads. Nothing is created or altered, so it is safe to run against
+production. It exits `1` when there are errors, which makes it a deploy gate:
+
+```yaml
+- run: pnpm farm schema check
+```
+
+Pass `--json` for the report as data. Owners that store data in a key-value
+mount have no tables and are listed as skipped.
+
 ## Declaring tables from a plugin
 
 Wrap the plugin you already return in `declareSchemaTables`:
