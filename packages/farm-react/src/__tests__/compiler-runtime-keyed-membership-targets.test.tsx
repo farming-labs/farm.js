@@ -4,10 +4,14 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyCompilerKeyedCollectionMutation,
-  createCompiledComponent,
+  createCompiledComponent as createCompleteCompiledComponent,
+  createCompiledComponentWithFeatures,
+  keyedRowsMembershipRuntimeFeature,
   createCompilerKeyedCollectionUpdate,
   type CompilerStateUpdater,
 } from "../compiler-runtime";
+
+let createCompiledComponent: typeof createCompleteCompiledComponent;
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -156,7 +160,13 @@ function membershipSnapshot(container: Element): Array<[string | null, string | 
   ]);
 }
 
-describe("compiled keyed membership targets", () => {
+describe.each([false, true])("keyed membership targets (%s)", (specialized) => {
+  beforeEach(() => {
+    createCompiledComponent = specialized
+      ? (definition) =>
+          createCompiledComponentWithFeatures(definition, [keyedRowsMembershipRuntimeFeature])
+      : createCompleteCompiledComponent;
+  });
   it("consumes compiler-proven Set deltas across queued setters", async () => {
     const initial = items(2_000);
     const harness = createMembershipHarness(

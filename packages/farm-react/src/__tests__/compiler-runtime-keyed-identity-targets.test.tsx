@@ -2,7 +2,14 @@ import React, { StrictMode, useState } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createCompiledComponent, type CompilerStateUpdater } from "../compiler-runtime";
+import {
+  createCompiledComponent as createCompleteCompiledComponent,
+  createCompiledComponentWithFeatures,
+  keyedRowsIdentityRuntimeFeature,
+  type CompilerStateUpdater,
+} from "../compiler-runtime";
+
+let createCompiledComponent: typeof createCompleteCompiledComponent;
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -38,7 +45,13 @@ function items(count: number): Item[] {
   }));
 }
 
-describe("compiled keyed identity targets", () => {
+describe.each([false, true])("compiled keyed identity targets (specialized: %s)", (specialized) => {
+  beforeEach(() => {
+    createCompiledComponent = specialized
+      ? (definition) =>
+          createCompiledComponentWithFeatures(definition, [keyedRowsIdentityRuntimeFeature])
+      : createCompleteCompiledComponent;
+  });
   it("evaluates only the previous and next keyed instances", async () => {
     const initial = items(2_000);
     let executions = 0;

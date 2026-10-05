@@ -39,7 +39,7 @@ describe("React AOT keyed identity targets", () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.optimizations.keyedIdentityTargets).toBe(4);
     expect(result.code.match(/identityTarget:/g)).toHaveLength(4);
-    expect(result.code).toContain("keyedRowsRuntimeFeature");
+    expect(result.code).toContain("keyedRowsIdentityRuntimeFeature");
     expect(result.code).not.toContain("keyedRowsPlainRuntimeFeature");
     expect(result.code).toContain("dependency: 1");
     expect(result.code).toContain("read: () => _farmState[1].get()");

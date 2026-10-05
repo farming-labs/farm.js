@@ -64,10 +64,53 @@ const testSource = String.raw`
     finalizeCompilerKeyedArrayMappedStructuralUpdate,
     keyedRowsMappedRollingWindowHintedRuntimeFeature,
     keyedRowsStructuralAppendMapHintedRuntimeFeature,
+    keyedRowsIdentityRuntimeFeature,
+    keyedRowsMembershipRuntimeFeature,
+    keyedRowsMapLookupRuntimeFeature,
   } = await import(
     "@farm.js/react/compiler-runtime"
   );
   const { List } = await import("@farm.js/react/list");
+
+  // Exercise the compiler-selected single-kind paths from the packed package
+  // under both supported React majors, including Strict Mode's mount replay.
+  for (const [feature, kind] of [
+    [keyedRowsIdentityRuntimeFeature, "identityTarget"],
+    [keyedRowsMembershipRuntimeFeature, "membershipTarget"],
+    [keyedRowsMapLookupRuntimeFeature, "mapLookupTarget"],
+  ]) {
+    const targetFor = (key) => kind === "identityTarget" ? key : kind === "membershipTarget" ? new Set([key]) : new Map([[key, "yes"]]);
+    const isSelected = (value, key) => kind === "identityTarget" ? value === key : kind === "membershipTarget" ? value.has(key) : value.get(key) === "yes";
+    let select;
+    const TargetRows = createCompiledComponentWithFeatures({
+      displayName: "CompatibilitySingleTargetRows",
+      initialize: () => [["a", "b"], targetFor("a")],
+      render(_props, state, blocks) {
+        const items = () => state[0].get();
+        const target = () => state[1].get();
+        const selected = (item) => isSelected(target(), item) ? "yes" : "no";
+        select = (key) => state[1].set(targetFor(key));
+        return React.createElement("section", null, React.createElement(blocks.KeyedRows, {
+          id: 0, items, rowKey: (item) => item, structureDependencies: [0],
+          bindings: [{ kind: "attribute", name: "data-selected", path: [], dependencies: [1], [kind]: { dependency: 1, read: target }, read: selected }],
+          create: (item) => ({ kind: "element", tag: "li", attributes: [{ name: "data-selected", value: selected(item) }], styles: [], children: [item] }),
+          render: () => React.createElement("ul", null, items().map((item) => React.createElement("li", { key: item, "data-selected": selected(item) }, item))),
+        }));
+      },
+      bindings: [{ kind: "block", id: 0, dependencies: [0, 1] }],
+    }, [feature]);
+    const targetContainer = document.createElement("div");
+    document.body.append(targetContainer);
+    const targetRoot = createRoot(targetContainer);
+    flushSync(() => targetRoot.render(React.createElement(React.StrictMode, null, React.createElement(TargetRows))));
+    const originalRows = [...targetContainer.querySelectorAll("li")];
+    select("b");
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.deepEqual([...targetContainer.querySelectorAll("li")], originalRows);
+    assert.deepEqual(originalRows.map((row) => row.getAttribute("data-selected")), ["no", "yes"]);
+    flushSync(() => targetRoot.unmount());
+  }
 
   const Counter = createCompiledComponentWithFeatures({
     displayName: "CompatibilityCounter",
