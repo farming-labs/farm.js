@@ -249,6 +249,10 @@ interactive, and Farm logs a warning naming the module and the reason. Fix the r
 the interactive part from a synchronous page. Preact, Solid, Vue, and Svelte keep async pages
 server-only.
 
+Client components that come from a package, such as the icons in `lucide-react`, cannot be isolated
+yet. An async page renders them as static HTML and still hydrates its own client components as
+islands, and Farm logs which packages it left static.
+
 ### Isolated client leaves without RSC
 
 `"use client"` also remains available in a normal React SSR application. Set
