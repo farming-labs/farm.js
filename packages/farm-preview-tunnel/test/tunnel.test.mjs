@@ -10,6 +10,8 @@ import { createPersistentPreviewRelay, startTypeScriptPreviewAgent } from "../di
 const RELAY_TOKEN = "relay-token-for-tests";
 
 test("forwards requests over one persistent websocket and closes with the agent", async () => {
+  const activity = [];
+  const sessions = [];
   const target = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -26,7 +28,18 @@ test("forwards requests over one persistent websocket and closes with the agent"
   await listen(target);
   const targetAddress = target.address();
 
-  const relay = createPersistentPreviewRelay({ registrationToken: RELAY_TOKEN });
+  const relay = createPersistentPreviewRelay({
+    registrationToken: RELAY_TOKEN,
+    observer: {
+      session(event) {
+        sessions.push(event);
+      },
+      request(event) {
+        activity.push(event);
+        return Promise.reject(new Error("optional reporter failed"));
+      },
+    },
+  });
   const relayAddress = await relay.listen();
   const agent = await startTypeScriptPreviewAgent({
     relayUrl: relayAddress.websocketUrl,
@@ -50,12 +63,20 @@ test("forwards requests over one persistent websocket and closes with the agent"
       url: "/hello?from=test",
       body: "farm",
     });
+    assert.equal(activity.length, 1);
+    assert.equal(activity[0].path, "/hello");
+    assert.equal(activity[0].status, 201);
+    assert.equal(activity[0].headers, undefined);
+    assert.equal(activity[0].body, undefined);
+    assert.equal(sessions[0].state, "connected");
 
     await close(target);
     await expectInactive(agent.publicUrl);
   } finally {
     await agent.close();
     await relay.close();
+    assert.equal(sessions.at(-1).state, "disconnected");
+    assert.equal(sessions.at(-1).token, undefined);
     await close(target);
   }
 });

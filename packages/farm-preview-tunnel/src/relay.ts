@@ -65,6 +65,8 @@ function isAllowedAgentOrigin(
 }
 
 export interface PersistentPreviewRelayOptions {
+  /** Optional metadata-only telemetry. Failures never interrupt a preview. */
+  observer?: PersistentPreviewRelayObserver;
   host?: string;
   port?: number;
   publicBaseUrl?: string;
@@ -113,7 +115,42 @@ export interface PersistentPreviewRelayAgentAuthorization {
 }
 
 export interface PersistentPreviewRelayAgentAuthorizationResult {
+  project?: string;
+  keyId?: string;
   expiresAt?: number;
+  /** Server-verified identity, never read from agent registration payloads. */
+  ownerId?: string;
+}
+
+export interface PersistentPreviewRelayObserver {
+  session?(event: {
+    project?: string;
+    keyId?: string;
+    id: string;
+    name: string;
+    ownerId?: string;
+    publicUrl: string;
+    expiresAt?: number;
+    state: "connected" | "disconnected";
+    at: number;
+  }): void | Promise<void>;
+  request?(event: {
+    sessionId: string;
+    method: string;
+    path: string;
+    status: number;
+    durationMs: number;
+    at: number;
+  }): void | Promise<void>;
+}
+
+function observe(callback: (() => void | Promise<void>) | undefined) {
+  if (!callback) return;
+  try {
+    void Promise.resolve(callback()).catch(() => undefined);
+  } catch {
+    /* Optional telemetry. */
+  }
 }
 
 export type PersistentPreviewRelayFallbackHandler = (
@@ -155,10 +192,13 @@ export interface PersistentPreviewRelayAddress {
 }
 
 interface AgentSession {
+  project?: string;
+  keyId?: string;
   id: string;
   name: string;
   socket: WebSocket;
   expiresAt?: number;
+  ownerId?: string;
 }
 
 interface PendingRequest {
@@ -183,6 +223,33 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
   const requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
   const maxBodyBytes = options.maxBodyBytes ?? 5 * 1024 * 1024;
   let address: PersistentPreviewRelayAddress | undefined;
+  const reportSession = (session: AgentSession, state: "connected" | "disconnected") => {
+    if (!options.observer?.session) return;
+    const baseUrl = trimTrailingSlash(options.publicBaseUrl || address?.httpUrl || "");
+    if (!baseUrl) return;
+    observe(() =>
+      options.observer!.session!({
+        id: session.id,
+        name: session.name,
+        ownerId: session.ownerId,
+        project: session.project,
+        keyId: session.keyId,
+        expiresAt: session.expiresAt,
+        publicUrl: createPublicUrl(baseUrl, publicDomain, session.name),
+        state,
+        at: Date.now(),
+      }),
+    );
+  };
+  const activityTimer = options.observer?.session
+    ? setInterval(() => {
+        for (const session of agents.values()) {
+          if (session.socket.readyState === session.socket.OPEN)
+            reportSession(session, "connected");
+        }
+      }, 30_000)
+    : undefined;
+  activityTimer?.unref();
 
   const server = createServer(async (request, response) => {
     try {
@@ -213,6 +280,26 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
         );
       }
 
+      if (options.observer?.request) {
+        const startedAt = Date.now();
+        let reported = false;
+        const report = () => {
+          if (reported) return;
+          reported = true;
+          observe(() =>
+            options.observer!.request!({
+              sessionId: (activeLocalSession || coordinatedSession)!.id,
+              method: request.method || "GET",
+              path: route.path.split(/[?#]/, 1)[0].slice(0, 2048),
+              status: response.writableFinished ? response.statusCode : 499,
+              durationMs: Date.now() - startedAt,
+              at: Date.now(),
+            }),
+          );
+        };
+        response.once("finish", report);
+        response.once("close", report);
+      }
       await forwardPublicRequest({
         request,
         response,
@@ -263,6 +350,7 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
     const detachSession = () => {
       if (!session || detached) return;
       detached = true;
+      reportSession(session, "disconnected");
       if (agents.get(session.name)?.id === session.id) {
         agents.delete(session.name);
         failPendingRequestsForSession(session.id, pending);
@@ -353,6 +441,9 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
               id: randomUUID(),
               name,
               socket,
+              ...(authorization?.ownerId ? { ownerId: authorization.ownerId } : {}),
+              ...(authorization?.project ? { project: authorization.project } : {}),
+              ...(authorization?.keyId ? { keyId: authorization.keyId } : {}),
               ...(expiresAt !== undefined ? { expiresAt } : {}),
             };
             const coordinatorTtlMs = remainingCoordinatorSessionTtl(
@@ -390,6 +481,7 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
               maxResponseBodyBytes,
             };
             socket.send(JSON.stringify(ready));
+            reportSession(session, "connected");
             if (session.expiresAt) {
               const scheduleExpiration = () => {
                 if (!session?.expiresAt) return;
@@ -465,6 +557,7 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
       return address;
     },
     async close() {
+      if (activityTimer) clearInterval(activityTimer);
       for (const session of agents.values()) session.socket.close(1001, "Relay shutting down");
       for (const { response, timeout, cleanup } of pending.values()) {
         clearTimeout(timeout);

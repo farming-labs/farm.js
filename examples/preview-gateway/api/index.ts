@@ -8,6 +8,8 @@ import {
   type PreviewGatewayStore,
 } from "@farm.js/preview-gateway";
 import { createPersistentPreviewRelay } from "@farm.js/preview-tunnel";
+import { waitUntil } from "@vercel/functions";
+import { createInfraPreviewIntegration } from "../lib/infra.js";
 import { del, get, list, put } from "@vercel/blob";
 
 import { createRedisPreviewAuthExchangeRateLimiter } from "../lib/redis-auth-rate-limiter.js";
@@ -210,6 +212,7 @@ export const config = {
 
 const domain = process.env.FARM_PREVIEW_DOMAIN || "preview.farmjs.dev";
 const coordinator = createRedisPreviewRelayCoordinator();
+const infra = createInfraPreviewIntegration(process.env, fetch, waitUntil);
 const auth = createManagedPreviewAuth();
 const pollingGateway = createNodePreviewGatewayHandler({
   domain,
@@ -217,9 +220,11 @@ const pollingGateway = createNodePreviewGatewayHandler({
   clientHeartbeatTimeoutMs: 1000 * 60 * 30,
   store: createVercelBlobStore(),
   auth,
+  observer: infra?.observer("polling"),
 });
 
 const persistentRelay = createPersistentPreviewRelay({
+  observer: infra?.observer("websocket"),
   publicBaseUrl: process.env.FARM_PREVIEW_GATEWAY_URL || `https://${domain}`,
   publicDomain: domain,
   publicWebSocketUrl: `wss://${domain}/agent`,
@@ -239,7 +244,12 @@ const persistentRelay = createPersistentPreviewRelay({
               signingSecret: auth.signingSecret,
               name,
             });
-            return { expiresAt: grant.expiresAt };
+            return {
+              expiresAt: grant.expiresAt,
+              ownerId: `${grant.provider || "github"}:${grant.subject}`,
+              project: grant.project ?? grant.name,
+              keyId: grant.keyId,
+            };
           } catch {
             return false;
           }
@@ -254,10 +264,10 @@ const persistentRelay = createPersistentPreviewRelay({
 function createManagedPreviewAuth(): PreviewManagedAuthOptions | undefined {
   const signingSecret = process.env.FARM_PREVIEW_AUTH_SECRET;
   const githubClientId = process.env.FARM_PREVIEW_GITHUB_CLIENT_ID;
-  if (!signingSecret && !githubClientId) return undefined;
-  if (!signingSecret || !githubClientId) {
+  if (!signingSecret && !githubClientId && !infra) return undefined;
+  if (!signingSecret || (!githubClientId && !infra)) {
     throw new Error(
-      "Managed preview auth requires FARM_PREVIEW_AUTH_SECRET and FARM_PREVIEW_GITHUB_CLIENT_ID.",
+      "Managed preview auth requires FARM_PREVIEW_AUTH_SECRET and either FARM_INFRA_URL or FARM_PREVIEW_GITHUB_CLIENT_ID.",
     );
   }
   const rateLimitExchange = createRedisPreviewAuthExchangeRateLimiter();
@@ -269,6 +279,7 @@ function createManagedPreviewAuth(): PreviewManagedAuthOptions | undefined {
   return {
     signingSecret,
     githubClientId,
+    ...(infra ? { deviceAuth: infra.deviceAuth, dashboardUrl: infra.dashboardUrl } : {}),
     rateLimitExchange,
     defaultSessionTtlMs: readDuration("FARM_PREVIEW_DEFAULT_TTL_MS", 1000 * 60 * 60),
     maxSessionTtlMs: readDuration("FARM_PREVIEW_MAX_TTL_MS", 1000 * 60 * 60 * 24),

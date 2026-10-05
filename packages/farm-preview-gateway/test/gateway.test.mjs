@@ -7,7 +7,18 @@ import { createNodePreviewGatewayHandler, MemoryPreviewGatewayStore } from "../d
 
 test("proxies a public preview request through the gateway queue", async () => {
   const store = new MemoryPreviewGatewayStore();
-  const gateway = await createGatewayServer(store);
+  const activity = [];
+  const gateway = await createGatewayServer(store, {
+    observer: {
+      session(event) {
+        assert.equal(event.token, undefined);
+      },
+      request(event) {
+        activity.push(event);
+        throw new Error("optional telemetry failed");
+      },
+    },
+  });
 
   try {
     const sessionResponse = await fetch(`${gateway.url}/api/sessions`, {
@@ -66,6 +77,11 @@ test("proxies a public preview request through the gateway queue", async () => {
     const response = await publicRequest;
     assert.equal(response.status, 202);
     assert.equal(await response.text(), "preview-ok");
+    assert.equal(activity.length, 1);
+    assert.equal(activity[0].path, "/docs");
+    assert.equal(activity[0].status, 202);
+    assert.equal(activity[0].headers, undefined);
+    assert.equal(activity[0].body, undefined);
   } finally {
     await gateway.close();
   }

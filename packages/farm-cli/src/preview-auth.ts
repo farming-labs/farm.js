@@ -13,7 +13,9 @@ export const PREVIEW_EXPIRY_CLOCK_SKEW_MS = 1000 * 60 * 5;
 export interface PreviewAuthPublicConfig {
   enabled: boolean;
   controlAuth?: "bearer" | "query";
-  provider?: "github";
+  provider?: "github" | "device";
+  issuer?: string;
+  dashboardUrl?: string;
   clientId?: string;
   scope?: string;
   defaultSessionTtlMs: number;
@@ -27,6 +29,7 @@ export interface AuthorizePreviewPlanOptions {
 }
 
 export interface PreviewAuthRuntime {
+  interactive?: boolean;
   fetch: typeof fetch;
   openBrowser(url: string): Promise<boolean>;
   wait(ms: number): Promise<void>;
@@ -69,7 +72,7 @@ export async function authorizePreviewGatewayPlan(
       ...(options.expiresInMs === undefined ? {} : { expiresInMs: options.expiresInMs }),
     };
   }
-  if (config.provider !== "github" || !config.clientId) {
+  if ((config.provider !== "github" && config.provider !== "device") || !config.clientId) {
     throw new Error("The Farm Preview gateway returned an unsupported login configuration.");
   }
 
@@ -77,7 +80,7 @@ export async function authorizePreviewGatewayPlan(
     ? undefined
     : process.env.FARM_PREVIEW_TOKEN || (await runtime.credentials.get(plan.gatewayUrl));
   if (!accountToken) {
-    const account = await loginWithGitHubDeviceFlow(plan.gatewayUrl, config, runtime);
+    const account = await loginWithPreviewDeviceFlow(plan.gatewayUrl, config, runtime);
     accountToken = account.token;
     await runtime.credentials.set(plan.gatewayUrl, accountToken);
     logger.success(`Signed in to Farm Preview as ${account.user.login}.`);
@@ -94,7 +97,7 @@ export async function authorizePreviewGatewayPlan(
       );
     }
     if (!process.env.FARM_PREVIEW_TOKEN) await runtime.credentials.delete(plan.gatewayUrl);
-    const account = await loginWithGitHubDeviceFlow(plan.gatewayUrl, config, runtime);
+    const account = await loginWithPreviewDeviceFlow(plan.gatewayUrl, config, runtime);
     accountToken = account.token;
     await runtime.credentials.set(plan.gatewayUrl, accountToken);
     logger.success(`Signed in to Farm Preview as ${account.user.login}.`);
@@ -111,6 +114,7 @@ export async function authorizePreviewGatewayPlan(
     relayToken: grant.token,
     expiresAt: grant.expiresAt,
     expiresInMs,
+    ...(config.dashboardUrl ? { dashboardUrl: config.dashboardUrl } : {}),
   };
 }
 
@@ -165,7 +169,110 @@ export async function loadPreviewAuthConfig(
   ) {
     throw new Error("The Farm Preview gateway returned an invalid login configuration.");
   }
+  if (config.enabled && config.provider === "device" && safeAuthUrl(config.issuer || "").search)
+    throw new Error("Invalid Farm Preview device issuer.");
+  if (config.dashboardUrl && safeAuthUrl(config.dashboardUrl).search)
+    throw new Error("Invalid Farm Preview dashboard URL.");
   return { ...config, controlAuth: config.controlAuth ?? "bearer" };
+}
+
+function safeAuthUrl(value: string, origin?: string) {
+  const url = new URL(value);
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (
+    (url.protocol !== "https:" && !(local && url.protocol === "http:")) ||
+    url.username ||
+    url.password ||
+    url.hash ||
+    (origin && url.origin !== origin)
+  )
+    throw new Error("Farm Preview returned an unsafe authentication URL.");
+  return url;
+}
+
+async function loginWithPreviewDeviceFlow(
+  gatewayUrl: string,
+  config: PreviewAuthPublicConfig,
+  runtime: PreviewAuthRuntime,
+): Promise<PreviewAccountExchange> {
+  if (runtime.interactive === false)
+    throw new Error(
+      "Farm Preview needs a credential in CI or a non-interactive terminal. Set FARM_PREVIEW_TOKEN to a Farm Infra API key, or sign in once from an interactive terminal.",
+    );
+  if (config.provider === "github") return loginWithGitHubDeviceFlow(gatewayUrl, config, runtime);
+  const issuer = safeAuthUrl(config.issuer || "");
+  if (issuer.search) throw new Error("Invalid Farm Preview device issuer.");
+  const base = issuer.href.replace(/\/$/, "");
+  const post = (path: string, body: object) =>
+    runtime.fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000),
+      redirect: "error",
+    });
+  const response = await post("/device/code", { client_id: config.clientId });
+  if (!response.ok) throw new Error(`Farm Infra could not start sign-in (${response.status}).`);
+  const device = (await response.json()) as GitHubDeviceAuthorization;
+  if (
+    typeof device.device_code !== "string" ||
+    !device.device_code ||
+    typeof device.user_code !== "string" ||
+    !device.user_code ||
+    !Number.isSafeInteger(device.expires_in) ||
+    device.expires_in <= 0 ||
+    device.expires_in > 3600 ||
+    (device.interval !== undefined &&
+      (!Number.isSafeInteger(device.interval) || device.interval < 1 || device.interval > 60))
+  )
+    throw new Error("Farm Infra returned an invalid device authorization.");
+  const browserUrl = safeAuthUrl(
+    device.verification_uri_complete || device.verification_uri,
+    issuer.origin,
+  ).href;
+  logger.info(`Confirm this code in Farm Infra: ${device.user_code}`);
+  logger.info(`Open: ${browserUrl}`);
+  if (!(await runtime.openBrowser(browserUrl)))
+    logger.warn("Open the URL above in your browser to continue.");
+  logger.info("After approving this device, return here to choose the preview duration.");
+  const deadline = Date.now() + device.expires_in * 1000;
+  let interval = (device.interval ?? 5) * 1000;
+  while (Date.now() < deadline) {
+    await runtime.wait(interval);
+    if (Date.now() >= deadline) break;
+    const poll = await post("/device/token", {
+      client_id: config.clientId,
+      device_code: device.device_code,
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+    });
+    const result = (await poll.json()) as {
+      access_token?: string;
+      expires_in?: number;
+      error?: string;
+    };
+    if (
+      poll.ok &&
+      typeof result.access_token === "string" &&
+      result.access_token &&
+      Number.isSafeInteger(result.expires_in) &&
+      result.expires_in! > 0
+    )
+      return {
+        token: result.access_token,
+        expiresAt: Date.now() + result.expires_in! * 1000,
+        user: { login: "your Farm Infra account" },
+      };
+    if (poll.status === 400 && result.error === "authorization_pending") continue;
+    if (poll.status === 400 && result.error === "slow_down") {
+      interval += 5000;
+      continue;
+    }
+    if (result.error === "access_denied")
+      throw new Error("Farm Infra sign-in was declined. Run farm preview again when ready.");
+    if (result.error === "expired_token") break;
+    throw new Error(`Farm Infra sign-in failed (${poll.status}). Try again.`);
+  }
+  throw new Error("Farm Infra sign-in expired. Run farm preview again to get a new code.");
 }
 
 export function parsePreviewDuration(value: string | number | undefined): number | undefined {
@@ -212,7 +319,7 @@ async function requestTunnelGrant(
       authorization: `Bearer ${accountToken}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ name: plan.requestedName, expiresInMs }),
+    body: JSON.stringify({ name: plan.requestedName, project: plan.project, expiresInMs }),
     signal: AbortSignal.timeout(10_000),
   });
   if (response.status === 401) {
@@ -332,6 +439,7 @@ async function exchangePreviewAccount(
 
 function createDefaultPreviewAuthRuntime(): PreviewAuthRuntime {
   return {
+    interactive: !!process.stdin.isTTY && !process.env.CI,
     fetch,
     openBrowser,
     wait: (ms) => delay(ms),
@@ -341,9 +449,15 @@ function createDefaultPreviewAuthRuntime(): PreviewAuthRuntime {
 }
 
 async function openBrowser(url: string) {
+  safeAuthUrl(url);
   const command =
-    process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
-  const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
+    process.platform === "darwin"
+      ? "open"
+      : process.platform === "win32"
+        ? "rundll32.exe"
+        : "xdg-open";
+  // Do not interpolate device URLs into cmd.exe: query strings contain shell metacharacters.
+  const args = process.platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url];
   try {
     return await new Promise<boolean>((resolve) => {
       const child = spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true });
