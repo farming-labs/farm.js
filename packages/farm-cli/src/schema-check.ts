@@ -6,6 +6,8 @@ export { formatSchemaCheck } from "@farm.js/core";
 export interface CheckSchemaOptions {
   root?: string;
   configPath?: string;
+  /** Milliseconds connecting, and each query, may take. Default 10 seconds. */
+  timeoutMs?: number;
 }
 
 /**
@@ -23,5 +25,5 @@ export async function runSchemaCheck(
   }
 
   const config = await resolveConfig({ ...userConfig, root }, "production");
-  return checkSchema(config);
+  return checkSchema(config, { timeoutMs: options.timeoutMs });
 }

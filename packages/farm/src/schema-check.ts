@@ -77,6 +77,38 @@ export type FarmSchemaCheckConfig = FarmSchemaOwnerConfig & {
   plugins?: readonly unknown[];
 };
 
+export interface FarmSchemaCheckOptions {
+  /**
+   * How long connecting, and each query, may take before the owner is
+   * reported unreachable. A pg client has no connect timeout of its own, so
+   * an unreachable host would otherwise hang the check. Default 10 seconds.
+   */
+  timeoutMs?: number;
+}
+
+const DEFAULT_TIMEOUT_MS = 10_000;
+
+/** Reject when `work` has not settled in time. The work itself is abandoned. */
+async function withTimeout<T>(work: () => Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`no answer within ${formatSeconds(timeoutMs)}`)),
+      timeoutMs,
+    );
+    // An abandoned connection attempt must not keep the process alive.
+    (timer as { unref?: () => void }).unref?.();
+  });
+  try {
+    return await Promise.race([Promise.resolve().then(work), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const formatSeconds = (ms: number) =>
+  ms < 1000 ? `${ms}ms` : `${Number((ms / 1000).toFixed(1))}s`;
+
 type SchemaOwner = {
   name: string;
   kind: "integration" | "plugin";
@@ -149,15 +181,28 @@ type OwnerDatabase = {
 function resolveSchemaExecutor(
   client: unknown,
   owner: string,
+  timeoutMs: number,
 ): (ReturnType<typeof createSchemaExecutor> & { client: unknown }) | null | undefined {
   for (const candidate of [client, (client as { $client?: unknown }).$client]) {
     if (candidate === undefined || candidate === null) continue;
+    let adapter: ReturnType<typeof createSchemaExecutor>;
     try {
-      const adapter = createSchemaExecutor(candidate, owner);
-      return adapter && { ...adapter, client: candidate };
+      adapter = createSchemaExecutor(candidate, owner);
     } catch {
-      // Not a driver Farm can read; try the next shape.
+      continue; // Not a driver Farm can read; try the next shape.
     }
+    if (!adapter) return null;
+    const { executor } = adapter;
+    return {
+      ...adapter,
+      client: candidate,
+      // Each query is bounded, not the whole check, so a large schema on a
+      // slow link still finishes while a dead connection fails fast.
+      executor: {
+        execute: (sql) => withTimeout(() => executor.execute(sql), timeoutMs),
+        query: (sql, params) => withTimeout(() => executor.query(sql, params), timeoutMs),
+      },
+    };
   }
   return undefined;
 }
@@ -193,7 +238,15 @@ function typeFamily(type: string): string | undefined {
   return undefined;
 }
 
-export async function checkSchema(config: FarmSchemaCheckConfig): Promise<FarmSchemaCheckReport> {
+export async function checkSchema(
+  config: FarmSchemaCheckConfig,
+  options: FarmSchemaCheckOptions = {},
+): Promise<FarmSchemaCheckReport> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new TypeError("timeoutMs must be a positive number of milliseconds.");
+  }
+  const timeoutHint = `Check that the database is reachable from here, or allow longer than ${formatSeconds(timeoutMs)} with \`--timeout <ms>\`.`;
   const owners = collectSchemaOwners(config);
   const issues: FarmSchemaCheckIssue[] = [];
   const summaries: FarmSchemaCheckOwner[] = [];
@@ -265,13 +318,14 @@ export async function checkSchema(config: FarmSchemaCheckConfig): Promise<FarmSc
 
     let client: unknown;
     try {
-      client = await owner.resolveClient(config);
+      client = await withTimeout(() => owner.resolveClient(config), timeoutMs);
     } catch (error) {
       issues.push({
         severity: "error",
         code: "client-unavailable",
         owner: owner.name,
         message: `Could not connect to ${owner.name}'s database: ${errorMessage(error)}`,
+        hint: timeoutHint,
       });
       continue;
     }
@@ -289,7 +343,7 @@ export async function checkSchema(config: FarmSchemaCheckConfig): Promise<FarmSc
       continue;
     }
 
-    const adapter = resolveSchemaExecutor(client, owner.name);
+    const adapter = resolveSchemaExecutor(client, owner.name, timeoutMs);
     if (adapter === null) {
       // A key/value mount has no tables to check.
       summary.relational = false;
@@ -361,6 +415,7 @@ export async function checkSchema(config: FarmSchemaCheckConfig): Promise<FarmSc
         code: "client-unavailable",
         owner: owner.name,
         message: `Could not read ${owner.name}'s tables: ${errorMessage(error)}`,
+        hint: timeoutHint,
       });
     }
   }

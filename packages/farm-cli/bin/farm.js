@@ -240,12 +240,17 @@ program
   .description("Compare declared tables and their references with the live database")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("-c, --config <config>", "Path to farm config file")
+  .option("--timeout <ms>", "How long connecting, and each query, may take", "10000")
   .option("--json", "Print machine-readable JSON")
   .action(async (options) => {
     let report;
     try {
+      const timeoutMs = Number(options.timeout);
+      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+        throw new Error("--timeout must be a positive number of milliseconds.");
+      }
       const { runSchemaCheck } = require("../dist/index.js");
-      report = await runSchemaCheck({ root: options.root, configPath: options.config });
+      report = await runSchemaCheck({ root: options.root, configPath: options.config, timeoutMs });
     } catch (error) {
       console.error("Failed to check the schema:", error?.message ?? error);
       process.exit(1);

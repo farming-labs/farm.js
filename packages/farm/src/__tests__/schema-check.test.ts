@@ -739,6 +739,60 @@ describe("farm schema check without a database", () => {
     second.close();
   });
 
+  it("gives up on a database that never answers, and still checks the rest", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const sqlite = new DatabaseSync(":memory:");
+    // Shaped like a pg pool whose host drops packets: queries never settle.
+    const blackhole = { query: () => new Promise(() => {}) };
+    const started = Date.now();
+    const report = await checkSchema(
+      {
+        plugins: [
+          plugin("hung", async () => blackhole),
+          plugin(
+            "connecting",
+            () => new Promise(() => {}),
+            defineSchema({
+              models: {
+                slow: { name: "slow_items", fields: { id: { type: "uuid", primaryKey: true } } },
+              },
+            }),
+          ),
+          plugin(
+            "healthy",
+            async () => sqlite,
+            defineSchema({
+              models: {
+                other: { name: "other_items", fields: { id: { type: "uuid", primaryKey: true } } },
+              },
+            }),
+          ),
+        ],
+      },
+      { timeoutMs: 50 },
+    );
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(report.issues).toEqual([
+      expect.objectContaining({
+        owner: "connecting",
+        code: "client-unavailable",
+        message: expect.stringContaining("no answer within 50ms"),
+        hint: expect.stringContaining("--timeout"),
+      }),
+      expect.objectContaining({
+        owner: "hung",
+        code: "client-unavailable",
+        message: expect.stringContaining("no answer within"),
+      }),
+      expect.objectContaining({ owner: "healthy", code: "table-missing" }),
+    ]);
+    sqlite.close();
+  });
+
+  it("rejects a timeout that is not a positive number", async () => {
+    await expect(checkSchema({}, { timeoutMs: 0 })).rejects.toThrow(/positive number/);
+  });
+
   it("never prints a password from a connection error", async () => {
     const report = await checkSchema({
       plugins: [
@@ -848,7 +902,61 @@ describeWithPostgres("farm schema check on postgres specifics", () => {
     }
   });
 
-  it("only sees tables in the connection's current schema", async () => {
+  it("finds a referenced table through the search path, as the app's queries do", async () => {
+    const { Client } = requireModule("pg") as {
+      Client: new (options: { connectionString: string }) => {
+        connect(): Promise<void>;
+        query(sql: string): Promise<unknown>;
+        end(): Promise<void>;
+      };
+    };
+    // One connection, so the search path set here is the one the check uses.
+    const client = new Client({ connectionString: postgresTestUrl! });
+    await client.connect();
+    const later = unique("later_schema");
+    const users = unique("path_users");
+    const points = unique("path_points");
+    try {
+      await client.query(`CREATE SCHEMA "${later}"`);
+      await client.query(`CREATE TABLE "${later}"."${users}" ("id" TEXT PRIMARY KEY)`);
+      // An owned table that exists only in the later schema.
+      await client.query(`CREATE TABLE "${later}"."${points}" ("id" TEXT PRIMARY KEY)`);
+      await client.query(`SET search_path TO public, "${later}"`);
+
+      const report = await checkSchema({
+        plugins: [
+          declareSchemaTables(definePlugin({ name: "farm:loyalty" }), {
+            name: "loyalty",
+            schema: defineSchema({
+              models: {
+                points: {
+                  name: points,
+                  fields: {
+                    id: { type: "uuid", primaryKey: true },
+                    userId: {
+                      type: "string",
+                      reference: { model: users, field: "id", enforced: "app" },
+                    },
+                  },
+                },
+              },
+            }),
+            resolveClient: async () => client,
+          }),
+        ],
+      });
+      // The reference resolves like a query would. The owned table does not:
+      // `migrate` creates it in the current schema, where it is still missing.
+      expect(report.issues).toEqual([
+        expect.objectContaining({ code: "table-missing", table: points }),
+      ]);
+    } finally {
+      await client.query(`DROP SCHEMA IF EXISTS "${later}" CASCADE`);
+      await client.end();
+    }
+  });
+
+  it("does not see tables in a schema outside the search path", async () => {
     const elsewhere = unique("elsewhere_users");
     await db.run(`CREATE SCHEMA "${schemaName}"`);
     await db.run(`CREATE TABLE "${schemaName}"."${elsewhere}" ("id" TEXT PRIMARY KEY)`);

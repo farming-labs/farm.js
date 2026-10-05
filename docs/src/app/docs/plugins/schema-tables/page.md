@@ -143,9 +143,14 @@ Warnings do not fail the check:
 - a client Farm cannot inspect, such as a Prisma client. That ORM's migrations
   own those tables. Drizzle databases are read through the driver they wrap
 
-A dotted reference such as `auth.users` is read as `schema.table` on Postgres
-and MySQL, so references into Supabase's `auth` schema work. Otherwise tables
-are looked up in the connection's current schema.
+A referenced table is found the way your app's queries find it: through the
+connection's search path on Postgres, or as `schema.table` when the reference is
+dotted, such as `auth.users` in Supabase. Tables a plugin creates are looked up
+in the current schema, because that is where `migrate` creates them.
+
+Connecting, and each query, has 10 seconds to answer, so an unreachable
+database fails the check instead of hanging it. Pass `--timeout <ms>` to change
+it.
 
 It only reads. Nothing is created or altered, so it is safe to run against
 production. It exits `1` when there are errors, which makes it a deploy gate:

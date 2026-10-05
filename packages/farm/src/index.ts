@@ -29,6 +29,7 @@ export {
   type FarmSchemaCheckConfig,
   type FarmSchemaCheckIssue,
   type FarmSchemaCheckOwner,
+  type FarmSchemaCheckOptions,
   type FarmSchemaCheckReport,
   type FarmSchemaCheckSeverity,
 } from "./schema-check";
