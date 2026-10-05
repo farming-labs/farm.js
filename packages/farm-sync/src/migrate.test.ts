@@ -1,6 +1,7 @@
 // @vitest-environment node
 import {
   applySchemaMigration,
+  checkSchema,
   collectOwnerModels,
   findSchemaTableOwners,
   migrateSchemaTables,
@@ -65,6 +66,53 @@ describe("sync declares the tables it owns", () => {
     const owner = findSchemaTableOwners({ plugins: [plugin(storage)] })[0]!;
 
     expect(await owner.resolveClient()).toBe(storage);
+  });
+});
+
+describe("sync forwards the database the app gave it", () => {
+  it("describes the models the app did not expose without creating them", () => {
+    const { schema: declared } = plugin(null) as {
+      schema: typeof schema & { models: Record<string, { external?: boolean }> };
+    };
+    expect(declared.models.tasks!.external).toBe(false);
+    expect(declared.models.auditLog!.external).toBe(true);
+    // The app's own schema object is not changed.
+    expect("external" in schema.models.auditLog).toBe(false);
+  });
+
+  it("uses the app's client, never storage.client", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const database = new DatabaseSync(":memory:");
+    const owner = findSchemaTableOwners({ plugins: [plugin(database)] })[0]!;
+    expect(await owner.resolveClient({ storage: { client: { query() {} } } })).toBe(database);
+    database.close();
+  });
+
+  it("passes the dialect the app set", () => {
+    const withDialect = sync({
+      schema: schema as never,
+      client: {},
+      dialect: "mysql",
+      models: { tasks: "read" },
+    });
+    expect(readSchemaTables(withDialect)?.dialect).toBe("mysql");
+  });
+
+  it("explains a missing data source when migrate asks for one", async () => {
+    const unconfigured = sync({ schema: schema as never, models: { tasks: "read" } });
+    await expect(
+      findSchemaTableOwners({ plugins: [unconfigured] })[0]!.resolveClient({}),
+    ).rejects.toThrow(/sync\(\): no data source is configured/);
+  });
+
+  it("passes farm schema check once migrated, without asking for the app's tables", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const database = new DatabaseSync(":memory:");
+    const config = { plugins: [plugin(database)] };
+    await migrateSchemaTables(findSchemaTableOwners(config)[0]!, { apply: true });
+    // auditLog was never exposed, so it is not sync's table to check either.
+    expect((await checkSchema(config)).issues).toEqual([]);
+    database.close();
   });
 });
 

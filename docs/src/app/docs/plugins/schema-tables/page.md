@@ -259,16 +259,19 @@ built from the renamed schema with `createIntegrationOrm` reads `user.id` from
 gets completion, and a model or field that does not exist fails when the config
 loads.
 
-### Keeping the tables in another database
+### When the app picks another database
 
-By default the tables live in the app's `storage.client`. A plugin that takes
-its own connection says so with `database`:
+Where data lives is the app's decision. By default a plugin's tables go in the
+app's `storage.client`, and the plugin sets nothing. Some plugins let the app
+choose a different database for them through their own options, the way Sync
+takes `sync({ client })`. Forward that choice with `database`:
 
 ```ts title="src/index.ts"
-export function jobs(options: { client: unknown }) {
+export function jobs(options: { client?: unknown } = {}) {
   return definePlugin({
     name: "farm:jobs",
     schema: jobsSchema,
+    // Undefined when the app passed nothing: storage.client is used.
     database: { client: options.client },
   });
 }

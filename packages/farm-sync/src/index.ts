@@ -1,5 +1,4 @@
 import {
-  declareSchemaTables,
   definePlugin,
   describeIntegrationOriginRejection,
   resolveIntegrationAllowedOrigins,
@@ -105,8 +104,25 @@ export function sync(options: SyncPluginOptions) {
     return ormPromise;
   };
 
-  const plugin = definePlugin({
+  return definePlugin({
     name: "farm:sync",
+    // `farm sync migrate` creates the tables of the models the app exposed.
+    // The rest of the app's schema is described, not created: those tables
+    // are the app's.
+    schema: {
+      ...options.schema,
+      models: Object.fromEntries(
+        Object.entries(options.schema.models).map(([key, model]) => [
+          key,
+          { ...model, external: !models.has(key) },
+        ]),
+      ),
+    },
+    // The database the app gave sync, not storage.client.
+    database: {
+      client: () => resolveSyncConnection(options),
+      dialect: options.dialect,
+    },
 
     client: {
       // Serializable descriptor the browser runtime reads at startup.
@@ -196,28 +212,6 @@ export function sync(options: SyncPluginOptions) {
         allowedOrigins,
       });
       if (response) await sendNodeResponse(res, response);
-    },
-  });
-
-  // Declare the tables sync owns, so `farm sync migrate` can create them
-  // without re-reading or re-validating configuration.
-  return declareSchemaTables(plugin, {
-    name: "sync",
-    schema: options.schema,
-    // A model the app has not opened to the browser is not sync's to create.
-    models: Array.from(models.keys()),
-    dialect: options.dialect,
-    resolveClient: async () => {
-      if (options.client) {
-        return typeof options.client === "function"
-          ? await (options.client as () => unknown | Promise<unknown>)()
-          : options.client;
-      }
-      if (options.storage) {
-        const { getStorage } = await import("@farm.js/core/storage");
-        return getStorage(options.storage);
-      }
-      return undefined;
     },
   });
 }
@@ -333,35 +327,37 @@ async function runMiddleware(
   return context;
 }
 
-async function resolveSyncClient(
-  options: SyncPluginOptions,
-  models: Map<string, ResolvedSyncModel>,
-): Promise<SyncOrmClient> {
+/** The connection or storage mount the app gave sync. */
+async function resolveSyncConnection(options: SyncPluginOptions): Promise<unknown> {
   if (options.client) {
-    const provided =
-      typeof options.client === "function"
-        ? await (options.client as () => unknown | Promise<unknown>)()
-        : options.client;
-
-    // Already model-shaped: an @farming-labs/orm client, or anything exposing
-    // the same four methods. Use it directly.
-    if (isModelClient(provided, models)) return provided;
-    return buildOrm(options.schema, provided);
+    return typeof options.client === "function"
+      ? await (options.client as () => unknown | Promise<unknown>)()
+      : options.client;
   }
 
   if (options.storage) {
-    const mount = options.storage;
     // Imported lazily so the storage runtime never reaches a browser bundle.
     const { getStorage } = await import("@farm.js/core/storage");
     // A mount is an unstorage instance, which the orm runtime drives like any
     // other backend — so this is the same code path as a real database.
-    return buildOrm(options.schema, getStorage(mount));
+    return getStorage(options.storage);
   }
 
   throw new Error(
     "sync(): no data source is configured. Set `storage` to a mount name from " +
       "storage.mounts in farm.config.ts, or pass `client` with your database connection.",
   );
+}
+
+async function resolveSyncClient(
+  options: SyncPluginOptions,
+  models: Map<string, ResolvedSyncModel>,
+): Promise<SyncOrmClient> {
+  const provided = await resolveSyncConnection(options);
+  // Already model-shaped: an @farming-labs/orm client, or anything exposing
+  // the same four methods. Use it directly.
+  if (options.client && isModelClient(provided, models)) return provided;
+  return buildOrm(options.schema, provided);
 }
 
 /** Let the orm runtime detect the driver and build the model client. */

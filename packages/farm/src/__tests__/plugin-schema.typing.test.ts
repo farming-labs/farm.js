@@ -34,8 +34,9 @@ defineConfig({ plugins: [teams({ schema: { user: { name: "members_auth" } } })] 
 definePlugin({ name: "farm:jobs", schema: teamsSchema, database: { client: () => ({}), dialect: "postgres" } });
 // @ts-expect-error dialects are the ones Farm migrates
 definePlugin({ name: "farm:jobs", schema: teamsSchema, database: { client: {}, dialect: "oracle" } });
-// @ts-expect-error a database needs its client
-definePlugin({ name: "farm:jobs", schema: teamsSchema, database: { dialect: "sqlite" } });
+// Forwarding an optional app setting needs no conditional.
+const appClient: unknown = undefined;
+definePlugin({ name: "farm:jobs", schema: teamsSchema, database: { client: appClient } });
 `;
   const options: ts.CompilerOptions = {
     strict: true,

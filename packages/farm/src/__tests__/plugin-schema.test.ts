@@ -5,6 +5,7 @@ import { createIntegrationOrm } from "../integration-orm";
 import { definePlugin } from "../plugin";
 import { defineSchema } from "../schema";
 import { checkSchema } from "../schema-check";
+import { createSyncModelTypeDeclarations } from "../schema-model-types";
 import { renameSchema, type FarmSchemaRenames } from "../schema-rename";
 import { collectSchemaModels, generateSqlStatements, type FarmSqlDialect } from "../schema-sql";
 import {
@@ -131,6 +132,17 @@ describe("definePlugin({ schema })", () => {
     own.close();
   });
 
+  it("uses storage.client when the app did not choose a database for the plugin", async () => {
+    const appDatabase = { query() {} };
+    const plugin = definePlugin({
+      name: "farm:teams",
+      schema: teamsSchema,
+      database: { client: undefined },
+    });
+    const [owner] = findSchemaTableOwners({ plugins: [plugin] });
+    expect(await owner!.resolveClient({ storage: { client: appDatabase } })).toBe(appDatabase);
+  });
+
   it("says when the plugin's own database gives no connection", async () => {
     const plugin = definePlugin({
       name: "farm:teams",
@@ -238,6 +250,20 @@ describe("external models", () => {
       expect(sql).not.toMatch(/CREATE TABLE IF NOT EXISTS ["`]user["`]/u);
       expect(sql).not.toMatch(/REFERENCES ["`]user["`]/u);
     }
+  });
+});
+
+describe("generated sync model types", () => {
+  it("leave out models the plugin only describes", () => {
+    const plugin = definePlugin({
+      name: "farm:sync",
+      schema: teamsSchema,
+      database: { client: {} },
+    });
+    const declarations = createSyncModelTypeDeclarations([plugin])!;
+    expect(declarations).toContain("organization:");
+    expect(declarations).toContain("member:");
+    expect(declarations).not.toMatch(/\buser:/u);
   });
 });
 

@@ -1661,8 +1661,12 @@ export function definePlugin<
 
 /** The database a plugin's `schema` tables live in, when not `storage.client`. */
 export interface FarmPluginDatabase {
-  /** A pg, mysql2, or sqlite connection, or a function returning one. */
-  client: unknown;
+  /**
+   * A pg, mysql2, or sqlite connection the app chose for this plugin, or a
+   * function returning one. Left undefined, the app's `storage.client` is used,
+   * so a plugin can forward an optional app setting as is.
+   */
+  client?: unknown;
   /** Only when the dialect cannot be detected from the connection. */
   dialect?: FarmSqlDialect;
 }
@@ -1696,14 +1700,16 @@ function declarePluginSchema<
   if (!plugin.schema || readSchemaTables(plugin)) return plugin;
   const name = pluginSchemaName(plugin.name);
   // Fail while the config loads, not at the first migrate or query.
-  resolveSchemaModels(name, plugin.schema);
+  const models = resolveSchemaModels(name, plugin.schema);
   const database = plugin.database;
   return declareSchemaTables(plugin, {
     name,
     schema: plugin.schema,
+    // Also listed by key, which tooling from before `external` existed reads.
+    models: Object.keys(models).filter((key) => !models[key]!.external),
     dialect: database?.dialect,
     resolveClient: async (config) => {
-      if (database) {
+      if (database?.client !== undefined && database.client !== null) {
         const client =
           typeof database.client === "function"
             ? await (database.client as () => unknown)()
