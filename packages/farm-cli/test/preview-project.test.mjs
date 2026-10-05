@@ -6,7 +6,11 @@ import test from "node:test";
 test("project resolution is stable across previews and validates explicit slugs", async () => {
   // Run the source helper in a separate process, including Node 22's explicit TS flag.
   const moduleUrl = new URL("../src/preview-project.ts", import.meta.url).href;
-  const { stdout } = await promisify(execFile)(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", `
+  const { stdout } = await promisify(execFile)(process.execPath, [
+    "--experimental-strip-types",
+    "--input-type=module",
+    "-e",
+    `
     import assert from "node:assert/strict";
     import { mkdtemp, writeFile, rm } from "node:fs/promises";
     import { tmpdir } from "node:os";
@@ -29,6 +33,7 @@ test("project resolution is stable across previews and validates explicit slugs"
       assert.equal(await resolvePreviewProject({root,project:"explicit"}), "explicit");
       console.log("project resolution passed");
     } finally { await rm(root, {recursive:true,force:true}); }
-  `]);
+  `,
+  ]);
   assert.match(stdout, /project resolution passed/);
 });
