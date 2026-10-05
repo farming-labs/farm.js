@@ -1,5 +1,4 @@
 import { defineClient } from "@farm.js/core/client/lifecycle";
-import { enhanceArtwork } from "./components/blog/artwork-motion";
 import { enhanceFigures } from "./components/blog/figure-player";
 import { enhanceAgentCheck, enhanceAgentCheckCopy } from "./components/agents/check-client";
 import { mountDocsAnnouncement } from "./components/docs-announcement";
@@ -20,13 +19,11 @@ export default defineClient({
         }
       }
       for (const element of document.querySelectorAll<HTMLElement>(
-        ".farm-blog .blog-release-art, .farm-blog .blog-reading-grid, .agent-artwork, [data-agent-check-root], [data-agent-check-copy], .farm-home .blog-figure",
+        ".farm-blog .blog-reading-grid, [data-agent-check-root], [data-agent-check-copy], .farm-home .blog-figure",
       )) {
         if (mounted.has(element)) continue;
         if (!hydrated && element.matches(".farm-home .blog-figure")) continue;
-        if (element.matches(".blog-release-art, .agent-artwork")) {
-          mounted.set(element, enhanceArtwork(element));
-        } else if (element.matches(".farm-home .blog-figure")) {
+        if (element.matches(".farm-home .blog-figure")) {
           mounted.set(element, enhanceFigures(element));
         } else if (element.matches("[data-agent-check-root]")) {
           mounted.set(element, enhanceAgentCheck(element));

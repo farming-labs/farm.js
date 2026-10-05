@@ -1,3 +1,5 @@
+import { useArtworkMotion } from "../use-artwork-motion";
+
 // A deterministic character field keeps the illustration crisp in SSR and costs
 // no canvas, JavaScript animation loop, image request, or client-side dependency.
 const field = Array.from({ length: 56 }, (_, row) =>
@@ -26,9 +28,12 @@ function RollingDigit({ value, order }: { value: number; order: number }) {
 }
 
 export function ReleaseArtwork({ fullBleed = false }: { fullBleed?: boolean }) {
+  const [ref, motion] = useArtworkMotion<HTMLDivElement>();
   return (
     <div
+      ref={ref}
       className={`blog-release-art${fullBleed ? " blog-release-art--full-bleed" : ""}`}
+      data-motion={motion}
       aria-hidden="true"
     >
       {!fullBleed && (
