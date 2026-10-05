@@ -17,11 +17,11 @@ replacement entries get new patterns. No request-path cache is retained.
 
 Observed on macOS arm64, Node 24.21.0, Vitest 3.2.7 (mean ms per 100-entry scan):
 
-| Request | Previous | Prepared |
-| --- | ---: | ---: |
-| `/missing` | 0.2357 | 0.0262 |
-| `/resource-99/value/nested` | 0.4841 | 0.0308 |
-| `/resource-99/%2541BC` | 0.4484 | 0.1456 |
+| Request                     | Previous | Prepared |
+| --------------------------- | -------: | -------: |
+| `/missing`                  |   0.2357 |   0.0262 |
+| `/resource-99/value/nested` |   0.4841 |   0.0308 |
+| `/resource-99/%2541BC`      |   0.4484 |   0.1456 |
 
 Relative margin of error was 4–6% except the previous nested-match case (21%).
 These are warmed matcher CPU measurements, not whole-request latency claims.
