@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { AgentArtwork } from "../../components/agents/artwork";
 import { AgentWaitlist } from "../../components/agents/waitlist";
+import { DeskComputer } from "../../components/agents/desk-computer";
 import { SelectionWire } from "../../components/home/selection-wire";
 import { BlogFigure } from "../../components/blog/figures";
 import { FlickeringGrid } from "../../components/ui/flickering-grid";
@@ -23,6 +24,7 @@ import {
   SiteHeader,
 } from "../../components/site-chrome";
 import "../../components/agents/waitlist.css";
+import "../../components/agents/desk-computer.css";
 import "../../components/blog/figures.css";
 import "./agents.css";
 
@@ -257,6 +259,7 @@ export default function AgentsPage() {
               <div>
                 <IndexedLabel index="06.3" label="Built for the open web" />
                 <h2 id="agents-open-title">Your stack. Your permissions.</h2>
+                <DeskComputer />
               </div>
               <div className="agents-open-copy">
                 <p>
