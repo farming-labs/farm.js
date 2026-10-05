@@ -12802,6 +12802,13 @@ packages:
       zod: 4.1.11
     dev: false
 
+  /@vercel/cli-config@0.3.1:
+    resolution: {integrity: sha512-sISbygqlFXYb8qfPu/+2Cf/A8IjrlAuZePdag3EDQr2PRA455s7UZtl9Ro674CWsB/saBRmz3jEkw0YsQs8OoQ==}
+    dependencies:
+      xdg-app-paths: 5.1.0
+      zod: 4.1.11
+    dev: false
+
   /@vercel/cli-exec@1.0.0:
     resolution: {integrity: sha512-kQF8LGie/Hbdq9/psJxLE7owRTcqMQMhgybU04gCeR7cbQAr5t8OrjefDNColJv1QSSucFt4pLwRiARVmlOnug==}
     engines: {node: '>= 18'}
@@ -12874,6 +12881,15 @@ packages:
     dependencies:
       '@vercel/cli-config': 0.2.0
       '@vercel/cli-exec': 1.0.0
+      jose: 5.10.0
+    dev: false
+
+  /@vercel/oidc@4.0.0:
+    resolution: {integrity: sha512-ko6ATeRUlHZMB5hLFdC7+/Q1dI2f3NX3gZHxtpALdkxurwjD5HFHGWYF+4o+4SF0E47jg6KzcHknmRpHcKgJ5A==}
+    engines: {node: '>= 20'}
+    dependencies:
+      '@vercel/cli-config': 0.3.1
+      '@vercel/cli-exec': 1.0.1
       jose: 5.10.0
     dev: false
 
