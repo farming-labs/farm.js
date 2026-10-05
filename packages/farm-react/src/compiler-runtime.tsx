@@ -4108,6 +4108,131 @@ interface KeyedTargetRuntime {
   clear(): void;
 }
 
+type KeyedTargetKind = "identityTarget" | "membershipTarget" | "mapLookupTarget";
+
+/** Two snapshot maps for a compiler-proven single target kind. The complete
+ * runtime below remains the compatibility path for mixed and structural rows. */
+function createSingleKindKeyedTargetRuntime<Snapshot extends { eligible: boolean }>(
+  props: CompilerKeyedRowsBlockProps,
+  kind: KeyedTargetKind,
+  snapshot: (value: unknown, previous?: Snapshot) => Snapshot,
+  changedKeys: (previous: Snapshot, next: Snapshot) => Set<string>,
+): KeyedTargetRuntime | undefined {
+  if (
+    !props.bindings.some(
+      (binding) => binding.identityTarget || binding.membershipTarget || binding.mapLookupTarget,
+    )
+  )
+    return undefined;
+  const previous = new Map<number, Snapshot>();
+  let next = new Map<number, Snapshot>();
+  // A changed definition or hand-authored feature selection must fall back to
+  // React before patching if it introduces an unsupported target kind.
+  const compatible = (binding: CompilerKeyedRowBinding) =>
+    (kind === "identityTarget" || !binding.identityTarget) &&
+    (kind === "membershipTarget" || !binding.membershipTarget) &&
+    (kind === "mapLookupTarget" || !binding.mapLookupTarget);
+  return {
+    hasSafeTargets(props, dirtyState) {
+      for (const binding of props.bindings) {
+        if (!compatible(binding)) return false;
+        const target = binding[kind];
+        if (
+          kind !== "identityTarget" &&
+          target &&
+          (!dirtyState || dirtyState.has(target.dependency)) &&
+          !snapshot(target.read()).eligible
+        )
+          return false;
+      }
+      return true;
+    },
+    commit(props, dirtyState) {
+      if (!dirtyState) previous.clear();
+      for (let index = 0; index < props.bindings.length; index++) {
+        const target = props.bindings[index][kind];
+        if (!target) previous.delete(index);
+        else if (!dirtyState || dirtyState.has(target.dependency))
+          previous.set(index, snapshot(target.read()));
+      }
+    },
+    prepare(props, indices) {
+      next = new Map();
+      for (const index of indices) {
+        const binding = props.bindings[index];
+        if (!compatible(binding)) return false;
+        const target = binding[kind];
+        if (!target) continue;
+        const value = snapshot(target.read(), previous.get(index));
+        if (kind !== "identityTarget" && !value.eligible) return false;
+        next.set(index, value);
+      }
+      return true;
+    },
+    select(props, index, dirtyState, fallbackKeys, fallbackCount) {
+      const binding = props.bindings[index];
+      const target = binding[kind];
+      const before = previous.get(index);
+      const after = next.get(index);
+      if (
+        target &&
+        binding.dependencies?.length === 1 &&
+        binding.dependencies[0] === target.dependency &&
+        dirtyState.has(target.dependency) &&
+        before?.eligible &&
+        after?.eligible
+      ) {
+        const keys = changedKeys(before, after);
+        return { keys, count: keys.size };
+      }
+      return { keys: fallbackKeys, count: fallbackCount };
+    },
+    commitPrepared(indices) {
+      for (const index of indices) {
+        const value = next.get(index);
+        if (value) previous.set(index, value);
+        else previous.delete(index);
+      }
+    },
+    clear() {
+      previous.clear();
+      next.clear();
+    },
+  };
+}
+
+function createKeyedIdentityTargetRuntime(props: CompilerKeyedRowsBlockProps) {
+  return createSingleKindKeyedTargetRuntime(
+    props,
+    "identityTarget",
+    keyedIdentityTargetSnapshot,
+    (previous, next) => {
+      const keys = new Set<string>();
+      if (previous.key !== undefined) keys.add(previous.key);
+      if (next.key !== undefined) keys.add(next.key);
+      return keys;
+    },
+  );
+}
+
+function createKeyedMembershipTargetRuntime(props: CompilerKeyedRowsBlockProps) {
+  return createSingleKindKeyedTargetRuntime(
+    props,
+    "membershipTarget",
+    keyedMembershipTargetSnapshot,
+    keyedMembershipChangedKeys,
+  );
+}
+
+function createKeyedMapLookupTargetRuntime(props: CompilerKeyedRowsBlockProps) {
+  return createSingleKindKeyedTargetRuntime(
+    props,
+    "mapLookupTarget",
+    keyedMapLookupTargetSnapshot,
+    keyedMapLookupChangedKeys,
+  );
+}
+
 function createKeyedTargetRuntime(
   props: CompilerKeyedRowsBlockProps,
 ): KeyedTargetRuntime | undefined {
@@ -10618,6 +10743,33 @@ export const keyedRowsPlainRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:plain",
   create: (owner) => ({
     KeyedRows: createKeyedRowsBlockComponentCore(owner),
+  }),
+};
+
+export const keyedRowsIdentityRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:identity",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponentCore(owner, {
+      keyedTargets: createKeyedIdentityTargetRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsMembershipRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:membership",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponentCore(owner, {
+      keyedTargets: createKeyedMembershipTargetRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsMapLookupRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:map-lookup",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponentCore(owner, {
+      keyedTargets: createKeyedMapLookupTargetRuntime,
+    }),
   }),
 };
 

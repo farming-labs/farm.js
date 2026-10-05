@@ -208,6 +208,91 @@ export async function planSchemaMigration(
   return { dialect, statements, upToDate, drift };
 }
 
+/** A table's columns as the database reports them, normalized per dialect. */
+export type FarmSchemaTableDescription = {
+  columns: Array<{ name: string; type: string; nullable: boolean; primaryKey: boolean }>;
+};
+
+/**
+ * Read any table, owned by Farm or not, or undefined when it does not exist.
+ * Used to check references to tables the app or a library created. On
+ * Postgres and MySQL a dotted name that is not itself a table, such as
+ * Supabase's `auth.users`, is read as `schema.table`, and on Postgres an
+ * unqualified name is found through the search path.
+ */
+export async function describeSchemaTable(
+  executor: FarmSchemaExecutor,
+  dialect: FarmSqlDialect,
+  table: string,
+): Promise<FarmSchemaTableDescription | undefined> {
+  const described = await describeTable(executor, dialect, table);
+  if (!described) {
+    if (dialect === "sqlite") return undefined;
+    const dot = table.indexOf(".");
+    if (dot > 0) {
+      return describeQualifiedTable(executor, dialect, table.slice(0, dot), table.slice(dot + 1));
+    }
+    // An unqualified name resolves through the search path, as the app's own
+    // queries resolve it. Farm creates its tables in the current schema, so
+    // only references to tables it does not create look further.
+    if (dialect === "postgres") {
+      const schema = await findOnSearchPath(executor, table);
+      return schema ? describeQualifiedTable(executor, dialect, schema, table) : undefined;
+    }
+    return undefined;
+  }
+  return {
+    columns: described.columns.map(({ name, type, nullable, primaryKey }) => ({
+      name,
+      type,
+      nullable,
+      primaryKey,
+    })),
+  };
+}
+
+async function describeQualifiedTable(
+  executor: FarmSchemaExecutor,
+  dialect: "postgres" | "mysql",
+  schema: string,
+  table: string,
+): Promise<FarmSchemaTableDescription | undefined> {
+  const rows = await executor.query(
+    dialect === "mysql"
+      ? "select column_name, column_type as type, is_nullable from information_schema.columns where table_schema = ? and table_name = ? order by ordinal_position"
+      : "select column_name, data_type as type, is_nullable from information_schema.columns where table_schema = $1 and table_name = $2 order by ordinal_position",
+    [schema, table],
+  );
+  if (rows.length === 0) return undefined;
+  return {
+    columns: rows.map((row) => ({
+      name: String(readRowValue(row, "column_name")),
+      type: normalizeColumnType(dialect, String(readRowValue(row, "type"))),
+      nullable: String(readRowValue(row, "is_nullable")).toUpperCase() === "YES",
+      primaryKey: false,
+    })),
+  };
+}
+
+/** The first schema on the connection's search path holding this table. */
+async function findOnSearchPath(
+  executor: FarmSchemaExecutor,
+  table: string,
+): Promise<string | undefined> {
+  const rows = await executor.query(
+    `select namespace.nspname as schema_name
+       from unnest(current_schemas(false)) with ordinality as path(name, position)
+       join pg_namespace namespace on namespace.nspname = path.name
+       join pg_class relation on relation.relnamespace = namespace.oid
+      where relation.relname = $1 and relation.relkind in ('r', 'p', 'v', 'f')
+      order by path.position
+      limit 1`,
+    [table],
+  );
+  const schema = rows[0] && readRowValue(rows[0], "schema_name");
+  return schema ? String(schema) : undefined;
+}
+
 /** A normalized table definition, or undefined when the table does not exist. */
 async function describeTable(
   executor: FarmSchemaExecutor,

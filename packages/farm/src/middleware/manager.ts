@@ -13,7 +13,6 @@ import type { IncomingMessage, ServerResponse } from "http";
 import type {
   FarmMiddlewareConfig,
   MiddlewareFunction,
-  MiddlewareMatcher,
   MiddlewareConfig,
   MiddlewareContext,
   MiddlewareResult,
@@ -35,6 +34,7 @@ import { createCliColors } from "../cli-colors";
 import { appendMiddlewareRoutePath } from "./path";
 import type { FarmServerConfig, ResolvedFarmServerConfig } from "../server-http";
 import { resolveFarmRequestURL } from "../server/request";
+import { compileMiddlewareConfig, matchesMiddlewareConfig } from "./matcher";
 
 export interface DiscoveredMiddleware {
   path: string;
@@ -85,6 +85,7 @@ export class MiddlewareManager {
     for (const [index, entry] of entries.entries()) {
       const handlers = this.getConfigHandlers(entry);
       const middlewareConfig = this.toMiddlewareConfig(entry);
+      compileMiddlewareConfig(middlewareConfig);
 
       if (handlers.length === 0) {
         this.globalConfig = middlewareConfig;
@@ -192,6 +193,9 @@ export class MiddlewareManager {
       const normalized = normalizeMiddlewareModule(module, routePath);
       if (!normalized) {
         throw new Error("must export a default handler or a named middleware handler");
+      }
+      if (normalized.config) {
+        compileMiddlewareConfig(normalized.config);
       }
 
       return {
@@ -387,31 +391,7 @@ export class MiddlewareManager {
     config: MiddlewareConfig,
     ctx: MiddlewareContext,
   ): { matched: boolean; params?: Record<string, string> } {
-    // Check exclusions
-    if (config.exclude) {
-      for (const pattern of config.exclude) {
-        if (this.matchPattern(pattern, pathname).matched) {
-          return { matched: false };
-        }
-      }
-    }
-
-    // Check matchers
-    if (config.matcher) {
-      for (const matcher of this.toMatcherList(config.matcher)) {
-        if (typeof matcher === "string" || matcher instanceof RegExp) {
-          const result = this.matchPattern(matcher, pathname);
-          if (result.matched) {
-            return result;
-          }
-        } else if (typeof matcher === "function" && matcher(ctx)) {
-          return { matched: true };
-        }
-      }
-      return { matched: false };
-    }
-
-    return { matched: true };
+    return matchesMiddlewareConfig(pathname, config, ctx);
   }
 
   /**
@@ -505,11 +485,6 @@ export class MiddlewareManager {
       matched: true,
       params: Object.keys(params).length > 0 ? params : undefined,
     };
-  }
-
-  private toMatcherList(matcher: MiddlewareConfig["matcher"]): MiddlewareMatcher[] {
-    if (!matcher) return [];
-    return Array.isArray(matcher) ? matcher : [matcher];
   }
 
   private getConfigHandlers(

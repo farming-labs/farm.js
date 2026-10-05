@@ -34,6 +34,7 @@ describe("scheduleFarmIslandHydration", () => {
           notifyVisibility = callback;
         }
         observe() {}
+        unobserve() {}
         disconnect() {
           disconnect();
         }
@@ -49,7 +50,7 @@ describe("scheduleFarmIslandHydration", () => {
 
     expect(hydrate).not.toHaveBeenCalled();
     notifyVisibility?.(
-      [{ isIntersecting: true } as IntersectionObserverEntry],
+      [{ isIntersecting: true, target: container.firstElementChild } as IntersectionObserverEntry],
       {} as IntersectionObserver,
     );
 
@@ -71,6 +72,7 @@ describe("scheduleFarmIslandHydration", () => {
         observe(target: Element) {
           observed.push(target);
         }
+        unobserve() {}
         disconnect() {}
       },
     );
@@ -87,7 +89,7 @@ describe("scheduleFarmIslandHydration", () => {
     expect(observed).toEqual([container.querySelector("button")]);
     expect(hydrate).not.toHaveBeenCalled();
     notifyVisibility?.(
-      [{ isIntersecting: true } as IntersectionObserverEntry],
+      [{ isIntersecting: true, target: container.firstElementChild } as IntersectionObserverEntry],
       {} as IntersectionObserver,
     );
     await expect(scheduled).resolves.toBe("visible");
@@ -98,6 +100,7 @@ describe("scheduleFarmIslandHydration", () => {
       "IntersectionObserver",
       class {
         observe() {}
+        unobserve() {}
         disconnect() {}
       },
     );
@@ -315,6 +318,7 @@ describe("scheduleFarmIslandHydration", () => {
           notifyVisibility = callback;
         }
         observe() {}
+        unobserve() {}
         disconnect() {
           disconnect();
         }
@@ -368,7 +372,7 @@ describe("scheduleFarmIslandHydration", () => {
     for (const controller of controllers) controller.abort();
     await Promise.all(scheduled);
     notifyVisibility?.(
-      [{ isIntersecting: true } as IntersectionObserverEntry],
+      [{ isIntersecting: true, target: visible.firstElementChild } as IntersectionObserverEntry],
       {} as IntersectionObserver,
     );
     notifyIdle?.();

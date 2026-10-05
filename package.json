@@ -48,6 +48,7 @@
     "benchmark:isolated-hydration": "node benchmarks/isolated-hydration/run.mjs",
     "benchmark:framework-hot-paths": "NODE_OPTIONS=--max-old-space-size=8192 pnpm --filter @farm.js/core build && node benchmarks/framework-hot-paths/run.mjs",
     "benchmark:api-route-matching": "pnpm --filter @farm.js/core exec vitest bench src/__benchmarks__/api-route-matching.bench.ts --run",
+    "benchmark:middleware-matchers": "NODE_OPTIONS=--max-old-space-size=8192 pnpm --filter @farm.js/core build && node benchmarks/middleware-matchers/run.mjs",
     "benchmark:preview": "pnpm --filter @farm.js/preview-tunnel build && node benchmarks/preview-tunnel/run.mjs",
     "lint": "oxlint . && oxfmt --check . && node scripts/check-synthetic-popstate.mjs",
     "format": "oxlint --fix . && oxfmt .",

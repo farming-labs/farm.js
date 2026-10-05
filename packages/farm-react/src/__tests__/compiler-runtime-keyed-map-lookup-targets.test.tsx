@@ -5,10 +5,14 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   applyCompilerKeyedCollectionMutation,
-  createCompiledComponent,
+  createCompiledComponent as createCompleteCompiledComponent,
+  createCompiledComponentWithFeatures,
+  keyedRowsMapLookupRuntimeFeature,
   createCompilerKeyedCollectionUpdate,
   type CompilerStateUpdater,
 } from "../compiler-runtime";
+
+let createCompiledComponent: typeof createCompleteCompiledComponent;
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -164,7 +168,13 @@ function lookupSnapshot(container: Element): Array<[string | null, string | null
   ]);
 }
 
-describe("compiled keyed Map lookup targets", () => {
+describe.each([false, true])("keyed Map lookup targets (%s)", (specialized) => {
+  beforeEach(() => {
+    createCompiledComponent = specialized
+      ? (definition) =>
+          createCompiledComponentWithFeatures(definition, [keyedRowsMapLookupRuntimeFeature])
+      : createCompleteCompiledComponent;
+  });
   it("consumes compiler-proven Map deltas across queued setters", async () => {
     const initial = items(2_000);
     const initialLookup = new Map<unknown, unknown>(

@@ -862,15 +862,49 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
       });
       expect(plan.fallbackReason).toBeUndefined();
       // A page that can fall back to route-wide hydration still rejects the package.
-      const asyncPage = path.join(root, "src", "page.tsx");
+      const page = path.join(root, "src", "page.tsx");
       fs.writeFileSync(
-        asyncPage,
-        'import { Icon } from "icon-kit";\nexport default async function Page() { return <Icon />; }\n',
+        page,
+        'import { Icon } from "icon-kit";\nimport { CopyButton } from "./components/copy-button";\nexport default function Page() { return <><Icon /><CopyButton text="x" /></>; }\n',
       );
       expect(
-        getClientModuleHydrationPlan(asyncPage, root, "off", { asyncOwnerIslands: true })
+        getClientModuleHydrationPlan(page, root, "enabled", { asyncOwnerIslands: true })
           .fallbackReason,
       ).toBe("package client boundary icon-kit cannot yet be isolated");
+    });
+
+    it("keeps an async page's islands beside package client components it renders statically", () => {
+      const { root } = markdownProject("export const components = {};\n");
+      const packageRoot = path.join(root, "node_modules", "icon-kit");
+      fs.mkdirSync(packageRoot, { recursive: true });
+      fs.writeFileSync(
+        path.join(packageRoot, "package.json"),
+        JSON.stringify({ name: "icon-kit", exports: "./index.js" }),
+      );
+      fs.writeFileSync(
+        path.join(packageRoot, "index.js"),
+        '"use client";\nexport function Icon() { return null; }\n',
+      );
+      // An async page never hydrates as a whole, so rejecting the package would leave the copy
+      // button static too.
+      const asyncPage = path.join(root, "src", "report.tsx");
+      fs.writeFileSync(
+        asyncPage,
+        'import { Icon } from "icon-kit";\nimport { CopyButton } from "./components/copy-button";\nexport default async function Report() { return <><Icon /><CopyButton text="x" /></>; }\n',
+      );
+      const plan = getClientModuleHydrationPlan(asyncPage, root, "off", {
+        asyncOwnerIslands: true,
+      });
+      expect(plan).toMatchObject({
+        shouldHydrate: false,
+        hasIsolatedClientBoundaries: true,
+        asyncOwnerIslands: true,
+        staticPackageBoundaries: ["icon-kit"],
+        isolatedBoundaries: [
+          { modulePath: path.join(root, "src", "components", "copy-button.tsx") },
+        ],
+      });
+      expect(plan.fallbackReason).toBeUndefined();
     });
 
     it("has no islands without a components module or without island support", () => {

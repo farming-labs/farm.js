@@ -838,6 +838,13 @@ unsupported expressions use the existing complete evaluation or React fallback. 
 safe and simply patch no next row. No option or component primitive is required. The compiler
 report exposes the number of emitted row-binding proofs as `keyedIdentityTargets`.
 
+For plain keyed rows using only one target kind, the compiler includes only that kind's target
+runtime: identity, Set membership, or Map lookup. Identity-only selection does not retain the
+Set/Map snapshot machinery. These paths keep two target snapshot maps instead of six. Rows
+combining target kinds, row conditionals, nested host blocks, or structural update hints continue
+using the complete runtime. This changes bundle and bookkeeping costs, not eligibility, update
+semantics, or the normal React fallback; there is no new option to enable.
+
 #### Key-directed Set membership updates
 
 Multi-selection usually keeps several row keys in local state:

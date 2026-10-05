@@ -368,6 +368,9 @@ type CompilerRuntimeFeatureName =
   | "keyed-list"
   | "keyed-rows"
   | "keyed-rows-plain"
+  | "keyed-rows-identity"
+  | "keyed-rows-membership"
+  | "keyed-rows-map-lookup"
   | "keyed-rows-hinted"
   | "keyed-rows-position-hinted"
   | "keyed-rows-batch-position-hinted"
@@ -451,6 +454,9 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-list": "keyedListRuntimeFeature",
   "keyed-rows": "keyedRowsRuntimeFeature",
   "keyed-rows-plain": "keyedRowsPlainRuntimeFeature",
+  "keyed-rows-identity": "keyedRowsIdentityRuntimeFeature",
+  "keyed-rows-membership": "keyedRowsMembershipRuntimeFeature",
+  "keyed-rows-map-lookup": "keyedRowsMapLookupRuntimeFeature",
   "keyed-rows-hinted": "keyedRowsHintedRuntimeFeature",
   "keyed-rows-position-hinted": "keyedRowsPositionHintedRuntimeFeature",
   "keyed-rows-batch-position-hinted": "keyedRowsBatchPositionHintedRuntimeFeature",
@@ -566,17 +572,16 @@ function runtimeFeaturesForPlans(
   const features = new Set<CompilerRuntimeFeatureName>();
   let keyedRowsHaveConditionals = false;
   let keyedRowsHaveHostBlocks = false;
-  let keyedRowsHaveTargets = false;
+  const keyedTargetKinds = new Set<"identity" | "membership" | "map-lookup">();
   for (const plan of plans) {
     if (plan.kind === "keyed-rows") {
       keyedRowsHaveConditionals ||= plan.conditionals.length > 0;
       keyedRowsHaveHostBlocks ||= Boolean(plan.descriptorBlocks?.size);
-      keyedRowsHaveTargets ||= plan.bindings.some(
-        (binding) =>
-          binding.identityTarget !== undefined ||
-          binding.membershipTarget !== undefined ||
-          binding.mapLookupTarget !== undefined,
-      );
+      for (const binding of plan.bindings) {
+        if (binding.identityTarget) keyedTargetKinds.add("identity");
+        if (binding.membershipTarget) keyedTargetKinds.add("membership");
+        if (binding.mapLookupTarget) keyedTargetKinds.add("map-lookup");
+      }
       continue;
     }
     if (plan.kind in COMPILER_RUNTIME_FEATURE_EXPORTS) {
@@ -642,8 +647,8 @@ function runtimeFeaturesForPlans(
                                     ? "-hinted"
                                     : "";
     features.add(
-      !keyedRowsHaveTargets && keyedRowsFeature === "keyed-rows" && hintSuffix === ""
-        ? "keyed-rows-plain"
+      keyedTargetKinds.size <= 1 && keyedRowsFeature === "keyed-rows" && hintSuffix === ""
+        ? (`keyed-rows-${[...keyedTargetKinds][0] ?? "plain"}` as CompilerRuntimeFeatureName)
         : (`${keyedRowsFeature}${hintSuffix}` as CompilerRuntimeFeatureName),
     );
   }

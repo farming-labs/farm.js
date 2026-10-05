@@ -682,6 +682,12 @@ export class RouteManager {
         `[Farm.js] Markdown pages render client components from ${markdownStaticPackages.join(", ")} as static HTML: package client components cannot be isolated yet.`,
       );
     }
+    for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
+      if (isFarmMarkdownPageFile(entry.modulePath) || !metadata.staticPackageBoundaries) continue;
+      logger.info(
+        `[Farm.js] ${entry.pattern} is async, so it renders client components from ${metadata.staticPackageBoundaries.join(", ")} as static HTML: package client components cannot be isolated yet.`,
+      );
+    }
 
     enforceFarmIsolatedHydrationRouteBudget(
       layoutEntries.map(({ entry, metadata }) => ({
