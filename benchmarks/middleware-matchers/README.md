@@ -3,7 +3,9 @@
 This benchmark compares Farm's compiled middleware configuration matcher with a control that
 repeats the previous per-request path canonicalization and regular-expression construction.
 Both variants run correctness checks for matches, misses, parameters, exclusions, encoded
-segments, and stateful regular expressions before measurement.
+segments before measurement; the unit suite also covers stateful regular expressions and edits
+to warmed matcher/exclusion arrays. The measured public matcher includes cache-invalidation
+checks, rather than bypassing them through the internal compiled matcher.
 
 Run from the repository root:
 

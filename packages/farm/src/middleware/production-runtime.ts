@@ -27,8 +27,6 @@ import {
 } from "./cookie-header";
 import {
   compileMiddlewareConfig,
-  type CompiledMiddlewareConfig,
-  matchesCompiledMiddlewareConfig,
   matchesMiddlewareConfig as matchesPreparedMiddlewareConfig,
 } from "./matcher";
 
@@ -71,7 +69,6 @@ interface ProductionMiddlewareEntry {
   filePath: string;
   handlers: MiddlewareFunction[];
   config?: MiddlewareConfig;
-  compiledConfig?: CompiledMiddlewareConfig;
   source: "config" | "file";
 }
 
@@ -703,12 +700,12 @@ function normalizeConfigMiddleware(config?: FarmMiddlewareConfig | null): {
       continue;
     }
 
+    compileMiddlewareConfig(middlewareConfig);
     entries.push({
       path: "/",
       filePath: `farm.config.ts#middleware-${index}`,
       handlers,
       config: middlewareConfig,
-      compiledConfig: compileMiddlewareConfig(middlewareConfig),
       source: "config",
     });
   }
@@ -727,12 +724,12 @@ function normalizeFileMiddleware(
       continue;
     }
 
+    if (normalized.config) compileMiddlewareConfig(normalized.config);
     entries.push({
       path: moduleEntry.path,
       filePath: moduleEntry.filePath || moduleEntry.path,
       handlers: normalized.handlers,
       config: normalized.config,
-      compiledConfig: normalized.config ? compileMiddlewareConfig(normalized.config) : undefined,
       source: "file",
     });
   }
@@ -778,7 +775,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
   const fileMiddleware = normalizeFileMiddleware(options.modules);
   const entries = [...configMiddleware.entries, ...fileMiddleware];
   const globalConfig = configMiddleware.globalConfig;
-  const compiledGlobalConfig = globalConfig ? compileMiddlewareConfig(globalConfig) : undefined;
+  if (globalConfig) compileMiddlewareConfig(globalConfig);
 
   return async function runProductionMiddleware(
     request: Request,
@@ -803,12 +800,8 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       : stripFarmBasePath(ctx.pathname, options.i18n?.basePath ?? "/");
     let parentData: MiddlewareContext["parent"] | undefined;
 
-    if (compiledGlobalConfig) {
-      const globalMatch = matchesCompiledMiddlewareConfig(
-        initialPathname,
-        compiledGlobalConfig,
-        ctx,
-      );
+    if (globalConfig) {
+      const globalMatch = matchesPreparedMiddlewareConfig(initialPathname, globalConfig, ctx);
       if (!globalMatch.matched) {
         return emptyResult(request);
       }
@@ -840,8 +833,8 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
 
     for (const candidate of applicable) {
       const { entry, routeMatch } = candidate;
-      const configMatch = entry.compiledConfig
-        ? matchesCompiledMiddlewareConfig(initialPathname, entry.compiledConfig, ctx)
+      const configMatch = entry.config
+        ? matchesPreparedMiddlewareConfig(initialPathname, entry.config, ctx)
         : { matched: true };
       if (!configMatch.matched) {
         continue;

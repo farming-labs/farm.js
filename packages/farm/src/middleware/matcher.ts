@@ -34,7 +34,24 @@ export interface CompiledMiddlewareConfig {
   exclude?: CompiledPattern[];
 }
 
-const compiledConfigCache = new WeakMap<MiddlewareConfig, CompiledMiddlewareConfig>();
+interface CachedMiddlewareConfig {
+  compiled: CompiledMiddlewareConfig;
+  matcher: MiddlewareConfig["matcher"];
+  matcherEntries?: MiddlewareMatcher[];
+  excludeEntries?: (string | RegExp)[];
+}
+
+const compiledConfigCache = new WeakMap<MiddlewareConfig, CachedMiddlewareConfig>();
+
+function sameEntries<T>(
+  current: readonly T[] | undefined,
+  previous: readonly T[] | undefined,
+): boolean {
+  return current === undefined || previous === undefined
+    ? current === previous
+    : current.length === previous.length &&
+        current.every((entry, index) => entry === previous[index]);
+}
 
 function toMatcherList(matcher: MiddlewareConfig["matcher"]): MiddlewareMatcher[] {
   if (!matcher) return [];
@@ -133,7 +150,12 @@ export function compileMiddlewareConfig(config: MiddlewareConfig): CompiledMiddl
       : undefined,
     exclude: config.exclude?.map(compilePattern),
   };
-  compiledConfigCache.set(config, compiled);
+  compiledConfigCache.set(config, {
+    compiled,
+    matcher: config.matcher,
+    matcherEntries: Array.isArray(config.matcher) ? config.matcher.slice() : undefined,
+    excludeEntries: config.exclude?.slice(),
+  });
   return compiled;
 }
 
@@ -221,6 +243,13 @@ export function matchesMiddlewareConfig(
   config: MiddlewareConfig,
   ctx: MiddlewareContext,
 ): { matched: boolean; params?: Record<string, string> } {
-  const compiled = compiledConfigCache.get(config) ?? compileMiddlewareConfig(config);
+  const cached = compiledConfigCache.get(config);
+  const unchanged =
+    cached &&
+    (Array.isArray(config.matcher)
+      ? sameEntries(config.matcher, cached.matcherEntries)
+      : config.matcher === cached.matcher) &&
+    sameEntries(config.exclude, cached.excludeEntries);
+  const compiled = unchanged ? cached.compiled : compileMiddlewareConfig(config);
   return matchesCompiledMiddlewareConfig(pathname, compiled, ctx);
 }
