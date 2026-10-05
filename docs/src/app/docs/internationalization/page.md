@@ -172,6 +172,11 @@ export function ProductLinks() {
 }
 ```
 
+Relative links and query-only links resolve against the current document URL. For example,
+`?tab=2` on `/store/fr/products` keeps the French locale and `/store` mount path when
+prefetching or navigating. Links that actually change locale use document navigation and are
+not prefetched by the SPA router.
+
 Farm also strips the locale before route and middleware matching, keeps it in SPA page-data snapshots, and localizes internal `redirect()` destinations. Existing page, layout, loading, error, metadata image, and middleware files do not need locale wrappers.
 
 Configuration `redirects()`, `rewrites()`, and `headers()` use the same internal, unprefixed source
