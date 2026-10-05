@@ -26,7 +26,11 @@ for (const count of [1, 1_000, 10_000])
     bench("previous static resolve + binding", () => call(previous));
     bench("indexed static resolve + binding", () => call(indexed));
     if (count === 1_000) {
-      bench("previous construction", () => new Previous(routes));
-      bench("indexed construction", () => new ClientRouteManifest(routes));
+      bench("previous construction", () => {
+        new Previous(routes);
+      });
+      bench("indexed construction", () => {
+        new ClientRouteManifest(routes);
+      });
     }
   });
