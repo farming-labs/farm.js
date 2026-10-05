@@ -204,6 +204,17 @@ describe("renameSchema", () => {
     expect(JSON.stringify(teamsSchema)).toBe(before);
   });
 
+  it("names the app's real table in the comment migrate writes for an external reference", () => {
+    const renamed = renameSchema(teamsSchema, {
+      user: { name: "members_auth", fields: { id: "user_id" } },
+    });
+    const sql = generateSqlStatements(collectSchemaModels([["teams", renamed]]), "postgres")
+      .map((statement) => statement.sql)
+      .join("\n");
+    expect(sql).toContain("/* references members_auth.user_id */");
+    expect(sql).not.toContain("references user.id");
+  });
+
   it("changes table and column names, and references follow", () => {
     const renamed = renameSchema(teamsSchema, {
       user: { name: "members_auth", fields: { id: "user_id" } },

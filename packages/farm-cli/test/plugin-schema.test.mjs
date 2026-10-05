@@ -120,7 +120,7 @@ test("generates a valid Prisma schema without the app's table", async () => {
 
     const prisma = await readFile(schemaPath, "utf8");
     assert.match(prisma, /@@map\("team_members"\)/);
-    assert.doesNotMatch(prisma, /members_auth/);
+    assert.doesNotMatch(prisma, /@@map\("members_auth"\)/);
     await run(process.execPath, [prismaCliPath, "validate", "--schema", schemaPath], {
       env: { ...process.env, CHECKPOINT_DISABLE: "1", PRISMA_HIDE_UPDATE_MESSAGE: "1" },
     });
@@ -136,7 +136,9 @@ test("generates Drizzle tables whose only foreign key is to the plugin's own tab
     assert.equal(generated.code, 0, generated.stderr);
 
     const source = await readFile(path.join(root, "farm-integrations.generated.ts"), "utf8");
-    assert.doesNotMatch(source, /members_auth/);
+    // No table for it, only a comment naming the app's real table.
+    assert.doesNotMatch(source, /Table\("members_auth"/);
+    assert.match(source, /\/\/ userId references members_auth\.user_id/);
     const modulePath = path.join(root, "schema.mjs");
     await writeFile(modulePath, source);
     const schema = await import(pathToFileURL(modulePath).href);

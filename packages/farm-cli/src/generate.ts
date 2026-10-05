@@ -1,6 +1,7 @@
 import {
   assertNoSchemaListField,
   collectSchemaModels,
+  describeSchemaReference,
   escapeSqlString,
   findSchemaTableOwners,
   generateFarmTypeArtifacts,
@@ -740,7 +741,7 @@ function renderDrizzleModel(
 
     if (field.reference && !reference) {
       lines.push(
-        `  // ${fieldKey} references ${field.reference.model}.${field.reference.field}${field.reference.onDelete ? ` (onDelete: ${field.reference.onDelete})` : ""}`,
+        `  // ${fieldKey} references ${describeSchemaReference(model, fieldKey)}${field.reference.onDelete ? ` (onDelete: ${field.reference.onDelete})` : ""}`,
       );
     }
 
@@ -1065,7 +1066,7 @@ function generateMongoBootstrap(models: readonly CollectedSchemaModel[]) {
 
       if (field.reference) {
         lines.push(
-          `  // ${fieldKey} references ${field.reference.model}.${field.reference.field}${field.reference.onDelete ? ` (onDelete: ${field.reference.onDelete})` : ""}`,
+          `  // ${fieldKey} references ${describeSchemaReference(model, fieldKey)}${field.reference.onDelete ? ` (onDelete: ${field.reference.onDelete})` : ""}`,
         );
       }
     }
