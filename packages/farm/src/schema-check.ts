@@ -7,6 +7,7 @@ import {
   describeSchemaTable,
   planSchemaMigration,
   type FarmSchemaExecutor,
+  type FarmSchemaTableDescription,
 } from "./schema-migrate";
 import {
   collectSchemaModels,
@@ -33,6 +34,7 @@ export type FarmSchemaCheckCode =
   | "table-conflict"
   | "client-missing"
   | "client-unavailable"
+  | "client-unsupported"
   | "table-missing"
   | "column-missing"
   | "column-type"
@@ -92,13 +94,16 @@ type SchemaOwner = {
 export function collectSchemaOwners(config: FarmSchemaCheckConfig): SchemaOwner[] {
   const owners: SchemaOwner[] = [];
   const integrationSchemas = getIntegrationSchemas(config.integrations as never);
+  // Every integration reads `storage.client`. A factory there would open a
+  // new connection per integration, so it is resolved once and shared.
+  let integrationClient: Promise<unknown> | undefined;
   for (const [name, schema] of Object.entries(integrationSchemas)) {
     owners.push({
       name,
       kind: "integration",
       schema: schema as FarmSchema,
       resolveClient: (resolved) =>
-        resolveIntegrationOrmRuntimeClient({ config: resolved as never }),
+        (integrationClient ??= resolveIntegrationOrmRuntimeClient({ config: resolved as never })),
     });
   }
   for (const declaration of findSchemaTableOwners(config)) {
@@ -115,13 +120,50 @@ export function collectSchemaOwners(config: FarmSchemaCheckConfig): SchemaOwner[
   return owners;
 }
 
-const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
+/** Driver errors can echo a connection string; never print its password. */
+const errorMessage = (error: unknown) =>
+  (error instanceof Error ? error.message : String(error)).replace(
+    /(\/\/[^/\s:@]+):[^@\s]+@/gu,
+    "$1:***@",
+  );
 
 function migrateHint(owner: SchemaOwner): string {
   return owner.kind === "plugin"
     ? `Run \`farm ${owner.name} migrate\` to see the SQL, then \`--apply\` it.`
     : "Create it with your migration tool: `farm generate` writes the integration's tables into your Prisma or Drizzle schema.";
 }
+
+/** Where an owner's tables live. */
+type OwnerDatabase = {
+  /** The driver connection, to tell owners sharing one database apart. */
+  client: unknown;
+  executor: FarmSchemaExecutor;
+  dialect: FarmSqlDialect;
+};
+
+/**
+ * A SQL executor for a client, null for a key/value mount, or undefined for a
+ * client Farm cannot read, such as a Prisma client. A Drizzle database keeps
+ * its driver on `$client`, which is used instead.
+ */
+function resolveSchemaExecutor(
+  client: unknown,
+  owner: string,
+): (ReturnType<typeof createSchemaExecutor> & { client: unknown }) | null | undefined {
+  for (const candidate of [client, (client as { $client?: unknown }).$client]) {
+    if (candidate === undefined || candidate === null) continue;
+    try {
+      const adapter = createSchemaExecutor(candidate, owner);
+      return adapter && { ...adapter, client: candidate };
+    } catch {
+      // Not a driver Farm can read; try the next shape.
+    }
+  }
+  return undefined;
+}
+
+const describeReferencedTable = (database: OwnerDatabase, table: string) =>
+  describeSchemaTable(database.executor, database.dialect, table);
 
 /** Physical table and column a reference points at, and who owns them. */
 type ReferenceTarget = {
@@ -133,21 +175,22 @@ type ReferenceTarget = {
 
 /**
  * Column type families a foreign key can join across. Same family is fine
- * (text and varchar, integer and bigint); different families never are
- * (text and uuid, text and integer).
+ * (text and varchar, integer and bigint); different families need a cast to
+ * join and can never carry a foreign key (text and uuid, text and integer).
  */
-function typeFamily(type: string): string {
+function typeFamily(type: string): string | undefined {
   const value = type.trim().toLowerCase();
   if (/^(bool|boolean|tinyint\(1\))/u.test(value)) return "boolean";
-  if (/^uuid/u.test(value)) return "uuid";
+  if (value.startsWith("uuid")) return "uuid";
   if (/(char|text|clob|citext|string)/u.test(value)) return "text";
   if (/^(int|integer|smallint|bigint|mediumint|tinyint|int[248]|serial|bigserial)/u.test(value)) {
     return "integer";
   }
   if (/^(double|real|float|numeric|decimal|number)/u.test(value)) return "number";
   if (/^(timestamp|datetime|date)/u.test(value)) return "datetime";
-  if (/^json/u.test(value)) return "json";
-  return value;
+  if (value.startsWith("json")) return "json";
+  // Enums, domains, arrays, binary: nothing to compare with confidence.
+  return undefined;
 }
 
 export async function checkSchema(config: FarmSchemaCheckConfig): Promise<FarmSchemaCheckReport> {
@@ -173,41 +216,26 @@ export async function checkSchema(config: FarmSchemaCheckConfig): Promise<FarmSc
     }
   }
 
-  // Two owners must not claim the same table.
-  const claims = new Map<string, string>();
-  for (const [ownerName, models] of ownedModels) {
-    for (const model of models) {
-      const key = model.modelName.toLowerCase();
-      const previous = claims.get(key);
-      if (previous && previous !== ownerName) {
-        issues.push({
-          severity: "error",
-          code: "table-conflict",
-          owner: ownerName,
-          table: model.modelName,
-          message: `"${model.modelName}" is claimed by both ${previous} and ${ownerName}.`,
-          hint: "Give one of the models a different table name with `name`, or narrow one owner's `models`.",
-        });
-      } else {
-        claims.set(key, ownerName);
-      }
-    }
-  }
-
   const resolveTarget = (
     ownerName: string,
     field: ResolvedSchemaField,
   ): ReferenceTarget | undefined => {
     const reference = field.reference;
     if (!reference) return undefined;
-    // The owner's own schema first, then any other owner that defines the model.
-    const candidates = [
-      ownerName,
-      ...owners.map((owner) => owner.name).filter((name) => name !== ownerName),
-    ];
-    for (const candidate of candidates) {
-      const model = knownModels.get(candidate)?.[reference.model];
-      if (!model) continue;
+    // The owner's own schema first, claimed or not: it describes the tables
+    // this owner works with. Then a model another owner creates. Another
+    // owner's unclaimed models are only its description of someone else's
+    // table, so they are not used to reinterpret this owner's reference.
+    const own = knownModels.get(ownerName)?.[reference.model];
+    const other = own
+      ? undefined
+      : owners.find(
+          (owner) =>
+            owner.name !== ownerName &&
+            (ownedModels.get(owner.name) ?? []).some((entry) => entry.modelKey === reference.model),
+        );
+    const model = own ?? (other && knownModels.get(other.name)?.[reference.model]);
+    if (model) {
       const claimedBy = [...ownedModels].find(([, models]) =>
         models.some((entry) => entry.modelName === model.name),
       )?.[0];
@@ -221,6 +249,9 @@ export async function checkSchema(config: FarmSchemaCheckConfig): Promise<FarmSc
     return { table: reference.model, column: reference.field };
   };
 
+  // Each owner's database, resolved before any check so a reference into
+  // another owner's table is looked up where that owner keeps it.
+  const databases = new Map<string, OwnerDatabase>();
   for (const owner of owners) {
     const models = ownedModels.get(owner.name);
     if (!models) continue;
@@ -258,18 +289,72 @@ export async function checkSchema(config: FarmSchemaCheckConfig): Promise<FarmSc
       continue;
     }
 
-    const adapter = createSchemaExecutor(client, owner.name);
-    if (!adapter) {
+    const adapter = resolveSchemaExecutor(client, owner.name);
+    if (adapter === null) {
       // A key/value mount has no tables to check.
       summary.relational = false;
       continue;
     }
+    if (adapter === undefined) {
+      // Not a failure: an ORM client means that ORM's migrations own the
+      // tables, and the check must not block a deploy it cannot inspect.
+      issues.push({
+        severity: "warning",
+        code: "client-unsupported",
+        owner: owner.name,
+        message: `${owner.name}'s database client cannot be inspected, so its tables were not checked.`,
+        hint: "Farm reads pg, mysql2, and sqlite connections, and Drizzle databases built on them. Check these tables with your ORM's migration status instead.",
+      });
+      continue;
+    }
     const dialect = owner.dialect ?? adapter.dialect;
     summary.dialect = dialect;
+    databases.set(owner.name, { client: adapter.client, executor: adapter.executor, dialect });
+  }
 
+  // Two owners must not claim the same table in the same database.
+  const claims = new Map<string, string>();
+  for (const [ownerName, models] of ownedModels) {
+    for (const model of models) {
+      const key = model.modelName.toLowerCase();
+      const previous = claims.get(key);
+      if (!previous || previous === ownerName) {
+        claims.set(key, ownerName);
+        continue;
+      }
+      const mine = databases.get(ownerName);
+      const theirs = databases.get(previous);
+      // Different dialects are different databases. Different client objects
+      // may still be one database (a factory opens a new connection per call).
+      if (mine && theirs && mine.dialect !== theirs.dialect) continue;
+      if (
+        mine?.dialect === "postgres" &&
+        theirs?.dialect === "postgres" &&
+        !(ownedModels.get(previous) ?? []).some((entry) => entry.modelName === model.modelName)
+      ) {
+        continue; // Postgres names are case-sensitive: "User" and "user" are two tables.
+      }
+      const shared = Boolean(mine && theirs && mine.client === theirs.client);
+      issues.push({
+        severity: shared ? "error" : "warning",
+        code: "table-conflict",
+        owner: ownerName,
+        table: model.modelName,
+        message: shared
+          ? `"${model.modelName}" is claimed by both ${previous} and ${ownerName}.`
+          : `"${model.modelName}" is claimed by both ${previous} and ${ownerName}. If they share a database, they write to the same table.`,
+        hint: "Give one of the models a different table name with `name`, or narrow one owner's `models`.",
+      });
+    }
+  }
+
+  for (const owner of owners) {
+    const models = ownedModels.get(owner.name);
+    const database = databases.get(owner.name);
+    if (!models || !database) continue;
     try {
-      await checkOwnerTables(owner, models, dialect, adapter.executor, issues);
-      await checkReferences(owner, models, dialect, adapter.executor, resolveTarget, issues);
+      await checkOwnerTables(owner, models, database.dialect, database.executor, issues);
+      await checkReferences(owner, models, database, databases, resolveTarget, issues);
     } catch (error) {
       issues.push({
         severity: "error",
@@ -359,13 +444,13 @@ async function checkOwnerTables(
 async function checkReferences(
   owner: SchemaOwner,
   models: readonly CollectedSchemaModel[],
-  dialect: FarmSqlDialect,
-  executor: FarmSchemaExecutor,
+  database: OwnerDatabase,
+  databases: ReadonlyMap<string, OwnerDatabase>,
   resolveTarget: (owner: string, field: ResolvedSchemaField) => ReferenceTarget | undefined,
   issues: FarmSchemaCheckIssue[],
 ) {
   const ownTables = new Set(models.map((model) => model.modelName));
-  const described = new Map<string, Awaited<ReturnType<typeof describeSchemaTable>>>();
+  const described = new Map<string, FarmSchemaTableDescription | undefined>();
 
   for (const model of models) {
     for (const field of Object.values(model.model.fields)) {
@@ -373,10 +458,16 @@ async function checkReferences(
       // References inside the owner's own tables are covered by the table check.
       if (!target || ownTables.has(target.table)) continue;
 
-      if (!described.has(target.table)) {
-        described.set(target.table, await describeSchemaTable(executor, dialect, target.table));
+      // Another owner's table lives in that owner's database. When it could
+      // not be reached or inspected, its own issue already says so.
+      const targetDatabase = target.owner ? databases.get(target.owner) : database;
+      if (!targetDatabase) continue;
+      const key = `${target.owner ?? ""}\u0000${target.table}`;
+      if (!described.has(key)) {
+        described.set(key, await describeReferencedTable(targetDatabase, target.table));
       }
-      const table = described.get(target.table);
+      const table = described.get(key);
+      const dialect = targetDatabase.dialect;
       const where = `"${model.modelName}.${field.name}" references "${target.table}.${target.column}"`;
 
       if (!table) {
@@ -394,8 +485,11 @@ async function checkReferences(
         continue;
       }
 
-      const column = table.columns.find(
-        (candidate) => candidate.name.toLowerCase() === target.column.toLowerCase(),
+      // Postgres column names are case-sensitive once quoted, as Farm quotes them.
+      const column = table.columns.find((candidate) =>
+        dialect === "postgres"
+          ? candidate.name === target.column
+          : candidate.name.toLowerCase() === target.column.toLowerCase(),
       );
       if (!column) {
         issues.push({
@@ -410,16 +504,26 @@ async function checkReferences(
         continue;
       }
 
-      const expected = getSqlColumnType(field, dialect);
-      if (typeFamily(expected) !== typeFamily(column.type)) {
+      // SQLite converts by affinity when it compares, so any pairing joins.
+      if (database.dialect === "sqlite" || dialect === "sqlite") continue;
+      const expected = getSqlColumnType(field, database.dialect);
+      const mine = typeFamily(expected);
+      const theirs = typeFamily(column.type);
+      if (mine && theirs && mine !== theirs) {
+        // A warning, not an error: Farm never puts a foreign key on a reference
+        // that leaves the owner, and lookups by value still work. Joins in SQL
+        // need a cast.
         issues.push({
-          severity: "error",
+          severity: "warning",
           code: "reference-type",
           owner: owner.name,
           table: model.modelName,
           column: field.name,
-          message: `${where}, but the types cannot be joined: ${expected.toLowerCase()} here, ${column.type} there.`,
-          hint: `Change "${field.name}" to match "${target.table}.${target.column}".`,
+          message: `${where}, but the types differ: ${expected.toLowerCase()} here, ${column.type} there. Lookups by value work; a SQL join needs a cast and a foreign key is not possible.`,
+          hint:
+            theirs === "uuid" && mine === "text"
+              ? 'Farm stores "uuid" fields as text in Postgres. Cast in joins, for example "users"."id"::text.'
+              : `Change "${field.name}" to match "${target.table}.${target.column}" if you join on it.`,
         });
       }
     }

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { createRequire } from "node:module";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { defineIntegration } from "../integrations";
 import { definePlugin } from "../plugin";
 import { defineSchema, type FarmSchema } from "../schema";
@@ -110,7 +110,9 @@ async function mysqlDatabase(): Promise<TestDatabase> {
 
 const databases: Array<[string, () => Promise<TestDatabase>]> = [
   ["sqlite", sqliteDatabase],
-  ...(postgresTestUrl ? [["postgres", postgresDatabase] as [string, () => Promise<TestDatabase>]] : []),
+  ...(postgresTestUrl
+    ? [["postgres", postgresDatabase] as [string, () => Promise<TestDatabase>]]
+    : []),
   ...(mysqlTestUrl ? [["mysql", mysqlDatabase] as [string, () => Promise<TestDatabase>]] : []),
 ];
 
@@ -185,7 +187,12 @@ describe.each(databases)("farm schema check on %s", (_name, open) => {
     expect(report.issues).toEqual([]);
     expect(report.ok).toBe(true);
     expect(report.owners).toEqual([
-      expect.objectContaining({ name: "tasks", kind: "plugin", dialect: db.dialect, relational: true }),
+      expect.objectContaining({
+        name: "tasks",
+        kind: "plugin",
+        dialect: db.dialect,
+        relational: true,
+      }),
     ]);
   });
 
@@ -234,7 +241,9 @@ describe.each(databases)("farm schema check on %s", (_name, open) => {
     expect(report.ok).toBe(false);
     const issues = report.issues.filter((issue) => issue.severity === "error");
     expect(codes(issues)).toEqual(["column-missing", "column-type"]);
-    expect(issues.find((issue) => issue.code === "column-missing")).toMatchObject({ column: "label" });
+    expect(issues.find((issue) => issue.code === "column-missing")).toMatchObject({
+      column: "label",
+    });
     expect(issues.find((issue) => issue.code === "column-type")).toMatchObject({ column: "count" });
   });
 
@@ -306,7 +315,7 @@ describe.each(databases)("farm schema check on %s", (_name, open) => {
       ]);
     });
 
-    it("rejects a reference whose types can never form a foreign key", async () => {
+    it("warns about a reference whose types cannot carry a foreign key", async () => {
       const db = await database();
       const users = unique("users_int");
       await createTable(db, users, `${db.quote("id")} ${db.types.integer} PRIMARY KEY`);
@@ -314,9 +323,20 @@ describe.each(databases)("farm schema check on %s", (_name, open) => {
       await migrate(db, "loyalty", schema);
 
       const report = await checkSchema({ plugins: [plugin("loyalty", schema, db.client)] });
-      expect(report.issues).toEqual([
-        expect.objectContaining({ code: "reference-type", severity: "error", column: "userId" }),
-      ]);
+      // Lookups by value still work, so it never fails the check. SQLite
+      // converts by affinity when it compares, so there is nothing to say.
+      expect(report.ok).toBe(true);
+      expect(report.issues).toEqual(
+        db.dialect === "sqlite"
+          ? []
+          : [
+              expect.objectContaining({
+                code: "reference-type",
+                severity: "warning",
+                column: "userId",
+              }),
+            ],
+      );
     });
 
     it("resolves a reference to another plugin's model by that plugin's table name", async () => {
@@ -368,19 +388,27 @@ describe.each(databases)("farm schema check on %s", (_name, open) => {
       // The app's schema describes `user` (really the members table); the plugin owns only `task`.
       const appSchema = defineSchema({
         models: {
-          user: { name: members, fields: { id: { type: "string", primaryKey: true, name: "member_id" } } },
+          user: {
+            name: members,
+            fields: { id: { type: "string", primaryKey: true, name: "member_id" } },
+          },
           task: {
             name: unique("task"),
             fields: {
               id: { type: "uuid", primaryKey: true },
-              ownerId: { type: "string", reference: { model: "user", field: "id", enforced: "app" } },
+              ownerId: {
+                type: "string",
+                reference: { model: "user", field: "id", enforced: "app" },
+              },
             },
           },
         },
       });
       await migrate(db, "sync", appSchema, ["task"]);
 
-      const report = await checkSchema({ plugins: [plugin("sync", appSchema, db.client, ["task"])] });
+      const report = await checkSchema({
+        plugins: [plugin("sync", appSchema, db.client, ["task"])],
+      });
       expect(report.issues).toEqual([]);
     });
   });
@@ -391,7 +419,10 @@ describe.each(databases)("farm schema check on %s", (_name, open) => {
       models: {
         account: {
           name: unique("billing_account"),
-          fields: { id: { type: "id", primaryKey: true }, ownerId: { type: "string", required: true } },
+          fields: {
+            id: { type: "id", primaryKey: true },
+            ownerId: { type: "string", required: true },
+          },
         },
       },
     });
@@ -402,15 +433,27 @@ describe.each(databases)("farm schema check on %s", (_name, open) => {
       schema: accounts,
     });
 
-    const missing = await checkSchema({ integrations: { billing }, storage: { client: db.client } } as never);
+    const missing = await checkSchema({
+      integrations: { billing },
+      storage: { client: db.client },
+    } as never);
     expect(missing.issues).toEqual([
-      expect.objectContaining({ code: "table-missing", owner: "billing", hint: expect.stringContaining("farm generate") }),
+      expect.objectContaining({
+        code: "table-missing",
+        owner: "billing",
+        hint: expect.stringContaining("farm generate"),
+      }),
     ]);
 
     await migrate(db, "billing", accounts);
-    const present = await checkSchema({ integrations: { billing }, storage: { client: db.client } } as never);
+    const present = await checkSchema({
+      integrations: { billing },
+      storage: { client: db.client },
+    } as never);
     expect(present.issues).toEqual([]);
-    expect(present.owners).toEqual([expect.objectContaining({ name: "billing", kind: "integration" })]);
+    expect(present.owners).toEqual([
+      expect.objectContaining({ name: "billing", kind: "integration" }),
+    ]);
   });
 
   it("never writes to the database", async () => {
@@ -439,7 +482,11 @@ describe("farm schema check without a database", () => {
     models: { item: { name: "items", fields: { id: { type: "uuid", primaryKey: true } } } },
   });
   const plugin = (name: string, resolveClient: () => Promise<unknown>, owned = schema) =>
-    declareSchemaTables(definePlugin({ name: `farm:${name}` }), { name, schema: owned, resolveClient });
+    declareSchemaTables(definePlugin({ name: `farm:${name}` }), {
+      name,
+      schema: owned,
+      resolveClient,
+    });
 
   it("is fine when nothing declares tables", async () => {
     const report = await checkSchema({ plugins: [definePlugin({ name: "plain" })] });
@@ -462,23 +509,42 @@ describe("farm schema check without a database", () => {
         plugin("broken", async () => {
           throw new Error("ECONNREFUSED");
         }),
-        plugin("healthy", async () => healthy, defineSchema({
-          models: { other: { name: "other_items", fields: { id: { type: "uuid", primaryKey: true } } } },
-        })),
+        plugin(
+          "healthy",
+          async () => healthy,
+          defineSchema({
+            models: {
+              other: { name: "other_items", fields: { id: { type: "uuid", primaryKey: true } } },
+            },
+          }),
+        ),
       ],
     });
     expect(report.issues).toEqual([
-      expect.objectContaining({ owner: "broken", code: "client-unavailable", message: expect.stringContaining("ECONNREFUSED") }),
+      expect.objectContaining({
+        owner: "broken",
+        code: "client-unavailable",
+        message: expect.stringContaining("ECONNREFUSED"),
+      }),
       expect.objectContaining({ owner: "healthy", code: "table-missing" }),
     ]);
     healthy.close();
   });
 
   it("reports an integration that declares tables without storage.client", async () => {
-    const billing = defineIntegration({ category: "payment", type: "custom", instance: {}, schema });
+    const billing = defineIntegration({
+      category: "payment",
+      type: "custom",
+      instance: {},
+      schema,
+    });
     const report = await checkSchema({ integrations: { billing } } as never);
     expect(report.issues).toEqual([
-      expect.objectContaining({ owner: "billing", code: "client-missing", hint: expect.stringContaining("storage.client") }),
+      expect.objectContaining({
+        owner: "billing",
+        code: "client-missing",
+        hint: expect.stringContaining("storage.client"),
+      }),
     ]);
   });
 
@@ -489,7 +555,11 @@ describe("farm schema check without a database", () => {
       plugins: [plugin("first", async () => db), plugin("second", async () => db)],
     });
     expect(report.issues.filter((issue) => issue.code === "table-conflict")).toEqual([
-      expect.objectContaining({ owner: "second", table: "items", message: expect.stringContaining("first and second") }),
+      expect.objectContaining({
+        owner: "second",
+        table: "items",
+        message: expect.stringContaining("first and second"),
+      }),
     ]);
     db.close();
   });
@@ -514,6 +584,172 @@ describe("farm schema check without a database", () => {
     });
     expect(codes(report.issues)).toEqual(["schema-invalid", "table-missing"]);
     db.close();
+  });
+
+  it("reads a Drizzle database through the driver it wraps", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const sqlite = new DatabaseSync(":memory:");
+    sqlite.exec('CREATE TABLE items ("id" TEXT PRIMARY KEY)');
+    // drizzle() exposes its driver on $client, and has no query() function.
+    const db = { select() {}, query: {}, $client: sqlite };
+    const report = await checkSchema({ plugins: [plugin("drizzle", async () => db)] });
+    expect(report.issues).toEqual([]);
+    expect(report.owners[0]).toMatchObject({ dialect: "sqlite", relational: true });
+    sqlite.close();
+  });
+
+  it("warns, without failing or stopping, for a client it cannot read", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const sqlite = new DatabaseSync(":memory:");
+    const prisma = { $queryRaw() {}, $connect() {}, user: {} };
+    const report = await checkSchema({
+      plugins: [
+        plugin("prisma", async () => prisma),
+        plugin(
+          "sqlite",
+          async () => sqlite,
+          defineSchema({
+            models: {
+              other: { name: "other_items", fields: { id: { type: "uuid", primaryKey: true } } },
+            },
+          }),
+        ),
+      ],
+    });
+    expect(report.issues).toEqual([
+      expect.objectContaining({ owner: "prisma", code: "client-unsupported", severity: "warning" }),
+      expect.objectContaining({ owner: "sqlite", code: "table-missing" }),
+    ]);
+    sqlite.close();
+  });
+
+  it("opens the integrations' shared client once", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const sqlite = new DatabaseSync(":memory:");
+    const factory = vi.fn(() => sqlite);
+    const integration = (type: string, table: string) =>
+      defineIntegration({
+        category: "payment",
+        type,
+        instance: {},
+        schema: defineSchema({
+          models: { row: { name: table, fields: { id: { type: "uuid", primaryKey: true } } } },
+        }),
+      });
+    await checkSchema({
+      integrations: {
+        first: integration("first", "first_rows"),
+        second: integration("second", "second_rows"),
+      },
+      storage: { client: factory },
+    } as never);
+    expect(factory).toHaveBeenCalledTimes(1);
+    sqlite.close();
+  });
+
+  it("looks up another owner's table in that owner's database", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const teamsDb = new DatabaseSync(":memory:");
+    const billingDb = new DatabaseSync(":memory:");
+    teamsDb.exec('CREATE TABLE organizations ("id" TEXT PRIMARY KEY)');
+    billingDb.exec(
+      'CREATE TABLE subscriptions ("id" TEXT PRIMARY KEY, "organizationId" TEXT NOT NULL)',
+    );
+    const teams = defineSchema({
+      models: {
+        organization: { name: "organizations", fields: { id: { type: "uuid", primaryKey: true } } },
+      },
+    });
+    const billing = defineSchema({
+      models: {
+        subscription: {
+          name: "subscriptions",
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            organizationId: {
+              type: "uuid",
+              reference: { model: "organization", field: "id", enforced: "app" },
+            },
+          },
+        },
+      },
+    });
+    const report = await checkSchema({
+      plugins: [
+        plugin("teams", async () => teamsDb, teams),
+        plugin("billing", async () => billingDb, billing),
+      ],
+    });
+    expect(report.issues).toEqual([]);
+    teamsDb.close();
+    billingDb.close();
+  });
+
+  it("does not reinterpret a reference through another owner's unclaimed model", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(":memory:");
+    db.exec('CREATE TABLE "user" ("id" TEXT PRIMARY KEY)');
+    db.exec('CREATE TABLE notes ("id" TEXT PRIMARY KEY, "userId" TEXT NOT NULL)');
+    // sync describes a `user` model it does not own, stored in "members".
+    const sync = defineSchema({
+      models: {
+        user: { name: "members", fields: { id: { type: "string", primaryKey: true } } },
+        task: { name: "tasks", fields: { id: { type: "uuid", primaryKey: true } } },
+      },
+    });
+    db.exec('CREATE TABLE tasks ("id" TEXT PRIMARY KEY)');
+    const notes = defineSchema({
+      models: {
+        note: {
+          name: "notes",
+          fields: {
+            id: { type: "uuid", primaryKey: true },
+            userId: { type: "string", reference: { model: "user", field: "id", enforced: "app" } },
+          },
+        },
+      },
+    });
+    const report = await checkSchema({
+      plugins: [
+        declareSchemaTables(definePlugin({ name: "farm:sync" }), {
+          name: "sync",
+          schema: sync,
+          models: ["task"],
+          resolveClient: async () => db,
+        }),
+        plugin("notes", async () => db, notes),
+      ],
+    });
+    // notes means the "user" table, which exists, not sync's "members".
+    expect(report.issues).toEqual([]);
+    db.close();
+  });
+
+  it("only fails a table conflict when both owners share the database", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const first = new DatabaseSync(":memory:");
+    const second = new DatabaseSync(":memory:");
+    const report = await checkSchema({
+      plugins: [plugin("first", async () => first), plugin("second", async () => second)],
+    });
+    expect(report.issues.filter((issue) => issue.code === "table-conflict")).toEqual([
+      expect.objectContaining({ severity: "warning", owner: "second" }),
+    ]);
+    first.close();
+    second.close();
+  });
+
+  it("never prints a password from a connection error", async () => {
+    const report = await checkSchema({
+      plugins: [
+        plugin("broken", async () => {
+          throw new Error("connect failed for postgres://app:s3cret-pass@db.internal:5432/app");
+        }),
+      ],
+    });
+    const message = report.issues[0]!.message;
+    expect(message).not.toContain("s3cret-pass");
+    expect(message).toContain("postgres://app:***@db.internal:5432/app");
   });
 
   function codes(issues: FarmSchemaCheckIssue[]) {
@@ -563,8 +799,53 @@ describeWithPostgres("farm schema check on postgres specifics", () => {
     });
     // Farm stores uuid as TEXT in Postgres, so Postgres would refuse the join without a cast.
     expect(report.issues).toContainEqual(
-      expect.objectContaining({ code: "reference-type", message: expect.stringContaining("uuid there") }),
+      expect.objectContaining({
+        code: "reference-type",
+        severity: "warning",
+        message: expect.stringContaining("uuid there"),
+        hint: expect.stringContaining("::text"),
+      }),
     );
+  });
+
+  it("reads a dotted reference as schema.table, like Supabase's auth.users", async () => {
+    const qualified = unique("qualified_schema");
+    await db.run(`CREATE SCHEMA "${qualified}"`);
+    try {
+      await db.run(`CREATE TABLE "${qualified}"."users" ("id" TEXT PRIMARY KEY)`);
+      const check = (field: string) =>
+        checkSchema({
+          plugins: [
+            declareSchemaTables(definePlugin({ name: "farm:loyalty" }), {
+              name: "loyalty",
+              schema: defineSchema({
+                models: {
+                  points: {
+                    name: unique("pg_points"),
+                    fields: {
+                      id: { type: "uuid", primaryKey: true },
+                      userId: {
+                        type: "string",
+                        reference: { model: `${qualified}.users`, field, enforced: "app" },
+                      },
+                    },
+                  },
+                },
+              }),
+              resolveClient: async () => db.client,
+            }),
+          ],
+        });
+      const found = await check("id");
+      expect(found.issues.filter((issue) => issue.code.startsWith("reference"))).toEqual([]);
+      // Postgres column names are case-sensitive once quoted.
+      const wrongCase = await check("ID");
+      expect(wrongCase.issues).toContainEqual(
+        expect.objectContaining({ code: "reference-column-missing" }),
+      );
+    } finally {
+      await db.run(`DROP SCHEMA IF EXISTS "${qualified}" CASCADE`);
+    }
   });
 
   it("only sees tables in the connection's current schema", async () => {
@@ -580,6 +861,8 @@ describeWithPostgres("farm schema check on postgres specifics", () => {
         }),
       ],
     });
-    expect(report.issues).toContainEqual(expect.objectContaining({ code: "reference-table-missing" }));
+    expect(report.issues).toContainEqual(
+      expect.objectContaining({ code: "reference-table-missing" }),
+    );
   });
 });

@@ -43,7 +43,14 @@ async function fixture() {
 
 async function check(root, ...args) {
   try {
-    const { stdout } = await run(process.execPath, [bin, "schema", "check", "--root", root, ...args]);
+    const { stdout } = await run(process.execPath, [
+      bin,
+      "schema",
+      "check",
+      "--root",
+      root,
+      ...args,
+    ]);
     return { code: 0, stdout };
   } catch (error) {
     return { code: error.code, stdout: error.stdout, stderr: error.stderr };
@@ -79,10 +86,24 @@ test("prints the report as JSON for scripts", async () => {
     assert.equal(result.code, 1, result.stderr);
     const report = JSON.parse(result.stdout);
     assert.equal(report.ok, false);
-    assert.deepEqual(
-      report.issues.map((issue) => issue.code).sort(),
-      ["reference-table-missing", "table-missing"],
+    assert.deepEqual(report.issues.map((issue) => issue.code).sort(), [
+      "reference-table-missing",
+      "table-missing",
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("still migrates a plugin that owns tables under the name schema", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-schema-named-"));
+  try {
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      config(path.join(root, "app.db")).replaceAll('"loyalty"', '"schema"'),
     );
+    const { stdout } = await run(process.execPath, [bin, "schema", "migrate", "--root", root]);
+    assert.match(stdout, /CREATE TABLE IF NOT EXISTS "points"/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -119,22 +119,33 @@ pnpm farm schema check
 ✗ loyalty (plugin, postgres)
     error   Table "points" does not exist.
             Run `farm loyalty migrate` to see the SQL, then `--apply` it.
-    error   "points.userId" references "users.id", but the types cannot be joined: text here, uuid there.
-            Change "userId" to match "users.id".
+    error   "points.userId" references "users.id", but "users" does not exist.
+            Farm does not manage that table. Run the migration that creates it (your ORM's, or a library's such as Better Auth) first.
 
 2 error(s), 0 warning(s)
 ```
 
-It reports:
+Errors are things that break at runtime:
 
-- **Missing tables and columns, and changed column types** in tables a plugin or
-  integration owns. These are errors.
-- **Other drift**, such as defaults, indexes, and foreign keys, as warnings.
-- **References that cannot work**: the referenced table or column does not
-  exist, or the two column types can never be joined. When the table belongs to
-  another plugin, the message names it so you know which `migrate` to run first.
-- **Two owners claiming the same table**, and an owner whose database cannot be
-  reached. One unreachable owner does not stop the others being checked.
+- a table, or a column, the owner needs is missing, or a column's type changed
+- a referenced table or column does not exist. When the table belongs to another
+  plugin, the message names it so you know which `migrate` to run first, and it
+  is looked up in that plugin's database
+- two owners claim the same table in the same database
+- an owner's database cannot be reached. The other owners are still checked
+
+Warnings do not fail the check:
+
+- other drift, such as defaults, indexes, and foreign keys
+- a reference whose column types differ, such as text pointing at a Postgres
+  `uuid`. Lookups by value work, but a SQL join needs a cast and a foreign key is
+  not possible. SQLite compares across types, so it is not flagged there
+- a client Farm cannot inspect, such as a Prisma client. That ORM's migrations
+  own those tables. Drizzle databases are read through the driver they wrap
+
+A dotted reference such as `auth.users` is read as `schema.table` on Postgres
+and MySQL, so references into Supabase's `auth` schema work. Otherwise tables
+are looked up in the connection's current schema.
 
 It only reads. Nothing is created or altered, so it is safe to run against
 production. It exits `1` when there are errors, which makes it a deploy gate:

@@ -215,7 +215,9 @@ export type FarmSchemaTableDescription = {
 
 /**
  * Read any table, owned by Farm or not, or undefined when it does not exist.
- * Used to check references to tables the app or a library created.
+ * Used to check references to tables the app or a library created. On
+ * Postgres and MySQL a dotted name that is not itself a table, such as
+ * Supabase's `auth.users`, is read as `schema.table`.
  */
 export async function describeSchemaTable(
   executor: FarmSchemaExecutor,
@@ -223,13 +225,40 @@ export async function describeSchemaTable(
   table: string,
 ): Promise<FarmSchemaTableDescription | undefined> {
   const described = await describeTable(executor, dialect, table);
-  if (!described) return undefined;
+  if (!described) {
+    const dot = table.indexOf(".");
+    if (dialect === "sqlite" || dot <= 0) return undefined;
+    return describeQualifiedTable(executor, dialect, table.slice(0, dot), table.slice(dot + 1));
+  }
   return {
     columns: described.columns.map(({ name, type, nullable, primaryKey }) => ({
       name,
       type,
       nullable,
       primaryKey,
+    })),
+  };
+}
+
+async function describeQualifiedTable(
+  executor: FarmSchemaExecutor,
+  dialect: "postgres" | "mysql",
+  schema: string,
+  table: string,
+): Promise<FarmSchemaTableDescription | undefined> {
+  const rows = await executor.query(
+    dialect === "mysql"
+      ? "select column_name, column_type as type, is_nullable from information_schema.columns where table_schema = ? and table_name = ? order by ordinal_position"
+      : "select column_name, data_type as type, is_nullable from information_schema.columns where table_schema = $1 and table_name = $2 order by ordinal_position",
+    [schema, table],
+  );
+  if (rows.length === 0) return undefined;
+  return {
+    columns: rows.map((row) => ({
+      name: String(readRowValue(row, "column_name")),
+      type: normalizeColumnType(dialect, String(readRowValue(row, "type"))),
+      nullable: String(readRowValue(row, "is_nullable")).toUpperCase() === "YES",
+      primaryKey: false,
     })),
   };
 }

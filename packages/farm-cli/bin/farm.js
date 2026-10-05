@@ -628,7 +628,9 @@ async function dispatchSchemaMigrate() {
   const registered = new Set(
     program.commands.flatMap((command) => [command.name(), ...command.aliases()]),
   );
-  if (registered.has(name)) return false;
+  // `farm schema` only has `check`, so a plugin that owns tables under the
+  // name "schema" can still be migrated.
+  if (registered.has(name) && name !== "schema") return false;
 
   const dynamic = new Command()
     .name(`farm ${name} migrate`)
