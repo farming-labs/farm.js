@@ -164,70 +164,196 @@ mount have no tables and are listed as skipped.
 
 ## Declaring tables from a plugin
 
-Wrap the plugin you already return in `declareSchemaTables`:
+Give `definePlugin` the schema:
 
 ```ts title="src/index.ts"
-import { declareSchemaTables, definePlugin } from "@farm.js/core";
+import { definePlugin, defineSchema } from "@farm.js/core";
 
-export function jobs(options: JobsOptions) {
-  const plugin = definePlugin({
-    name: "farm:jobs",
+export const teamsSchema = defineSchema({
+  models: {
+    organization: {
+      fields: { id: { type: "uuid", primaryKey: true }, name: { type: "string" } },
+    },
+    member: {
+      fields: {
+        id: { type: "uuid", primaryKey: true },
+        organizationId: {
+          type: "uuid",
+          reference: { model: "organization", field: "id", onDelete: "cascade" },
+        },
+      },
+    },
+  },
+});
+
+export function teams() {
+  return definePlugin({ name: "farm:teams", schema: teamsSchema });
+}
+```
+
+That is the whole contract. Apps that configure the plugin get:
+
+- `farm teams migrate`: the command is the part of the plugin name after its
+  last `:` or `/`
+- the plugin's models in `farm generate --orm prisma|drizzle|...`, alongside
+  every integration's
+- its tables in `farm schema check`
+
+The tables live in the app's database, `storage.client` in `farm.config.ts`,
+the same one integrations use. A broken schema fails when the config loads.
+
+### Tables the plugin uses but does not create
+
+A plugin often points at a table the app owns, such as the `user` table its auth
+library creates. Describe it with `external: true`:
+
+```ts
+user: {
+  external: true,
+  fields: { id: { type: "string", primaryKey: true } },
+},
+member: {
+  fields: {
     // ...
-  });
+    userId: { type: "string", reference: { model: "user", field: "id" } },
+  },
+},
+```
 
-  return declareSchemaTables(plugin, {
-    name: "jobs",
-    schema: options.schema,
-    resolveClient: () => resolveClient(options),
+Farm never creates an external table: `migrate`, generated Prisma and Drizzle
+schemas, and conflict checks all skip it, and no foreign key points at it. It is
+described so the reference resolves to the real table, `farm schema check` can
+verify that table exists, and the plugin can query it.
+
+### Letting the app use its own names
+
+The app's tables may not be called what your schema calls them. Accept renames
+as an option and apply them with `renameSchema`:
+
+```ts title="src/index.ts"
+import { definePlugin, renameSchema, type FarmSchemaRenames } from "@farm.js/core";
+
+type TeamsOptions = { schema?: FarmSchemaRenames<typeof teamsSchema> };
+
+export function teams(options: TeamsOptions = {}) {
+  return definePlugin({
+    name: "farm:teams",
+    schema: renameSchema(teamsSchema, options.schema),
   });
 }
 ```
 
-That is the whole contract. `farm jobs migrate` now works in any app that
-configures the plugin, and `farm generate --orm prisma|drizzle|...` includes the
-plugin's models alongside every integration's.
-
-| Field           | Purpose                                                          |
-| --------------- | ---------------------------------------------------------------- |
-| `name`          | the `<plugin>` in `farm <plugin> migrate`                        |
-| `schema`        | the schema whose models this plugin stores                       |
-| `models`        | model keys it owns; defaults to every model in the schema        |
-| `resolveClient` | returns the configured connection, or the storage mount          |
-| `dialect`       | only when the dialect cannot be detected from the client's shape |
-
-### Declare only what you own
-
-A declaration claims every model in the schema. Narrow it with `models` when an
-app hands your plugin a schema it shares with the rest of its code:
-
-```ts
-models: ["jobs", "jobRuns"],
+```ts title="farm.config.ts"
+teams({
+  schema: {
+    user: { name: "members_auth", fields: { id: "user_id" } },
+    member: { name: "team_members" },
+  },
+});
 ```
 
-A model the plugin was never given control of is not its table to create.
-`@farm.js/sync` narrows to the models an app opened to the browser, so a model
-left out of its `models` option is never created.
+Only names change. Migrate creates `team_members`, the check looks for
+`members_auth.user_id`, and at runtime the plugin keeps its own names: an ORM
+built from the renamed schema with `createIntegrationOrm` reads `user.id` from
+`members_auth.user_id`. Renames are typed from the plugin's schema, so the app
+gets completion, and a model or field that does not exist fails when the config
+loads.
 
-### The client
+### Adding columns to the app's tables
 
-`resolveClient` is called only by tooling, never on the request path, so it can
-be as expensive as it needs to be. It receives the app's resolved config, for an
-owner whose connection lives there rather than in its own options:
+Sometimes a plugin needs data on a row the app owns, such as points on each
+user. Describe the table as external and `extend` it with the columns:
 
-```ts
-resolveClient: (config) => config.storage?.client,
+```ts title="src/index.ts"
+export const loyaltySchema = defineSchema({
+  models: {
+    user: { external: true, fields: { id: { type: "string", primaryKey: true } } },
+    pointsHistory: {
+      fields: {
+        /* ... */
+      },
+    },
+  },
+  extend: {
+    user: { fields: { points: { type: "integer", default: 0 } } },
+  },
+});
 ```
 
-Return whatever the app configured — Farm detects the shape:
+The app's table may already hold rows, so each column must have a `default` or
+be `nullable`. Unique, indexed, and primary-key columns cannot be added this
+way. Both fail when the config loads.
 
-| Returned                                                          | Result                                                      |
+Nothing changes in the app's table until the app allows it:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  plugins: [loyalty()],
+  schema: { allowExtend: { loyalty: ["user"] } },
+});
+```
+
+List the plugin's model names or your own table names. Without the entry,
+`farm loyalty migrate` prints the `ALTER TABLE` commented out with the entry to
+add, `--apply` creates the plugin's own tables but not the columns and exits
+with an error, and `farm schema check` reports each missing column. With it,
+`--apply` adds them:
+
+```sql
+ALTER TABLE "user" ADD COLUMN "points" INTEGER NOT NULL DEFAULT 0;
+```
+
+Farm only adds. A column that already exists is never changed, even with a
+different type: the check warns instead. If the table does not exist yet, the
+command says so and still creates the plugin's own tables.
+
+**When Prisma or Drizzle owns the table**, a column added behind its back is
+drift its next migration would undo. In a project with `prisma/schema.prisma`
+or a `drizzle.config.*`, Farm never alters the app's tables. `migrate` and
+`farm generate --orm` print the line to add to your schema instead:
+
+```
+// In the Prisma model mapped to "user":
+points Int @default(0)
+```
+
+### When the app picks another database
+
+Where data lives is the app's decision. By default a plugin's tables go in the
+app's `storage.client`, and the plugin sets nothing. Some plugins let the app
+choose a different database for them through their own options, the way Sync
+takes `sync({ client })`. Forward that choice with `database`:
+
+```ts title="src/index.ts"
+export function jobs(options: { client?: unknown } = {}) {
+  return definePlugin({
+    name: "farm:jobs",
+    schema: jobsSchema,
+    // Undefined when the app passed nothing: storage.client is used.
+    database: { client: options.client },
+  });
+}
+```
+
+`client` can also be a function that returns the connection. Farm only calls it
+from tooling (`migrate`, `generate`, `schema check`), never on the request path.
+It detects what it is given:
+
+| Connection                                                        | Result                                                      |
 | ----------------------------------------------------------------- | ----------------------------------------------------------- |
 | `pg`, `mysql2`, `node:sqlite`, or anything with `query`/`prepare` | migrated                                                    |
 | an unstorage mount, or anything with `getItem`/`setItem`          | reported as having no tables                                |
 | anything else                                                     | an error naming your plugin and pointing at its own tooling |
 
-Set `dialect` explicitly when a client exposes a generic `query` and is not
-Postgres — the shape alone cannot tell Postgres and MySQL apart.
+Set `database.dialect` when a connection exposes a generic `query` and is not
+Postgres: the shape alone cannot tell Postgres and MySQL apart.
+
+### Only create what you own
+
+Every model in `schema` is a table the plugin creates, except the ones marked
+`external: true`. When an app hands your plugin a schema it shares with the rest
+of its code, mark the models the plugin was not given control of as external. A
+model the plugin was never given is not its table to create.
 
 ## What is generated
 

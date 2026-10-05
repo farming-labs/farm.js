@@ -53,6 +53,13 @@ export interface FarmSchemaConstraint {
 export interface FarmSchemaModel {
   name?: string;
   description?: string;
+  /**
+   * A table someone else creates, such as the app's or an auth library's
+   * `user`. It is described so references to it resolve to its real name, and
+   * so queries can read it, but Farm never creates it: migrate, generated ORM
+   * schemas, and conflict checks skip it.
+   */
+  external?: boolean;
   fields: Record<string, FarmSchemaField>;
   constraints?: readonly FarmSchemaConstraint[];
   meta?: Record<string, unknown>;
@@ -79,6 +86,21 @@ export interface FarmSchema {
   meta?: Record<string, unknown>;
   extend?: Record<string, FarmSchemaModelExtension>;
   override?: Record<string, FarmSchemaModelOverride>;
+}
+
+/** App-level rules for the tables plugins and integrations declare. */
+export interface FarmSchemaConfig {
+  /**
+   * Tables a plugin may add columns to, keyed by the plugin's migrate name.
+   * List the plugin's model names (`user`) or your real table names
+   * (`members_auth`). Without an entry, `farm <plugin> migrate` prints the
+   * `ALTER TABLE` and refuses to run it.
+   *
+   * ```ts
+   * schema: { allowExtend: { loyalty: ["user"] } }
+   * ```
+   */
+  allowExtend?: Record<string, readonly string[]>;
 }
 
 /**

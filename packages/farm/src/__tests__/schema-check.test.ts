@@ -458,14 +458,20 @@ describe.each(databases)("farm schema check on %s", (_name, open) => {
 
   it("never writes to the database", async () => {
     const db = await database();
-    const before = await db.listTables();
+    // Other test files share this database and create their own tables in
+    // parallel, so only tables this file could have made are compared.
+    const ownTables = async () =>
+      (await db.listTables()).filter((table) => table.startsWith("farm_check_"));
+    const before = await ownTables();
+    const readonly = unique("readonly");
+    const nobody = unique("nobody");
     const schema = defineSchema({
       models: {
         item: {
-          name: unique("readonly"),
+          name: readonly,
           fields: {
             id: { type: "uuid", primaryKey: true },
-            userId: { type: "string", reference: { model: unique("nobody"), field: "id" } },
+            userId: { type: "string", reference: { model: nobody, field: "id" } },
           },
         },
       },
@@ -473,7 +479,10 @@ describe.each(databases)("farm schema check on %s", (_name, open) => {
 
     await checkSchema({ plugins: [plugin("items", schema, db.client)] });
     await checkSchema({ plugins: [plugin("items", schema, db.client)] });
-    expect(await db.listTables()).toEqual(before);
+    const after = await ownTables();
+    expect(after).toEqual(before);
+    expect(after).not.toContain(readonly);
+    expect(after).not.toContain(nobody);
   });
 });
 

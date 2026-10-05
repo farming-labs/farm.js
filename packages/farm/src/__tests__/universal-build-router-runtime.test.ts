@@ -748,9 +748,12 @@ describe("generated deployment navigation guard", () => {
   it("clears older prefetched HTML after a deployment mismatch", () => {
     const getHandler = new Function(
       `${generateUniversalRouterStateRuntime()}; return clearFarmPrefetchCacheOnDeploymentMismatch;`,
-    ) as () => (router: { prefetchCache: Map<string, string> }, error: Error) => void;
+    ) as () => (router: { clearCache(): void }, error: Error) => void;
     const clearOnMismatch = getHandler();
     const router = {
+      clearCache() {
+        this.prefetchCache.clear();
+      },
       prefetchCache: new Map([
         ["/reports", "old release"],
         ["/settings", "old release"],

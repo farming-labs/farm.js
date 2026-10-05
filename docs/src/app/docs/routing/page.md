@@ -121,6 +121,9 @@ or an empty array.
 Farm writes the route union into the consolidated `src/farm.d.ts` declaration file. Link hrefs and route component props accept real routes without widening everything to plain string. Link hrefs can also include query strings and hash fragments.
 Changing only the fragment preserves SPA state, honors push versus replace history, and does not
 request route data again.
+Relative navigation, prefetch, and shallow history URLs resolve against the current document in
+development and production. For example, `?tab=settings` from `/users/123?tab=profile` keeps
+`/users/123`, and `456` from `/users/123` resolves to `/users/456`.
 Native anchor behavior still takes precedence: for example, a `Link` with a `download` attribute is
 handled by the browser instead of Farm's SPA router. Absolute URI schemes such as `mailto:`, `tel:`,
 `sms:`, and same-origin `blob:` URLs are passed through unchanged and are never prefetched as app routes. Literal custom
@@ -128,6 +131,20 @@ schemes such as `customapp:open` are validated from their URI grammar and work w
 Viewport prefetch uses a short scroll guard and is cancelled if its link unmounts before the guard
 expires. Intent prefetches are deduplicated while active; after an attempt settles, a later hover,
 focus, or touch can retry while successful route data remains deduplicated by the router cache.
+The development page-data router reuses a successfully decoded JSON prefetch response when
+navigation overlaps it with the same URL, interception origin, and active layout chain.
+Refreshes and different contexts fetch independently, and failed prefetches are retried by
+navigation. Cancelling a waiting
+navigation does not cancel its background prefetch. Deferred streaming responses keep independent
+requests and cancellation ownership; a waiting navigation starts its own request once the
+prefetch response headers identify a deferred stream.
+Production HTML navigation also reuses matching in-flight prefetches. Different interception
+contexts and deployment identities stay separate; failed prefetches are retried by navigation.
+Refresh bypasses pending prefetches, and clearing the cache prevents their late responses from
+repopulating it. Cancelling navigation does not abort a shared background prefetch.
+When a production HTML request redirects, Farm hands the original URL to a full document
+navigation so the browser preserves the redirect destination, fragments, and push/replace history.
+Prefetching a redirect never navigates the page or caches destination HTML under the original URL.
 Internal `Link` hrefs stay app-relative: when `basePath: "/console"` is configured, `href="/about"`
 renders and navigates to `/console/about`. Do not add the base path to route hrefs yourself.
 For a reusable custom-scheme type, use ``ExternalHref<`customapp:${string}`>`` (or declaration-merge

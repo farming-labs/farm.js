@@ -1,7 +1,10 @@
+import type { FarmSchemaExtension } from "./schema-extend";
 import {
   generateSqlStatements,
   getSqlColumnType,
+  getSqlDefaultExpression,
   isNullableField,
+  quoteSqlIdentifier,
   type CollectedSchemaModel,
   type FarmSqlDialect,
   type FarmSqlStatement,
@@ -786,12 +789,157 @@ export async function applySchemaMigration(
   return { applied, skipped: plan.drift };
 }
 
+/**
+ * Column type families a foreign key can join across. Same family is fine
+ * (text and varchar, integer and bigint); different families need a cast to
+ * join and can never carry a foreign key (text and uuid, text and integer).
+ */
+/** @internal */
+export function columnTypeFamily(type: string): string | undefined {
+  const value = type.trim().toLowerCase();
+  if (/^(bool|boolean|tinyint\(1\))/u.test(value)) return "boolean";
+  if (value.startsWith("uuid")) return "uuid";
+  if (/(char|text|clob|citext|string)/u.test(value)) return "text";
+  if (/^(int|integer|smallint|bigint|mediumint|tinyint|int[248]|serial|bigserial)/u.test(value)) {
+    return "integer";
+  }
+  if (/^(double|real|float|numeric|decimal|number)/u.test(value)) return "number";
+  if (/^(timestamp|datetime|date)/u.test(value)) return "datetime";
+  if (value.startsWith("json")) return "json";
+  // Enums, domains, arrays, binary: nothing to compare with confidence.
+  return undefined;
+}
+
+export type FarmSchemaExtensionStatement = FarmSqlStatement & {
+  extension: FarmSchemaExtension;
+  fieldKey: string;
+  column: string;
+};
+
+export type FarmSchemaExtensionPlan = {
+  /** `ALTER TABLE … ADD COLUMN` for each column the table does not have yet. */
+  statements: FarmSchemaExtensionStatement[];
+  /** Columns already there, as `table.column`. */
+  present: string[];
+  /** Extensions whose table does not exist, so nothing can be added yet. */
+  missingTables: FarmSchemaExtension[];
+  /** Columns that exist with a type the extension does not expect. Left alone. */
+  conflicts: Array<{
+    extension: FarmSchemaExtension;
+    column: string;
+    expected: string;
+    actual: string;
+  }>;
+  /** Columns this database cannot add as declared. */
+  unsupported: Array<{ extension: FarmSchemaExtension; column: string; reason: string }>;
+};
+
+/**
+ * Plan the columns owners add to tables they do not own. Only additions:
+ * a column that exists is never altered, whatever its definition.
+ */
+export async function planSchemaExtensions(
+  extensions: readonly FarmSchemaExtension[],
+  dialect: FarmSqlDialect,
+  executor: FarmSchemaExecutor,
+): Promise<FarmSchemaExtensionPlan> {
+  const plan: FarmSchemaExtensionPlan = {
+    statements: [],
+    present: [],
+    missingTables: [],
+    conflicts: [],
+    unsupported: [],
+  };
+
+  for (const extension of extensions) {
+    const table = await describeSchemaTable(executor, dialect, extension.table);
+    if (!table) {
+      plan.missingTables.push(extension);
+      continue;
+    }
+
+    for (const { fieldKey, field } of extension.fields) {
+      // Postgres compares quoted names exactly; MySQL and SQLite do not.
+      const existing = table.columns.find((column) =>
+        dialect === "postgres"
+          ? column.name === field.name
+          : column.name.toLowerCase() === field.name.toLowerCase(),
+      );
+      const expected = getSqlColumnType(field, dialect);
+
+      if (existing) {
+        const mine = columnTypeFamily(expected);
+        const theirs = columnTypeFamily(existing.type);
+        if (dialect !== "sqlite" && mine && theirs && mine !== theirs) {
+          plan.conflicts.push({ extension, column: field.name, expected, actual: existing.type });
+        } else {
+          plan.present.push(`${extension.table}.${field.name}`);
+        }
+        continue;
+      }
+
+      const reason = unsupportedColumnReason(field, dialect);
+      if (reason) {
+        plan.unsupported.push({ extension, column: field.name, reason });
+        continue;
+      }
+
+      const defaultValue = getSqlDefaultExpression(field, dialect);
+      const parts = [
+        `ALTER TABLE ${quoteTableName(dialect, extension.table)} ADD COLUMN`,
+        quoteSqlIdentifier(dialect, field.name),
+        expected,
+        ...(isNullableField(field) ? [] : ["NOT NULL"]),
+        ...(defaultValue ? [`DEFAULT ${defaultValue}`] : []),
+      ];
+      plan.statements.push({
+        kind: "column",
+        target: `${extension.table}.${field.name}`,
+        sql: `${parts.join(" ")};`,
+        extension,
+        fieldKey,
+        column: field.name,
+      });
+    }
+  }
+  return plan;
+}
+
+/** Why a column cannot be added to a table that may hold rows, if it cannot. */
+function unsupportedColumnReason(field: ResolvedSchemaField, dialect: FarmSqlDialect) {
+  const type = getSqlColumnType(field, dialect);
+  const defaultValue = getSqlDefaultExpression(field, dialect);
+  if (dialect === "mysql" && defaultValue && (type === "TEXT" || type === "JSON")) {
+    return `MySQL cannot give a ${type} column a default. Make it nullable without a default.`;
+  }
+  if (dialect === "sqlite" && defaultValue === "CURRENT_TIMESTAMP") {
+    return "SQLite cannot add a column whose default is the current time. Make it nullable.";
+  }
+  if (!isNullableField(field) && !defaultValue) {
+    return "It is required but its default cannot be written in SQL. Make it nullable.";
+  }
+  return undefined;
+}
+
+/** A table name for DDL; `schema.table` on Postgres and MySQL, as references read it. */
+function quoteTableName(dialect: FarmSqlDialect, table: string) {
+  const dot = table.indexOf(".");
+  if (dialect === "sqlite" || dot <= 0) return quoteSqlIdentifier(dialect, table);
+  return `${quoteSqlIdentifier(dialect, table.slice(0, dot))}.${quoteSqlIdentifier(dialect, table.slice(dot + 1))}`;
+}
+
 /** Render a plan as a reviewable SQL file. */
-export function formatSchemaMigration(plan: FarmSchemaMigratePlan, owner: string): string {
+export function formatSchemaMigration(
+  plan: FarmSchemaMigratePlan,
+  owner: string,
+  options: { addsColumns?: boolean } = {},
+): string {
   const header = [
     `-- Generated by \`farm ${owner} migrate\` from the ${owner} schema.`,
     `-- Dialect: ${plan.dialect}`,
-    "-- Review before applying. Farm never alters existing tables.",
+    options.addsColumns
+      ? "-- Review before applying. Existing tables only get the columns added below; nothing is changed or dropped."
+      : "-- Review before applying. Farm never alters existing tables.",
   ];
 
   if (plan.statements.length === 0) {

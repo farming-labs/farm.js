@@ -627,7 +627,14 @@ function FigureFrame({
     </div>
   );
   const drawing = (
-    <svg aria-hidden onPointerLeave={onRelease} viewBox={view.join(" ")}>
+    <svg
+      aria-hidden
+      onPointerLeave={(event) => {
+        // A touch pointer leaves as soon as the finger lifts; keep what it tapped.
+        if (event.pointerType !== "touch") onRelease();
+      }}
+      viewBox={view.join(" ")}
+    >
       {children}
     </svg>
   );
@@ -666,7 +673,10 @@ function FigureFrame({
           // A click on the backdrop lands on the dialog itself.
           if (event.target === event.currentTarget) dialogRef.current?.close();
         }}
-        onClose={() => setOpen(false)}
+        onClose={() => {
+          setOpen(false);
+          onRelease();
+        }}
         ref={dialogRef}
       >
         {open && (
@@ -1579,6 +1589,8 @@ const KEY_MS = 110;
 const TYPE_MS = KEYSTROKES.length * KEY_MS;
 // A scanline sweeps the screen while it boots, so the boot reads as one.
 const SCAN_MS = 850;
+// How long a keystroke's dash takes to run one dash length down the cable.
+const CORD_MS = 450;
 // The command and its output play out in 3D. Once the output has finished,
 // right before the logo comes up, the camera swings round to face the screen;
 // the screen blinks off, the logo boots face-on, and the camera swings back
@@ -1822,7 +1834,9 @@ export function DevFigure() {
       <LensContext.Provider value={lens(blend(ISOMETRIC, DEV_FACE_ON, swung))}>
         {DESK}
         {/* Each keystroke runs down the cable into the computer. */}
-        <Line className={typing ? "iso-cord iso-cord-live" : "iso-cord"} lines={[KEY_CABLE]} />
+        <g style={typing ? { strokeDashoffset: -((now % CORD_MS) / CORD_MS) * 12 } : undefined}>
+          <Line className={typing ? "iso-cord iso-cord-live" : "iso-cord"} lines={[KEY_CABLE]} />
+        </g>
         <g
           className="iso-lane"
           data-on={steer === "computer" || undefined}
@@ -1873,7 +1887,7 @@ const KEYS = [
     token: "demo-reader",
     subject: "demo-reader",
     cuts: [0.3, 0.3, 0.14],
-    readout: "subject demo-reader · list_projects, search_projects · create_project stays locked",
+    readout: "subject demo-reader · list_projects, search_projects · not create_project",
   },
   {
     token: "demo-token",

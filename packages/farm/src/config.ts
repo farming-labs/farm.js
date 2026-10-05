@@ -1,3 +1,4 @@
+import type { FarmSchemaConfig } from "./schema";
 import type {
   FarmConfig as BaseFarmConfig,
   FarmMigrationCommand,
@@ -390,6 +391,30 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   vite?: ViteUserConfig | ((config: ViteUserConfig) => ViteUserConfig);
 
   [key: string]: any;
+}
+
+/** Validate the app's schema rules while the config loads. */
+function resolveSchemaConfig(config: FarmSchemaConfig | undefined): FarmSchemaConfig {
+  if (config === undefined) return {};
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    throw new TypeError("`schema` in farm.config must be an object.");
+  }
+  const allowExtend = config.allowExtend;
+  if (allowExtend !== undefined) {
+    if (!allowExtend || typeof allowExtend !== "object" || Array.isArray(allowExtend)) {
+      throw new TypeError(
+        "`schema.allowExtend` must map a plugin's migrate name to the tables it may add columns to.",
+      );
+    }
+    for (const [owner, tables] of Object.entries(allowExtend)) {
+      if (!Array.isArray(tables) || tables.some((table) => typeof table !== "string")) {
+        throw new TypeError(
+          `\`schema.allowExtend.${owner}\` must be a list of model or table names, such as ["user"].`,
+        );
+      }
+    }
+  }
+  return config;
 }
 
 export interface ResolvedFarmConfig extends Required<
@@ -1057,6 +1082,7 @@ export async function resolveConfig(
     telemetry: userConfig.telemetry !== false,
     devtools: resolveFarmDevtoolsConfig(userConfig.devtools, mode),
     storage: userConfig.storage || {},
+    schema: resolveSchemaConfig(userConfig.schema),
     cache: userConfig.cache || {},
     auth,
     mcp,

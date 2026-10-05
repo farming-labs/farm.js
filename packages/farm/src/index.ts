@@ -15,12 +15,18 @@ export * from "./schema";
 export * from "./schema-sql";
 export * from "./schema-migrate";
 export * from "./schema-tables";
+export {
+  collectSchemaExtensions,
+  isSchemaExtensionAllowed,
+  type FarmSchemaExtension,
+} from "./schema-extend";
 export * from "./integrations";
 export * from "./integration-orm";
 export * from "./integration-api";
 export { createFarmApp } from "./app";
 export { FarmProvider } from "./provider";
 export { getCurrentRequest } from "./server/request";
+export { renameSchema, type FarmSchemaRenames } from "./schema-rename";
 export {
   checkSchema,
   collectSchemaOwners,
@@ -33,7 +39,12 @@ export {
   type FarmSchemaCheckReport,
   type FarmSchemaCheckSeverity,
 } from "./schema-check";
-export { definePlugin, FarmRuntimeShutdownError, PluginManager } from "./plugin";
+export {
+  definePlugin,
+  FarmRuntimeShutdownError,
+  PluginManager,
+  type FarmPluginDatabase,
+} from "./plugin";
 export {
   defineConfig,
   defineFarmConfig,
