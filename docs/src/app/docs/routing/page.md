@@ -142,6 +142,9 @@ Production HTML navigation also reuses matching in-flight prefetches. Different 
 contexts and deployment identities stay separate; failed prefetches are retried by navigation.
 Refresh bypasses pending prefetches, and clearing the cache prevents their late responses from
 repopulating it. Cancelling navigation does not abort a shared background prefetch.
+When a production HTML request redirects, Farm hands the original URL to a full document
+navigation so the browser preserves the redirect destination, fragments, and push/replace history.
+Prefetching a redirect never navigates the page or caches destination HTML under the original URL.
 Internal `Link` hrefs stay app-relative: when `basePath: "/console"` is configured, `href="/about"`
 renders and navigates to `/console/about`. Do not add the base path to route hrefs yourself.
 For a reusable custom-scheme type, use ``ExternalHref<`customapp:${string}`>`` (or declaration-merge

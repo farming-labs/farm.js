@@ -1862,7 +1862,15 @@ async function fetchFarmNavigationDocument(url, headers, recover = true, signal)
   const response = await fetch(url, {
     headers: createFarmDeploymentRequestHeaders(deploymentId, headers),
     signal,
+    redirect: "manual",
   });
+  // Let a document navigation follow redirects, including cross-origin chains
+  // and fragment inheritance. Never cache/swap their HTML under the source URL.
+  if (response.type === "opaqueredirect" || response.redirected) {
+    const error = new Error("Farm navigation requires a document redirect");
+    error.name = "FarmNavigationRedirect";
+    throw error;
+  }
   if (isFarmDeploymentMismatchResponse(response, deploymentId)) {
     const error = createFarmDeploymentMismatchError(response, deploymentId || "unknown");
     window.dispatchEvent(new CustomEvent("farm:deployment-mismatch", { detail: error }));
@@ -2328,6 +2336,7 @@ export function generateUniversalRouterStateProperties(): string {
         if (pending.valid && deploymentId === window.__FARM_DEPLOYMENT_ID__) return html;
       } catch (error) {
         if (signal?.aborted || !recover) throw error;
+        if (error?.name === "FarmNavigationRedirect") throw error;
         if (error?.name === "FarmDeploymentMismatchError") {
           window.location.assign(url);
           throw error;
@@ -2786,6 +2795,13 @@ ${generateUniversalRouterStateProperties()}
       this.finishNavigation(navigation);
     } catch (error) {
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+      if (error?.name === "FarmNavigationRedirect") {
+        this.cancelActiveNavigation();
+        if (action === "pop") window.location.reload();
+        else if (action === "replace") window.location.replace(href);
+        else window.location.assign(href);
+        return;
+      }
       if (clientNavigation) {
         await farmClientRuntime.failNavigation(clientNavigation, error);
       }
@@ -3760,6 +3776,13 @@ ${generateUniversalRouterStateProperties()}
       this.finishNavigation(navigation);
     } catch (error) {
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+      if (error?.name === "FarmNavigationRedirect") {
+        this.cancelActiveNavigation();
+        if (action === "pop") window.location.reload();
+        else if (action === "replace") window.location.replace(href);
+        else window.location.assign(href);
+        return;
+      }
       if (clientNavigation) {
         await farmClientRuntime.failNavigation(clientNavigation, error);
       }
