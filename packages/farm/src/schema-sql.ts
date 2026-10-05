@@ -18,7 +18,21 @@ export type CollectedSchemaModel = {
   exportName: string;
   prismaModelName: string;
   model: ResolvedSchemaModel;
+  /**
+   * Real table and column for references to models this owner describes but
+   * does not create (external, or outside its `models`), keyed by field. Only
+   * shown in comments: Farm never creates a foreign key to them.
+   */
+  referenceTargets?: Record<string, { table: string; column: string }>;
 };
+
+/** `table.column` a field's reference points at, using real names when known. */
+export function describeSchemaReference(model: CollectedSchemaModel, fieldKey: string): string {
+  const field = model.model.fields[fieldKey];
+  const target = model.referenceTargets?.[fieldKey];
+  if (target) return `${target.table}.${target.column}`;
+  return `${field?.reference?.model}.${field?.reference?.field}`;
+}
 
 const SQL_ON_DELETE_ACTIONS = {
   cascade: "CASCADE",
@@ -45,6 +59,8 @@ export function collectSchemaModels(
 
     for (const [modelKey, model] of Object.entries(resolvedModels)) {
       if (only && !only.includes(modelKey)) continue;
+      // Someone else creates it; it is only described to resolve references.
+      if (model.external) continue;
 
       const collisionKey = model.name.toLowerCase();
       const previousOwner = seenModelNames.get(collisionKey);
@@ -57,6 +73,20 @@ export function collectSchemaModels(
 
       seenModelNames.set(collisionKey, `${ownerKey}.${modelKey}`);
 
+      const referenceTargets: Record<string, { table: string; column: string }> = {};
+      for (const [fieldKey, field] of Object.entries(model.fields)) {
+        const reference = field.reference;
+        if (!reference || !Object.prototype.hasOwnProperty.call(resolvedModels, reference.model)) {
+          continue;
+        }
+        const target = resolvedModels[reference.model]!;
+        if (!target.external && (!only || only.includes(reference.model))) continue;
+        referenceTargets[fieldKey] = {
+          table: target.name,
+          column: target.fields[reference.field]?.name ?? reference.field,
+        };
+      }
+
       collectedModels.push({
         ownerKey,
         modelKey,
@@ -64,6 +94,7 @@ export function collectSchemaModels(
         exportName: toCamelCase(`${ownerKey}_${modelKey}`),
         prismaModelName: toPascalCase(`${ownerKey}_${modelKey}`),
         model,
+        ...(Object.keys(referenceTargets).length > 0 ? { referenceTargets } : {}),
       });
     }
   }
@@ -173,7 +204,7 @@ function renderSqlTable(
       parts.push(reference);
     } else if (field.reference) {
       parts.push(
-        `/* references ${field.reference.model}.${field.reference.field}${field.reference.onDelete ? ` on delete ${field.reference.onDelete}` : ""} */`,
+        `/* references ${describeSchemaReference(model, fieldKey)}${field.reference.onDelete ? ` on delete ${field.reference.onDelete}` : ""} */`,
       );
     }
 
