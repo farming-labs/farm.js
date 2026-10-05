@@ -115,7 +115,7 @@ for (const [index, renderer] of ["html", "react"].entries()) {
         expect(window.location[method as keyof typeof window.location]).toHaveBeenCalledTimes(1);
         if (action !== "pop") {
           expect(window.location[method as "replace" | "assign"]).toHaveBeenCalledWith(
-            "/base/old?x=1#details",
+            "https://example.test/base/old?x=1#details",
           );
         }
         expect(runtime.cancelNavigation).toHaveBeenCalledTimes(1);
@@ -137,7 +137,23 @@ for (const [index, renderer] of ["html", "react"].entries()) {
       resolve(redirectedResponse());
       await Promise.all([rejected, navigate]);
       expect(fetch).toHaveBeenCalledTimes(1);
-      expect(window.location.assign).toHaveBeenCalledWith("/base/old?x=1#details");
+      expect(window.location.assign).toHaveBeenCalledWith(
+        "https://example.test/base/old?x=1#details",
+      );
+    });
+
+    it("keeps the originally resolved relative URL if shallow history changes while loading", async () => {
+      const { router, fetch, window } = setup();
+      let resolve!: (response: Response) => void;
+      fetch.mockImplementation(() => new Promise<Response>((done) => (resolve = done)));
+      const navigation = router.navigate("old?x=1#details");
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+      window.location.href = "https://example.test/another/location";
+      resolve(redirectedResponse());
+      await navigation;
+      expect(window.location.assign).toHaveBeenCalledWith(
+        "https://example.test/base/old?x=1#details",
+      );
     });
 
     it("does not redirect a superseded navigation when its response settles", async () => {

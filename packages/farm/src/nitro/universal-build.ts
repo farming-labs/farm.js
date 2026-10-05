@@ -2798,8 +2798,8 @@ ${generateUniversalRouterStateProperties()}
       if (error?.name === "FarmNavigationRedirect") {
         this.cancelActiveNavigation();
         if (action === "pop") window.location.reload();
-        else if (action === "replace") window.location.replace(href);
-        else window.location.assign(href);
+        else if (action === "replace") window.location.replace(url.href);
+        else window.location.assign(url.href);
         return;
       }
       if (clientNavigation) {
@@ -3779,8 +3779,8 @@ ${generateUniversalRouterStateProperties()}
       if (error?.name === "FarmNavigationRedirect") {
         this.cancelActiveNavigation();
         if (action === "pop") window.location.reload();
-        else if (action === "replace") window.location.replace(href);
-        else window.location.assign(href);
+        else if (action === "replace") window.location.replace(url.href);
+        else window.location.assign(url.href);
         return;
       }
       if (clientNavigation) {
