@@ -233,8 +233,13 @@ as an option and apply them with `renameSchema`:
 ```ts title="src/index.ts"
 import { definePlugin, renameSchema, type FarmSchemaRenames } from "@farm.js/core";
 
-export function teams(options: { schema?: FarmSchemaRenames<typeof teamsSchema> } = {}) {
-  return definePlugin({ name: "farm:teams", schema: renameSchema(teamsSchema, options.schema) });
+type TeamsOptions = { schema?: FarmSchemaRenames<typeof teamsSchema> };
+
+export function teams(options: TeamsOptions = {}) {
+  return definePlugin({
+    name: "farm:teams",
+    schema: renameSchema(teamsSchema, options.schema),
+  });
 }
 ```
 
