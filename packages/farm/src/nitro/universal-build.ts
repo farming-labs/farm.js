@@ -1874,7 +1874,7 @@ async function fetchFarmNavigationDocument(url, headers, recover = true, signal)
 
 function clearFarmPrefetchCacheOnDeploymentMismatch(router, error) {
   if (error?.name === "FarmDeploymentMismatchError") {
-    router.prefetchCache.clear();
+    router.clearCache();
   }
 }
 
@@ -2068,6 +2068,8 @@ export function generateUniversalRouterStateProperties(): string {
   navigationState: IDLE_NAVIGATION_STATE,
   navigationSequence: 0,
   activeNavigation: null,
+  pendingPrefetches: new Map(),
+  prefetchGeneration: 0,
   prefetchObserver: null,
   observedPrefetchLinks: new Map(),
   viewportPrefetchQueue: [],
@@ -2296,6 +2298,69 @@ export function generateUniversalRouterStateProperties(): string {
         this.prefetchCache.delete(key);
       }
     }
+    for (const [key, pending] of this.pendingPrefetches) {
+      if (key === url || key.startsWith(interceptionPrefix)) {
+        pending.valid = false;
+        this.pendingPrefetches.delete(key);
+      }
+    }
+  },
+
+  clearCache: function() {
+    this.prefetchGeneration++;
+    this.prefetchCache.clear();
+    for (const pending of this.pendingPrefetches.values()) pending.valid = false;
+    this.pendingPrefetches.clear();
+  },
+
+  fetchPrefetchedDocument: async function(url, interceptFrom, fresh, recover, signal, cacheResult = true) {
+    signal?.throwIfAborted();
+    const cacheKey = interceptFrom ? url + "\\nintercept:" + interceptFrom : url;
+    if (fresh) this.clearPrefetchedPath(url);
+    const cached = fresh ? undefined : this.readFreshPrefetch(cacheKey);
+    if (cached !== undefined) return cached;
+    const deploymentId = window.__FARM_DEPLOYMENT_ID__;
+    const pending = this.pendingPrefetches.get(cacheKey);
+    if (!fresh && pending && pending.deploymentId === deploymentId) {
+      const cancellation = createClientCancellation(signal);
+      try {
+        const html = await cancellation.run(() => pending.promise);
+        if (pending.valid && deploymentId === window.__FARM_DEPLOYMENT_ID__) return html;
+      } catch (error) {
+        if (signal?.aborted || !recover) throw error;
+        if (error?.name === "FarmDeploymentMismatchError") {
+          window.location.assign(url);
+          throw error;
+        }
+        // A speculative failure must not poison a real navigation: retry it.
+      } finally {
+        cancellation.dispose();
+      }
+    }
+
+    const generation = this.prefetchGeneration;
+    // Only speculative requests have shared ownership. Ordinary navigations
+    // keep their own abort signal and cannot cancel another caller's work.
+    const record = recover ? null : { valid: true, deploymentId, promise: null };
+    const request = async () => {
+      const response = await fetchFarmNavigationDocument(url, {
+        "Accept": "text/html",
+        ...(interceptFrom ? { "X-Farm-Intercept-From": interceptFrom } : {}),
+      }, recover, signal);
+      if (!response.ok) throw new Error("Failed to fetch page");
+      const html = await response.text();
+      if (cacheResult && !signal?.aborted && generation === this.prefetchGeneration &&
+          deploymentId === window.__FARM_DEPLOYMENT_ID__ && (!record || record.valid)) {
+        this.storePrefetchedHtml(cacheKey, html);
+      }
+      return html;
+    };
+    if (!record) return request();
+    record.promise = request().finally(() => {
+      if (this.pendingPrefetches.get(cacheKey) === record) this.pendingPrefetches.delete(cacheKey);
+    });
+    this.pendingPrefetches.set(cacheKey, record);
+    return record.promise;
   },
 
   // Cached documents go stale the moment a mutation lands, and a long-lived
@@ -2611,7 +2676,7 @@ async function hydrateFarmDocsAdapterRuntime() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${clientPluginEntry.imports}
 ${clientCachePersistence.imports}
@@ -2743,18 +2808,7 @@ ${generateUniversalRouterStateProperties()}
   },
   
   fetchPage: async function(url, fresh = false, recover = true, signal) {
-    if (fresh) this.clearPrefetchedPath(url);
-    const cached = fresh ? undefined : this.readFreshPrefetch(url);
-    if (cached !== undefined) return cached;
-    
-    const response = await fetchFarmNavigationDocument(
-      url,
-      { "Accept": "text/html" },
-      recover,
-      signal,
-    );
-    if (!response.ok) throw new Error("Failed to fetch page");
-    return response.text();
+    return this.fetchPrefetchedDocument(url, undefined, fresh, recover, signal, !recover);
   },
   
   swapContent: function(html) {
@@ -2812,16 +2866,11 @@ ${generateUniversalRouterStateProperties()}
     if (this.readFreshPrefetch(pathname) !== undefined) return;
     
     return this.fetchPage(pathname, false, false)
-      .then(function(html) { spaRouter.storePrefetchedHtml(pathname, html); })
       .catch(function(error) {
         clearFarmPrefetchCacheOnDeploymentMismatch(spaRouter, error);
       });
   },
 
-  clearCache: function() {
-    this.prefetchCache.clear();
-  },
-  
   observeForPrefetch: function(element) {
     if (!("IntersectionObserver" in window)) return;
 
@@ -2983,7 +3032,7 @@ ${layoutImports}
 ${rendererClientImports}
 ${isolatedHydrationImport}
 ${providerClientCode.imports}
-import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -3733,24 +3782,7 @@ ${generateUniversalRouterStateProperties()}
   },
   
   fetchPage: async function(url, interceptFrom, fresh = false, recover = true, signal) {
-    const cacheKey = interceptFrom ? url + "\\nintercept:" + interceptFrom : url;
-    if (fresh) this.clearPrefetchedPath(url);
-    const cached = fresh ? undefined : this.readFreshPrefetch(cacheKey);
-    if (cached !== undefined) return cached;
-    
-    const response = await fetchFarmNavigationDocument(
-      url,
-      {
-        "Accept": "text/html",
-        ...(interceptFrom ? { "X-Farm-Intercept-From": interceptFrom } : {}),
-      },
-      recover,
-      signal,
-    );
-    if (!response.ok) throw new Error("Failed to fetch page");
-    const html = await response.text();
-    this.storePrefetchedHtml(cacheKey, html);
-    return html;
+    return this.fetchPrefetchedDocument(url, interceptFrom, fresh, recover, signal);
   },
   
   swapContent: async function(html, targetPath, navigation, clientNavigation) {
