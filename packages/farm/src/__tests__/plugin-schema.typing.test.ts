@@ -30,6 +30,12 @@ teams({ schema: { user: { fields: { userId: "user_id" } } } });
 teams({ schema: { user: { name: 1 } } });
 
 defineConfig({ plugins: [teams({ schema: { user: { name: "members_auth" } } })] });
+
+definePlugin({ name: "farm:jobs", schema: teamsSchema, database: { client: () => ({}), dialect: "postgres" } });
+// @ts-expect-error dialects are the ones Farm migrates
+definePlugin({ name: "farm:jobs", schema: teamsSchema, database: { client: {}, dialect: "oracle" } });
+// @ts-expect-error a database needs its client
+definePlugin({ name: "farm:jobs", schema: teamsSchema, database: { dialect: "sqlite" } });
 `;
   const options: ts.CompilerOptions = {
     strict: true,

@@ -259,66 +259,40 @@ built from the renamed schema with `createIntegrationOrm` reads `user.id` from
 gets completion, and a model or field that does not exist fails when the config
 loads.
 
-### Choosing the name or connection yourself
+### Keeping the tables in another database
 
-`declareSchemaTables` declares the same thing with every setting exposed. Use it
-when the command name should differ from the plugin name, the tables live
-somewhere other than `storage.client`, or the plugin owns only part of a schema
-it was handed:
+By default the tables live in the app's `storage.client`. A plugin that takes
+its own connection says so with `database`:
 
 ```ts title="src/index.ts"
-import { declareSchemaTables, definePlugin } from "@farm.js/core";
-
-export function jobs(options: JobsOptions) {
-  return declareSchemaTables(definePlugin({ name: "farm:jobs" /* ... */ }), {
-    name: "jobs",
-    schema: options.schema,
-    resolveClient: () => resolveClient(options),
+export function jobs(options: { client: unknown }) {
+  return definePlugin({
+    name: "farm:jobs",
+    schema: jobsSchema,
+    database: { client: options.client },
   });
 }
 ```
 
-| Field           | Purpose                                                          |
-| --------------- | ---------------------------------------------------------------- |
-| `name`          | the `<plugin>` in `farm <plugin> migrate`                        |
-| `schema`        | the schema whose models this plugin stores                       |
-| `models`        | model keys it owns; defaults to every model in the schema        |
-| `resolveClient` | returns the configured connection, or the storage mount          |
-| `dialect`       | only when the dialect cannot be detected from the client's shape |
+`client` can also be a function that returns the connection. Farm only calls it
+from tooling (`migrate`, `generate`, `schema check`), never on the request path.
+It detects what it is given:
 
-### Declare only what you own
-
-A declaration claims every model in the schema. Narrow it with `models` when an
-app hands your plugin a schema it shares with the rest of its code:
-
-```ts
-models: ["jobs", "jobRuns"],
-```
-
-A model the plugin was never given control of is not its table to create.
-`@farm.js/sync` narrows to the models an app opened to the browser, so a model
-left out of its `models` option is never created.
-
-### The client
-
-`resolveClient` is called only by tooling, never on the request path, so it can
-be as expensive as it needs to be. It receives the app's resolved config, for an
-owner whose connection lives there rather than in its own options:
-
-```ts
-resolveClient: (config) => config.storage?.client,
-```
-
-Return whatever the app configured — Farm detects the shape:
-
-| Returned                                                          | Result                                                      |
+| Connection                                                        | Result                                                      |
 | ----------------------------------------------------------------- | ----------------------------------------------------------- |
 | `pg`, `mysql2`, `node:sqlite`, or anything with `query`/`prepare` | migrated                                                    |
 | an unstorage mount, or anything with `getItem`/`setItem`          | reported as having no tables                                |
 | anything else                                                     | an error naming your plugin and pointing at its own tooling |
 
-Set `dialect` explicitly when a client exposes a generic `query` and is not
-Postgres — the shape alone cannot tell Postgres and MySQL apart.
+Set `database.dialect` when a connection exposes a generic `query` and is not
+Postgres: the shape alone cannot tell Postgres and MySQL apart.
+
+### Only create what you own
+
+Every model in `schema` is a table the plugin creates, except the ones marked
+`external: true`. When an app hands your plugin a schema it shares with the rest
+of its code, mark the models the plugin was not given control of as external. A
+model the plugin was never given is not its table to create.
 
 ## What is generated
 

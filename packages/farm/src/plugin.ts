@@ -30,6 +30,7 @@ import {
 } from "./request-context";
 import { getFarmPluginIntegrationContext } from "./plugin-integration-context";
 import type { FarmSchema } from "./schema";
+import type { FarmSqlDialect } from "./schema-sql";
 import { declareSchemaTables, readSchemaTables } from "./schema-owner";
 import { resolveSchemaModels } from "./schema-resolve";
 import { normalizeFarmBasePath, stripFarmBasePath } from "./base-path";
@@ -558,6 +559,8 @@ export interface FarmPlugin<
    * only reads, such as the app's `user`, with `external: true`.
    */
   schema?: FarmSchema;
+  /** Where the `schema` tables live, when not in the app's `storage.client`. */
+  database?: FarmPluginDatabase;
 
   /** @internal Carries the expected integration instance type without runtime data. */
   readonly [FARM_PLUGIN_INTEGRATION_INSTANCE]?: (instance: TIntegrationInstance) => void;
@@ -1656,6 +1659,14 @@ export function definePlugin<
   return declarePluginSchema(plugin);
 }
 
+/** The database a plugin's `schema` tables live in, when not `storage.client`. */
+export interface FarmPluginDatabase {
+  /** A pg, mysql2, or sqlite connection, or a function returning one. */
+  client: unknown;
+  /** Only when the dialect cannot be detected from the connection. */
+  dialect?: FarmSqlDialect;
+}
+
 /** The `farm <name> migrate` namespace for a plugin: `farm:teams` → `teams`. */
 function pluginSchemaName(pluginName: string): string {
   const name = pluginName.slice(
@@ -1670,21 +1681,38 @@ function pluginSchemaName(pluginName: string): string {
 }
 
 /**
- * Register the tables a plugin's `schema` describes. A plugin that declared
- * them itself with `declareSchemaTables`, to pick its own name or connection,
- * keeps that declaration.
+ * Record the tables a plugin's `schema` describes, so migrate, generate, and
+ * check find them. Farm's own packages that record ownership themselves keep
+ * their declaration.
  */
-function declarePluginSchema<TPlugin extends { name: string; schema?: FarmSchema }>(
-  plugin: TPlugin,
-): TPlugin {
+function declarePluginSchema<
+  TPlugin extends { name: string; schema?: FarmSchema; database?: FarmPluginDatabase },
+>(plugin: TPlugin): TPlugin {
+  if (plugin.database && !plugin.schema) {
+    throw new Error(
+      `Plugin "${plugin.name}" sets \`database\` without a \`schema\`: it only says where the schema's tables live.`,
+    );
+  }
   if (!plugin.schema || readSchemaTables(plugin)) return plugin;
   const name = pluginSchemaName(plugin.name);
   // Fail while the config loads, not at the first migrate or query.
   resolveSchemaModels(name, plugin.schema);
+  const database = plugin.database;
   return declareSchemaTables(plugin, {
     name,
     schema: plugin.schema,
+    dialect: database?.dialect,
     resolveClient: async (config) => {
+      if (database) {
+        const client =
+          typeof database.client === "function"
+            ? await (database.client as () => unknown)()
+            : database.client;
+        if (client === undefined || client === null) {
+          throw new Error(`The ${name} plugin's \`database.client\` returned no connection.`);
+        }
+        return client;
+      }
       const { resolveIntegrationOrmRuntimeClient } = await import("./integration-orm");
       const client = await resolveIntegrationOrmRuntimeClient({ config: config as never });
       if (client === undefined || client === null) {

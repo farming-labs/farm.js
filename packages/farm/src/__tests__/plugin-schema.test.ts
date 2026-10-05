@@ -80,7 +80,7 @@ describe("definePlugin({ schema })", () => {
     );
   });
 
-  it("keeps a declaration the author made to choose a name or connection", () => {
+  it("keeps a declaration one of Farm's own packages recorded itself", () => {
     const plugin = declareSchemaTables(
       { name: "farm:teams", schema: teamsSchema },
       { name: "orgs", schema: teamsSchema, resolveClient: async () => null },
@@ -101,6 +101,51 @@ describe("definePlugin({ schema })", () => {
     const [owner] = findSchemaTableOwners({ plugins: [teams()] });
     expect(await owner!.resolveClient({ storage: { client } })).toBe(client);
     expect(await owner!.resolveClient({ storage: { client: () => client } })).toBe(client);
+  });
+
+  it("keeps the tables in the plugin's own database when it sets one", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const own = new DatabaseSync(":memory:");
+    const appDatabase = { query() {} };
+    for (const client of [own, () => own, async () => own]) {
+      const plugin = definePlugin({
+        name: "farm:teams",
+        schema: teamsSchema,
+        database: { client, dialect: "sqlite" },
+      });
+      const [owner] = findSchemaTableOwners({ plugins: [plugin] });
+      expect(owner!.dialect).toBe("sqlite");
+      expect(await owner!.resolveClient({ storage: { client: appDatabase } })).toBe(own);
+    }
+
+    // And migrate and check use it, not storage.client.
+    const config = {
+      plugins: [
+        definePlugin({ name: "farm:teams", schema: teamsSchema, database: { client: own } }),
+      ],
+      storage: { client: appDatabase },
+    };
+    await migrateSchemaTables(findSchemaTableOwners(config)[0]!, { config, apply: true });
+    own.exec('CREATE TABLE "user" ("id" TEXT PRIMARY KEY, "email" TEXT NOT NULL)');
+    expect((await checkSchema(config)).issues).toEqual([]);
+    own.close();
+  });
+
+  it("says when the plugin's own database gives no connection", async () => {
+    const plugin = definePlugin({
+      name: "farm:teams",
+      schema: teamsSchema,
+      database: { client: () => undefined },
+    });
+    await expect(
+      findSchemaTableOwners({ plugins: [plugin] })[0]!.resolveClient({}),
+    ).rejects.toThrow("The teams plugin's `database.client` returned no connection.");
+  });
+
+  it("refuses a database without a schema", () => {
+    expect(() => definePlugin({ name: "farm:teams", database: { client: {} } })).toThrow(
+      /sets `database` without a `schema`/,
+    );
   });
 
   it("says to set storage.client when the app has not", async () => {

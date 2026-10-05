@@ -34,7 +34,12 @@ export {
   type FarmSchemaCheckReport,
   type FarmSchemaCheckSeverity,
 } from "./schema-check";
-export { definePlugin, FarmRuntimeShutdownError, PluginManager } from "./plugin";
+export {
+  definePlugin,
+  FarmRuntimeShutdownError,
+  PluginManager,
+  type FarmPluginDatabase,
+} from "./plugin";
 export {
   defineConfig,
   defineFarmConfig,

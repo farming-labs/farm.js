@@ -1,17 +1,21 @@
 import type { FarmSchema } from "./schema";
 import type { FarmSqlDialect } from "./schema-sql";
 
-// Kept apart from schema-tables.ts, which pulls in migration and SQL code, so
-// definePlugin can declare a plugin's tables without loading any of it.
+// How Farm records which tables a plugin or integration owns. Internal: plugins
+// set `schema` on definePlugin. Kept apart from schema-tables.ts, which pulls
+// in migration and SQL code, so definePlugin loads none of it.
 
 /**
  * Attached to a plugin or integration to say "I own these tables".
  *
  * Read by tooling so it can reach an already-resolved schema and connection
  * instead of re-reading and re-validating configuration.
+ *
+ * @internal
  */
 export const FARM_SCHEMA_TABLES = Symbol.for("farm.schema-tables");
 
+/** @internal What `definePlugin({ schema })` records on a plugin. */
 export interface FarmSchemaTablesDeclaration {
   /** Command namespace: this is the `<name>` in `farm <name> migrate`. */
   name: string;
@@ -35,19 +39,12 @@ export interface FarmSchemaTablesDeclaration {
 }
 
 /**
- * Declare that a plugin owns tables, so `farm <name> migrate` can create them
- * and `farm generate` can include them in schema artifacts.
+ * Record that a plugin or integration owns tables, so `farm <name> migrate`,
+ * `farm generate`, and `farm schema check` find them.
  *
- * ```ts
- * const plugin = definePlugin({ name: "farm:jobs", ... });
- *
- * return declareSchemaTables(plugin, {
- *   name: "jobs",
- *   schema: options.schema,
- *   models: ["jobs", "jobRuns"],
- *   resolveClient: () => resolveClient(options),
- * });
- * ```
+ * @internal Not part of the plugin API: plugins set `schema` (and `database`)
+ * on `definePlugin`, which calls this. Exported for Farm's own packages and for
+ * code written against earlier betas.
  *
  * The declaration is non-enumerable, so it never reaches a config serializer or
  * a plugin's own option spreading.
@@ -64,7 +61,7 @@ export function declareSchemaTables<TTarget extends object>(
   return target;
 }
 
-/** The declaration on a plugin, when it has one. */
+/** @internal The declaration on a plugin, when it has one. */
 export function readSchemaTables(candidate: unknown): FarmSchemaTablesDeclaration | undefined {
   if (!candidate || (typeof candidate !== "object" && typeof candidate !== "function")) {
     return undefined;

@@ -272,7 +272,7 @@ export async function checkSchema(
       code: "owner-conflict",
       owner: name,
       message: `${schemas.length} plugins declare tables under the name "${name}", so \`farm ${name} migrate\` and this check only see the first.`,
-      hint: "Rename one plugin, or declare its tables with declareSchemaTables and a different name.",
+      hint: "Rename one of the plugins: the part of its name after the last `:` or `/` is its migrate command.",
     });
   }
   const summaries: FarmSchemaCheckOwner[] = [];
