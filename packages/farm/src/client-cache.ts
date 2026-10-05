@@ -79,6 +79,7 @@ const DEFAULT_GC_SWEEP_INTERVAL_MS = 30_000;
 export class FarmClientDataCache {
   private entries = new Map<string, FarmClientCacheEntry>();
   private aliases = new Map<string, string>();
+  private aliasesByTarget = new Map<string, Set<string>>();
   private invalidatedAt = new Map<string, number>();
   private listeners = new Map<string, Set<FarmClientCacheListener>>();
   private inflight = new Map<string, Promise<unknown>>();
@@ -181,6 +182,7 @@ export class FarmClientDataCache {
     const keys = new Set([...this.entries.keys(), ...this.listeners.keys()]);
     this.entries.clear();
     this.aliases.clear();
+    this.aliasesByTarget.clear();
     this.invalidatedAt.clear();
     this.inflight.clear();
     this.pendingMetadataSweeps.clear();
@@ -267,7 +269,14 @@ export class FarmClientDataCache {
     if (this.pendingMetadataSweeps.delete(alias) && !this.entries.has(resolved)) {
       this.pendingMetadataSweeps.add(resolved);
     }
-    this.aliases.set(alias, resolved);
+    const previousTarget = this.aliases.get(alias);
+    if (previousTarget !== resolved) {
+      this.removeAlias(alias);
+      this.aliases.set(alias, resolved);
+      let aliases = this.aliasesByTarget.get(resolved);
+      if (!aliases) this.aliasesByTarget.set(resolved, (aliases = new Set()));
+      aliases.add(alias);
+    }
     this.emit(alias);
     this.emit(resolved, this.invalidatedAt.has(resolved) ? "invalidate" : undefined);
   }
@@ -361,18 +370,41 @@ export class FarmClientDataCache {
       }
     }
 
-    for (const [alias, target] of this.aliases) {
+    // Walk only the reverse edges owned by swept targets, including aliases
+    // of aliases. Discover the complete chain before deleting any edge.
+    const related = new Set<string>();
+    const targets = new Set(swept);
+    for (const target of targets) {
+      for (const alias of this.aliasesByTarget.get(target) ?? []) {
+        related.add(alias);
+        targets.add(alias);
+      }
+    }
+    const removable: string[] = [];
+    for (const alias of related) {
       // Keep any alias that is still addressable: one that has its own entry,
       // that something is subscribed to, that owns in-flight work, or whose
       // target is still live.
       if (this.entries.has(alias) || this.listeners.has(alias) || this.inflight.has(alias))
         continue;
-      const resolved = this.resolveKey(target);
+      const resolved = this.resolveKey(alias);
       if (!swept.has(resolved)) continue;
       if (this.entries.has(resolved) || protectedKeys.has(resolved)) continue;
-      this.aliases.delete(alias);
+      removable.push(alias);
+    }
+    for (const alias of removable) {
+      this.removeAlias(alias);
       this.invalidatedAt.delete(alias);
     }
+  }
+
+  private removeAlias(alias: string): void {
+    const target = this.aliases.get(alias);
+    if (target === undefined) return;
+    this.aliases.delete(alias);
+    const aliases = this.aliasesByTarget.get(target);
+    aliases?.delete(alias);
+    if (aliases?.size === 0) this.aliasesByTarget.delete(target);
   }
 
   private sweepPendingEntryMetadata(): void {
