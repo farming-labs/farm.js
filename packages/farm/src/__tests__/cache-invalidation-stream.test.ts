@@ -15,6 +15,124 @@ afterEach(async () => {
 });
 
 describe("cache invalidation event stream", () => {
+  it("keeps delivering when the consumer drains each batch", async () => {
+    const response = createFarmCacheInvalidationStream({ heartbeatIntervalMs: false });
+    const reader = response.body!.getReader();
+    readers.push(reader);
+    await readText(reader);
+    for (let i = 0; i < 1_000; i++) {
+      const key = `${i}:${"x".repeat(1_000)}`;
+      notifyFarmCacheInvalidation(key);
+      expect(await readText(reader)).toBe(`data: ${encodeURIComponent(JSON.stringify([key]))}\n\n`);
+    }
+  });
+
+  it("bounds encoded expansion and filters before applying buffer limits", async () => {
+    const response = createFarmCacheInvalidationStream({
+      heartbeatIntervalMs: false,
+      filter: (key) => !key.startsWith("private:"),
+    });
+    const reader = response.body!.getReader();
+    await readText(reader);
+    notifyFarmCacheInvalidation(`private:${"x".repeat(100_000)}`);
+    notifyFarmCacheInvalidation("allowed");
+    expect(await readText(reader)).toContain("allowed");
+    const failure = expect(reader.read()).rejects.toThrow("buffer limit");
+    notifyFarmCacheInvalidation("界".repeat(10_000));
+    await failure;
+  });
+
+  it("cleans up when a filter aborts its own stream", async () => {
+    const abort = new AbortController();
+    const response = createFarmCacheInvalidationStream({
+      signal: abort.signal,
+      heartbeatIntervalMs: false,
+      filter: () => {
+        abort.abort();
+        return true;
+      },
+    });
+    const reader = response.body!.getReader();
+    await readText(reader);
+    notifyFarmCacheInvalidation("abort:filter");
+    expect(await reader.read()).toEqual({ done: true, value: undefined });
+  });
+
+  it("bounds unread output and removes the invalidation listener on overflow", async () => {
+    const abort = new AbortController();
+    let filterCalls = 0;
+    const response = createFarmCacheInvalidationStream({
+      signal: abort.signal,
+      heartbeatIntervalMs: false,
+      filter: () => {
+        filterCalls++;
+        return true;
+      },
+    });
+    try {
+      for (let i = 0; i < 1_000; i++) {
+        notifyFarmCacheInvalidation(`${i}:${"x".repeat(1_000)}`);
+        await Promise.resolve();
+      }
+      const calls = filterCalls;
+      notifyFarmCacheInvalidation("after:overflow");
+      expect(filterCalls).toBe(calls);
+      await expect(response.body!.getReader().read()).rejects.toThrow("buffer limit");
+    } finally {
+      abort.abort();
+    }
+  });
+
+  it("bounds pending keys before the microtask flush and rejects oversized keys", async () => {
+    for (const keys of [
+      Array.from({ length: 1_025 }, (_, i) => `key:${i}`),
+      ["x".repeat(65_536)],
+    ]) {
+      const abort = new AbortController();
+      const response = createFarmCacheInvalidationStream({
+        signal: abort.signal,
+        heartbeatIntervalMs: false,
+      });
+      try {
+        for (const key of keys) notifyFarmCacheInvalidation(key);
+        await expect(response.body!.getReader().read()).rejects.toThrow("buffer limit");
+      } finally {
+        abort.abort();
+      }
+    }
+  });
+
+  it("coalesces repeated pending keys without treating duplicates as overflow", async () => {
+    const response = createFarmCacheInvalidationStream({ heartbeatIntervalMs: false });
+    const reader = response.body!.getReader();
+    readers.push(reader);
+    await readText(reader);
+    for (let i = 0; i < 10_000; i++) notifyFarmCacheInvalidation("same:key");
+    expect(await readText(reader)).toBe(`data: ${encodeURIComponent('["same:key"]')}\n\n`);
+    notifyFarmCacheInvalidation("later:key");
+    expect(await readText(reader)).toContain(encodeURIComponent('["later:key"]'));
+  });
+
+  it("does not queue heartbeat history for an unread stream", async () => {
+    vi.useFakeTimers();
+    const abort = new AbortController();
+    const response = createFarmCacheInvalidationStream({
+      signal: abort.signal,
+      heartbeatIntervalMs: 20,
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(2_000);
+      abort.abort();
+      const reader = response.body!.getReader();
+      expect(await readText(reader)).toContain(": connected");
+      expect(await reader.read()).toEqual({ done: true, value: undefined });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      abort.abort();
+      vi.useRealTimers();
+    }
+  });
+
   it("batches encoded invalidations into an SSE response", async () => {
     const response = createFarmCacheInvalidationStream({ heartbeatIntervalMs: false });
     const reader = response.body!.getReader();

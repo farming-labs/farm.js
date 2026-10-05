@@ -830,6 +830,13 @@ their existing inputs, cache policy, and current browser credentials. Native `Ev
 reconnection handles transient disconnects; Farm's existing focus and reconnect revalidation covers
 events missed while the browser was offline.
 
+The stream is best-effort, not a durable event log: reconnects do not replay missed keys.
+To bound memory for slow clients, Farm limits queued encoded output to 64 KiB and each pending
+microtask batch to 1,024 distinct keys / 64 KiB of UTF-16 key data. Overflow (including an oversized
+key or encoded batch) errors the stream and releases its listener and heartbeat; EventSource can
+reconnect normally. Heartbeats are skipped while output is queued. Apps requiring guaranteed
+delivery should use a durable event source and explicitly resynchronize reads after reconnecting.
+
 The stream forwards events from the current server process. A multi-instance deployment needs a
 shared pub/sub backplane feeding each instance's invalidation bus. That is intentionally outside the
 first version of this API. The selected deployment target must also support a long-lived streaming
