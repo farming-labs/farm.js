@@ -1,4 +1,4 @@
-import { matchAPIRoute, parseDynamicSegment } from "./route-pattern";
+import { matchAPIRoute, parseDynamicSegment } from "../../api/route-pattern";
 
 export type APIRouteManifest = readonly {
   readonly path: string;
@@ -8,9 +8,7 @@ export type BoundRouteParams = Readonly<Record<string, string | readonly string[
 
 /** A schema-free lookup shared by every immutable scope of one API client. */
 export class ClientRouteManifest {
-  private readonly routes: Map<string, APIRouteManifest[number]>;
-  private readonly candidates = new Map<string, APIRouteManifest[number][]>();
-  private readonly nextSegments = new Map<string, Set<string>>();
+  readonly routes: Map<string, APIRouteManifest[number]>;
   constructor(routes: APIRouteManifest) {
     this.routes = new Map(
       routes.map((route) => [
@@ -21,42 +19,23 @@ export class ClientRouteManifest {
         },
       ]),
     );
-    // The API client owns this schema-free snapshot; app input is copied above
-    // and no mutable route table escapes the client factory.
-    const addCandidate = (path: string, route: APIRouteManifest[number]) => {
-      let candidates = this.candidates.get(path);
-      if (!candidates) this.candidates.set(path, (candidates = []));
-      candidates.push(route);
-    };
-    for (const route of this.routes.values()) {
-      addCandidate(route.path, route);
-      const segments = route.path.split("/");
-      let parent = "";
-      for (let i = 0; i < segments.length; i++) {
-        const segment = segments[i]!;
-        if (i > 0 && parseDynamicSegment(segment)) {
-          let next = this.nextSegments.get(parent);
-          if (!next) this.nextSegments.set(parent, (next = new Set()));
-          next.add(segment);
-          if (i === segments.length - 1) addCandidate(parent, route);
-        }
-        parent = i === 0 ? segment : `${parent}/${segment}`;
-      }
-    }
   }
 
   bind(path: string, input: unknown): { segment: string; params: BoundRouteParams } {
     const params = readParams(input);
-    const normalized = path.replace(/\/$/, "");
+    const prefix = `${path.replace(/\/$/, "")}/`;
     const candidates = new Set(
-      [...(this.nextSegments.get(normalized) ?? [])].filter((segment) => {
-        const dynamic = parseDynamicSegment(segment);
-        return (
-          dynamic &&
-          Object.keys(params).every((key) => key === dynamic.name) &&
-          (Object.prototype.hasOwnProperty.call(params, dynamic.name) || dynamic.optional)
-        );
-      }),
+      [...this.routes.keys()]
+        .filter((route) => route.startsWith(prefix))
+        .map((route) => route.slice(prefix.length).split("/")[0])
+        .filter((segment) => {
+          const dynamic = parseDynamicSegment(segment);
+          return (
+            dynamic &&
+            Object.keys(params).every((key) => key === dynamic.name) &&
+            (Object.prototype.hasOwnProperty.call(params, dynamic.name) || dynamic.optional)
+          );
+        }),
     );
     if (candidates.size !== 1)
       throw new TypeError(
@@ -86,7 +65,7 @@ export class ClientRouteManifest {
   ): string {
     const normalized = path.replace(/\/$/, "");
     const supplied = readParams(input?.params);
-    const candidates = (this.candidates.get(normalized) ?? []).filter((route) => {
+    const candidates = [...this.routes.values()].filter((route) => {
       if (route.path === normalized) return true;
       if (!route.path.startsWith(`${normalized}/`)) return false;
       const tail = route.path.slice(normalized.length + 1);
