@@ -83,8 +83,8 @@ new grants; existing grants remain valid until expiry.
 The Previews dashboard shows account-owned connections, expiry, and the latest 200
 request metadata records per preview. It refreshes every five seconds and marks missing
 heartbeats as **Stale**, not live. Paths, methods, statuses, durations, and times are
-recorded; query strings, headers, bodies, and credentials are excluded. Paths may still
-contain your app's identifiers. This is best-effort activity reporting, not an audit log
+recorded; query strings, headers, and bodies are excluded. Paths may still contain app
+identifiers or embedded credentials; never put secrets in URL paths. This is best-effort activity reporting, not an audit log
 or your application's stdout/stderr. Your app still runs on your computer or CI runner.
 
 ### Projects and preview details

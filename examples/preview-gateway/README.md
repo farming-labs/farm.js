@@ -109,8 +109,8 @@ remain usable until their expiry. Missing/unavailable identity services fail clo
 Optional `observer` hooks in both gateway transports report session lifecycle and
 request metadata. This example forwards them using Vercel `waitUntil`, with bounded
 concurrency and timeouts; failures never break public requests. Heartbeats are throttled
-to one report per session per 20 seconds. No request bodies, headers, query strings or
-credentials are reported. Paths may still contain application identifiers. Reporting
+to one report per session per 20 seconds. No request bodies, headers, or query strings
+are reported. Paths may contain identifiers or embedded credentials; never put secrets in URL paths. Reporting
 is best-effort; it is not a durable audit stream. The dashboard marks old heartbeats stale.
 
 Infra keeps the latest 200 requests per session and lists the latest 50 sessions that
