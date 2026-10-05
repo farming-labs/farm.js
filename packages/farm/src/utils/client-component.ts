@@ -695,6 +695,24 @@ export function getMarkdownPageHydrationPlan(
   };
 }
 
+/**
+ * Every Markdown page shares the configured MDX components module, so one inspection of it plans
+ * all of them. Inspecting it per page walked the same import graph synchronously once per page,
+ * which on a large site blocked the build long enough to time out module loads.
+ */
+export function createMarkdownPageHydrationPlanner(
+  componentsModulePath: string | undefined,
+  root: string | undefined,
+  mode: FarmIsolatedClientHydrationMode = "off",
+  options: FarmClientHydrationPlanOptions = {},
+): () => ClientModuleHydrationPlan {
+  let plan: ClientModuleHydrationPlan | undefined;
+  // Each page gets its own copy: the route budget rewrites a page's plan in place.
+  return () => ({
+    ...(plan ??= getMarkdownPageHydrationPlan(componentsModulePath, root, mode, options)),
+  });
+}
+
 interface FarmIsolatedHydrationRoutePlan {
   mode: FarmIsolatedClientHydrationMode;
   asyncOwnerIslands?: true;
