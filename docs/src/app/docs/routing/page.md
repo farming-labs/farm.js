@@ -128,6 +128,13 @@ schemes such as `customapp:open` are validated from their URI grammar and work w
 Viewport prefetch uses a short scroll guard and is cancelled if its link unmounts before the guard
 expires. Intent prefetches are deduplicated while active; after an attempt settles, a later hover,
 focus, or touch can retry while successful route data remains deduplicated by the router cache.
+The development page-data router reuses a successfully decoded JSON prefetch response when
+navigation overlaps it with the same URL, interception origin, and active layout chain.
+Refreshes and different contexts fetch independently, and failed prefetches are retried by
+navigation. Cancelling a waiting
+navigation does not cancel its background prefetch. Deferred streaming responses keep independent
+requests and cancellation ownership; a waiting navigation starts its own request once the
+prefetch response headers identify a deferred stream.
 Internal `Link` hrefs stay app-relative: when `basePath: "/console"` is configured, `href="/about"`
 renders and navigates to `/console/about`. Do not add the base path to route hrefs yourself.
 For a reusable custom-scheme type, use ``ExternalHref<`customapp:${string}`>`` (or declaration-merge

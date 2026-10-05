@@ -8,7 +8,8 @@ process.env.FARM_E2E_MODE = "prod";
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  testIgnore: ["runtime-error-overlay.spec.ts"],
+  // The generated production router navigates HTML, not dev page-data responses.
+  testIgnore: ["runtime-error-overlay.spec.ts", "prefetch-navigation.spec.ts"],
   timeout: 30_000,
   expect: {
     timeout: 5_000,
