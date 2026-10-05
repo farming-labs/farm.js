@@ -233,6 +233,10 @@ still receives its own result. Once both references' keys are known, newer pendi
 are protected too. A key cannot be associated with a previously unknown reference until a Farm
 transport returns its cache metadata; plain-data transports remain scoped to the function and input.
 
+Expired shared-cache entries keep their aliases and invalidation marks while a related subscription
+or request is active. Releasing an owner rechecks that key without scanning unrelated pending
+entries. Retargeting an alias also releases the previous target's metadata once it has no owner.
+
 ### Share optimistic updates
 
 API mutations can optimistically update data watched by `useServerQuery` when both features use the
