@@ -42,8 +42,9 @@
     letter-spacing: 0;
   }
 
-  .farm-home,
-  .farm-home * {
+  /* A default only: zero specificity, so a component's own border color wins
+     whichever stylesheet the bundler happens to load first. */
+  :where(.farm-home, .farm-home *) {
     border-color: rgb(229 231 235);
   }
 

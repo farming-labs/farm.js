@@ -95,7 +95,7 @@ export interface ClientModuleHydrationPlan extends ClientModuleMetadata {
    * as isolated islands. Set regardless of the experiment mode.
    */
   asyncOwnerIslands?: true;
-  /** Packages whose client components a Markdown page renders as static server HTML. */
+  /** Packages whose client components a Markdown page or async owner renders as static server HTML. */
   staticPackageBoundaries?: string[];
 }
 
@@ -607,8 +607,11 @@ export function getClientModuleHydrationPlan(
     return emptyPlan("the owner explicitly exports `hydrate = true`");
   }
 
+  // An async owner never hydrates as a whole, so a package client component it renders (an icon
+  // library, say) stays static HTML instead of keeping every local island static too.
   const inspection = collectIsolatedClientBoundaries(resolvedPath, root, {
     allowDynamicCardinality: asyncOwner,
+    staticPackageBoundaries: asyncOwner,
   });
   if (inspection.boundaries.length === 0) {
     return emptyPlan(inspection.fallbackReason);
@@ -645,6 +648,8 @@ export function getClientModuleHydrationPlan(
   if (asyncOwner) {
     delete plan.suppressedAsyncHydration;
     plan.asyncOwnerIslands = true;
+    if (inspection.staticPackages.length > 0)
+      plan.staticPackageBoundaries = inspection.staticPackages;
   }
   return plan;
 }

@@ -234,6 +234,35 @@ program
   });
 
 program
+  .command("schema")
+  .description("Inspect the database tables integrations and plugins declare")
+  .command("check")
+  .description("Compare declared tables and their references with the live database")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("-c, --config <config>", "Path to farm config file")
+  .option("--timeout <ms>", "How long connecting, and each query, may take", "10000")
+  .option("--json", "Print machine-readable JSON")
+  .action(async (options) => {
+    let report;
+    try {
+      const timeoutMs = Number(options.timeout);
+      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+        throw new Error("--timeout must be a positive number of milliseconds.");
+      }
+      const { runSchemaCheck } = require("../dist/index.js");
+      report = await runSchemaCheck({ root: options.root, configPath: options.config, timeoutMs });
+    } catch (error) {
+      console.error("Failed to check the schema:", error?.message ?? error);
+      process.exit(1);
+    }
+    const { formatSchemaCheck } = require("../dist/index.js");
+    const output = options.json ? JSON.stringify(report, null, 2) : formatSchemaCheck(report);
+    // Database clients can keep the event loop alive, so exit once the
+    // report is flushed instead of waiting for them to close.
+    process.stdout.write(`${output}\n`, () => process.exit(report.ok ? 0 : 1));
+  });
+
+program
   .command("doctor")
   .description("Inspect project configuration and the running Farm runtime")
   .option("-r, --root <root>", "Root directory", process.cwd())
@@ -604,7 +633,9 @@ async function dispatchSchemaMigrate() {
   const registered = new Set(
     program.commands.flatMap((command) => [command.name(), ...command.aliases()]),
   );
-  if (registered.has(name)) return false;
+  // `farm schema` only has `check`, so a plugin that owns tables under the
+  // name "schema" can still be migrated.
+  if (registered.has(name) && name !== "schema") return false;
 
   const dynamic = new Command()
     .name(`farm ${name} migrate`)
