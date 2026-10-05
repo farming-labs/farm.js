@@ -5076,7 +5076,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
     : "";
   const apiRouteHelpersImport =
     apiRoutes.length > 0
-      ? `import { mergePluginAPIRoutes, getAllowedAPIRouteMethods, invokeAPIRouteEndpoint, matchAPIRouteAtBasePath, resolveAPIRouteEndpoint } from "@farm.js/core/api/runtime";`
+      ? `import { mergePluginAPIRoutes, getAllowedAPIRouteMethods, invokeAPIRouteEndpoint, createStaticAPIRouteMatcherAtBasePath, resolveAPIRouteEndpoint } from "@farm.js/core/api/runtime";`
       : "";
   const productionRuntimeImport = `import {
   _runWithAfterRequest,
@@ -5250,14 +5250,10 @@ ${nativeMCP.importSource}
   const apiHandlerCode =
     apiRoutes.length > 0
       ? `
-const apiRouteMap = new Map(apiRoutes.map((route) => [route.path, route]));
+const matchBuiltAPIRoute = createStaticAPIRouteMatcherAtBasePath(apiRoutes, farmLocalAPIBasePath);
 
 function matchLocalAPIRequest(request) {
-  return matchAPIRouteAtBasePath(
-    apiRouteMap,
-    new URL(request.url).pathname,
-    farmLocalAPIBasePath
-  );
+  return matchBuiltAPIRoute(new URL(request.url).pathname);
 }
 
 async function handleAPIRequest(request) {

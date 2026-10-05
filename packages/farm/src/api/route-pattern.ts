@@ -23,6 +23,73 @@ interface CompiledAPIRouteEntry {
 // HMR replacement, and edits to route.path therefore remain visible immediately.
 const compiledEntries = new WeakMap<object, CompiledAPIRouteEntry>();
 
+interface IndexedAPIRoute<T extends { path: string }> {
+  route: T;
+  compiled: CompiledAPIRouteEntry;
+  order: number;
+}
+
+interface APIRoutePrefix<T extends { path: string }> {
+  children: Map<string, APIRoutePrefix<T>>;
+  candidates: IndexedAPIRoute<T>[];
+}
+
+/**
+ * @internal Snapshot matcher for the generated production route table only.
+ * The public live-Map matcher below intentionally does not use this index.
+ */
+export function createStaticAPIRouteMatcher<T extends { path: string }>(routes: readonly T[]) {
+  const table = new Map(routes.map((route) => [route.path, Object.freeze({ ...route })]));
+  const root: APIRoutePrefix<T> = { children: new Map(), candidates: [] };
+  let order = 0;
+  for (const route of table.values()) {
+    const compiled = compileRouteEntry(route.path);
+    let node = root;
+    // Only prune by a proven static prefix. Dynamic/catch-all tails still use
+    // the authoritative matcher, including its existing specificity rules.
+    for (const segment of compiled.segments) {
+      if (segment.dynamic) break;
+      let child = node.children.get(segment.value!);
+      if (!child) {
+        child = { children: new Map(), candidates: [] };
+        node.children.set(segment.value!, child);
+      }
+      node = child;
+    }
+    node.candidates.push({ route, compiled, order: order++ });
+  }
+
+  return (pathname: string): APIRouteMatch<T> | null => {
+    const exactRoute = table.get(pathname);
+    if (exactRoute) return { route: exactRoute, params: {} };
+    const normalizedPathname = normalizePathname(pathname);
+    if (normalizedPathname !== pathname) {
+      const normalizedRoute = table.get(normalizedPathname);
+      if (normalizedRoute) return { route: normalizedRoute, params: {} };
+    }
+    const segments = getPathSegments(normalizedPathname).map(decodePathSegment);
+    let best: IndexedAPIRoute<T> | undefined;
+    let bestMatch: APIRouteMatch<T> | null = null;
+    let node: APIRoutePrefix<T> | undefined = root;
+    let depth = 0;
+    while (node) {
+      for (const candidate of node.candidates) {
+        const params = matchRouteEntry(candidate.compiled, segments);
+        if (!params) continue;
+        const comparison = best
+          ? compareRouteSpecificity(candidate.compiled.specificity, best.compiled.specificity)
+          : -1;
+        if (comparison < 0 || (comparison === 0 && candidate.order < best!.order)) {
+          best = candidate;
+          bestMatch = { route: candidate.route, params };
+        }
+      }
+      node = depth < segments.length ? node.children.get(segments[depth++]!) : undefined;
+    }
+    return bestMatch;
+  };
+}
+
 export function matchAPIRoute<T extends { path: string }>(
   routes: Map<string, T>,
   pathname: string,
