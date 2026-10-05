@@ -667,6 +667,9 @@ there. Request-local server caches do not subscribe to the global invalidation c
 Lazy expiry checks ownership only for the expired key and its aliases. Unrelated subscriptions
 and requests are not scanned on each expired read; aliases and invalidation metadata remain
 available while a related consumer or request still owns them.
+Explicit entry deletion follows the same metadata cleanup rules: unowned aliases and invalidation
+marks are released, while observed keys retain them until their last owner leaves. Deleting a key
+that has never held an entry does not discard an explicit invalidation made before its first write.
 
 Use `scope: "shared"` only for public data requested with `credentials: "omit"` and no custom
 headers that intentionally shares a structured key with route data or another API client:

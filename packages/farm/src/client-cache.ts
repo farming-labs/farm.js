@@ -173,7 +173,11 @@ export class FarmClientDataCache {
     const deleted = this.entries.delete(resolved);
     this.inflight.delete(resolved);
     if (deleted) this.persistence?.onDelete(resolved);
-    if (this.pendingMetadataSweeps.has(resolved)) this.sweepPendingEntryMetadata();
+    // Match expiry cleanup, retaining aliases/marks only while a live owner
+    // needs them. A no-op delete must preserve invalidation before first set.
+    if (deleted || this.pendingMetadataSweeps.has(resolved)) {
+      this.sweepEntryMetadata(new Set([resolved]));
+    }
     this.emit(resolved);
     return deleted;
   }
