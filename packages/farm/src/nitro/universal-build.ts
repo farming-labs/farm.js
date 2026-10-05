@@ -72,6 +72,7 @@ import {
   isFarmDocsSearchEnabled,
   resolveFarmDocsSearchClientModule,
 } from "../docs/search-client";
+import { generateFarmDocsAdapterClientRuntime } from "../docs/adapter-client";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "../docs/fonts";
 import { compileFarmDocsManifest } from "../docs/compiler";
 import { compileFarmDocsAdapterEdgeManifest } from "../docs/adapter";
@@ -2643,28 +2644,7 @@ function isFarmDocsPath() {
   return false;
 }
 `;
-  const docsAdapterRuntime = docsAdapterReact
-    ? `
-import * as FarmDocsAdapterReact from ${JSON.stringify(docsAdapterReact)};
-
-async function hydrateFarmDocsAdapterRuntime() {
-  const runtime = window.__FARM_DOCS_ADAPTER__;
-  if (!runtime) return false;
-  if (typeof FarmDocsAdapterReact.hydrateFarmDocs !== "function") {
-    throw new Error("The configured Farm docs adapter does not export hydrateFarmDocs().");
-  }
-  FarmDocsAdapterReact.hydrateFarmDocs({
-    config: runtime.config || {},
-    data: runtime.data,
-  });
-  return true;
-}
-`
-    : `
-async function hydrateFarmDocsAdapterRuntime() {
-  return false;
-}
-`;
+  const docsAdapterRuntime = generateFarmDocsAdapterClientRuntime(docsAdapterReact);
 
   if (
     clientPages.length === 0 &&
