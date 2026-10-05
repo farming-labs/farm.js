@@ -5,7 +5,6 @@ import type {
   MiddlewareConfig,
   MiddlewareContext,
   MiddlewareFunction,
-  MiddlewareMatcher,
   MiddlewareModule,
   MiddlewareResult,
 } from "./types";
@@ -26,6 +25,10 @@ import {
   serializeMiddlewareCookie as serializeCookie,
   serializeMiddlewareCookieDeletion,
 } from "./cookie-header";
+import {
+  compileMiddlewareConfig,
+  matchesMiddlewareConfig as matchesPreparedMiddlewareConfig,
+} from "./matcher";
 
 export interface ProductionMiddlewareModuleEntry {
   path: string;
@@ -496,11 +499,6 @@ function createWebMiddlewareContext(
   };
 }
 
-function toMatcherList(matcher: MiddlewareConfig["matcher"]): MiddlewareMatcher[] {
-  if (!matcher) return [];
-  return Array.isArray(matcher) ? matcher : [matcher];
-}
-
 function escapeRegex(value: string): string {
   return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
 }
@@ -628,29 +626,7 @@ export function matchesMiddlewareConfig(
   config: MiddlewareConfig,
   ctx: MiddlewareContext,
 ): { matched: boolean; params?: Record<string, string> } {
-  if (config.exclude) {
-    for (const pattern of config.exclude) {
-      if (matchPattern(pattern, pathname).matched) {
-        return { matched: false };
-      }
-    }
-  }
-
-  if (config.matcher) {
-    for (const matcher of toMatcherList(config.matcher)) {
-      if (typeof matcher === "string" || matcher instanceof RegExp) {
-        const result = matchPattern(matcher, pathname);
-        if (result.matched) {
-          return result;
-        }
-      } else if (typeof matcher === "function" && matcher(ctx)) {
-        return { matched: true };
-      }
-    }
-    return { matched: false };
-  }
-
-  return { matched: true };
+  return matchesPreparedMiddlewareConfig(pathname, config, ctx);
 }
 
 function matchRoutePath(
@@ -724,6 +700,7 @@ function normalizeConfigMiddleware(config?: FarmMiddlewareConfig | null): {
       continue;
     }
 
+    compileMiddlewareConfig(middlewareConfig);
     entries.push({
       path: "/",
       filePath: `farm.config.ts#middleware-${index}`,
@@ -747,6 +724,7 @@ function normalizeFileMiddleware(
       continue;
     }
 
+    if (normalized.config) compileMiddlewareConfig(normalized.config);
     entries.push({
       path: moduleEntry.path,
       filePath: moduleEntry.filePath || moduleEntry.path,
@@ -797,6 +775,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
   const fileMiddleware = normalizeFileMiddleware(options.modules);
   const entries = [...configMiddleware.entries, ...fileMiddleware];
   const globalConfig = configMiddleware.globalConfig;
+  if (globalConfig) compileMiddlewareConfig(globalConfig);
 
   return async function runProductionMiddleware(
     request: Request,
@@ -822,7 +801,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     let parentData: MiddlewareContext["parent"] | undefined;
 
     if (globalConfig) {
-      const globalMatch = matchesMiddlewareConfig(initialPathname, globalConfig, ctx);
+      const globalMatch = matchesPreparedMiddlewareConfig(initialPathname, globalConfig, ctx);
       if (!globalMatch.matched) {
         return emptyResult(request);
       }
@@ -855,7 +834,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     for (const candidate of applicable) {
       const { entry, routeMatch } = candidate;
       const configMatch = entry.config
-        ? matchesMiddlewareConfig(initialPathname, entry.config, ctx)
+        ? matchesPreparedMiddlewareConfig(initialPathname, entry.config, ctx)
         : { matched: true };
       if (!configMatch.matched) {
         continue;
