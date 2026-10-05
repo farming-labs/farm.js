@@ -691,7 +691,7 @@ test("agents page connects the blog, planned capabilities, and Markdown", async 
   expect(errors).toEqual([]);
 });
 
-test("agents ASCII motion starts on navigation, pauses offscreen, and respects reduced motion", async ({
+test("agents ASCII motion starts in view after navigation, pauses offscreen, and respects reduced motion", async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -702,14 +702,20 @@ test("agents ASCII motion starts on navigation, pauses offscreen, and respects r
     .click();
   const art = page.locator(".agent-artwork");
   await expect(art).toHaveAttribute("aria-hidden", "true");
+  // The concept artwork now sits below the available-today cards, not in the
+  // hero. It should stay paused until it is scrolled into the viewport.
+  await expect(art).not.toBeInViewport();
+  await expect(art).toHaveAttribute("data-motion", "paused");
+  await art.scrollIntoViewIfNeeded();
+  await expect(art).toBeInViewport();
   await expect(art).toHaveAttribute("data-motion", "running");
   await expect(art.locator(".agent-ascii-row")).toHaveCount(54);
   const row = art.locator(".agent-ascii-row").first();
   await expect(row).toHaveCSS("animation-play-state", "running");
   await expect(row).toHaveCSS("animation-name", "agent-mesh-breathe");
   await expect(row).toHaveCSS("transform", "none");
-  // This short page can keep the hero's last pixels in a tall viewport at the
-  // bottom. Establish actual non-intersection before testing the pause state.
+  // Establish actual non-intersection before testing the pause state, even
+  // when the viewport would otherwise retain part of the artwork at the bottom.
   await page.setViewportSize({ width: 1440, height: 700 });
   await page.locator("footer").scrollIntoViewIfNeeded();
   await expect(art).not.toBeInViewport();
