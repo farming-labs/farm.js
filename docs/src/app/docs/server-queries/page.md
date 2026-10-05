@@ -128,6 +128,9 @@ timestamp is newer than the invalidation or its canonical key is learned only on
 The original caller still receives its result. Enabled mounted consumers refresh after the old
 work settles; an imperative read with `swr: false` waits for fresh data on the next call.
 Unrelated invalidations and invalidations before a read starts do not invalidate that read.
+Broadcast invalidations for keys a client cache does not own are retained only by active
+request-lifetime trackers, not indefinitely by every cache. Cached, subscribed, and pending keys
+still receive invalidations, including keys reached through provisional aliases.
 
 Use `fetchServerQuery(productQuery, input)` for an imperative browser read that should participate in deduplication and SWR. Calling the generated `productQuery(input)` reference directly still returns plain typed data, but the fetch helper supplies the browser cache lifecycle.
 

@@ -60,20 +60,6 @@ const cacheFinalizer =
     ? new FinalizationRegistry<() => void>((unsubscribe) => unsubscribe())
     : undefined;
 
-// This closure must only capture a weak reference, never the cache itself.
-function subscribeWeakCache(reference: WeakRef<FarmClientDataCache>): () => void {
-  const unsubscribe = subscribeFarmCacheInvalidation((key) => {
-    const cache = reference.deref();
-    if (cache) cache.invalidate(key);
-    else dispose();
-  });
-  function dispose() {
-    unsubscribe();
-    cacheFinalizer?.unregister(reference);
-  }
-  return dispose;
-}
-
 const DEFAULT_GC_SWEEP_INTERVAL_MS = 30_000;
 
 export class FarmClientDataCache {
@@ -96,16 +82,30 @@ export class FarmClientDataCache {
     if (options.subscribeToInvalidation !== false) {
       if (typeof WeakRef === "function") {
         const reference = new WeakRef(this);
-        const unsubscribe = subscribeWeakCache(reference);
+        const unsubscribe = FarmClientDataCache.subscribeWeakCache(reference);
         cacheFinalizer?.register(this, unsubscribe, reference);
         this.unsubscribeInvalidation = unsubscribe;
       } else {
         // Keep invalidation working on older runtimes without weak references.
         this.unsubscribeInvalidation = subscribeFarmCacheInvalidation((key) =>
-          this.invalidate(key),
+          this.applyInvalidation(key, Date.now(), false),
         );
       }
     }
+  }
+
+  // This closure must only capture a weak reference, never the cache itself.
+  private static subscribeWeakCache(reference: WeakRef<FarmClientDataCache>): () => void {
+    const unsubscribe = subscribeFarmCacheInvalidation((key) => {
+      const cache = reference.deref();
+      if (cache) cache.applyInvalidation(key, Date.now(), false);
+      else dispose();
+    });
+    function dispose() {
+      unsubscribe();
+      cacheFinalizer?.unregister(reference);
+    }
+    return dispose;
   }
 
   get size(): number {
@@ -206,11 +206,22 @@ export class FarmClientDataCache {
   }
 
   invalidate(key: string, now = Date.now()): void {
+    // Explicit invalidation can precede a set/alias; preserve that contract.
+    this.applyInvalidation(key, now, true);
+  }
+
+  private applyInvalidation(key: string, now: number, retainUnowned: boolean): void {
     const resolved = this.resolveKey(key);
     for (const keys of invalidationTrackers.get(this) ?? []) keys.add(resolved);
-    this.invalidatedAt.set(resolved, now);
-
     const entry = this.entries.get(resolved);
+    const alreadyRetained = this.invalidatedAt.has(resolved);
+    // Broadcasts reach every cache, including caches which have never used the
+    // key. Late-discovered response keys are already tracked per request above.
+    // Retain shared timestamps only while the cache actually owns the key.
+    if (retainUnowned || entry || alreadyRetained || this.hasMetadataOwner(resolved)) {
+      this.invalidatedAt.set(resolved, now);
+      if (!entry && !retainUnowned && !alreadyRetained) this.pendingMetadataSweeps.add(resolved);
+    }
     if (entry) {
       this.entries.set(resolved, {
         ...entry,
@@ -220,6 +231,15 @@ export class FarmClientDataCache {
     }
 
     this.emit(resolved, "invalidate");
+  }
+
+  private hasMetadataOwner(key: string): boolean {
+    const related = new Set([key]);
+    for (const target of related) {
+      if (this.listeners.has(target) || this.inflight.has(target)) return true;
+      for (const alias of this.aliasesByTarget.get(target) ?? []) related.add(alias);
+    }
+    return false;
   }
 
   alias(alias: string, key: string): void {
