@@ -819,18 +819,17 @@ export class FarmDataCache {
   }
 
   private pruneInvalidatedTagVersions(): void {
-    for (const [tag, invalidatedVersion] of this.invalidatedTagVersions) {
-      const staleEntryNeedsVersion = Array.from(this.entries.values()).some(
-        (entry) => entry.tags.has(tag) && entry.createdVersion < invalidatedVersion,
-      );
-      if (staleEntryNeedsVersion) continue;
-
-      const activeGenerationNeedsVersion = Array.from(this.activeGenerations).some(
-        (generation) => generation.tags.has(tag) && generation.createdVersion < invalidatedVersion,
-      );
-      if (!activeGenerationNeedsVersion) {
-        this.invalidatedTagVersions.delete(tag);
+    // Stop as soon as a dependent entry or fill is found; do not materialize
+    // the entire cache for each invalidated tag on the write path.
+    tags: for (const [tag, invalidatedVersion] of this.invalidatedTagVersions) {
+      for (const entry of this.entries.values()) {
+        if (entry.tags.has(tag) && entry.createdVersion < invalidatedVersion) continue tags;
       }
+      for (const generation of this.activeGenerations) {
+        if (generation.tags.has(tag) && generation.createdVersion < invalidatedVersion)
+          continue tags;
+      }
+      this.invalidatedTagVersions.delete(tag);
     }
   }
 
