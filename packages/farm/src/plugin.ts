@@ -29,6 +29,9 @@ import {
   setRequestContext,
 } from "./request-context";
 import { getFarmPluginIntegrationContext } from "./plugin-integration-context";
+import type { FarmSchema } from "./schema";
+import { declareSchemaTables, readSchemaTables } from "./schema-owner";
+import { resolveSchemaModels } from "./schema-resolve";
 import { normalizeFarmBasePath, stripFarmBasePath } from "./base-path";
 import {
   normalizeFarmPluginRuntimeEndpointPath,
@@ -547,6 +550,14 @@ export interface FarmPlugin<
   dev?: FarmPluginDevHooks<TState, TIntegrationInstance, TIntegrationBound>;
   /** Optional browser lifecycle for this logical plugin. */
   client?: FarmPluginClientConfig<TClientState, TClientPublic>;
+  /**
+   * Tables this plugin stores data in. Farm creates them with
+   * `farm <name> migrate` (the part of the plugin name after its last `:` or
+   * `/`), includes them in `farm generate` and `farm schema check`, and
+   * reaches them through the app's `storage.client`. Mark tables the plugin
+   * only reads, such as the app's `user`, with `external: true`.
+   */
+  schema?: FarmSchema;
 
   /** @internal Carries the expected integration instance type without runtime data. */
   readonly [FARM_PLUGIN_INTEGRATION_INSTANCE]?: (instance: TIntegrationInstance) => void;
@@ -1642,7 +1653,48 @@ export function definePlugin<
   false,
   TRoutes
 > {
-  return plugin;
+  return declarePluginSchema(plugin);
+}
+
+/** The `farm <name> migrate` namespace for a plugin: `farm:teams` → `teams`. */
+function pluginSchemaName(pluginName: string): string {
+  const name = pluginName.slice(
+    Math.max(pluginName.lastIndexOf(":"), pluginName.lastIndexOf("/")) + 1,
+  );
+  if (!/^[a-z0-9][a-z0-9_-]*$/iu.test(name)) {
+    throw new Error(
+      `Plugin "${pluginName}" declares a schema, so its name must end in a word made of letters, numbers, "-" or "_": that word becomes \`farm <name> migrate\`.`,
+    );
+  }
+  return name;
+}
+
+/**
+ * Register the tables a plugin's `schema` describes. A plugin that declared
+ * them itself with `declareSchemaTables`, to pick its own name or connection,
+ * keeps that declaration.
+ */
+function declarePluginSchema<TPlugin extends { name: string; schema?: FarmSchema }>(
+  plugin: TPlugin,
+): TPlugin {
+  if (!plugin.schema || readSchemaTables(plugin)) return plugin;
+  const name = pluginSchemaName(plugin.name);
+  // Fail while the config loads, not at the first migrate or query.
+  resolveSchemaModels(name, plugin.schema);
+  return declareSchemaTables(plugin, {
+    name,
+    schema: plugin.schema,
+    resolveClient: async (config) => {
+      const { resolveIntegrationOrmRuntimeClient } = await import("./integration-orm");
+      const client = await resolveIntegrationOrmRuntimeClient({ config: config as never });
+      if (client === undefined || client === null) {
+        throw new Error(
+          `The ${name} plugin keeps its tables in the app's database: set \`storage.client\` in farm.config.`,
+        );
+      }
+      return client;
+    },
+  });
 }
 
 export namespace definePlugin {
@@ -1670,7 +1722,7 @@ export namespace definePlugin {
       TIntegrationInstance,
       true
     > {
-      return plugin;
+      return declarePluginSchema(plugin);
     };
   }
 }

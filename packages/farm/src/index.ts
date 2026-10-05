@@ -21,6 +21,7 @@ export * from "./integration-api";
 export { createFarmApp } from "./app";
 export { FarmProvider } from "./provider";
 export { getCurrentRequest } from "./server/request";
+export { renameSchema, type FarmSchemaRenames } from "./schema-rename";
 export {
   checkSchema,
   collectSchemaOwners,

@@ -164,28 +164,114 @@ mount have no tables and are listed as skipped.
 
 ## Declaring tables from a plugin
 
-Wrap the plugin you already return in `declareSchemaTables`:
+Give `definePlugin` the schema:
+
+```ts title="src/index.ts"
+import { definePlugin, defineSchema } from "@farm.js/core";
+
+export const teamsSchema = defineSchema({
+  models: {
+    organization: {
+      fields: { id: { type: "uuid", primaryKey: true }, name: { type: "string" } },
+    },
+    member: {
+      fields: {
+        id: { type: "uuid", primaryKey: true },
+        organizationId: {
+          type: "uuid",
+          reference: { model: "organization", field: "id", onDelete: "cascade" },
+        },
+      },
+    },
+  },
+});
+
+export function teams() {
+  return definePlugin({ name: "farm:teams", schema: teamsSchema });
+}
+```
+
+That is the whole contract. Apps that configure the plugin get:
+
+- `farm teams migrate`: the command is the part of the plugin name after its
+  last `:` or `/`
+- the plugin's models in `farm generate --orm prisma|drizzle|...`, alongside
+  every integration's
+- its tables in `farm schema check`
+
+The tables live in the app's database, `storage.client` in `farm.config.ts`,
+the same one integrations use. A broken schema fails when the config loads.
+
+### Tables the plugin uses but does not create
+
+A plugin often points at a table the app owns, such as the `user` table its auth
+library creates. Describe it with `external: true`:
+
+```ts
+user: {
+  external: true,
+  fields: { id: { type: "string", primaryKey: true } },
+},
+member: {
+  fields: {
+    // ...
+    userId: { type: "string", reference: { model: "user", field: "id" } },
+  },
+},
+```
+
+Farm never creates an external table: `migrate`, generated Prisma and Drizzle
+schemas, and conflict checks all skip it, and no foreign key points at it. It is
+described so the reference resolves to the real table, `farm schema check` can
+verify that table exists, and the plugin can query it.
+
+### Letting the app use its own names
+
+The app's tables may not be called what your schema calls them. Accept renames
+as an option and apply them with `renameSchema`:
+
+```ts title="src/index.ts"
+import { definePlugin, renameSchema, type FarmSchemaRenames } from "@farm.js/core";
+
+export function teams(options: { schema?: FarmSchemaRenames<typeof teamsSchema> } = {}) {
+  return definePlugin({ name: "farm:teams", schema: renameSchema(teamsSchema, options.schema) });
+}
+```
+
+```ts title="farm.config.ts"
+teams({
+  schema: {
+    user: { name: "members_auth", fields: { id: "user_id" } },
+    member: { name: "team_members" },
+  },
+});
+```
+
+Only names change. Migrate creates `team_members`, the check looks for
+`members_auth.user_id`, and at runtime the plugin keeps its own names: an ORM
+built from the renamed schema with `createIntegrationOrm` reads `user.id` from
+`members_auth.user_id`. Renames are typed from the plugin's schema, so the app
+gets completion, and a model or field that does not exist fails when the config
+loads.
+
+### Choosing the name or connection yourself
+
+`declareSchemaTables` declares the same thing with every setting exposed. Use it
+when the command name should differ from the plugin name, the tables live
+somewhere other than `storage.client`, or the plugin owns only part of a schema
+it was handed:
 
 ```ts title="src/index.ts"
 import { declareSchemaTables, definePlugin } from "@farm.js/core";
 
 export function jobs(options: JobsOptions) {
-  const plugin = definePlugin({
-    name: "farm:jobs",
-    // ...
-  });
-
-  return declareSchemaTables(plugin, {
+  return declareSchemaTables(definePlugin({ name: "farm:jobs" /* ... */ }), {
     name: "jobs",
     schema: options.schema,
     resolveClient: () => resolveClient(options),
   });
 }
 ```
-
-That is the whole contract. `farm jobs migrate` now works in any app that
-configures the plugin, and `farm generate --orm prisma|drizzle|...` includes the
-plugin's models alongside every integration's.
 
 | Field           | Purpose                                                          |
 | --------------- | ---------------------------------------------------------------- |

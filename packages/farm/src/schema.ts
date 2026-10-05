@@ -53,6 +53,13 @@ export interface FarmSchemaConstraint {
 export interface FarmSchemaModel {
   name?: string;
   description?: string;
+  /**
+   * A table someone else creates, such as the app's or an auth library's
+   * `user`. It is described so references to it resolve to its real name, and
+   * so queries can read it, but Farm never creates it: migrate, generated ORM
+   * schemas, and conflict checks skip it.
+   */
+  external?: boolean;
   fields: Record<string, FarmSchemaField>;
   constraints?: readonly FarmSchemaConstraint[];
   meta?: Record<string, unknown>;

@@ -15,7 +15,11 @@ import {
   type CollectedSchemaModel,
   type FarmSqlDialect,
 } from "./schema-sql";
-import { findSchemaTableOwners, type FarmSchemaOwnerConfig } from "./schema-tables";
+import {
+  findSchemaTableOwners,
+  readSchemaTables,
+  type FarmSchemaOwnerConfig,
+} from "./schema-tables";
 
 /**
  * Read-only checks of every schema owner against the real database.
@@ -31,6 +35,7 @@ export type FarmSchemaCheckSeverity = "error" | "warning";
 
 export type FarmSchemaCheckCode =
   | "schema-invalid"
+  | "owner-conflict"
   | "table-conflict"
   | "client-missing"
   | "client-unavailable"
@@ -249,6 +254,27 @@ export async function checkSchema(
   const timeoutHint = `Check that the database is reachable from here, or allow longer than ${formatSeconds(timeoutMs)} with \`--timeout <ms>\`.`;
   const owners = collectSchemaOwners(config);
   const issues: FarmSchemaCheckIssue[] = [];
+
+  // Owners are found by name, so a second plugin declaring tables under a
+  // name already taken is invisible to migrate and to this check.
+  const declared = new Map<string, unknown[]>();
+  for (const candidate of config.plugins ?? []) {
+    const declaration = readSchemaTables(candidate);
+    if (!declaration) continue;
+    const schemas = declared.get(declaration.name) ?? [];
+    if (!schemas.includes(declaration.schema)) schemas.push(declaration.schema);
+    declared.set(declaration.name, schemas);
+  }
+  for (const [name, schemas] of declared) {
+    if (schemas.length < 2) continue;
+    issues.push({
+      severity: "error",
+      code: "owner-conflict",
+      owner: name,
+      message: `${schemas.length} plugins declare tables under the name "${name}", so \`farm ${name} migrate\` and this check only see the first.`,
+      hint: "Rename one plugin, or declare its tables with declareSchemaTables and a different name.",
+    });
+  }
   const summaries: FarmSchemaCheckOwner[] = [];
 
   // Every model key each owner knows about, claimed or not, with its

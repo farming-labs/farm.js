@@ -45,6 +45,8 @@ export function collectSchemaModels(
 
     for (const [modelKey, model] of Object.entries(resolvedModels)) {
       if (only && !only.includes(modelKey)) continue;
+      // Someone else creates it; it is only described to resolve references.
+      if (model.external) continue;
 
       const collisionKey = model.name.toLowerCase();
       const previousOwner = seenModelNames.get(collisionKey);
