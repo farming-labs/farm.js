@@ -295,11 +295,17 @@ export class FarmClientDataCache {
     }
     const previousTarget = this.aliases.get(alias);
     if (previousTarget !== resolved) {
+      const previousResolved =
+        previousTarget !== undefined && this.pendingMetadataSweeps.size > 0
+          ? this.resolveKey(alias)
+          : undefined;
       this.removeAlias(alias);
       this.aliases.set(alias, resolved);
       let aliases = this.aliasesByTarget.get(resolved);
       if (!aliases) this.aliasesByTarget.set(resolved, (aliases = new Set()));
       aliases.add(alias);
+      // Retargeting can release the last owner of a previously expired target.
+      if (previousResolved !== undefined) this.sweepPendingEntryMetadata(previousResolved);
     }
     this.emit(alias);
     this.emit(resolved, this.invalidatedAt.has(resolved) ? "invalidate" : undefined);
@@ -320,7 +326,7 @@ export class FarmClientDataCache {
       // must not evict a newer subscriber's live listener set.
       if (listeners!.size === 0 && this.listeners.get(key) === listeners) {
         this.listeners.delete(key);
-        this.sweepPendingEntryMetadata();
+        this.sweepPendingEntryMetadata(key);
       }
     };
   }
@@ -335,7 +341,7 @@ export class FarmClientDataCache {
 
   deleteInflight(key: string): void {
     const resolved = this.resolveKey(key);
-    if (this.inflight.delete(resolved)) this.sweepPendingEntryMetadata();
+    if (this.inflight.delete(resolved)) this.sweepPendingEntryMetadata(resolved);
   }
 
   private scheduleGcSweep(): void {
@@ -432,8 +438,16 @@ export class FarmClientDataCache {
     if (aliases?.size === 0) this.aliasesByTarget.delete(target);
   }
 
-  private sweepPendingEntryMetadata(): void {
+  private sweepPendingEntryMetadata(key?: string): void {
     if (this.pendingMetadataSweeps.size === 0) return;
+    // Owner releases affect one canonical key, not every pending eviction.
+    if (key !== undefined) {
+      const resolved = this.resolveKey(key);
+      if (this.pendingMetadataSweeps.has(resolved)) {
+        this.sweepEntryMetadata(new Set([resolved]));
+      }
+      return;
+    }
     this.sweepEntryMetadata(new Set(this.pendingMetadataSweeps));
   }
 
