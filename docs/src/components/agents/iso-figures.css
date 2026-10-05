@@ -24,6 +24,7 @@
   margin: 0;
   padding: 22px 28px 20px;
   outline: none;
+  container: agents-iso / inline-size;
 }
 .agents-iso:focus-visible {
   outline: 1px solid rgb(255 255 255 / 0.4);
@@ -139,6 +140,15 @@
   font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-size: 11px;
   line-height: 1.4;
+  /* One height whatever it says, so the page never jumps as it changes: room
+     for one line where the longest readout fits on one, two where it wraps.
+     Readouts stay within 75 characters for this. */
+  min-height: calc(13px + 1.4em);
+}
+@container agents-iso (max-width: 520px) {
+  .agents-iso-readout {
+    min-height: calc(13px + 2.8em);
+  }
 }
 .agents-iso-stage :is(polygon, path, ellipse) {
   stroke: rgb(255 255 255 / 0.2);
@@ -309,12 +319,6 @@
 .agents-iso .iso-cord-live {
   stroke: rgb(255 255 255 / 0.8);
   stroke-dasharray: 3 9;
-  animation: agents-iso-flow 0.45s linear infinite;
-}
-@keyframes agents-iso-flow {
-  to {
-    stroke-dashoffset: -12;
-  }
 }
 .agents-iso .iso-scan {
   stroke: rgb(255 255 255 / 0.55);
@@ -506,7 +510,6 @@
 @media (prefers-reduced-motion: reduce) {
   .agents-iso-dialog[open],
   .agents-iso-dialog[open]::backdrop,
-  .agents-iso .iso-cord-live,
   .agents-iso .iso-tag[data-refused] {
     animation: none;
   }
