@@ -1,4 +1,4 @@
-import { compareRouteSpecificity, type RouteSegmentSpecificity } from "../routing/specificity";
+import { compareRouteSpecificity, type RouteSegmentSpecificity } from "../../routing/specificity";
 
 export type APIRouteParamValue = string | string[];
 export type APIRouteParams = Record<string, APIRouteParamValue>;
@@ -8,86 +8,51 @@ export interface APIRouteMatch<T extends { path: string }> {
   params: APIRouteParams;
 }
 
-interface CompiledAPIRouteSegment {
-  value?: string;
-  dynamic?: { name: string; catchAll: boolean; optional: boolean };
-}
-
-interface CompiledAPIRouteEntry {
-  path: string;
-  segments: CompiledAPIRouteSegment[];
-  specificity: RouteSegmentSpecificity[];
-}
-
-// Cache only route metadata, not table membership or winners. Live Map mutations,
-// HMR replacement, and edits to route.path therefore remain visible immediately.
-const compiledEntries = new WeakMap<object, CompiledAPIRouteEntry>();
-
 export function matchAPIRoute<T extends { path: string }>(
   routes: Map<string, T>,
   pathname: string,
 ): APIRouteMatch<T> | null {
   const exactRoute = routes.get(pathname);
-  if (exactRoute) return { route: exactRoute, params: {} };
+  if (exactRoute) {
+    return { route: exactRoute, params: {} };
+  }
 
   const normalizedPathname = normalizePathname(pathname);
   if (normalizedPathname !== pathname) {
     const normalizedRoute = routes.get(normalizedPathname);
-    if (normalizedRoute) return { route: normalizedRoute, params: {} };
+    if (normalizedRoute) {
+      return { route: normalizedRoute, params: {} };
+    }
   }
 
-  const pathnameSegments = getPathSegments(normalizedPathname).map(decodePathSegment);
   let bestMatch: APIRouteMatch<T> | null = null;
   let bestSpecificity: RouteSegmentSpecificity[] | null = null;
+
   for (const route of routes.values()) {
-    const routePath = route.path;
-    let entry = compiledEntries.get(route);
-    if (!entry || entry.path !== routePath) {
-      entry = compileRouteEntry(routePath);
-      compiledEntries.set(route, entry);
-    }
-    const params = matchRouteEntry(entry, pathnameSegments);
+    const params = matchRoutePath(route.path, pathname);
     if (!params) continue;
-    if (
-      bestSpecificity === null ||
-      compareRouteSpecificity(entry.specificity, bestSpecificity) < 0
-    ) {
+
+    const specificity = getAPIRouteSpecificity(route.path);
+    if (bestSpecificity === null || compareRouteSpecificity(specificity, bestSpecificity) < 0) {
       bestMatch = { route, params };
-      bestSpecificity = entry.specificity;
+      bestSpecificity = specificity;
     }
   }
+
   return bestMatch;
 }
 
-function compileRouteEntry(path: string): CompiledAPIRouteEntry {
-  const segments = getPathSegments(path).map((segment) => {
-    const dynamic = parseDynamicSegment(segment);
-    return dynamic ? { dynamic } : { value: decodePathSegment(segment) };
-  });
-  return {
-    path,
-    segments,
-    specificity: segments.map((segment) => {
-      const dynamic = segment.dynamic;
-      if (!dynamic) return "static";
-      if (!dynamic.catchAll) return "dynamic";
-      return dynamic.optional ? "optional-catch-all" : "catch-all";
-    }),
-  };
-}
-
-function matchRouteEntry(
-  entry: CompiledAPIRouteEntry,
-  pathnameSegments: readonly string[],
-): APIRouteParams | null {
+function matchRoutePath(routePath: string, pathname: string): APIRouteParams | null {
+  const routeSegments = getPathSegments(routePath);
+  const pathnameSegments = getPathSegments(pathname);
   const params: APIRouteParams = {};
   let pathIndex = 0;
 
-  for (const routeSegment of entry.segments) {
-    const dynamicSegment = routeSegment.dynamic;
+  for (const routeSegment of routeSegments) {
+    const dynamicSegment = parseDynamicSegment(routeSegment);
 
     if (dynamicSegment?.catchAll) {
-      const remainingSegments = pathnameSegments.slice(pathIndex);
+      const remainingSegments = pathnameSegments.slice(pathIndex).map(decodePathSegment);
       if (remainingSegments.length === 0 && !dynamicSegment.optional) {
         return null;
       }
@@ -104,12 +69,12 @@ function matchRouteEntry(
     }
 
     if (dynamicSegment) {
-      params[dynamicSegment.name] = pathnameSegment;
+      params[dynamicSegment.name] = decodePathSegment(pathnameSegment);
       pathIndex++;
       continue;
     }
 
-    if (routeSegment.value !== pathnameSegment) {
+    if (decodePathSegment(routeSegment) !== decodePathSegment(pathnameSegment)) {
       return null;
     }
 
@@ -123,6 +88,15 @@ function getPathSegments(pathname: string): string[] {
   return normalizePathname(pathname)
     .split("/")
     .filter((segment) => segment.length > 0);
+}
+
+function getAPIRouteSpecificity(routePath: string): RouteSegmentSpecificity[] {
+  return getPathSegments(routePath).map((segment) => {
+    const dynamic = parseDynamicSegment(segment);
+    if (!dynamic) return "static";
+    if (!dynamic.catchAll) return "dynamic";
+    return dynamic.optional ? "optional-catch-all" : "catch-all";
+  });
 }
 
 function normalizePathname(pathname: string): string {
