@@ -208,6 +208,32 @@ export async function planSchemaMigration(
   return { dialect, statements, upToDate, drift };
 }
 
+/** A table's columns as the database reports them, normalized per dialect. */
+export type FarmSchemaTableDescription = {
+  columns: Array<{ name: string; type: string; nullable: boolean; primaryKey: boolean }>;
+};
+
+/**
+ * Read any table, owned by Farm or not, or undefined when it does not exist.
+ * Used to check references to tables the app or a library created.
+ */
+export async function describeSchemaTable(
+  executor: FarmSchemaExecutor,
+  dialect: FarmSqlDialect,
+  table: string,
+): Promise<FarmSchemaTableDescription | undefined> {
+  const described = await describeTable(executor, dialect, table);
+  if (!described) return undefined;
+  return {
+    columns: described.columns.map(({ name, type, nullable, primaryKey }) => ({
+      name,
+      type,
+      nullable,
+      primaryKey,
+    })),
+  };
+}
+
 /** A normalized table definition, or undefined when the table does not exist. */
 async function describeTable(
   executor: FarmSchemaExecutor,

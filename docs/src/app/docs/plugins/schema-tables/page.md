@@ -104,6 +104,48 @@ Two setups need nothing, and say so rather than guessing:
   });
   ```
 
+## Checking everything at once
+
+`migrate` looks at one plugin. `farm schema check` looks at every integration
+and plugin that declares tables, against the database each one uses, and at the
+tables they point to that Farm does not manage, such as your ORM's `users` or the
+tables Better Auth creates:
+
+```bash
+pnpm farm schema check
+```
+
+```
+✗ loyalty (plugin, postgres)
+    error   Table "points" does not exist.
+            Run `farm loyalty migrate` to see the SQL, then `--apply` it.
+    error   "points.userId" references "users.id", but the types cannot be joined: text here, uuid there.
+            Change "userId" to match "users.id".
+
+2 error(s), 0 warning(s)
+```
+
+It reports:
+
+- **Missing tables and columns, and changed column types** in tables a plugin or
+  integration owns. These are errors.
+- **Other drift**, such as defaults, indexes, and foreign keys, as warnings.
+- **References that cannot work**: the referenced table or column does not
+  exist, or the two column types can never be joined. When the table belongs to
+  another plugin, the message names it so you know which `migrate` to run first.
+- **Two owners claiming the same table**, and an owner whose database cannot be
+  reached. One unreachable owner does not stop the others being checked.
+
+It only reads. Nothing is created or altered, so it is safe to run against
+production. It exits `1` when there are errors, which makes it a deploy gate:
+
+```yaml
+- run: pnpm farm schema check
+```
+
+Pass `--json` for the report as data. Owners that store data in a key-value
+mount have no tables and are listed as skipped.
+
 ## Declaring tables from a plugin
 
 Wrap the plugin you already return in `declareSchemaTables`:

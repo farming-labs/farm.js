@@ -50,6 +50,7 @@ React is the default renderer. `--renderer preact`, `--renderer solid`, `--rende
 | farm migrate next --write        | Apply a deterministic Next.js App Router migration.                  |
 | farm migrate tanstack --write    | Apply a deterministic TanStack Router file-route migration.          |
 | farm migrate                     | Run one-shot schema or provider migration commands.                  |
+| farm schema check                | Check every declared table and reference against the live database.  |
 | farm add integration stripe --ui | Add integration wiring and optional UI.                              |
 | farm cron list                   | List configured UTC schedules and target routes.                     |
 | farm cron run dailyCleanup       | Invoke one cron route on a running app.                              |

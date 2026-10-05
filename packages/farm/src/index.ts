@@ -21,6 +21,17 @@ export * from "./integration-api";
 export { createFarmApp } from "./app";
 export { FarmProvider } from "./provider";
 export { getCurrentRequest } from "./server/request";
+export {
+  checkSchema,
+  collectSchemaOwners,
+  formatSchemaCheck,
+  type FarmSchemaCheckCode,
+  type FarmSchemaCheckConfig,
+  type FarmSchemaCheckIssue,
+  type FarmSchemaCheckOwner,
+  type FarmSchemaCheckReport,
+  type FarmSchemaCheckSeverity,
+} from "./schema-check";
 export { definePlugin, FarmRuntimeShutdownError, PluginManager } from "./plugin";
 export {
   defineConfig,
