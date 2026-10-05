@@ -222,6 +222,15 @@ export class FarmClientDataCache {
     this.emit(resolved, "invalidate");
   }
 
+  private hasMetadataOwner(key: string): boolean {
+    const related = new Set([key]);
+    for (const target of related) {
+      if (this.listeners.has(target) || this.inflight.has(target)) return true;
+      for (const alias of this.aliasesByTarget.get(target) ?? []) related.add(alias);
+    }
+    return false;
+  }
+
   alias(alias: string, key: string): void {
     const resolved = this.resolveKey(key);
     if (alias === resolved) return;
@@ -356,8 +365,9 @@ export class FarmClientDataCache {
    */
   private sweepEntryMetadata(swept: Set<string>): void {
     const protectedKeys = new Set<string>();
-    for (const key of this.listeners.keys()) protectedKeys.add(this.resolveKey(key));
-    for (const key of this.inflight.keys()) protectedKeys.add(this.resolveKey(key));
+    // A lazy read usually evicts one key. Do not rescan every unrelated live
+    // subscription/request for each expired entry; follow its reverse aliases.
+    for (const key of swept) if (this.hasMetadataOwner(key)) protectedKeys.add(key);
 
     for (const key of swept) {
       if (this.entries.has(key)) {
