@@ -33,6 +33,52 @@ function passthroughTransformer(spy = vi.fn()): FarmImageTransformer {
 }
 
 describe("Farm image optimizer", () => {
+  it("rechecks remote restrictions and redirect paths after warming the pattern cache", async () => {
+    const fetcher = vi.fn(
+      async () => new Response(PNG, { headers: { "content-type": "image/png" } }),
+    );
+    const handler = createFarmImageHandler(
+      resolveFarmImageConfig({
+        remotePatterns: [
+          {
+            protocol: "https",
+            hostname: "images.example.test",
+            port: "",
+            pathname: "/public/*",
+            search: "?v=1",
+          },
+        ],
+      }),
+      { fetch: fetcher as typeof fetch, transform: passthroughTransformer() },
+    );
+    expect(
+      (await handler(new Request(optimizerUrl("https://images.example.test/public/a.png?v=1"))))
+        ?.status,
+    ).toBe(200);
+    for (const source of [
+      "http://images.example.test/public/a.png?v=1",
+      "https://other.example.test/public/a.png?v=1",
+      "https://images.example.test:444/public/a.png?v=1",
+      "https://images.example.test/public/a.png?v=2",
+      "https://images.example.test/private/a.png?v=1",
+      "https://images.example.test/public/nested/a.png?v=1",
+    ]) {
+      expect((await handler(new Request(optimizerUrl(source))))?.status).toBe(400);
+    }
+    expect(fetcher).toHaveBeenCalledOnce();
+    fetcher.mockImplementation(
+      async () => new Response(null, { status: 302, headers: { location: "/private/a.png?v=1" } }),
+    );
+    expect(
+      (
+        await handler(
+          new Request(optimizerUrl("https://images.example.test/public/redirect.png?v=1")),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it("optimizes allowed local images and serves cache validators", async () => {
     const transform = vi.fn();
     const fetcher = vi.fn(async (_url: URL, init?: RequestInit) => {

@@ -5,6 +5,7 @@ import type {
   ResolvedFarmImageConfig,
 } from "./image-config";
 import { matchesFarmIfNoneMatch } from "./server-http";
+import { matchesImagePathPattern } from "./image-pattern";
 
 export interface FarmImageTransformInput {
   source: Uint8Array;
@@ -762,7 +763,7 @@ function matchesRemotePattern(url: URL, pattern: FarmImageRemotePattern): boolea
     (!pattern.protocol || url.protocol === `${pattern.protocol}:`) &&
     matchesHostname(url.hostname, pattern.hostname) &&
     (pattern.port === undefined || url.port === pattern.port) &&
-    matchesGlob(url.pathname, pattern.pathname ?? "/**") &&
+    matchesImagePathPattern(url.pathname, pattern) &&
     (pattern.search === undefined || url.search === pattern.search)
   );
 }
@@ -770,7 +771,7 @@ function matchesRemotePattern(url: URL, pattern: FarmImageRemotePattern): boolea
 function matchesLocalPatterns(url: URL, patterns: readonly FarmImageLocalPattern[]): boolean {
   return patterns.some(
     (pattern) =>
-      matchesGlob(url.pathname, pattern.pathname) &&
+      matchesImagePathPattern(url.pathname, pattern) &&
       (pattern.search === undefined || url.search === pattern.search),
   );
 }
@@ -788,12 +789,6 @@ function matchesHostname(hostname: string, pattern: string): boolean {
     return normalizedHostname.endsWith(`.${suffix}`) && !!prefix && !prefix.includes(".");
   }
   return normalizedHostname === normalizedPattern;
-}
-
-function matchesGlob(value: string, pattern: string): boolean {
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-  const source = escaped.replace(/\*\*/g, "\0").replace(/\*/g, "[^/]*").replace(/\0/g, ".*");
-  return new RegExp(`^${source}$`).test(value);
 }
 
 function createOptimizedImageResponse(
