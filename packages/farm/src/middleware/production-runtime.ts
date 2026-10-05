@@ -5,7 +5,6 @@ import type {
   MiddlewareConfig,
   MiddlewareContext,
   MiddlewareFunction,
-  MiddlewareMatcher,
   MiddlewareModule,
   MiddlewareResult,
 } from "./types";
@@ -26,6 +25,12 @@ import {
   serializeMiddlewareCookie as serializeCookie,
   serializeMiddlewareCookieDeletion,
 } from "./cookie-header";
+import {
+  compileMiddlewareConfig,
+  type CompiledMiddlewareConfig,
+  matchesCompiledMiddlewareConfig,
+  matchesMiddlewareConfig as matchesPreparedMiddlewareConfig,
+} from "./matcher";
 
 export interface ProductionMiddlewareModuleEntry {
   path: string;
@@ -66,6 +71,7 @@ interface ProductionMiddlewareEntry {
   filePath: string;
   handlers: MiddlewareFunction[];
   config?: MiddlewareConfig;
+  compiledConfig?: CompiledMiddlewareConfig;
   source: "config" | "file";
 }
 
@@ -496,11 +502,6 @@ function createWebMiddlewareContext(
   };
 }
 
-function toMatcherList(matcher: MiddlewareConfig["matcher"]): MiddlewareMatcher[] {
-  if (!matcher) return [];
-  return Array.isArray(matcher) ? matcher : [matcher];
-}
-
 function escapeRegex(value: string): string {
   return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
 }
@@ -628,29 +629,7 @@ export function matchesMiddlewareConfig(
   config: MiddlewareConfig,
   ctx: MiddlewareContext,
 ): { matched: boolean; params?: Record<string, string> } {
-  if (config.exclude) {
-    for (const pattern of config.exclude) {
-      if (matchPattern(pattern, pathname).matched) {
-        return { matched: false };
-      }
-    }
-  }
-
-  if (config.matcher) {
-    for (const matcher of toMatcherList(config.matcher)) {
-      if (typeof matcher === "string" || matcher instanceof RegExp) {
-        const result = matchPattern(matcher, pathname);
-        if (result.matched) {
-          return result;
-        }
-      } else if (typeof matcher === "function" && matcher(ctx)) {
-        return { matched: true };
-      }
-    }
-    return { matched: false };
-  }
-
-  return { matched: true };
+  return matchesPreparedMiddlewareConfig(pathname, config, ctx);
 }
 
 function matchRoutePath(
@@ -729,6 +708,7 @@ function normalizeConfigMiddleware(config?: FarmMiddlewareConfig | null): {
       filePath: `farm.config.ts#middleware-${index}`,
       handlers,
       config: middlewareConfig,
+      compiledConfig: compileMiddlewareConfig(middlewareConfig),
       source: "config",
     });
   }
@@ -752,6 +732,7 @@ function normalizeFileMiddleware(
       filePath: moduleEntry.filePath || moduleEntry.path,
       handlers: normalized.handlers,
       config: normalized.config,
+      compiledConfig: normalized.config ? compileMiddlewareConfig(normalized.config) : undefined,
       source: "file",
     });
   }
@@ -797,6 +778,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
   const fileMiddleware = normalizeFileMiddleware(options.modules);
   const entries = [...configMiddleware.entries, ...fileMiddleware];
   const globalConfig = configMiddleware.globalConfig;
+  const compiledGlobalConfig = globalConfig ? compileMiddlewareConfig(globalConfig) : undefined;
 
   return async function runProductionMiddleware(
     request: Request,
@@ -821,8 +803,12 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       : stripFarmBasePath(ctx.pathname, options.i18n?.basePath ?? "/");
     let parentData: MiddlewareContext["parent"] | undefined;
 
-    if (globalConfig) {
-      const globalMatch = matchesMiddlewareConfig(initialPathname, globalConfig, ctx);
+    if (compiledGlobalConfig) {
+      const globalMatch = matchesCompiledMiddlewareConfig(
+        initialPathname,
+        compiledGlobalConfig,
+        ctx,
+      );
       if (!globalMatch.matched) {
         return emptyResult(request);
       }
@@ -854,8 +840,8 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
 
     for (const candidate of applicable) {
       const { entry, routeMatch } = candidate;
-      const configMatch = entry.config
-        ? matchesMiddlewareConfig(initialPathname, entry.config, ctx)
+      const configMatch = entry.compiledConfig
+        ? matchesCompiledMiddlewareConfig(initialPathname, entry.compiledConfig, ctx)
         : { matched: true };
       if (!configMatch.matched) {
         continue;
