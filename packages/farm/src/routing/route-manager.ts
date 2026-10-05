@@ -8,7 +8,10 @@ import type {
 import {
   parseRoutePath,
   matchRoute,
+  matchRouteParts,
   matchRoutePrefix,
+  matchRoutePrefixParts,
+  splitRoutePath,
   resolveAppPath,
   globFiles,
   logger,
@@ -208,7 +211,9 @@ export class RouteManager {
   private routes: Map<string, RouteEntry> = new Map();
   private pageRouteShapes: Map<string, RouteEntry> = new Map();
   private layouts: Map<string, RouteEntry> = new Map();
+  private orderedLayouts: RouteEntry[] = [];
   private routeSlots: Map<string, RouteSlotEntry> = new Map();
+  private routeSlotOwnerSegments: Map<string, ParsedRoute["segments"]> = new Map();
   private loadings: Map<string, RouteEntry> = new Map();
   private errors: Map<string, RouteEntry> = new Map();
   private metadataImages: Map<string, MetadataImageEntry> = new Map();
@@ -241,7 +246,9 @@ export class RouteManager {
     this.routes.clear();
     this.pageRouteShapes.clear();
     this.layouts.clear();
+    this.orderedLayouts = [];
     this.routeSlots.clear();
+    this.routeSlotOwnerSegments.clear();
     this.loadings.clear();
     this.errors.clear();
     this.metadataImages.clear();
@@ -273,6 +280,17 @@ export class RouteManager {
         compareRouteEntries(left, right),
       ),
     );
+    this.orderedLayouts = Array.from(this.layouts.values()).sort(
+      (left, right) => left.route.segments.length - right.route.segments.length,
+    );
+    for (const slot of this.routeSlots.values()) {
+      if (!this.routeSlotOwnerSegments.has(slot.ownerPattern)) {
+        this.routeSlotOwnerSegments.set(
+          slot.ownerPattern,
+          parseRoutePath(`${slot.ownerPattern}/page.tsx`).segments,
+        );
+      }
+    }
 
     // Silent discovery - only log if verbose mode enabled
     if (process.env.FARM_VERBOSE) {
@@ -303,12 +321,13 @@ export class RouteManager {
     // Remove trailing slash except for root
     const routePathname = this.toRoutePathname(pathname);
     const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
+    const pathParts = splitRoutePath(normalizedPath);
     // Find matching page route
     let matchedRoute: RouteEntry | null = null;
     let params: Record<string, string> = {};
 
     for (const routeEntry of this.routes.values()) {
-      const match = matchRoute(normalizedPath, routeEntry.route.segments);
+      const match = matchRouteParts(pathParts, routeEntry.route.segments);
       if (match.matches) {
         matchedRoute = routeEntry;
         params = match.params;
@@ -317,8 +336,8 @@ export class RouteManager {
     }
 
     // Find all matching layouts (from root to specific)
-    const layouts = this.findMatchingLayouts(normalizedPath);
-    const slots = this.findMatchingRouteSlots(normalizedPath, options.interceptFrom);
+    const layouts = this.findMatchingLayouts(normalizedPath, pathParts);
+    const slots = this.findMatchingRouteSlots(normalizedPath, pathParts, options.interceptFrom);
 
     return {
       route: matchedRoute,
@@ -1225,15 +1244,14 @@ export class RouteManager {
   /**
    * Find all layouts that should wrap a given path
    */
-  private findMatchingLayouts(pathname: string): RouteEntry[] {
+  private findMatchingLayouts(
+    pathname: string,
+    pathnameParts = splitRoutePath(pathname),
+  ): RouteEntry[] {
     const matchingLayouts: RouteEntry[] = [];
 
-    const sortedLayouts = Array.from(this.layouts.values()).sort((a, b) => {
-      return a.route.segments.length - b.route.segments.length;
-    });
-
-    for (const layoutEntry of sortedLayouts) {
-      if (matchRoutePrefix(pathname, layoutEntry.route.segments)) {
+    for (const layoutEntry of this.orderedLayouts) {
+      if (matchRoutePrefixParts(pathnameParts, layoutEntry.route.segments)) {
         matchingLayouts.push(layoutEntry);
       }
     }
@@ -1241,10 +1259,14 @@ export class RouteManager {
     return matchingLayouts;
   }
 
-  private findMatchingRouteSlots(pathname: string, interceptFrom?: string): MatchedRouteSlot[] {
+  private findMatchingRouteSlots(
+    pathname: string,
+    pathnameParts: readonly string[],
+    interceptFrom?: string,
+  ): MatchedRouteSlot[] {
     const groups = new Map<string, RouteSlotEntry[]>();
     for (const entry of this.routeSlots.values()) {
-      if (!this.matchesRoutePrefix(pathname, entry.ownerPattern)) continue;
+      if (!this.matchesRoutePrefix(pathname, entry.ownerPattern, pathnameParts)) continue;
       const key = `${entry.ownerPattern}:${entry.name}`;
       const entries = groups.get(key) ?? [];
       entries.push(entry);
@@ -1254,6 +1276,7 @@ export class RouteManager {
     const normalizedFrom = interceptFrom
       ? this.toRoutePathname(new URL(interceptFrom, "http://farm.local").pathname)
       : undefined;
+    const normalizedFromParts = normalizedFrom ? splitRoutePath(normalizedFrom) : undefined;
     const matches: MatchedRouteSlot[] = [];
 
     for (const entries of groups.values()) {
@@ -1263,11 +1286,11 @@ export class RouteManager {
           (entry) =>
             !entry.interception ||
             (normalizedFrom !== undefined &&
-              this.matchesRoutePrefix(normalizedFrom, entry.ownerPattern)),
+              this.matchesRoutePrefix(normalizedFrom, entry.ownerPattern, normalizedFromParts)),
         )
         .map((entry) => ({
           entry,
-          match: matchRoute(pathname, entry.route.segments),
+          match: matchRouteParts(pathnameParts, entry.route.segments),
         }))
         .filter((candidate) => candidate.match.matches)
         .sort((left, right) => {
@@ -1311,10 +1334,15 @@ export class RouteManager {
     });
   }
 
-  private matchesRoutePrefix(pathname: string, pattern: string): boolean {
+  private matchesRoutePrefix(
+    pathname: string,
+    pattern: string,
+    pathnameParts: readonly string[] = splitRoutePath(pathname),
+  ): boolean {
     if (pattern === "/") return true;
-    const patternSegments = parseRoutePath(`${pattern}/page.tsx`).segments;
-    return matchRoutePrefix(pathname, patternSegments);
+    const patternSegments =
+      this.routeSlotOwnerSegments.get(pattern) ?? parseRoutePath(`${pattern}/page.tsx`).segments;
+    return matchRoutePrefixParts(pathnameParts, patternSegments);
   }
 
   private findNearestBoundary(
