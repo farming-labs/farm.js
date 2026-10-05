@@ -6,6 +6,7 @@ import {
   type FarmIslandReplayKind,
   type FarmIslandStrategy,
 } from "../island";
+import { observeIslandVisibility } from "./island-triggers";
 
 export interface ScheduleFarmIslandHydrationOptions<T> {
   container: Element;
@@ -254,14 +255,7 @@ export function scheduleFarmIslandHydration<T>({
         return;
       }
 
-      const observer = new IntersectionObserver(
-        (entries) => {
-          if (entries.some((entry) => entry.isIntersecting)) start();
-        },
-        { rootMargin: "200px" },
-      );
-      for (const target of targets) observer.observe(target);
-      triggerCleanups.add(() => observer.disconnect());
+      triggerCleanups.add(observeIslandVisibility(container.ownerDocument, targets, start));
       return;
     }
 
