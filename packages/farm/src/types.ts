@@ -2,6 +2,7 @@ import type { FarmRenderer } from "./renderer";
 import type { IncomingMessage, ServerResponse } from "http";
 import type { FarmAgentUserConfig } from "./agent-config";
 import type { FarmStorageUserConfig } from "./storage/types";
+import type { FarmSchemaConfig } from "./schema";
 import type { FarmIntegrationsUserConfig } from "./integrations";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
 import type { FarmMarkdownResolvedConfig, FarmMarkdownUserConfig } from "./markdown";
@@ -182,6 +183,8 @@ export interface FarmConfig {
     };
   };
   storage?: FarmStorageUserConfig;
+  /** Rules for the tables plugins and integrations declare, such as which app tables they may add columns to. */
+  schema?: FarmSchemaConfig;
   /** Shared application data, route, ISR, and PPR cache. */
   cache?: FarmCacheUserConfig;
   integrations?: FarmIntegrationsUserConfig;

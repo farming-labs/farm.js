@@ -3,6 +3,7 @@ import {
   applySchemaMigration,
   checkSchema,
   collectOwnerModels,
+  collectSchemaExtensions,
   findSchemaTableOwners,
   migrateSchemaTables,
   planSchemaMigration,
@@ -103,6 +104,31 @@ describe("sync forwards the database the app gave it", () => {
     await expect(
       findSchemaTableOwners({ plugins: [unconfigured] })[0]!.resolveClient({}),
     ).rejects.toThrow(/sync\(\): no data source is configured/);
+  });
+
+  it("reads the app's own extend as part of its models, never as columns sync adds", async () => {
+    const composed = {
+      ...schema,
+      extend: {
+        // On a model the browser does not see: the app composing its schema.
+        auditLog: { fields: { actor: { type: "string" as const, nullable: true } } },
+        // On an exposed model: part of the table sync creates.
+        tasks: { fields: { priority: { type: "integer" as const, default: 0 } } },
+      },
+    };
+    const extended = sync({
+      schema: composed as never,
+      client: () => null,
+      models: { tasks: "write" },
+      where: false,
+    });
+    const declaration = readSchemaTables(extended)!;
+    expect(
+      collectSchemaExtensions(declaration.name, declaration.schema, declaration.models),
+    ).toEqual([]);
+    const [tasks] = collectOwnerModels(declaration);
+    expect(Object.keys(tasks!.model.fields)).toContain("priority");
+    expect(collectOwnerModels(declaration).map((model) => model.modelKey)).toEqual(["tasks"]);
   });
 
   it("passes farm schema check once migrated, without asking for the app's tables", async () => {

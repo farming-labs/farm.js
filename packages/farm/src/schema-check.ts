@@ -1,8 +1,15 @@
-import type { FarmSchema } from "./schema";
+import type { FarmSchema, FarmSchemaConfig } from "./schema";
+import {
+  collectSchemaExtensions,
+  describeSchemaExtensionApproval,
+  isSchemaExtensionAllowed,
+  type FarmSchemaExtension,
+} from "./schema-extend";
 import { getIntegrationSchemas } from "./integrations";
 import { resolveIntegrationOrmRuntimeClient } from "./integration-orm";
 import { resolveSchemaModels, type ResolvedSchemaField } from "./schema-resolve";
 import {
+  columnTypeFamily,
   createSchemaExecutor,
   describeSchemaTable,
   planSchemaMigration,
@@ -48,7 +55,12 @@ export type FarmSchemaCheckCode =
   | "foreign-key-missing"
   | "reference-table-missing"
   | "reference-column-missing"
-  | "reference-type";
+  | "reference-type"
+  | "extend-invalid"
+  | "extend-table-missing"
+  | "extend-column-missing"
+  | "extend-column-type"
+  | "extend-column-shared";
 
 export interface FarmSchemaCheckIssue {
   severity: FarmSchemaCheckSeverity;
@@ -222,26 +234,6 @@ type ReferenceTarget = {
   /** Another Farm owner, or undefined for tables Farm does not manage. */
   owner?: string;
 };
-
-/**
- * Column type families a foreign key can join across. Same family is fine
- * (text and varchar, integer and bigint); different families need a cast to
- * join and can never carry a foreign key (text and uuid, text and integer).
- */
-function typeFamily(type: string): string | undefined {
-  const value = type.trim().toLowerCase();
-  if (/^(bool|boolean|tinyint\(1\))/u.test(value)) return "boolean";
-  if (value.startsWith("uuid")) return "uuid";
-  if (/(char|text|clob|citext|string)/u.test(value)) return "text";
-  if (/^(int|integer|smallint|bigint|mediumint|tinyint|int[248]|serial|bigserial)/u.test(value)) {
-    return "integer";
-  }
-  if (/^(double|real|float|numeric|decimal|number)/u.test(value)) return "number";
-  if (/^(timestamp|datetime|date)/u.test(value)) return "datetime";
-  if (value.startsWith("json")) return "json";
-  // Enums, domains, arrays, binary: nothing to compare with confidence.
-  return undefined;
-}
 
 export async function checkSchema(
   config: FarmSchemaCheckConfig,
@@ -428,6 +420,50 @@ export async function checkSchema(
     }
   }
 
+  // Columns owners add to tables they do not own, and which database each
+  // table is in: the owner that creates it, or the extending owner's own.
+  const allowExtend = (config.schema as FarmSchemaConfig | undefined)?.allowExtend;
+  const extensions = new Map<string, FarmSchemaExtension[]>();
+  const addedColumns = new Map<string, string>();
+  for (const owner of owners) {
+    if (!ownedModels.has(owner.name)) continue;
+    try {
+      const owned = collectSchemaExtensions(owner.name, owner.schema, owner.models);
+      extensions.set(owner.name, owned);
+      for (const extension of owned) {
+        for (const { field } of extension.fields) {
+          const key = `${extension.table}.${field.name}`.toLowerCase();
+          const other = addedColumns.get(key);
+          if (other && other !== owner.name) {
+            issues.push({
+              severity: "warning",
+              code: "extend-column-shared",
+              owner: owner.name,
+              table: extension.table,
+              column: field.name,
+              message: `${other} and ${owner.name} both add "${extension.table}.${field.name}", so they will share one column.`,
+            });
+          } else {
+            addedColumns.set(key, owner.name);
+          }
+        }
+      }
+    } catch (error) {
+      issues.push({
+        severity: "error",
+        code: "extend-invalid",
+        owner: owner.name,
+        message: errorMessage(error),
+      });
+    }
+  }
+  const databaseForTable = (table: string): OwnerDatabase | undefined => {
+    const creator = [...ownedModels].find(([, models]) =>
+      models.some((model) => model.modelName === table),
+    )?.[0];
+    return creator ? databases.get(creator) : undefined;
+  };
+
   for (const owner of owners) {
     const models = ownedModels.get(owner.name);
     const database = databases.get(owner.name);
@@ -435,6 +471,14 @@ export async function checkSchema(
     try {
       await checkOwnerTables(owner, models, database.dialect, database.executor, issues);
       await checkReferences(owner, models, database, databases, resolveTarget, issues);
+      await checkExtensions(
+        owner,
+        extensions.get(owner.name) ?? [],
+        databaseForTable,
+        database,
+        allowExtend,
+        issues,
+      );
     } catch (error) {
       issues.push({
         severity: "error",
@@ -588,8 +632,8 @@ async function checkReferences(
       // SQLite converts by affinity when it compares, so any pairing joins.
       if (database.dialect === "sqlite" || dialect === "sqlite") continue;
       const expected = getSqlColumnType(field, database.dialect);
-      const mine = typeFamily(expected);
-      const theirs = typeFamily(column.type);
+      const mine = columnTypeFamily(expected);
+      const theirs = columnTypeFamily(column.type);
       if (mine && theirs && mine !== theirs) {
         // A warning, not an error: Farm never puts a foreign key on a reference
         // that leaves the owner, and lookups by value still work. Joins in SQL
@@ -605,6 +649,73 @@ async function checkReferences(
             theirs === "uuid" && mine === "text"
               ? 'Farm stores "uuid" fields as text in Postgres. Cast in joins, for example "users"."id"::text.'
               : `Change "${field.name}" to match "${target.table}.${target.column}" if you join on it.`,
+        });
+      }
+    }
+  }
+}
+
+async function checkExtensions(
+  owner: SchemaOwner,
+  extensions: readonly FarmSchemaExtension[],
+  databaseForTable: (table: string) => OwnerDatabase | undefined,
+  ownDatabase: OwnerDatabase,
+  allowExtend: Record<string, readonly string[]> | undefined,
+  issues: FarmSchemaCheckIssue[],
+) {
+  for (const extension of extensions) {
+    const database = databaseForTable(extension.table) ?? ownDatabase;
+    const table = await describeSchemaTable(database.executor, database.dialect, extension.table);
+    const columns = extension.fields.map(({ field }) => field.name);
+    if (!table) {
+      issues.push({
+        severity: "error",
+        code: "extend-table-missing",
+        owner: owner.name,
+        table: extension.table,
+        message: `${owner.name} adds ${columns.map((column) => `"${column}"`).join(", ")} to "${extension.table}", which does not exist.`,
+        hint: "Run the migration that creates it (your ORM's, or a library's such as Better Auth) first.",
+      });
+      continue;
+    }
+
+    const allowed = isSchemaExtensionAllowed(allowExtend, extension);
+    for (const { field } of extension.fields) {
+      const existing = table.columns.find((column) =>
+        database.dialect === "postgres"
+          ? column.name === field.name
+          : column.name.toLowerCase() === field.name.toLowerCase(),
+      );
+      if (!existing) {
+        const command =
+          owner.kind === "plugin"
+            ? `\`farm ${owner.name} migrate --apply\``
+            : "your migration tool";
+        issues.push({
+          severity: "error",
+          code: "extend-column-missing",
+          owner: owner.name,
+          table: extension.table,
+          column: field.name,
+          message: `${owner.name} needs "${extension.table}.${field.name}", which does not exist.`,
+          hint: allowed
+            ? `Add it with ${command}. If your ORM owns "${extension.table}", add the column to its schema instead.`
+            : `Allow it in farm.config with \`${describeSchemaExtensionApproval(extension)}\`, then add it with ${command}. If your ORM owns "${extension.table}", add the column to its schema instead.`,
+        });
+        continue;
+      }
+      if (database.dialect === "sqlite") continue;
+      const expected = getSqlColumnType(field, database.dialect);
+      const mine = columnTypeFamily(expected);
+      const theirs = columnTypeFamily(existing.type);
+      if (mine && theirs && mine !== theirs) {
+        issues.push({
+          severity: "warning",
+          code: "extend-column-type",
+          owner: owner.name,
+          table: extension.table,
+          column: field.name,
+          message: `"${extension.table}.${field.name}" is ${existing.type}; ${owner.name} expects ${expected.toLowerCase()}.`,
         });
       }
     }

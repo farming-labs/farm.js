@@ -160,6 +160,7 @@ export class FarmApp {
       preset: config.preset ?? "node-server",
       deploy: config.deploy || {},
       storage: config.storage || {},
+      schema: config.schema || {},
       cache: config.cache || {},
       auth: isResolvedAuthConfig(config.auth) ? config.auth : resolveFarmAuthConfig(config.auth),
       integrations: config.integrations || {},

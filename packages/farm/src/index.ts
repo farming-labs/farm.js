@@ -15,6 +15,11 @@ export * from "./schema";
 export * from "./schema-sql";
 export * from "./schema-migrate";
 export * from "./schema-tables";
+export {
+  collectSchemaExtensions,
+  isSchemaExtensionAllowed,
+  type FarmSchemaExtension,
+} from "./schema-extend";
 export * from "./integrations";
 export * from "./integration-orm";
 export * from "./integration-api";

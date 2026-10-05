@@ -258,6 +258,7 @@ mount, and shortcut together.
 | theme         | Enabling light, dark, and system modes with client and server APIs.                   |
 | storage       | Configuring KV drivers/mounts and, in the current beta, an integration DB client.     |
 | migrations    | Running one-shot schema/provider commands with `farm migrate`.                        |
+| schema        | Allowing plugins to add columns to your tables with `schema.allowExtend`.             |
 | cron          | Mapping portable UTC schedules to ordinary GET API routes.                            |
 | i18n          | Configuring locale routes, detection, message catalogs, typing, and direction.        |
 | docs          | Serving the built-in docs runtime and docs API.                                       |
