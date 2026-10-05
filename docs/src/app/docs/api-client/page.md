@@ -664,6 +664,9 @@ evicted on its next read, and a periodic background sweep also removes expired e
 consumer is watching, so unread keys do not accumulate in long-lived sessions. Older runtimes
 without `WeakRef` retain the existing strong subscription, so avoid repeatedly creating callers
 there. Request-local server caches do not subscribe to the global invalidation channel.
+Lazy expiry checks ownership only for the expired key and its aliases. Unrelated subscriptions
+and requests are not scanned on each expired read; aliases and invalidation metadata remain
+available while a related consumer or request still owns them.
 
 Use `scope: "shared"` only for public data requested with `credentials: "omit"` and no custom
 headers that intentionally shares a structured key with route data or another API client:

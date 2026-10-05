@@ -376,8 +376,9 @@ export class FarmClientDataCache {
    */
   private sweepEntryMetadata(swept: Set<string>): void {
     const protectedKeys = new Set<string>();
-    for (const key of this.listeners.keys()) protectedKeys.add(this.resolveKey(key));
-    for (const key of this.inflight.keys()) protectedKeys.add(this.resolveKey(key));
+    // A lazy read usually evicts one key. Do not rescan every unrelated live
+    // subscription/request for each expired entry; follow its reverse aliases.
+    for (const key of swept) if (this.hasMetadataOwner(key)) protectedKeys.add(key);
 
     for (const key of swept) {
       if (this.entries.has(key)) {
