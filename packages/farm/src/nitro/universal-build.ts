@@ -5928,14 +5928,14 @@ function escapeFarmHtmlAttribute(value) {
 
 async function renderFarmElement(ReactDOMServer, element) {
   const streamErrors = [];
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
+  let encoder;
   const normalizeChunk = function(chunk) {
-    if (typeof chunk === "string") return encoder.encode(chunk);
+    if (typeof chunk === "string") return (encoder ||= new TextEncoder()).encode(chunk);
     if (chunk instanceof Uint8Array) return chunk;
     return new Uint8Array(chunk);
   };
   const decodeChunks = function(chunks) {
+    const decoder = new TextDecoder();
     let html = "";
     for (const chunk of chunks) {
       html += decoder.decode(chunk, { stream: true });
@@ -6039,6 +6039,7 @@ async function renderFarmElement(ReactDOMServer, element) {
   if (farmRendererStreamingCapabilities.node &&
       typeof ReactDOMServer.renderToPipeableStream === "function") {
     let pipeableStream;
+    let stream;
     let streamController;
     let streamClosed = false;
     let streamStarted = false;
@@ -6056,16 +6057,6 @@ async function renderFarmElement(ReactDOMServer, element) {
     const complete = new Promise(function(resolve, reject) {
       settleComplete = resolve;
       rejectComplete = reject;
-    });
-    const stream = new ReadableStream({
-      start(controller) {
-        streamController = controller;
-      },
-      cancel(reason) {
-        if (pipeableStream && typeof pipeableStream.abort === "function") {
-          pipeableStream.abort(reason);
-        }
-      },
     });
     const fail = function(error) {
       if (!streamClosed) {
@@ -6102,6 +6093,20 @@ async function renderFarmElement(ReactDOMServer, element) {
           pipeableStream.pipe(destination);
           queueMicrotask(function() {
             decisionState = allReady ? "complete" : "stream";
+            // A synchronous render returns buffered HTML. Only allocate the
+            // bridge when streaming, before exposing that decision to callers.
+            if (decisionState === "stream") {
+              stream = new ReadableStream({
+                start(controller) {
+                  streamController = controller;
+                },
+                cancel(reason) {
+                  if (pipeableStream && typeof pipeableStream.abort === "function") {
+                    pipeableStream.abort(reason);
+                  }
+                },
+              });
+            }
             settleDecision(decisionState);
           });
         } catch (error) {
