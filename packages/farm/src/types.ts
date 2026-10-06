@@ -678,6 +678,11 @@ export interface Metadata {
   alternates?: {
     canonical?: string;
     languages?: Record<string, string>;
+    /**
+     * Alternate representations keyed by MIME type, such as an RSS feed.
+     * `text/markdown` replaces the link Farm adds for a page's Markdown mirror.
+     */
+    types?: Record<string, string | Array<{ url: string; title?: string }>>;
   };
   icons?:
     | string

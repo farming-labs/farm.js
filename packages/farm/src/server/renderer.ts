@@ -60,6 +60,7 @@ import {
 } from "../navigation-errors";
 import {
   addMetadataImageReference,
+  addMetadataMarkdownAlternate,
   mergeMetadata,
   renderMetadataHead,
   type FarmMetadataImageReference,
@@ -98,7 +99,7 @@ import {
   renderFarmLlmsFullTxt,
   resolveFarmLlmsTxtConfig,
 } from "../llms-txt";
-import { resolveMarkdownConfig } from "../markdown";
+import { getFarmMarkdownAlternatePath, resolveMarkdownConfig } from "../markdown";
 import {
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
@@ -2061,6 +2062,18 @@ export class ServerRenderer {
         metadata = addMetadataImageReference(metadata, reference);
       }
     }
+
+    // Advertise the Markdown mirror in the head as well as the Link header,
+    // using the public path the .md request will be resolved against.
+    const snapshot = getFarmI18nClientSnapshot();
+    const publicPathname = applyFarmBasePath(
+      snapshot ? localizeFarmHref(options.pathname, snapshot.locale, snapshot) : options.pathname,
+      this.config.basePath,
+    );
+    metadata = addMetadataMarkdownAlternate(
+      metadata,
+      getFarmMarkdownAlternatePath(resolveMarkdownConfig(this.config.md as any), publicPathname),
+    );
 
     return metadata;
   }

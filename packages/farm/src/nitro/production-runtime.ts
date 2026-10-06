@@ -38,7 +38,12 @@ export {
   stripFarmLocaleFromPathname,
 } from "../i18n/routing";
 export { renderFarmLocaleAlternateLinks } from "../i18n/alternates";
-export { addMetadataImageReference, mergeMetadata, renderMetadataHead } from "../metadata";
+export {
+  addMetadataImageReference,
+  addMetadataMarkdownAlternate,
+  mergeMetadata,
+  renderMetadataHead,
+} from "../metadata";
 export { createFarmMetadataRouteResponse } from "../metadata-route";
 export {
   collectFarmLlmsTxtPages,
