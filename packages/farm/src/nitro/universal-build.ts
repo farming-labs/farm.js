@@ -398,11 +398,14 @@ function isCloudflareImagePreset(preset: string): boolean {
   return preset === "cloudflare" || preset === "cloudflare-pages" || preset === "cloudflare-module";
 }
 
-function shouldUseExternalMetadataImageRuntime(
-  preset: string,
-  hasGeneratedMetadataImages: boolean,
-): boolean {
-  return hasGeneratedMetadataImages && preset !== "vercel-edge" && !isCloudflareImagePreset(preset);
+/**
+ * Whether the server output loads @vercel/og from node_modules. Its Node build
+ * reads its wasm and default font from beside its own file, so Node presets
+ * cannot inline it into a bundle, whether generated metadata images or app
+ * server code imports it.
+ */
+function shouldUseExternalMetadataImageRuntime(preset: string, usesImageRuntime: boolean): boolean {
+  return usesImageRuntime && preset !== "vercel-edge" && !isCloudflareImagePreset(preset);
 }
 
 function resolveImageRuntime(
@@ -4304,10 +4307,11 @@ async function buildSSRInMemory(
   // Find a temporary file path for the virtual entry
   // We'll use a plugin to intercept this
   const virtualEntryId = "\0virtual:farm-ssr-entry";
-  const useExternalMetadataImageRuntime = shouldUseExternalMetadataImageRuntime(
-    preset,
-    metadataImageRoutes.some((image) => image.sourceType === "module"),
-  );
+  // Any server module may import @vercel/og, which is only known once this
+  // graph is built. Keep it external on Node presets regardless: an unused
+  // external costs nothing, and Nitro copies the package only when the bundle
+  // imports it.
+  const useExternalMetadataImageRuntime = shouldUseExternalMetadataImageRuntime(preset, true);
   const rendererOptionalExternals = isReactRenderer(config.renderer)
     ? []
     : [
@@ -8917,14 +8921,14 @@ async function buildNitroUniversal(
   const hasGeneratedMetadataImages = Array.from(routeManager.getMetadataImages().values()).some(
     (image) => image.sourceType === "module",
   );
+  const ssrExternalPackages = collectSSRExternalPackages(ssrBundle);
   const useExternalMetadataImageRuntime = shouldUseExternalMetadataImageRuntime(
     preset,
-    hasGeneratedMetadataImages,
+    hasGeneratedMetadataImages || ssrExternalPackages.has("@vercel/og"),
   );
   const nitroRollupExternal = (id: string) =>
     (useExternalMetadataImageRuntime && id === "@vercel/og") ||
     (isNitroRollupExternal(id) && !(isCloudflareWorker && NITRO_REACT_RUNTIME_MODULES.has(id)));
-  const ssrExternalPackages = collectSSRExternalPackages(ssrBundle);
   const copiedRuntimePackages = new Set([
     ...(imageRuntime === "node" ? ["sharp"] : []),
     ...(useExternalMetadataImageRuntime ? ["@vercel/og"] : []),

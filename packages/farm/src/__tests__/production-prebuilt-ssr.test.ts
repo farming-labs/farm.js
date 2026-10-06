@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { chromium } from "@playwright/test";
+import { imageSize } from "image-size";
 import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
@@ -4115,6 +4116,100 @@ export default function OpenGraphImage() {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 180_000);
+
+  it("serves a @vercel/og ImageResponse from an API route on a built node-server", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      // No metadata image route: the API route alone must pull in the image runtime.
+      await fs.mkdir(path.join(root, "src", "app", "api", "card"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "api", "card", "route.tsx"),
+        `
+import { ImageResponse } from "@vercel/og";
+
+export function GET(request) {
+  const title = new URL(request.url).searchParams.get("title") ?? "Farm.js";
+  return new ImageResponse(
+    <div style={{ display: "flex", width: "100%", height: "100%", alignItems: "center", justifyContent: "center", background: "#09090b", color: "white", fontSize: 48 }}>
+      {title}
+    </div>,
+    { width: 600, height: 315, headers: { "cache-control": "public, max-age=60" } },
+  );
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "vercel-og-api-route-node-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(response.headers.get("content-type")).toBe("image/png");
+          expect(response.headers.get("cache-control")).toBe("public, max-age=60");
+          const bytes = Buffer.from(await response.arrayBuffer());
+          expect(imageSize(bytes)).toMatchObject({ width: 600, height: 315, type: "png" });
+        },
+        "/api/card?title=Shared",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("keeps a @vercel/og API route import bundled in Cloudflare worker output", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      // Node presets keep @vercel/og external; a Worker has no node_modules to load it from.
+      await fs.mkdir(path.join(root, "src", "app", "api", "card"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "api", "card", "route.tsx"),
+        `
+import { ImageResponse } from "@vercel/og";
+
+export function GET() {
+  return new ImageResponse(<div style={{ display: "flex" }}>Cloudflare og route</div>, {
+    width: 600,
+    height: 315,
+  });
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "vercel-og-api-route-cloudflare-test",
+          deploy: { target: "cloudflare", preset: "cloudflare-module" },
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "cloudflare-module" });
+
+      const serverOutput = await readJavaScriptOutput(
+        path.join(root, config.deploy.outputDir, "server"),
+      );
+      expect(serverOutput).toContain("Cloudflare og route");
+      expect(serverOutput).not.toContain(".wasm?module");
+      expect(serverOutput).not.toMatch(/\bfrom\s*["']@vercel\/og["']/);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("answers redirect() and notFound() from pages, streams and middleware", async () => {
     const root = await createProductionFixture();
     const write = async (relativePath: string, source: string) => {
