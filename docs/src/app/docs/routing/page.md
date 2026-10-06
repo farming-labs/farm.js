@@ -849,6 +849,34 @@ export default function DocsLayout({ children }: LayoutProps) {
 
 Pair this layout with `opengraph-image.tsx` in the same `[...slug]` segment to generate a different PNG for each document. `generateMetadata` supplies the title, description, and social fields; the image file renders the PNG described below. Leave `openGraph.images` and `twitter.images` unset when Farm should attach the nearest generated image automatically. An explicit image value still takes precedence.
 
+### Article fields
+
+When `openGraph.type` is `"article"`, Farm also renders the Open Graph article properties:
+
+```tsx
+import type { MetadataProps } from "@farm.js/core";
+
+export async function generateMetadata({ params }: MetadataProps<"/blog/[slug]">) {
+  const post = await getPost(params.slug);
+
+  return {
+    openGraph: {
+      type: "article",
+      publishedTime: post.publishedAt,
+      modifiedTime: post.updatedAt,
+      authors: ["https://acme.test/team/ada"],
+      section: "Engineering",
+      tags: post.tags,
+    },
+  };
+}
+```
+
+`publishedTime` and `modifiedTime` take an ISO string or a `Date` and render
+`article:published_time` and `article:modified_time`. `authors` and `tags` take a string or an
+array and render one `article:author` or `article:tag` per item. `section` renders
+`article:section`. Other `openGraph.type` values ignore these fields.
+
 ### Favicons
 
 Place favicon files in `public/`, then declare them through the root layout metadata. Files in `public/` are served from the application root, so `public/favicon.svg` is available at `/favicon.svg`.
@@ -937,6 +965,26 @@ export default function robots(): MetadataRoute.Robots {
     host: "https://acme.test",
   };
 }
+```
+
+`robots.txt` controls crawling. Per-page indexing directives belong in `metadata.robots`, which
+renders a `<meta name="robots">` tag. Besides `index` and `follow`, it accepts `noarchive`,
+`nosnippet`, `noimageindex`, `max-snippet`, `max-image-preview`, `max-video-preview`, and
+`unavailable_after`. `googleBot` takes the same directives, or a string, for a separate
+`<meta name="googlebot">` tag:
+
+```tsx
+import type { Metadata } from "@farm.js/core";
+
+export const metadata: Metadata = {
+  robots: {
+    index: true,
+    follow: true,
+    "max-snippet": -1,
+    "max-image-preview": "large",
+    googleBot: { noimageindex: true },
+  },
+};
 ```
 
 **src/app/manifest.ts**

@@ -142,6 +142,9 @@ export function renderMetadataHead(
   appendMetaName(tags, "creator", resolvedMetadata.creator);
   appendMetaName(tags, "publisher", resolvedMetadata.publisher);
   appendMetaName(tags, "robots", normalizeRobots(resolvedMetadata.robots));
+  if (isRecord(resolvedMetadata.robots)) {
+    appendMetaName(tags, "googlebot", normalizeRobots(resolvedMetadata.robots.googleBot));
+  }
 
   const alternates = (resolvedMetadata as any).alternates;
   const explicitCanonical = isRecord(alternates) ? alternates.canonical : undefined;
@@ -234,6 +237,18 @@ function appendOpenGraph(tags: string[], openGraph: Metadata["openGraph"], metad
     appendMetaProperty(tags, "og:image:height", image.height);
     appendMetaProperty(tags, "og:image:alt", image.alt);
     appendMetaProperty(tags, "og:image:type", image.type);
+  }
+
+  if (openGraph.type === "article") {
+    appendMetaProperty(tags, "article:published_time", normalizeDate(openGraph.publishedTime));
+    appendMetaProperty(tags, "article:modified_time", normalizeDate(openGraph.modifiedTime));
+    for (const author of normalizeArray(openGraph.authors)) {
+      appendMetaProperty(tags, "article:author", author);
+    }
+    appendMetaProperty(tags, "article:section", openGraph.section);
+    for (const tag of normalizeArray(openGraph.tags)) {
+      appendMetaProperty(tags, "article:tag", tag);
+    }
   }
 }
 
@@ -380,13 +395,29 @@ function normalizeKeywords(keywords: Metadata["keywords"]): string | undefined {
   return keywords;
 }
 
-function normalizeRobots(robots: Metadata["robots"]): string | undefined {
+const ROBOTS_FLAGS = ["noarchive", "nosnippet", "noimageindex"] as const;
+const ROBOTS_VALUES = [
+  "max-snippet",
+  "max-image-preview",
+  "max-video-preview",
+  "unavailable_after",
+] as const;
+
+/** Serialize `robots` or `robots.googleBot` into a robots meta `content` value. */
+function normalizeRobots(robots: unknown): string | undefined {
   if (typeof robots === "string") return robots;
   if (!isRecord(robots)) return undefined;
 
   const values: string[] = [];
   if (typeof robots.index === "boolean") values.push(robots.index ? "index" : "noindex");
   if (typeof robots.follow === "boolean") values.push(robots.follow ? "follow" : "nofollow");
+  for (const flag of ROBOTS_FLAGS) {
+    if (robots[flag] === true) values.push(flag);
+  }
+  for (const directive of ROBOTS_VALUES) {
+    const value = normalizeContent(robots[directive]);
+    if (value) values.push(`${directive}:${value}`);
+  }
   return values.join(", ") || undefined;
 }
 
@@ -430,6 +461,13 @@ function normalizeNumber(value: unknown): number | undefined {
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
+}
+
+function normalizeDate(value: unknown): string | undefined {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  }
+  return normalizeContent(value);
 }
 
 function normalizeContent(value: unknown): string | undefined {
