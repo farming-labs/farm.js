@@ -126,6 +126,12 @@ pnpm --dir benchmarks/frameworks/apps/farm build
 node benchmarks/frameworks/preload-response.mjs > /tmp/farm-preload-response.json
 ```
 
+For an isolated-runner check, manually dispatch the CI workflow with
+`preload-response-benchmark` enabled. Its opt-in diagnostic job builds the maintained fixture,
+collects two independent comparisons, and retains the raw JSON artifact for review. It does not
+assert timing thresholds or replace canonical results; check the recorded load and distributions
+before drawing a performance conclusion.
+
 This runs five alternating fresh-process pairs against the same built SSR entry, with 1,000 warmups
 and 3,000 measured requests per process. The baseline forces the old buffered-body path; both arms
 retain the no-candidate preload scanner guard. Every response is checked for equivalent HTML and
