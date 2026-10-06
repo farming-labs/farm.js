@@ -197,6 +197,24 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=8192
 
+  benchmark-harness:
+    name: Benchmark Harness (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v6
+      - name: Install harness-only dependencies
+        run: pnpm --dir benchmarks/frameworks --filter farmjs-framework-benchmarks install --frozen-lockfile --ignore-scripts
+      - name: Verify benchmark correctness and reporting guards
+        run: node benchmarks/frameworks/run.mjs --self-check
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

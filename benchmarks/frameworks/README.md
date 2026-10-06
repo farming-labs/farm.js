@@ -6,10 +6,16 @@ server-rendered framework stacks. It does not treat their underlying build tools
 ## Fixture and validation
 
 Each pinned fixture serves one dynamic SSR route with the same CSS and 120-item DOM workload. Every
-timed response must return HTTP 200, `framework-benchmark-v1`, an item count of 120, and a numeric
-server-render timestamp. The runner also requests the exact same URL again and requires a different
-timestamp before measuring it, which prevents an accidentally static or per-URL cached fixture from
-being accepted.
+timed response must return HTTP 200 and exactly one real `<main>` with the benchmark marker and item
+count. The HTML parser validates all 120 ordered `<li>` rows, identifiers, and labels inside that
+fixture; marker strings or rows in scripts, comments, and inert templates do not count. The numeric
+server-render timestamp comes from that same element, not embedded serialized data. Framework
+comments, whitespace, extra attributes, and HTML entities are supported.
+
+Full-body response and first-page clocks stop before HTML parsing/validation. The runner also requests
+the exact same URL again and requires a different timestamp before measuring it. This startup check
+rejects an already-static or per-URL cached fixture; it does not prove that caching cannot begin later
+in a run. Per-request cache detection remains a separate follow-up.
 
 The fixtures live in an isolated pnpm workspace under this directory. Farm.js links to the local
 `packages/farm` and `packages/farm-cli`; the other framework versions are pinned in the benchmark
@@ -85,8 +91,9 @@ and prints its path. It does **not** replace the checked-in results or landing-p
 node benchmarks/frameworks/run.mjs --runs 1 --requests 3 --warmups 1
 ```
 
-Validate scheduling, readiness precision, numeric options, environment sanitization, and publish
-guards without starting framework servers:
+Validate rendered fixtures, scheduling, readiness precision, numeric options, environment sanitization,
+and publish guards without starting framework servers (fixture tests use a temporary loopback HTTP
+server):
 
 ```sh
 corepack pnpm --dir benchmarks/frameworks self-check
