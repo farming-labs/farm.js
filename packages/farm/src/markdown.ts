@@ -1,3 +1,27 @@
+/** Content type for Markdown responses, including agent-facing error bodies. */
+export const FARM_MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8";
+
+export function farmRequestWantsMarkdown(
+  pathname: string,
+  accept: string | null | undefined,
+): boolean {
+  return pathname.toLowerCase().endsWith(".md") || requestAcceptsMarkdown(accept);
+}
+
+export function createFarmMarkdownErrorBody(
+  status: number,
+  pathname: string,
+  homeHref = "/",
+): string {
+  const heading = status === 404 ? "Page not found" : `Request failed (${status})`;
+  return (
+    `# ${heading}\n\n` +
+    `No page is available at \`${pathname}\`. The URL may be incorrect, ` +
+    `or the page has not been published.\n\n` +
+    `Browse [the site homepage](${homeHref}) to find available pages.\n`
+  );
+}
+
 export type FarmMarkdownRouteInput =
   | string
   | {
