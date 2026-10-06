@@ -7,6 +7,10 @@ on:
         description: Collect buffered-response diagnostic samples on an isolated runner
         type: boolean
         default: false
+      layout-order-benchmark:
+        description: Collect production layout-order diagnostic samples on an isolated runner
+        type: boolean
+        default: false
   push:
     branches: [main]
   pull_request:
@@ -49,6 +53,37 @@ jobs:
         with:
           name: preload-response-${{ github.sha }}
           path: ${{ runner.temp }}/preload-response-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  layout-order-benchmark:
+    name: Layout Order Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.layout-order-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build current router and verify layout selection
+        run: |
+          pnpm --filter @farm.js/core build:runtime
+          pnpm --filter @farm.js/core exec vitest run src/__tests__/production-layout-order.test.ts
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+      - name: Collect two independent alternating comparisons
+        run: |
+          node benchmarks/layout-order/run.mjs > "${{ runner.temp }}/layout-order-first.json"
+          node benchmarks/layout-order/run.mjs > "${{ runner.temp }}/layout-order-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: layout-order-${{ github.sha }}
+          path: ${{ runner.temp }}/layout-order-*.json
           if-no-files-found: warn
           retention-days: 14
 

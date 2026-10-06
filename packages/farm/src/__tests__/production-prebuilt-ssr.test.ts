@@ -380,6 +380,58 @@ async function expectNitroFallback(root: string): Promise<void> {
 }
 
 describe("production prebuilt SSR output", () => {
+  it("preserves root-to-leaf layout order in a built nested dynamic route", async () => {
+    const root = await createProductionFixture();
+    try {
+      for (const [relative, name] of [
+        ["", "root"],
+        ["reports", "reports"],
+        ["reports/[id]", "item"],
+      ]) {
+        const directory = path.join(root, "src", "app", relative);
+        await fs.mkdir(directory, { recursive: true });
+        await fs.writeFile(
+          path.join(directory, "layout.tsx"),
+          `export default function Layout({ children }) { return <section data-layout-order="${name}">{children}</section>; }`,
+        );
+      }
+      const leaf = path.join(root, "src", "app", "reports", "[id]", "activity");
+      await fs.mkdir(leaf, { recursive: true });
+      await fs.writeFile(
+        path.join(leaf, "page.tsx"),
+        `export default function Page({ params }) { return <main data-layout-order="page">{params.id}</main>; }`,
+      );
+      const config = await resolveConfig(
+        { root, srcDir: "src", images: { provider: "none" }, telemetry: false },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          expect(
+            [...html.matchAll(/data-layout-order="([^"]+)"/g)].map((match) => match[1]),
+          ).toEqual(["root", "reports", "item", "page"]);
+          expect(html).toContain(">one</main>");
+        },
+        "/reports/one/activity",
+      );
+      await runProductionRequest(serverDir, async (response) => {
+        expect(response.status).toBe(200);
+        expect(
+          [...(await response.text()).matchAll(/data-layout-order="([^"]+)"/g)].map(
+            (match) => match[1],
+          ),
+        ).toEqual(["root"]);
+      });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it.each([false, true])(
     "enforces final preload budgets after HTML transforms (plugin: %s)",
     async (withPlugin) => {
