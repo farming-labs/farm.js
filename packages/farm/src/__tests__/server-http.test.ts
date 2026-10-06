@@ -3,6 +3,12 @@
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { invokeAPIRouteEndpoint } from "../api/runtime";
+import { getCurrentRequest } from "../server/request";
+import {
+  getRequestContext,
+  getRequestContextSnapshot,
+  setRequestContext,
+} from "../request-context";
 import {
   bufferFarmRequestBody,
   matchesFarmIfNoneMatch,
@@ -11,6 +17,27 @@ import {
 } from "../server-http";
 
 describe("Farm server HTTP policy", () => {
+  it("preserves private request context and exposure flags when buffering a POST", async () => {
+    const request = new Request("https://example.com/api/tool", { method: "POST", body: "hello" });
+    const metadata = { id: "server-owned-request" };
+    setRequestContext(request, "telemetry", metadata);
+    setRequestContext(request, "theme", "dark", { exposeToPage: true });
+    const response = await invokeAPIRouteEndpoint(async (buffered: Request) => {
+      expect(buffered).not.toBe(request);
+      expect(getCurrentRequest()).toBe(buffered);
+      expect(getRequestContext(buffered, "telemetry")).toBe(metadata);
+      expect(getRequestContextSnapshot(buffered, { exposedOnly: true })).toEqual(
+        new Map([["theme", "dark"]]),
+      );
+      expect(await buffered.text()).toBe("hello");
+      setRequestContext(buffered, "handler-only", true);
+      expect(getRequestContext(request, "handler-only")).toBeUndefined();
+      return new Response("ok");
+    }, request);
+    expect(response.status).toBe(200);
+    expect(getRequestContext(new Request(request.url), "telemetry")).toBeUndefined();
+  });
+
   it("matches wildcard, weak, listed, and quoted-comma entity tags", () => {
     expect(matchesFarmIfNoneMatch("*", '"farm"')).toBe(true);
     expect(matchesFarmIfNoneMatch('W/"farm"', '"farm"')).toBe(true);
