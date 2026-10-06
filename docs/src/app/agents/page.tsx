@@ -34,6 +34,7 @@ import "../../components/blog/figures.css";
 import "./agents.css";
 
 export const metadata = {
+  openGraph: { title: "Agent infrastructure — Farm.js", url: "/agents" },
   title: "Agent infrastructure — Farm.js",
   description:
     "Farm.js apps are agent-native by default: agent runtimes, Markdown mirrors, MCP tools, and WebMCP. Plus upcoming infrastructure for deploying agents and MCP servers.",
