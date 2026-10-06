@@ -203,11 +203,10 @@ export async function _runWithFarmRequestSpan<T>(
   options: FarmRequestSpanOptions = {},
 ): Promise<T> {
   const startedAt = Date.now();
-  const url = new URL(request.url);
+  const url =
+    tracingState.enabled && tracingState.spans.has("request") ? new URL(request.url) : undefined;
   const shouldTrace =
-    tracingState.enabled &&
-    tracingState.spans.has("request") &&
-    !tracingState.ignorePaths.some((prefix) => url.pathname.startsWith(prefix));
+    url && !tracingState.ignorePaths.some((prefix) => url.pathname.startsWith(prefix));
 
   if (!shouldTrace) {
     options.onStart?.();
