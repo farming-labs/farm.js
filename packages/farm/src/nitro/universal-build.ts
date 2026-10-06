@@ -4521,11 +4521,14 @@ async function buildSSRInMemory(
  * Root paths the docs engine answers that the app serves itself, so the
  * production server leaves them to the app: /llms.txt and /llms-full.txt
  * (agent.llmsTxt, llms.ts, llms-full.ts), /sitemap.xml (sitemap.ts), and
- * /robots.txt (robots.ts). A public file needs no entry, since the platform
- * serves it before any route.
+ * /robots.txt (agent.crawlers, robots.ts). A public file needs no entry, since
+ * the platform serves it before any route.
  */
 export function getFarmAppOwnedDocsEnginePaths(
-  agent: Pick<ResolvedFarmConfig["agent"], "llmsTxt"> | undefined,
+  agent:
+    | (Pick<ResolvedFarmConfig["agent"], "llmsTxt"> &
+        Partial<Pick<ResolvedFarmConfig["agent"], "crawlers">>)
+    | undefined,
   applicationMetadataRoutes: ReadonlyArray<
     Pick<UniversalApplicationMetadataRoute, "kind" | "pattern">
   >,
@@ -4539,7 +4542,7 @@ export function getFarmAppOwnedDocsEnginePaths(
     ...(llmsTxt?.enabled || ownedByFile("llms") ? ["/llms.txt"] : []),
     ...((llmsTxt?.enabled && llmsTxt.full) || ownedByFile("llms-full") ? ["/llms-full.txt"] : []),
     ...(ownedByFile("sitemap") ? ["/sitemap.xml"] : []),
-    ...(ownedByFile("robots") ? ["/robots.txt"] : []),
+    ...(agent?.crawlers?.enabled || ownedByFile("robots") ? ["/robots.txt"] : []),
   ];
 }
 
@@ -4888,6 +4891,12 @@ function generateVirtualEntryCode(
 ): string {
   const hasCompressionRuntime =
     config.compress && resolveFarmInstrumentationRuntime(preset) === "nodejs";
+  // agent.crawlers serves /robots.txt unless a root robots.ts owns it.
+  const servesAgentRobotsTxt =
+    Boolean(config.agent?.crawlers?.enabled) &&
+    !applicationMetadataRoutes.some(
+      (metadata) => metadata.kind === "robots" && metadata.pattern === "/",
+    );
   const hasPluginRuntime = hasRuntimeIntegrationConfig || hasServerRuntimePlugins;
   const hasPrecompiledDocs = Boolean(farmDocsPrecompiledManifest);
   const adapterOwnsDocsRuntime = Boolean(
@@ -5253,6 +5262,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   createFarmInstrumentationLifecycle,
   createFarmCacheKey,
   createFarmMetadataRouteResponse,
+  createFarmAgentRobots,
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsMarkdownReader,
@@ -5732,6 +5742,7 @@ const farmImageHandler = ${
   };
 const farmMarkdownConfig = ${JSON.stringify(config.md)};
 const farmLlmsTxtConfig = ${JSON.stringify(config.agent?.llmsTxt ?? { enabled: false, include: [], exclude: [] })};
+${servesAgentRobotsTxt ? `const farmAgentCrawlers = ${JSON.stringify(config.agent.crawlers)};` : ""}
 const farmMdxConfig = ${JSON.stringify({
     ...config.mdx,
     components: typeof config.mdx?.components === "string" ? config.mdx.components : undefined,
@@ -6639,6 +6650,34 @@ function createApplicationMetadataHref(match, locale) {
   return applyFarmBasePath(localizedHref);
 }
 
+${
+  servesAgentRobotsTxt
+    ? `// robots.txt from agent.crawlers, built the same way as in development.
+function createFarmAgentRobotsResponse(request) {
+  const rootLayout = layoutRoutes.find((layout) => layout.pattern === "/");
+  return createFarmMetadataRouteResponse(
+    "robots",
+    createFarmAgentRobots({
+      crawlers: farmAgentCrawlers,
+      sitemapPath: ${
+        applicationMetadataRoutes.some(
+          (metadata) => metadata.kind === "sitemap" && metadata.pattern === "/",
+        )
+          ? JSON.stringify("/sitemap.xml")
+          : "undefined"
+      },
+      metadataBase: rootLayout && rootLayout.module && rootLayout.module.metadata
+        ? rootLayout.module.metadata.metadataBase
+        : undefined,
+      basePath: ${JSON.stringify(config.basePath)},
+    }),
+    {},
+    { method: request.method },
+  );
+}
+`
+    : ""
+}
 // Static pages and root metadata for llms.txt, built the same way as in development.
 function createFarmLlmsTxtContext(request, full) {
   const origin = new URL(request.url).origin;
@@ -7550,6 +7589,19 @@ async function handleFarmRequestInContext(
   );
   if (applicationMetadataResponse) {
     return applyProductionMiddlewareHeaders(applicationMetadataResponse, middlewareHeaders);
+  }
+  `
+      : ""
+  }
+  ${
+    servesAgentRobotsTxt
+      ? `
+  // agent.crawlers with no robots.ts: serve the generated file.
+  if (normalizeRuntimePath(routePathname) === "/robots.txt") {
+    return applyProductionMiddlewareHeaders(
+      createFarmAgentRobotsResponse(request),
+      middlewareHeaders,
+    );
   }
   `
       : ""

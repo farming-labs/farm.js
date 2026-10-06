@@ -412,9 +412,11 @@ describe("production middleware runtime", () => {
       );
       expect(robotsResponse.status).toBe(200);
       expect(robotsResponse.headers.get("content-type")).toBe("text/plain; charset=utf-8");
-      await expect(robotsResponse.text()).resolves.toContain(
-        "Sitemap: https://example.test/sitemap.xml",
-      );
+      const robotsText = await robotsResponse.text();
+      expect(robotsText).toContain("Sitemap: https://example.test/sitemap.xml");
+      // The app's robots.ts wins over agent.crawlers.
+      expect(robotsText).toContain("Disallow: /private/");
+      expect(robotsText).not.toContain("GPTBot");
 
       // Agents that request Markdown for a missing page get a Markdown 404 body.
       const markdownExtension404 = await serverModule.default.fetch(

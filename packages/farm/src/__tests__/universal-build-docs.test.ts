@@ -8,6 +8,7 @@ import {
   getFarmAppOwnedDocsEnginePaths,
 } from "../nitro/universal-build";
 import { resolveFarmLlmsTxtConfig } from "../llms-txt";
+import { resolveFarmAgentCrawlers } from "../agent-crawlers";
 
 const docsConfig: FarmDocsResolvedConfig = {
   enabled: true,
@@ -110,5 +111,18 @@ describe("universal docs build", () => {
         { kind: "llms-full", pattern: "/" },
       ]),
     ).toEqual(["/llms.txt", "/llms-full.txt"]);
+  });
+
+  it("hands the app /robots.txt when agent.crawlers generates it", () => {
+    const llmsOff = { llmsTxt: resolveFarmLlmsTxtConfig(undefined) };
+    expect(
+      getFarmAppOwnedDocsEnginePaths({ ...llmsOff, crawlers: resolveFarmAgentCrawlers(true) }, []),
+    ).toEqual(["/robots.txt"]);
+    expect(
+      getFarmAppOwnedDocsEnginePaths(
+        { ...llmsOff, crawlers: resolveFarmAgentCrawlers(undefined) },
+        [],
+      ),
+    ).toEqual([]);
   });
 });

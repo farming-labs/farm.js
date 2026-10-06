@@ -1012,6 +1012,10 @@ export const metadata: Metadata = {
 };
 ```
 
+A root `robots.ts` replaces the robots.txt that [`agent.crawlers`](/docs/configuration#ai-crawlers)
+generates, and a `public/robots.txt` wins over both. All three take `/robots.txt` from the docs
+engine.
+
 **src/app/manifest.ts**
 
 ```ts
