@@ -1092,6 +1092,26 @@ For advanced renderers, the default export may still return a `Response`, string
 
 Keep only one implementation for each image kind in a segment. For example, defining both `opengraph-image.png` and `opengraph-image.tsx` produces a build error. For broad social-platform compatibility, use 1200 by 630; generated JSX routes emit PNG automatically.
 
+### Other meta tags
+
+Use `other` for a `<meta name>` tag that has no dedicated metadata field. Each key renders one tag,
+and an array value renders one tag per item:
+
+```tsx
+import type { Metadata } from "@farm.js/core";
+
+export const metadata: Metadata = {
+  other: {
+    "apple-itunes-app": "app-id=123456789",
+    "format-detection": "telephone=no",
+  },
+};
+```
+
+Names and values are escaped. `other` merges one level deep, so a page can replace a key its layout
+set and keep the rest. Client navigation removes the previous page's `other` tags before adding the
+next page's.
+
 ## File Route States
 
 Use `loading.*` and `error.*` next to a file route to define route-local loading and error states.
