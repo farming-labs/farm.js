@@ -4514,6 +4514,32 @@ async function buildSSRInMemory(
 }
 
 /**
+ * Root paths the docs engine answers that the app serves itself, so the
+ * production server leaves them to the app: /llms.txt and /llms-full.txt
+ * (agent.llmsTxt, llms.ts, llms-full.ts), /sitemap.xml (sitemap.ts), and
+ * /robots.txt (robots.ts). A public file needs no entry, since the platform
+ * serves it before any route.
+ */
+export function getFarmAppOwnedDocsEnginePaths(
+  agent: Pick<ResolvedFarmConfig["agent"], "llmsTxt"> | undefined,
+  applicationMetadataRoutes: ReadonlyArray<
+    Pick<UniversalApplicationMetadataRoute, "kind" | "pattern">
+  >,
+): string[] {
+  const llmsTxt = agent?.llmsTxt;
+  const ownedByFile = (kind: UniversalApplicationMetadataRoute["kind"]) =>
+    applicationMetadataRoutes.some(
+      (metadata) => metadata.kind === kind && metadata.pattern === "/",
+    );
+  return [
+    ...(llmsTxt?.enabled || ownedByFile("llms") ? ["/llms.txt"] : []),
+    ...((llmsTxt?.enabled && llmsTxt.full) || ownedByFile("llms-full") ? ["/llms-full.txt"] : []),
+    ...(ownedByFile("sitemap") ? ["/sitemap.xml"] : []),
+    ...(ownedByFile("robots") ? ["/robots.txt"] : []),
+  ];
+}
+
+/**
  * Generate virtual entry code that bundles all routes
  * This creates managers at runtime from bundled code
  */
@@ -7340,18 +7366,10 @@ async function handleFarmRequestInContext(
       ? `
   // Docs responses are served after app middleware so route guards and
   // middleware headers apply to the docs engine like any other page content.
-  // An app's own llms.txt and llms-full.txt (agent.llmsTxt, llms.ts, llms-full.ts)
-  // take those paths from the docs engine.
+  // An app's own llms.txt, llms-full.txt, sitemap.xml, and robots.txt take
+  // those paths from the docs engine.
   if (farmDocsHandler${(() => {
-    const llmsTxt = config.agent?.llmsTxt;
-    const ownedByFile = (kind: string) =>
-      applicationMetadataRoutes.some(
-        (metadata) => metadata.kind === kind && metadata.pattern === "/",
-      );
-    const owned = [
-      ...(llmsTxt?.enabled || ownedByFile("llms") ? ["/llms.txt"] : []),
-      ...((llmsTxt?.enabled && llmsTxt.full) || ownedByFile("llms-full") ? ["/llms-full.txt"] : []),
-    ];
+    const owned = getFarmAppOwnedDocsEnginePaths(config.agent, applicationMetadataRoutes);
     return owned.length
       ? ` && !${JSON.stringify(owned)}.includes(normalizeRuntimePath(routePathname))`
       : "";
