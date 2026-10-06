@@ -1,7 +1,7 @@
 import { performance } from "node:perf_hooks";
 import { parse } from "parse5";
 
-const marker = "framework-benchmark-v1";
+export const marker = "framework-benchmark-v1";
 
 function attribute(node, name) {
   return node.attrs?.find((entry) => entry.name === name)?.value;

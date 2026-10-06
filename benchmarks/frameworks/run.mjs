@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
-import { requestPage, isFreshFixtureResponse, measureRequests } from "./fixture.mjs";
+import { marker, requestPage, isFreshFixtureResponse, measureRequests } from "./fixture.mjs";
 
 const benchmarkDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(benchmarkDir, "../..");
@@ -627,7 +627,52 @@ async function runSelfChecks() {
     );
   }
 
-  const report = JSON.parse(await fs.readFile(path.join(resultsDir, "latest.json"), "utf8"));
+  // Construct a fresh report instead of loading a saved one: serialization tests
+  // alone cannot catch failures between collecting samples and writing them.
+  const rawSamples = Object.fromEntries(
+    [
+      "devFirstPageMs",
+      "devFirstRequestMs",
+      "devWarmResponseMs",
+      "buildMs",
+      "productionBootMs",
+      "productionResponseMs",
+      "responseBytes",
+    ].map((key, index) => [key, [index + 0.123456789, index + 2.987654321]]),
+  );
+  const report = createReport(
+    canonical,
+    frameworks,
+    new Map(frameworks.map(({ id }) => [id, rawSamples])),
+    rounds,
+    {
+      ...cleanIdentity,
+      commit: "self-check-revision",
+      branch: "self-check",
+      inputSha256: "self-check-inputs",
+      rootLockSha256: "self-check-lockfile",
+      workspaceDirty: false,
+    },
+  );
+  assert(report.fixture.marker === "framework-benchmark-v1", "Report must identify the fixture");
+  assert(report.revision.commit === "self-check-revision", "Report must retain its revision");
+  assert(report.frameworks.length === frameworks.length, "Report must retain every framework");
+  for (const framework of report.frameworks) {
+    for (const [metric, values] of Object.entries(rawSamples)) {
+      assert(
+        JSON.stringify(framework.metrics[metric].samples) === JSON.stringify(values),
+        "Fresh report must retain unrounded samples: " + framework.id + "/" + metric,
+      );
+    }
+  }
+  const published = createPublishedReport(report);
+  assert(published.fixture.marker === report.fixture.marker, "Published fixture must match");
+  assert(
+    published.frameworks.every((framework) =>
+      Object.values(framework.metrics).every((metric) => !("samples" in metric)),
+    ),
+    "Compact published data must omit raw samples",
+  );
   report.quality = createReportQuality(
     { ...canonical, only: ["farm"] },
     [frameworks[0]],
