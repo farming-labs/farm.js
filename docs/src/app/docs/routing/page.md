@@ -1029,6 +1029,32 @@ Generated metadata routes accept `GET` and `HEAD` and return `405` for other met
 
 `feed.ts` is not reserved yet because feeds need an explicit RSS, Atom, or JSON Feed contract. Use an API or programmatic route for feeds until that format is defined.
 
+### Alternate representations
+
+Advertise other formats of a page, such as that feed route, with `alternates.types`. Each MIME
+type renders `<link rel="alternate" type href>`, with an optional `title`:
+
+```tsx
+import type { Metadata } from "@farm.js/core";
+
+export const metadata: Metadata = {
+  alternates: {
+    types: {
+      "application/rss+xml": [{ url: "/blog/feed.xml", title: "Acme blog" }],
+      "application/atom+xml": "/blog/atom.xml",
+    },
+  },
+};
+```
+
+Relative URLs resolve against `metadataBase`, the same as `alternates.languages`. A page that sets
+`alternates.types` replaces its layout's whole `types` object.
+
+When a page has a [Markdown mirror](/docs/markdown), Farm adds
+`<link rel="alternate" type="text/markdown" href="/blog/hello.md">` to its head next to the `Link`
+response header it already sends. Set `alternates.types["text/markdown"]` to advertise a different
+URL. Restricting `md.expose` or setting `md: false` removes the link along with the mirror.
+
 ### Static metadata images
 
 Place `opengraph-image.png` next to a page or layout segment for a zero-code, route-local social image. Farm supports `.png`, `.jpg`, `.jpeg`, `.gif`, and `.webp` files.

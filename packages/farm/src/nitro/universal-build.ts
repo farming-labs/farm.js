@@ -5199,6 +5199,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   _runWithMiddlewareData,
   _setDefaultFarmThemeConfig,
   addMetadataImageReference,
+  addMetadataMarkdownAlternate,
   appendFarmRedirectQuery,
   applyFarmBasePath,
   applyFarmCspNonceToResponse,
@@ -5296,7 +5297,7 @@ import { dirname as farmDocsDirname, join as farmDocsJoin } from "node:path";
 import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
       : "";
   const markdownHandlerImport = config.md?.enabled
-    ? `import { applyMarkdownNegotiationHeaders, createMarkdownMirrorResponse } from "@farm.js/core/markdown";`
+    ? `import { applyMarkdownNegotiationHeaders, createMarkdownMirrorResponse, getFarmMarkdownAlternatePath } from "@farm.js/core/markdown";`
     : "";
   const appMarkdownImport = hasMarkdownPages
     ? `import { createFarmMarkdownRouteModule, createFarmMarkdownSourceResponse } from "@farm.js/core/internal/app-markdown-runtime";`
@@ -7979,6 +7980,17 @@ async function handleFarmRequestInContext(
               createMetadataImageReference(imageMatch, farmLocaleResolution?.locale),
             );
           }
+        }
+        ${
+          config.md?.enabled
+            ? `
+        // Advertise the Markdown mirror in the head as well as the Link header,
+        // using the public path the .md request will be resolved against.
+        mergedMetadata = addMetadataMarkdownAlternate(
+          mergedMetadata,
+          getFarmMarkdownAlternatePath(farmMarkdownConfig, pathname),
+        );`
+            : ""
         }
 
         const renderedMetadata = renderMetadataHead(mergedMetadata, { pathname, jsonLd: ${JSON.stringify(config.agent?.jsonLd ?? false)} });

@@ -107,6 +107,34 @@ export function addMetadataImageReference(
   };
 }
 
+const MARKDOWN_MIME_TYPE = "text/markdown";
+
+/**
+ * Advertise a page's Markdown mirror as `alternates.types["text/markdown"]`
+ * unless the page already declares one. `href` comes from the request path, so
+ * it is kept same-origin the same way the default canonical is.
+ */
+export function addMetadataMarkdownAlternate(
+  metadata: MetadataRecord,
+  href: string | null | undefined,
+): MetadataRecord {
+  if (!href) return metadata;
+
+  const alternates = isRecord(metadata.alternates) ? metadata.alternates : {};
+  const types = isRecord(alternates.types) ? alternates.types : {};
+  if (Object.keys(types).some((type) => type.toLowerCase() === MARKDOWN_MIME_TYPE)) {
+    return metadata;
+  }
+
+  return {
+    ...metadata,
+    alternates: {
+      ...alternates,
+      types: { ...types, [MARKDOWN_MIME_TYPE]: sanitizeSelfCanonicalPathname(href) },
+    },
+  };
+}
+
 export interface RenderMetadataHeadOptions {
   /**
    * Current request pathname. Used to emit a default `<link rel="canonical">`
@@ -171,6 +199,18 @@ export function renderMetadataHead(
       appendLink(tags, "alternate", resolveMetadataUrl(href, metadataBase), {
         hreflang: language,
       });
+    }
+  }
+
+  if (isRecord(alternates) && isRecord(alternates.types)) {
+    for (const [type, value] of Object.entries(alternates.types)) {
+      for (const entry of normalizeArray(value)) {
+        const link = isRecord(entry) ? entry : { url: entry };
+        appendLink(tags, "alternate", resolveMetadataUrl(link.url, metadataBase), {
+          type,
+          title: link.title,
+        });
+      }
     }
   }
 
