@@ -7171,6 +7171,9 @@ async function getCachedPPRShell(cacheKey) {
  * Main request handler - created at runtime with bundled routes
  */
 async function handleFarmRequest(request, adapterContext) {
+  // Share only this request's parse. Rewrites and middleware replacements keep
+  // their own URL, while response negotiation retains the original pathname.
+  const requestUrl = new URL(request.url);
   const response = await ${
     config.i18n.enabled
       ? `_runWithFarmI18nRequest(
@@ -7195,16 +7198,17 @@ async function handleFarmRequest(request, adapterContext) {
         false,
         Date.now(),
         adapterContext,
+        requestUrl,
       );
       return applyFarmI18nResponse(response, farmLocaleResolution);
     },
-    { redirect: !isFarmLocalAPIPathname(new URL(request.url).pathname) }
+    { redirect: !isFarmLocalAPIPathname(requestUrl.pathname) }
   )`
-      : "handleFarmRequestInContext(request, null, false, Date.now(), adapterContext)"
+      : "handleFarmRequestInContext(request, null, false, Date.now(), adapterContext, requestUrl)"
   };
   ${
     config.md?.enabled
-      ? `const pathname = getFarmRoutePathname(new URL(request.url).pathname);
+      ? `const pathname = getFarmRoutePathname(requestUrl.pathname);
   if (matchPageRoute(pathname)) {
     return applyMarkdownNegotiationHeaders(response, {
       config: farmMarkdownConfig,
@@ -7222,8 +7226,9 @@ async function handleFarmRequestInContext(
   configuredRewriteApplied = false,
   requestStartTime = Date.now(),
   adapterContext,
+  requestUrl = new URL(request.url),
 ) {
-  let url = new URL(request.url);
+  let url = requestUrl;
   let pathname = url.pathname;
   let routePathname = getFarmRoutePathname(pathname);
 
