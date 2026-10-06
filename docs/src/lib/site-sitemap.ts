@@ -5,8 +5,12 @@ import { SITE_URL } from "./site";
 /**
  * Sitemap for the pages outside /docs. The docs engine serves /sitemap.xml with
  * the docs pages, so these pages get a second sitemap that robots.ts lists.
+ *
+ * It sits at the root because a sitemap only covers URLs under its own directory
+ * unless it is submitted in Search Console, and it has no extension because a
+ * dotted final segment in a programmatic API route breaks the production build.
  */
-export const SITE_SITEMAP_PATH = "/sitemap-site.xml";
+export const SITE_SITEMAP_PATH = "/sitemap-site";
 
 const posts = [launchPost];
 
