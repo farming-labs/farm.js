@@ -115,6 +115,29 @@ The report marks this assessment **unavailable** with fewer than three selected 
 measured rounds. Otherwise, “not detected” is not proof of an idle host. Publication eligibility also
 requires the full methodology and clean inputs described above; partial runs are diagnostic only.
 
+## Buffered-response diagnostic
+
+For the focused buffered-HTML response ablation, build the local core runtime and Farm fixture,
+then run the diagnostic under Node 24.11+:
+
+```sh
+pnpm --filter @farm.js/core build:runtime
+pnpm --dir benchmarks/frameworks/apps/farm build
+node benchmarks/frameworks/preload-response.mjs > /tmp/farm-preload-response.json
+```
+
+For an isolated-runner check, manually dispatch the CI workflow with
+`preload-response-benchmark` enabled. Its opt-in diagnostic job builds the maintained fixture,
+collects two independent comparisons, and retains the raw JSON artifact for review. It does not
+assert timing thresholds or replace canonical results; check the recorded load and distributions
+before drawing a performance conclusion.
+
+This runs five alternating fresh-process pairs against the same built SSR entry, with 1,000 warmups
+and 3,000 measured requests per process. The baseline forces the old buffered-body path; both arms
+retain the no-candidate preload scanner guard. Every response is checked for equivalent HTML and
+same-URL freshness. Output includes raw batch samples, CPU time, and machine load. It is an
+in-process diagnostic, not network latency or a canonical cross-framework result.
+
 ## Limitations
 
 This small dynamic-SSR fixture measures local framework baseline overhead on one machine. It does
