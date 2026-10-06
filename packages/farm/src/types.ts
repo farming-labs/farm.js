@@ -584,11 +584,20 @@ export interface LayoutModule<TRoute extends FarmRoutePropsTarget = FarmRoutePro
   generateMetadata?: (props: LayoutMetadataProps<TRoute>) => Promise<Metadata> | Metadata;
 }
 
+/** A schema.org JSON-LD object, such as `{ "@context": "https://schema.org", "@type": "Article" }`. */
+export type MetadataJsonLd = object;
+
 export interface Metadata {
   metadataBase?: string | URL;
   title?: string | { default?: string; template?: string };
   description?: string;
   keywords?: string | string[];
+  /**
+   * schema.org structured data rendered as `<script type="application/ld+json">`,
+   * one per object. Layout entries come first, then the page's. Renders
+   * alongside the site-level `agent.jsonLd`.
+   */
+  jsonLd?: MetadataJsonLd | MetadataJsonLd[];
   author?: string;
   authors?: Array<{ name: string; url?: string }>;
   creator?: string;
