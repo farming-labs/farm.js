@@ -81,6 +81,47 @@ FARM_PREVIEW_GATEWAY_URL=https://preview.farmjs.dev
 
 ### Managed developer login
 
+#### Farm Infra mode
+
+To use Farm Infra API keys and first-party browser device approval, configure:
+
+```txt
+FARM_INFRA_URL=https://your-infra.example.com
+FARM_PREVIEW_GATEWAY_SECRET=<separate-random-secret-at-least-32-bytes>
+FARM_PREVIEW_AUTH_SECRET=<gateway-signing-secret-at-least-32-bytes>
+```
+
+Set the identical `FARM_PREVIEW_GATEWAY_SECRET` in Infra. It authenticates the private
+identity/activity backchannel; it is not a developer API key and must never reach the
+CLI or browser. `FARM_INFRA_URL` must be an HTTPS origin (loopback HTTP works locally).
+The integration never follows redirects carrying credentials.
+
+Apply Infra's auth, API-key, and preview schema migrations **before** deploying and
+enabling this gateway mode. Production auth includes a database-backed rate limiter.
+Ship the compatible CLI update as well: older clients do not understand the new
+`device` provider. Keep the existing Redis and Blob configuration described above.
+
+The gateway verifies API keys/device credentials with Infra on every grant. The signed
+grant contains the verified owner, preview name, and expiry. Only that short-lived grant
+reaches the tunnel transport. A revoked key cannot create a new grant; existing grants
+remain usable until their expiry. Missing/unavailable identity services fail closed.
+
+Optional `observer` hooks in both gateway transports report session lifecycle and
+request metadata. This example forwards them using Vercel `waitUntil`, with bounded
+concurrency and timeouts; failures never break public requests. Heartbeats are throttled
+to one report per session per 20 seconds. No request bodies, headers, or query strings
+are reported. Paths may contain identifiers or embedded credentials; never put secrets in URL paths. Reporting
+is best-effort; it is not a durable audit stream. The dashboard marks old heartbeats stale.
+
+Infra keeps the latest 200 requests per session and lists the latest 50 sessions that
+expired less than seven days ago. Configure the maintenance POST described in the Infra
+README to physically delete expired sessions and their request records. This gateway
+does not automatically provision that scheduler.
+
+#### Legacy GitHub mode
+
+Leave `FARM_INFRA_URL` unset to retain the existing GitHub flow:
+
 Create a GitHub OAuth app with Device Flow enabled. Configure its public client id and a private Farm
 signing secret:
 
@@ -136,11 +177,24 @@ Then point the CLI at it:
 farm preview --gateway http://localhost:3000 --name local-check
 ```
 
-For local gateway runs, the public URL uses the path fallback:
+By default, local gateway runs use the path fallback:
 
 ```txt
 http://localhost:3000/__preview/local-check
 ```
+
+For interactive websites, set `FARM_PREVIEW_DOMAIN=localhost` on the local gateway
+as well. The public URL becomes `http://local-check.localhost:3000`, preserving
+the gateway port. Each preview gets its own origin, so root-relative scripts,
+styles, API calls, and links reach that preview without rewriting the app. Use a
+browser that resolves `*.localhost` to loopback. The path fallback is useful for
+individual HTTP requests but does not relocate an app's root-relative URLs.
+
+When composing the Node adapters yourself, pass `domain: "localhost"` to
+`createNodePreviewGatewayHandler` and `publicDomain: "localhost"` to
+`createPersistentPreviewRelay`. Keep the CLI's gateway/relay endpoints on the
+gateway origin, not on a preview subdomain. Target WebSocket upgrades, including
+Vite HMR, remain subject to the limits below.
 
 ## Limits
 
