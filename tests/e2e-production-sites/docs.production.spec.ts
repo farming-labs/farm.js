@@ -651,7 +651,9 @@ test("agents page connects the blog, planned capabilities, and Markdown", async 
   await expect(page.locator(".agents-capabilities")).toContainText(
     "compatible agents talk to your app",
   );
-  await expect(page.locator("#agents-now-title")).toHaveAccessibleName("Agent-native by default.");
+  await expect(page.locator("#agents-now-title")).toHaveAccessibleName(
+    "Agent-ready. One config block.",
+  );
   const shipped = page.locator(".agents-now article");
   await expect(shipped).toHaveCount(4);
   await expect(shipped.getByText("[ Experimental ]")).toHaveCount(2);
@@ -690,7 +692,7 @@ test("agents page connects the blog, planned capabilities, and Markdown", async 
   expect(mirror.ok()).toBe(true);
   expect(await mirror.text()).toContain("# Agent infrastructure");
   expect(await mirror.text()).toContain("planned capabilities");
-  expect(await mirror.text()).toContain("## Agent-native by default");
+  expect(await mirror.text()).toContain("## Agent-ready with one config block");
   expect(errors).toEqual([]);
 });
 
