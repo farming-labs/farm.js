@@ -81,7 +81,7 @@ import { _withAfterNodeMiddleware } from "./after";
 import { _runWithAPIRequestRuntime } from "./api/server-context";
 import type { APIRequestRuntime } from "./api/server-client-bridge";
 import {
-  farmAppOwnsLlmsPath,
+  farmAppOwnsDocsEnginePath,
   isViteModuleRequest,
   shouldBypassFarmRouterForDottedPath,
 } from "./dev-static";
@@ -1832,14 +1832,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
           // Vite loading a `.md` file as a module is not a request for docs or Markdown.
           const viteModuleRequest = isViteModuleRequest(parsedRequestUrl, req.headers);
-          // An app's own llms.txt and llms-full.txt (agent.llmsTxt, llms.ts, llms-full.ts,
-          // or a public file) take those paths from the docs engine, as in production.
-          const appOwnsLlmsTxt = farmAppOwnsLlmsPath(requestPathname, {
+          // An app's own llms.txt, llms-full.txt, sitemap.xml, and robots.txt (agent.llmsTxt,
+          // a root llms.ts, llms-full.ts, sitemap.ts, or robots.ts, or a public file) take
+          // those paths from the docs engine, as in production.
+          const appOwnsDocsEnginePath = farmAppOwnsDocsEnginePath(requestPathname, {
             generatedPaths: farmLlmsTxtGeneratedPaths(farmConfig),
             routeManager: farmApp.getRouteManager(),
             publicDir: server.config.publicDir,
           });
-          if (farmDocsHandler && !appOwnsLlmsTxt && !viteModuleRequest) {
+          if (farmDocsHandler && !appOwnsDocsEnginePath && !viteModuleRequest) {
             const docsRequest = new Request(fullUrl, {
               method: requestMethod,
               headers: docsHeaders,
