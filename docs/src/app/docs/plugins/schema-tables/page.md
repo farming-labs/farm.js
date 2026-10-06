@@ -236,6 +236,39 @@ plugin needs, as in `billing (plugin, postgres, needs teams)`. Add
 an app that installs your plugin without the other one fails while its config
 loads instead of at the first query.
 
+### Foreign keys between plugins
+
+A reference to another plugin's table becomes a real foreign key when that is
+safe: the other table is in the same database, the referenced column is its
+primary key or unique, and the column types match. It is created with the
+table, so `farm schema migrate` gets it for you by creating the other plugin's
+tables first:
+
+```sql
+CREATE TABLE IF NOT EXISTS "subscription" (
+  "id" TEXT PRIMARY KEY,
+  "organizationId" TEXT NOT NULL REFERENCES "organization" ("id") ON DELETE CASCADE
+);
+```
+
+If the other plugin has not created its table yet, the table is created without
+the key and the command says to run `farm schema migrate`. A table that already
+exists never gets a foreign key on its own: it may hold rows that point at
+nothing. Allow it, and Farm counts those rows first and adds the key only when
+there are none:
+
+```ts title="farm.config.ts"
+schema: {
+  allowForeignKeys: {
+    billing: ["subscription"];
+  }
+}
+```
+
+SQLite can only add a foreign key when it creates a table. References to the
+app's own tables, and references with `enforced: "app"` or `"none"`, never get
+one.
+
 ### Tables the plugin uses but does not create
 
 A plugin often points at a table the app owns, such as the `user` table its auth

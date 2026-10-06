@@ -1,5 +1,6 @@
 import type { FarmSchema, FarmSchemaConfig } from "./schema";
 import { collectSchemaDependencies, orderSchemaOwners } from "./schema-dependencies";
+import { describeForeignKeyApproval, planCrossOwnerReferences } from "./schema-foreign-keys";
 import {
   collectSchemaExtensions,
   describeSchemaExtensionApproval,
@@ -477,6 +478,22 @@ export async function checkSchema(
     const database = databases.get(owner.name);
     if (!models || !database) continue;
     try {
+      // The same foreign keys migrate would create, so a missing one can be named.
+      const crossOwner = await planCrossOwnerReferences(
+        owner,
+        findSchemaTableOwners(config),
+        database.dialect,
+        database.executor,
+      );
+      for (const reference of crossOwner.eligible) {
+        const model = models.find((candidate) => candidate.modelKey === reference.modelKey);
+        if (!model) continue;
+        (model.foreignKeys ??= {})[reference.fieldKey] = {
+          table: reference.referencedTable,
+          column: reference.referencedColumn,
+          onDelete: reference.onDelete,
+        };
+      }
       await checkOwnerTables(owner, models, database.dialect, database.executor, issues);
       await checkReferences(owner, models, database, databases, resolveTarget, issues);
       await checkExtensions(
@@ -561,7 +578,7 @@ async function checkOwnerTables(
         message: `"${drift.table}" is missing the ${index.unique ? "unique " : ""}index on (${index.columns.join(", ")}).`,
       });
     }
-    for (const reference of drift.missingReferences) {
+    for (const reference of drift.missingReferences ?? []) {
       issues.push({
         severity: "warning",
         code: "foreign-key-missing",
@@ -571,6 +588,20 @@ async function checkOwnerTables(
         message: `"${drift.table}.${reference.column}" has no foreign key to "${reference.referencedTable}.${reference.referencedColumn}".`,
       });
     }
+  }
+  for (const key of plan.addableForeignKeys ?? []) {
+    issues.push({
+      severity: "warning",
+      code: "foreign-key-missing",
+      owner: owner.name,
+      table: key.table,
+      column: key.column,
+      message: `"${key.table}.${key.column}" has no foreign key to "${key.referencedTable}.${key.referencedColumn}", which ${owner.name} could have.`,
+      hint:
+        dialect === "sqlite"
+          ? "SQLite can only add a foreign key when it creates the table."
+          : `Allow it with \`${describeForeignKeyApproval({ owner: owner.name, modelKey: key.modelKey })}\` in farm.config, then run \`farm ${owner.name} migrate --apply\`. Rows that point at nothing are checked first.`,
+    });
   }
 }
 
@@ -643,9 +674,9 @@ async function checkReferences(
       const mine = columnTypeFamily(expected);
       const theirs = columnTypeFamily(column.type);
       if (mine && theirs && mine !== theirs) {
-        // A warning, not an error: Farm never puts a foreign key on a reference
-        // that leaves the owner, and lookups by value still work. Joins in SQL
-        // need a cast.
+        // A warning, not an error: lookups by value still work, and Farm only
+        // creates a foreign key across owners when the types match, so this
+        // reference simply stays without one. Joins in SQL need a cast.
         issues.push({
           severity: "warning",
           code: "reference-type",

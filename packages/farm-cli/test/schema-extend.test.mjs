@@ -88,7 +88,7 @@ test("prints the ALTER TABLE with the approval it needs, and refuses to apply it
     const applied = await farm(root, "loyalty", "migrate", "--apply");
     assert.equal(applied.code, 1, applied.output);
     assert.match(applied.output, /Not allowed yet, so not added: user\.points/);
-    assert.match(applied.output, /column\(s\) loyalty needs are still missing: user\.points/);
+    assert.match(applied.output, /change\(s\) loyalty needs are still missing: user\.points/);
     // Its own table is created; the app's table is untouched.
     assert.deepEqual(await columns(database, "pointsHistory"), ["id"]);
     assert.deepEqual(await columns(database, "user"), ["id"]);
