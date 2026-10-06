@@ -1001,6 +1001,8 @@ export { default } from "./llms";
 
 Farm automatically adds the nearest discovered manifest to rendered page heads unless `metadata.manifest` already supplies an explicit URL. A nested file keeps its route prefix: `src/app/docs/sitemap.ts` is served at `/docs/sitemap.xml`, and a file under `[tenant]` receives the concrete tenant param.
 
+With the [docs engine](/docs/docs-engine) enabled, a root `sitemap.ts`, `robots.ts`, `llms.ts`, or `llms-full.ts` takes its path from the docs engine, which keeps serving the ones the app does not define. An app sitemap replaces the docs engine's instead of extending it, so list the docs pages in it when crawlers should find them there.
+
 Generated metadata routes accept `GET` and `HEAD` and return `405` for other methods. They revalidate by default. Export `revalidate = 300` for shared CDN caching or `revalidate = false` only for permanently immutable output. A returned `Response` is an escape hatch for custom XML, headers, or status codes.
 
 `feed.ts` is not reserved yet because feeds need an explicit RSS, Atom, or JSON Feed contract. Use an API or programmatic route for feeds until that format is defined.
