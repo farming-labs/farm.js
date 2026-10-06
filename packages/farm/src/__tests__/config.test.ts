@@ -387,6 +387,18 @@ describe("resolveConfig", () => {
     expect((disabled.openapi as any).specRoute).toBe(false);
   });
 
+  it("keeps preview noindex off by default", async () => {
+    const defaults = await resolveConfig({}, "production");
+    expect(defaults.agent.noindexPreviews).toBe(false);
+
+    const configured = await resolveConfig({ agent: { noindexPreviews: true } }, "production");
+    expect(configured.agent.noindexPreviews).toBe(true);
+
+    await expect(
+      resolveConfig({ agent: { noindexPreviews: "yes" as never } }, "production"),
+    ).rejects.toThrow("agent.noindexPreviews must be a boolean.");
+  });
+
   it("resolves the agent config with JSON-LD and llms.txt off by default", async () => {
     const defaults = await resolveConfig({}, "production");
     expect(defaults.agent.jsonLd).toBe(false);

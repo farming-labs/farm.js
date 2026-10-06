@@ -103,6 +103,7 @@ import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import { createFarmThemeCssPlugin } from "../theme/vite";
 import { resolveFarmInstrumentationFile } from "../instrumentation";
 import { getFarmPresetRuntime } from "../deployment";
+import { isFarmPreviewDeploymentEnvironment } from "../deployment-environment";
 import { resolveFarmInstrumentationRuntime } from "../instrumentation-runtime";
 import {
   getFarmRendererCapabilities,
@@ -5244,6 +5245,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   appendFarmRedirectQuery,
   applyFarmBasePath,
   applyFarmCspNonceToResponse,
+  applyFarmPreviewRobotsTag,
   applyFarmThemeDocument,
   appendFarmLinkHeader,
   applyProductionMiddlewareHeaders,
@@ -5285,6 +5287,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   resolveDefaultErrorStatus,
   resolveFarmSecurityConfig,
   resolveFarmInstrumentationRuntime,
+  resolveFarmPreviewDeployment,
   resolveFarmWebRequestOrigin,
   runWithFarmRequestSpan,
   searchParamsToObject,
@@ -5737,6 +5740,17 @@ const farmMdxConfig = ${JSON.stringify({
     components: typeof config.mdx?.components === "string" ? config.mdx.components : undefined,
   })};
 const configuredFarmMdxComponents = farmUserConfig?.mdx?.components;
+${
+  config.agent?.noindexPreviews
+    ? `// agent.noindexPreviews: the runtime environment decides, falling back to the
+// environment this was built in, since Netlify exposes its deploy context only
+// to the build.
+const farmNoindexPreview = resolveFarmPreviewDeployment(
+  globalThis.process?.env,
+  ${JSON.stringify(isFarmPreviewDeploymentEnvironment(process.env))},
+);`
+    : ""
+}
 const farmMdxComponents = ${
     mdxComponentsPath
       ? `(FarmMdxComponentsModule.components || Reflect.get(FarmMdxComponentsModule, "default") || {})`
@@ -8639,11 +8653,17 @@ ${generatePreloadResponseRuntimeSource()}
 
 // Export as Web Standard fetch API
 export async function fetch(request, context) {
-  return _runWithAPIRequestRuntime({
+  ${config.agent?.noindexPreviews ? "const response = await" : "return"} _runWithAPIRequestRuntime({
     basePath: farmLocalAPIBasePath,
     dispatch: async (localRequest) =>
       (await handleAPIRequest(localRequest)) ?? Response.json({ error: "Not Found" }, { status: 404 }),
-  }, () => handleFarmFetch(request, context));
+  }, () => handleFarmFetch(request, context));${
+    config.agent?.noindexPreviews
+      ? `
+  // Keep every response of a preview deployment out of search indexes.
+  return farmNoindexPreview ? applyFarmPreviewRobotsTag(response) : response;`
+      : ""
+  }
 }
 
 async function handleFarmFetch(request, context) {

@@ -146,6 +146,8 @@ import {
 import { resolveFarmPageDataFailure } from "./navigation/page-data-error";
 import { addMetadataMarkdownAlternate, mergeMetadata } from "./metadata";
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
+import { isFarmPreviewDeploymentEnvironment } from "./deployment-environment";
+import { FARM_PREVIEW_ROBOTS_TAG } from "./preview-noindex";
 import { resolveFarmRequestURL } from "./server/request";
 import { reportOpenAPIDevGenerationResult } from "./openapi/dev-status";
 
@@ -1090,6 +1092,16 @@ export function farmPlugin(
       await farmApp.initialize();
 
       const farmConfig = farmApp.getConfig();
+      // agent.noindexPreviews marks every dev response, Vite's own included, when
+      // the environment says this is a preview (`FARM_PREVIEW=1 farm dev`).
+      if (farmConfig.agent?.noindexPreviews) {
+        server.middlewares.use((_req, res, next) => {
+          if (isFarmPreviewDeploymentEnvironment(process.env)) {
+            res.setHeader("X-Robots-Tag", FARM_PREVIEW_ROBOTS_TAG);
+          }
+          next();
+        });
+      }
       const apiServerBasePath = resolveFarmAPIServerBasePath(farmConfig.api);
       const serverConfig = resolveFarmServerConfig(farmConfig.server);
       let imageHandler: FarmImageHandler | null = null;
