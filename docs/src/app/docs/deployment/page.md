@@ -319,6 +319,40 @@ export default defineConfig({
 });
 ```
 
+## Preview deployments
+
+Set `agent.noindexPreviews` to keep preview deployments out of search results:
+
+```ts
+export default defineConfig({
+  agent: { noindexPreviews: true },
+});
+```
+
+On a preview, every response from Farm's server (pages, API routes, docs, errors) gets
+`X-Robots-Tag: noindex, nofollow`. Production deployments are unaffected. The option lives with the
+other [agent readiness](/docs/configuration#agent-readiness) settings.
+
+A deployment is a preview when:
+
+| Signal                                      | Where                                             |
+| ------------------------------------------- | ------------------------------------------------- |
+| `FARM_PREVIEW=1` (`0` turns it off)         | Any host, `farm dev`, `farm build`, or the server |
+| `VERCEL_ENV=preview`                        | Vercel previews and custom environments           |
+| `CONTEXT=deploy-preview` or `branch-deploy` | Netlify, with `NETLIFY` set, read at build time   |
+| `IS_PULL_REQUEST=true`                      | Render pull request previews                      |
+
+Farm reads these when it builds and again when the server starts, so a preview build stays one at
+runtime (Netlify sets `CONTEXT` only during the build); an explicit `FARM_PREVIEW` at runtime wins
+over the build. Cloudflare Pages exposes no variable that tells a preview from production, so set
+`FARM_PREVIEW=1` in its preview environment; Cloudflare already sends `X-Robots-Tag: noindex` on
+`*.pages.dev` preview URLs. Run `FARM_PREVIEW=1 farm dev` to check the behavior locally.
+
+Files a platform serves straight from its CDN or static file server, such as prerendered pages and
+assets, do not pass through Farm's server and keep their platform's headers. Vercel, Netlify, and
+Cloudflare Pages already mark their generated preview URLs as noindex; a preview on a custom
+domain only gets the header on responses from Farm's server.
+
 ## Production checklist
 
 - Run `farm build` before `farm deploy`.

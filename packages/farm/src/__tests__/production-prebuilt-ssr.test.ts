@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { chromium } from "@playwright/test";
+import { imageSize } from "image-size";
 import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
@@ -549,7 +550,19 @@ describe("production prebuilt SSR output", () => {
 
         await runProductionRequest(serverDir, async (response) => {
           expect(response.status).toBe(200);
-          expect(await response.text()).toContain("prebuilt SSR output");
+          const html = await response.text();
+          expect(html).toContain("prebuilt SSR output");
+          // The head advertises the mirror exactly when the Link header does.
+          const markdownLink = '<link rel="alternate" href="/index.md" type="text/markdown">';
+          if (markdownMirrors) {
+            expect(response.headers.get("link")).toContain(
+              '</index.md>; rel="alternate"; type="text/markdown"',
+            );
+            expect(html).toContain(markdownLink);
+          } else {
+            expect(response.headers.get("link") ?? "").not.toContain("text/markdown");
+            expect(html).not.toContain('type="text/markdown"');
+          }
 
           for (const [pathname, accept] of [
             ["/missing.md", "text/html"],
@@ -594,6 +607,80 @@ describe("production prebuilt SSR output", () => {
     },
     120_000,
   );
+
+  it("renders layout and page JSON-LD next to the site-level script", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        `
+export const metadata = {
+  openGraph: { siteName: "Farm Shop" },
+  jsonLd: { "@context": "https://schema.org", "@type": "WebSite", name: "Farm Shop" },
+};
+
+export default function RootLayout({ children }) {
+  return <html><body>{children}</body></html>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+export const metadata = {
+  jsonLd: [
+    { "@context": "https://schema.org", "@type": "Article", headline: "</script><script>alert(1)</script>" },
+  ],
+};
+
+export default function Page() {
+  return <main>json-ld page</main>;
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          agent: { jsonLd: true },
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "json-ld-production-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          const head = html.slice(0, html.indexOf("</head>"));
+          const scripts = [
+            ...head.matchAll(/<script type="application\/ld\+json"([^>]*)>(.*?)<\/script>/g),
+          ];
+
+          // Site identity first and unmarked, then layout and page entries, marked.
+          expect(scripts.map(([, attributes]) => attributes.trim())).toEqual([
+            "",
+            "data-farm-metadata",
+            "data-farm-metadata",
+          ]);
+          expect(scripts.map(([, , json]) => JSON.parse(json!)["@type"])).toEqual([
+            "Organization",
+            "WebSite",
+            "Article",
+          ]);
+          expect(JSON.parse(scripts[2]![2]!).headline).toBe("</script><script>alert(1)</script>");
+          expect(head).not.toContain("<script>alert(1)");
+        },
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
 
   it("adds a fresh CSP nonce to production HTML and every script tag", async () => {
     const root = await createProductionFixture();
@@ -4093,6 +4180,100 @@ export default function OpenGraphImage() {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 180_000);
+
+  it("serves a @vercel/og ImageResponse from an API route on a built node-server", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      // No metadata image route: the API route alone must pull in the image runtime.
+      await fs.mkdir(path.join(root, "src", "app", "api", "card"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "api", "card", "route.tsx"),
+        `
+import { ImageResponse } from "@vercel/og";
+
+export function GET(request) {
+  const title = new URL(request.url).searchParams.get("title") ?? "Farm.js";
+  return new ImageResponse(
+    <div style={{ display: "flex", width: "100%", height: "100%", alignItems: "center", justifyContent: "center", background: "#09090b", color: "white", fontSize: 48 }}>
+      {title}
+    </div>,
+    { width: 600, height: 315, headers: { "cache-control": "public, max-age=60" } },
+  );
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "vercel-og-api-route-node-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(response.headers.get("content-type")).toBe("image/png");
+          expect(response.headers.get("cache-control")).toBe("public, max-age=60");
+          const bytes = Buffer.from(await response.arrayBuffer());
+          expect(imageSize(bytes)).toMatchObject({ width: 600, height: 315, type: "png" });
+        },
+        "/api/card?title=Shared",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("keeps a @vercel/og API route import bundled in Cloudflare worker output", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      // Node presets keep @vercel/og external; a Worker has no node_modules to load it from.
+      await fs.mkdir(path.join(root, "src", "app", "api", "card"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "api", "card", "route.tsx"),
+        `
+import { ImageResponse } from "@vercel/og";
+
+export function GET() {
+  return new ImageResponse(<div style={{ display: "flex" }}>Cloudflare og route</div>, {
+    width: 600,
+    height: 315,
+  });
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "vercel-og-api-route-cloudflare-test",
+          deploy: { target: "cloudflare", preset: "cloudflare-module" },
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "cloudflare-module" });
+
+      const serverOutput = await readJavaScriptOutput(
+        path.join(root, config.deploy.outputDir, "server"),
+      );
+      expect(serverOutput).toContain("Cloudflare og route");
+      expect(serverOutput).not.toContain(".wasm?module");
+      expect(serverOutput).not.toMatch(/\bfrom\s*["']@vercel\/og["']/);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("answers redirect() and notFound() from pages, streams and middleware", async () => {
     const root = await createProductionFixture();
     const write = async (relativePath: string, source: string) => {

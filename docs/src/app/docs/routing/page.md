@@ -766,7 +766,8 @@ from the rendered React page automatically.
 Export `metadata` for static head tags or `generateMetadata` when the values depend on route params, search params, middleware data, or route data. Farm merges layout metadata from root to leaf, then applies the page metadata last.
 
 During HTML-based client navigation, Farm reconciles the destination document's title, meta tags,
-canonical and alternate links, icons, and manifest link. Tags omitted by the destination are removed,
+canonical and alternate links, icons, manifest link, and
+[page JSON-LD](/docs/configuration#agent-readiness). Tags omitted by the destination are removed,
 so metadata from the previous route cannot remain active.
 
 A layout can define a default title and a `%s` template for child segments. The layout itself uses
@@ -849,6 +850,34 @@ export default function DocsLayout({ children }: LayoutProps) {
 
 Pair this layout with `opengraph-image.tsx` in the same `[...slug]` segment to generate a different PNG for each document. `generateMetadata` supplies the title, description, and social fields; the image file renders the PNG described below. Leave `openGraph.images` and `twitter.images` unset when Farm should attach the nearest generated image automatically. An explicit image value still takes precedence.
 
+### Article fields
+
+When `openGraph.type` is `"article"`, Farm also renders the Open Graph article properties:
+
+```tsx
+import type { MetadataProps } from "@farm.js/core";
+
+export async function generateMetadata({ params }: MetadataProps<"/blog/[slug]">) {
+  const post = await getPost(params.slug);
+
+  return {
+    openGraph: {
+      type: "article",
+      publishedTime: post.publishedAt,
+      modifiedTime: post.updatedAt,
+      authors: ["https://acme.test/team/ada"],
+      section: "Engineering",
+      tags: post.tags,
+    },
+  };
+}
+```
+
+`publishedTime` and `modifiedTime` take an ISO string or a `Date` and render
+`article:published_time` and `article:modified_time`. `authors` and `tags` take a string or an
+array and render one `article:author` or `article:tag` per item. `section` renders
+`article:section`. Other `openGraph.type` values ignore these fields.
+
 ### Favicons
 
 Place favicon files in `public/`, then declare them through the root layout metadata. Files in `public/` are served from the application root, so `public/favicon.svg` is available at `/favicon.svg`.
@@ -878,6 +907,30 @@ export const metadata: Metadata = {
 ```
 
 Root layout metadata applies the favicon to every route. Nested layouts and pages can override individual icon entries through their own metadata. Do not render a `<link rel="icon">` element from the layout component; declaring `metadata.icons` lets Farm place the tags in the document head in both development and production.
+
+### Site verification
+
+Search consoles confirm site ownership with a meta tag. Set the tokens once in the root layout:
+
+**src/app/layout.tsx**
+
+```tsx
+import type { Metadata } from "@farm.js/core";
+
+export const metadata: Metadata = {
+  verification: {
+    google: "google-token",
+    bing: "bing-token",
+    yandex: "yandex-token",
+    other: { "facebook-domain-verification": "facebook-token" },
+  },
+};
+```
+
+`google`, `bing`, and `yandex` render `google-site-verification`, `msvalidate.01`, and
+`yandex-verification`. `other` renders one `<meta name content>` per key. Every field accepts an
+array when a service needs more than one token. Like `openGraph`, `verification` merges one level
+deep, so a nested layout or page adds tokens and replaces the ones it repeats.
 
 ### Application metadata routes
 
@@ -937,6 +990,26 @@ export default function robots(): MetadataRoute.Robots {
     host: "https://acme.test",
   };
 }
+```
+
+`robots.txt` controls crawling. Per-page indexing directives belong in `metadata.robots`, which
+renders a `<meta name="robots">` tag. Besides `index` and `follow`, it accepts `noarchive`,
+`nosnippet`, `noimageindex`, `max-snippet`, `max-image-preview`, `max-video-preview`, and
+`unavailable_after`. `googleBot` takes the same directives, or a string, for a separate
+`<meta name="googlebot">` tag:
+
+```tsx
+import type { Metadata } from "@farm.js/core";
+
+export const metadata: Metadata = {
+  robots: {
+    index: true,
+    follow: true,
+    "max-snippet": -1,
+    "max-image-preview": "large",
+    googleBot: { noimageindex: true },
+  },
+};
 ```
 
 **src/app/manifest.ts**
@@ -1001,9 +1074,37 @@ export { default } from "./llms";
 
 Farm automatically adds the nearest discovered manifest to rendered page heads unless `metadata.manifest` already supplies an explicit URL. A nested file keeps its route prefix: `src/app/docs/sitemap.ts` is served at `/docs/sitemap.xml`, and a file under `[tenant]` receives the concrete tenant param.
 
+With the [docs engine](/docs/docs-engine) enabled, a root `sitemap.ts`, `robots.ts`, `llms.ts`, or `llms-full.ts` takes its path from the docs engine, which keeps serving the ones the app does not define. An app sitemap replaces the docs engine's instead of extending it, so list the docs pages in it when crawlers should find them there.
+
 Generated metadata routes accept `GET` and `HEAD` and return `405` for other methods. They revalidate by default. Export `revalidate = 300` for shared CDN caching or `revalidate = false` only for permanently immutable output. A returned `Response` is an escape hatch for custom XML, headers, or status codes.
 
 `feed.ts` is not reserved yet because feeds need an explicit RSS, Atom, or JSON Feed contract. Use an API or programmatic route for feeds until that format is defined.
+
+### Alternate representations
+
+Advertise other formats of a page, such as that feed route, with `alternates.types`. Each MIME
+type renders `<link rel="alternate" type href>`, with an optional `title`:
+
+```tsx
+import type { Metadata } from "@farm.js/core";
+
+export const metadata: Metadata = {
+  alternates: {
+    types: {
+      "application/rss+xml": [{ url: "/blog/feed.xml", title: "Acme blog" }],
+      "application/atom+xml": "/blog/atom.xml",
+    },
+  },
+};
+```
+
+Relative URLs resolve against `metadataBase`, the same as `alternates.languages`. A page that sets
+`alternates.types` replaces its layout's whole `types` object.
+
+When a page has a [Markdown mirror](/docs/markdown), Farm adds
+`<link rel="alternate" type="text/markdown" href="/blog/hello.md">` to its head next to the `Link`
+response header it already sends. Set `alternates.types["text/markdown"]` to advertise a different
+URL. Restricting `md.expose` or setting `md: false` removes the link along with the mirror.
 
 ### Static metadata images
 
@@ -1091,6 +1192,26 @@ Generated images revalidate on every request by default. Export `revalidate = 30
 For advanced renderers, the default export may still return a `Response`, string, or bytes. To preserve the earlier React-to-SVG behavior, export `contentType = "image/svg+xml"` and return an SVG React element. A returned `Response` keeps its own status, headers, and body.
 
 Keep only one implementation for each image kind in a segment. For example, defining both `opengraph-image.png` and `opengraph-image.tsx` produces a build error. For broad social-platform compatibility, use 1200 by 630; generated JSX routes emit PNG automatically.
+
+### Other meta tags
+
+Use `other` for a `<meta name>` tag that has no dedicated metadata field. Each key renders one tag,
+and an array value renders one tag per item:
+
+```tsx
+import type { Metadata } from "@farm.js/core";
+
+export const metadata: Metadata = {
+  other: {
+    "apple-itunes-app": "app-id=123456789",
+    "format-detection": "telephone=no",
+  },
+};
+```
+
+Names and values are escaped. `other` merges one level deep, so a page can replace a key its layout
+set and keep the rest. Client navigation removes the previous page's `other` tags before adding the
+next page's.
 
 ## File Route States
 

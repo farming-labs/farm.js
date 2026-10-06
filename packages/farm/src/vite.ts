@@ -35,7 +35,12 @@ import {
   scanProgrammaticPagePaths,
 } from "./routes-shared";
 import type { FarmDocsAPIHandler } from "./docs";
-import { createMarkdownMirrorResponse, resolveMarkdownMirrorTarget } from "./markdown";
+import {
+  createMarkdownMirrorResponse,
+  getFarmMarkdownAlternatePath,
+  getFarmMarkdownMirrorPath,
+  resolveMarkdownMirrorTarget,
+} from "./markdown";
 import { resolveFarmLlmsTxtConfig } from "./llms-txt";
 import {
   FARM_MARKDOWN_CONTENT_TYPE,
@@ -81,7 +86,7 @@ import { _withAfterNodeMiddleware } from "./after";
 import { _runWithAPIRequestRuntime } from "./api/server-context";
 import type { APIRequestRuntime } from "./api/server-client-bridge";
 import {
-  farmAppOwnsLlmsPath,
+  farmAppOwnsDocsEnginePath,
   isViteModuleRequest,
   shouldBypassFarmRouterForDottedPath,
 } from "./dev-static";
@@ -139,8 +144,10 @@ import {
   parseFarmLayoutChainHeader,
 } from "./navigation/render-plan";
 import { resolveFarmPageDataFailure } from "./navigation/page-data-error";
-import { mergeMetadata } from "./metadata";
+import { addMetadataMarkdownAlternate, mergeMetadata } from "./metadata";
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
+import { isFarmPreviewDeploymentEnvironment } from "./deployment-environment";
+import { FARM_PREVIEW_ROBOTS_TAG } from "./preview-noindex";
 import { resolveFarmRequestURL } from "./server/request";
 import { reportOpenAPIDevGenerationResult } from "./openapi/dev-status";
 
@@ -1085,6 +1092,16 @@ export function farmPlugin(
       await farmApp.initialize();
 
       const farmConfig = farmApp.getConfig();
+      // agent.noindexPreviews marks every dev response, Vite's own included, when
+      // the environment says this is a preview (`FARM_PREVIEW=1 farm dev`).
+      if (farmConfig.agent?.noindexPreviews) {
+        server.middlewares.use((_req, res, next) => {
+          if (isFarmPreviewDeploymentEnvironment(process.env)) {
+            res.setHeader("X-Robots-Tag", FARM_PREVIEW_ROBOTS_TAG);
+          }
+          next();
+        });
+      }
       const apiServerBasePath = resolveFarmAPIServerBasePath(farmConfig.api);
       const serverConfig = resolveFarmServerConfig(farmConfig.server);
       let imageHandler: FarmImageHandler | null = null;
@@ -1832,14 +1849,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
           // Vite loading a `.md` file as a module is not a request for docs or Markdown.
           const viteModuleRequest = isViteModuleRequest(parsedRequestUrl, req.headers);
-          // An app's own llms.txt and llms-full.txt (agent.llmsTxt, llms.ts, llms-full.ts,
-          // or a public file) take those paths from the docs engine, as in production.
-          const appOwnsLlmsTxt = farmAppOwnsLlmsPath(requestPathname, {
+          // An app's own llms.txt, llms-full.txt, sitemap.xml, and robots.txt (agent.llmsTxt,
+          // a root llms.ts, llms-full.ts, sitemap.ts, or robots.ts, or a public file) take
+          // those paths from the docs engine, as in production.
+          const appOwnsDocsEnginePath = farmAppOwnsDocsEnginePath(requestPathname, {
             generatedPaths: farmLlmsTxtGeneratedPaths(farmConfig),
             routeManager: farmApp.getRouteManager(),
             publicDir: server.config.publicDir,
           });
-          if (farmDocsHandler && !appOwnsLlmsTxt && !viteModuleRequest) {
+          if (farmDocsHandler && !appOwnsDocsEnginePath && !viteModuleRequest) {
             const docsRequest = new Request(fullUrl, {
               method: requestMethod,
               headers: docsHeaders,
@@ -1943,10 +1961,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             if (!varyValues.some((value) => value.toLowerCase() === "accept")) {
               res.setHeader("Vary", [...varyValues, "Accept"].join(", "));
             }
-            const alternatePath =
-              markdownPageTarget.pathname === "/"
-                ? "/index.md"
-                : `${markdownPageTarget.pathname}.md`;
+            const alternatePath = getFarmMarkdownMirrorPath(markdownPageTarget.pathname);
             const alternateLink = `<${alternatePath}>; rel="alternate"; type="text/markdown"`;
             const currentLink = res.getHeader("Link");
             res.setHeader(
@@ -2534,6 +2549,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     await (routeModule as any).generateMetadata(routeProps),
                   );
                 }
+                mergedMetadata = addMetadataMarkdownAlternate(
+                  mergedMetadata,
+                  getFarmMarkdownAlternatePath(farmApp.getConfig().md, targetRequestUrl.pathname),
+                );
 
                 const routeSlots = await Promise.all(
                   slots.map(async (slot) => {
