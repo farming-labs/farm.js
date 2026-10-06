@@ -422,6 +422,32 @@ structured format, and receives the generated pages and defaults to build on. Wh
 site name or title, `metadataBase`, and description. A page with none of those gets no JSON-LD. An
 object sets the `type` (emitted as `@type`) and fields such as `name`, `url`, `logo`, and `sameAs`.
 
+Pages and layouts add their own structured data with `metadata.jsonLd`, an object or an array of
+objects. It works without `agent.jsonLd`; when both are set, the site script comes first.
+
+```tsx title="src/app/blog/[slug]/page.tsx"
+import type { MetadataProps } from "@farm.js/core";
+
+export async function generateMetadata({ params }: MetadataProps<"/blog/[slug]">) {
+  const post = await getPost(params.slug);
+
+  return {
+    title: post.title,
+    jsonLd: {
+      "@context": "https://schema.org",
+      "@type": "BlogPosting",
+      headline: post.title,
+      datePublished: post.publishedAt,
+    },
+  };
+}
+```
+
+Each object renders its own `<script type="application/ld+json">` with `<` escaped, so values
+cannot close the tag. Entries from layouts render first and accumulate with the page's instead of
+replacing them. Client navigation swaps page and layout JSON-LD for the next route's and leaves
+the site script and any `ld+json` script the app renders itself in place.
+
 ## Isolated client hydration
 
 React applications can keep using `"use client"` without enabling React Server Components. By

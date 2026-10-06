@@ -87,7 +87,7 @@ function pruneUndefined(object: Record<string, unknown>): Record<string, unknown
  * Serialize a JSON-LD object for inline `<script>` embedding, escaping `<` so a
  * value containing `</script>` cannot break out of the tag.
  */
-function serializeJsonLd(value: unknown): string {
+export function serializeJsonLd(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 

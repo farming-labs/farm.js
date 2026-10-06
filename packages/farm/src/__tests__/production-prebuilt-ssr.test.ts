@@ -543,6 +543,80 @@ describe("production prebuilt SSR output", () => {
     120_000,
   );
 
+  it("renders layout and page JSON-LD next to the site-level script", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        `
+export const metadata = {
+  openGraph: { siteName: "Farm Shop" },
+  jsonLd: { "@context": "https://schema.org", "@type": "WebSite", name: "Farm Shop" },
+};
+
+export default function RootLayout({ children }) {
+  return <html><body>{children}</body></html>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+export const metadata = {
+  jsonLd: [
+    { "@context": "https://schema.org", "@type": "Article", headline: "</script><script>alert(1)</script>" },
+  ],
+};
+
+export default function Page() {
+  return <main>json-ld page</main>;
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          agent: { jsonLd: true },
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "json-ld-production-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          const head = html.slice(0, html.indexOf("</head>"));
+          const scripts = [
+            ...head.matchAll(/<script type="application\/ld\+json"([^>]*)>(.*?)<\/script>/g),
+          ];
+
+          // Site identity first and unmarked, then layout and page entries, marked.
+          expect(scripts.map(([, attributes]) => attributes.trim())).toEqual([
+            "",
+            "data-farm-metadata",
+            "data-farm-metadata",
+          ]);
+          expect(scripts.map(([, , json]) => JSON.parse(json!)["@type"])).toEqual([
+            "Organization",
+            "WebSite",
+            "Article",
+          ]);
+          expect(JSON.parse(scripts[2]![2]!).headline).toBe("</script><script>alert(1)</script>");
+          expect(head).not.toContain("<script>alert(1)");
+        },
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("adds a fresh CSP nonce to production HTML and every script tag", async () => {
     const root = await createProductionFixture();
 

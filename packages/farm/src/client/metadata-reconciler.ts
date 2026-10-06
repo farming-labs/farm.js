@@ -1,10 +1,10 @@
-import { renderMetadataHead, resolveMetadataTitle } from "../metadata";
+import { FARM_METADATA_ATTRIBUTE, renderMetadataHead, resolveMetadataTitle } from "../metadata";
 import type { Metadata } from "../types";
 
 export type NavigationMetadata = (Metadata & Record<string, any>) | undefined;
 
 /** Marks head elements this reconciler inserted, so they can be replaced. */
-const MANAGED_ATTRIBUTE = "data-farm-metadata";
+const MANAGED_ATTRIBUTE = FARM_METADATA_ATTRIBUTE;
 
 /**
  * Head tags the metadata system owns outright. These are swept on every
@@ -38,6 +38,7 @@ const ICON_SELECTORS = [
   'link[rel="apple-touch-icon"]',
 ].join(", ");
 const MANIFEST_SELECTOR = 'link[rel="manifest"]';
+const PAGE_JSON_LD_SELECTOR = `script[type="application/ld+json"][${MANAGED_ATTRIBUTE}]`;
 
 function removeAll(selector: string): void {
   for (const element of Array.from(document.head.querySelectorAll(selector))) {
@@ -50,9 +51,10 @@ function removeAll(selector: string): void {
  * load of the target route renders: same title resolution and the same managed
  * tag set, produced by the same `renderMetadataHead` the server uses.
  *
- * JSON-LD is deliberately untouched: the agent JSON-LD script is site identity
- * rather than page metadata, and sweeping ld+json scripts could remove ones the
- * application authored itself.
+ * Only page and layout JSON-LD (`metadata.jsonLd`) is swapped, matched by its
+ * marker. The agent JSON-LD script is site identity rather than page metadata,
+ * and ld+json scripts the application authored itself carry no marker, so
+ * both stay untouched.
  */
 export function applyFarmMetadataToDocument(metadata: NavigationMetadata, pathname: string): void {
   document.title = resolveMetadataTitle(metadata?.title) || "Farm.js App";
@@ -62,6 +64,7 @@ export function applyFarmMetadataToDocument(metadata: NavigationMetadata, pathna
   template.innerHTML = rendered.tags;
 
   removeAll(OWNED_SELECTORS);
+  removeAll(PAGE_JSON_LD_SELECTOR);
   if (metadata?.icons) removeAll(ICON_SELECTORS);
   if (metadata?.manifest) removeAll(MANIFEST_SELECTOR);
 

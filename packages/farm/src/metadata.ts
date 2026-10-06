@@ -1,5 +1,5 @@
 import type { Metadata } from "./types";
-import { renderFarmAgentJsonLd, type FarmAgentJsonLd } from "./agent-config";
+import { renderFarmAgentJsonLd, serializeJsonLd, type FarmAgentJsonLd } from "./agent-config";
 
 export type MetadataImageKind = "opengraph" | "twitter";
 
@@ -20,6 +20,12 @@ export interface RenderedMetadataHead {
   hasExplicitTitle: boolean;
 }
 
+/**
+ * Marks head tags rendered from app-defined metadata that no fixed selector can
+ * match, so client navigation can find and replace them.
+ */
+export const FARM_METADATA_ATTRIBUTE = "data-farm-metadata";
+
 type MetadataRecord = Metadata & Record<string, any>;
 
 export function mergeMetadata(
@@ -32,6 +38,7 @@ export function mergeMetadata(
   return {
     ...base,
     ...next,
+    jsonLd: mergeMetadataJsonLd(base.jsonLd, next.jsonLd),
     title: mergeMetadataTitle(base.title, next.title),
     openGraph: mergeNestedMetadata(base.openGraph, next.openGraph),
     twitter: mergeNestedMetadata(base.twitter, next.twitter),
@@ -62,6 +69,13 @@ function mergeMetadataTitle(base: Metadata["title"], next: Metadata["title"]): M
 
 function applyTitleTemplate(template: string, title: string): string {
   return template.split("%s").join(title);
+}
+
+/** Layout and page JSON-LD accumulate instead of replacing each other. */
+function mergeMetadataJsonLd(base: Metadata["jsonLd"], next: Metadata["jsonLd"]) {
+  if (base === undefined) return next;
+  if (next === undefined) return base;
+  return [...normalizeArray(base), ...normalizeArray(next)] as NonNullable<Metadata["jsonLd"]>;
 }
 
 export function addMetadataImageReference(
@@ -191,6 +205,15 @@ export function renderMetadataHead(
       description: normalizeContent(resolvedMetadata.description),
     });
     if (jsonLdScript) tags.push(jsonLdScript);
+  }
+
+  // Page and layout JSON-LD is marked so client navigation swaps it, while the
+  // unmarked site-level script above stays put.
+  for (const entry of normalizeArray(resolvedMetadata.jsonLd)) {
+    if (!isRecord(entry)) continue;
+    tags.push(
+      `<script type="application/ld+json" ${FARM_METADATA_ATTRIBUTE}>${serializeJsonLd(entry)}</script>`,
+    );
   }
 
   return {
