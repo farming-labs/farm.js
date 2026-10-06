@@ -1,4 +1,5 @@
 import type { FarmSchemaConfig } from "./schema";
+import { assertPluginDependencies } from "./plugin-dependencies";
 import type {
   FarmConfig as BaseFarmConfig,
   FarmMigrationCommand,
@@ -1132,6 +1133,9 @@ export async function resolveConfig(
     env,
     vite: typeof userConfig.vite === "function" ? userConfig.vite({}) : userConfig.vite || {},
   };
+
+  // Every plugin is known now, including those integrations contribute.
+  assertPluginDependencies(resolved.plugins, resolved.integrations as never);
 
   return resolved;
 }

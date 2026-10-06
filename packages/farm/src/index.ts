@@ -15,6 +15,7 @@ export * from "./schema";
 export * from "./schema-sql";
 export * from "./schema-migrate";
 export * from "./schema-tables";
+export { collectSchemaDependencies, orderSchemaOwners } from "./schema-dependencies";
 export {
   collectSchemaExtensions,
   isSchemaExtensionAllowed,
