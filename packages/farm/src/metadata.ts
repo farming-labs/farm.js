@@ -20,6 +20,12 @@ export interface RenderedMetadataHead {
   hasExplicitTitle: boolean;
 }
 
+/**
+ * Marks head tags rendered from app-defined metadata that no fixed selector can
+ * match, so client navigation can find and replace them.
+ */
+export const FARM_METADATA_ATTRIBUTE = "data-farm-metadata";
+
 type MetadataRecord = Metadata & Record<string, any>;
 
 export function mergeMetadata(
@@ -37,6 +43,7 @@ export function mergeMetadata(
     twitter: mergeNestedMetadata(base.twitter, next.twitter),
     alternates: mergeNestedMetadata((base as any).alternates, (next as any).alternates),
     icons: mergeNestedMetadata((base as any).icons, (next as any).icons),
+    verification: mergeNestedMetadata(base.verification, next.verification),
   };
 }
 
@@ -179,6 +186,7 @@ export function renderMetadataHead(
 
   appendOpenGraph(tags, resolvedMetadata.openGraph, metadataBase);
   appendTwitter(tags, resolvedMetadata.twitter, metadataBase);
+  appendVerification(tags, resolvedMetadata.verification);
 
   if (options.jsonLd) {
     const jsonLdConfig = options.jsonLd === true ? {} : options.jsonLd;
@@ -252,6 +260,20 @@ function appendTwitter(tags: string[], twitter: Metadata["twitter"], metadataBas
   }
 }
 
+/**
+ * Meta tags named by the app. No fixed selector matches them, so they carry the
+ * marker client navigation sweeps by; tags with names Farm knows do not.
+ */
+function appendNamedMetaRecord(tags: string[], record: unknown) {
+  if (!isRecord(record)) return;
+
+  for (const [name, value] of Object.entries(record)) {
+    for (const content of normalizeArray(value)) {
+      appendMetaName(tags, name, content, true);
+    }
+  }
+}
+
 function appendIcons(tags: string[], icons: unknown, metadataBase?: string): boolean {
   if (!icons) return false;
 
@@ -286,10 +308,13 @@ function appendIconList(tags: string[], rel: string, value: unknown, metadataBas
   }
 }
 
-function appendMetaName(tags: string[], name: string, content: unknown) {
+function appendMetaName(tags: string[], name: string, content: unknown, marked = false) {
   const normalized = normalizeContent(content);
-  if (!normalized) return;
-  tags.push(`<meta name="${escapeAttribute(name)}" content="${escapeAttribute(normalized)}">`);
+  if (!normalized || !name) return;
+  const marker = marked ? ` ${FARM_METADATA_ATTRIBUTE}` : "";
+  tags.push(
+    `<meta name="${escapeAttribute(name)}" content="${escapeAttribute(normalized)}"${marker}>`,
+  );
 }
 
 function appendMetaProperty(tags: string[], property: string, content: unknown) {
@@ -298,6 +323,23 @@ function appendMetaProperty(tags: string[], property: string, content: unknown) 
   tags.push(
     `<meta property="${escapeAttribute(property)}" content="${escapeAttribute(normalized)}">`,
   );
+}
+
+const VERIFICATION_META_NAMES = [
+  ["google", "google-site-verification"],
+  ["bing", "msvalidate.01"],
+  ["yandex", "yandex-verification"],
+] as const;
+
+function appendVerification(tags: string[], verification: Metadata["verification"]) {
+  if (!isRecord(verification)) return;
+
+  for (const [key, name] of VERIFICATION_META_NAMES) {
+    for (const token of normalizeArray(verification[key])) {
+      appendMetaName(tags, name, token);
+    }
+  }
+  appendNamedMetaRecord(tags, verification.other);
 }
 
 function appendLink(
