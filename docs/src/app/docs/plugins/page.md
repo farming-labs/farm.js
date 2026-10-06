@@ -382,6 +382,11 @@ encoded response body, adds `Vary: Accept-Encoding`, and removes the identity `C
 Responses that are already encoded, partial, marked `no-transform`, or sent as server-sent events
 are left unchanged.
 
+Dynamic Brotli responses use compression quality 5 to balance response latency and transfer size.
+Both Brotli and gzip flush each chunk so streaming content can arrive before the response finishes.
+Gzip keeps its existing compression level; this setting does not change precompressed static assets
+or compression managed by a deployment platform.
+
 Compression applies to media types that actually shrink: every `text/*` type, `application/json`,
 `application/javascript`, `application/xml`, `application/wasm`, `application/x-ndjson`, any
 `+json` or `+xml` type such as `image/svg+xml` or `application/manifest+json`, and the
