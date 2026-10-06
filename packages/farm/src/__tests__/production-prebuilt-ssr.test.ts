@@ -497,7 +497,19 @@ describe("production prebuilt SSR output", () => {
 
         await runProductionRequest(serverDir, async (response) => {
           expect(response.status).toBe(200);
-          expect(await response.text()).toContain("prebuilt SSR output");
+          const html = await response.text();
+          expect(html).toContain("prebuilt SSR output");
+          // The head advertises the mirror exactly when the Link header does.
+          const markdownLink = '<link rel="alternate" href="/index.md" type="text/markdown">';
+          if (markdownMirrors) {
+            expect(response.headers.get("link")).toContain(
+              '</index.md>; rel="alternate"; type="text/markdown"',
+            );
+            expect(html).toContain(markdownLink);
+          } else {
+            expect(response.headers.get("link") ?? "").not.toContain("text/markdown");
+            expect(html).not.toContain('type="text/markdown"');
+          }
 
           for (const [pathname, accept] of [
             ["/missing.md", "text/html"],

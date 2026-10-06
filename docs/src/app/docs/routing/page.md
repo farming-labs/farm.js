@@ -849,6 +849,67 @@ export default function DocsLayout({ children }: LayoutProps) {
 
 Pair this layout with `opengraph-image.tsx` in the same `[...slug]` segment to generate a different PNG for each document. `generateMetadata` supplies the title, description, and social fields; the image file renders the PNG described below. Leave `openGraph.images` and `twitter.images` unset when Farm should attach the nearest generated image automatically. An explicit image value still takes precedence.
 
+### Search, crawler, and article fields
+
+These fields are optional and render nothing unless a layout or page sets them. Like `openGraph`
+and `alternates`, `verification` and `other` merge one level deep: a page adds keys to the
+layout's object and replaces the keys it repeats.
+
+**src/app/blog/[slug]/page.tsx**
+
+```tsx
+import type { Metadata } from "@farm.js/core";
+
+export const metadata: Metadata = {
+  verification: {
+    google: "google-token",
+    bing: "bing-token",
+    yandex: "yandex-token",
+    other: { "facebook-domain-verification": "facebook-token" },
+  },
+  other: { "apple-itunes-app": "app-id=123456789" },
+  alternates: {
+    types: {
+      "application/rss+xml": [{ url: "/blog/feed.xml", title: "Acme blog" }],
+    },
+  },
+  robots: {
+    index: true,
+    follow: true,
+    "max-snippet": -1,
+    "max-image-preview": "large",
+    googleBot: { noimageindex: true },
+  },
+  openGraph: {
+    type: "article",
+    publishedTime: "2026-10-01T09:00:00Z",
+    modifiedTime: "2026-10-02T09:00:00Z",
+    authors: ["https://acme.test/team/ada"],
+    section: "Engineering",
+    tags: ["metadata", "seo"],
+  },
+};
+```
+
+| Field                                                  | Renders                                                                                                                                                                   |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `verification.google`                                  | `<meta name="google-site-verification">`, one per token                                                                                                                   |
+| `verification.bing`                                    | `<meta name="msvalidate.01">`                                                                                                                                             |
+| `verification.yandex`                                  | `<meta name="yandex-verification">`                                                                                                                                       |
+| `verification.other`, `other`                          | `<meta name content>` for each key; an array value renders one tag per item                                                                                               |
+| `alternates.types`                                     | `<link rel="alternate" type href title>` for each MIME type and URL                                                                                                       |
+| `robots`                                               | `<meta name="robots">` with `index`, `follow`, `noarchive`, `nosnippet`, `noimageindex`, `max-snippet`, `max-image-preview`, `max-video-preview`, and `unavailable_after` |
+| `robots.googleBot`                                     | A separate `<meta name="googlebot">` with the same directives, or a string                                                                                                |
+| `openGraph.publishedTime` and the other article fields | `article:published_time`, `article:modified_time`, `article:author`, `article:section`, and `article:tag`, only when `openGraph.type` is `"article"`                      |
+
+`publishedTime` and `modifiedTime` also accept a `Date`. Relative URLs in `alternates.types`
+resolve against `metadataBase`, the same as `alternates.languages`.
+
+When a page has a [Markdown mirror](/docs/markdown), Farm adds
+`<link rel="alternate" type="text/markdown" href="/blog/hello.md">` to its head, next to the `Link`
+response header it already sends. Set `alternates.types["text/markdown"]` to advertise a different
+URL. Restricting `md.expose` or setting `md: false` removes the link along with the mirror.
+
 ### Favicons
 
 Place favicon files in `public/`, then declare them through the root layout metadata. Files in `public/` are served from the application root, so `public/favicon.svg` is available at `/favicon.svg`.

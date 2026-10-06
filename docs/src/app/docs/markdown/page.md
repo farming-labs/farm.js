@@ -209,7 +209,9 @@ curl -H "Accept: text/markdown" http://localhost:3000/pricing
 
 Farm returns the same markdown representation with `Content-Type: text/markdown`,
 `Content-Location: /pricing.md`, and `Vary: Accept`. The HTML response also advertises the
-`.md` URL through a `Link` header, while ordinary browser requests continue to receive HTML.
+`.md` URL through a `Link` header and a `<link rel="alternate" type="text/markdown">` tag in the
+document head, while ordinary browser requests continue to receive HTML. Set
+`metadata.alternates.types["text/markdown"]` to point the head link somewhere else.
 
 ## Production notes
 

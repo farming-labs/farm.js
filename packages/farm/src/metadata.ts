@@ -1,5 +1,11 @@
-import type { Metadata } from "./types";
+import type { Metadata, MetadataRobotsDirectives } from "./types";
 import { renderFarmAgentJsonLd, type FarmAgentJsonLd } from "./agent-config";
+
+/**
+ * Marks head tags rendered from app-defined metadata that no fixed selector can
+ * match, so client navigation can find and replace them.
+ */
+export const FARM_METADATA_ATTRIBUTE = "data-farm-metadata";
 
 export type MetadataImageKind = "opengraph" | "twitter";
 
@@ -37,6 +43,8 @@ export function mergeMetadata(
     twitter: mergeNestedMetadata(base.twitter, next.twitter),
     alternates: mergeNestedMetadata((base as any).alternates, (next as any).alternates),
     icons: mergeNestedMetadata((base as any).icons, (next as any).icons),
+    verification: mergeNestedMetadata(base.verification, next.verification),
+    other: mergeNestedMetadata(base.other, next.other),
   };
 }
 
@@ -100,6 +108,34 @@ export function addMetadataImageReference(
   };
 }
 
+const MARKDOWN_MIME_TYPE = "text/markdown";
+
+/**
+ * Advertise a page's Markdown mirror as `alternates.types["text/markdown"]`
+ * unless the page already declares one. `href` comes from the request path, so
+ * it is kept same-origin the same way the default canonical is.
+ */
+export function addMetadataMarkdownAlternate(
+  metadata: MetadataRecord,
+  href: string | null | undefined,
+): MetadataRecord {
+  if (!href) return metadata;
+
+  const alternates = isRecord(metadata.alternates) ? metadata.alternates : {};
+  const types = isRecord(alternates.types) ? alternates.types : {};
+  if (Object.keys(types).some((type) => type.toLowerCase() === MARKDOWN_MIME_TYPE)) {
+    return metadata;
+  }
+
+  return {
+    ...metadata,
+    alternates: {
+      ...alternates,
+      types: { ...types, [MARKDOWN_MIME_TYPE]: sanitizeSelfCanonicalPathname(href) },
+    },
+  };
+}
+
 export interface RenderMetadataHeadOptions {
   /**
    * Current request pathname. Used to emit a default `<link rel="canonical">`
@@ -142,6 +178,9 @@ export function renderMetadataHead(
   appendMetaName(tags, "creator", resolvedMetadata.creator);
   appendMetaName(tags, "publisher", resolvedMetadata.publisher);
   appendMetaName(tags, "robots", normalizeRobots(resolvedMetadata.robots));
+  if (isRecord(resolvedMetadata.robots)) {
+    appendMetaName(tags, "googlebot", normalizeRobots(resolvedMetadata.robots.googleBot));
+  }
 
   const alternates = (resolvedMetadata as any).alternates;
   const explicitCanonical = isRecord(alternates) ? alternates.canonical : undefined;
@@ -167,6 +206,18 @@ export function renderMetadataHead(
     }
   }
 
+  if (isRecord(alternates) && isRecord(alternates.types)) {
+    for (const [type, value] of Object.entries(alternates.types)) {
+      for (const entry of normalizeArray(value)) {
+        const link = isRecord(entry) ? entry : { url: entry };
+        appendLink(tags, "alternate", resolveMetadataUrl(link.url, metadataBase), {
+          type,
+          title: link.title,
+        });
+      }
+    }
+  }
+
   const hasFavicon = appendIcons(tags, (resolvedMetadata as any).icons, metadataBase);
 
   if ((resolvedMetadata as any).manifest) {
@@ -179,6 +230,8 @@ export function renderMetadataHead(
 
   appendOpenGraph(tags, resolvedMetadata.openGraph, metadataBase);
   appendTwitter(tags, resolvedMetadata.twitter, metadataBase);
+  appendVerification(tags, resolvedMetadata.verification);
+  appendNamedMetaRecord(tags, resolvedMetadata.other);
 
   if (options.jsonLd) {
     const jsonLdConfig = options.jsonLd === true ? {} : options.jsonLd;
@@ -235,6 +288,49 @@ function appendOpenGraph(tags: string[], openGraph: Metadata["openGraph"], metad
     appendMetaProperty(tags, "og:image:alt", image.alt);
     appendMetaProperty(tags, "og:image:type", image.type);
   }
+
+  if (openGraph.type === "article") {
+    appendMetaProperty(tags, "article:published_time", normalizeDate(openGraph.publishedTime));
+    appendMetaProperty(tags, "article:modified_time", normalizeDate(openGraph.modifiedTime));
+    for (const author of normalizeArray(openGraph.authors)) {
+      appendMetaProperty(tags, "article:author", author);
+    }
+    appendMetaProperty(tags, "article:section", openGraph.section);
+    for (const tag of normalizeArray(openGraph.tags)) {
+      appendMetaProperty(tags, "article:tag", tag);
+    }
+  }
+}
+
+const VERIFICATION_META_NAMES = [
+  ["google", "google-site-verification"],
+  ["bing", "msvalidate.01"],
+  ["yandex", "yandex-verification"],
+] as const;
+
+function appendVerification(tags: string[], verification: Metadata["verification"]) {
+  if (!isRecord(verification)) return;
+
+  for (const [key, name] of VERIFICATION_META_NAMES) {
+    for (const token of normalizeArray(verification[key])) {
+      appendMetaName(tags, name, token);
+    }
+  }
+  appendNamedMetaRecord(tags, verification.other);
+}
+
+/**
+ * Meta tags named by the app. No fixed selector matches them, so they carry the
+ * marker client navigation sweeps by; tags with names Farm knows do not.
+ */
+function appendNamedMetaRecord(tags: string[], record: unknown) {
+  if (!isRecord(record)) return;
+
+  for (const [name, value] of Object.entries(record)) {
+    for (const content of normalizeArray(value)) {
+      appendMetaName(tags, name, content, true);
+    }
+  }
 }
 
 function appendTwitter(tags: string[], twitter: Metadata["twitter"], metadataBase?: string) {
@@ -286,10 +382,13 @@ function appendIconList(tags: string[], rel: string, value: unknown, metadataBas
   }
 }
 
-function appendMetaName(tags: string[], name: string, content: unknown) {
+function appendMetaName(tags: string[], name: string, content: unknown, marked = false) {
   const normalized = normalizeContent(content);
-  if (!normalized) return;
-  tags.push(`<meta name="${escapeAttribute(name)}" content="${escapeAttribute(normalized)}">`);
+  if (!normalized || !name) return;
+  const marker = marked ? ` ${FARM_METADATA_ATTRIBUTE}` : "";
+  tags.push(
+    `<meta name="${escapeAttribute(name)}" content="${escapeAttribute(normalized)}"${marker}>`,
+  );
 }
 
 function appendMetaProperty(tags: string[], property: string, content: unknown) {
@@ -380,13 +479,30 @@ function normalizeKeywords(keywords: Metadata["keywords"]): string | undefined {
   return keywords;
 }
 
-function normalizeRobots(robots: Metadata["robots"]): string | undefined {
+const ROBOTS_FLAGS = ["noarchive", "nosnippet", "noimageindex"] as const;
+const ROBOTS_VALUES = [
+  "max-snippet",
+  "max-image-preview",
+  "max-video-preview",
+  "unavailable_after",
+] as const;
+
+function normalizeRobots(
+  robots: string | MetadataRobotsDirectives | undefined,
+): string | undefined {
   if (typeof robots === "string") return robots;
   if (!isRecord(robots)) return undefined;
 
   const values: string[] = [];
   if (typeof robots.index === "boolean") values.push(robots.index ? "index" : "noindex");
   if (typeof robots.follow === "boolean") values.push(robots.follow ? "follow" : "nofollow");
+  for (const flag of ROBOTS_FLAGS) {
+    if (robots[flag] === true) values.push(flag);
+  }
+  for (const directive of ROBOTS_VALUES) {
+    const value = normalizeContent(robots[directive]);
+    if (value) values.push(`${directive}:${value}`);
+  }
   return values.join(", ") || undefined;
 }
 
@@ -430,6 +546,13 @@ function normalizeNumber(value: unknown): number | undefined {
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
+}
+
+function normalizeDate(value: unknown): string | undefined {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  }
+  return normalizeContent(value);
 }
 
 function normalizeContent(value: unknown): string | undefined {

@@ -35,7 +35,12 @@ import {
   scanProgrammaticPagePaths,
 } from "./routes-shared";
 import type { FarmDocsAPIHandler } from "./docs";
-import { createMarkdownMirrorResponse, resolveMarkdownMirrorTarget } from "./markdown";
+import {
+  createMarkdownMirrorResponse,
+  getFarmMarkdownAlternatePath,
+  getFarmMarkdownMirrorPath,
+  resolveMarkdownMirrorTarget,
+} from "./markdown";
 import { resolveFarmLlmsTxtConfig } from "./llms-txt";
 import {
   FARM_MARKDOWN_CONTENT_TYPE,
@@ -139,7 +144,7 @@ import {
   parseFarmLayoutChainHeader,
 } from "./navigation/render-plan";
 import { resolveFarmPageDataFailure } from "./navigation/page-data-error";
-import { mergeMetadata } from "./metadata";
+import { addMetadataMarkdownAlternate, mergeMetadata } from "./metadata";
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
 import { resolveFarmRequestURL } from "./server/request";
 import { reportOpenAPIDevGenerationResult } from "./openapi/dev-status";
@@ -1952,10 +1957,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             if (!varyValues.some((value) => value.toLowerCase() === "accept")) {
               res.setHeader("Vary", [...varyValues, "Accept"].join(", "));
             }
-            const alternatePath =
-              markdownPageTarget.pathname === "/"
-                ? "/index.md"
-                : `${markdownPageTarget.pathname}.md`;
+            const alternatePath = getFarmMarkdownMirrorPath(markdownPageTarget.pathname);
             const alternateLink = `<${alternatePath}>; rel="alternate"; type="text/markdown"`;
             const currentLink = res.getHeader("Link");
             res.setHeader(
@@ -2543,6 +2545,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     await (routeModule as any).generateMetadata(routeProps),
                   );
                 }
+                mergedMetadata = addMetadataMarkdownAlternate(
+                  mergedMetadata,
+                  getFarmMarkdownAlternatePath(farmApp.getConfig().md, targetRequestUrl.pathname),
+                );
 
                 const routeSlots = await Promise.all(
                   slots.map(async (slot) => {

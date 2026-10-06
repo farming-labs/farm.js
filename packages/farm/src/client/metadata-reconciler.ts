@@ -1,16 +1,17 @@
-import { renderMetadataHead, resolveMetadataTitle } from "../metadata";
+import { FARM_METADATA_ATTRIBUTE, renderMetadataHead, resolveMetadataTitle } from "../metadata";
 import type { Metadata } from "../types";
 
 export type NavigationMetadata = (Metadata & Record<string, any>) | undefined;
 
 /** Marks head elements this reconciler inserted, so they can be replaced. */
-const MANAGED_ATTRIBUTE = "data-farm-metadata";
+const MANAGED_ATTRIBUTE = FARM_METADATA_ATTRIBUTE;
 
 /**
  * Head tags the metadata system owns outright. These are swept on every
  * navigation whether or not they carry the managed marker, because the tags
  * rendered by the server for the first page have no marker and must not
- * survive into the next page's head.
+ * survive into the next page's head. Meta tags named by the app (`other`,
+ * `verification.other`) are rendered with the marker, so they are swept too.
  */
 const OWNED_SELECTORS = [
   'meta[name="description"]',
@@ -19,10 +20,16 @@ const OWNED_SELECTORS = [
   'meta[name="creator"]',
   'meta[name="publisher"]',
   'meta[name="robots"]',
+  'meta[name="googlebot"]',
+  'meta[name="google-site-verification"]',
+  'meta[name="msvalidate.01"]',
+  'meta[name="yandex-verification"]',
+  `meta[${MANAGED_ATTRIBUTE}]`,
   'link[rel="author"]',
   'link[rel="canonical"]',
   'link[rel="alternate"]',
   'meta[property^="og:"]',
+  'meta[property^="article:"]',
   'meta[name^="twitter:"]',
 ].join(", ");
 

@@ -129,4 +129,62 @@ describe("SPA navigation metadata", () => {
     expect(document.head.querySelectorAll('link[rel="icon"]')).toHaveLength(1);
     router.destroy();
   });
+
+  it("replaces verification, custom meta, robots, article, and typed alternate tags", async () => {
+    window.history.replaceState(null, "", "/post");
+    // The first page's head as the server rendered it from renderMetadataHead.
+    document.head.innerHTML = [
+      '<meta name="viewport" content="width=device-width">',
+      '<meta name="googlebot" content="noindex">',
+      '<meta name="google-site-verification" content="old-token">',
+      '<meta name="facebook-domain-verification" content="fb" data-farm-metadata>',
+      '<meta name="apple-itunes-app" content="app-id=1" data-farm-metadata>',
+      '<meta property="article:published_time" content="2026-10-01">',
+      '<meta property="article:tag" content="old">',
+      '<link rel="alternate" href="/post.md" type="text/markdown">',
+      '<link rel="alternate" href="/feed.xml" type="application/rss+xml">',
+    ].join("");
+
+    stubPageDataFetch({
+      "/next": {
+        verification: { google: "new-token" },
+        other: { "apple-itunes-app": "app-id=2" },
+        robots: { index: true, googleBot: { "max-snippet": 50 } },
+        openGraph: { type: "article", tags: ["fresh"] },
+        alternates: { types: { "text/markdown": "/next.md" } },
+      },
+      "/plain": {},
+    });
+
+    const router = createRouter();
+    await router.navigate("/next", { scroll: false });
+
+    expect(headAttribute('meta[name="google-site-verification"]', "content")).toBe("new-token");
+    expect(document.head.querySelectorAll('meta[name="google-site-verification"]')).toHaveLength(1);
+    expect(headAttribute('meta[name="apple-itunes-app"]', "content")).toBe("app-id=2");
+    expect(document.head.querySelectorAll('meta[name="apple-itunes-app"]')).toHaveLength(1);
+    // The previous page's app-named tag is gone even though the next page has no such name.
+    expect(document.head.querySelector('meta[name="facebook-domain-verification"]')).toBeNull();
+    expect(headAttribute('meta[name="googlebot"]', "content")).toBe("max-snippet:50");
+    expect(document.head.querySelector('meta[property="article:published_time"]')).toBeNull();
+    expect(
+      Array.from(document.head.querySelectorAll('meta[property="article:tag"]')).map((tag) =>
+        tag.getAttribute("content"),
+      ),
+    ).toEqual(["fresh"]);
+    expect(headAttribute('link[rel="alternate"][type="text/markdown"]', "href")).toBe("/next.md");
+    expect(document.head.querySelector('link[type="application/rss+xml"]')).toBeNull();
+    // Document-level tags the metadata system does not own are kept.
+    expect(headAttribute('meta[name="viewport"]', "content")).toBe("width=device-width");
+
+    // Navigating on to a page without these fields removes the managed tags.
+    await router.navigate("/plain", { scroll: false });
+    expect(document.head.querySelector('meta[name="google-site-verification"]')).toBeNull();
+    expect(document.head.querySelector('meta[name="apple-itunes-app"]')).toBeNull();
+    expect(document.head.querySelector('meta[name="googlebot"]')).toBeNull();
+    expect(document.head.querySelector('meta[property^="article:"]')).toBeNull();
+    expect(document.head.querySelector('link[rel="alternate"]')).toBeNull();
+    expect(headAttribute('meta[name="viewport"]', "content")).toBe("width=device-width");
+    router.destroy();
+  });
 });

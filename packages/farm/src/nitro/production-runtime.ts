@@ -33,7 +33,12 @@ export {
   localizeFarmPathname,
   stripFarmLocaleFromPathname,
 } from "../i18n/routing";
-export { addMetadataImageReference, mergeMetadata, renderMetadataHead } from "../metadata";
+export {
+  addMetadataImageReference,
+  addMetadataMarkdownAlternate,
+  mergeMetadata,
+  renderMetadataHead,
+} from "../metadata";
 export { createFarmMetadataRouteResponse } from "../metadata-route";
 export {
   collectFarmLlmsTxtPages,
