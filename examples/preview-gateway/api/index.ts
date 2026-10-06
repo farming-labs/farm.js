@@ -221,10 +221,12 @@ const pollingGateway = createNodePreviewGatewayHandler({
   store: createVercelBlobStore(),
   auth,
   observer: infra?.observer("polling"),
+  authorizeSession: infra?.authorizeSession,
 });
 
 const persistentRelay = createPersistentPreviewRelay({
   observer: infra?.observer("websocket"),
+  authorizeSession: infra?.authorizeSession,
   publicBaseUrl: process.env.FARM_PREVIEW_GATEWAY_URL || `https://${domain}`,
   publicDomain: domain,
   publicWebSocketUrl: `wss://${domain}/agent`,
@@ -249,6 +251,7 @@ const persistentRelay = createPersistentPreviewRelay({
               ownerId: `${grant.provider || "github"}:${grant.subject}`,
               project: grant.project ?? grant.name,
               keyId: grant.keyId,
+              grantId: grant.nonce,
             };
           } catch {
             return false;

@@ -77,8 +77,17 @@ CI never waits for browser approval: provide a credential, otherwise the command
 with instructions. Device approval signs the first-party CLI into your Infra account;
 the saved credential is a Better Auth session token, not a third-party OAuth access token.
 The gateway verifies that credential or API key whenever it issues a new, name-scoped
-grant. A grant cannot outlive the verified account session. Revoking an API key prevents
-new grants; existing grants remain valid until expiry.
+grant. A grant cannot outlive the verified account session or API key expiry. API keys
+may be restricted to one project slug: pass the matching `--project` when starting a preview.
+With the matching Infra access-control gateway, revoking a key also blocks existing
+preview traffic. **Stop preview** in the detail page revokes that grant across reconnects
+without stopping your local app; start a new `farm preview` to get another grant.
+Both transports check access before forwarding. WebSocket relays also check idle connections
+every five seconds; authority requests have a five-second timeout and fail closed.
+Work already executed locally cannot be undone. Older gateways without the access hook
+only enforce key revocation on new grants, so deploy the matching Infra migrations and
+access endpoint before updating the gateway. Revoking a device account session prevents
+new grants; stop existing previews separately.
 
 The Previews dashboard shows account-owned connections, expiry, and the latest 200
 request metadata records per preview. It refreshes every five seconds and marks missing

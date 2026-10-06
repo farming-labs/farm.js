@@ -103,8 +103,15 @@ Ship the compatible CLI update as well: older clients do not understand the new
 
 The gateway verifies API keys/device credentials with Infra on every grant. The signed
 grant contains the verified owner, preview name, and expiry. Only that short-lived grant
-reaches the tunnel transport. A revoked key cannot create a new grant; existing grants
-remain usable until their expiry. Missing/unavailable identity services fail closed.
+reaches the tunnel transport. Identity may include a project restriction and credential
+expiry; grants must match that project and cannot outlive the credential.
+The Infra adapter also checks `/api/previews/access` on registration and before forwarding,
+so key revocation, expiry, and dashboard **Stop preview** apply to active previews.
+The signed nonce identifies the grant across reconnects and both transports. WebSocket
+relays check idle connections every 5 seconds; polling rechecks during waits. Calls have
+a 5-second deadline and fail closed. Already executed app work cannot be undone.
+Deploy the matching Infra key/preview migrations and access endpoint first, then this gateway.
+Legacy/self-hosted gateways that omit `authorizeSession` retain their existing behavior.
 
 Optional `observer` hooks in both gateway transports report session lifecycle and
 request metadata. This example forwards them using Vercel `waitUntil`, with bounded

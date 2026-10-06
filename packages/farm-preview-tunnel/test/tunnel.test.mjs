@@ -508,8 +508,11 @@ test("falls through to an existing HTTP gateway when no native session matches",
 });
 
 test("coordinates requests across separate relay instances", async () => {
+  let allowed = true;
+  let forwarded = 0;
   const coordinator = new MemoryRelayCoordinator();
   const relayA = createPersistentPreviewRelay({
+    authorizeSession: async () => allowed,
     registrationToken: RELAY_TOKEN,
     publicBaseUrl: "https://preview.example.com",
     publicDomain: "preview.example.com",
@@ -526,7 +529,10 @@ test("coordinates requests across separate relay instances", async () => {
     requestTimeoutMs: 2_000,
   });
   const [addressA, addressB] = await Promise.all([relayA.listen(), relayB.listen()]);
-  const target = createServer((request, response) => response.end(`shared:${request.url}`));
+  const target = createServer((request, response) => {
+    forwarded++;
+    response.end(`shared:${request.url}`);
+  });
   await listen(target);
   const targetAddress = target.address();
   const agent = await startTypeScriptPreviewAgent({
@@ -544,6 +550,14 @@ test("coordinates requests across separate relay instances", async () => {
     );
     assert.equal(response.status, 200);
     assert.equal(response.body, "shared:/from/another/instance?coordinated=true");
+    const before = forwarded;
+    allowed = false;
+    const denied = await requestWithHost(
+      `${addressB.httpUrl}/denied`,
+      "shared-agent.preview.example.com",
+    );
+    assert.notEqual(denied.status, 200);
+    assert.equal(forwarded, before);
   } finally {
     await agent.close();
     await Promise.all([relayA.close(), relayB.close()]);
