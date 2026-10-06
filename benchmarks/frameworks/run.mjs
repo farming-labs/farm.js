@@ -8,7 +8,13 @@ import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
-import { marker, requestPage, isFreshFixtureResponse, measureRequests } from "./fixture.mjs";
+import {
+  marker,
+  requestPage,
+  isFreshFixtureResponse,
+  measureRequests,
+  responseEncodings,
+} from "./fixture.mjs";
 
 const benchmarkDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(benchmarkDir, "../..");
@@ -255,6 +261,7 @@ function parseOptions(argv) {
     prepare: true,
     publish: false,
     burnIn: true,
+    encoding: "identity",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -266,6 +273,14 @@ function parseOptions(argv) {
       if (inlineValue === undefined) index += 1;
       const key = name.slice(2);
       options[key] = parseIntegerOption(name, nextValue);
+      continue;
+    }
+
+    if (name === "--encoding") {
+      if (inlineValue === undefined) index += 1;
+      if (!responseEncodings.includes(nextValue))
+        throw new Error("--encoding must be identity, gzip, or br");
+      options.encoding = nextValue;
       continue;
     }
 
@@ -330,6 +345,8 @@ function assertPublishableOptions(options) {
   }
   if (!options.burnIn) throw new Error("Publishing requires the unmeasured burn-in round");
   if (!options.prepare) throw new Error("Publishing requires rebuilding the local Farm packages");
+  if (options.encoding !== "identity")
+    throw new Error("Publishing requires identity encoding; compressed runs are diagnostic only");
 }
 
 function printHelp() {
@@ -342,6 +359,7 @@ function printHelp() {
       "  --runs N          cold dev/build/boot rounds (default: 7)",
       "  --requests N      measured requests per server and round (default: 30)",
       "  --warmups N       excluded warm-up requests per server and round (default: 30)",
+      "  --encoding MODE   identity (default), gzip, or br; records actual response encoding",
       "  --only LIST       comma-separated framework ids",
       "  --seed N          deterministic round-order seed",
       "  --skip-prepare    skip the untimed local Farm package build",
@@ -470,6 +488,7 @@ async function runSelfChecks() {
   const fixtureChecks = await runCommand(process.execPath, [
     "--test",
     path.join(benchmarkDir, "fixture.test.mjs"),
+    path.join(benchmarkDir, "encoding.test.mjs"),
   ]);
   console.log(fixtureChecks.output.trim());
   if (readinessPollIntervalMs > 2) {
@@ -558,9 +577,21 @@ async function runSelfChecks() {
   }
 
   const canonical = parseOptions([]);
+  assertEncodingOptions();
   const rounds = Array.from({ length: 7 }, (_, index) => ({
     index: index + 1,
-    frameworks: Object.fromEntries(frameworks.map(({ id }) => [id, { buildMs: 100 }])),
+    frameworks: Object.fromEntries(
+      frameworks.map(({ id }) => [
+        id,
+        {
+          buildMs: 100,
+          responses: {
+            dev: [{ contentEncoding: "identity" }],
+            production: [{ contentEncoding: "identity" }],
+          },
+        },
+      ]),
+    ),
   }));
   const assert = (condition, message) => {
     if (!condition) throw new Error(message);
@@ -638,6 +669,8 @@ async function runSelfChecks() {
       "productionBootMs",
       "productionResponseMs",
       "responseBytes",
+      "encodedResponseBodyBytes",
+      "decodedResponseBodyBytes",
     ].map((key, index) => [key, [index + 0.123456789, index + 2.987654321]]),
   );
   const report = createReport(
@@ -655,6 +688,10 @@ async function runSelfChecks() {
     },
   );
   assert(report.fixture.marker === "framework-benchmark-v1", "Report must identify the fixture");
+  assert(
+    report.schemaVersion === 2 && report.methodology.requestEncoding === "identity",
+    "Report must disclose the transport and encoding methodology",
+  );
   assert(report.revision.commit === "self-check-revision", "Report must retain its revision");
   assert(report.frameworks.length === frameworks.length, "Report must retain every framework");
   for (const framework of report.frameworks) {
@@ -666,6 +703,20 @@ async function runSelfChecks() {
     }
   }
   const published = createPublishedReport(report);
+  assert(
+    published.frameworks.every(
+      (framework) => framework.responseEncodings.production.join() === "identity",
+    ),
+    "Actual encoding must survive aggregation and publication",
+  );
+  assert(
+    published.methodology.requestEncoding === "identity",
+    "Published report must retain encoding",
+  );
+  assert(
+    createMarkdown(report).includes("Encoded body"),
+    "Markdown must distinguish body byte metrics",
+  );
   assert(published.fixture.marker === report.fixture.marker, "Published fixture must match");
   assert(
     published.frameworks.every((framework) =>
@@ -710,6 +761,27 @@ async function runSelfChecks() {
     await fs.rm(temporary, { recursive: true, force: true });
   }
   console.log("Benchmark harness self-checks passed");
+}
+
+function assertEncodingOptions() {
+  for (const encoding of responseEncodings) {
+    if (parseOptions(["--encoding=" + encoding]).encoding !== encoding)
+      throw new Error("Encoding option was lost");
+  }
+  for (const args of [
+    ["--encoding"],
+    ["--encoding=deflate"],
+    ["--encoding=gzip", "--publish"],
+    ["--encoding=br", "--publish"],
+  ]) {
+    let rejected = false;
+    try {
+      parseOptions(args);
+    } catch {
+      rejected = true;
+    }
+    if (!rejected) throw new Error("Invalid encoding/publication options were accepted");
+  }
 }
 
 function appendOutput(state, chunk) {
@@ -869,24 +941,31 @@ async function runCommand(command, args, options = {}) {
   return { durationMs, output: output.value };
 }
 
-async function waitForRenderedPage(child, output, url, startedAt) {
+async function waitForRenderedPage(child, output, url, startedAt, options) {
   const deadline = performance.now() + 180000;
   while (performance.now() < deadline) {
     if (hasExited(child)) {
       throw new Error("Server exited before rendering the fixture.\n" + output.value);
     }
     try {
-      const response = await requestPage(url);
+      const response = await requestPage(url, 60000, options.encoding);
       if (isFreshFixtureResponse(response)) {
+        options.onResponse(response, "ready");
         return {
           elapsedMs: response.completedAt - startedAt,
           firstRequestMs: response.durationMs,
           responseBytes: response.bytes,
+          encodedBodyBytes: response.encodedBodyBytes,
+          decodedBodyBytes: response.decodedBodyBytes,
           renderedAt: response.renderedAt,
         };
       }
-    } catch {
-      // The port is not listening yet.
+    } catch (error) {
+      // Retry only a server that has not started listening. Bad encodings,
+      // broken bodies and request deadlines are failures, not readiness signals.
+      const failures = error instanceof AggregateError ? error.errors : [error];
+      if (!failures.length || failures.some((failure) => failure.code !== "ECONNREFUSED"))
+        throw error;
     }
     await new Promise((resolve) => setTimeout(resolve, readinessPollIntervalMs));
   }
@@ -899,15 +978,16 @@ async function launchServer(command, args, options) {
   const startedAt = performance.now();
   const { child, output } = spawnProcess(command, args, options);
   try {
-    const ready = await waitForRenderedPage(child, output, options.url, startedAt);
+    const ready = await waitForRenderedPage(child, output, options.url, startedAt, options);
     await new Promise((resolve) => setTimeout(resolve, 6));
-    const dynamicResponse = await requestPage(options.url);
+    const dynamicResponse = await requestPage(options.url, 60000, options.encoding);
     if (
       !isFreshFixtureResponse(dynamicResponse) ||
       dynamicResponse.renderedAt === ready.renderedAt
     ) {
       throw new Error("Fixture did not produce a fresh dynamic SSR response");
     }
+    options.onResponse(dynamicResponse, "verification");
     return { child, output, ready };
   } catch (error) {
     await stopProcess(child);
@@ -977,15 +1057,33 @@ async function runRound(framework, round, options) {
   const port = basePort + round * 20 + frameworks.findIndex((item) => item.id === framework.id);
   const url = "http://" + (framework.devHost || "127.0.0.1") + ":" + port + "/";
   const cliPath = path.join(appDir, framework.cli);
+  const responses = { dev: [], production: [] };
+  const recordResponses = (mode) => ({
+    encoding: options.encoding,
+    onResponse: (response, phase) =>
+      responses[mode].push({
+        phase,
+        durationMs: response.durationMs,
+        contentEncoding: response.contentEncoding,
+        encodedBodyBytes: response.encodedBodyBytes,
+        decodedBodyBytes: response.decodedBodyBytes,
+      }),
+  });
 
   await cleanFramework(framework);
   const devServer = await launchServer(process.execPath, [cliPath, ...framework.devArgs(port)], {
     cwd: appDir,
     url,
+    ...recordResponses("dev"),
   });
   let devWarmSamples;
   try {
-    devWarmSamples = await measureRequests(url, options.warmups, options.requests);
+    devWarmSamples = await measureRequests(
+      url,
+      options.warmups,
+      options.requests,
+      recordResponses("dev"),
+    );
   } finally {
     await stopProcess(devServer.child);
   }
@@ -1002,10 +1100,16 @@ async function runRound(framework, round, options) {
     cwd: appDir,
     env: production.env,
     url: productionUrl,
+    ...recordResponses("production"),
   });
   let productionSamples;
   try {
-    productionSamples = await measureRequests(productionUrl, options.warmups, options.requests);
+    productionSamples = await measureRequests(
+      productionUrl,
+      options.warmups,
+      options.requests,
+      recordResponses("production"),
+    );
   } finally {
     await stopProcess(productionServer.child);
   }
@@ -1018,6 +1122,9 @@ async function runRound(framework, round, options) {
     productionBootMs: productionServer.ready.elapsedMs,
     productionResponseMs: productionSamples,
     responseBytes: productionServer.ready.responseBytes,
+    encodedResponseBodyBytes: productionServer.ready.encodedBodyBytes,
+    decodedResponseBodyBytes: productionServer.ready.decodedBodyBytes,
+    responses,
   };
 }
 
@@ -1180,7 +1287,7 @@ function detectContendedRounds(rounds) {
 
 function createReport(options, selected, samplesByFramework, rounds, identity) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     revision: {
       benchmarkInputsDirty: identity.benchmarkInputsDirty,
@@ -1215,13 +1322,18 @@ function createReport(options, selected, samplesByFramework, rounds, identity) {
         "Ambient Node compile-cache controls removed; framework CLIs retain their normal compile-cache behavior",
       readinessPollIntervalMs,
       timer: "External monotonic wall clock",
+      requestEncoding: options.encoding,
+      responseTransport:
+        "Node HTTP/1.1 with explicit decoding (v2; not directly comparable to the prior Fetch transport)",
+      responseBodyBytes:
+        "Encoded and decoded HTTP body bytes; excludes headers, chunk framing, and TLS. responseBytes is the legacy decoded-size alias.",
       devFirstPage:
         "Framework process spawn to the first HTTP 200 containing the expected rendered marker",
       cleanBuild: "Framework build process spawn to successful exit after generated-cache removal",
       productionBoot:
         "Built production process spawn to the first HTTP 200 containing the expected marker",
       responseLatency:
-        "Sequential full-body loopback HTTP requests with a fresh connection; warmups excluded",
+        "Sequential full-body loopback HTTP requests with a fresh connection, including decompression and UTF-8 decoding; validation and warmups excluded",
       productionCommand:
         "Recommended framework production command; Next.js uses next start and every other row uses a generated server entry",
     },
@@ -1235,6 +1347,20 @@ function createReport(options, selected, samplesByFramework, rounds, identity) {
         label: framework.label,
         version: framework.version,
         stack: framework.stack,
+        responseEncodings: Object.fromEntries(
+          ["dev", "production"].map((mode) => [
+            mode,
+            [
+              ...new Set(
+                rounds.flatMap((round) =>
+                  (round.frameworks[framework.id]?.responses?.[mode] || []).map(
+                    (response) => response.contentEncoding,
+                  ),
+                ),
+              ),
+            ],
+          ]),
+        ),
         metrics: {
           devFirstPageMs: summarize(samples.devFirstPageMs),
           devFirstRequestMs: summarize(samples.devFirstRequestMs),
@@ -1243,6 +1369,8 @@ function createReport(options, selected, samplesByFramework, rounds, identity) {
           productionBootMs: summarize(samples.productionBootMs),
           productionResponseMs: summarize(samples.productionResponseMs),
           responseBytes: summarize(samples.responseBytes),
+          encodedResponseBodyBytes: summarize(samples.encodedResponseBodyBytes),
+          decodedResponseBodyBytes: summarize(samples.decodedResponseBodyBytes),
         },
       };
     }),
@@ -1288,6 +1416,7 @@ function createReportQuality(options, selected, rounds, identity) {
 
 function createPublishedReport(report) {
   return {
+    schemaVersion: report.schemaVersion,
     generatedAt: report.generatedAt,
     revision: {
       benchmarkInputsDirty: report.revision.benchmarkInputsDirty,
@@ -1310,6 +1439,9 @@ function createPublishedReport(report) {
       cache: report.methodology.cache,
       nodeCompileCache: report.methodology.nodeCompileCache,
       readinessPollIntervalMs: report.methodology.readinessPollIntervalMs,
+      requestEncoding: report.methodology.requestEncoding,
+      responseTransport: report.methodology.responseTransport,
+      responseBodyBytes: report.methodology.responseBodyBytes,
     },
     system: report.system,
     frameworks: report.frameworks.map((framework) => ({
@@ -1317,6 +1449,7 @@ function createPublishedReport(report) {
       label: framework.label,
       version: framework.version,
       stack: framework.stack,
+      responseEncodings: framework.responseEncodings,
       metrics: Object.fromEntries(
         Object.entries(framework.metrics).map(([key, value]) => [key, withoutSamples(value)]),
       ),
@@ -1334,8 +1467,8 @@ function createMarkdown(report, samplesPath = null, readmePath = "../README.md")
       report.revision.commit.slice(0, 12) +
       ".",
     "",
-    "| Framework | First dev page | Warm dev | Fixture build | Production boot | Production response p50 / p95 | HTML |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| Framework | First dev page | Warm dev | Fixture build | Production boot | Production response p50 / p95 | Decoded HTML | Encoded body | Actual encoding (dev / prod) |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
   ];
 
   for (const framework of report.frameworks) {
@@ -1359,7 +1492,13 @@ function createMarkdown(report, samplesPath = null, readmePath = "../README.md")
         formatMs(metrics.productionResponseMs.p95) +
         " | " +
         Math.round(metrics.responseBytes.median).toLocaleString("en") +
-        " B |",
+        " B | " +
+        Math.round(metrics.encodedResponseBodyBytes.median).toLocaleString("en") +
+        " B | " +
+        framework.responseEncodings.dev.join(", ") +
+        " / " +
+        framework.responseEncodings.production.join(", ") +
+        " |",
     );
   }
 
@@ -1370,6 +1509,11 @@ function createMarkdown(report, samplesPath = null, readmePath = "../README.md")
     "## Scope",
     "",
     "- Fixture: " + report.fixture.description,
+    "- Requested Accept-Encoding: " +
+      report.methodology.requestEncoding +
+      ". Identity fallback is recorded, not treated as compressed output.",
+    "- Transport: " + report.methodology.responseTransport + ".",
+    "- Body sizes: " + report.methodology.responseBodyBytes,
     "- Build metric: complete fixture-project production build; local Farm package preparation is excluded.",
     "- Warm responses: " +
       report.methodology.warmupRequestsPerRun +
@@ -1515,6 +1659,8 @@ async function runBenchmark() {
         productionBootMs: [],
         productionResponseMs: [],
         responseBytes: [],
+        encodedResponseBodyBytes: [],
+        decodedResponseBodyBytes: [],
       },
     ]),
   );
@@ -1565,6 +1711,8 @@ async function runBenchmark() {
       samples.productionBootMs.push(result.productionBootMs);
       samples.productionResponseMs.push(...result.productionResponseMs);
       samples.responseBytes.push(result.responseBytes);
+      samples.encodedResponseBodyBytes.push(result.encodedResponseBodyBytes);
+      samples.decodedResponseBodyBytes.push(result.decodedResponseBodyBytes);
       roundRecord.frameworks[framework.id] = {
         devFirstPageMs: Math.round(result.devFirstPageMs * 100) / 100,
         devWarmResponseMs: summarize(result.devWarmResponseMs).median,
@@ -1572,6 +1720,9 @@ async function runBenchmark() {
         productionBootMs: Math.round(result.productionBootMs * 100) / 100,
         productionResponseMs: summarize(result.productionResponseMs).median,
         responseBytes: result.responseBytes,
+        encodedResponseBodyBytes: result.encodedResponseBodyBytes,
+        decodedResponseBodyBytes: result.decodedResponseBodyBytes,
+        responses: result.responses,
       };
       console.log(
         "dev " +
