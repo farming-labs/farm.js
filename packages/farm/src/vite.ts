@@ -103,7 +103,7 @@ import { resolveFarmLayoutFonts } from "./font";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { isFarmI18nCatalogFile, resolveFarmI18nMessagePath } from "./i18n/config";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
-import { localizeFarmPathname } from "./i18n/routing";
+import { renderFarmLocaleAlternateLinks } from "./i18n/alternates";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
 import {
   createFarmClientOptimizeDepsConfig,
@@ -282,18 +282,9 @@ function renderFarmI18nStaticHead(
   const runtime = `<script>window.__FARM_I18N__ = ${serializeFarmInlineValue(snapshot)};</script>`;
   if (snapshot.routing === "none") return runtime;
 
-  const links = snapshot.locales.map(
-    (locale) =>
-      `<link rel="alternate" hreflang="${escapeFarmHtmlAttribute(locale)}" href="${escapeFarmHtmlAttribute(
-        localizeFarmPathname(requestPath, locale, snapshot),
-      )}">`,
-  );
-  links.push(
-    `<link rel="alternate" hreflang="x-default" href="${escapeFarmHtmlAttribute(
-      localizeFarmPathname(requestPath, snapshot.defaultLocale, snapshot),
-    )}">`,
-  );
-  return `${links.join("")}${runtime}`;
+  // Pre-rendered without a request or route metadata, so there is no origin to
+  // resolve against and the hrefs stay paths.
+  return `${renderFarmLocaleAlternateLinks(requestPath, snapshot)}${runtime}`;
 }
 
 function getPublicEnvDefine(config: FarmVitePluginOptions): Record<string, unknown> {
