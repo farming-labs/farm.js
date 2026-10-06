@@ -15,6 +15,11 @@ import {
   measureRequests,
   responseEncodings,
 } from "./fixture.mjs";
+import {
+  generatedBenchmarkOutputs,
+  generatedOutputExclusions,
+  inspectGeneratedOutputs,
+} from "./input-policy.mjs";
 
 const benchmarkDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(benchmarkDir, "../..");
@@ -489,6 +494,7 @@ async function runSelfChecks() {
     "--test",
     path.join(benchmarkDir, "fixture.test.mjs"),
     path.join(benchmarkDir, "encoding.test.mjs"),
+    path.join(benchmarkDir, "input-identity.test.mjs"),
   ]);
   console.log(fixtureChecks.output.trim());
   if (readinessPollIntervalMs > 2) {
@@ -1153,8 +1159,7 @@ async function collectBenchmarkInputFiles(directory = benchmarkDir, relativeDire
     }
     if (
       relativePath === ".benchmark.lock" ||
-      /^apps\/farm\/src\/farm-.*\.d\.ts$/.test(relativePath) ||
-      relativePath === "apps/farm/src/lib/api.generated.ts"
+      Object.hasOwn(generatedBenchmarkOutputs, relativePath)
     ) {
       continue;
     }
@@ -1186,6 +1191,9 @@ function readCommand(command, args = []) {
 }
 
 async function collectRunIdentity() {
+  // Validate ownership before any fixture cleanup or generator can overwrite a
+  // reserved output. Hash outputs separately so their normal churn is visible.
+  const generatedOutputs = await inspectGeneratedOutputs(benchmarkDir);
   const farmSourceStatus = readCommand("git", [
     "status",
     "--porcelain",
@@ -1207,6 +1215,7 @@ async function collectRunIdentity() {
     "--",
     benchmarkGitPath,
     ":(exclude)" + benchmarkGitPath + "/results/**",
+    ...generatedOutputExclusions(benchmarkGitPath),
   ]);
   return {
     benchmarkInputsDirty: benchmarkInputStatus !== "",
@@ -1220,6 +1229,7 @@ async function collectRunIdentity() {
       .update(await fs.readFile(path.join(repoRoot, "pnpm-lock.yaml")))
       .digest("hex"),
     inputSha256: await hashBenchmarkInputs(),
+    generatedOutputs,
   };
 }
 
@@ -1301,6 +1311,7 @@ function createReport(options, selected, samplesByFramework, rounds, identity) {
     inputs: {
       sha256: identity.inputSha256,
       rootLockSha256: identity.rootLockSha256,
+      generatedOutputs: identity.generatedOutputs,
     },
     fixture: {
       name: "small-dynamic-ssr",
@@ -1536,6 +1547,7 @@ function createMarkdown(report, samplesPath = null, readmePath = "../README.md")
       ".",
     "- Runtime: Node " + report.system.node + ", pnpm " + report.system.pnpm + ".",
     "- Benchmark input SHA-256: " + report.inputs.sha256 + ".",
+    "- Known generator-owned outputs are excluded from source identity and fingerprinted separately in JSON; authored inputs remain guarded.",
     "- Benchmark inputs dirty: " + (report.revision.benchmarkInputsDirty ? "yes" : "no") + ".",
     "- Farm source dirty: " + (report.revision.farmSourceDirty ? "yes" : "no") + ".",
     "- Root lockfile dirty: " + (report.revision.rootLockDirty ? "yes" : "no") + ".",
@@ -1738,7 +1750,13 @@ async function runBenchmark() {
 
   const endIdentity = await collectRunIdentity();
   assertRunIdentityUnchanged(startIdentity, endIdentity);
-  const report = createReport(options, selected, samplesByFramework, roundRecords, startIdentity);
+  const report = createReport(options, selected, samplesByFramework, roundRecords, {
+    ...startIdentity,
+    generatedOutputs: {
+      before: startIdentity.generatedOutputs,
+      after: endIdentity.generatedOutputs,
+    },
+  });
   if (options.publish) {
     if (!report.quality.publishable) {
       throw new Error("Refusing to publish: " + report.quality.publicationBlockers.join("; "));

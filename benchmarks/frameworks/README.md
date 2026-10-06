@@ -150,6 +150,28 @@ The report marks this assessment **unavailable** with fewer than three selected 
 measured rounds. Otherwise, “not detected” is not proof of an idle host. Publication eligibility also
 requires the full methodology and clean inputs described above; partial runs are diagnostic only.
 
+### Generated-output ownership
+
+The fixture generators own these exact paths, relative to this benchmark directory:
+
+- `apps/farm/src/farm.d.ts`, the legacy `farm-routes.d.ts`, `farm-env.d.ts`, `farm-images.d.ts`
+  and `farm-i18n.d.ts` in the same directory, and `apps/farm/src/lib/api.generated.ts`.
+- `apps/tanstack/src/routeTree.gen.ts`.
+- `apps/next/next-env.d.ts`.
+
+They are outputs, not authored benchmark inputs: their creation, regeneration or removal does not
+invalidate source identity or make a run unpublishable. Reports retain their exact before/after
+SHA-256 values (or `null` for absent files) under `inputs.generatedOutputs`. A run refuses an existing
+reserved path without the expected generator marker, or a non-regular file such as a symlink, before
+fixture cleanup. The marker is an ownership check, not proof that a file was never manually edited.
+
+Keep handwritten types and code outside these generator-owned paths. There is no broad exclusion
+for `farm-*.d.ts`, other declarations or `*.generated.ts`: route sources, configuration, manifests,
+lockfiles and the exclusion policy itself remain fingerprinted. Their mid-run changes still fail.
+Generators may overwrite their owned outputs; use a disposable clean checkout if any existing
+generated version needs preserving. This policy does not reset, restore, stage or commit files, and
+the broader workspace-dirty flag still discloses tracked generated-output changes.
+
 ## Buffered-response diagnostic
 
 For the focused buffered-HTML response ablation, build the local core runtime and Farm fixture,
