@@ -235,6 +235,10 @@ the props the server passed it. This works by default in React apps; it does not
 layout keeps the async page as server HTML and the islands inside it still hydrate, including
 after client navigation between pages of that layout.
 
+Navigating away cancels pending island work and unmounts its roots without waiting for hydration.
+React's early-update diagnostic during that synchronous cancellation is expected; hydration
+mismatches, updates to live roots, and other errors are still reported.
+
 Islands have the same limits as [isolated client leaves](#isolated-client-leaves-without-rsc):
 
 - Props must be serializable. Passing server-rendered JSX as `children` or another prop

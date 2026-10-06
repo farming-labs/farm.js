@@ -627,6 +627,9 @@ test("article sidebar tracks native navigation, reading position, pointer, and k
 test("agents page connects the blog, planned capabilities, and Markdown", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  // Exercise navigation away from the article while its isolated roots are still hydrating.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
   await page.goto("/blog/0.1.0");
   await page.evaluate(() => {
     (window as Window & { __agentsNavigation?: boolean }).__agentsNavigation = true;

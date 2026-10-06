@@ -269,6 +269,135 @@ describe("isolated client boundary", () => {
     expect(runtime.rootCount()).toBe(0);
   });
 
+  it.each([18, 19])("cancels a root before its first commit with React %s", async (version) => {
+    const ReactRuntime = version === 18 ? (requireReact18("react") as typeof React) : React;
+    const hydrate = version === 18 ? requireReact18("react-dom/client").hydrateRoot : hydrateRoot;
+    const render =
+      version === 18 ? requireReact18("react-dom/server").renderToString : renderToString;
+    const mounted = vi.fn();
+    const errors = vi.fn();
+    vi.stubGlobal("reportError", errors);
+    function Cancelled() {
+      ReactRuntime.useEffect(mounted, []);
+      return ReactRuntime.createElement("button", null, "Cancelled");
+    }
+    const Boundary = createFarmIsolatedClientBoundary(
+      ReactRuntime,
+      Cancelled,
+      "/src/cancelled.tsx",
+      "default",
+      "load",
+    );
+    document.body.innerHTML = render(ReactRuntime.createElement(Boundary));
+    const container = document.querySelector("farm-client-boundary")!;
+    const runtime = createFarmIsolatedHydrationRuntime({
+      ReactRuntime,
+      hydrateRoot: (container, element, options) =>
+        hydrate(container, element, {
+          onRecoverableError: errors,
+          ...options,
+        }),
+      load: async () => ({ __farm_client_boundary_originals__: { default: Cancelled } }),
+      schedule: async ({ hydrate }) => hydrate(),
+    });
+
+    // Keep React's scheduled work pending until navigation has removed this root.
+    await ReactRuntime.act(async () => {
+      await runtime.hydrate(document);
+      runtime.dispose(container);
+      container.remove();
+    });
+
+    expect(errors).not.toHaveBeenCalled();
+    expect(mounted).not.toHaveBeenCalled();
+    expect(runtime.rootCount()).toBe(0);
+    expect(container.hasAttribute("data-farm-hydrated")).toBe(false);
+  });
+
+  it.each([
+    [
+      "This root received an early update, before anything was able hydrate. Switched the entire root to client rendering.",
+      true,
+    ],
+    ["Minified React error #424; visit https://react.dev/errors/424 for the full message", true],
+    ["Minified React error #418; hydration mismatch", false],
+    ["Unexpected teardown error", false],
+  ])(
+    "reports %s except for the known synchronous cancellation diagnostic",
+    async (message, cancellation) => {
+      function Content() {
+        return <button>Content</button>;
+      }
+      const Boundary = createFarmIsolatedClientBoundary(
+        React,
+        Content,
+        "/src/content.tsx",
+        "default",
+        "load",
+      );
+      document.body.innerHTML = renderToString(<Boundary />);
+      const error = new Error(message);
+      const errors = vi.fn();
+      vi.stubGlobal("reportError", errors);
+      let recover!: (error: unknown) => void;
+      const unmount = vi.fn(() => recover(error));
+      const runtime = createFarmIsolatedHydrationRuntime({
+        ReactRuntime: React,
+        hydrateRoot: (_container, _element, options) => {
+          recover = options?.onRecoverableError ?? errors;
+          return { render() {}, unmount };
+        },
+        load: async () => ({ __farm_client_boundary_originals__: { default: Content } }),
+        schedule: async ({ hydrate }) => hydrate(),
+      });
+      await runtime.hydrate(document);
+      recover(error);
+      expect(errors).toHaveBeenCalledExactlyOnceWith(error);
+      errors.mockClear();
+
+      runtime.dispose(document);
+      runtime.dispose(document);
+      expect(unmount).toHaveBeenCalledOnce();
+      expect(errors).toHaveBeenCalledTimes(cancellation ? 0 : 1);
+      errors.mockClear();
+
+      // A later error is not part of this root's synchronous unmount operation.
+      recover(error);
+      expect(errors).toHaveBeenCalledExactlyOnceWith(error);
+      vi.stubGlobal("reportError", undefined);
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      recover(error);
+      expect(consoleError).toHaveBeenCalledExactlyOnceWith(error);
+    },
+  );
+
+  it("still reports real hydration mismatches on live roots", async () => {
+    function Content() {
+      return <button>Client</button>;
+    }
+    const Boundary = createFarmIsolatedClientBoundary(
+      React,
+      Content,
+      "/src/content.tsx",
+      "default",
+      "load",
+    );
+    document.body.innerHTML = renderToString(<Boundary />).replace(
+      ">Client</button>",
+      ">Server</button>",
+    );
+    const errors = vi.fn();
+    vi.stubGlobal("reportError", errors);
+    const runtime = createRuntime({
+      "/src/content.tsx": { __farm_client_boundary_originals__: { default: Content } },
+    });
+    await act(async () => runtime.hydrate(document));
+    expect(errors).toHaveBeenCalledOnce();
+    expect(errors.mock.calls[0][0].message).toContain("Hydration failed");
+    expect(document.querySelector("button")?.textContent).toBe("Client");
+    act(() => runtime.dispose(document));
+  });
+
   it("rehydrates a boundary whose earlier pass was aborted while its module was still loading", async () => {
     function Slow() {
       return <button>Slow</button>;
