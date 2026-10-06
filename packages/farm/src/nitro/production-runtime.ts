@@ -4,6 +4,7 @@ export { mergeRouteRenderingDirectiveConfig } from "../route-rendering";
 export type { FarmServerConfig } from "../server-http";
 export {
   bufferFarmRequestBody,
+  cloneFarmRequestWithContext,
   createFarmNodeRequestAbortSignal,
   createFarmRequestBodyErrorResponse,
   matchesFarmIfNoneMatch,

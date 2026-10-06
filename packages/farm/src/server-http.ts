@@ -318,6 +318,12 @@ export function parseBodySizeLimit(value: number | string, optionName = "bodySiz
   return bytes;
 }
 
+export function cloneFarmRequestWithContext(request: Request): Request {
+  const cloned = request.clone();
+  copyRequestContext(request, cloned);
+  return cloned;
+}
+
 export async function bufferFarmRequestBody(request: Request, limit: number): Promise<Request> {
   if (request.method === "GET" || request.method === "HEAD" || request.body === null) {
     return request;

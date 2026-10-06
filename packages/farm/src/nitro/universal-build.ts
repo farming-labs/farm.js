@@ -5207,6 +5207,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   applyProductionMiddlewareHeaders,
   configureFarmCache,
   configureFarmObservability,
+  cloneFarmRequestWithContext,
   createDefaultErrorMarkup,
   createFarmInstrumentationLifecycle,
   createFarmCacheKey,
@@ -7283,7 +7284,7 @@ async function handleFarmRequestInContext(
   ${
     hasServerRuntimeIntegrations
       ? `
-  const integrationDispatch = await handleIntegrationRequest(request.clone());
+  const integrationDispatch = await handleIntegrationRequest(cloneFarmRequestWithContext(request));
   if (integrationDispatch.response) {
     return integrationDispatch.response;
   }
@@ -7356,7 +7357,7 @@ async function handleFarmRequestInContext(
       ? ` && !${JSON.stringify(owned)}.includes(normalizeRuntimePath(routePathname))`
       : "";
   })()}) {
-    const docsResponse = await farmDocsHandler(request.clone());
+    const docsResponse = await farmDocsHandler(cloneFarmRequestWithContext(request));
     if (docsResponse) {
       if (!docsResponse.headers.get("content-type")?.toLowerCase().includes("text/html")) {
         return applyProductionMiddlewareHeaders(docsResponse, middlewareHeaders);
@@ -7384,7 +7385,7 @@ async function handleFarmRequestInContext(
   // The raw markdown source of a page route is the page's content in another
   // representation; middleware guarding the route must run before serving it.
   const markdownSourceResponse = await createFarmMarkdownSourceResponse?.({
-    request: request.clone(),
+    request: cloneFarmRequestWithContext(request),
     config: farmMdxConfig,
     resolveSource: (targetPathname) => {
       const match = matchPageRoute(getFarmRoutePathname(targetPathname));
@@ -7403,7 +7404,7 @@ async function handleFarmRequestInContext(
       ? `
   if (farmMarkdownConfig?.enabled) {
     const markdownResponse = await createMarkdownMirrorResponse({
-      request: request.clone(),
+      request: cloneFarmRequestWithContext(request),
       config: farmMarkdownConfig,
       routeExists: (targetPathname) =>
         Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
@@ -7420,7 +7421,7 @@ async function handleFarmRequestInContext(
   ${
     apiRoutes.length > 0
       ? `
-  const apiResponse = await handleAPIRequest(request.clone());
+  const apiResponse = await handleAPIRequest(cloneFarmRequestWithContext(request));
   if (apiResponse) {
     return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
   }
@@ -7481,7 +7482,7 @@ async function handleFarmRequestInContext(
     metadataImageRoutes.length > 0
       ? `
   const metadataImageResponse = await handleMetadataImageRequest(
-    request.clone(),
+    cloneFarmRequestWithContext(request),
     routePathname
   );
   if (metadataImageResponse) {
@@ -7495,7 +7496,7 @@ async function handleFarmRequestInContext(
     applicationMetadataRoutes.length > 0
       ? `
   const applicationMetadataResponse = await handleApplicationMetadataRouteRequest(
-    request.clone(),
+    cloneFarmRequestWithContext(request),
     routePathname
   );
   if (applicationMetadataResponse) {
@@ -7536,7 +7537,7 @@ async function handleFarmRequestInContext(
   ${
     config.docs?.enabled
       ? `if (farmDocsAPIHandler && isFarmDocsAPIRequest(pathname)) {
-    const docsAPIResponse = await farmDocsAPIHandler(request.clone());
+    const docsAPIResponse = await farmDocsAPIHandler(cloneFarmRequestWithContext(request));
     if (docsAPIResponse) {
       return applyProductionMiddlewareHeaders(docsAPIResponse, middlewareHeaders);
     }
