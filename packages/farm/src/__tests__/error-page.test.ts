@@ -35,7 +35,12 @@ describe("default error page", () => {
       /\.farm-default-error__frame \{[^}]*min-height: 100svh;[^}]*\}/,
     );
     expect(DEFAULT_ERROR_STYLES).toMatch(
-      /\.farm-default-error__content \{[^}]*max-height: 100%;[^}]*overflow-y: auto;[^}]*\}/,
+      /\.farm-default-error__frame > \.farm-default-error__content \{[^}]*max-height: 100%;[^}]*overflow-y: auto;[^}]*\}/,
+    );
+    // The dev overlay reuses the content class without the frame and keeps its
+    // own scroll container and pinned actions, so the base rule must not scroll.
+    expect(DEFAULT_ERROR_STYLES).not.toMatch(
+      /(^|\n)\.farm-default-error__content \{[^}]*overflow-y: auto;[^}]*\}/,
     );
     // Source lines are blocks inside <pre>; the newlines between them must not
     // render as blank lines.

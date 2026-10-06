@@ -75,10 +75,19 @@ body {
 .farm-default-error__content {
   width: min(100%, 680px);
   min-width: 0;
+  align-self: center;
+  margin: 0 auto;
+  padding: clamp(64px, 10vh, 112px) 0;
+}
+
+/* The full page fits the screen: the frame is one screen tall and its content
+   scrolls inside it when the details run long. The dev overlay reuses these
+   classes without the frame and keeps its own scrolling. */
+.farm-default-error__frame > .farm-default-error__content {
   max-height: 100%;
   align-self: safe center;
-  margin: 0 auto;
-  padding: clamp(24px, 8vh, 112px) 0;
+  padding-top: clamp(24px, 8vh, 112px);
+  padding-bottom: clamp(24px, 8vh, 112px);
   overflow-y: auto;
 }
 
@@ -87,7 +96,7 @@ body {
 }
 
 .farm-default-error > .farm-default-error__content {
-  align-self: safe center;
+  align-self: center;
   padding-right: 24px;
   padding-left: 24px;
 }
@@ -431,11 +440,16 @@ body {
   }
 
   .farm-default-error__content {
-    padding: 32px 0 36px;
+    padding: 56px 0 68px;
+  }
+
+  .farm-default-error__frame > .farm-default-error__content {
+    padding-top: 32px;
+    padding-bottom: 36px;
   }
 
   .farm-default-error > .farm-default-error__content {
-    padding: 28px 18px;
+    padding: 48px 18px;
   }
 
   .farm-default-error__title {
