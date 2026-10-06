@@ -130,7 +130,12 @@ function compressResponse(response: Response, encoding: SupportedEncoding): Resp
   // path for an ordinary browser.
   const compressor =
     encoding === "br"
-      ? createBrotliCompress({ flush: constants.BROTLI_OPERATION_FLUSH })
+      ? createBrotliCompress({
+          flush: constants.BROTLI_OPERATION_FLUSH,
+          // Dynamic responses need bounded compression work. Node defaults to
+          // quality 11, spending substantially more CPU for a small size gain.
+          params: { [constants.BROTLI_PARAM_QUALITY]: 5 },
+        })
       : createGzip({ flush: constants.Z_SYNC_FLUSH });
   const input = Readable.fromWeb(response.body as any);
   const output = pipeline(input, compressor, () => {
