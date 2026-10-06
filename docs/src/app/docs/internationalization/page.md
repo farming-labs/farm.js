@@ -312,7 +312,7 @@ const getNavigation = unstable_cache(async () => loadNavigation(getLocale()), ["
 
 The English and French results occupy different cache entries even though the application key is the same.
 
-Static routes with URL prefixes expand once per locale. `routing: "none"` keeps localized pages dynamic because one static URL cannot safely contain multiple languages. PPR shell keys also include the locale.
+Static routes with URL prefixes expand once per locale. `routing: "none"` keeps localized pages dynamic because one static URL cannot safely contain multiple languages. PPR shell keys also include the locale and, when URLs use prefixes, the request origin that the shell's `hreflang` links point at.
 
 ## Document language, direction, and SEO
 
@@ -320,7 +320,7 @@ Farm sets these values during server rendering:
 
 - `<html lang>` from the resolved locale.
 - `<html dir>` from the locale direction.
-- `hreflang` links for every configured locale plus `x-default` when URLs use prefixes.
+- `hreflang` links for every configured locale plus `x-default` when URLs use prefixes. Search engines only accept absolute alternate URLs, so Farm resolves them against the route's `metadataBase` when it is set and against the request origin otherwise. Forwarded host and protocol headers count only with `server.trustProxy`.
 - Locale-aware Open Graph and Twitter image URLs.
 - A serialized locale snapshot for hydration.
 
@@ -396,7 +396,7 @@ i18n: {
 
 1. Keep `strict: true` and run the application type check in CI.
 2. Use canonical locale names such as `en-US` and `pt-BR`.
-3. Confirm every locale URL renders the expected `lang`, `dir`, and `hreflang` values.
+3. Confirm every locale URL renders the expected `lang`, `dir`, and absolute `hreflang` values. Set `metadataBase` in the root layout when the app answers on more than one host, so the alternates always name the canonical one.
 4. Verify browser and cookie detection without caching the redirect response publicly.
 5. Use logical CSS properties and test at least one RTL locale when supported.
 6. Send the user's locale with background jobs, emails, and webhooks, then use `createTranslator(locale)` or `runWithLocale(locale, fn)`.

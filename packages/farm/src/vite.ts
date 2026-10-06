@@ -81,7 +81,7 @@ import { _withAfterNodeMiddleware } from "./after";
 import { _runWithAPIRequestRuntime } from "./api/server-context";
 import type { APIRequestRuntime } from "./api/server-client-bridge";
 import {
-  farmAppOwnsLlmsPath,
+  farmAppOwnsDocsEnginePath,
   isViteModuleRequest,
   shouldBypassFarmRouterForDottedPath,
 } from "./dev-static";
@@ -103,7 +103,7 @@ import { resolveFarmLayoutFonts } from "./font";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { isFarmI18nCatalogFile, resolveFarmI18nMessagePath } from "./i18n/config";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
-import { localizeFarmPathname } from "./i18n/routing";
+import { renderFarmLocaleAlternateLinks } from "./i18n/alternates";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
 import {
   createFarmClientOptimizeDepsConfig,
@@ -282,18 +282,9 @@ function renderFarmI18nStaticHead(
   const runtime = `<script>window.__FARM_I18N__ = ${serializeFarmInlineValue(snapshot)};</script>`;
   if (snapshot.routing === "none") return runtime;
 
-  const links = snapshot.locales.map(
-    (locale) =>
-      `<link rel="alternate" hreflang="${escapeFarmHtmlAttribute(locale)}" href="${escapeFarmHtmlAttribute(
-        localizeFarmPathname(requestPath, locale, snapshot),
-      )}">`,
-  );
-  links.push(
-    `<link rel="alternate" hreflang="x-default" href="${escapeFarmHtmlAttribute(
-      localizeFarmPathname(requestPath, snapshot.defaultLocale, snapshot),
-    )}">`,
-  );
-  return `${links.join("")}${runtime}`;
+  // Pre-rendered without a request or route metadata, so there is no origin to
+  // resolve against and the hrefs stay paths.
+  return `${renderFarmLocaleAlternateLinks(requestPath, snapshot)}${runtime}`;
 }
 
 function getPublicEnvDefine(config: FarmVitePluginOptions): Record<string, unknown> {
@@ -1841,14 +1832,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
           // Vite loading a `.md` file as a module is not a request for docs or Markdown.
           const viteModuleRequest = isViteModuleRequest(parsedRequestUrl, req.headers);
-          // An app's own llms.txt and llms-full.txt (agent.llmsTxt, llms.ts, llms-full.ts,
-          // or a public file) take those paths from the docs engine, as in production.
-          const appOwnsLlmsTxt = farmAppOwnsLlmsPath(requestPathname, {
+          // An app's own llms.txt, llms-full.txt, sitemap.xml, and robots.txt (agent.llmsTxt,
+          // a root llms.ts, llms-full.ts, sitemap.ts, or robots.ts, or a public file) take
+          // those paths from the docs engine, as in production.
+          const appOwnsDocsEnginePath = farmAppOwnsDocsEnginePath(requestPathname, {
             generatedPaths: farmLlmsTxtGeneratedPaths(farmConfig),
             routeManager: farmApp.getRouteManager(),
             publicDir: server.config.publicDir,
           });
-          if (farmDocsHandler && !appOwnsLlmsTxt && !viteModuleRequest) {
+          if (farmDocsHandler && !appOwnsDocsEnginePath && !viteModuleRequest) {
             const docsRequest = new Request(fullUrl, {
               method: requestMethod,
               headers: docsHeaders,

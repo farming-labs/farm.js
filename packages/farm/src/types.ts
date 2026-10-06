@@ -584,16 +584,36 @@ export interface LayoutModule<TRoute extends FarmRoutePropsTarget = FarmRoutePro
   generateMetadata?: (props: LayoutMetadataProps<TRoute>) => Promise<Metadata> | Metadata;
 }
 
+/** A schema.org JSON-LD object, such as `{ "@context": "https://schema.org", "@type": "Article" }`. */
+export type MetadataJsonLd = object;
+
 export interface Metadata {
   metadataBase?: string | URL;
   title?: string | { default?: string; template?: string };
   description?: string;
   keywords?: string | string[];
+  /**
+   * schema.org structured data rendered as `<script type="application/ld+json">`,
+   * one per object. Layout entries come first, then the page's. Renders
+   * alongside the site-level `agent.jsonLd`.
+   */
+  jsonLd?: MetadataJsonLd | MetadataJsonLd[];
   author?: string;
   authors?: Array<{ name: string; url?: string }>;
   creator?: string;
+  /** Site ownership tokens for search consoles, one `<meta>` per token. */
+  verification?: {
+    /** `google-site-verification` */
+    google?: string | string[];
+    /** `msvalidate.01` */
+    bing?: string | string[];
+    /** `yandex-verification` */
+    yandex?: string | string[];
+    /** Any other verification meta name, keyed by name. */
+    other?: Record<string, string | string[]>;
+  };
   publisher?: string;
-  robots?: string | { index?: boolean; follow?: boolean };
+  robots?: string | MetadataRobots;
   openGraph?: {
     title?: string;
     description?: string;
@@ -618,6 +638,16 @@ export interface Metadata {
     image?: string;
     type?: string;
     locale?: string;
+    /** `article:published_time`, rendered when `type` is `"article"`. */
+    publishedTime?: string | Date;
+    /** `article:modified_time`, rendered when `type` is `"article"`. */
+    modifiedTime?: string | Date;
+    /** `article:author` profile URLs or names, rendered when `type` is `"article"`. */
+    authors?: string | string[];
+    /** `article:section`, rendered when `type` is `"article"`. */
+    section?: string;
+    /** `article:tag`, rendered when `type` is `"article"`. */
+    tags?: string | string[];
   };
   twitter?: {
     card?: "summary" | "summary_large_image" | "app" | "player";
@@ -657,6 +687,8 @@ export interface Metadata {
         apple?: string | Array<string | { url: string; sizes?: string; type?: string }>;
       };
   manifest?: string;
+  /** Extra `<meta name content>` tags, keyed by name. An array renders one tag per value. */
+  other?: Record<string, string | number | Array<string | number>>;
 }
 
 export interface FarmRequest extends IncomingMessage {
@@ -715,4 +747,25 @@ export interface SSGCollectionResult {
   ssg: SSGPage[];
   /** Routes that will be server-rendered on each request */
   ssr: string[];
+}
+
+/** Crawler directives for a robots `<meta>` tag. Unset fields are omitted. */
+export interface MetadataRobotsDirectives {
+  index?: boolean;
+  follow?: boolean;
+  noarchive?: boolean;
+  nosnippet?: boolean;
+  noimageindex?: boolean;
+  /** Maximum text snippet length; `-1` means no limit and `0` means no snippet. */
+  "max-snippet"?: number;
+  "max-image-preview"?: "none" | "standard" | "large";
+  /** Maximum video preview length in seconds; `-1` means no limit. */
+  "max-video-preview"?: number;
+  /** Date after which the page should drop out of results, for example an ISO 8601 date. */
+  unavailable_after?: string;
+}
+
+export interface MetadataRobots extends MetadataRobotsDirectives {
+  /** Directives for a separate `<meta name="googlebot">` tag. */
+  googleBot?: string | MetadataRobotsDirectives;
 }

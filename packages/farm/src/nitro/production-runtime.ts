@@ -16,7 +16,11 @@ export {
   createLateNotFoundRecovery,
   createLateRedirectRecovery,
 } from "../navigation/late-navigation-recovery";
-export { _runWithCurrentRequest, getCurrentRequest } from "../server/request";
+export {
+  _runWithCurrentRequest,
+  getCurrentRequest,
+  resolveFarmWebRequestOrigin,
+} from "../server/request";
 export { _runWithAPIRequestRuntime } from "../api/server-context";
 export {
   configureFarmCache,
@@ -33,6 +37,7 @@ export {
   localizeFarmPathname,
   stripFarmLocaleFromPathname,
 } from "../i18n/routing";
+export { renderFarmLocaleAlternateLinks } from "../i18n/alternates";
 export { addMetadataImageReference, mergeMetadata, renderMetadataHead } from "../metadata";
 export { createFarmMetadataRouteResponse } from "../metadata-route";
 export {

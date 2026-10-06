@@ -398,11 +398,14 @@ function isCloudflareImagePreset(preset: string): boolean {
   return preset === "cloudflare" || preset === "cloudflare-pages" || preset === "cloudflare-module";
 }
 
-function shouldUseExternalMetadataImageRuntime(
-  preset: string,
-  hasGeneratedMetadataImages: boolean,
-): boolean {
-  return hasGeneratedMetadataImages && preset !== "vercel-edge" && !isCloudflareImagePreset(preset);
+/**
+ * Whether the server output loads @vercel/og from node_modules. Its Node build
+ * reads its wasm and default font from beside its own file, so Node presets
+ * cannot inline it into a bundle, whether generated metadata images or app
+ * server code imports it.
+ */
+function shouldUseExternalMetadataImageRuntime(preset: string, usesImageRuntime: boolean): boolean {
+  return usesImageRuntime && preset !== "vercel-edge" && !isCloudflareImagePreset(preset);
 }
 
 function resolveImageRuntime(
@@ -4304,10 +4307,11 @@ async function buildSSRInMemory(
   // Find a temporary file path for the virtual entry
   // We'll use a plugin to intercept this
   const virtualEntryId = "\0virtual:farm-ssr-entry";
-  const useExternalMetadataImageRuntime = shouldUseExternalMetadataImageRuntime(
-    preset,
-    metadataImageRoutes.some((image) => image.sourceType === "module"),
-  );
+  // Any server module may import @vercel/og, which is only known once this
+  // graph is built. Keep it external on Node presets regardless: an unused
+  // external costs nothing, and Nitro copies the package only when the bundle
+  // imports it.
+  const useExternalMetadataImageRuntime = shouldUseExternalMetadataImageRuntime(preset, true);
   const rendererOptionalExternals = isReactRenderer(config.renderer)
     ? []
     : [
@@ -4511,6 +4515,32 @@ async function buildSSRInMemory(
     entryFile: ssrEntryFile!,
     configuredHeaderRoutes,
   };
+}
+
+/**
+ * Root paths the docs engine answers that the app serves itself, so the
+ * production server leaves them to the app: /llms.txt and /llms-full.txt
+ * (agent.llmsTxt, llms.ts, llms-full.ts), /sitemap.xml (sitemap.ts), and
+ * /robots.txt (robots.ts). A public file needs no entry, since the platform
+ * serves it before any route.
+ */
+export function getFarmAppOwnedDocsEnginePaths(
+  agent: Pick<ResolvedFarmConfig["agent"], "llmsTxt"> | undefined,
+  applicationMetadataRoutes: ReadonlyArray<
+    Pick<UniversalApplicationMetadataRoute, "kind" | "pattern">
+  >,
+): string[] {
+  const llmsTxt = agent?.llmsTxt;
+  const ownedByFile = (kind: UniversalApplicationMetadataRoute["kind"]) =>
+    applicationMetadataRoutes.some(
+      (metadata) => metadata.kind === kind && metadata.pattern === "/",
+    );
+  return [
+    ...(llmsTxt?.enabled || ownedByFile("llms") ? ["/llms.txt"] : []),
+    ...((llmsTxt?.enabled && llmsTxt.full) || ownedByFile("llms-full") ? ["/llms-full.txt"] : []),
+    ...(ownedByFile("sitemap") ? ["/sitemap.xml"] : []),
+    ...(ownedByFile("robots") ? ["/robots.txt"] : []),
+  ];
 }
 
 /**
@@ -4770,18 +4800,18 @@ function getFarmBufferedPreloadMarker(html) {
 }
 
 async function applyFarmPreloadBudget(response, pathname) {
-  const headers = new Headers(response.headers);
+  let headers = response.headers;
   const linkHeader = headers.get("Link") || "";
   const isHtml = headers.get("Content-Type")?.toLowerCase().includes("text/html");
   const isStreaming = headers.get("x-farm-preload-streaming") === "1";
   const bufferedMarker = headers.get("x-farm-preload-buffered");
   const hasNoHtmlPreloads = bufferedMarker === "none";
   const isBuffered = bufferedMarker === "1" || hasNoHtmlPreloads;
-  headers.delete("x-farm-preload-streaming");
-  headers.delete("x-farm-preload-buffered");
-
   if (!isHtml) {
     if (!isStreaming && !isBuffered) return response;
+    headers = new Headers(headers);
+    headers.delete("x-farm-preload-streaming");
+    headers.delete("x-farm-preload-buffered");
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
@@ -4791,9 +4821,17 @@ async function applyFarmPreloadBudget(response, pathname) {
 
   if (isStreaming || !isBuffered || response.body === null) {
     const managed = manageFarmLinkHeaderPreloads(linkHeader, farmPreloadConfig);
+    reportFarmPreloadWarnings(managed.warnings, "route " + pathname);
+    // Unknown streams retain their body and ownership when no headers change.
+    // Empty Link values and even unrecognized internal markers still need cleanup.
+    if (!headers.has("x-farm-preload-streaming") &&
+        !headers.has("x-farm-preload-buffered") &&
+        (managed.value || null) === headers.get("Link")) return response;
+    headers = new Headers(headers);
+    headers.delete("x-farm-preload-streaming");
+    headers.delete("x-farm-preload-buffered");
     if (managed.value) headers.set("Link", managed.value);
     else headers.delete("Link");
-    reportFarmPreloadWarnings(managed.warnings, "route " + pathname);
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
@@ -4803,6 +4841,9 @@ async function applyFarmPreloadBudget(response, pathname) {
 
   // Keep the document/header budget semantics (including unchanged Link
   // formatting), but do not consume and re-encode a proven preload-free body.
+  headers = new Headers(headers);
+  headers.delete("x-farm-preload-streaming");
+  headers.delete("x-farm-preload-buffered");
   const html = hasNoHtmlPreloads ? "" : await response.text();
   const managed = manageFarmDocumentPreloads(html, linkHeader, farmPreloadConfig);
   if (managed.linkHeader) headers.set("Link", managed.linkHeader);
@@ -5229,7 +5270,6 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   isFarmNotFoundError,
   isFarmRedirectError,
   localizeFarmHref,
-  localizeFarmPathname,
   manageFarmDocumentPreloads,
   mergeRouteRenderingDirectiveConfig,
   manageFarmLinkHeaderPreloads,
@@ -5237,12 +5277,14 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   matchesFarmIfNoneMatch,
   normalizeRevalidatePath,
   reportFarmPreloadWarnings,
+  renderFarmLocaleAlternateLinks,
   renderMetadataHead,
   resolveFarmRouteContext,
   resolveFarmTrailingSlashRedirect,
   resolveDefaultErrorStatus,
   resolveFarmSecurityConfig,
   resolveFarmInstrumentationRuntime,
+  resolveFarmWebRequestOrigin,
   runWithFarmRequestSpan,
   searchParamsToObject,
   setFarmBasePath,
@@ -5928,14 +5970,14 @@ function escapeFarmHtmlAttribute(value) {
 
 async function renderFarmElement(ReactDOMServer, element) {
   const streamErrors = [];
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
+  let encoder;
   const normalizeChunk = function(chunk) {
-    if (typeof chunk === "string") return encoder.encode(chunk);
+    if (typeof chunk === "string") return (encoder ||= new TextEncoder()).encode(chunk);
     if (chunk instanceof Uint8Array) return chunk;
     return new Uint8Array(chunk);
   };
   const decodeChunks = function(chunks) {
+    const decoder = new TextDecoder();
     let html = "";
     for (const chunk of chunks) {
       html += decoder.decode(chunk, { stream: true });
@@ -6039,6 +6081,7 @@ async function renderFarmElement(ReactDOMServer, element) {
   if (farmRendererStreamingCapabilities.node &&
       typeof ReactDOMServer.renderToPipeableStream === "function") {
     let pipeableStream;
+    let stream;
     let streamController;
     let streamClosed = false;
     let streamStarted = false;
@@ -6056,16 +6099,6 @@ async function renderFarmElement(ReactDOMServer, element) {
     const complete = new Promise(function(resolve, reject) {
       settleComplete = resolve;
       rejectComplete = reject;
-    });
-    const stream = new ReadableStream({
-      start(controller) {
-        streamController = controller;
-      },
-      cancel(reason) {
-        if (pipeableStream && typeof pipeableStream.abort === "function") {
-          pipeableStream.abort(reason);
-        }
-      },
     });
     const fail = function(error) {
       if (!streamClosed) {
@@ -6102,6 +6135,20 @@ async function renderFarmElement(ReactDOMServer, element) {
           pipeableStream.pipe(destination);
           queueMicrotask(function() {
             decisionState = allReady ? "complete" : "stream";
+            // A synchronous render returns buffered HTML. Only allocate the
+            // bridge when streaming, before exposing that decision to callers.
+            if (decisionState === "stream") {
+              stream = new ReadableStream({
+                start(controller) {
+                  streamController = controller;
+                },
+                cancel(reason) {
+                  if (pipeableStream && typeof pipeableStream.abort === "function") {
+                    pipeableStream.abort(reason);
+                  }
+                },
+              });
+            }
             settleDecision(decisionState);
           });
         } catch (error) {
@@ -6285,26 +6332,26 @@ function createFarmErrorDocument(html, title) {
     : "<!DOCTYPE html>\\n" + fullHtml;
 }
 
-function renderFarmI18nAlternateLinks(requestPath, snapshot) {
+// The origin hreflang alternates resolve against when the route sets no
+// metadataBase. Forwarded authority counts only under server.trustProxy, the
+// same rule the development server applies.
+function resolveFarmI18nAlternateOrigin(request) {
+  return resolveFarmWebRequestOrigin(request, {
+    trustProxy: farmServerConfig.trustProxy === true,
+  });
+}
+
+function renderFarmI18nAlternateLinks(requestPath, snapshot, request, metadata) {
   if (!snapshot || snapshot.routing === "none") return "";
   const url = new URL(requestPath, "http://farm.local");
   const routePathname = stripFarmLocaleFromPathname(url.pathname, snapshot);
-  const links = snapshot.locales.map(function(locale) {
-    const href = localizeFarmPathname(routePathname, locale, snapshot);
-    return '<link rel="alternate" hreflang="' + escapeFarmHtmlAttribute(locale) +
-      '" href="' + escapeFarmHtmlAttribute(href) + '">';
+  return renderFarmLocaleAlternateLinks(routePathname, snapshot, {
+    metadataBase: metadata ? metadata.metadataBase : undefined,
+    origin: request ? resolveFarmI18nAlternateOrigin(request) : undefined,
   });
-  links.push(
-    '<link rel="alternate" hreflang="x-default" href="' +
-      escapeFarmHtmlAttribute(
-        localizeFarmPathname(routePathname, snapshot.defaultLocale, snapshot)
-      ) +
-      '">'
-  );
-  return links.join("");
 }
 
-function applyFarmI18nDocument(html, requestPath, snapshot) {
+function applyFarmI18nDocument(html, requestPath, snapshot, request, metadata) {
   if (!snapshot) return html;
   const locale = escapeFarmHtmlAttribute(snapshot.locale);
   const direction = escapeFarmHtmlAttribute(snapshot.direction);
@@ -6316,7 +6363,7 @@ function applyFarmI18nDocument(html, requestPath, snapshot) {
     return '<html' + cleaned + ' lang="' + locale + '" dir="' + direction + '">';
   });
   const runtimeMarkup =
-    renderFarmI18nAlternateLinks(requestPath, snapshot) +
+    renderFarmI18nAlternateLinks(requestPath, snapshot, request, metadata) +
     '<script>window.__FARM_I18N__ = ' + serializeFarmInlineValue(snapshot) + ';</script>';
   nextHtml = nextHtml.replace(/<head([^>]*)>/i, function(_match, attributes) {
     // Function replacement: runtimeMarkup may contain $-sequences ($&, $', $$).
@@ -7114,13 +7161,16 @@ function getPPRShellBypassReason(request, middlewareData, middlewareContext) {
   return undefined;
 }
 
-function getPPRShellCacheKey(url, locale) {
-  return createFarmCacheKey([
+// origin is set when the shell carries hreflang alternates (i18n prefix
+// routing), so one host never serves a shell holding another host's URLs.
+function getPPRShellCacheKey(url, locale, origin) {
+  const key = [
     "ppr",
     locale || "",
     normalizeRevalidatePath(url.pathname),
     url.search,
-  ]);
+  ];
+  return createFarmCacheKey(origin ? key.concat(origin) : key);
 }
 
 function getPPRHeaders(status, config) {
@@ -7171,6 +7221,9 @@ async function getCachedPPRShell(cacheKey) {
  * Main request handler - created at runtime with bundled routes
  */
 async function handleFarmRequest(request, adapterContext) {
+  // Share only this request's parse. Rewrites and middleware replacements keep
+  // their own URL, while response negotiation retains the original pathname.
+  const requestUrl = new URL(request.url);
   const response = await ${
     config.i18n.enabled
       ? `_runWithFarmI18nRequest(
@@ -7195,16 +7248,17 @@ async function handleFarmRequest(request, adapterContext) {
         false,
         Date.now(),
         adapterContext,
+        requestUrl,
       );
       return applyFarmI18nResponse(response, farmLocaleResolution);
     },
-    { redirect: !isFarmLocalAPIPathname(new URL(request.url).pathname) }
+    { redirect: !isFarmLocalAPIPathname(requestUrl.pathname) }
   )`
-      : "handleFarmRequestInContext(request, null, false, Date.now(), adapterContext)"
+      : "handleFarmRequestInContext(request, null, false, Date.now(), adapterContext, requestUrl)"
   };
   ${
     config.md?.enabled
-      ? `const pathname = getFarmRoutePathname(new URL(request.url).pathname);
+      ? `const pathname = getFarmRoutePathname(requestUrl.pathname);
   if (matchPageRoute(pathname)) {
     return applyMarkdownNegotiationHeaders(response, {
       config: farmMarkdownConfig,
@@ -7222,8 +7276,9 @@ async function handleFarmRequestInContext(
   configuredRewriteApplied = false,
   requestStartTime = Date.now(),
   adapterContext,
+  requestUrl = new URL(request.url),
 ) {
-  let url = new URL(request.url);
+  let url = requestUrl;
   let pathname = url.pathname;
   let routePathname = getFarmRoutePathname(pathname);
 
@@ -7340,18 +7395,10 @@ async function handleFarmRequestInContext(
       ? `
   // Docs responses are served after app middleware so route guards and
   // middleware headers apply to the docs engine like any other page content.
-  // An app's own llms.txt and llms-full.txt (agent.llmsTxt, llms.ts, llms-full.ts)
-  // take those paths from the docs engine.
+  // An app's own llms.txt, llms-full.txt, sitemap.xml, and robots.txt take
+  // those paths from the docs engine.
   if (farmDocsHandler${(() => {
-    const llmsTxt = config.agent?.llmsTxt;
-    const ownedByFile = (kind: string) =>
-      applicationMetadataRoutes.some(
-        (metadata) => metadata.kind === kind && metadata.pattern === "/",
-      );
-    const owned = [
-      ...(llmsTxt?.enabled || ownedByFile("llms") ? ["/llms.txt"] : []),
-      ...((llmsTxt?.enabled && llmsTxt.full) || ownedByFile("llms-full") ? ["/llms-full.txt"] : []),
-    ];
+    const owned = getFarmAppOwnedDocsEnginePaths(config.agent, applicationMetadataRoutes);
     return owned.length
       ? ` && !${JSON.stringify(owned)}.includes(normalizeRuntimePath(routePathname))`
       : "";
@@ -7403,7 +7450,9 @@ async function handleFarmRequestInContext(
       ? `
   if (farmMarkdownConfig?.enabled) {
     const markdownResponse = await createMarkdownMirrorResponse({
-      request: request.clone(),
+      // The mirror helper only reads metadata and creates its own GET request.
+      // Cloning here needlessly tees bodies even when negotiation rejects them.
+      request,
       config: farmMarkdownConfig,
       routeExists: (targetPathname) =>
         Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
@@ -7579,7 +7628,13 @@ async function handleFarmRequestInContext(
         : undefined;
       let pprCanCache = pprConfig.enabled && !pprBypassReason;
       const pprCacheKey = pprCanCache
-        ? getPPRShellCacheKey(url, farmLocaleResolution?.locale)
+        ? getPPRShellCacheKey(
+            url,
+            farmLocaleResolution?.locale,
+            farmLocaleResolution && farmI18nConfig.routing !== "none"
+              ? resolveFarmI18nAlternateOrigin(request)
+              : ""
+          )
         : null;
       if (pprConfig.enabled && pprBypassReason) {
         emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: pprBypassReason });
@@ -8173,7 +8228,13 @@ async function handleFarmRequestInContext(
 </body>
 </html>\`;
         }
-        fullHtml = applyFarmI18nDocument(fullHtml, pathname, farmI18nSnapshot);
+        fullHtml = applyFarmI18nDocument(
+          fullHtml,
+          pathname,
+          farmI18nSnapshot,
+          request,
+          mergedMetadata
+        );
         fullHtml = applyFarmThemeDocument(
           fullHtml,
           farmThemeConfig,
@@ -8312,7 +8373,8 @@ async function handleFarmRequestInContext(
             applyFarmI18nDocument(
               createFarmErrorDocument(errorHtml, "Application Error"),
               pathname,
-              getFarmI18nSnapshot()
+              getFarmI18nSnapshot(),
+              request
             ),
             farmThemeConfig,
             farmResolvedRuntimeConfig.basePath,
@@ -8353,7 +8415,8 @@ async function handleFarmRequestInContext(
             errorStatus + " - " + errorStatusText
           ),
           pathname,
-          getFarmI18nSnapshot()
+          getFarmI18nSnapshot(),
+          request
         ),
         farmThemeConfig,
         farmResolvedRuntimeConfig.basePath,
@@ -8455,7 +8518,7 @@ async function handleFarmRequestInContext(
 </body>
 </html>\`;
     }
-    fullHtml = applyFarmI18nDocument(fullHtml, pathname, getFarmI18nSnapshot());
+    fullHtml = applyFarmI18nDocument(fullHtml, pathname, getFarmI18nSnapshot(), request);
     fullHtml = applyFarmThemeDocument(
       fullHtml,
       farmThemeConfig,
@@ -8881,14 +8944,14 @@ async function buildNitroUniversal(
   const hasGeneratedMetadataImages = Array.from(routeManager.getMetadataImages().values()).some(
     (image) => image.sourceType === "module",
   );
+  const ssrExternalPackages = collectSSRExternalPackages(ssrBundle);
   const useExternalMetadataImageRuntime = shouldUseExternalMetadataImageRuntime(
     preset,
-    hasGeneratedMetadataImages,
+    hasGeneratedMetadataImages || ssrExternalPackages.has("@vercel/og"),
   );
   const nitroRollupExternal = (id: string) =>
     (useExternalMetadataImageRuntime && id === "@vercel/og") ||
     (isNitroRollupExternal(id) && !(isCloudflareWorker && NITRO_REACT_RUNTIME_MODULES.has(id)));
-  const ssrExternalPackages = collectSSRExternalPackages(ssrBundle);
   const copiedRuntimePackages = new Set([
     ...(imageRuntime === "node" ? ["sharp"] : []),
     ...(useExternalMetadataImageRuntime ? ["@vercel/og"] : []),

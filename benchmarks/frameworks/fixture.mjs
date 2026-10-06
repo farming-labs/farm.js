@@ -1,4 +1,9 @@
 import { performance } from "node:perf_hooks";
+import { get as httpGet } from "node:http";
+import { get as httpsGet } from "node:https";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { createGunzip, createBrotliDecompress } from "node:zlib";
 import { parse } from "parse5";
 
 export const marker = "framework-benchmark-v1";
@@ -66,30 +71,90 @@ function renderedFixtureTimestamp(body) {
   return timestamp;
 }
 
-export async function requestPage(url, timeoutMs = 60000) {
+export const responseEncodings = ["identity", "gzip", "br"];
+
+export async function requestPage(url, timeoutMs = 60000, encoding = "identity") {
+  if (!responseEncodings.includes(encoding))
+    throw new Error("Unsupported request encoding: " + encoding);
+  const target = new URL(url);
+  if (target.protocol !== "http:" && target.protocol !== "https:")
+    throw new Error("Expected an HTTP fixture URL");
+  const signal = AbortSignal.timeout(timeoutMs);
+  const rethrowRequestError = (error) => {
+    throw signal.aborted ? signal.reason : error;
+  };
   // All fixture servers run on this host and stamp each render with Date.now().
   // Keep wall-clock controls outside the monotonic response-duration timer.
   const requestedAt = Date.now();
   const startedAt = performance.now();
-  const response = await fetch(url, {
-    cache: "no-store",
-    headers: { connection: "close" },
-    signal: AbortSignal.timeout(timeoutMs),
+  // Fetch transparently decompresses the body. Read HTTP body chunks instead so
+  // encoded bytes describe this very request, without trusting Content-Length.
+  const response = await new Promise((resolve, reject) => {
+    const request = (target.protocol === "https:" ? httpsGet : httpGet)(
+      target,
+      {
+        agent: false,
+        headers: {
+          connection: "close",
+          "cache-control": "no-cache",
+          pragma: "no-cache",
+          "accept-encoding": encoding,
+        },
+        signal,
+      },
+      resolve,
+    );
+    request.on("error", reject);
+  }).catch(rethrowRequestError);
+  const contentEncoding = (response.headers["content-encoding"] || "identity").trim().toLowerCase();
+  if (contentEncoding !== "identity" && contentEncoding !== encoding) {
+    response.destroy();
+    throw new Error("Unexpected response encoding: " + contentEncoding);
+  }
+  let encodedBodyBytes = 0;
+  let decodedBodyBytes = 0;
+  const chunks = [];
+  const counter = new Transform({
+    transform(chunk, _encoding, callback) {
+      encodedBodyBytes += chunk.length;
+      callback(null, chunk);
+    },
   });
-  const body = await response.text();
+  const decoder =
+    contentEncoding === "gzip"
+      ? createGunzip()
+      : contentEncoding === "br"
+        ? createBrotliDecompress()
+        : null;
+  await pipeline(
+    response,
+    counter,
+    ...(decoder ? [decoder] : []),
+    async (source) => {
+      for await (const chunk of source) {
+        decodedBodyBytes += chunk.length;
+        chunks.push(chunk);
+      }
+    },
+    { signal },
+  ).catch(rethrowRequestError);
+  const body = new TextDecoder().decode(Buffer.concat(chunks, decodedBodyBytes));
   // Stop both response and first-page clocks before parsing/validation. The
   // benchmark measures the server and full-body transfer, not this client work.
   const completedAt = performance.now();
   const receivedAt = Date.now();
   return {
     body,
-    bytes: Buffer.byteLength(body),
+    bytes: decodedBodyBytes,
+    encodedBodyBytes,
+    decodedBodyBytes,
+    contentEncoding,
     durationMs: completedAt - startedAt,
     completedAt,
     requestedAt,
     receivedAt,
     renderedAt: renderedFixtureTimestamp(body),
-    status: response.status,
+    status: response.statusCode,
   };
 }
 
@@ -109,20 +174,27 @@ export function isFreshFixtureResponse(response) {
   );
 }
 
-export async function measureRequests(url, warmups, count) {
+export async function measureRequests(
+  url,
+  warmups,
+  count,
+  { encoding = "identity", onResponse } = {},
+) {
   for (let index = 0; index < warmups; index += 1) {
-    const response = await requestPage(url);
+    const response = await requestPage(url, 60000, encoding);
     if (!isFreshFixtureResponse(response)) {
       throw new Error("Fixture validation or freshness check failed during warm-up");
     }
+    onResponse?.(response, "warmup");
   }
 
   const samples = [];
   for (let index = 0; index < count; index += 1) {
-    const response = await requestPage(url);
+    const response = await requestPage(url, 60000, encoding);
     if (!isFreshFixtureResponse(response)) {
       throw new Error("Fixture validation or freshness check failed during measured request");
     }
+    onResponse?.(response, "measured");
     samples.push(response.durationMs);
   }
   return samples;

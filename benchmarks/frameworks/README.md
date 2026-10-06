@@ -44,8 +44,24 @@ It verifies the installed package versions against every label in the report bef
 - **Production boot:** production-process spawn to the first validated, fully read response.
 - **Production response:** sequential full-body loopback requests after warmups, reported as p50 and
   p95. Each request uses a fresh connection.
-- **HTML:** bytes in the production response body, reported because response size affects full-body
-  latency.
+- **Decoded HTML:** production body bytes after content decoding. `responseBytes` remains a
+  compatibility alias for `decodedResponseBodyBytes`.
+- **Encoded body:** production HTTP body bytes before decompression, counted from the received
+  chunks, not inferred from `Content-Length`. This excludes HTTP headers, chunk framing, TCP and TLS.
+  Summary byte metrics use each round's production-readiness response; raw per-response records also
+  retain byte counts and actual encoding for readiness, startup verification, warmups and measurements.
+
+Requests explicitly send `Accept-Encoding: identity` by default. Use `--encoding gzip` or
+`--encoding br` for separate compression diagnostics. A server may return identity; reports record
+that fallback rather than claiming compression was used. Unrequested encodings, corrupt/truncated
+bodies and response deadlines fail the run. Redirects are not followed: the fixture URL itself must
+return the validated HTTP 200 workload.
+
+Schema v2 uses Node HTTP/1.1 with a fresh connection and explicit content decoding, replacing the
+previous Fetch transport's implicit encoding/decompression. Full-body latency includes decoding;
+it is not isolated rendering time. **Do not compare these timings directly with schema-v1 reports.**
+Rerun all compared frameworks under the same encoding and transport. Existing published results are
+not rewritten by this change.
 
 All durations use Node's external monotonic clock. Readiness is checked every 2 ms so single-digit
 production-boot differences are not hidden by the polling interval. One unmeasured burn-in pass over
@@ -98,6 +114,8 @@ and prints its path. It does **not** replace the checked-in results or landing-p
 
 ```sh
 node benchmarks/frameworks/run.mjs --runs 1 --requests 3 --warmups 1
+node benchmarks/frameworks/run.mjs --only farm,tanstack --encoding gzip --runs 1 --requests 3 --warmups 1
+node benchmarks/frameworks/run.mjs --only farm,tanstack --encoding br --runs 1 --requests 3 --warmups 1
 ```
 
 Validate rendered fixtures, scheduling, readiness precision, numeric options, environment sanitization,
@@ -115,7 +133,8 @@ node benchmarks/frameworks/run.mjs --runs 7 --requests 30 --warmups 30 --publish
 ```
 
 `--publish` requires all five frameworks, at least seven measured rounds, 30 measured requests, 30
-warmups, the discarded burn-in, and a fresh untimed build of the local Farm packages. It writes:
+warmups, identity encoding, the discarded burn-in, and a fresh untimed build of the local Farm
+packages. Compressed runs remain diagnostic-only so they cannot replace the canonical report. It writes:
 
 - `results/latest.json` — metadata, per-round data, and every raw sample.
 - `results/latest.md` — the concise human-readable report.

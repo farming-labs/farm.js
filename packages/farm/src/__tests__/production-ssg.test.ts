@@ -865,15 +865,26 @@ describe("production SSG output", () => {
           expect(secondHtml).not.toBe(firstHtml);
         } else {
           const english = await fetch(`${production.origin}/app/en/sensitive`);
-          const french = await fetch(`${production.origin}/app/fr/sensitive`);
+          // Without server.trustProxy a forwarded host must not move the alternates.
+          const french = await fetch(`${production.origin}/app/fr/sensitive`, {
+            headers: { "x-forwarded-host": "evil.test", "x-forwarded-proto": "https" },
+          });
           expect(english.status).toBe(200);
           expect(french.status).toBe(200);
           const englishHtml = await english.text();
           const frenchHtml = await french.text();
           expect(englishHtml).toContain("i18n-page");
           expect(frenchHtml).toContain("i18n-page");
-          expect(englishHtml).toContain('hreflang="fr" href="/app/fr/sensitive"');
-          expect(frenchHtml).toContain('hreflang="en" href="/app/en/sensitive"');
+          expect(englishHtml).toContain(
+            `hreflang="fr" href="${production.origin}/app/fr/sensitive"`,
+          );
+          expect(englishHtml).toContain(
+            `hreflang="x-default" href="${production.origin}/app/en/sensitive"`,
+          );
+          expect(frenchHtml).toContain(
+            `hreflang="en" href="${production.origin}/app/en/sensitive"`,
+          );
+          expect(frenchHtml).not.toContain("evil.test");
         }
       } finally {
         await production?.stop();
