@@ -379,6 +379,100 @@ async function expectNitroFallback(root: string): Promise<void> {
 }
 
 describe("production prebuilt SSR output", () => {
+  it.each([true, false])(
+    "keeps the MDX compiler out of TSX-only output (Markdown mirrors: %s)",
+    async (markdownMirrors) => {
+      const root = await createProductionFixture();
+      const emittedModules = new Set<string>();
+
+      try {
+        const config = await resolveConfig(
+          {
+            root,
+            srcDir: "src",
+            md: markdownMirrors,
+            images: { provider: "none" },
+            telemetry: false,
+            generateBuildId: () => "markdown-response-boundary-test",
+            vite: {
+              plugins: [
+                {
+                  name: "record-emitted-markdown-dependencies",
+                  generateBundle(_options, bundle) {
+                    for (const output of Object.values(bundle)) {
+                      if (output.type !== "chunk") continue;
+                      for (const id of Object.keys(output.modules)) {
+                        emittedModules.add(id.replace(/\\/g, "/"));
+                      }
+                    }
+                  },
+                },
+              ],
+            },
+          },
+          "production",
+        );
+
+        await build(config, { root, preset: "node-server" });
+        const serverDir = path.join(root, ".farm", ".output", "server");
+        await fs.access(path.join(serverDir, "farm-ssr"));
+        expect([...emittedModules].some((id) => id.includes("virtual:farm-ssr-entry"))).toBe(true);
+        // Inspect module provenance in every emitted chunk, including dynamic chunks.
+        // A renamed output file must not conceal an accidentally bundled compiler.
+        expect(
+          [...emittedModules].filter((id) =>
+            /\/(?:@mdx-js\/|remark-[^/]+\/|micromark(?:-[^/]+)?\/)/.test(id),
+          ),
+        ).toEqual([]);
+
+        await runProductionRequest(serverDir, async (response) => {
+          expect(response.status).toBe(200);
+          expect(await response.text()).toContain("prebuilt SSR output");
+
+          for (const [pathname, accept] of [
+            ["/missing.md", "text/html"],
+            ["/missing", "text/markdown"],
+          ]) {
+            const missing = await fetch(new URL(pathname, response.url), {
+              headers: { accept },
+            });
+            expect(missing.status).toBe(404);
+            expect(missing.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+            const body = await missing.text();
+            expect(body).toContain("# Page not found");
+            expect(body).toContain(pathname);
+            expect(body).toContain("](/)");
+
+            const head = await fetch(new URL(pathname, response.url), {
+              method: "HEAD",
+              headers: { accept },
+            });
+            expect(head.status).toBe(404);
+            expect(head.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+            expect(await head.text()).toBe("");
+          }
+
+          const html404 = await fetch(new URL("/missing", response.url), {
+            headers: { accept: "text/html, text/markdown;q=0" },
+          });
+          expect(html404.status).toBe(404);
+          expect(html404.headers.get("content-type")).toContain("text/html");
+          expect(await html404.text()).toContain("404");
+
+          if (markdownMirrors) {
+            const mirror = await fetch(response.url, { headers: { accept: "text/markdown" } });
+            expect(mirror.status).toBe(200);
+            expect(mirror.headers.get("content-type")).toContain("text/markdown");
+            expect(await mirror.text()).toContain("prebuilt SSR output");
+          }
+        });
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+
   it("adds a fresh CSP nonce to production HTML and every script tag", async () => {
     const root = await createProductionFixture();
 
@@ -559,6 +653,11 @@ export function CopyButton({ text }) {
         path.join(root, "src", "app", "notes", "page.md"),
         `# Notes\n\nSome server-rendered text.\n\n<CopyButton text="copy me" />\n`,
       );
+      await fs.mkdir(path.join(root, "src", "app", "notes-mdx"), { recursive: true });
+      await fs.copyFile(
+        path.join(root, "src", "app", "notes", "page.md"),
+        path.join(root, "src", "app", "notes-mdx", "page.mdx"),
+      );
       const config = await resolveConfig(
         {
           root,
@@ -585,6 +684,23 @@ export function CopyButton({ text }) {
           expect(html).toContain("Some server-rendered text.");
           expect(html).toContain('data-farm-layout-client="true"');
           expect(html).toMatch(/<farm-client-boundary[^>]*copy-button/);
+          expect(html).toContain("<title>Notes</title>");
+
+          const mdx = await fetch(new URL("/notes-mdx", response.url));
+          expect(mdx.status).toBe(200);
+          const mdxHtml = await mdx.text();
+          expect(mdxHtml).toContain("Some server-rendered text.");
+          expect(mdxHtml).toMatch(/<farm-client-boundary[^>]*copy-button/);
+          expect(mdxHtml).toContain("<title>Notes</title>");
+
+          for (const pathname of ["/notes.md", "/notes-mdx.md"]) {
+            const raw = await fetch(new URL(pathname, response.url));
+            expect(raw.status).toBe(200);
+            expect(raw.headers.get("content-type")).toContain("text/markdown");
+            expect(await raw.text()).toBe(
+              `# Notes\n\nSome server-rendered text.\n\n<CopyButton text="copy me" />\n`,
+            );
+          }
         },
         "/notes",
       );

@@ -5244,7 +5244,8 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
     : "const createFarmMarkdownSourceResponse = null;";
   // Always available: agents can request Markdown on any route, so the
   // Markdown error body is not gated on the app having Markdown page files.
-  const markdownErrorImport = `import { FARM_MARKDOWN_CONTENT_TYPE, createFarmMarkdownErrorBody, farmRequestWantsMarkdown } from "@farm.js/core/internal/app-markdown-runtime";`;
+  // Use the response-only module so TSX apps do not bundle the MDX compiler.
+  const markdownErrorImport = `import { FARM_MARKDOWN_CONTENT_TYPE, createFarmMarkdownErrorBody, farmRequestWantsMarkdown } from "@farm.js/core/markdown";`;
   const mdxComponentsPath =
     typeof config.mdx?.components === "string"
       ? path.isAbsolute(config.mdx.components)
