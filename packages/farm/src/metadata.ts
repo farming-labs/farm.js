@@ -40,6 +40,7 @@ export function mergeMetadata(
     ...next,
     jsonLd: mergeMetadataJsonLd(base.jsonLd, next.jsonLd),
     title: mergeMetadataTitle(base.title, next.title),
+    other: mergeNestedMetadata(base.other, next.other),
     openGraph: mergeNestedMetadata(base.openGraph, next.openGraph),
     twitter: mergeNestedMetadata(base.twitter, next.twitter),
     alternates: mergeNestedMetadata((base as any).alternates, (next as any).alternates),
@@ -192,6 +193,7 @@ export function renderMetadataHead(
     );
   }
 
+  appendNamedMetaRecord(tags, resolvedMetadata.other);
   appendOpenGraph(tags, resolvedMetadata.openGraph, metadataBase);
   appendTwitter(tags, resolvedMetadata.twitter, metadataBase);
   appendVerification(tags, resolvedMetadata.verification);

@@ -677,6 +677,8 @@ export interface Metadata {
         apple?: string | Array<string | { url: string; sizes?: string; type?: string }>;
       };
   manifest?: string;
+  /** Extra `<meta name content>` tags, keyed by name. An array renders one tag per value. */
+  other?: Record<string, string | number | Array<string | number>>;
 }
 
 export interface FarmRequest extends IncomingMessage {
