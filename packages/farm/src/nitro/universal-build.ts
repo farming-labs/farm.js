@@ -7403,7 +7403,9 @@ async function handleFarmRequestInContext(
       ? `
   if (farmMarkdownConfig?.enabled) {
     const markdownResponse = await createMarkdownMirrorResponse({
-      request: request.clone(),
+      // The mirror helper only reads metadata and creates its own GET request.
+      // Cloning here needlessly tees bodies even when negotiation rejects them.
+      request,
       config: farmMarkdownConfig,
       routeExists: (targetPathname) =>
         Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
