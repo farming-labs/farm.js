@@ -37,7 +37,7 @@ production-boot differences are not hidden by the polling interval. One unmeasur
 every selected framework is discarded before collection. Measured orders use a seeded,
 position-balanced cyclic schedule: every complete block gives each framework every ordinal position
 exactly once, and partial blocks differ by at most one appearance per position. Raw JSON retains every
-timing sample.
+timing sample at full precision; displayed summary statistics are rounded.
 
 ## Cache and server policy
 
@@ -78,7 +78,8 @@ corepack pnpm install --frozen-lockfile
 corepack pnpm --dir benchmarks/frameworks install --frozen-lockfile
 ```
 
-An ordinary run prints a report but does **not** replace the checked-in results:
+An ordinary run saves raw samples and a report in a unique, Git-ignored `results/run-*/` directory
+and prints its path. It does **not** replace the checked-in results or landing-page data:
 
 ```sh
 node benchmarks/frameworks/run.mjs --runs 1 --requests 3 --warmups 1
@@ -110,6 +111,9 @@ benchmark harness and fixture inputs, clean Farm sources, and a clean root lockf
 records the benchmark SHA-256 and whether the wider workspace was dirty. An exclusive PID lock
 prevents simultaneous suite runs. Publishing is also rejected when a measured round shows correlated
 contention: at least three frameworks with build times above 1.5× their own measured median.
+The report marks this assessment **unavailable** with fewer than three selected frameworks or three
+measured rounds. Otherwise, “not detected” is not proof of an idle host. Publication eligibility also
+requires the full methodology and clean inputs described above; partial runs are diagnostic only.
 
 ## Limitations
 
