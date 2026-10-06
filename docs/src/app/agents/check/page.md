@@ -24,4 +24,4 @@ Every check looks at what an agent sees without a browser: the HTML, the Markdow
 | Agent card                   | `/.well-known/agent-card.json`. Reported, not scored, while the specs settle. | 0      |
 | WebMCP                       | Tools the page registers for in-browser agents. Reported, not scored.         | 0      |
 
-Farm.js apps answer most of these checks by default. See [agent infrastructure](/agents) for what comes next.
+Farm.js apps pass the readable and Markdown checks by default, and one `agent` block in `farm.config.ts` adds `llms.txt` and JSON-LD (see [agent readiness](/docs/configuration#agent-readiness)). See [agent infrastructure](/agents) for what comes next.

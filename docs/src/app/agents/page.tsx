@@ -36,7 +36,7 @@ import "./agents.css";
 export const metadata = {
   title: "Agent infrastructure — Farm.js",
   description:
-    "Farm.js apps are agent-native by default: agent runtimes, Markdown mirrors, MCP tools, and WebMCP. Plus upcoming infrastructure for deploying agents and MCP servers.",
+    "Farm.js apps serve Markdown versions of every page by default, and config turns on llms.txt, JSON-LD, MCP tools, WebMCP, and agent runtimes. Plus upcoming infrastructure for deploying agents and MCP servers.",
 } satisfies Metadata;
 
 // What ships in v0.1.0, as opposed to the upcoming infrastructure further down the page.
@@ -61,7 +61,7 @@ const availableNow = [
     title: "Every page in Markdown.",
     code: 'curl -H "Accept: text/markdown" /pricing',
     description:
-      "Pages answer agents with a Markdown mirror, by .md suffix or Accept header. Turn on OpenAPI and llms.txt with ordinary config.",
+      "Pages answer agents with a Markdown mirror, by .md suffix or Accept header. llms.txt, JSON-LD, and OpenAPI stay off until you turn them on in config.",
     href: "/docs/markdown",
     link: "Markdown mirrors",
   },
@@ -203,15 +203,15 @@ export default function AgentsPage() {
                 <div>
                   <IndexedLabel index="06.1" label="Available today" />
                   <h2 id="agents-now-title" className="font-geist-pixel">
-                    Agent-native
+                    Agent-ready.
                     <br />
-                    by default.
+                    One config block.
                   </h2>
                 </div>
                 <p>
-                  Every Farm.js v0.1.0 app can run an agent, answer agents in Markdown, and expose
-                  the tools you choose. Discovery never grants permission; your app still authorizes
-                  every action.
+                  Pages answer agents in Markdown by default. An agent block in farm.config.ts adds
+                  llms.txt and JSON-LD, and an mcp block exposes the tools you choose. Discovery
+                  never grants permission; your app still authorizes every action.
                 </p>
               </div>
               <div className="agents-now farm-full-rule">
