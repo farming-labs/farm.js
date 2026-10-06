@@ -1,10 +1,10 @@
-import { renderMetadataHead, resolveMetadataTitle } from "../metadata";
+import { FARM_METADATA_ATTRIBUTE, renderMetadataHead, resolveMetadataTitle } from "../metadata";
 import type { Metadata } from "../types";
 
 export type NavigationMetadata = (Metadata & Record<string, any>) | undefined;
 
 /** Marks head elements this reconciler inserted, so they can be replaced. */
-const MANAGED_ATTRIBUTE = "data-farm-metadata";
+const MANAGED_ATTRIBUTE = FARM_METADATA_ATTRIBUTE;
 
 /**
  * Head tags the metadata system owns outright. These are swept on every
@@ -16,6 +16,9 @@ const OWNED_SELECTORS = [
   'meta[name="description"]',
   'meta[name="keywords"]',
   'meta[name="author"]',
+  'meta[name="google-site-verification"]',
+  'meta[name="msvalidate.01"]',
+  'meta[name="yandex-verification"]',
   'meta[name="creator"]',
   'meta[name="publisher"]',
   'meta[name="robots"]',
@@ -24,6 +27,8 @@ const OWNED_SELECTORS = [
   'link[rel="alternate"]',
   'meta[property^="og:"]',
   'meta[name^="twitter:"]',
+  // Meta tags named by the app carry the marker, since no fixed name matches them.
+  `meta[${MANAGED_ATTRIBUTE}]`,
 ].join(", ");
 
 /**

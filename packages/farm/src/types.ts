@@ -592,6 +592,17 @@ export interface Metadata {
   author?: string;
   authors?: Array<{ name: string; url?: string }>;
   creator?: string;
+  /** Site ownership tokens for search consoles, one `<meta>` per token. */
+  verification?: {
+    /** `google-site-verification` */
+    google?: string | string[];
+    /** `msvalidate.01` */
+    bing?: string | string[];
+    /** `yandex-verification` */
+    yandex?: string | string[];
+    /** Any other verification meta name, keyed by name. */
+    other?: Record<string, string | string[]>;
+  };
   publisher?: string;
   robots?: string | { index?: boolean; follow?: boolean };
   openGraph?: {

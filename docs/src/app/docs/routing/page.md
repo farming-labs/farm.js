@@ -879,6 +879,30 @@ export const metadata: Metadata = {
 
 Root layout metadata applies the favicon to every route. Nested layouts and pages can override individual icon entries through their own metadata. Do not render a `<link rel="icon">` element from the layout component; declaring `metadata.icons` lets Farm place the tags in the document head in both development and production.
 
+### Site verification
+
+Search consoles confirm site ownership with a meta tag. Set the tokens once in the root layout:
+
+**src/app/layout.tsx**
+
+```tsx
+import type { Metadata } from "@farm.js/core";
+
+export const metadata: Metadata = {
+  verification: {
+    google: "google-token",
+    bing: "bing-token",
+    yandex: "yandex-token",
+    other: { "facebook-domain-verification": "facebook-token" },
+  },
+};
+```
+
+`google`, `bing`, and `yandex` render `google-site-verification`, `msvalidate.01`, and
+`yandex-verification`. `other` renders one `<meta name content>` per key. Every field accepts an
+array when a service needs more than one token. Like `openGraph`, `verification` merges one level
+deep, so a nested layout or page adds tokens and replaces the ones it repeats.
+
 ### Application metadata routes
 
 Use server-only metadata files when crawlers or browsers need an application-level document rather than an HTML `<meta>` tag. Farm discovers five conventions in `src/app` and route segments:
