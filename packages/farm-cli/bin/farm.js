@@ -246,12 +246,14 @@ schemaCommand
   .option("--apply", "Execute the statements against the database")
   .action(async (options) => {
     try {
-      const { migrateAllSchemas } = require("../dist/index.js");
+      const { askToConfirm, migrateAllSchemas } = require("../dist/index.js");
       await migrateAllSchemas({
         root: options.root,
         configPath: options.config,
         write: options.write,
         apply: options.apply,
+        // Only a person at a terminal is asked; scripts and CI print and stop.
+        confirm: process.stdin.isTTY && process.stdout.isTTY ? askToConfirm : undefined,
       });
     } catch (error) {
       console.error("Failed to migrate:", error?.message ?? error);
@@ -671,12 +673,13 @@ async function dispatchSchemaMigrate() {
     .option("-w, --write <file>", "Write the statements to a file instead of printing them")
     .option("--apply", "Execute the statements against the database")
     .action(async (options) => {
-      const { migrateSchema } = require("../dist/index.js");
+      const { askToConfirm, migrateSchema } = require("../dist/index.js");
       await migrateSchema(name, {
         root: options.root,
         configPath: options.config,
         write: options.write,
         apply: options.apply,
+        confirm: process.stdin.isTTY && process.stdout.isTTY ? askToConfirm : undefined,
       });
     });
 

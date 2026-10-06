@@ -86,7 +86,13 @@ export type FarmSchemaMigratePlan = {
   statements: FarmSqlStatement[];
   /** Tables that exist and already match the schema. */
   upToDate: string[];
-  /** Tables that exist but differ. Never altered automatically. */
+  /**
+   * Additions to tables that exist: columns that can join a table with rows
+   * (nullable, or with a default the database can write) and non-unique
+   * indexes. Applied with the rest of the plan. Anything else stays in drift.
+   */
+  upgrades?: Array<FarmSqlStatement & { table: string }>;
+  /** Tables that exist but differ in ways Farm will not change on its own. */
   drift: FarmSchemaDrift[];
   /**
    * Foreign keys to other owners' tables that an existing table does not
@@ -120,6 +126,7 @@ export async function planSchemaMigration(
   const upToDate: string[] = [];
   const drift: FarmSchemaDrift[] = [];
   const addableForeignKeys: FarmSchemaAddableForeignKey[] = [];
+  const upgrades: Array<FarmSqlStatement & { table: string }> = [];
   const modelLookup = new Map(
     models.map((model) => [`${model.ownerKey}.${model.modelKey}`, model]),
   );
@@ -235,21 +242,58 @@ export async function planSchemaMigration(
         ),
     );
 
+    // What can be added to a table that may hold rows is an upgrade; the rest
+    // stays drift, for a migration step or a person to decide.
+    const remainingColumns: string[] = [];
+    for (const column of missingColumns) {
+      const field = expectedColumns.get(column.toLowerCase())!;
+      if (field.primaryKey || field.unique || unsupportedColumnReason(field, dialect)) {
+        remainingColumns.push(column);
+        continue;
+      }
+      upgrades.push({
+        kind: "column",
+        table: model.modelName,
+        target: `${model.modelName}.${column}`,
+        sql: addColumnStatement(dialect, model.modelName, field),
+      });
+    }
+    const remainingIndexes: FarmSchemaIndexDefinition[] = [];
+    for (const index of missingIndexes) {
+      // A unique index fails on duplicate rows, so it is never added on its own.
+      const columnsExist = index.columns.every(
+        (column) => actualColumns.has(column.toLowerCase()) || !remainingColumns.includes(column),
+      );
+      if (index.unique || !columnsExist) {
+        remainingIndexes.push(index);
+        continue;
+      }
+      const columns = index.columns.map((column) => quoteSqlIdentifier(dialect, column)).join(", ");
+      upgrades.push({
+        kind: "index",
+        table: model.modelName,
+        target: index.name,
+        sql: `CREATE INDEX${dialect === "mysql" ? "" : " IF NOT EXISTS"} ${quoteSqlIdentifier(dialect, index.name)} ON ${quoteTableName(dialect, model.modelName)} (${columns});`,
+      });
+    }
+
     const entry = {
       table: model.modelName,
-      missingColumns,
+      missingColumns: remainingColumns,
       extraColumns,
       changedColumns,
-      missingIndexes,
+      missingIndexes: remainingIndexes,
       extraIndexes: extraIndexes.map(({ name, columns, unique }) => ({ name, columns, unique })),
       missingReferences,
       extraReferences,
     };
     if (hasSchemaDrift(entry)) drift.push(entry);
-    else upToDate.push(model.modelName);
+    else if (!upgrades.some((upgrade) => upgrade.table === model.modelName)) {
+      upToDate.push(model.modelName);
+    }
   }
 
-  return { dialect, statements, upToDate, drift, addableForeignKeys };
+  return { dialect, statements, upgrades, upToDate, drift, addableForeignKeys };
 }
 
 /** A table's columns as the database reports them, normalized per dialect. */
@@ -823,7 +867,8 @@ export async function applySchemaMigration(
   executor: FarmSchemaExecutor,
 ): Promise<FarmSchemaMigrateResult> {
   const applied: string[] = [];
-  for (const statement of plan.statements) {
+  // New tables first, then additions to existing ones.
+  for (const statement of [...plan.statements, ...(plan.upgrades ?? [])]) {
     await executor.execute(statement.sql);
     applied.push(statement.target);
   }
@@ -925,18 +970,10 @@ export async function planSchemaExtensions(
         continue;
       }
 
-      const defaultValue = getSqlDefaultExpression(field, dialect);
-      const parts = [
-        `ALTER TABLE ${quoteTableName(dialect, extension.table)} ADD COLUMN`,
-        quoteSqlIdentifier(dialect, field.name),
-        expected,
-        ...(isNullableField(field) ? [] : ["NOT NULL"]),
-        ...(defaultValue ? [`DEFAULT ${defaultValue}`] : []),
-      ];
       plan.statements.push({
         kind: "column",
         target: `${extension.table}.${field.name}`,
-        sql: `${parts.join(" ")};`,
+        sql: addColumnStatement(dialect, extension.table, field),
         extension,
         fieldKey,
         column: field.name,
@@ -944,6 +981,19 @@ export async function planSchemaExtensions(
     }
   }
   return plan;
+}
+
+/** `ALTER TABLE … ADD COLUMN` for a column that passed `unsupportedColumnReason`. */
+function addColumnStatement(dialect: FarmSqlDialect, table: string, field: ResolvedSchemaField) {
+  const defaultValue = getSqlDefaultExpression(field, dialect);
+  const parts = [
+    `ALTER TABLE ${quoteTableName(dialect, table)} ADD COLUMN`,
+    quoteSqlIdentifier(dialect, field.name),
+    getSqlColumnType(field, dialect),
+    ...(isNullableField(field) ? [] : ["NOT NULL"]),
+    ...(defaultValue ? [`DEFAULT ${defaultValue}`] : []),
+  ];
+  return `${parts.join(" ")};`;
 }
 
 /** Why a column cannot be added to a table that may hold rows, if it cannot. */
@@ -978,17 +1028,29 @@ export function formatSchemaMigration(
   const header = [
     `-- Generated by \`farm ${owner} migrate\` from the ${owner} schema.`,
     `-- Dialect: ${plan.dialect}`,
-    options.addsColumns
+    options.addsColumns || (plan.upgrades?.length ?? 0) > 0
       ? "-- Review before applying. Existing tables only get what is added below; nothing is changed or dropped."
       : "-- Review before applying. Farm never alters existing tables.",
   ];
+  const upgrades = plan.upgrades ?? [];
 
-  if (plan.statements.length === 0) {
+  if (plan.statements.length === 0 && upgrades.length === 0) {
     header.push("--", "-- Nothing to create: every declared model already has a table.");
     return `${header.join("\n")}\n`;
   }
 
-  return `${header.join("\n")}\n\n${plan.statements.map((statement) => statement.sql).join("\n\n")}\n`;
+  const sections = [
+    ...plan.statements.map((statement) => statement.sql),
+    ...(upgrades.length > 0
+      ? [
+          [
+            "-- Added to tables that already exist:",
+            ...upgrades.map((statement) => statement.sql),
+          ].join("\n"),
+        ]
+      : []),
+  ];
+  return `${header.join("\n")}\n\n${sections.join("\n\n")}\n`;
 }
 
 /** Human-readable summary of tables that exist but no longer match the schema. */

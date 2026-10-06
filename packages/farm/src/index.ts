@@ -18,6 +18,12 @@ export * from "./schema-tables";
 export { collectSchemaDependencies, orderSchemaOwners } from "./schema-dependencies";
 export type { FarmCrossOwnerReference } from "./schema-foreign-keys";
 export {
+  FARM_SCHEMA_STATE_TABLE,
+  type FarmSchemaChanges,
+  type FarmSchemaSnapshot,
+  type FarmSchemaState,
+} from "./schema-state";
+export {
   collectSchemaExtensions,
   isSchemaExtensionAllowed,
   type FarmSchemaExtension,

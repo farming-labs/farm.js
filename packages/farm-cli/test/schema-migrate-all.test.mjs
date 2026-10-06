@@ -81,10 +81,14 @@ async function tables(database) {
   const { DatabaseSync } = await import("node:sqlite");
   const db = new DatabaseSync(database);
   try {
-    return db
-      .prepare("select name from sqlite_master where type = 'table' order by name")
-      .all()
-      .map((row) => row.name);
+    return (
+      db
+        .prepare("select name from sqlite_master where type = 'table' order by name")
+        .all()
+        .map((row) => row.name)
+        // Farm's record of what it applied.
+        .filter((name) => name !== "farm_schema_state")
+    );
   } finally {
     db.close();
   }

@@ -18,6 +18,23 @@ export interface MigrateSchemaOptions {
   write?: string;
   /** Execute the statements. */
   apply?: boolean;
+  /**
+   * Asked after printing a plan, when there is something to apply. Only the
+   * CLI in an interactive terminal passes one; scripts and CI print and stop.
+   */
+  confirm?: (question: string) => Promise<boolean>;
+}
+
+/** A yes/no question in the terminal; anything but "y" or "yes" is no. */
+export async function askToConfirm(question: string): Promise<boolean> {
+  const { createInterface } = await import("node:readline/promises");
+  const terminal = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await terminal.question(`${question} (y/N) `);
+    return /^y(es)?$/iu.test(answer.trim());
+  } finally {
+    terminal.close();
+  }
 }
 
 async function loadApp(options: MigrateSchemaOptions) {
@@ -58,8 +75,18 @@ export async function migrateSchema(
     );
   }
 
-  const outcome = await migrateOwner(owner, config, options);
-  if (options.apply && outcome.pending.length > 0) {
+  let outcome = await migrateOwner(owner, config, options);
+  let applied = Boolean(options.apply);
+  if (
+    !applied &&
+    !options.write &&
+    outcome.planned > 0 &&
+    (await options.confirm?.(`Apply these changes to ${owner.name}'s tables now?`))
+  ) {
+    outcome = await migrateOwner(owner, config, { ...options, apply: true, confirm: undefined });
+    applied = true;
+  }
+  if (applied && outcome.pending.length > 0) {
     throw new Error(
       `${outcome.pending.length} change(s) ${owner.name} needs are still missing: ${outcome.pending.join(", ")}. See above for why.`,
     );
@@ -76,7 +103,7 @@ async function migrateOwner(
   owner: LoadedApp["owners"][number],
   config: LoadedApp["config"],
   options: MigrateSchemaOptions & { sqlOnly?: boolean },
-): Promise<{ pending: string[]; sql: string; created: number }> {
+): Promise<{ pending: string[]; sql: string; created: number; planned: number }> {
   // An ORM's schema owns the app's tables: report the columns an owner adds
   // there instead of altering them behind the ORM's back.
   const ormOwners = detectOrmSchemaOwners(config.root);
@@ -112,7 +139,7 @@ async function migrateOwner(
 
   if (result.applied.length > 0) {
     logger.success(`Created ${result.applied.length} object(s).`);
-  } else if (result.plan.statements.length > 0 && !options.write && !options.apply) {
+  } else if (result.planned > 0 && !options.write && !options.apply && !options.confirm) {
     logger.info("Re-run with --apply to execute, or --write <file> to save it.");
   }
 
@@ -133,6 +160,7 @@ async function migrateOwner(
     ],
     sql: result.sql,
     created: result.applied.length,
+    planned: result.planned,
   };
 }
 
@@ -157,6 +185,7 @@ export async function migrateAllSchemas(options: MigrateSchemaOptions = {}): Pro
   const failed = new Set<string>();
   const problems: string[] = [];
   const files: string[] = [];
+  let planned = 0;
   for (const owner of ordered) {
     // A plugin whose dependency failed would only fail the same way, or
     // create tables that point at nothing.
@@ -177,6 +206,7 @@ export async function migrateAllSchemas(options: MigrateSchemaOptions = {}): Pro
         sqlOnly: Boolean(options.write),
       });
       files.push(outcome.sql);
+      planned += outcome.planned;
       if (options.apply && outcome.pending.length > 0) {
         problems.push(`${owner.name}: still missing ${outcome.pending.join(", ")}.`);
       }
@@ -197,5 +227,14 @@ export async function migrateAllSchemas(options: MigrateSchemaOptions = {}): Pro
 
   if (problems.length > 0) {
     throw new Error(`Not everything was migrated:\n  ${problems.join("\n  ")}`);
+  }
+
+  if (
+    !options.apply &&
+    !options.write &&
+    planned > 0 &&
+    (await options.confirm?.("Apply all of these changes now?"))
+  ) {
+    await migrateAllSchemas({ ...options, apply: true, confirm: undefined });
   }
 }

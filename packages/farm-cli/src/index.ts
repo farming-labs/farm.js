@@ -112,6 +112,7 @@ export {
 export { migrateFarmAuth, type MigrateFarmAuthOptions } from "./auth";
 export {
   listSchemaTableOwners,
+  askToConfirm,
   migrateAllSchemas,
   migrateSchema,
   type MigrateSchemaOptions,

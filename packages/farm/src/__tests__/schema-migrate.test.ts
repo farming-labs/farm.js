@@ -690,29 +690,43 @@ describe("migration planning", () => {
     expect(second.drift).toEqual([]);
   });
 
-  it("reports a differing table instead of altering it", async () => {
+  it("adds what a table with rows can take, and reports the rest", async () => {
     const { database, executor } = await sqliteExecutor();
-    // A table that predates a schema change: one column missing, one extra.
+    // A table that predates a schema change: columns missing, one extra, a row.
     database.exec(
       `create table todo_items (id TEXT primary key, title TEXT, list_id TEXT, legacy_note TEXT)`,
     );
+    database.exec(`insert into todo_items (id, title, list_id) values ('t1', 'old', 'l1')`);
 
     const plan = await planSchemaMigration(models(), "sqlite", executor);
 
-    expect(plan.statements).toEqual([]); // nothing is emitted for it
+    expect(plan.statements).toEqual([]); // the table is not created again
+    // Columns with a default, and the plain indexes, can join a table with rows.
+    expect(plan.upgrades!.map((upgrade) => upgrade.target)).toEqual([
+      "todo_items.status",
+      "todo_items.priority",
+      "todo_items_list_id_idx",
+      "todo_items_list_id_status_index",
+    ]);
+    // A unique column and a required one without a default cannot; nor is
+    // the extra column ever dropped.
     expect(plan.drift).toHaveLength(1);
-    expect(plan.drift[0]!.missingColumns).toEqual(
-      expect.arrayContaining(["status", "priority", "slug", "updated_at"]),
-    );
+    expect(plan.drift[0]!.missingColumns).toEqual(["slug", "updated_at"]);
     expect(plan.drift[0]!.extraColumns).toEqual(["legacy_note"]);
 
     const applied = await applySchemaMigration(plan, executor);
-    expect(applied.applied).toEqual([]);
+    expect(applied.applied).toEqual(plan.upgrades!.map((upgrade) => upgrade.target));
     expect(applied.skipped).toHaveLength(1);
 
-    // The pre-existing column is untouched.
-    const columns = await executor.query("pragma table_info('todo_items')");
-    expect(columns.map((row) => row.name)).toContain("legacy_note");
+    // The existing row gets the defaults, and the old column is untouched.
+    const rows = await executor.query("select * from todo_items");
+    expect(rows).toEqual([
+      expect.objectContaining({ id: "t1", status: "open", priority: 0, legacy_note: null }),
+    ]);
+
+    // Running it again adds nothing.
+    const again = await planSchemaMigration(models(), "sqlite", executor);
+    expect(again.upgrades).toEqual([]);
   });
 
   it("reports definition and index drift even when every column name matches", async () => {
@@ -751,12 +765,14 @@ describe("migration planning", () => {
           differences: ["default"],
         },
       ],
-      missingIndexes: expect.arrayContaining([
-        expect.objectContaining({ columns: ["list_id"], unique: false }),
-        expect.objectContaining({ columns: ["slug"], unique: true }),
-        expect.objectContaining({ columns: ["list_id", "status"], unique: false }),
-      ]),
+      // A unique index could fail on duplicate rows, so it stays for a person.
+      missingIndexes: [expect.objectContaining({ columns: ["slug"], unique: true })],
     });
+    // Plain indexes are added.
+    expect(plan.upgrades!.map((upgrade) => upgrade.target)).toEqual([
+      "todo_items_list_id_idx",
+      "todo_items_list_id_status_index",
+    ]);
 
     expect(describeSchemaDrift(plan.drift)).toContain(
       'changed column status: default expected "open", found none',
@@ -773,15 +789,13 @@ describe("migration planning", () => {
     const plan = await planSchemaMigration(models(), "sqlite", executor);
 
     expect(plan.upToDate).toEqual([]);
+    // The removed index is put back; the extra one is reported, never dropped.
+    expect(plan.upgrades).toEqual([
+      expect.objectContaining({ kind: "index", target: "todo_items_list_id_idx" }),
+    ]);
     expect(plan.drift).toHaveLength(1);
     expect(plan.drift[0]!.changedColumns).toEqual([]);
-    expect(plan.drift[0]!.missingIndexes).toEqual([
-      {
-        name: "todo_items_list_id_idx",
-        columns: ["list_id"],
-        unique: false,
-      },
-    ]);
+    expect(plan.drift[0]!.missingIndexes).toEqual([]);
     expect(plan.drift[0]!.extraIndexes).toEqual([
       {
         name: "legacy_title_idx",
