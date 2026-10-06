@@ -446,6 +446,8 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
 - Configure `theme` for no-flash light/dark/system rendering and typed client/server access.
 - Use Farm image helpers plus the `images` allowlist and format policy for optimization.
 - Use `docs` for human docs, shared search, markdown, `llms.txt`, sitemap, robots, and agent APIs.
+  A root `sitemap.ts`, `robots.ts`, `llms.ts`, or `llms-full.ts` (or the same file in `public/`)
+  takes its path from the docs engine.
 - Use `agent.llmsTxt` for an app's own `/llms.txt` and `/llms-full.txt` (`full: false` skips the
   second). A static `public/llms.txt` or `public/llms-full.txt` overrides each, and so do
   `src/app/llms.ts` and `src/app/llms-full.ts`, which return the whole file as a string or the
