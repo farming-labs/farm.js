@@ -10,9 +10,13 @@ export interface PreviewManagedAuthOptions {
     issuer: string;
     clientId: string;
     /** Resolve an API key or approved device credential on every new grant. */
-    authorizeAccount(
-      token: string,
-    ): Promise<{ subject: string; login: string; expiresAt?: number; keyId?: string } | null>;
+    authorizeAccount(token: string): Promise<{
+      subject: string;
+      login: string;
+      expiresAt?: number;
+      keyId?: string;
+      project?: string;
+    } | null>;
   };
   /** Public console URL. Must not contain credentials or query parameters. */
   dashboardUrl?: string;
@@ -41,6 +45,8 @@ export type PreviewAuthExchangeRateLimiter = (
 ) => PreviewAuthExchangeRateLimitResult | Promise<PreviewAuthExchangeRateLimitResult>;
 
 export interface PreviewAccountIdentity {
+  /** Optional credential restriction; never taken from the grant request. */
+  project?: string;
   /** Non-secret identifier supplied by the credential verifier, never the CLI. */
   keyId?: string;
   provider: "github" | "device";
@@ -57,6 +63,8 @@ export interface PreviewAccountClaims extends PreviewAccountIdentity {
 }
 
 export interface PreviewTunnelGrantClaims {
+  /** Unique signed grant identity, used to revoke reconnects across transports. */
+  nonce?: string;
   project?: string;
   keyId?: string;
   kind: "tunnel";
@@ -195,6 +203,8 @@ export function issuePreviewTunnelGrant(
     throw new PreviewAuthError(400, "Preview expiry must be a positive integer.");
   }
   const requestedTtlMs = input.expiresInMs ?? durations.defaultSessionTtlMs;
+  if (account.project !== undefined && account.project !== (input.project ?? input.name))
+    throw new PreviewAuthError(403, "This API key is restricted to another preview project.");
   const ttlMs = Math.max(MIN_SESSION_TTL_MS, Math.min(durations.maxSessionTtlMs, requestedTtlMs));
   const issuedAt = Date.now();
   const expiresAt = Math.min(issuedAt + ttlMs, account.expiresAt);
@@ -228,6 +238,8 @@ export function verifyPreviewTunnelGrant(
     typeof claims.subject !== "string" ||
     typeof claims.login !== "string" ||
     typeof claims.name !== "string" ||
+    (claims.nonce !== undefined &&
+      (typeof claims.nonce !== "string" || !/^[\w-]{1,128}$/.test(claims.nonce))) ||
     (claims.project !== undefined &&
       (typeof claims.project !== "string" || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(claims.project))) ||
     (claims.keyId !== undefined &&
@@ -328,6 +340,9 @@ export async function authorizePreviewAccount(
     !account.subject ||
     typeof account.login !== "string" ||
     !account.login ||
+    (account.project !== undefined &&
+      (typeof account.project !== "string" ||
+        !/^[a-z0-9][a-z0-9-]{0,62}$/.test(account.project))) ||
     (account.keyId !== undefined &&
       (typeof account.keyId !== "string" || !/^[\w-]{1,128}$/.test(account.keyId))) ||
     (account.expiresAt !== undefined &&
@@ -341,6 +356,7 @@ export async function authorizePreviewAccount(
     subject: account.subject,
     login: account.login,
     ...(account.keyId ? { keyId: account.keyId } : {}),
+    ...(account.project ? { project: account.project } : {}),
     issuedAt: now,
     expiresAt: account.expiresAt ?? now + DEFAULT_ACCOUNT_TOKEN_TTL_MS,
   };

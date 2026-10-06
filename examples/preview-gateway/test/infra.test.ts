@@ -7,6 +7,24 @@ const env = {
   FARM_PREVIEW_GATEWAY_SECRET: "fixture-only-backchannel-secret-at-least-32-bytes",
 };
 
+test("access checks send only verified grant metadata and reject incomplete or unavailable authority", async () => {
+  let status = 200;
+  const calls: Record<string, unknown>[] = [];
+  const integration = createInfraPreviewIntegration(env, (async (_url, init) => {
+    calls.push(JSON.parse(String(init?.body)));
+    return Response.json({ allowed: true }, { status });
+  }) as typeof fetch)!;
+  const session = { id: "session", name: "store", ownerId: "device:owner", project: "store", keyId: "key_ci", grantId: "grant_one", expiresAt: Date.now() + 60_000 };
+  assert.equal(await integration.authorizeSession(session), true);
+  assert.deepEqual(calls[0], { userId: "owner", project: "store", keyId: "key_ci", grantId: "grant_one", expiresAt: session.expiresAt });
+  assert.equal(await integration.authorizeSession({ ...session, grantId: undefined }), false);
+  assert.equal(await integration.authorizeSession({ ...session, ownerId: "github:owner" }), false);
+  status = 403;
+  assert.equal(await integration.authorizeSession(session), false);
+  status = 503;
+  await assert.rejects(integration.authorizeSession(session), /unavailable/);
+});
+
 test("Infra backchannel requires a safe origin and a separate secret", () => {
   assert.equal(createInfraPreviewIntegration({}), undefined);
   for (const FARM_INFRA_URL of [

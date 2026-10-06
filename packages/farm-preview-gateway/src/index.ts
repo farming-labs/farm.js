@@ -30,7 +30,19 @@ export {
   type PreviewTunnelGrantClaims,
 } from "./auth.js";
 
+export interface PreviewSessionAccess {
+  id: string;
+  name: string;
+  ownerId?: string;
+  project?: string;
+  keyId?: string;
+  grantId?: string;
+  expiresAt?: number;
+}
+
 export interface PreviewGatewayOptions {
+  /** Required access control when supplied. Denials and errors fail closed, unlike telemetry. */
+  authorizeSession?: (session: PreviewSessionAccess) => Promise<boolean>;
   /** Optional metadata-only telemetry. Failures never interrupt a preview. */
   observer?: PreviewGatewayObserver;
   domain?: string;
@@ -48,6 +60,7 @@ export interface PreviewGatewayOptions {
 }
 
 export interface PreviewGatewaySession {
+  grantId?: string;
   project?: string;
   keyId?: string;
   ownerId?: string;
@@ -104,6 +117,7 @@ export interface PreviewGatewayStore {
 }
 
 interface PreviewGatewayRuntimeConfig {
+  authorizeSession?: PreviewGatewayOptions["authorizeSession"];
   observer?: PreviewGatewayObserver;
   domain: string;
   baseUrl?: string;
@@ -119,6 +133,7 @@ interface PreviewGatewayRuntimeConfig {
 
 export interface PreviewGatewayObserver {
   session?(event: {
+    grantId?: string;
     project?: string;
     keyId?: string;
     id: string;
@@ -157,6 +172,7 @@ function reportSession(
   observe(() =>
     config.observer!.session!({
       id: session.id,
+      grantId: session.grantId,
       name: session.name,
       project: session.project,
       keyId: session.keyId,
@@ -227,6 +243,7 @@ export function createPreviewGatewayHandler(
   if (options.auth) getPreviewAuthPublicConfig(options.auth);
   const store = options.store || createPreviewGatewayStoreFromEnv();
   const config = {
+    authorizeSession: options.authorizeSession,
     observer: options.observer,
     domain: normalizeDomain(options.domain || process.env.FARM_PREVIEW_DOMAIN || DEFAULT_DOMAIN),
     baseUrl: options.baseUrl || process.env.FARM_PREVIEW_GATEWAY_URL,
@@ -701,6 +718,7 @@ async function createSession(
   let ownerId: string | undefined;
   let project: string | undefined;
   let keyId: string | undefined;
+  let grantId: string | undefined;
 
   if (config.auth) {
     const grantToken = readPreviewBearerToken(request);
@@ -716,6 +734,7 @@ async function createSession(
       ownerId = `${grant.provider || "github"}:${grant.subject}`;
       project = grant.project ?? grant.name;
       keyId = grant.keyId;
+      grantId = grant.nonce;
       expiresAt = grant.expiresAt;
       slidingExpiration = false;
     } catch (error) {
@@ -751,6 +770,7 @@ async function createSession(
 
   const hostname = `${name}.${config.domain}`;
   const session: PreviewGatewaySession = {
+    ...(grantId ? { grantId } : {}),
     ...(project ? { project } : {}),
     ...(keyId ? { keyId } : {}),
     ...(ownerId ? { ownerId } : {}),
@@ -766,6 +786,7 @@ async function createSession(
     lastHeartbeatAt: Date.now(),
   };
 
+  await requireSessionAccess(config, session);
   await store.createSession(session, Math.max(1, expiresAt - Date.now()));
   reportSession(config, session, "connected");
 
@@ -790,6 +811,9 @@ async function handleSessionRoute(
     route.sessionId,
     readPreviewBearerToken(request) || url.searchParams.get("token"),
   );
+
+  // Cleanup is still possible when the authority is unavailable or the grant is revoked.
+  if (request.method !== "DELETE" || route.action) await requireSessionAccess(config, session);
 
   if (request.method === "GET" && route.action === "requests") {
     return await pollSessionRequests(url, store, config, session);
@@ -887,12 +911,18 @@ async function pollSessionRequests(
 ) {
   const waitMs = clamp(Number(url.searchParams.get("wait") || config.pollTimeoutMs), 1000, 25000);
   const deadline = Date.now() + waitMs;
+  let nextAccessCheckAt = Date.now() + 1000;
 
   await markSessionOnline(store, config, session);
 
   while (Date.now() < deadline) {
+    if (Date.now() >= nextAccessCheckAt) {
+      await requireSessionAccess(config, session);
+      nextAccessCheckAt = Date.now() + 1000;
+    }
     const requests = await store.takeRequests(session.id, DEFAULT_POLL_REQUEST_LIMIT);
     if (requests.length) {
+      await requireSessionAccess(config, session);
       await markSessionOnline(store, config, session);
       return json({ requests });
     }
@@ -919,6 +949,8 @@ async function proxyPublicRequest(
     reportSession(config, session, "disconnected");
     return inactivePreviewResponse(request, route.name);
   }
+
+  await requireSessionAccess(config, session);
 
   const startedAt = Date.now();
   let status = 500;
@@ -1020,6 +1052,7 @@ async function waitForPreviewResponse(
   while (Date.now() < deadline) {
     if (signal.aborted) return "cancelled";
     if (Date.now() >= nextLivenessCheckAt) {
+      await requireSessionAccess(config, session);
       const latestSession = await store.getSessionById(session.id);
       if (!latestSession || !isPreviewClientOnline(latestSession, config)) {
         if (latestSession) await store.deleteSession(latestSession);
@@ -1030,6 +1063,7 @@ async function waitForPreviewResponse(
 
     const response = await store.getResponse(session.id, requestId);
     if (response) {
+      await requireSessionAccess(config, session);
       await store.deleteResponse(session.id, requestId);
       return response;
     }
@@ -1042,6 +1076,29 @@ async function waitForPreviewResponse(
   }
 
   return undefined;
+}
+
+async function requireSessionAccess(
+  config: PreviewGatewayRuntimeConfig,
+  session: PreviewGatewaySession,
+) {
+  if (!config.authorizeSession) return;
+  const { id, name, ownerId, project, keyId, grantId, expiresAt } = session;
+  let allowed;
+  try {
+    allowed = await config.authorizeSession({
+      id,
+      name,
+      ownerId,
+      project,
+      keyId,
+      grantId,
+      expiresAt,
+    });
+  } catch {
+    throw new GatewayHttpError(503, "Preview access verification is temporarily unavailable.");
+  }
+  if (allowed !== true) throw new GatewayHttpError(403, "This preview is no longer authorized.");
 }
 
 async function markSessionOnline(

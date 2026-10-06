@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { PreviewManagedAuthOptions, PreviewGatewayObserver } from "@farm.js/preview-gateway";
+import type { PreviewManagedAuthOptions, PreviewGatewayObserver, PreviewSessionAccess } from "@farm.js/preview-gateway";
 
 /** Private backchannel; account credentials are used only for verification. */
 export function createInfraPreviewIntegration(
@@ -107,5 +107,17 @@ export function createInfraPreviewIntegration(
       },
     };
   }
-  return { deviceAuth, dashboardUrl: `${url.origin}/dashboard/previews`, observer };
+  async function authorizeSession(session: PreviewSessionAccess) {
+    if (!session.ownerId?.startsWith("device:") || !session.grantId || !session.expiresAt) return false;
+    const response = await request(`${url.origin}/api/previews/access`, {
+      method: "POST", headers, redirect: "error", signal: AbortSignal.timeout(5000),
+      body: JSON.stringify({ userId: session.ownerId.slice(7), grantId: session.grantId,
+        project: session.project ?? session.name, keyId: session.keyId, expiresAt: session.expiresAt }),
+    });
+    if (response.status === 403) { await response.body?.cancel(); return false; }
+    if (!response.ok) { await response.body?.cancel(); throw new Error("Preview access verification unavailable."); }
+    const body = await response.json();
+    return body.allowed === true;
+  }
+  return { deviceAuth, dashboardUrl: `${url.origin}/dashboard/previews`, observer, authorizeSession };
 }
