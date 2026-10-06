@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/polar",
-  "version": "0.1.1-beta.4",
+  "version": "0.1.1",
   "description": "Polar billing integration for Farm.js",
   "license": "MIT",
   "repository": {
