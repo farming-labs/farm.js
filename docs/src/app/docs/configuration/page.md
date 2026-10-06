@@ -455,6 +455,31 @@ cannot close the tag. Entries from layouts render first and accumulate with the 
 replacing them. Client navigation swaps page and layout JSON-LD for the next route's and leaves
 the site script and any `ld+json` script the app renders itself in place.
 
+Instead of writing those objects by hand, use the typed builders in `@farm.js/core/json-ld`:
+`article`, `breadcrumbList`, `faqPage`, `product`, and `softwareApplication`. Each returns a plain
+object with `@context` and `@type` set and unset fields left out. Pass one, or an array of them, as
+`metadata.jsonLd`:
+
+```tsx title="src/app/docs/[slug]/page.tsx"
+import type { Metadata } from "@farm.js/core";
+import * as jsonLd from "@farm.js/core/json-ld";
+
+export const metadata: Metadata = {
+  jsonLd: [
+    jsonLd.article({
+      type: "TechArticle",
+      headline: "Routing",
+      datePublished: new Date("2026-10-01"),
+      author: { name: "Acme", type: "Organization" },
+    }),
+    jsonLd.breadcrumbList([{ name: "Docs", url: "https://acme.test/docs" }, { name: "Routing" }]),
+  ],
+};
+```
+
+Values are passed through as written, so use absolute URLs. Spread a result to add schema.org
+properties the builder does not model, for example `{ ...jsonLd.product(input), gtin13: "..." }`.
+
 ### AI crawlers
 
 `crawlers` serves a generated `/robots.txt` with a group per category you set:
