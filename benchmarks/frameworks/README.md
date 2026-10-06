@@ -12,10 +12,19 @@ fixture; marker strings or rows in scripts, comments, and inert templates do not
 server-render timestamp comes from that same element, not embedded serialized data. Framework
 comments, whitespace, extra attributes, and HTML entities are supported.
 
-Full-body response and first-page clocks stop before HTML parsing/validation. The runner also requests
-the exact same URL again and requires a different timestamp before measuring it. This startup check
-rejects an already-static or per-URL cached fixture; it does not prove that caching cannot begin later
-in a run. Per-request cache detection remains a separate follow-up.
+Full-body response and first-page clocks stop before HTML parsing/validation. Every readiness,
+warm-up, and measured response must also have a render timestamp within that request's local
+wall-clock window, from immediately before the request until its full body has been read. This
+rejects stale responses even when caching begins after startup or partway through measurement, and
+rejects future timestamps or backwards request windows. The wall-clock snapshots and validation
+stay outside the monotonic response timer; no extra measured requests, sleeps, or cache-busting URLs
+are added. The separate startup check still requests the exact same URL again and requires a
+different timestamp before measurement.
+
+These controls require the fixture servers and runner to share one host and a stable wall clock.
+Timestamps have millisecond resolution: fresh renders may legitimately share a timestamp, and reuse
+within the same millisecond cannot be distinguished. Timestamp validation is a cache guard, not
+proof of unique execution for every response. Timing metrics still use the monotonic clock.
 
 The fixtures live in an isolated pnpm workspace under this directory. Farm.js links to the local
 `packages/farm` and `packages/farm-cli`; the other framework versions are pinned in the benchmark

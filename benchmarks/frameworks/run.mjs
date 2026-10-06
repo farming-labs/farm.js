@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
-import { requestPage, isValidFixtureResponse } from "./fixture.mjs";
+import { requestPage, isFreshFixtureResponse, measureRequests } from "./fixture.mjs";
 
 const benchmarkDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(benchmarkDir, "../..");
@@ -832,7 +832,7 @@ async function waitForRenderedPage(child, output, url, startedAt) {
     }
     try {
       const response = await requestPage(url);
-      if (isValidFixtureResponse(response)) {
+      if (isFreshFixtureResponse(response)) {
         return {
           elapsedMs: response.completedAt - startedAt,
           firstRequestMs: response.durationMs,
@@ -858,7 +858,7 @@ async function launchServer(command, args, options) {
     await new Promise((resolve) => setTimeout(resolve, 6));
     const dynamicResponse = await requestPage(options.url);
     if (
-      !isValidFixtureResponse(dynamicResponse) ||
+      !isFreshFixtureResponse(dynamicResponse) ||
       dynamicResponse.renderedAt === ready.renderedAt
     ) {
       throw new Error("Fixture did not produce a fresh dynamic SSR response");
@@ -868,25 +868,6 @@ async function launchServer(command, args, options) {
     await stopProcess(child);
     throw error;
   }
-}
-
-async function measureRequests(url, warmups, count) {
-  for (let index = 0; index < warmups; index += 1) {
-    const response = await requestPage(url);
-    if (!isValidFixtureResponse(response)) {
-      throw new Error("Fixture validation failed during warm-up");
-    }
-  }
-
-  const samples = [];
-  for (let index = 0; index < count; index += 1) {
-    const response = await requestPage(url);
-    if (!isValidFixtureResponse(response)) {
-      throw new Error("Fixture validation failed during measured request");
-    }
-    samples.push(response.durationMs);
-  }
-  return samples;
 }
 
 async function cleanFramework(framework) {
