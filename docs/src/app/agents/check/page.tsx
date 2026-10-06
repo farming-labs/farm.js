@@ -15,6 +15,7 @@ import "../../../components/agents/check.css";
 import "../agents.css";
 
 export const metadata = {
+  openGraph: { title: "Agent-ready check — Farm.js", url: "/agents/check" },
   title: "Agent-ready check — Farm.js",
   description:
     "Score any website on what AI agents can read and call: Markdown, llms.txt, robots.txt, MCP, OpenAPI and structured data, with a fix for each gap.",
