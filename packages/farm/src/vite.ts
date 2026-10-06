@@ -247,6 +247,29 @@ export function farmI18nClientBridgePlugin(): Plugin {
   };
 }
 
+/** Core entries whose runtime must never ship to the browser. */
+const FARM_SERVER_ONLY_ENTRIES = new Set(["@farm.js/core/og"]);
+
+/**
+ * Fail a browser graph that imports a server-only core entry, instead of
+ * bundling its server runtime (for `@farm.js/core/og`, the `@vercel/og` wasm
+ * renderer) into client code.
+ */
+export function farmServerOnlyEntriesPlugin(): Plugin {
+  return {
+    name: "farm:server-only-entries",
+    enforce: "pre",
+    resolveId(id, importer, options) {
+      if (options?.ssr || !FARM_SERVER_ONLY_ENTRIES.has(id)) return null;
+      this.error(
+        `${id} is server-only and cannot be imported into client code${
+          importer ? ` (imported by ${importer})` : ""
+        }. Use it from an API route or another server module.`,
+      );
+    },
+  };
+}
+
 const FARM_CONFIG_FILENAMES = new Set([
   "farm.config.ts",
   "farm.config.tsx",
@@ -5856,6 +5879,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
       ...(rendererVitePlugins as any[]),
       viteBrowserExternalPlugin,
       farmI18nClientBridgePlugin(),
+      farmServerOnlyEntriesPlugin(),
       farmPlugin(config),
       farmEnvironmentFunctionsPlugin(),
       farmBrandingPlugin,

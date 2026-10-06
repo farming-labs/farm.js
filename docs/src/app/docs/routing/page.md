@@ -1193,6 +1193,44 @@ For advanced renderers, the default export may still return a `Response`, string
 
 Keep only one implementation for each image kind in a segment. For example, defining both `opengraph-image.png` and `opengraph-image.tsx` produces a build error. For broad social-platform compatibility, use 1200 by 630; generated JSX routes emit PNG automatically.
 
+### Image responses in API routes
+
+When an image needs its own URL, such as a share card per record or a badge another site embeds, return `ImageResponse` from an API route. `@farm.js/core/og` exports the same `@vercel/og` renderer that generated metadata images use, so the app does not install it separately.
+
+**src/app/api/og/route.tsx**
+
+```tsx
+import { ImageResponse } from "@farm.js/core/og";
+
+export async function GET(request: Request) {
+  const title = new URL(request.url).searchParams.get("title") ?? "Acme";
+
+  return new ImageResponse(
+    <div
+      style={{
+        display: "flex",
+        width: "100%",
+        height: "100%",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "#09090b",
+        color: "white",
+        fontSize: 72,
+      }}
+    >
+      {title}
+    </div>,
+    { width: 1200, height: 630 },
+  );
+}
+```
+
+`ImageResponse` is a standard `Response` with a PNG body. Its options take `width`, `height`, `fonts`, `emoji`, and `debug` alongside the usual `status` and `headers`. The element goes to the renderer as written, so style it with `style` or the `tw` prop; the `className` conversion described above applies only to metadata image files. Like generated metadata images, it takes React JSX.
+
+Outside development the response defaults to `cache-control: public, immutable, no-transform, max-age=31536000`. Pass a lowercase `cache-control` header when the image can change, for example `headers: { "cache-control": "public, max-age=300" }`.
+
+`@farm.js/core/og` is server-only. Importing it from a client component fails the build, and the development request, with an error that names the importing module. On Node presets, including `node-server` and Vercel Functions, Farm copies `@vercel/og` and its wasm and font files into the server output whenever the server bundle imports it. Edge and Cloudflare Worker presets are not supported yet.
+
 ### Other meta tags
 
 Use `other` for a `<meta name>` tag that has no dedicated metadata field. Each key renders one tag,
