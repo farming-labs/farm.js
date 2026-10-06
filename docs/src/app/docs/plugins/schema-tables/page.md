@@ -104,6 +104,31 @@ Two setups need nothing, and say so rather than guessing:
   });
   ```
 
+## Migrating every plugin at once
+
+`farm schema migrate` runs every plugin's migration in one go, dependencies
+first. A plugin whose tables point at another plugin's (`billing` at `teams`)
+waits for it:
+
+```bash
+pnpm farm schema migrate           # print every plan, in order
+pnpm farm schema migrate --apply   # create the tables
+pnpm farm schema migrate --write migrations/farm.sql
+```
+
+```
+Migrating in order: teams → billing → audit
+```
+
+It behaves like running `farm <plugin> migrate` for each plugin in that order,
+with the same flags, approvals, and Prisma or Drizzle handling. If one plugin
+fails, the plugins that depend on it are skipped, the rest still run, and the
+command exits with an error listing what did not finish. Running it again only
+does what is left.
+
+Your own ORM's or library's migrations are not run by it. Run those first, with
+[`farm migrate`](/docs/cli#run-command-migrations) or their own command.
+
 ## Checking everything at once
 
 `migrate` looks at one plugin. `farm schema check` looks at every integration
