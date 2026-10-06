@@ -378,8 +378,9 @@ mixed declarations, the resolved catalog, and permission checks.
 
 ## Agent readiness
 
-`agent` holds opt-in features that help AI agents and crawlers understand a public site. Both are
-off by default, so internal tools and private dashboards are unaffected.
+`agent` holds opt-in features that help AI agents and crawlers understand a public site, and decide
+which of them may use it. All of them are off by default, so internal tools and private dashboards
+are unaffected.
 
 ```ts title="farm.config.ts"
 import { defineConfig } from "@farm.js/core";
@@ -391,10 +392,15 @@ export default defineConfig({
       summary: "Billing for small teams.",
       exclude: ["/admin/[...path]"],
     },
+    noindexPreviews: true,
     jsonLd: true,
   },
 });
 ```
+
+`noindexPreviews: true` adds `X-Robots-Tag: noindex, nofollow` to every response from Farm's server
+on a preview deployment; [Preview deployments](/docs/deployment#preview-deployments) covers how
+Farm detects one.
 
 `llmsTxt: true` serves [`/llms.txt`](https://llmstxt.org): a Markdown index of every static page,
 with each page's metadata title and description, linking to its [Markdown mirror](/docs/markdown)

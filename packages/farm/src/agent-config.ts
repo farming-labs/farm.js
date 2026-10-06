@@ -9,6 +9,7 @@ import {
   type FarmLlmsTxtUserConfig,
   type ResolvedFarmLlmsTxtConfig,
 } from "./llms-txt";
+import { resolveFarmNoindexPreviews } from "./preview-noindex";
 
 /** schema.org JSON-LD emitted in the document head to identify the site. */
 export interface FarmAgentJsonLd {
@@ -43,6 +44,15 @@ export interface FarmAgentUserConfig {
    */
   jsonLd?: boolean | FarmAgentJsonLd;
   /**
+   * On a preview deployment, send `X-Robots-Tag: noindex, nofollow` with every
+   * response from Farm's server. Previews are detected from `FARM_PREVIEW`,
+   * `VERCEL_ENV=preview`, Netlify's deploy-preview and branch-deploy contexts,
+   * and Render pull request previews. Production is unaffected.
+   *
+   * @default false
+   */
+  noindexPreviews?: boolean;
+  /**
    * Serve `/llms.txt` (https://llmstxt.org): a Markdown index of the app's static
    * pages, linking to their Markdown mirrors. `true` builds it from page metadata;
    * an object sets the title, summary, details, and which routes to list. A
@@ -55,6 +65,7 @@ export interface FarmAgentUserConfig {
 
 export interface ResolvedFarmAgentConfig {
   jsonLd: FarmAgentJsonLd | false;
+  noindexPreviews: boolean;
   llmsTxt: ResolvedFarmLlmsTxtConfig;
 }
 
@@ -64,6 +75,7 @@ export function resolveFarmAgentConfig(
   const jsonLd = input?.jsonLd;
   return {
     jsonLd: !jsonLd ? false : jsonLd === true ? {} : jsonLd,
+    noindexPreviews: resolveFarmNoindexPreviews(input?.noindexPreviews),
     llmsTxt: resolveFarmLlmsTxtConfig(input?.llmsTxt),
   };
 }

@@ -451,6 +451,9 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
   `src/app/llms.ts` and `src/app/llms-full.ts`, which return the whole file as a string or the
   structured format and receive the generated `pages` and `defaults`.
 - Use `md`/`mdx` for page mirrors and content routes; use `openapi` for API references.
+- Use `agent.noindexPreviews: true` to send `X-Robots-Tag: noindex, nofollow` on preview
+  deployments (`FARM_PREVIEW=1`, `VERCEL_ENV=preview`, Netlify deploy-preview/branch-deploy at
+  build time, Render PR previews). Test locally with `FARM_PREVIEW=1 farm dev`.
 - Use `after()` only for short post-response work and a jobs integration for durable work.
 - Configure OpenTelemetry and Farm runtime events for correlated traces.
 
