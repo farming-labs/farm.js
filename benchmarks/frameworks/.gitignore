@@ -11,3 +11,6 @@ apps/nuxt/.output/
 apps/tanstack/.nitro/
 apps/tanstack/.output/
 apps/tanstack/.tanstack/
+
+# Local diagnostic samples; canonical latest.json/latest.md remain tracked.
+results/run-*/

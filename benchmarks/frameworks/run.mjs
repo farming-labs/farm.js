@@ -314,22 +314,22 @@ function parseOptions(argv) {
   if (unknown.length) throw new Error("Unknown framework: " + unknown.join(", "));
   if (!options.only.length) throw new Error("Select at least one framework");
 
-  if (options.publish) {
-    const canonicalIds = frameworks.map((framework) => framework.id);
-    const isCanonicalSet =
-      options.only.length === canonicalIds.length &&
-      canonicalIds.every((id) => options.only.includes(id));
-    if (!isCanonicalSet || options.runs < 7 || options.requests < 30 || options.warmups < 30) {
-      throw new Error(
-        "Publishing requires all frameworks, at least 7 rounds, 30 requests, and 30 warmups",
-      );
-    }
-    if (!options.burnIn) throw new Error("Publishing requires the unmeasured burn-in round");
-    if (!options.prepare) {
-      throw new Error("Publishing requires rebuilding the local Farm packages");
-    }
-  }
+  if (options.publish) assertPublishableOptions(options);
   return options;
+}
+
+function assertPublishableOptions(options) {
+  const canonicalIds = frameworks.map((framework) => framework.id);
+  const isCanonicalSet =
+    options.only.length === canonicalIds.length &&
+    canonicalIds.every((id) => options.only.includes(id));
+  if (!isCanonicalSet || options.runs < 7 || options.requests < 30 || options.warmups < 30) {
+    throw new Error(
+      "Publishing requires all frameworks, at least 7 rounds, 30 requests, and 30 warmups",
+    );
+  }
+  if (!options.burnIn) throw new Error("Publishing requires the unmeasured burn-in round");
+  if (!options.prepare) throw new Error("Publishing requires rebuilding the local Farm packages");
 }
 
 function printHelp() {
@@ -390,7 +390,7 @@ function summarize(samples) {
     p95: round(percentile(sorted, 0.95)),
     min: round(sorted[0] || 0),
     max: round(sorted[sorted.length - 1] || 0),
-    samples: samples.map(round),
+    samples: [...samples],
   };
 }
 
@@ -466,7 +466,7 @@ function assertPositionBalanced(orders, values) {
   }
 }
 
-function runSelfChecks() {
+async function runSelfChecks() {
   if (readinessPollIntervalMs > 2) {
     throw new Error("Readiness polling must retain single-digit millisecond precision");
   }
@@ -552,6 +552,113 @@ function runSelfChecks() {
     }
   }
 
+  const canonical = parseOptions([]);
+  const rounds = Array.from({ length: 7 }, (_, index) => ({
+    index: index + 1,
+    frameworks: Object.fromEntries(frameworks.map(({ id }) => [id, { buildMs: 100 }])),
+  }));
+  const assert = (condition, message) => {
+    if (!condition) throw new Error(message);
+  };
+  assert(summarize([0.123456789]).samples[0] === 0.123456789, "Raw samples must not be rounded");
+  for (const count of [1, 2]) {
+    const selected = frameworks.slice(0, count);
+    const quality = createReportQuality(
+      { ...canonical, only: selected.map(({ id }) => id) },
+      selected,
+      rounds,
+      cleanIdentity,
+    );
+    assert(
+      quality.contentionAssessment.status === "unavailable",
+      "Partial selection must not imply no contention",
+    );
+    assert(!quality.publishable, "Partial selection must not be publishable");
+  }
+  assert(
+    createReportQuality(canonical, frameworks, rounds.slice(0, 1), cleanIdentity)
+      .contentionAssessment.status === "unavailable",
+    "One round cannot assess correlated contention",
+  );
+  const quiet = createReportQuality(canonical, frameworks, rounds, cleanIdentity);
+  assert(
+    quiet.contentionAssessment.status === "not-detected" && quiet.publishable,
+    "Qualifying quiet run should remain publishable",
+  );
+  const contended = createReportQuality(
+    canonical,
+    frameworks,
+    [
+      ...rounds,
+      {
+        index: 8,
+        frameworks: Object.fromEntries(frameworks.map(({ id }) => [id, { buildMs: 200 }])),
+      },
+    ],
+    cleanIdentity,
+  );
+  assert(
+    contended.contentionAssessment.status === "detected" && !contended.publishable,
+    "Correlated contention must block publication",
+  );
+  for (const overrides of [
+    { runs: 1 },
+    { requests: 1 },
+    { warmups: 0 },
+    { burnIn: false },
+    { prepare: false },
+  ]) {
+    assert(
+      !createReportQuality({ ...canonical, ...overrides }, frameworks, rounds, cleanIdentity)
+        .publishable,
+      "Insufficient methodology must block publication",
+    );
+  }
+  for (const key of Object.keys(cleanIdentity)) {
+    assert(
+      !createReportQuality(canonical, frameworks, rounds, { ...cleanIdentity, [key]: true })
+        .publishable,
+      "Dirty report must not be publishable",
+    );
+  }
+
+  const report = JSON.parse(await fs.readFile(path.join(resultsDir, "latest.json"), "utf8"));
+  report.quality = createReportQuality(
+    { ...canonical, only: ["farm"] },
+    [frameworks[0]],
+    rounds,
+    cleanIdentity,
+  );
+  assert(
+    createMarkdown(report).includes("unavailable"),
+    "Markdown must disclose unavailable contention assessment",
+  );
+  assert(
+    !createMarkdown(report).includes("latest.json"),
+    "Unsaved report must not link older canonical samples",
+  );
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "farm-benchmark-report-test-"));
+  try {
+    const first = await writeDiagnosticReport(report, temporary);
+    const second = await writeDiagnosticReport(report, temporary);
+    assert(first.jsonPath !== second.jsonPath, "Diagnostic runs must have unique artifacts");
+    assert(
+      JSON.stringify(JSON.parse(await fs.readFile(first.jsonPath, "utf8"))) ===
+        JSON.stringify(report),
+      "Diagnostic JSON must retain all raw samples",
+    );
+    const markdown = await fs.readFile(first.markdownPath, "utf8");
+    assert(
+      markdown.includes("raw.json") && !markdown.includes("latest.json"),
+      "Diagnostic Markdown must link its own samples",
+    );
+    assert(
+      (await fs.readdir(temporary)).length === 2,
+      "Diagnostic writes must not create canonical outputs",
+    );
+  } finally {
+    await fs.rm(temporary, { recursive: true, force: true });
+  }
   console.log("Benchmark harness self-checks passed");
 }
 
@@ -1068,7 +1175,6 @@ function detectContendedRounds(rounds) {
 }
 
 function createReport(options, selected, samplesByFramework, rounds, identity) {
-  const contendedRounds = detectContendedRounds(rounds);
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
@@ -1115,12 +1221,7 @@ function createReport(options, selected, samplesByFramework, rounds, identity) {
       productionCommand:
         "Recommended framework production command; Next.js uses next start and every other row uses a generated server entry",
     },
-    quality: {
-      contendedRounds,
-      contentionRule:
-        "Publishing is blocked when at least three frameworks exceed 1.5× their own median build time in the same round",
-      publishable: contendedRounds.length === 0,
-    },
+    quality: createReportQuality(options, selected, rounds, identity),
     system: collectSystemMetadata(),
     rounds,
     frameworks: selected.map((framework) => {
@@ -1141,6 +1242,43 @@ function createReport(options, selected, samplesByFramework, rounds, identity) {
         },
       };
     }),
+  };
+}
+
+function createReportQuality(options, selected, rounds, identity) {
+  const available = selected.length >= 3 && rounds.length >= 3;
+  const contendedRounds = available ? detectContendedRounds(rounds) : [];
+  const contentionAssessment = {
+    status: !available ? "unavailable" : contendedRounds.length ? "detected" : "not-detected",
+    ...(!available
+      ? { reason: "Requires at least three selected frameworks and three measured rounds" }
+      : {}),
+  };
+  const publicationBlockers = [];
+  if (rounds.length !== options.runs)
+    publicationBlockers.push("Measured round count does not match the requested methodology");
+  for (const check of [
+    () => assertPublishableOptions(options),
+    () => assertPublishableRunIdentity(identity),
+  ]) {
+    try {
+      check();
+    } catch (error) {
+      publicationBlockers.push(error.message);
+    }
+  }
+  if (!available) publicationBlockers.push(contentionAssessment.reason);
+  if (contendedRounds.length)
+    publicationBlockers.push(
+      "Correlated host contention in measured round(s): " + contendedRounds.join(", "),
+    );
+  return {
+    contendedRounds,
+    contentionAssessment,
+    contentionRule:
+      "At least three frameworks exceeding 1.5× their own median build time in the same round; assessment requires at least three frameworks and three measured rounds",
+    publicationBlockers,
+    publishable: publicationBlockers.length === 0,
   };
 }
 
@@ -1182,7 +1320,7 @@ function createPublishedReport(report) {
   };
 }
 
-function createMarkdown(report) {
+function createMarkdown(report, samplesPath = null, readmePath = "../README.md") {
   const lines = [
     "# Meta-framework benchmark",
     "",
@@ -1256,15 +1394,36 @@ function createMarkdown(report) {
     "- Workspace dirty: " +
       (report.revision.workspaceDirty ? "yes; the broader workspace state is recorded" : "no") +
       ".",
-    "- Contended measured rounds detected: " +
-      (report.quality.contendedRounds.length ? report.quality.contendedRounds.join(", ") : "none") +
+    "- Correlated-contention assessment: " +
+      (report.quality.contentionAssessment?.status === "unavailable"
+        ? "unavailable — " + report.quality.contentionAssessment.reason
+        : report.quality.contendedRounds.length
+          ? "detected in round(s) " + report.quality.contendedRounds.join(", ")
+          : "not detected (not proof of an idle host)") +
       ".",
+    "- Publication eligible: " + (report.quality.publishable ? "yes" : "no") + ".",
     "",
-    "See ../README.md for metric boundaries, controls, limitations, and reproduction steps. " +
-      "The complete samples are in latest.json.",
+    "See " +
+      readmePath +
+      " for metric boundaries, controls, limitations, and reproduction steps. " +
+      (samplesPath
+        ? "The complete samples are in " + samplesPath + "."
+        : "Raw samples have not been saved."),
     "",
   );
   return lines.join("\n");
+}
+
+async function writeDiagnosticReport(report, directory = resultsDir) {
+  await fs.mkdir(directory, { recursive: true });
+  const runDirectory = await fs.mkdtemp(path.join(directory, "run-"));
+  const jsonPath = path.join(runDirectory, "raw.json");
+  const markdownPath = path.join(runDirectory, "report.md");
+  await fs.writeFile(jsonPath, JSON.stringify(report, null, 2) + "\n", { flag: "wx" });
+  await fs.writeFile(markdownPath, createMarkdown(report, "raw.json", "../../README.md"), {
+    flag: "wx",
+  });
+  return { jsonPath, markdownPath };
 }
 
 async function writeReports(report) {
@@ -1280,7 +1439,7 @@ async function writeReports(report) {
       path: path.join(resultsDir, "latest.json"),
       contents: JSON.stringify(report, null, 2) + "\n",
     },
-    { path: path.join(resultsDir, "latest.md"), contents: createMarkdown(report) },
+    { path: path.join(resultsDir, "latest.md"), contents: createMarkdown(report, "latest.json") },
     {
       path: path.join(repoRoot, "docs/src/lib/benchmark-results.generated.ts"),
       contents: generatedModule,
@@ -1316,7 +1475,7 @@ async function main() {
   if (arguments_.includes("--self-check")) {
     if (arguments_.length !== 1)
       throw new Error("--self-check cannot be combined with other options");
-    runSelfChecks();
+    await runSelfChecks();
     return;
   }
   await acquireBenchmarkLock();
@@ -1425,18 +1584,24 @@ async function runBenchmark() {
   const endIdentity = await collectRunIdentity();
   assertRunIdentityUnchanged(startIdentity, endIdentity);
   const report = createReport(options, selected, samplesByFramework, roundRecords, startIdentity);
-  console.log("\n" + createMarkdown(report));
-
   if (options.publish) {
     if (!report.quality.publishable) {
-      throw new Error(
-        "Refusing to publish: correlated host contention detected in measured round(s) " +
-          report.quality.contendedRounds.join(", "),
-      );
+      throw new Error("Refusing to publish: " + report.quality.publicationBlockers.join("; "));
     }
     await writeReports(report);
+    console.log("\n" + createMarkdown(report, "latest.json"));
     console.log("Raw samples: " + path.relative(repoRoot, path.join(resultsDir, "latest.json")));
   } else {
+    const saved = await writeDiagnosticReport(report);
+    console.log(
+      "\n" +
+        createMarkdown(
+          report,
+          path.relative(repoRoot, saved.jsonPath),
+          "benchmarks/frameworks/README.md",
+        ),
+    );
+    console.log("Raw samples: " + path.relative(repoRoot, saved.jsonPath));
     console.log("Canonical result files unchanged. Pass --publish for a qualifying full run.");
   }
 }
