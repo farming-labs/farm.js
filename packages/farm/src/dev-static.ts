@@ -61,14 +61,24 @@ export function isViteModuleRequest(
   return value !== undefined && SCRIPT_FETCH_DESTINATIONS.has(value.toLowerCase());
 }
 
+/** Root files the docs engine answers that an app can serve itself. */
+const DOCS_ENGINE_APP_OWNABLE_PATHS = new Set([
+  "/llms.txt",
+  "/llms-full.txt",
+  "/sitemap.xml",
+  "/robots.txt",
+]);
+
 /**
- * Whether the app serves /llms.txt or /llms-full.txt itself, through
- * `agent.llmsTxt`, an llms.ts or llms-full.ts route, or a file in the public
- * dir. Development then keeps the docs engine off that path, as production
- * does, where platforms serve public files before any route. Other files under
- * the project root do not count: production does not emit them.
+ * Whether the app serves one of the docs engine's root files itself:
+ * /llms.txt or /llms-full.txt through `agent.llmsTxt` or an llms.ts or
+ * llms-full.ts route, /sitemap.xml through sitemap.ts, /robots.txt through
+ * robots.ts, or any of them through a file in the public dir. Development then
+ * keeps the docs engine off that path, as production does, where platforms
+ * serve public files before any route. Other files under the project root do
+ * not count: production does not emit them.
  */
-export function farmAppOwnsLlmsPath(
+export function farmAppOwnsDocsEnginePath(
   pathname: string,
   options: {
     generatedPaths: readonly string[];
@@ -76,7 +86,7 @@ export function farmAppOwnsLlmsPath(
     publicDir: string | false | undefined;
   },
 ): boolean {
-  if (pathname !== "/llms.txt" && pathname !== "/llms-full.txt") return false;
+  if (!DOCS_ENGINE_APP_OWNABLE_PATHS.has(pathname)) return false;
   return (
     options.generatedPaths.includes(pathname) ||
     Boolean(options.routeManager?.matchMetadataRoute(pathname)) ||
