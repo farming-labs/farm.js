@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
+import { requestPage, isValidFixtureResponse } from "./fixture.mjs";
 
 const benchmarkDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(benchmarkDir, "../..");
@@ -21,7 +22,6 @@ const appsRoot = path.join(benchmarkDir, "apps");
 const resultsDir = path.join(benchmarkDir, "results");
 const benchmarkGitPath = path.relative(repoRoot, benchmarkDir).split(path.sep).join("/");
 const lockPath = path.join(benchmarkDir, ".benchmark.lock");
-const marker = "framework-benchmark-v1";
 const basePort = 46100;
 const processTimeoutMs = 8 * 60 * 1000;
 const readinessPollIntervalMs = 2;
@@ -467,6 +467,11 @@ function assertPositionBalanced(orders, values) {
 }
 
 async function runSelfChecks() {
+  const fixtureChecks = await runCommand(process.execPath, [
+    "--test",
+    path.join(benchmarkDir, "fixture.test.mjs"),
+  ]);
+  console.log(fixtureChecks.output.trim());
   if (readinessPollIntervalMs > 2) {
     throw new Error("Readiness polling must retain single-digit millisecond precision");
   }
@@ -819,33 +824,6 @@ async function runCommand(command, args, options = {}) {
   return { durationMs, output: output.value };
 }
 
-async function requestPage(url, timeoutMs = 60000) {
-  const startedAt = performance.now();
-  const response = await fetch(url, {
-    cache: "no-store",
-    headers: { connection: "close" },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const body = await response.text();
-  const renderedAtMatch = body.match(/data-rendered-at="(\d+)"/);
-  return {
-    body,
-    bytes: Buffer.byteLength(body),
-    durationMs: performance.now() - startedAt,
-    renderedAt: renderedAtMatch ? Number.parseInt(renderedAtMatch[1], 10) : null,
-    status: response.status,
-  };
-}
-
-function isValidFixtureResponse(response) {
-  return (
-    response.status === 200 &&
-    response.body.includes(marker) &&
-    response.body.includes('data-item-count="120"') &&
-    Number.isFinite(response.renderedAt)
-  );
-}
-
 async function waitForRenderedPage(child, output, url, startedAt) {
   const deadline = performance.now() + 180000;
   while (performance.now() < deadline) {
@@ -856,7 +834,7 @@ async function waitForRenderedPage(child, output, url, startedAt) {
       const response = await requestPage(url);
       if (isValidFixtureResponse(response)) {
         return {
-          elapsedMs: performance.now() - startedAt,
+          elapsedMs: response.completedAt - startedAt,
           firstRequestMs: response.durationMs,
           responseBytes: response.bytes,
           renderedAt: response.renderedAt,
