@@ -544,6 +544,10 @@ default. Lower-priority hints above those budgets are removed from buffered HTML
 headers, while the actual image and font elements remain unchanged and load normally. Route scripts,
 stylesheets, and module preloads are not removed.
 
+Production responses reuse buffered HTML without a body decode/re-encode when Farm can prove it
+contains no preload candidates. `Link` header budgets still apply, and HTML transformed by plugins
+is checked after those transforms. Candidate-bearing documents retain the full combined budget.
+
 ```ts
 import { defineConfig } from "@farm.js/core";
 

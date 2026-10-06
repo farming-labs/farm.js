@@ -111,6 +111,23 @@ records the benchmark SHA-256 and whether the wider workspace was dirty. An excl
 prevents simultaneous suite runs. Publishing is also rejected when a measured round shows correlated
 contention: at least three frameworks with build times above 1.5× their own measured median.
 
+## Buffered-response diagnostic
+
+For the focused buffered-HTML response ablation, build the local core runtime and Farm fixture,
+then run the diagnostic under Node 24.11+:
+
+```sh
+pnpm --filter @farm.js/core build:runtime
+pnpm --dir benchmarks/frameworks/apps/farm build
+node benchmarks/frameworks/preload-response.mjs > /tmp/farm-preload-response.json
+```
+
+This runs five alternating fresh-process pairs against the same built SSR entry, with 1,000 warmups
+and 3,000 measured requests per process. The baseline forces the old buffered-body path; both arms
+retain the no-candidate preload scanner guard. Every response is checked for equivalent HTML and
+same-URL freshness. Output includes raw batch samples, CPU time, and machine load. It is an
+in-process diagnostic, not network latency or a canonical cross-framework result.
+
 ## Limitations
 
 This small dynamic-SSR fixture measures local framework baseline overhead on one machine. It does

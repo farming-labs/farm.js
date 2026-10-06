@@ -379,6 +379,76 @@ async function expectNitroFallback(root: string): Promise<void> {
 }
 
 describe("production prebuilt SSR output", () => {
+  it.each([false, true])(
+    "enforces final preload budgets after HTML transforms (plugin: %s)",
+    async (withPlugin) => {
+      const root = await createProductionFixture();
+      const plugin = definePlugin({
+        name: "production-preload-transform",
+        transformHTML(html) {
+          return html.replace(
+            "</head>",
+            '<link rel="preload" as="image" href="/plugin.webp" fetchpriority="high"></head>',
+          );
+        },
+      });
+      try {
+        if (withPlugin)
+          await fs.writeFile(
+            path.join(root, "farm.config.mjs"),
+            `export default { plugins: [{ name: "production-preload-transform", ${plugin.transformHTML!.toString()} }] };`,
+          );
+        const config = await resolveConfig(
+          {
+            root,
+            srcDir: "src",
+            images: { provider: "none" },
+            telemetry: false,
+            plugins: withPlugin ? [plugin] : [],
+            headers: () => [
+              {
+                source: "/",
+                headers: [
+                  {
+                    key: "Link",
+                    value:
+                      "</first.webp>; rel=preload; as=image, </second.webp>; rel=preload; as=image",
+                  },
+                  { key: "Set-Cookie", value: "a=1; Path=/" },
+                  { key: "Set-Cookie", value: "b=2; Path=/" },
+                ],
+              },
+            ],
+            generateBuildId: () => "preload-buffered-response-test",
+          },
+          "production",
+        );
+        await build(config, { root, preset: "node-server" });
+        await runProductionRequest(
+          path.join(root, ".farm", ".output", "server"),
+          async (response) => {
+            expect(response.status).toBe(200);
+            expect(response.headers.has("x-farm-preload-buffered")).toBe(false);
+            expect(response.headers.has("x-farm-preload-streaming")).toBe(false);
+            expect(response.headers.getSetCookie()).toEqual(["a=1; Path=/", "b=2; Path=/"]);
+            const html = await response.text();
+            expect(html).toContain("prebuilt SSR output");
+            if (withPlugin) {
+              expect(html).toContain('href="/plugin.webp"');
+              expect(response.headers.get("link") || "").not.toContain(".webp");
+            } else {
+              expect(response.headers.get("link")).toContain("/first.webp");
+              expect(response.headers.get("link")).not.toContain("/second.webp");
+            }
+          },
+        );
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+
   it.each([true, false])(
     "keeps the MDX compiler out of TSX-only output (Markdown mirrors: %s)",
     async (markdownMirrors) => {
