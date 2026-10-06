@@ -6962,13 +6962,8 @@ function getApplicableLayouts(pathname) {
     }
   }
   
-  // Sort by depth (root first, then nested)
-  applicable.sort((a, b) => {
-    const depthA = a.pattern.split('/').filter(Boolean).length;
-    const depthB = b.pattern.split('/').filter(Boolean).length;
-    return depthA - depthB;
-  });
-  
+  // buildSSRInMemory already emits these immutable descriptors in stable depth
+  // order. Filtering preserves that order, including equal-depth ties.
   return applicable;
 }
 
