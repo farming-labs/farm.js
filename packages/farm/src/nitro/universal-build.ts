@@ -4800,18 +4800,18 @@ function getFarmBufferedPreloadMarker(html) {
 }
 
 async function applyFarmPreloadBudget(response, pathname) {
-  const headers = new Headers(response.headers);
+  let headers = response.headers;
   const linkHeader = headers.get("Link") || "";
   const isHtml = headers.get("Content-Type")?.toLowerCase().includes("text/html");
   const isStreaming = headers.get("x-farm-preload-streaming") === "1";
   const bufferedMarker = headers.get("x-farm-preload-buffered");
   const hasNoHtmlPreloads = bufferedMarker === "none";
   const isBuffered = bufferedMarker === "1" || hasNoHtmlPreloads;
-  headers.delete("x-farm-preload-streaming");
-  headers.delete("x-farm-preload-buffered");
-
   if (!isHtml) {
     if (!isStreaming && !isBuffered) return response;
+    headers = new Headers(headers);
+    headers.delete("x-farm-preload-streaming");
+    headers.delete("x-farm-preload-buffered");
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
@@ -4821,9 +4821,17 @@ async function applyFarmPreloadBudget(response, pathname) {
 
   if (isStreaming || !isBuffered || response.body === null) {
     const managed = manageFarmLinkHeaderPreloads(linkHeader, farmPreloadConfig);
+    reportFarmPreloadWarnings(managed.warnings, "route " + pathname);
+    // Unknown streams retain their body and ownership when no headers change.
+    // Empty Link values and even unrecognized internal markers still need cleanup.
+    if (!headers.has("x-farm-preload-streaming") &&
+        !headers.has("x-farm-preload-buffered") &&
+        (managed.value || null) === headers.get("Link")) return response;
+    headers = new Headers(headers);
+    headers.delete("x-farm-preload-streaming");
+    headers.delete("x-farm-preload-buffered");
     if (managed.value) headers.set("Link", managed.value);
     else headers.delete("Link");
-    reportFarmPreloadWarnings(managed.warnings, "route " + pathname);
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
@@ -4833,6 +4841,9 @@ async function applyFarmPreloadBudget(response, pathname) {
 
   // Keep the document/header budget semantics (including unchanged Link
   // formatting), but do not consume and re-encode a proven preload-free body.
+  headers = new Headers(headers);
+  headers.delete("x-farm-preload-streaming");
+  headers.delete("x-farm-preload-buffered");
   const html = hasNoHtmlPreloads ? "" : await response.text();
   const managed = manageFarmDocumentPreloads(html, linkHeader, farmPreloadConfig);
   if (managed.linkHeader) headers.set("Link", managed.linkHeader);

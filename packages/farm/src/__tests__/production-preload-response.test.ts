@@ -14,13 +14,26 @@ function runtime(mode: FarmPreloadMode = "enforce") {
     preload: { mode, maxImages: 1, maxFonts: 1 },
   }).preload;
   const report = vi.fn();
+  const headerCopies = vi.fn();
   const generated = new Function(
     "manageFarmDocumentPreloads",
     "manageFarmLinkHeaderPreloads",
     "farmPreloadConfig",
     "reportFarmPreloadWarnings",
+    "Headers",
     `${generatePreloadResponseRuntimeSource()}; return { getFarmBufferedPreloadMarker, applyFarmPreloadBudget };`,
-  )(manageFarmDocumentPreloads, manageFarmLinkHeaderPreloads, config, report) as {
+  )(
+    manageFarmDocumentPreloads,
+    manageFarmLinkHeaderPreloads,
+    config,
+    report,
+    new Proxy(Headers, {
+      construct(target, args) {
+        headerCopies();
+        return Reflect.construct(target, args);
+      },
+    }),
+  ) as {
     getFarmBufferedPreloadMarker(html: unknown): string;
     applyFarmPreloadBudget(response: Response, pathname: string): Promise<Response>;
   };
@@ -28,6 +41,7 @@ function runtime(mode: FarmPreloadMode = "enforce") {
     ...generated,
     config,
     report,
+    headerCopies,
     response(html: string, init: ResponseInit = {}) {
       const headers = new Headers(init.headers);
       headers.set("content-type", "text/html; charset=utf-8");
@@ -38,6 +52,66 @@ function runtime(mode: FarmPreloadMode = "enforce") {
 }
 
 describe("production preload response processing", () => {
+  it("skips header copies for non-HTML responses without managed markers", async () => {
+    const r = runtime();
+    const original = Response.json({ ok: true });
+    expect(await r.applyFarmPreloadBudget(original, "/api")).toBe(original);
+    expect(r.headerCopies).not.toHaveBeenCalled();
+    expect(await original.json()).toEqual({ ok: true });
+  });
+
+  it.each([undefined, '</alternate>; rel="alternate"'])(
+    "reuses unknown HTML streams when header processing is a no-op (%s)",
+    async (link) => {
+      const r = runtime();
+      const cancel = vi.fn();
+      const stream = new ReadableStream({ cancel });
+      const original = new Response(stream, {
+        status: 201,
+        statusText: "Created",
+        headers: { "content-type": "text/html", ...(link ? { link } : {}) },
+      });
+      original.headers.append("set-cookie", "first=1; Path=/");
+      original.headers.append("set-cookie", "second=2; Path=/");
+      const output = await r.applyFarmPreloadBudget(original, "/");
+      expect(output).toBe(original);
+      expect(r.headerCopies).not.toHaveBeenCalled();
+      expect(r.report).toHaveBeenCalledExactlyOnceWith([], "route /");
+      expect(output.statusText).toBe("Created");
+      expect(output.headers.getSetCookie()).toEqual(["first=1; Path=/", "second=2; Path=/"]);
+      expect(original.bodyUsed).toBe(false);
+      await output.body!.cancel("navigation");
+      expect(cancel).toHaveBeenCalledExactlyOnceWith("navigation");
+    },
+  );
+
+  it("accepts immutable no-op responses and copies when headers need changing", async () => {
+    const r = runtime();
+    const immutable = await fetch("data:text/html,<p>immutable</p>");
+    expect(() => immutable.headers.set("x-test", "no")).toThrow();
+    expect(await r.applyFarmPreloadBudget(immutable, "/")).toBe(immutable);
+    expect(r.headerCopies).not.toHaveBeenCalled();
+    expect(await immutable.text()).toBe("<p>immutable</p>");
+
+    const original = new Response("html", { headers: { "content-type": "text/html", link: "" } });
+    const output = await r.applyFarmPreloadBudget(original, "/");
+    expect(output).not.toBe(original);
+    expect(original.headers.get("link")).toBe("");
+    expect(output.headers.has("link")).toBe(false);
+    expect(await output.text()).toBe("html");
+  });
+
+  it("still strips unrecognized internal markers from HTML responses", async () => {
+    const r = runtime();
+    const original = new Response("html", {
+      headers: { "content-type": "text/html", "x-farm-preload-buffered": "future" },
+    });
+    const output = await r.applyFarmPreloadBudget(original, "/");
+    expect(output.headers.has("x-farm-preload-buffered")).toBe(false);
+    expect(original.headers.get("x-farm-preload-buffered")).toBe("future");
+    expect(await output.text()).toBe("html");
+  });
+
   it.each([
     "<p>hello 🌱</p>",
     '<link rel="modulepreload" href="/client.js">',
