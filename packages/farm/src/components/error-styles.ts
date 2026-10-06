@@ -42,8 +42,8 @@ body {
 
 .farm-default-error__frame {
   width: min(100%, 1180px);
-  min-height: 100vh;
-  min-height: 100svh;
+  height: 100vh;
+  height: 100svh;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   margin: 0 auto;
@@ -75,9 +75,11 @@ body {
 .farm-default-error__content {
   width: min(100%, 680px);
   min-width: 0;
-  align-self: center;
+  max-height: 100%;
+  align-self: safe center;
   margin: 0 auto;
-  padding: clamp(64px, 10vh, 112px) 0;
+  padding: clamp(24px, 8vh, 112px) 0;
+  overflow-y: auto;
 }
 
 .farm-default-error--development .farm-default-error__content {
@@ -85,7 +87,7 @@ body {
 }
 
 .farm-default-error > .farm-default-error__content {
-  align-self: center;
+  align-self: safe center;
   padding-right: 24px;
   padding-left: 24px;
 }
@@ -289,6 +291,11 @@ body {
   tab-size: 2;
 }
 
+.farm-default-error__source-code > code {
+  display: block;
+  white-space: normal;
+}
+
 .farm-default-error__source-line {
   min-width: max-content;
   display: grid;
@@ -424,11 +431,11 @@ body {
   }
 
   .farm-default-error__content {
-    padding: 56px 0 68px;
+    padding: 32px 0 36px;
   }
 
   .farm-default-error > .farm-default-error__content {
-    padding: 48px 18px;
+    padding: 28px 18px;
   }
 
   .farm-default-error__title {
