@@ -1,4 +1,5 @@
 import type { FarmSchema, FarmSchemaConfig } from "./schema";
+import { collectSchemaDependencies, orderSchemaOwners } from "./schema-dependencies";
 import {
   collectSchemaExtensions,
   describeSchemaExtensionApproval,
@@ -81,6 +82,8 @@ export interface FarmSchemaCheckOwner {
   /** False when the owner stores data in a key/value mount, which has no tables. */
   relational: boolean;
   tables: string[];
+  /** Owners whose tables this one needs, declared or implied by its schema. */
+  dependsOn: string[];
 }
 
 export interface FarmSchemaCheckReport {
@@ -132,6 +135,7 @@ type SchemaOwner = {
   schema: FarmSchema;
   models?: readonly string[];
   dialect?: FarmSqlDialect;
+  dependsOn?: readonly string[];
   resolveClient(config: FarmSchemaCheckConfig): Promise<unknown>;
 };
 
@@ -163,6 +167,7 @@ export function collectSchemaOwners(config: FarmSchemaCheckConfig): SchemaOwner[
       schema: declaration.schema,
       models: declaration.models,
       dialect: declaration.dialect,
+      dependsOn: declaration.dependsOn,
       resolveClient: (resolved) => declaration.resolveClient(resolved),
     });
   }
@@ -244,7 +249,9 @@ export async function checkSchema(
     throw new TypeError("timeoutMs must be a positive number of milliseconds.");
   }
   const timeoutHint = `Check that the database is reachable from here, or allow longer than ${formatSeconds(timeoutMs)} with \`--timeout <ms>\`.`;
-  const owners = collectSchemaOwners(config);
+  // Dependencies first, so the report reads in the order things get created.
+  const dependencies = collectSchemaDependencies(collectSchemaOwners(config));
+  const owners = orderSchemaOwners(collectSchemaOwners(config), dependencies);
   const issues: FarmSchemaCheckIssue[] = [];
 
   // Owners are found by name, so a second plugin declaring tables under a
@@ -331,6 +338,7 @@ export async function checkSchema(
       kind: owner.kind,
       relational: true,
       tables: models.map((model) => model.modelName),
+      dependsOn: [...(dependencies.get(owner.name) ?? [])],
     };
     summaries.push(summary);
 
@@ -730,7 +738,12 @@ export function formatSchemaCheck(report: FarmSchemaCheckReport): string {
   const lines: string[] = [];
   for (const owner of report.owners) {
     const ownIssues = report.issues.filter((issue) => issue.owner === owner.name);
-    const label = `${owner.name} (${owner.kind}${owner.dialect ? `, ${owner.dialect}` : ""})`;
+    const details = [
+      owner.kind,
+      ...(owner.dialect ? [owner.dialect] : []),
+      ...(owner.dependsOn?.length ? [`needs ${owner.dependsOn.join(", ")}`] : []),
+    ];
+    const label = `${owner.name} (${details.join(", ")})`;
     if (!owner.relational) {
       lines.push(`- ${label}: stores data in a key/value mount, nothing to check`);
       continue;

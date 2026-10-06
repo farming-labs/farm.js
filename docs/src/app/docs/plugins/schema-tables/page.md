@@ -202,6 +202,15 @@ That is the whole contract. Apps that configure the plugin get:
 The tables live in the app's database, `storage.client` in `farm.config.ts`,
 the same one integrations use. A broken schema fails when the config loads.
 
+### Tables from another plugin
+
+A reference to a table another plugin creates, or columns added to one, makes
+that plugin a dependency: `farm schema check` lists it first and shows what each
+plugin needs, as in `billing (plugin, postgres, needs teams)`. Add
+[`dependsOn`](/docs/plugins/create-plugin#depend-on-another-plugin) as well, so
+an app that installs your plugin without the other one fails while its config
+loads instead of at the first query.
+
 ### Tables the plugin uses but does not create
 
 A plugin often points at a table the app owns, such as the `user` table its auth

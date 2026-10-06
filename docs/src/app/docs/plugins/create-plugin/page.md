@@ -248,6 +248,28 @@ export function securityPlugin(options: SecurityPluginOptions = {}) {
 
 Keep the public surface small: export the factory, its options, and any intentionally shared types. Consumers should not need to understand the plugin's internal state or lifecycle wiring.
 
+## Depend on another plugin
+
+A plugin that needs another one says so with `dependsOn`, by name (`farm:teams`
+or `teams`) or integration key:
+
+```ts title="src/index.ts"
+export function billing() {
+  return definePlugin({ name: "farm:billing", dependsOn: ["teams"] /* ... */ });
+}
+```
+
+The app's config then fails to load, before anything runs, when a dependency is
+missing:
+
+```
+Plugin "farm:billing" depends on "teams", which is not configured.
+Add it to `plugins` (or `integrations`) in farm.config.
+```
+
+A plugin that lists itself, or plugins that depend on each other in a cycle,
+fail the same way.
+
 ## Transform config
 
 `configure` runs after Farm loads the app config and before it creates the development or production pipeline. Return only when the plugin needs to replace the current value.

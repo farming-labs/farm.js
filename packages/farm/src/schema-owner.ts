@@ -36,6 +36,8 @@ export interface FarmSchemaTablesDeclaration {
   resolveClient(config: FarmSchemaOwnerConfig): Promise<unknown>;
   /** Set explicitly when the client's dialect cannot be detected. */
   dialect?: FarmSqlDialect;
+  /** Owners whose tables must exist first, by owner name. */
+  dependsOn?: readonly string[];
 }
 
 /**

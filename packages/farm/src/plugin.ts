@@ -32,6 +32,7 @@ import { getFarmPluginIntegrationContext } from "./plugin-integration-context";
 import type { FarmSchema } from "./schema";
 import type { FarmSqlDialect } from "./schema-sql";
 import { declareSchemaTables, readSchemaTables } from "./schema-owner";
+import { pluginShortName } from "./plugin-dependencies";
 import { collectSchemaExtensions } from "./schema-extend";
 import { resolveSchemaModels } from "./schema-resolve";
 import { normalizeFarmBasePath, stripFarmBasePath } from "./base-path";
@@ -562,6 +563,12 @@ export interface FarmPlugin<
   schema?: FarmSchema;
   /** Where the `schema` tables live, when not in the app's `storage.client`. */
   database?: FarmPluginDatabase;
+  /**
+   * Plugins this one needs, by name (`farm:teams` or `teams`) or integration
+   * key. The config fails to load when one is missing or they form a cycle,
+   * and migrations run dependencies first.
+   */
+  dependsOn?: readonly string[];
 
   /** @internal Carries the expected integration instance type without runtime data. */
   readonly [FARM_PLUGIN_INTEGRATION_INSTANCE]?: (instance: TIntegrationInstance) => void;
@@ -1674,9 +1681,7 @@ export interface FarmPluginDatabase {
 
 /** The `farm <name> migrate` namespace for a plugin: `farm:teams` → `teams`. */
 function pluginSchemaName(pluginName: string): string {
-  const name = pluginName.slice(
-    Math.max(pluginName.lastIndexOf(":"), pluginName.lastIndexOf("/")) + 1,
-  );
+  const name = pluginShortName(pluginName);
   if (!/^[a-z0-9][a-z0-9_-]*$/iu.test(name)) {
     throw new Error(
       `Plugin "${pluginName}" declares a schema, so its name must end in a word made of letters, numbers, "-" or "_": that word becomes \`farm <name> migrate\`.`,
@@ -1691,7 +1696,12 @@ function pluginSchemaName(pluginName: string): string {
  * their declaration.
  */
 function declarePluginSchema<
-  TPlugin extends { name: string; schema?: FarmSchema; database?: FarmPluginDatabase },
+  TPlugin extends {
+    name: string;
+    schema?: FarmSchema;
+    database?: FarmPluginDatabase;
+    dependsOn?: readonly string[];
+  },
 >(plugin: TPlugin): TPlugin {
   if (plugin.database && !plugin.schema) {
     throw new Error(
@@ -1709,6 +1719,7 @@ function declarePluginSchema<
     schema: plugin.schema,
     // Also listed by key, which tooling from before `external` existed reads.
     models: Object.keys(models).filter((key) => !models[key]!.external),
+    ...(plugin.dependsOn ? { dependsOn: plugin.dependsOn.map(pluginShortName) } : {}),
     dialect: database?.dialect,
     resolveClient: async (config) => {
       if (database?.client !== undefined && database.client !== null) {
