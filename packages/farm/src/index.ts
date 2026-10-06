@@ -16,6 +16,7 @@ export * from "./schema-sql";
 export * from "./schema-migrate";
 export * from "./schema-tables";
 export { collectSchemaDependencies, orderSchemaOwners } from "./schema-dependencies";
+export type { FarmCrossOwnerReference } from "./schema-foreign-keys";
 export {
   collectSchemaExtensions,
   isSchemaExtensionAllowed,

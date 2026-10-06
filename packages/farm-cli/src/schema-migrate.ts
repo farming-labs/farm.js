@@ -61,7 +61,7 @@ export async function migrateSchema(
   const outcome = await migrateOwner(owner, config, options);
   if (options.apply && outcome.pending.length > 0) {
     throw new Error(
-      `${outcome.pending.length} column(s) ${owner.name} needs are still missing: ${outcome.pending.join(", ")}. See above for why.`,
+      `${outcome.pending.length} change(s) ${owner.name} needs are still missing: ${outcome.pending.join(", ")}. See above for why.`,
     );
   }
 }
@@ -121,7 +121,19 @@ async function migrateOwner(
       "Tables that differ from the schema were left unchanged. Review them and migrate with your own tooling.",
     );
   }
-  return { pending: result.extensions.pending, sql: result.sql, created: result.applied.length };
+  return {
+    // Still missing after --apply: columns, and foreign keys the app allowed
+    // but rows that point at nothing kept out.
+    pending: [
+      ...result.extensions.pending,
+      ...result.foreignKeys.blocked.map(
+        ({ key, orphans }) =>
+          `${key.table}.${key.column} → ${key.referencedTable} (${orphans} orphan row(s))`,
+      ),
+    ],
+    sql: result.sql,
+    created: result.applied.length,
+  };
 }
 
 /**

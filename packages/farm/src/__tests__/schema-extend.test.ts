@@ -251,7 +251,7 @@ describe.each(databases)("adding columns to the app's tables on %s", (_name, ope
     const first = await migrateSchemaTables(owner, { config, apply: true });
     expect(first.applied).toContain(`${users}.points`);
     expect(first.extensions.pending).toEqual([]);
-    expect(first.sql).toContain("Existing tables only get the columns added below");
+    expect(first.sql).toContain("Existing tables only get what is added below");
 
     // Existing rows get the default; the nullable column stays empty.
     const rows = await db.rows(

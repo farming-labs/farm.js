@@ -400,17 +400,18 @@ function resolveSchemaConfig(config: FarmSchemaConfig | undefined): FarmSchemaCo
   if (!config || typeof config !== "object" || Array.isArray(config)) {
     throw new TypeError("`schema` in farm.config must be an object.");
   }
-  const allowExtend = config.allowExtend;
-  if (allowExtend !== undefined) {
-    if (!allowExtend || typeof allowExtend !== "object" || Array.isArray(allowExtend)) {
+  for (const key of ["allowExtend", "allowForeignKeys"] as const) {
+    const entries = config[key];
+    if (entries === undefined) continue;
+    if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
       throw new TypeError(
-        "`schema.allowExtend` must map a plugin's migrate name to the tables it may add columns to.",
+        `\`schema.${key}\` must map a plugin's migrate name to a list of model or table names.`,
       );
     }
-    for (const [owner, tables] of Object.entries(allowExtend)) {
+    for (const [owner, tables] of Object.entries(entries)) {
       if (!Array.isArray(tables) || tables.some((table) => typeof table !== "string")) {
         throw new TypeError(
-          `\`schema.allowExtend.${owner}\` must be a list of model or table names, such as ["user"].`,
+          `\`schema.${key}.${owner}\` must be a list of model or table names, such as ["user"].`,
         );
       }
     }

@@ -101,6 +101,17 @@ export interface FarmSchemaConfig {
    * ```
    */
   allowExtend?: Record<string, readonly string[]>;
+  /**
+   * A plugin's existing tables that may get foreign keys to other plugins'
+   * tables, keyed by the plugin's migrate name. Tables created from now on
+   * get them automatically; an existing table may hold rows that point at
+   * nothing, so Farm checks for those first and adds the key only when allowed.
+   *
+   * ```ts
+   * schema: { allowForeignKeys: { billing: ["subscription"] } }
+   * ```
+   */
+  allowForeignKeys?: Record<string, readonly string[]>;
 }
 
 /**

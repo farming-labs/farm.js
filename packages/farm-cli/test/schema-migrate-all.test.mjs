@@ -17,7 +17,7 @@ const fixtures = fileURLToPath(new URL("./fixtures/", import.meta.url));
  */
 const config = (
   database,
-  { teamsDatabase = "", extra = "" } = {},
+  { teamsDatabase = "", extra = "", enforced = "app" } = {},
 ) => `import { DatabaseSync } from "node:sqlite";
 import { definePlugin, defineSchema } from "@farm.js/core";
 
@@ -38,7 +38,7 @@ const billing = definePlugin({
           id: { type: "uuid", primaryKey: true },
           organizationId: {
             type: "uuid",
-            reference: { model: "organization", field: "id", enforced: "app" },
+            reference: { model: "organization", field: "id", enforced: ${JSON.stringify(enforced)}, onDelete: "cascade" },
           },
         },
       },
@@ -161,6 +161,30 @@ test("farm <plugin> migrate still migrates one plugin on its own", async () => {
     const one = await farm(root, "billing", "migrate", "--apply");
     assert.equal(one.code, 0, one.output);
     assert.deepEqual(await tables(database), ["subscription"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("gives a plugin's table a real foreign key to another plugin's, created in order", async () => {
+  const { root, database } = await fixture({ enforced: "db" });
+  try {
+    const applied = await farm(root, "schema", "migrate", "--apply");
+    assert.equal(applied.code, 0, applied.output);
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(database);
+    try {
+      const keys = db.prepare('PRAGMA foreign_key_list("subscription")').all();
+      assert.deepEqual(
+        keys.map((key) => [key.table, key.from, key.to, key.on_delete]),
+        [["organization", "organizationId", "id", "CASCADE"]],
+      );
+    } finally {
+      db.close();
+    }
+    const check = await farm(root, "schema", "check");
+    assert.equal(check.code, 0, check.output);
+    assert.match(check.output, /billing \(plugin, sqlite, needs teams\)/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
