@@ -67,6 +67,9 @@ function renderedFixtureTimestamp(body) {
 }
 
 export async function requestPage(url, timeoutMs = 60000) {
+  // All fixture servers run on this host and stamp each render with Date.now().
+  // Keep wall-clock controls outside the monotonic response-duration timer.
+  const requestedAt = Date.now();
   const startedAt = performance.now();
   const response = await fetch(url, {
     cache: "no-store",
@@ -77,11 +80,14 @@ export async function requestPage(url, timeoutMs = 60000) {
   // Stop both response and first-page clocks before parsing/validation. The
   // benchmark measures the server and full-body transfer, not this client work.
   const completedAt = performance.now();
+  const receivedAt = Date.now();
   return {
     body,
     bytes: Buffer.byteLength(body),
     durationMs: completedAt - startedAt,
     completedAt,
+    requestedAt,
+    receivedAt,
     renderedAt: renderedFixtureTimestamp(body),
     status: response.status,
   };
@@ -91,4 +97,33 @@ export function isValidFixtureResponse(response) {
   return (
     response.status === 200 && Number.isSafeInteger(response.renderedAt) && response.renderedAt > 0
   );
+}
+
+export function isFreshFixtureResponse(response) {
+  return (
+    isValidFixtureResponse(response) &&
+    Number.isSafeInteger(response.requestedAt) &&
+    Number.isSafeInteger(response.receivedAt) &&
+    response.renderedAt >= response.requestedAt &&
+    response.renderedAt <= response.receivedAt
+  );
+}
+
+export async function measureRequests(url, warmups, count) {
+  for (let index = 0; index < warmups; index += 1) {
+    const response = await requestPage(url);
+    if (!isFreshFixtureResponse(response)) {
+      throw new Error("Fixture validation or freshness check failed during warm-up");
+    }
+  }
+
+  const samples = [];
+  for (let index = 0; index < count; index += 1) {
+    const response = await requestPage(url);
+    if (!isFreshFixtureResponse(response)) {
+      throw new Error("Fixture validation or freshness check failed during measured request");
+    }
+    samples.push(response.durationMs);
+  }
+  return samples;
 }
