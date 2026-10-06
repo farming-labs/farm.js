@@ -10,9 +10,7 @@ export interface PreviewManagedAuthOptions {
     issuer: string;
     clientId: string;
     /** Resolve an API key or approved device credential on every new grant. */
-    authorizeAccount(
-      token: string,
-    ): Promise<{
+    authorizeAccount(token: string): Promise<{
       subject: string;
       login: string;
       expiresAt?: number;
