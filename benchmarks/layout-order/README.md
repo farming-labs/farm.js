@@ -18,6 +18,13 @@ both outputs outside timing. Seven fresh-process pairs alternate arm order; each
 environment, host load and isolated minified-selector sizes. This is not full SSR, HTTP latency,
 hydration, throughput or a cross-framework comparison. Do not run builds/tests alongside it.
 
+For isolated-runner evidence, manually dispatch the existing `CI` workflow on this branch with
+`layout-order-benchmark` enabled. Its separate job builds the current router, runs the layout-order
+regression suite, then runs two complete comparisons sequentially without concurrent work in that job.
+The `layout-order-<commit>` artifact retains both raw JSON reports for 14 days. This opt-in job is
+skipped on ordinary pushes and pull requests. A passing job establishes that the diagnostic ran and
+its correctness controls passed; review both sets of timing distributions before claiming a speedup.
+
 ## Initial local evidence — inconclusive timing
 
 macOS 26.2, Apple M1 (8 logical CPUs, 16 GB), Node 24.21.0, base `55e95f58` with this candidate:
