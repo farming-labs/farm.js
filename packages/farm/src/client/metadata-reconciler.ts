@@ -22,10 +22,12 @@ const OWNED_SELECTORS = [
   'meta[name="creator"]',
   'meta[name="publisher"]',
   'meta[name="robots"]',
+  'meta[name="googlebot"]',
   'link[rel="author"]',
   'link[rel="canonical"]',
   'link[rel="alternate"]',
   'meta[property^="og:"]',
+  'meta[property^="article:"]',
   'meta[name^="twitter:"]',
   // Meta tags named by the app carry the marker, since no fixed name matches them.
   `meta[${MANAGED_ATTRIBUTE}]`,
