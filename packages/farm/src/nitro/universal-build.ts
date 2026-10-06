@@ -5229,7 +5229,6 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   isFarmNotFoundError,
   isFarmRedirectError,
   localizeFarmHref,
-  localizeFarmPathname,
   manageFarmDocumentPreloads,
   mergeRouteRenderingDirectiveConfig,
   manageFarmLinkHeaderPreloads,
@@ -5237,12 +5236,14 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   matchesFarmIfNoneMatch,
   normalizeRevalidatePath,
   reportFarmPreloadWarnings,
+  renderFarmLocaleAlternateLinks,
   renderMetadataHead,
   resolveFarmRouteContext,
   resolveFarmTrailingSlashRedirect,
   resolveDefaultErrorStatus,
   resolveFarmSecurityConfig,
   resolveFarmInstrumentationRuntime,
+  resolveFarmWebRequestOrigin,
   runWithFarmRequestSpan,
   searchParamsToObject,
   setFarmBasePath,
@@ -6285,26 +6286,26 @@ function createFarmErrorDocument(html, title) {
     : "<!DOCTYPE html>\\n" + fullHtml;
 }
 
-function renderFarmI18nAlternateLinks(requestPath, snapshot) {
+// The origin hreflang alternates resolve against when the route sets no
+// metadataBase. Forwarded authority counts only under server.trustProxy, the
+// same rule the development server applies.
+function resolveFarmI18nAlternateOrigin(request) {
+  return resolveFarmWebRequestOrigin(request, {
+    trustProxy: farmServerConfig.trustProxy === true,
+  });
+}
+
+function renderFarmI18nAlternateLinks(requestPath, snapshot, request, metadata) {
   if (!snapshot || snapshot.routing === "none") return "";
   const url = new URL(requestPath, "http://farm.local");
   const routePathname = stripFarmLocaleFromPathname(url.pathname, snapshot);
-  const links = snapshot.locales.map(function(locale) {
-    const href = localizeFarmPathname(routePathname, locale, snapshot);
-    return '<link rel="alternate" hreflang="' + escapeFarmHtmlAttribute(locale) +
-      '" href="' + escapeFarmHtmlAttribute(href) + '">';
+  return renderFarmLocaleAlternateLinks(routePathname, snapshot, {
+    metadataBase: metadata ? metadata.metadataBase : undefined,
+    origin: request ? resolveFarmI18nAlternateOrigin(request) : undefined,
   });
-  links.push(
-    '<link rel="alternate" hreflang="x-default" href="' +
-      escapeFarmHtmlAttribute(
-        localizeFarmPathname(routePathname, snapshot.defaultLocale, snapshot)
-      ) +
-      '">'
-  );
-  return links.join("");
 }
 
-function applyFarmI18nDocument(html, requestPath, snapshot) {
+function applyFarmI18nDocument(html, requestPath, snapshot, request, metadata) {
   if (!snapshot) return html;
   const locale = escapeFarmHtmlAttribute(snapshot.locale);
   const direction = escapeFarmHtmlAttribute(snapshot.direction);
@@ -6316,7 +6317,7 @@ function applyFarmI18nDocument(html, requestPath, snapshot) {
     return '<html' + cleaned + ' lang="' + locale + '" dir="' + direction + '">';
   });
   const runtimeMarkup =
-    renderFarmI18nAlternateLinks(requestPath, snapshot) +
+    renderFarmI18nAlternateLinks(requestPath, snapshot, request, metadata) +
     '<script>window.__FARM_I18N__ = ' + serializeFarmInlineValue(snapshot) + ';</script>';
   nextHtml = nextHtml.replace(/<head([^>]*)>/i, function(_match, attributes) {
     // Function replacement: runtimeMarkup may contain $-sequences ($&, $', $$).
@@ -7114,13 +7115,16 @@ function getPPRShellBypassReason(request, middlewareData, middlewareContext) {
   return undefined;
 }
 
-function getPPRShellCacheKey(url, locale) {
-  return createFarmCacheKey([
+// origin is set when the shell carries hreflang alternates (i18n prefix
+// routing), so one host never serves a shell holding another host's URLs.
+function getPPRShellCacheKey(url, locale, origin) {
+  const key = [
     "ppr",
     locale || "",
     normalizeRevalidatePath(url.pathname),
     url.search,
-  ]);
+  ];
+  return createFarmCacheKey(origin ? key.concat(origin) : key);
 }
 
 function getPPRHeaders(status, config) {
@@ -7579,7 +7583,13 @@ async function handleFarmRequestInContext(
         : undefined;
       let pprCanCache = pprConfig.enabled && !pprBypassReason;
       const pprCacheKey = pprCanCache
-        ? getPPRShellCacheKey(url, farmLocaleResolution?.locale)
+        ? getPPRShellCacheKey(
+            url,
+            farmLocaleResolution?.locale,
+            farmLocaleResolution && farmI18nConfig.routing !== "none"
+              ? resolveFarmI18nAlternateOrigin(request)
+              : ""
+          )
         : null;
       if (pprConfig.enabled && pprBypassReason) {
         emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: pprBypassReason });
@@ -8173,7 +8183,13 @@ async function handleFarmRequestInContext(
 </body>
 </html>\`;
         }
-        fullHtml = applyFarmI18nDocument(fullHtml, pathname, farmI18nSnapshot);
+        fullHtml = applyFarmI18nDocument(
+          fullHtml,
+          pathname,
+          farmI18nSnapshot,
+          request,
+          mergedMetadata
+        );
         fullHtml = applyFarmThemeDocument(
           fullHtml,
           farmThemeConfig,
@@ -8312,7 +8328,8 @@ async function handleFarmRequestInContext(
             applyFarmI18nDocument(
               createFarmErrorDocument(errorHtml, "Application Error"),
               pathname,
-              getFarmI18nSnapshot()
+              getFarmI18nSnapshot(),
+              request
             ),
             farmThemeConfig,
             farmResolvedRuntimeConfig.basePath,
@@ -8353,7 +8370,8 @@ async function handleFarmRequestInContext(
             errorStatus + " - " + errorStatusText
           ),
           pathname,
-          getFarmI18nSnapshot()
+          getFarmI18nSnapshot(),
+          request
         ),
         farmThemeConfig,
         farmResolvedRuntimeConfig.basePath,
@@ -8455,7 +8473,7 @@ async function handleFarmRequestInContext(
 </body>
 </html>\`;
     }
-    fullHtml = applyFarmI18nDocument(fullHtml, pathname, getFarmI18nSnapshot());
+    fullHtml = applyFarmI18nDocument(fullHtml, pathname, getFarmI18nSnapshot(), request);
     fullHtml = applyFarmThemeDocument(
       fullHtml,
       farmThemeConfig,
