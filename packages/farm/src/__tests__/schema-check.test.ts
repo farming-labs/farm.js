@@ -52,14 +52,34 @@ async function sqliteDatabase(): Promise<TestDatabase> {
   };
 }
 
-async function postgresDatabase(): Promise<TestDatabase> {
+/**
+ * This file's own Postgres schema. Test files run in parallel against one
+ * database, and Farm keeps one record of applied schemas per schema, so a
+ * shared one would let another file's records reach these checks.
+ */
+const postgresSchema = `farm_check_${process.pid}_${Date.now() % 100000}`;
+let postgresSchemaReady: Promise<void> | undefined;
+
+type PgPool = {
+  query(sql: string): Promise<{ rows: Array<Record<string, unknown>> }>;
+  end(): Promise<void>;
+};
+
+function pgPool(options?: string): PgPool {
   const { Pool } = requireModule("pg") as {
-    Pool: new (options: { connectionString: string }) => {
-      query(sql: string): Promise<{ rows: Array<Record<string, unknown>> }>;
-      end(): Promise<void>;
-    };
+    Pool: new (options: { connectionString: string; options?: string }) => PgPool;
   };
-  const pool = new Pool({ connectionString: postgresTestUrl! });
+  return new Pool({ connectionString: postgresTestUrl!, ...(options ? { options } : {}) });
+}
+
+async function postgresDatabase(): Promise<TestDatabase> {
+  postgresSchemaReady ??= (async () => {
+    const admin = pgPool();
+    await admin.query(`CREATE SCHEMA IF NOT EXISTS "${postgresSchema}"`);
+    await admin.end();
+  })();
+  await postgresSchemaReady;
+  const pool = pgPool(`-c search_path=${postgresSchema}`);
   return {
     dialect: "postgres",
     client: pool,
@@ -107,6 +127,13 @@ async function mysqlDatabase(): Promise<TestDatabase> {
     },
   };
 }
+
+afterAll(async () => {
+  if (!postgresSchemaReady) return;
+  const admin = pgPool();
+  await admin.query(`DROP SCHEMA IF EXISTS "${postgresSchema}" CASCADE`);
+  await admin.end();
+});
 
 const databases: Array<[string, () => Promise<TestDatabase>]> = [
   ["sqlite", sqliteDatabase],
@@ -458,14 +485,20 @@ describe.each(databases)("farm schema check on %s", (_name, open) => {
 
   it("never writes to the database", async () => {
     const db = await database();
-    const before = await db.listTables();
+    // Other test files share this database and create their own tables in
+    // parallel, so only tables this file could have made are compared.
+    const ownTables = async () =>
+      (await db.listTables()).filter((table) => table.startsWith("farm_check_"));
+    const before = await ownTables();
+    const readonly = unique("readonly");
+    const nobody = unique("nobody");
     const schema = defineSchema({
       models: {
         item: {
-          name: unique("readonly"),
+          name: readonly,
           fields: {
             id: { type: "uuid", primaryKey: true },
-            userId: { type: "string", reference: { model: unique("nobody"), field: "id" } },
+            userId: { type: "string", reference: { model: nobody, field: "id" } },
           },
         },
       },
@@ -473,7 +506,10 @@ describe.each(databases)("farm schema check on %s", (_name, open) => {
 
     await checkSchema({ plugins: [plugin("items", schema, db.client)] });
     await checkSchema({ plugins: [plugin("items", schema, db.client)] });
-    expect(await db.listTables()).toEqual(before);
+    const after = await ownTables();
+    expect(after).toEqual(before);
+    expect(after).not.toContain(readonly);
+    expect(after).not.toContain(nobody);
   });
 });
 
@@ -921,7 +957,7 @@ describeWithPostgres("farm schema check on postgres specifics", () => {
       await client.query(`CREATE TABLE "${later}"."${users}" ("id" TEXT PRIMARY KEY)`);
       // An owned table that exists only in the later schema.
       await client.query(`CREATE TABLE "${later}"."${points}" ("id" TEXT PRIMARY KEY)`);
-      await client.query(`SET search_path TO public, "${later}"`);
+      await client.query(`SET search_path TO "${postgresSchema}", "${later}"`);
 
       const report = await checkSchema({
         plugins: [

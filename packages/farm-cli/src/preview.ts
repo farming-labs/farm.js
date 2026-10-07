@@ -12,6 +12,7 @@ import {
 import { runNativePreviewTunnel } from "./preview-native";
 import { createHttpLocalUrl } from "./local-url";
 import { authorizePreviewGatewayPlan, parsePreviewDuration } from "./preview-auth";
+import { resolvePreviewProject } from "./preview-project";
 
 export interface PreviewFarmOptions {
   root?: string;
@@ -21,6 +22,7 @@ export interface PreviewFarmOptions {
   url?: string;
   gatewayUrl?: string;
   name?: string;
+  project?: string;
   dryRun?: boolean;
   noProbe?: boolean;
   timeoutMs?: number;
@@ -73,6 +75,7 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
     const expiresInMs = parsePreviewDuration(options.expires);
     const plan = {
       ...createPreviewGatewayPlan(target, options),
+      project: await resolvePreviewProject(options),
       ...(expiresInMs ? { expiresInMs } : {}),
     };
 

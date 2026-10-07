@@ -88,6 +88,32 @@ export interface FarmSchema {
   override?: Record<string, FarmSchemaModelOverride>;
 }
 
+/** App-level rules for the tables plugins and integrations declare. */
+export interface FarmSchemaConfig {
+  /**
+   * Tables a plugin may add columns to, keyed by the plugin's migrate name.
+   * List the plugin's model names (`user`) or your real table names
+   * (`members_auth`). Without an entry, `farm <plugin> migrate` prints the
+   * `ALTER TABLE` and refuses to run it.
+   *
+   * ```ts
+   * schema: { allowExtend: { loyalty: ["user"] } }
+   * ```
+   */
+  allowExtend?: Record<string, readonly string[]>;
+  /**
+   * A plugin's existing tables that may get foreign keys to other plugins'
+   * tables, keyed by the plugin's migrate name. Tables created from now on
+   * get them automatically; an existing table may hold rows that point at
+   * nothing, so Farm checks for those first and adds the key only when allowed.
+   *
+   * ```ts
+   * schema: { allowForeignKeys: { billing: ["subscription"] } }
+   * ```
+   */
+  allowForeignKeys?: Record<string, readonly string[]>;
+}
+
 /**
  * Declare a data schema with full type inference preserved.
  *

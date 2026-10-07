@@ -86,7 +86,9 @@ test("migrates only the plugin's tables, under the app's names, and checks the r
       db
         .prepare("select name from sqlite_master where type = 'table' order by name")
         .all()
-        .map((row) => row.name);
+        .map((row) => row.name)
+        // Farm's record of what it applied.
+        .filter((name) => name !== "farm_schema_state");
     assert.deepEqual(tables(), ["organization", "team_members"]);
 
     const missing = await farm(root, "schema", "check");

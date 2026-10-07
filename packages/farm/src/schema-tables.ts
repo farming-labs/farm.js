@@ -1,12 +1,51 @@
+import type { FarmSchemaConfig } from "./schema";
+import {
+  collectSchemaExtensions,
+  describeSchemaExtensionApproval,
+  isSchemaExtensionAllowed,
+} from "./schema-extend";
+import {
+  planOwnerSchemaSteps,
+  withoutRenameTargets,
+  runSchemaStep,
+  type FarmPlannedSchemaStep,
+  type FarmSchemaStepPlan,
+} from "./schema-steps";
+import {
+  FARM_SCHEMA_STATE_TABLE,
+  createSchemaSnapshot,
+  describeSchemaChanges,
+  diffSchemaSnapshots,
+  hasSchemaChanges,
+  readSchemaState,
+  writeSchemaState,
+  type FarmSchemaChanges,
+} from "./schema-state";
+import {
+  describeForeignKeyApproval,
+  isForeignKeyAllowed,
+  planCrossOwnerReferences,
+  type FarmCrossOwnerReference,
+} from "./schema-foreign-keys";
 import {
   applySchemaMigration,
   createSchemaExecutor,
   describeSchemaDrift,
   formatSchemaMigration,
+  planSchemaExtensions,
   planSchemaMigration,
+  type FarmSchemaExtensionPlan,
+  type FarmSchemaAddableForeignKey,
+  type FarmSchemaExecutor,
+  type FarmSchemaExtensionStatement,
   type FarmSchemaMigratePlan,
 } from "./schema-migrate";
-import { collectSchemaModels, type CollectedSchemaModel } from "./schema-sql";
+import {
+  collectSchemaModels,
+  quoteSqlIdentifier,
+  type CollectedSchemaModel,
+  type FarmSqlDialect,
+} from "./schema-sql";
 import {
   readSchemaTables,
   type FarmSchemaOwnerConfig,
@@ -60,6 +99,12 @@ export interface MigrateSchemaTablesOptions {
   write?: string;
   /** Execute the plan. */
   apply?: boolean;
+  /**
+   * What to do with columns the owner adds to tables it does not own.
+   * `"report"` when the app's ORM owns those tables: they are never altered,
+   * only reported, so the ORM's migrations stay the source of truth.
+   */
+  extensions?: "apply" | "report";
   log?: (message: string) => void;
 }
 
@@ -67,13 +112,46 @@ export interface MigrateSchemaTablesResult {
   plan: FarmSchemaMigratePlan;
   sql: string;
   applied: string[];
+  /** Foreign keys to other owners' tables that this run did not create. */
+  foreignKeys: {
+    /** The other owner has not created its table yet. */
+    waiting: FarmCrossOwnerReference[];
+    /** On an existing table, not allowed in `schema.allowForeignKeys`. */
+    unapproved: FarmSchemaAddableForeignKey[];
+    /** On an existing SQLite table, which cannot get one. */
+    unsupported: FarmSchemaAddableForeignKey[];
+    /** Allowed, but rows already point at nothing. */
+    blocked: Array<{ key: FarmSchemaAddableForeignKey; orphans: number }>;
+  };
+  /** What the installed version changes compared with the last applied one. */
+  upgrade?: { from?: string; to?: string; changes: FarmSchemaChanges };
+  /** The owner's migration steps: what ran now, and what is still to do. */
+  steps: { plan?: FarmSchemaStepPlan; ran: string[]; pending: string[] };
+  /** Statements and steps `--apply` would run. */
+  planned: number;
+  /** Columns the owner adds to tables it does not own. */
+  extensions: FarmSchemaExtensionPlan & {
+    /** Additions the app has not allowed in `schema.allowExtend`. */
+    unapproved: FarmSchemaExtensionStatement[];
+    /** `table.column` still missing after this run, whatever the reason. */
+    pending: string[];
+  };
 }
+
+const emptyExtensionPlan = (): FarmSchemaExtensionPlan => ({
+  statements: [],
+  present: [],
+  missingTables: [],
+  conflicts: [],
+  unsupported: [],
+});
 
 /**
  * Plan, and optionally apply, the tables one owner needs.
  *
  * Nothing is executed unless `apply` is set: the default is to hand back sql a
- * person can read before it touches a database.
+ * person can read before it touches a database. Columns added to tables the
+ * owner does not own also need the app's `schema.allowExtend`.
  */
 export async function migrateSchemaTables(
   owner: FarmSchemaTablesDeclaration,
@@ -91,13 +169,198 @@ export async function migrateSchemaTables(
       plan: { dialect: "sqlite", statements: [], upToDate: [], drift: [] },
       sql: "",
       applied: [],
+      extensions: { ...emptyExtensionPlan(), unapproved: [], pending: [] },
+      foreignKeys: { waiting: [], unapproved: [], unsupported: [], blocked: [] },
+      steps: { ran: [], pending: [] },
+      planned: 0,
     };
   }
 
-  const { executor, dialect } = adapter;
+  const { executor } = adapter;
+  const dialect = owner.dialect ?? adapter.dialect;
+  const schemaConfig = options.config?.schema as FarmSchemaConfig | undefined;
+  const reportOnly = options.extensions === "report";
+  const applying = Boolean(options.apply) && !reportOnly;
+
+  // Migration steps the owner ships: renames run before anything is planned,
+  // so a renamed column is never mistaken for one removed and one added.
+  const steps = owner.migrations ?? [];
+  let stepPlan: FarmSchemaStepPlan | undefined;
+  const stepsRan: string[] = [];
+  let stepsStopped: FarmPlannedSchemaStep | undefined;
+  if (steps.length > 0) {
+    stepPlan = await planOwnerSchemaSteps({
+      owner: owner.name,
+      schema: owner.schema,
+      steps,
+      tables: collectOwnerModels(owner).map((model) => model.modelName),
+      dialect,
+      executor,
+      readApplied: !reportOnly,
+    });
+    for (const id of stepPlan.edited) {
+      log(
+        `Migration step "${id}" changed after it ran here. Farm never runs a step twice; review the change yourself.`,
+      );
+    }
+  }
+  const runSteps = async (phase: "before" | "after") => {
+    for (const planned of stepPlan?.steps ?? []) {
+      if (stepsStopped) return;
+      if (planned.phase !== phase) continue;
+      if (planned.state === "blocked") {
+        stepsStopped = planned;
+        log(
+          `Stopped at migration step "${planned.step.id}" (${planned.summary}): ${planned.reason} Later steps wait for it.`,
+        );
+        return;
+      }
+      await runSchemaStep(executor, dialect, owner.name, planned);
+      stepsRan.push(planned.step.id);
+    }
+  };
+  if (applying) await runSteps("before");
+
+  // References to other plugins' tables get a real foreign key when it is
+  // safe: inline for a table created now, with approval for an existing one.
   const models = collectOwnerModels(owner);
-  const plan = await planSchemaMigration(models, owner.dialect ?? dialect, executor);
-  const sql = formatSchemaMigration(plan, owner.name);
+  // Planned without the columns and tables a pending rename will produce:
+  // until it runs they are missing, and adding them would strand the data.
+  const planningModels = applying ? models : withoutRenameTargets(models, stepPlan);
+  const others = options.config ? findSchemaTableOwners(options.config as never) : [];
+  const crossOwner = await planCrossOwnerReferences(owner, others, dialect, executor);
+  for (const reference of crossOwner.eligible) {
+    const model = planningModels.find((candidate) => candidate.modelKey === reference.modelKey);
+    if (!model) continue;
+    (model.foreignKeys ??= {})[reference.fieldKey] = {
+      table: reference.referencedTable,
+      column: reference.referencedColumn,
+      onDelete: reference.onDelete,
+    };
+  }
+  const plan = await planSchemaMigration(planningModels, dialect, executor);
+
+  // What this version changes compared with what was last applied here.
+  const snapshot = createSchemaSnapshot(models);
+  const state = await readSchemaState(executor, dialect, owner.name);
+  const changes = state ? diffSchemaSnapshots(state.snapshot, snapshot) : undefined;
+  const upgrade =
+    state && changes && hasSchemaChanges(changes)
+      ? { from: state.version, to: owner.version, changes }
+      : undefined;
+  const pendingSteps = (stepPlan?.steps ?? []).filter((planned) => planned.state !== "record");
+  if (upgrade || pendingSteps.length > 0) {
+    const versions =
+      upgrade?.from && upgrade.to && upgrade.from !== upgrade.to
+        ? `${owner.name} ${upgrade.from} → ${upgrade.to} changes its tables:`
+        : `${owner.name}'s tables changed since they were last migrated:`;
+    log(
+      [
+        versions,
+        ...describeStepChanges(stepPlan),
+        ...describeSchemaChanges(withoutStepChanges(changes, stepPlan)),
+        ...renameHints(withoutStepChanges(changes, stepPlan)),
+      ].join("\n"),
+    );
+  }
+  // An ORM's migrations own the app's tables there, and track their own
+  // history; an extra table would only show up as drift in its tooling.
+  const recordState = async () => {
+    if (options.extensions === "report") return;
+    try {
+      await writeSchemaState(executor, dialect, owner.name, { version: owner.version, snapshot });
+    } catch (error) {
+      // The migration itself succeeded; only the record of it did not.
+      log(
+        `Applied, but could not record it in "${FARM_SCHEMA_STATE_TABLE}" (${error instanceof Error ? error.message : String(error)}). The next upgrade of ${owner.name} will be compared with the database instead of this version.`,
+      );
+    }
+  };
+
+  const addable = plan.addableForeignKeys ?? [];
+  const foreignKeysUnsupported = dialect === "sqlite" ? addable : [];
+  const foreignKeysAllowed =
+    dialect === "sqlite"
+      ? []
+      : addable.filter((key) =>
+          isForeignKeyAllowed(schemaConfig?.allowForeignKeys, { owner: owner.name, ...key }),
+        );
+  const foreignKeysUnapproved =
+    dialect === "sqlite" ? [] : addable.filter((key) => !foreignKeysAllowed.includes(key));
+
+  const extensionsPlan = await planSchemaExtensions(
+    collectSchemaExtensions(owner.name, owner.schema, owner.models),
+    dialect,
+    executor,
+  );
+  const allowExtend = schemaConfig?.allowExtend;
+  const approved = reportOnly
+    ? []
+    : extensionsPlan.statements.filter((statement) =>
+        isSchemaExtensionAllowed(allowExtend, statement.extension),
+      );
+  const unapproved = reportOnly
+    ? []
+    : extensionsPlan.statements.filter((statement) => !approved.includes(statement));
+  const sql =
+    formatSteps(stepPlan, "before", reportOnly) +
+    formatSchemaMigration(plan, owner.name, {
+      addsColumns: approved.length + foreignKeysAllowed.length > 0,
+    }) +
+    formatSteps(stepPlan, "after", reportOnly) +
+    formatForeignKeys(owner.name, dialect, foreignKeysAllowed, foreignKeysUnapproved) +
+    formatExtensions(owner.name, {
+      approved,
+      unapproved,
+      reported: reportOnly ? extensionsPlan.statements : [],
+    });
+
+  const pendingAfter = (added: ReadonlySet<string>) => [
+    ...extensionsPlan.statements
+      .map((statement) => statement.target)
+      .filter((target) => !added.has(target)),
+    ...extensionsPlan.unsupported.map((entry) => `${entry.extension.table}.${entry.column}`),
+    ...extensionsPlan.missingTables.flatMap((extension) =>
+      extension.fields.map(({ field }) => `${extension.table}.${field.name}`),
+    ),
+  ];
+  const blocked: Array<{ key: FarmSchemaAddableForeignKey; orphans: number }> = [];
+  const result = (applied: string[]): MigrateSchemaTablesResult => ({
+    plan,
+    sql,
+    applied,
+    extensions: { ...extensionsPlan, unapproved, pending: pendingAfter(new Set(applied)) },
+    foreignKeys: {
+      waiting: crossOwner.waiting,
+      unapproved: foreignKeysUnapproved,
+      unsupported: foreignKeysUnsupported,
+      blocked,
+    },
+    upgrade,
+    steps: {
+      plan: stepPlan,
+      ran: stepsRan,
+      pending: (stepPlan?.steps ?? [])
+        .filter((planned) => !stepsRan.includes(planned.step.id))
+        .map((planned) => planned.step.id),
+    },
+    planned: pendingStatements + runnableSteps,
+  });
+
+  // A table created now without its foreign key, because the other plugin
+  // has not created its table yet: say how to get both, in order.
+  const creating = new Set(plan.statements.map((statement) => statement.target));
+  for (const reference of crossOwner.waiting) {
+    if (!creating.has(reference.table)) continue;
+    log(
+      `"${reference.table}.${reference.column}" is created without a foreign key: ${reference.referencedOwner} has not created "${reference.referencedTable}" yet. Run \`farm schema migrate\` to create both in order.`,
+    );
+  }
+  for (const key of foreignKeysUnsupported) {
+    log(
+      `"${key.table}.${key.column}" has no foreign key to "${key.referencedTable}". SQLite can only add one when it creates the table.`,
+    );
+  }
 
   if (plan.upToDate.length > 0) {
     log(`Already up to date: ${plan.upToDate.join(", ")}`);
@@ -107,9 +370,30 @@ export async function migrateSchemaTables(
       `These tables exist but no longer match the schema. Farm will not change them:\n${describeSchemaDrift(plan.drift)}`,
     );
   }
-  if (plan.statements.length === 0) {
+  logExtensionProblems(owner.name, extensionsPlan, log);
+
+  const pendingStatements =
+    plan.statements.length +
+    (plan.upgrades?.length ?? 0) +
+    approved.length +
+    foreignKeysAllowed.length;
+  // Steps still to run (or record) here, up to the first one that cannot.
+  const blockedAt = (stepPlan?.steps ?? []).findIndex((planned) => planned.state === "blocked");
+  const runnableSteps = (stepPlan?.steps ?? [])
+    .slice(0, blockedAt === -1 ? undefined : blockedAt)
+    .filter((planned) => !stepsRan.includes(planned.step.id)).length;
+  if (
+    pendingStatements === 0 &&
+    runnableSteps === 0 &&
+    blockedAt === -1 &&
+    unapproved.length === 0 &&
+    foreignKeysUnapproved.length === 0 &&
+    (!reportOnly || extensionsPlan.statements.length === 0)
+  ) {
     log("Nothing to create.");
-    return { plan, sql, applied: [] };
+    // A first --apply on an up-to-date database records where it stands.
+    if (options.apply) await recordState();
+    return result([]);
   }
 
   if (options.write) {
@@ -117,16 +401,278 @@ export async function migrateSchemaTables(
     const { dirname } = await import("node:path");
     await mkdir(dirname(options.write), { recursive: true });
     await writeFile(options.write, sql, "utf8");
-    log(`Wrote ${plan.statements.length} statement(s) to ${options.write}`);
-    return { plan, sql, applied: [] };
+    log(`Wrote ${pendingStatements} statement(s) to ${options.write}`);
+    return result([]);
   }
 
   if (!options.apply) {
     log(sql);
-    return { plan, sql, applied: [] };
+    return result([]);
   }
 
-  const applied = await applySchemaMigration(plan, executor);
-  log(`Created: ${applied.applied.join(", ")}`);
-  return { plan, sql, applied: applied.applied };
+  for (const approval of new Set(
+    unapproved.map((statement) => describeSchemaExtensionApproval(statement.extension)),
+  )) {
+    const columns = unapproved
+      .filter((statement) => describeSchemaExtensionApproval(statement.extension) === approval)
+      .map((statement) => statement.target);
+    log(
+      `Not allowed yet, so not added: ${columns.join(", ")}. To allow it, add to farm.config: ${approval}`,
+    );
+  }
+
+  const created = await applySchemaMigration(plan, executor);
+  const applied = [...created.applied];
+  // Tables first: a column is only ever added after the owner's own tables exist.
+  for (const statement of approved) {
+    await executor.execute(statement.sql);
+    applied.push(statement.target);
+  }
+  // Foreign keys last, once every table and column they involve exists. A key
+  // on rows that already point at nothing would fail, so those are counted
+  // first and the key is left for the app to clean up.
+  for (const key of foreignKeysAllowed) {
+    const orphans = await countOrphans(executor, dialect, key);
+    if (orphans > 0) {
+      blocked.push({ key, orphans });
+      log(
+        `Cannot add the foreign key "${key.table}.${key.column}" → "${key.referencedTable}": ${orphans} row(s) point at no "${key.referencedTable}". Fix or remove them, then run again.`,
+      );
+      continue;
+    }
+    await executor.execute(foreignKeyStatement(dialect, key));
+    applied.push(`${key.table}.${key.column} → ${key.referencedTable}`);
+  }
+  for (const key of foreignKeysUnapproved) {
+    log(
+      `Not allowed yet, so not added: the foreign key "${key.table}.${key.column}" → "${key.referencedTable}". To allow it, add to farm.config: ${describeForeignKeyApproval({ owner: owner.name, modelKey: key.modelKey })}`,
+    );
+  }
+  if (applied.length > 0) log(`Created: ${applied.join(", ")}`);
+  // Custom SQL last: a backfill can fill this release's new columns.
+  await runSteps("after");
+  if (stepsRan.length > 0) log(`Ran migration steps: ${stepsRan.join(", ")}`);
+  await recordState();
+  return result(applied);
+}
+
+function foreignKeyStatement(dialect: FarmSqlDialect, key: FarmSchemaAddableForeignKey) {
+  // The name Postgres would give it, within the 63-character identifier limit.
+  const name = `${key.table}_${key.column}_fkey`.slice(0, 63);
+  const onDelete = key.onDelete !== "noAction" ? ` ON DELETE ${SQL_ON_DELETE[key.onDelete]}` : "";
+  const q = (value: string) => quoteSqlIdentifier(dialect, value);
+  return `ALTER TABLE ${q(key.table)} ADD CONSTRAINT ${q(name)} FOREIGN KEY (${q(key.column)}) REFERENCES ${q(key.referencedTable)} (${q(key.referencedColumn)})${onDelete};`;
+}
+
+const SQL_ON_DELETE = {
+  cascade: "CASCADE",
+  restrict: "RESTRICT",
+  setNull: "SET NULL",
+  noAction: "NO ACTION",
+} as const;
+
+/** Rows whose value points at no row in the referenced table. */
+async function countOrphans(
+  executor: FarmSchemaExecutor,
+  dialect: FarmSqlDialect,
+  key: FarmSchemaAddableForeignKey,
+): Promise<number> {
+  const q = (name: string) => quoteSqlIdentifier(dialect, name);
+  const rows = await executor.query(
+    `SELECT COUNT(*) AS orphans FROM ${q(key.table)} child WHERE child.${q(key.column)} IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ${q(key.referencedTable)} parent WHERE parent.${q(key.referencedColumn)} = child.${q(key.column)})`,
+  );
+  const row = rows[0] ?? {};
+  return Number(row.orphans ?? row.ORPHANS ?? Object.values(row)[0] ?? 0);
+}
+
+function formatForeignKeys(
+  owner: string,
+  dialect: FarmSqlDialect,
+  allowed: readonly FarmSchemaAddableForeignKey[],
+  unapproved: readonly FarmSchemaAddableForeignKey[],
+): string {
+  const sections: string[] = [];
+  if (allowed.length > 0) {
+    sections.push(
+      [
+        `-- Foreign keys from ${owner}'s existing tables to other plugins' tables, allowed in farm.config.`,
+        "-- Added only when no row points at nothing.",
+        ...allowed.map((key) => foreignKeyStatement(dialect, key)),
+      ].join("\n"),
+    );
+  }
+  if (unapproved.length > 0) {
+    const approvals = [
+      ...new Set(
+        unapproved.map((key) => describeForeignKeyApproval({ owner, modelKey: key.modelKey })),
+      ),
+    ];
+    sections.push(
+      [
+        `-- Foreign keys from ${owner}'s existing tables to other plugins' tables. Not allowed yet, so not run.`,
+        "-- To allow them, add to farm.config:",
+        ...approvals.map((approval) => `--   ${approval}`),
+        ...unapproved.map((key) => `-- ${foreignKeyStatement(dialect, key)}`),
+      ].join("\n"),
+    );
+  }
+  return sections.length > 0 ? `\n${sections.join("\n\n")}\n` : "";
+}
+
+/** The steps, numbered, as the upgrade summary shows them. */
+function describeStepChanges(stepPlan: FarmSchemaStepPlan | undefined): string[] {
+  const pending = (stepPlan?.steps ?? []).filter((planned) => planned.state !== "record");
+  return pending.map((planned, index) => {
+    const when = planned.phase === "after" ? " (after the changes below)" : "";
+    const blocked = planned.state === "blocked" ? `  ✗ blocked: ${planned.reason}` : "";
+    return `  ${index + 1}. ${planned.summary}${when}${blocked}`;
+  });
+}
+
+/** The snapshot diff, minus what the owner's rename steps already explain. */
+function withoutStepChanges(
+  changes: FarmSchemaChanges | undefined,
+  stepPlan: FarmSchemaStepPlan | undefined,
+): FarmSchemaChanges {
+  const empty = {
+    addedTables: [],
+    addedColumns: [],
+    addedIndexes: [],
+    otherChanges: [],
+    removedColumns: [],
+  };
+  if (!changes) return empty;
+  const renamedTo = new Set<string>();
+  const renamedFrom = new Set<string>();
+  for (const { summary, step } of stepPlan?.steps ?? []) {
+    const match = /^rename (?:table )?(\S+) → (\S+)$/u.exec(summary);
+    if (!match || !("renameColumn" in step || "renameTable" in step)) continue;
+    renamedFrom.add(match[1]!);
+    renamedTo.add(match[2]!);
+  }
+  return {
+    addedTables: changes.addedTables.filter((table) => !renamedTo.has(table)),
+    addedColumns: changes.addedColumns.filter(
+      ({ table, column }) => !renamedTo.has(`${table}.${column}`),
+    ),
+    addedIndexes: changes.addedIndexes,
+    otherChanges: changes.otherChanges.filter(
+      (change) => ![...renamedFrom].some((from) => change === `${from} is removed`),
+    ),
+    removedColumns: (changes.removedColumns ?? []).filter(
+      ({ table, column }) => !renamedFrom.has(`${table}.${column}`),
+    ),
+  };
+}
+
+/**
+ * A column removed and another of the same type added in one table looks
+ * like a rename the plugin forgot to ship a step for.
+ */
+function renameHints(changes: FarmSchemaChanges): string[] {
+  const hints: string[] = [];
+  for (const removed of changes.removedColumns ?? []) {
+    const added = changes.addedColumns.find(
+      ({ table, type }) => table === removed.table && type === removed.type,
+    );
+    if (!added) continue;
+    hints.push(
+      `  ? if ${removed.table}.${removed.column} was renamed to ${added.table}.${added.column}, the plugin needs a migration step, or the data stays in ${removed.column}`,
+    );
+  }
+  return hints;
+}
+
+function formatSteps(
+  stepPlan: FarmSchemaStepPlan | undefined,
+  phase: "before" | "after",
+  reportOnly: boolean,
+): string {
+  const planned = (stepPlan?.steps ?? []).filter(
+    (entry) => entry.phase === phase && entry.state !== "record",
+  );
+  if (planned.length === 0) return "";
+  const heading =
+    phase === "before"
+      ? "-- Migration steps, run before the changes below:"
+      : "-- Migration steps, run after the changes above:";
+  const lines = [heading];
+  for (const entry of planned) {
+    lines.push(`-- ${entry.step.id}: ${entry.summary}`);
+    if (entry.state === "blocked") {
+      lines.push(`--   blocked: ${entry.reason}`);
+      continue;
+    }
+    for (const statement of entry.statements) {
+      lines.push(reportOnly ? `-- ${statement};` : `${statement.replace(/;\s*$/u, "")};`);
+    }
+  }
+  if (reportOnly) {
+    lines.push("-- Your ORM owns these tables: add the steps to its migrations instead.");
+  }
+  return `${lines.join("\n")}\n\n`;
+}
+
+function formatExtensions(
+  owner: string,
+  groups: {
+    approved: readonly FarmSchemaExtensionStatement[];
+    unapproved: readonly FarmSchemaExtensionStatement[];
+    reported: readonly FarmSchemaExtensionStatement[];
+  },
+): string {
+  const sections: string[] = [];
+  if (groups.approved.length > 0) {
+    sections.push(
+      [
+        `-- Columns ${owner} adds to tables it does not own, allowed in farm.config.`,
+        ...groups.approved.map((statement) => statement.sql),
+      ].join("\n"),
+    );
+  }
+  if (groups.unapproved.length > 0) {
+    const approvals = [
+      ...new Set(
+        groups.unapproved.map((statement) => describeSchemaExtensionApproval(statement.extension)),
+      ),
+    ];
+    sections.push(
+      [
+        `-- Columns ${owner} adds to tables it does not own. Not allowed yet, so not run.`,
+        "-- To allow them, add to farm.config:",
+        ...approvals.map((approval) => `--   ${approval}`),
+        ...groups.unapproved.map((statement) => `-- ${statement.sql}`),
+      ].join("\n"),
+    );
+  }
+  if (groups.reported.length > 0) {
+    sections.push(
+      [
+        `-- Columns ${owner} adds to tables your ORM owns. Farm will not alter them:`,
+        "-- add them to your ORM's schema and run its migration.",
+        ...groups.reported.map((statement) => `-- ${statement.sql}`),
+      ].join("\n"),
+    );
+  }
+  return sections.length > 0 ? `\n${sections.join("\n\n")}\n` : "";
+}
+
+function logExtensionProblems(
+  owner: string,
+  plan: FarmSchemaExtensionPlan,
+  log: (message: string) => void,
+) {
+  for (const extension of plan.missingTables) {
+    log(
+      `Cannot add ${extension.fields.map(({ field }) => field.name).join(", ")} to "${extension.table}": the table does not exist. Run the migration that creates it (your ORM's, or a library's such as Better Auth) first.`,
+    );
+  }
+  for (const entry of plan.unsupported) {
+    log(`Cannot add "${entry.extension.table}.${entry.column}" for ${owner}: ${entry.reason}`);
+  }
+  for (const entry of plan.conflicts) {
+    log(
+      `"${entry.extension.table}.${entry.column}" already exists as ${entry.actual}; ${owner} expects ${entry.expected.toLowerCase()}. Farm will not change it.`,
+    );
+  }
 }

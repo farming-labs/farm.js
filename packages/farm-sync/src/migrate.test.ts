@@ -3,6 +3,7 @@ import {
   applySchemaMigration,
   checkSchema,
   collectOwnerModels,
+  collectSchemaExtensions,
   findSchemaTableOwners,
   migrateSchemaTables,
   planSchemaMigration,
@@ -105,6 +106,31 @@ describe("sync forwards the database the app gave it", () => {
     ).rejects.toThrow(/sync\(\): no data source is configured/);
   });
 
+  it("reads the app's own extend as part of its models, never as columns sync adds", async () => {
+    const composed = {
+      ...schema,
+      extend: {
+        // On a model the browser does not see: the app composing its schema.
+        auditLog: { fields: { actor: { type: "string" as const, nullable: true } } },
+        // On an exposed model: part of the table sync creates.
+        tasks: { fields: { priority: { type: "integer" as const, default: 0 } } },
+      },
+    };
+    const extended = sync({
+      schema: composed as never,
+      client: () => null,
+      models: { tasks: "write" },
+      where: false,
+    });
+    const declaration = readSchemaTables(extended)!;
+    expect(
+      collectSchemaExtensions(declaration.name, declaration.schema, declaration.models),
+    ).toEqual([]);
+    const [tasks] = collectOwnerModels(declaration);
+    expect(Object.keys(tasks!.model.fields)).toContain("priority");
+    expect(collectOwnerModels(declaration).map((model) => model.modelKey)).toEqual(["tasks"]);
+  });
+
   it("passes farm schema check once migrated, without asking for the app's tables", async () => {
     const { DatabaseSync } = await import("node:sqlite");
     const database = new DatabaseSync(":memory:");
@@ -173,7 +199,7 @@ describe("migrating a real sync app", () => {
     expect(listed.rows[0].listId).toBe("list-a");
   });
 
-  it("leaves an existing table alone and reports the difference", async () => {
+  it("adds a missing index to an existing table and reports the rest", async () => {
     const { DatabaseSync } = await import("node:sqlite");
     const database = new DatabaseSync(":memory:");
     database.exec(`create table todo_items (id TEXT primary key, title TEXT, list_id TEXT)`);
@@ -185,7 +211,9 @@ describe("migrating a real sync app", () => {
       log: (message) => logs.push(message),
     });
 
-    expect(result.applied).toEqual([]);
+    // A plain index can join a table with rows; a required column without a
+    // default cannot, so it is reported instead.
+    expect(result.applied).toEqual(["todo_items_list_id_idx"]);
     expect(logs.join("\n")).toContain("updated_at");
   });
 

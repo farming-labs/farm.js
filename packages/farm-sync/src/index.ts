@@ -109,15 +109,7 @@ export function sync(options: SyncPluginOptions) {
     // `farm sync migrate` creates the tables of the models the app exposed.
     // The rest of the app's schema is described, not created: those tables
     // are the app's.
-    schema: {
-      ...options.schema,
-      models: Object.fromEntries(
-        Object.entries(options.schema.models).map(([key, model]) => [
-          key,
-          { ...model, external: !models.has(key) },
-        ]),
-      ),
-    },
+    schema: syncOwnedSchema(options.schema, models),
     // The database the app gave sync, not storage.client.
     database: {
       client: () => resolveSyncConnection(options),
@@ -325,6 +317,37 @@ async function runMiddleware(
     if (produced) context = { ...context, ...produced };
   }
   return context;
+}
+
+/**
+ * The app's schema as sync owns it: exposed models are sync's tables, the rest
+ * are described but never created. `extend` is folded into the models first,
+ * so the app composing its own schema is never read as sync asking to add
+ * columns to the app's tables.
+ */
+function syncOwnedSchema(schema: FarmSchema, exposed: ReadonlyMap<string, unknown>): FarmSchema {
+  const models: FarmSchema["models"] = { ...schema.models };
+  for (const [key, extension] of Object.entries(schema.extend ?? {})) {
+    const existing = models[key];
+    models[key] = {
+      ...(existing ?? { fields: {} }),
+      ...(extension.name ? { name: extension.name } : {}),
+      ...(extension.description ? { description: extension.description } : {}),
+      fields: { ...existing?.fields, ...extension.fields },
+      constraints: [...(existing?.constraints ?? []), ...(extension.constraints ?? [])],
+      meta: { ...existing?.meta, ...extension.meta },
+    };
+  }
+  return {
+    ...schema,
+    extend: undefined,
+    models: Object.fromEntries(
+      Object.entries(models).map(([key, model]) => [
+        key,
+        { ...model, external: !exposed.has(key) },
+      ]),
+    ),
+  };
 }
 
 /** The connection or storage mount the app gave sync. */

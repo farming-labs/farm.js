@@ -1,5 +1,6 @@
 import type { FarmSchema } from "./schema";
 import type { FarmSqlDialect } from "./schema-sql";
+import type { FarmSchemaMigrationStep } from "./schema-step-types";
 
 // How Farm records which tables a plugin or integration owns. Internal: plugins
 // set `schema` on definePlugin. Kept apart from schema-tables.ts, which pulls
@@ -36,6 +37,12 @@ export interface FarmSchemaTablesDeclaration {
   resolveClient(config: FarmSchemaOwnerConfig): Promise<unknown>;
   /** Set explicitly when the client's dialect cannot be detected. */
   dialect?: FarmSqlDialect;
+  /** Owners whose tables must exist first, by owner name. */
+  dependsOn?: readonly string[];
+  /** The owner's release, shown when an upgrade changes its tables. */
+  version?: string;
+  /** Ordered steps for changes Farm does not infer, such as renames. */
+  migrations?: readonly FarmSchemaMigrationStep[];
 }
 
 /**

@@ -24,6 +24,15 @@ export type CollectedSchemaModel = {
    * shown in comments: Farm never creates a foreign key to them.
    */
   referenceTargets?: Record<string, { table: string; column: string }>;
+  /**
+   * References to tables other owners create that may carry a real foreign
+   * key, keyed by field. Set by migrate after checking the database; only a
+   * table created now gets one inline.
+   */
+  foreignKeys?: Record<
+    string,
+    { table: string; column: string; onDelete: NonNullable<FarmSchemaReference["onDelete"]> }
+  >;
 };
 
 /** `table.column` a field's reference points at, using real names when known. */
@@ -103,7 +112,7 @@ export function collectSchemaModels(
 }
 
 export type FarmSqlStatement = {
-  kind: "table" | "index";
+  kind: "table" | "index" | "column";
   /** The object this statement creates, for drift reporting. */
   target: string;
   sql: string;
@@ -199,7 +208,12 @@ function renderSqlTable(
       parts.push(`DEFAULT ${defaultValue}`);
     }
 
-    const reference = internalReferences.get(fieldKey);
+    const crossOwner = model.foreignKeys?.[fieldKey];
+    const reference =
+      internalReferences.get(fieldKey) ??
+      (crossOwner
+        ? `REFERENCES ${quoteSqlIdentifier(dialect, crossOwner.table)} (${quoteSqlIdentifier(dialect, crossOwner.column)})${crossOwner.onDelete !== "noAction" ? ` ON DELETE ${SQL_ON_DELETE_ACTIONS[crossOwner.onDelete]}` : ""}`
+        : undefined);
     if (reference) {
       parts.push(reference);
     } else if (field.reference) {

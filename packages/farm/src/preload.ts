@@ -323,6 +323,12 @@ interface HtmlLinkElement {
 }
 
 function findHtmlLinkElements(html: string): HtmlLinkElement[] {
+  // getHtmlPreloadKind needs a literal `preload` relation token. Without one,
+  // skip document normalization and tag scanning (including modulepreload-only
+  // pages). Possible matches still use the full parser below, even in inert text.
+  // Other runtime input types retain the existing path and its errors.
+  if (typeof html === "string" && !/\bpreload\b/i.test(html)) return [];
+
   const elements: HtmlLinkElement[] = [];
   const lowerHtml = html.toLowerCase();
   let cursor = 0;

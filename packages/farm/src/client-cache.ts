@@ -173,7 +173,11 @@ export class FarmClientDataCache {
     const deleted = this.entries.delete(resolved);
     this.inflight.delete(resolved);
     if (deleted) this.persistence?.onDelete(resolved);
-    if (this.pendingMetadataSweeps.has(resolved)) this.sweepPendingEntryMetadata();
+    // Match expiry cleanup, retaining aliases/marks only while a live owner
+    // needs them. A no-op delete must preserve invalidation before first set.
+    if (deleted || this.pendingMetadataSweeps.has(resolved)) {
+      this.sweepEntryMetadata(new Set([resolved]));
+    }
     this.emit(resolved);
     return deleted;
   }
@@ -291,11 +295,17 @@ export class FarmClientDataCache {
     }
     const previousTarget = this.aliases.get(alias);
     if (previousTarget !== resolved) {
+      const previousResolved =
+        previousTarget !== undefined && this.pendingMetadataSweeps.size > 0
+          ? this.resolveKey(alias)
+          : undefined;
       this.removeAlias(alias);
       this.aliases.set(alias, resolved);
       let aliases = this.aliasesByTarget.get(resolved);
       if (!aliases) this.aliasesByTarget.set(resolved, (aliases = new Set()));
       aliases.add(alias);
+      // Retargeting can release the last owner of a previously expired target.
+      if (previousResolved !== undefined) this.sweepPendingEntryMetadata(previousResolved);
     }
     this.emit(alias);
     this.emit(resolved, this.invalidatedAt.has(resolved) ? "invalidate" : undefined);
@@ -316,7 +326,7 @@ export class FarmClientDataCache {
       // must not evict a newer subscriber's live listener set.
       if (listeners!.size === 0 && this.listeners.get(key) === listeners) {
         this.listeners.delete(key);
-        this.sweepPendingEntryMetadata();
+        this.sweepPendingEntryMetadata(key);
       }
     };
   }
@@ -331,7 +341,7 @@ export class FarmClientDataCache {
 
   deleteInflight(key: string): void {
     const resolved = this.resolveKey(key);
-    if (this.inflight.delete(resolved)) this.sweepPendingEntryMetadata();
+    if (this.inflight.delete(resolved)) this.sweepPendingEntryMetadata(resolved);
   }
 
   private scheduleGcSweep(): void {
@@ -376,8 +386,9 @@ export class FarmClientDataCache {
    */
   private sweepEntryMetadata(swept: Set<string>): void {
     const protectedKeys = new Set<string>();
-    for (const key of this.listeners.keys()) protectedKeys.add(this.resolveKey(key));
-    for (const key of this.inflight.keys()) protectedKeys.add(this.resolveKey(key));
+    // A lazy read usually evicts one key. Do not rescan every unrelated live
+    // subscription/request for each expired entry; follow its reverse aliases.
+    for (const key of swept) if (this.hasMetadataOwner(key)) protectedKeys.add(key);
 
     for (const key of swept) {
       if (this.entries.has(key)) {
@@ -427,8 +438,16 @@ export class FarmClientDataCache {
     if (aliases?.size === 0) this.aliasesByTarget.delete(target);
   }
 
-  private sweepPendingEntryMetadata(): void {
+  private sweepPendingEntryMetadata(key?: string): void {
     if (this.pendingMetadataSweeps.size === 0) return;
+    // Owner releases affect one canonical key, not every pending eviction.
+    if (key !== undefined) {
+      const resolved = this.resolveKey(key);
+      if (this.pendingMetadataSweeps.has(resolved)) {
+        this.sweepEntryMetadata(new Set([resolved]));
+      }
+      return;
+    }
     this.sweepEntryMetadata(new Set(this.pendingMetadataSweeps));
   }
 

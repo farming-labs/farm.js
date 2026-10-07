@@ -2,6 +2,19 @@ name: CI
 
 on:
   workflow_dispatch:
+    inputs:
+      preload-response-benchmark:
+        description: Collect buffered-response diagnostic samples on an isolated runner
+        type: boolean
+        default: false
+      layout-order-benchmark:
+        description: Collect production layout-order diagnostic samples on an isolated runner
+        type: boolean
+        default: false
+      page-route-inputs-benchmark:
+        description: Collect production page-route input diagnostic samples on an isolated runner
+        type: boolean
+        default: false
   push:
     branches: [main]
   pull_request:
@@ -12,6 +25,123 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  preload-response-benchmark:
+    name: Preload Response Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.preload-response-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build local framework packages
+        run: |
+          pnpm --filter @farm.js/core build
+          pnpm --filter @farm.js/cli build
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+      - name: Install and build the maintained fixture
+        run: |
+          pnpm --dir benchmarks/frameworks --filter farm-framework-benchmark install --frozen-lockfile
+          pnpm --dir benchmarks/frameworks/apps/farm exec farm build --preset node-server
+      - name: Collect two independent alternating comparisons
+        run: |
+          node benchmarks/frameworks/preload-response.mjs > "${{ runner.temp }}/preload-response-first.json"
+          node benchmarks/frameworks/preload-response.mjs > "${{ runner.temp }}/preload-response-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: preload-response-${{ github.sha }}
+          path: ${{ runner.temp }}/preload-response-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  layout-order-benchmark:
+    name: Layout Order Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.layout-order-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build current router and verify layout selection
+        run: |
+          pnpm --filter @farm.js/core build:runtime
+          pnpm --filter @farm.js/core exec vitest run src/__tests__/production-layout-order.test.ts
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+      - name: Collect two independent alternating comparisons
+        run: |
+          node benchmarks/layout-order/run.mjs > "${{ runner.temp }}/layout-order-first.json"
+          node benchmarks/layout-order/run.mjs > "${{ runner.temp }}/layout-order-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: layout-order-${{ github.sha }}
+          path: ${{ runner.temp }}/layout-order-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  page-route-inputs-benchmark:
+    name: Page Route Inputs Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.page-route-inputs-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - name: Verify generated route matching
+        run: pnpm --filter @farm.js/core exec vitest run src/__tests__/production-page-route-inputs.test.ts src/__tests__/universal-build-router-runtime.test.ts src/__tests__/route-matcher-parity.test.ts src/__tests__/guard-pathname-canonicalization.test.ts
+      - name: Collect two independent alternating comparisons
+        run: |
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-first.json"
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-second.json"
+      - name: Isolate catch-all measurements from preceding scenarios
+        env:
+          FARM_PAGE_ROUTE_SCENARIO: catchAll
+        run: |
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-catchall-short-first.json"
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-catchall-short-second.json"
+      - name: Measure warmed catch-all matching separately
+        env:
+          FARM_PAGE_ROUTE_SCENARIO: catchAll
+          FARM_PAGE_ROUTE_WARMUPS: "100000"
+          FARM_PAGE_ROUTE_ITERATIONS: "1000000"
+        run: |
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-catchall-long-first.json"
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-catchall-long-second.json"
+      - name: Measure warmed unchanged-path controls separately
+        env:
+          FARM_PAGE_ROUTE_WARMUPS: "100000"
+          FARM_PAGE_ROUTE_ITERATIONS: "1000000"
+        run: |
+          for scenario in staticHit genericControl; do
+            for repetition in first second; do
+              FARM_PAGE_ROUTE_SCENARIO="$scenario" node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-$scenario-long-$repetition.json"
+            done
+          done
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: page-route-inputs-${{ github.sha }}
+          path: ${{ runner.temp }}/page-route-inputs-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
   test:
     name: Test (${{ matrix.os }}, Node ${{ matrix.node-version }})
     runs-on: ${{ matrix.os }}
@@ -123,7 +253,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run Postgres storage and schema tests
-        run: pnpm --dir packages/farm exec vitest run src/__tests__/storage.test.ts src/__tests__/schema-migrate.test.ts src/__tests__/schema-check.test.ts src/__tests__/plugin-schema.test.ts
+        run: pnpm --dir packages/farm exec vitest run src/__tests__/storage.test.ts src/__tests__/schema-migrate.test.ts src/__tests__/schema-check.test.ts src/__tests__/plugin-schema.test.ts src/__tests__/schema-extend.test.ts src/__tests__/schema-foreign-keys.test.ts src/__tests__/schema-upgrades.test.ts src/__tests__/schema-steps.test.ts
         env:
           FARM_REQUIRE_TEST_POSTGRES: "1"
           FARM_TEST_POSTGRES_URL: postgresql://farm:farm@127.0.0.1:5432/farm_test
@@ -156,6 +286,24 @@ jobs:
         run: pnpm test:deploy-runtimes
         env:
           NODE_OPTIONS: --max-old-space-size=8192
+
+  benchmark-harness:
+    name: Benchmark Harness (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v6
+      - name: Install harness-only dependencies
+        run: pnpm --dir benchmarks/frameworks --filter farmjs-framework-benchmarks install --frozen-lockfile --ignore-scripts
+      - name: Verify benchmark correctness and reporting guards
+        run: node benchmarks/frameworks/run.mjs --self-check
 
   lint:
     name: Lint

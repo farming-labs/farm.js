@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.1-beta.4",
+  "version": "0.1.1",
   "description": "Core Farm.js framework for modern integrated apps",
   "keywords": [
     "@farm.js/core",
@@ -138,6 +138,9 @@
       "agent-runtime": [
         "./dist/agent-runtime.d.ts"
       ],
+      "json-ld": [
+        "./dist/json-ld.d.ts"
+      ],
       "css": [
         "./types/css.d.ts"
       ],
@@ -150,6 +153,9 @@
       ],
       "image/sharp": [
         "./dist/image/sharp.d.ts"
+      ],
+      "og": [
+        "./dist/og.d.ts"
       ],
       "i18n": [
         "./dist/i18n/index.d.ts"
@@ -536,6 +542,11 @@
       "import": "./dist/agent-runtime.mjs",
       "require": "./dist/agent-runtime.cjs"
     },
+    "./json-ld": {
+      "types": "./dist/json-ld.d.ts",
+      "import": "./dist/json-ld.mjs",
+      "require": "./dist/json-ld.cjs"
+    },
     "./css": {
       "types": "./types/css.d.ts"
     },
@@ -553,6 +564,11 @@
       "types": "./dist/image/sharp.d.ts",
       "import": "./dist/image/sharp.mjs",
       "require": "./dist/image/sharp.cjs"
+    },
+    "./og": {
+      "types": "./dist/og.d.ts",
+      "import": "./dist/og.mjs",
+      "require": "./dist/og.cjs"
     },
     "./i18n": {
       "types": "./dist/i18n/index.d.ts",

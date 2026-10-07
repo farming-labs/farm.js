@@ -21,9 +21,9 @@ cancelled navigation, transport/HTTP/JSON failures, deferred streams, cache clea
 On macOS arm64, Node 24.21.0, pnpm 8.12.1:
 
 | Work per overlapping JSON prefetch/navigation | Before (`f920c090`) | After |
-| --- | ---: | ---: |
-| Page-data network requests | 2 | 1 |
-| Destination renders | 1 | 1 |
+| --------------------------------------------- | ------------------: | ----: |
+| Page-data network requests                    |                   2 |     1 |
+| Destination renders                           |                   1 |     1 |
 
 The request-count regression fails on the baseline with `expected 1, received 2`. The Chrome
 development browser test passes with the fix. The reduction applies only when compatible work
@@ -34,10 +34,10 @@ overlaps; it is not a claim that all navigation is twice as fast.
 Bundling `packages/farm/src/client/spa-router.ts` with esbuild 0.28.0, browser platform, ESM,
 bundling and minification enabled, without externalizing dependencies:
 
-| Standalone module bundle | Before | After |
-| --- | ---: | ---: |
-| Minified bytes | 61,304 | 63,193 |
-| gzip bytes | 18,797 | 19,535 |
+| Standalone module bundle | Before |  After |
+| ------------------------ | -----: | -----: |
+| Minified bytes           | 61,304 | 63,193 |
+| gzip bytes               | 18,797 | 19,535 |
 
 The standalone measurement includes transitive dependencies and is not a full app transfer-size
 measurement. The added cancellation helper may already be shared with other client code in an app.

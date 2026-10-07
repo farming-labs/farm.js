@@ -8,9 +8,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { chromium } from "@playwright/test";
+import { imageSize } from "image-size";
 import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
-import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
+import {
+  loadFarmProductionVite,
+  supportsRolldownVite,
+  type FarmProductionViteRuntime,
+} from "../build/production-vite";
 import { resolveConfig } from "../config";
 import { defineIntegration } from "../integrations";
 import { definePlugin } from "../plugin";
@@ -379,6 +384,325 @@ async function expectNitroFallback(root: string): Promise<void> {
 }
 
 describe("production prebuilt SSR output", () => {
+  it("preserves root-to-leaf layout order in a built nested dynamic route", async () => {
+    const root = await createProductionFixture();
+    try {
+      for (const [relative, name] of [
+        ["", "root"],
+        ["reports", "reports"],
+        ["reports/[id]", "item"],
+        ["docs/[[...slug]]", "docs"],
+      ]) {
+        const directory = path.join(root, "src", "app", relative);
+        await fs.mkdir(directory, { recursive: true });
+        await fs.writeFile(
+          path.join(directory, "layout.tsx"),
+          `export default function Layout({ children }) { return <section data-layout-order="${name}">{children}</section>; }`,
+        );
+      }
+      const leaf = path.join(root, "src", "app", "reports", "[id]", "activity");
+      await fs.mkdir(leaf, { recursive: true });
+      await fs.writeFile(
+        path.join(leaf, "page.tsx"),
+        `export default function Page({ params }) { return <main data-layout-order="page">{params.id}</main>; }`,
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "docs", "[[...slug]]", "page.tsx"),
+        `export default function Page({ params }) { return <main data-layout-order="page">{params.slug}</main>; }`,
+      );
+      const config = await resolveConfig(
+        { root, srcDir: "src", images: { provider: "none" }, telemetry: false },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      await runProductionRequest(serverDir, async (initial) => {
+        await initial.arrayBuffer();
+        // Several requests to the same live server exercise reuse without leaking
+        // the previous request's URL, params or selected layout array.
+        for (const [pathname, order, text] of [
+          ["/reports/one/activity", ["root", "reports", "item", "page"], "one"],
+          ["/docs", ["root", "docs", "page"], ""],
+          [
+            "/reports/two%20items/activity?source=docs",
+            ["root", "reports", "item", "page"],
+            "two items",
+          ],
+          ["/docs/a%2Fb/guide", ["root", "docs", "page"], "a/b/guide"],
+          ["/reports/a%252Fb/activity", ["root", "reports", "item", "page"], "a%2Fb"],
+          ["/", ["root"], undefined],
+        ] as const) {
+          const response = await fetch(new URL(pathname, initial.url));
+          expect(response.status, pathname).toBe(200);
+          const html = await response.text();
+          expect(
+            [...html.matchAll(/data-layout-order="([^"]+)"/g)].map((match) => match[1]),
+          ).toEqual(order);
+          if (text !== undefined) expect(html).toContain(`>${text}</main>`);
+        }
+        // The Node adapter rejects malformed escapes before layout selection.
+        const malformed = await fetch(new URL("/docs/%ZZ", initial.url));
+        expect(malformed.status).toBe(400);
+        await malformed.arrayBuffer();
+        const missing = await fetch(new URL("/unknown/route", initial.url));
+        expect(missing.status).toBe(404);
+        await missing.arrayBuffer();
+      });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it.each([false, true])(
+    "enforces final preload budgets after HTML transforms (plugin: %s)",
+    async (withPlugin) => {
+      const root = await createProductionFixture();
+      const plugin = definePlugin({
+        name: "production-preload-transform",
+        transformHTML(html) {
+          return html.replace(
+            "</head>",
+            '<link rel="preload" as="image" href="/plugin.webp" fetchpriority="high"></head>',
+          );
+        },
+      });
+      try {
+        if (withPlugin)
+          await fs.writeFile(
+            path.join(root, "farm.config.mjs"),
+            `export default { plugins: [{ name: "production-preload-transform", ${plugin.transformHTML!.toString()} }] };`,
+          );
+        const config = await resolveConfig(
+          {
+            root,
+            srcDir: "src",
+            images: { provider: "none" },
+            telemetry: false,
+            plugins: withPlugin ? [plugin] : [],
+            headers: () => [
+              {
+                source: "/",
+                headers: [
+                  {
+                    key: "Link",
+                    value:
+                      "</first.webp>; rel=preload; as=image, </second.webp>; rel=preload; as=image",
+                  },
+                  { key: "Set-Cookie", value: "a=1; Path=/" },
+                  { key: "Set-Cookie", value: "b=2; Path=/" },
+                ],
+              },
+            ],
+            generateBuildId: () => "preload-buffered-response-test",
+          },
+          "production",
+        );
+        await build(config, { root, preset: "node-server" });
+        await runProductionRequest(
+          path.join(root, ".farm", ".output", "server"),
+          async (response) => {
+            expect(response.status).toBe(200);
+            expect(response.headers.has("x-farm-preload-buffered")).toBe(false);
+            expect(response.headers.has("x-farm-preload-streaming")).toBe(false);
+            expect(response.headers.getSetCookie()).toEqual(["a=1; Path=/", "b=2; Path=/"]);
+            const html = await response.text();
+            expect(html).toContain("prebuilt SSR output");
+            if (withPlugin) {
+              expect(html).toContain('href="/plugin.webp"');
+              expect(response.headers.get("link") || "").not.toContain(".webp");
+            } else {
+              expect(response.headers.get("link")).toContain("/first.webp");
+              expect(response.headers.get("link")).not.toContain("/second.webp");
+            }
+          },
+        );
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+
+  it.each([true, false])(
+    "keeps the MDX compiler out of TSX-only output (Markdown mirrors: %s)",
+    async (markdownMirrors) => {
+      const root = await createProductionFixture();
+      const emittedModules = new Set<string>();
+
+      try {
+        const config = await resolveConfig(
+          {
+            root,
+            srcDir: "src",
+            md: markdownMirrors,
+            images: { provider: "none" },
+            telemetry: false,
+            generateBuildId: () => "markdown-response-boundary-test",
+            vite: {
+              plugins: [
+                {
+                  name: "record-emitted-markdown-dependencies",
+                  generateBundle(_options, bundle) {
+                    for (const output of Object.values(bundle)) {
+                      if (output.type !== "chunk") continue;
+                      for (const id of Object.keys(output.modules)) {
+                        emittedModules.add(id.replace(/\\/g, "/"));
+                      }
+                    }
+                  },
+                },
+              ],
+            },
+          },
+          "production",
+        );
+
+        await build(config, { root, preset: "node-server" });
+        const serverDir = path.join(root, ".farm", ".output", "server");
+        await fs.access(path.join(serverDir, "farm-ssr"));
+        expect([...emittedModules].some((id) => id.includes("virtual:farm-ssr-entry"))).toBe(true);
+        // Inspect module provenance in every emitted chunk, including dynamic chunks.
+        // A renamed output file must not conceal an accidentally bundled compiler.
+        expect(
+          [...emittedModules].filter((id) =>
+            /\/(?:@mdx-js\/|remark-[^/]+\/|micromark(?:-[^/]+)?\/)/.test(id),
+          ),
+        ).toEqual([]);
+
+        await runProductionRequest(serverDir, async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          expect(html).toContain("prebuilt SSR output");
+          // The head advertises the mirror exactly when the Link header does.
+          const markdownLink = '<link rel="alternate" href="/index.md" type="text/markdown">';
+          if (markdownMirrors) {
+            expect(response.headers.get("link")).toContain(
+              '</index.md>; rel="alternate"; type="text/markdown"',
+            );
+            expect(html).toContain(markdownLink);
+          } else {
+            expect(response.headers.get("link") ?? "").not.toContain("text/markdown");
+            expect(html).not.toContain('type="text/markdown"');
+          }
+
+          for (const [pathname, accept] of [
+            ["/missing.md", "text/html"],
+            ["/missing", "text/markdown"],
+          ]) {
+            const missing = await fetch(new URL(pathname, response.url), {
+              headers: { accept },
+            });
+            expect(missing.status).toBe(404);
+            expect(missing.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+            const body = await missing.text();
+            expect(body).toContain("# Page not found");
+            expect(body).toContain(pathname);
+            expect(body).toContain("](/)");
+
+            const head = await fetch(new URL(pathname, response.url), {
+              method: "HEAD",
+              headers: { accept },
+            });
+            expect(head.status).toBe(404);
+            expect(head.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+            expect(await head.text()).toBe("");
+          }
+
+          const html404 = await fetch(new URL("/missing", response.url), {
+            headers: { accept: "text/html, text/markdown;q=0" },
+          });
+          expect(html404.status).toBe(404);
+          expect(html404.headers.get("content-type")).toContain("text/html");
+          expect(await html404.text()).toContain("404");
+
+          if (markdownMirrors) {
+            const mirror = await fetch(response.url, { headers: { accept: "text/markdown" } });
+            expect(mirror.status).toBe(200);
+            expect(mirror.headers.get("content-type")).toContain("text/markdown");
+            expect(await mirror.text()).toContain("prebuilt SSR output");
+          }
+        });
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+
+  it("renders layout and page JSON-LD next to the site-level script", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        `
+export const metadata = {
+  openGraph: { siteName: "Farm Shop" },
+  jsonLd: { "@context": "https://schema.org", "@type": "WebSite", name: "Farm Shop" },
+};
+
+export default function RootLayout({ children }) {
+  return <html><body>{children}</body></html>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+export const metadata = {
+  jsonLd: [
+    { "@context": "https://schema.org", "@type": "Article", headline: "</script><script>alert(1)</script>" },
+  ],
+};
+
+export default function Page() {
+  return <main>json-ld page</main>;
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          agent: { jsonLd: true },
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "json-ld-production-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          const head = html.slice(0, html.indexOf("</head>"));
+          const scripts = [
+            ...head.matchAll(/<script type="application\/ld\+json"([^>]*)>(.*?)<\/script>/g),
+          ];
+
+          // Site identity first and unmarked, then layout and page entries, marked.
+          expect(scripts.map(([, attributes]) => attributes.trim())).toEqual([
+            "",
+            "data-farm-metadata",
+            "data-farm-metadata",
+          ]);
+          expect(scripts.map(([, , json]) => JSON.parse(json!)["@type"])).toEqual([
+            "Organization",
+            "WebSite",
+            "Article",
+          ]);
+          expect(JSON.parse(scripts[2]![2]!).headline).toBe("</script><script>alert(1)</script>");
+          expect(head).not.toContain("<script>alert(1)");
+        },
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("adds a fresh CSP nonce to production HTML and every script tag", async () => {
     const root = await createProductionFixture();
 
@@ -559,6 +883,11 @@ export function CopyButton({ text }) {
         path.join(root, "src", "app", "notes", "page.md"),
         `# Notes\n\nSome server-rendered text.\n\n<CopyButton text="copy me" />\n`,
       );
+      await fs.mkdir(path.join(root, "src", "app", "notes-mdx"), { recursive: true });
+      await fs.copyFile(
+        path.join(root, "src", "app", "notes", "page.md"),
+        path.join(root, "src", "app", "notes-mdx", "page.mdx"),
+      );
       const config = await resolveConfig(
         {
           root,
@@ -585,6 +914,23 @@ export function CopyButton({ text }) {
           expect(html).toContain("Some server-rendered text.");
           expect(html).toContain('data-farm-layout-client="true"');
           expect(html).toMatch(/<farm-client-boundary[^>]*copy-button/);
+          expect(html).toContain("<title>Notes</title>");
+
+          const mdx = await fetch(new URL("/notes-mdx", response.url));
+          expect(mdx.status).toBe(200);
+          const mdxHtml = await mdx.text();
+          expect(mdxHtml).toContain("Some server-rendered text.");
+          expect(mdxHtml).toMatch(/<farm-client-boundary[^>]*copy-button/);
+          expect(mdxHtml).toContain("<title>Notes</title>");
+
+          for (const pathname of ["/notes.md", "/notes-mdx.md"]) {
+            const raw = await fetch(new URL(pathname, response.url));
+            expect(raw.status).toBe(200);
+            expect(raw.headers.get("content-type")).toContain("text/markdown");
+            expect(await raw.text()).toBe(
+              `# Notes\n\nSome server-rendered text.\n\n<CopyButton text="copy me" />\n`,
+            );
+          }
         },
         "/notes",
       );
@@ -3794,6 +4140,50 @@ export default function OpenGraphImage() {
     }
   }, 120_000);
 
+  it("rejects @farm.js/core/og in a client component at build time", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "share-button.tsx"),
+        `
+"use client";
+
+import { ImageResponse } from "@farm.js/core/og";
+
+export default function ShareButton() {
+  return <button onClick={() => new ImageResponse(<div />)}>share</button>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+import ShareButton from "./share-button";
+
+export default function Page() {
+  return <main><ShareButton /></main>;
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "og-image-response-client-test",
+        },
+        "production",
+      );
+
+      await expect(build(config, { root, preset: "node-server" })).rejects.toThrow(
+        "@farm.js/core/og is server-only and cannot be imported into client code",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("serves a React.lazy opengraph-image as a PNG from a built universal node-server", async () => {
     const root = await createProductionFixture();
 
@@ -3855,6 +4245,146 @@ export default function OpenGraphImage() {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 180_000);
+
+  it("serves a @vercel/og ImageResponse from an API route on a built node-server", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      // No metadata image route: the API route alone must pull in the image runtime.
+      await fs.mkdir(path.join(root, "src", "app", "api", "card"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "api", "card", "route.tsx"),
+        `
+import { ImageResponse } from "@vercel/og";
+
+export function GET(request) {
+  const title = new URL(request.url).searchParams.get("title") ?? "Farm.js";
+  return new ImageResponse(
+    <div style={{ display: "flex", width: "100%", height: "100%", alignItems: "center", justifyContent: "center", background: "#09090b", color: "white", fontSize: 48 }}>
+      {title}
+    </div>,
+    { width: 600, height: 315, headers: { "cache-control": "public, max-age=60" } },
+  );
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "vercel-og-api-route-node-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(response.headers.get("content-type")).toBe("image/png");
+          expect(response.headers.get("cache-control")).toBe("public, max-age=60");
+          const bytes = Buffer.from(await response.arrayBuffer());
+          expect(imageSize(bytes)).toMatchObject({ width: 600, height: 315, type: "png" });
+        },
+        "/api/card?title=Shared",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("serves an @farm.js/core/og ImageResponse from an API route on a built node-server", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      // The import reaches @vercel/og through core's bundled og entry, not the app.
+      await fs.mkdir(path.join(root, "src", "app", "api", "card"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "api", "card", "route.tsx"),
+        `
+import { ImageResponse } from "@farm.js/core/og";
+
+export function GET() {
+  return new ImageResponse(<div style={{ display: "flex" }}>core og route</div>, {
+    width: 600,
+    height: 315,
+  });
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "core-og-api-route-node-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(response.headers.get("content-type")).toBe("image/png");
+          const bytes = Buffer.from(await response.arrayBuffer());
+          expect(imageSize(bytes)).toMatchObject({ width: 600, height: 315, type: "png" });
+        },
+        "/api/card",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("keeps a @vercel/og API route import bundled in Cloudflare worker output", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      // Node presets keep @vercel/og external; a Worker has no node_modules to load it from.
+      await fs.mkdir(path.join(root, "src", "app", "api", "card"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "api", "card", "route.tsx"),
+        `
+import { ImageResponse } from "@vercel/og";
+
+export function GET() {
+  return new ImageResponse(<div style={{ display: "flex" }}>Cloudflare og route</div>, {
+    width: 600,
+    height: 315,
+  });
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "vercel-og-api-route-cloudflare-test",
+          deploy: { target: "cloudflare", preset: "cloudflare-module" },
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "cloudflare-module" });
+
+      const serverOutput = await readJavaScriptOutput(
+        path.join(root, config.deploy.outputDir, "server"),
+      );
+      expect(serverOutput).toContain("Cloudflare og route");
+      expect(serverOutput).not.toContain(".wasm?module");
+      expect(serverOutput).not.toMatch(/\bfrom\s*["']@vercel\/og["']/);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("answers redirect() and notFound() from pages, streams and middleware", async () => {
     const root = await createProductionFixture();
     const write = async (relativePath: string, source: string) => {
@@ -4020,4 +4550,83 @@ export default function OpenGraphImage() {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 180_000);
+  // Programmatic routes load through a virtual id that ends in the route path
+  // (`routes.tsx?farm-route=api:%2Ffeed.xml`). A path ending in a file extension
+  // used to make the production transform read the id as an .xml or .json file.
+  it.each(["rolldown", "rollup"] as const)(
+    "builds programmatic routes whose path ends in a file extension with %s",
+    async (builder) => {
+      if (builder === "rolldown" && !supportsRolldownVite()) return;
+      const root = await createProductionFixture();
+
+      try {
+        await fs.writeFile(
+          path.join(root, "src", "routes.tsx"),
+          `
+import { defineRoutes } from "@farm.js/core";
+
+function Guide() {
+  return <main data-dotted-page="true">guide v2</main>;
+}
+
+export default defineRoutes(({ api, page }) => [
+  api("/feed.xml", {
+    GET: () =>
+      new Response("<rss><channel><title>feed</title></channel></rss>", {
+        headers: { "content-type": "application/rss+xml" },
+      }),
+  }),
+  api("/data.json", { GET: () => Response.json({ ok: true }) }),
+  page("/guide.v2", { component: Guide }),
+]);
+`.trim(),
+        );
+
+        const config = await resolveConfig(
+          {
+            root,
+            srcDir: "src",
+            images: { provider: "none" },
+            generateBuildId: () => `dotted-programmatic-routes-${builder}`,
+          },
+          "production",
+        );
+        await build(config, {
+          root,
+          preset: "node-server",
+          productionVite: await loadFarmProductionVite(builder),
+        });
+
+        const serverDir = path.join(root, ".farm", ".output", "server");
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            expect(response.headers.get("content-type")).toContain("application/rss+xml");
+            await expect(response.text()).resolves.toContain("<title>feed</title>");
+          },
+          "/feed.xml",
+        );
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            await expect(response.json()).resolves.toEqual({ ok: true });
+          },
+          "/data.json",
+        );
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            await expect(response.text()).resolves.toContain('data-dotted-page="true"');
+          },
+          "/guide.v2",
+        );
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+    180_000,
+  );
 });

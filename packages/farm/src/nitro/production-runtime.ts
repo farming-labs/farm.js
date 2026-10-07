@@ -1,5 +1,6 @@
 export { _runWithAfterRequest } from "../after";
 export { farmSecretsMatch } from "../secret-compare";
+export { createFarmLayoutSelector } from "../routing/layout-selector";
 export { mergeRouteRenderingDirectiveConfig } from "../route-rendering";
 export type { FarmServerConfig } from "../server-http";
 export {
@@ -12,11 +13,17 @@ export {
   resolveFarmServerConfig,
 } from "../server-http";
 export { createFarmProductionLifecycle } from "../production-lifecycle";
+export { resolveFarmPreviewDeployment } from "../deployment-environment";
+export { applyFarmPreviewRobotsTag } from "../preview-noindex";
 export {
   createLateNotFoundRecovery,
   createLateRedirectRecovery,
 } from "../navigation/late-navigation-recovery";
-export { _runWithCurrentRequest, getCurrentRequest } from "../server/request";
+export {
+  _runWithCurrentRequest,
+  getCurrentRequest,
+  resolveFarmWebRequestOrigin,
+} from "../server/request";
 export { _runWithAPIRequestRuntime } from "../api/server-context";
 export {
   configureFarmCache,
@@ -33,8 +40,15 @@ export {
   localizeFarmPathname,
   stripFarmLocaleFromPathname,
 } from "../i18n/routing";
-export { addMetadataImageReference, mergeMetadata, renderMetadataHead } from "../metadata";
+export { renderFarmLocaleAlternateLinks } from "../i18n/alternates";
+export {
+  addMetadataImageReference,
+  addMetadataMarkdownAlternate,
+  mergeMetadata,
+  renderMetadataHead,
+} from "../metadata";
 export { createFarmMetadataRouteResponse } from "../metadata-route";
+export { createFarmAgentRobots } from "../agent-crawlers";
 export {
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,

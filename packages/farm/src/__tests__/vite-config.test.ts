@@ -7,7 +7,7 @@ import { createServer } from "vite";
 import { describe, expect, it, vi } from "vitest";
 import { FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE } from "../server/vite-config";
 import { logger } from "../utils";
-import { defineConfig, farmPlugin } from "../vite";
+import { defineConfig, farmPlugin, farmServerOnlyEntriesPlugin } from "../vite";
 
 describe("Farm Vite dependency optimization", () => {
   it("pre-bundles framework and route UI entries with React", async () => {
@@ -29,6 +29,38 @@ describe("Farm Vite dependency optimization", () => {
     expect(config.resolve?.alias).toMatchObject({
       "@": path.resolve(process.cwd(), "web"),
     });
+  });
+});
+
+describe("Farm Vite server-only entries", () => {
+  it("rejects @farm.js/core/og in the development browser graph only", async () => {
+    const config = await defineConfig();
+    const names = (config.plugins as Array<{ name?: string }>).map((plugin) => plugin?.name);
+    expect(names).toContain("farm:server-only-entries");
+
+    const resolveId = farmServerOnlyEntriesPlugin().resolveId as (
+      this: { error(message: string): never },
+      id: string,
+      importer: string | undefined,
+      options: { ssr?: boolean },
+    ) => unknown;
+    const context = {
+      error(message: string): never {
+        throw new Error(message);
+      },
+    };
+
+    expect(() =>
+      resolveId.call(context, "@farm.js/core/og", "/app/src/components/share.tsx", {}),
+    ).toThrow(
+      "@farm.js/core/og is server-only and cannot be imported into client code (imported by /app/src/components/share.tsx)",
+    );
+    expect(
+      resolveId.call(context, "@farm.js/core/og", "/app/src/app/api/card/route.tsx", {
+        ssr: true,
+      }),
+    ).toBeNull();
+    expect(resolveId.call(context, "@farm.js/core/client", "/app/src/page.tsx", {})).toBeNull();
   });
 });
 
