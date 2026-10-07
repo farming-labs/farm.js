@@ -235,6 +235,11 @@ wall/CPU measurements, source/runner hashes, and machine load. Do not run other 
 alongside measurements or interpret planner-only gains as an equivalent full-build improvement.
 The diagnostic creates and removes only its own temporary fixtures; published results are untouched.
 
+For an independent-runner check, manually dispatch the CI workflow with
+`hydration-planning-benchmark` enabled. The opt-in job builds the runtime, collects two comparisons,
+and uploads both raw JSON files. It does not assert timing thresholds or publish canonical results;
+review the inactive gains alongside active controls and recorded machine load.
+
 ## Limitations
 
 This small dynamic-SSR fixture measures local framework baseline overhead on one machine. It does
