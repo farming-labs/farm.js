@@ -27,6 +27,54 @@ With Vue, the same routes use names such as `src/app/page.vue` and
 
 With Svelte, use `src/app/page.svelte` and `src/app/blog/[slug]/page.svelte`.
 
+## Programmatic routes
+
+File routes cover most apps. Define routes in code instead when a URL can't be a folder, or when a
+page and the endpoints it needs belong together. Export `defineRoutes` from `src/routes.ts` (or
+`routes.tsx`, `farm.routes.ts`, `farm.routes.tsx`, and their `.js`/`.jsx` forms):
+
+**src/routes.tsx**
+
+```tsx
+import { createEndpoint, defineRoutes } from "@farm.js/core";
+import { z } from "zod";
+import { ChangelogPage } from "./features/changelog/page";
+import { listReleases, renderReleasesFeed } from "./features/changelog/releases";
+
+export default defineRoutes(({ page, api }) => [
+  page("/changelog", { component: ChangelogPage }),
+  api("/changelog/feed.xml", {
+    GET: async () =>
+      new Response(renderReleasesFeed(await listReleases()), {
+        headers: { "content-type": "application/rss+xml" },
+      }),
+  }),
+  api("/changelog/releases.json", {
+    GET: createEndpoint(
+      {
+        method: "GET",
+        query: z.object({ limit: z.coerce.number().int().positive().default(20) }),
+      },
+      async ({ query }) => Response.json(await listReleases(query.limit)),
+    ),
+  }),
+]);
+```
+
+- `api()` takes the same handlers a `route.ts` exports, one per method (`GET`, `HEAD`, `QUERY`,
+  `POST`, `PUT`, `DELETE`, `PATCH`, `OPTIONS`): a plain `(request) => Response` or a
+  `createEndpoint(...)` with request validation.
+- Paths don't need the `/api` prefix that file API routes live under, and they can end in a file
+  extension such as `/feed.xml` or `/data.json`.
+- `page()` and `layout()` take a component plus the route options covered below: data, guards,
+  search params, pending, error and not-found UI, and [route runtime](/docs/route-runtime) settings.
+- Programmatic pages join the same route table as file routes, so generated route types,
+  `PageProps` and typed links include them. Programmatic API routes are not in the generated API
+  client types yet; use a file route under `src/app/api` when you need a typed client.
+
+Prefer a file route when the URL maps to a folder. Reach for `defineRoutes` for colocated
+features, URLs a folder can't express, and route lists generated from data or configuration.
+
 ## Named slots and intercepted routes
 
 An `@name` directory gives its owning layout another rendered node alongside `children`. Use slots
