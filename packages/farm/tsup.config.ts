@@ -56,6 +56,7 @@ export const farmPackageBuildOptions = {
     "environment/vite": "src/environment-vite.ts",
     testing: "src/testing.ts",
     "agent-runtime": "src/agent-runtime.ts",
+    "json-ld": "src/json-ld.ts",
     image: "src/image.tsx",
     "image/server": "src/image-server.ts",
     "image/sharp": "src/image-sharp.ts",
