@@ -1,8 +1,10 @@
 # Production page-route input preparation
 
 The production page manifest is immutable. Its pattern routes now retain split pattern segments,
-and a request pathname is split/decoded once after the existing exact-route lookup misses. Matching
-still uses the same algorithm, original route order and per-attempt params/backtracking state.
+and a request pathname is split/decoded once after the existing exact-route lookup misses. Fixed-length
+patterns additionally retain parsed literal/parameter descriptors. They use a length check and a direct
+segment walk; wildcard/catch-all patterns retain the complete existing backtracking matcher.
+Both paths preserve original route order and fresh per-attempt params/captures.
 The generic string matcher remains available for redirects, rewrites, metadata, errors and slots.
 No request paths/results are cached, and client/development routing is unchanged.
 
@@ -16,10 +18,26 @@ node benchmarks/page-route-inputs/run.mjs > /tmp/page-route-inputs-first.json
 node benchmarks/page-route-inputs/run.mjs > /tmp/page-route-inputs-second.json
 ```
 
-The diagnostic executes the actual emitted matcher, page table and selector. Its baseline restores
-the old preparation boundary without changing the algorithm; it removes the new wrapper boundary
-as well so an extra function call is not charged to the baseline. No package build is needed for
-these generated-source measurements. Real built-runtime verification is separate.
+By default, the diagnostic isolates the earlier split/decode optimization: fixed-length segment
+preparation is disabled in both arms. Its baseline restores the old preparation boundary without
+changing the algorithm; it removes the wrapper boundary as well so an extra function call is not
+charged to the baseline. No package build is needed for these generated-source measurements.
+Real built-runtime verification is separate.
+
+To measure fixed-length pattern preparation against the already-shipped split-segment selector:
+
+```sh
+FARM_PAGE_ROUTE_BASELINE=segments node benchmarks/page-route-inputs/run.mjs > /tmp/page-route-segments-first.json
+FARM_PAGE_ROUTE_BASELINE=segments node benchmarks/page-route-inputs/run.mjs > /tmp/page-route-segments-second.json
+```
+
+This mode uses the actual emitted matcher/table/selector as candidate. The baseline removes only
+the fixed-length helpers and their registration/selection calls. It retains request decoding once
+and pre-split pattern segments, so gains from earlier changes are not attributed to this follow-up.
+Catch-all and generic matching algorithms are identical in both arms. The mode adds a valid-only
+single-dynamic scenario (the original `singleDynamic` alternates valid and malformed inputs), early-hit and
+wrong-length-miss scenarios over 100 patterns. `FARM_PAGE_ROUTE_BASELINE` accepts only `inputs`
+(default) or `segments`; JSON records the mode. The controls below work with either mode.
 
 Seven fresh-process pairs alternate baseline/candidate order, with 1,000 warmups and 10,000 measured
 lookups per arm/scenario. Assertions outside timing compare route identity, params and the descriptors
@@ -34,7 +52,9 @@ workload and must not be presented as normal valid-URL performance.
 JSON retains every pair, wall/CPU times, environment/load, generated runtime and runner hashes,
 and isolated minified/gzip selector sizes. Sizes include the complete matcher/table/selector, not
 an application bundle. Retained state is O(total pattern segments) per server-module instance;
-startup now does the split work once. Exact static hits and empty/static-only misses still do no
+startup does the split work once, plus descriptor preparation in `segments` mode. Preparation adds
+server-side code, retained descriptors and startup work; inspect these costs alongside lookup gains.
+Exact static hits and empty/static-only misses still do no
 request splitting or decoding.
 
 Optional diagnostic controls retain the default measurements and allow a separate investigation:
@@ -55,7 +75,9 @@ if they were the same workload.
 
 ## Isolated runner
 
-Manually dispatch the existing `CI` workflow with `page-route-inputs-benchmark` enabled. The
+Manually dispatch the existing `CI` workflow with `page-route-inputs-benchmark` enabled. Select
+`page-route-baseline: segments` for the fixed-length follow-up, or leave `inputs` for the earlier
+split/decode comparison. The
 `Page Route Inputs Diagnostic` job runs focused correctness tests, then two full timing comparisons,
 two isolated short catch-all comparisons and two warmed catch-all comparisons sequentially without
 other work in that job. Two warmed comparisons each also isolate the static-hit and generic-matcher
@@ -101,13 +123,20 @@ and individual pairs, including malformed-input and unfavorable controls.
 
 ## Correctness controls
 
-The preparation tests fail without the optimization: a two-segment late hit/miss over 100 dynamic
+The input-preparation tests fail without the optimization: a two-segment late hit/miss over 100 dynamic
 routes performs 200 splits and 200 decodes instead of one split and two decodes. They also verify
 one-time preparation, zero request preparation on static paths, first-match order, descriptor
 identity, fresh params, single decoding, malformed escapes, and hidden catch-all captures.
 Existing tests retain memoized backtracking and redirect/rewrite/guard parity checks. The built Node
 fixture additionally exercises optional catch-alls, double-encoded IDs, repeated requests, the
 adapter's malformed-escape rejection, and a subsequent 404.
+
+The fixed-length regression checks fail on the split-segment baseline: late hits and misses still
+perform 606/600 regular-expression matches and 100 backtracking matcher calls. With fixed-length
+preparation both counts are zero. Cross-product parity checks cover literal/bracket/colon segments,
+duplicate and special parameter names, Unicode, encoded slashes, double encoding, malformed escapes,
+repeated/trailing slashes and length mismatches. Hidden capture descriptors and their fresh objects
+are checked independently. Unsupported/wildcard/catch-all forms explicitly exercise the fallback.
 
 No public API, configuration, deployment target, renderer, generated fixture source, release version
 or published benchmark result is changed.

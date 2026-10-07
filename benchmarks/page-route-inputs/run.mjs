@@ -31,19 +31,36 @@ assert.ok(
 const matcher = emit(source.slice(matcherStart, matcherEnd));
 const table = emit(source.slice(tableStart, tableEnd));
 const selector = emit(source.slice(selectorStart, selectorEnd));
+const baselineKind = process.env.FARM_PAGE_ROUTE_BASELINE ?? "inputs";
+assert.ok(["inputs", "segments"].includes(baselineKind), "Unknown page-route baseline");
+const preparedStart = matcher.indexOf("function prepareRuntimePageSegments(segments) {");
+const genericStart = matcher.indexOf("function matchRuntimePathPattern(pattern, pathname) {");
+assert.ok(preparedStart > 0 && genericStart > preparedStart);
+const unpreparedMatcher = matcher.slice(0, preparedStart) + matcher.slice(genericStart);
+const preparedRegistration = `const segments = splitRuntimePath(route.pattern);
+    patternPageRoutes.push({ route, segments, prepared: prepareRuntimePageSegments(segments) });`;
+const unpreparedRegistration =
+  "patternPageRoutes.push({ route, segments: splitRuntimePath(route.pattern) });";
+const preparedSelection = `for (const { route, segments, prepared } of patternPageRoutes) {
+    const params = prepared
+      ? matchPreparedRuntimePageSegments(prepared, pathnameSegments)
+      : matchRuntimePathSegments(segments, pathnameSegments);`;
+const unpreparedSelection = `for (const { route, segments } of patternPageRoutes) {
+    const params = matchRuntimePathSegments(segments, pathnameSegments);`;
+assert.ok(table.includes(preparedRegistration));
+assert.ok(selector.includes(preparedSelection));
+const unpreparedTable = table.replace(preparedRegistration, unpreparedRegistration);
+const unpreparedSelector = selector.replace(preparedSelection, unpreparedSelection);
 const boundary =
   "  return matchRuntimePathSegments(patternSegments, pathnameSegments);\n}\n\nfunction matchRuntimePathSegments(patternSegments, pathnameSegments) {\n";
 assert.ok(matcher.includes(boundary));
-assert.ok(
-  table.includes("patternPageRoutes.push({ route, segments: splitRuntimePath(route.pattern) });"),
-);
-assert.ok(selector.includes("matchRuntimePathSegments(segments, pathnameSegments)"));
 // Restore the pre-change preparation boundary, leaving the matching algorithm
-// identical and avoiding an extra wrapper call in the baseline.
-const baselineMatcher = matcher.replace(boundary, "");
+// identical and avoiding an extra wrapper call in the baseline. Keep this older
+// input-preparation comparison independent of the fixed-length segment fast path.
+const baselineMatcher = unpreparedMatcher.replace(boundary, "");
 assert.ok(!baselineMatcher.includes("matchRuntimePathSegments"));
-const baselineTable = table.replace(
-  "patternPageRoutes.push({ route, segments: splitRuntimePath(route.pattern) });",
+const baselineTable = unpreparedTable.replace(
+  unpreparedRegistration,
   "patternPageRoutes.push(route);",
 );
 const baselineSelector = `function matchPageRoute(pathname) {
@@ -55,10 +72,16 @@ const baselineSelector = `function matchPageRoute(pathname) {
   }
   return null;
 }`;
-const code = {
-  baseline: baselineMatcher + baselineTable + baselineSelector,
-  candidate: matcher + table + selector,
-};
+const code =
+  baselineKind === "segments"
+    ? {
+        baseline: unpreparedMatcher + unpreparedTable + unpreparedSelector,
+        candidate: matcher + table + selector,
+      }
+    : {
+        baseline: baselineMatcher + baselineTable + baselineSelector,
+        candidate: unpreparedMatcher + unpreparedTable + unpreparedSelector,
+      };
 const factories = Object.fromEntries(
   Object.entries(code).map(([arm, code]) => [
     arm,
@@ -94,6 +117,14 @@ const scenarios = {
     genericPattern: "/users/[id]",
   },
 };
+if (baselineKind === "segments") {
+  scenarios.singleDynamicValid = {
+    routes: routes(["/users/[id]"]),
+    paths: ["/users/a%252Fb", "/users/value"],
+  };
+  scenarios.early100 = { routes: dynamic100, paths: ["/route0/value", "/route1/value"] };
+  scenarios.lengthMiss100 = { routes: dynamic100, paths: ["/route99", "/route99/one/two"] };
+}
 const scenarioName = process.env.FARM_PAGE_ROUTE_SCENARIO;
 assert.ok(scenarioName === undefined || Object.hasOwn(scenarios, scenarioName), "Unknown scenario");
 const selectedScenarios = scenarioName ? { [scenarioName]: scenarios[scenarioName] } : scenarios;
@@ -217,9 +248,10 @@ if (arm === "baseline" || arm === "candidate") {
         loadBefore,
         loadAfter: os.loadavg(),
         scenarios: Object.keys(selectedScenarios),
+        baselineKind,
         warmups,
         iterations,
-        methodology: `Seven alternating fresh-process pairs; ${warmups} warmups and ${iterations} lookups per arm/scenario. Actual emitted matcher/table/selector; baseline restores the old preparation boundary without modifying the algorithm. Route identity, params and hidden capture descriptors checked outside timing. Setup (100 creations after 20 warmups) measured separately. Selector-only, not SSR/HTTP/application performance.`,
+        methodology: `Seven alternating fresh-process pairs; ${warmups} warmups and ${iterations} lookups per arm/scenario. ${baselineKind === "segments" ? "Actual emitted matcher/table/selector versus the previous split-segment matcher; catch-all/generic algorithms unchanged." : "Input preparation comparison: baseline restores the old split/decode boundary; fixed-length segment preparation disabled in both arms."} Route identity, params and hidden capture descriptors checked outside timing. Setup (100 creations after 20 warmups) measured separately. Selector-only, not SSR/HTTP/application performance.`,
         helperBytes,
         summary,
         pairs,
