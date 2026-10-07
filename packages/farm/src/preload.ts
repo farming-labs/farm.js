@@ -331,6 +331,11 @@ function findHtmlLinkElements(html: string): HtmlLinkElement[] {
 
   const elements: HtmlLinkElement[] = [];
   const lowerHtml = html.toLowerCase();
+  // Sticky matches stay anchored at this tag without slicing the rest of the
+  // document. Keep their cursors local to this synchronous scan.
+  const rawTextTag = /<(script|style|template|textarea|title|noscript|svg)(?=[\s/>])/y;
+  const linkTag = /<link(?=[\s/>])/iy;
+  const ordinaryTag = /<\/?[A-Za-z][\w:-]*(?=[\s/>])/y;
   let cursor = 0;
 
   while (cursor < html.length) {
@@ -343,9 +348,8 @@ function findHtmlLinkElements(html: string): HtmlLinkElement[] {
       continue;
     }
 
-    const rawText = lowerHtml
-      .slice(start)
-      .match(/^<(script|style|template|textarea|title|noscript|svg)(?=[\s/>])/);
+    rawTextTag.lastIndex = start;
+    const rawText = rawTextTag.exec(lowerHtml);
     if (rawText?.[1]) {
       const openingEnd = findHtmlTagEnd(html, start);
       if (openingEnd === -1) break;
@@ -363,7 +367,8 @@ function findHtmlLinkElements(html: string): HtmlLinkElement[] {
       continue;
     }
 
-    if (/^<link(?=[\s/>])/i.test(html.slice(start))) {
+    linkTag.lastIndex = start;
+    if (linkTag.test(html)) {
       const end = findHtmlTagEnd(html, start);
       if (end === -1) break;
       elements.push({ start, end, value: html.slice(start, end) });
@@ -371,7 +376,8 @@ function findHtmlLinkElements(html: string): HtmlLinkElement[] {
       continue;
     }
 
-    if (/^<\/?[A-Za-z][\w:-]*(?=[\s/>])/.test(html.slice(start))) {
+    ordinaryTag.lastIndex = start;
+    if (ordinaryTag.test(html)) {
       const end = findHtmlTagEnd(html, start);
       cursor = end === -1 ? html.length : end;
       continue;

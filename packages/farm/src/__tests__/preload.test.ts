@@ -15,6 +15,53 @@ afterEach(() => {
 });
 
 describe("smart preload manager", () => {
+  it("recognizes tags without slicing the remaining document at every tag", () => {
+    const config = resolveFarmPerformanceConfig({ preload: { maxImages: 0 } }).preload;
+    const hint = '<link rel="preload" as="image" href="/hero.webp">';
+    const content = "<article><p>keep</p></article>".repeat(120);
+    const html = content + hint;
+    const slice = vi.spyOn(String.prototype, "slice");
+    const result = manageFarmDocumentPreloads(html, "", config);
+    const suffixSlices = slice.mock.calls.filter(
+      (args, index) => slice.mock.contexts[index] === html && args[1] === undefined,
+    );
+    slice.mockRestore();
+
+    expect(result).toEqual({
+      html: content,
+      linkHeader: "",
+      warnings: [{ kind: "image", count: 1, budget: 0, removed: 1 }],
+    });
+    // The final output tail is allowed; tag recognition must not slice suffixes.
+    expect(suffixSlices).toHaveLength(1);
+  });
+
+  it.each(["enforce", "warn"] as const)(
+    "keeps tag recognition anchored and resets matcher state between %s documents",
+    (mode) => {
+      const config = resolveFarmPerformanceConfig({ preload: { mode, maxImages: 0 } }).preload;
+      const hint = '<LiNk rel="preload" as="image" href="/hero.webp">';
+      const inert =
+        `<!-- ${hint} -->` +
+        `<ScRiPt data-note=">">${hint}</ScRiPt>` +
+        `<textarea>${hint}</textarea>` +
+        `<section data-note='${hint}'>keep</section>`;
+      for (const prefix of ["<", "<!invalid>", "<123>", "plain text", ""]) {
+        for (const [html, withoutHint] of [
+          [prefix + hint + inert, prefix + inert],
+          [inert + hint, inert],
+          [hint, ""],
+        ]) {
+          expect(manageFarmDocumentPreloads(html, "", config)).toEqual({
+            html: mode === "warn" ? html : withoutHint,
+            linkHeader: "",
+            warnings: [{ kind: "image", count: 1, budget: 0, removed: mode === "warn" ? 0 : 1 }],
+          });
+        }
+      }
+    },
+  );
+
   it.each([null, undefined, 42, {}])("preserves the runtime error for invalid HTML %j", (html) => {
     const config = resolveFarmPerformanceConfig(undefined).preload;
     expect(() => manageFarmHtmlPreloads(html as unknown as string, config)).toThrow(TypeError);
