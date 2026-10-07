@@ -2,6 +2,12 @@ import type { FarmSchema, FarmSchemaConfig } from "./schema";
 import { collectSchemaDependencies, orderSchemaOwners } from "./schema-dependencies";
 import { describeForeignKeyApproval, planCrossOwnerReferences } from "./schema-foreign-keys";
 import {
+  createSchemaSnapshot,
+  diffSchemaSnapshots,
+  hasSchemaChanges,
+  readSchemaState,
+} from "./schema-state";
+import {
   collectSchemaExtensions,
   describeSchemaExtensionApproval,
   isSchemaExtensionAllowed,
@@ -62,7 +68,8 @@ export type FarmSchemaCheckCode =
   | "extend-table-missing"
   | "extend-column-missing"
   | "extend-column-type"
-  | "extend-column-shared";
+  | "extend-column-shared"
+  | "schema-upgrade";
 
 export interface FarmSchemaCheckIssue {
   severity: FarmSchemaCheckSeverity;
@@ -137,6 +144,7 @@ type SchemaOwner = {
   models?: readonly string[];
   dialect?: FarmSqlDialect;
   dependsOn?: readonly string[];
+  version?: string;
   resolveClient(config: FarmSchemaCheckConfig): Promise<unknown>;
 };
 
@@ -169,6 +177,7 @@ export function collectSchemaOwners(config: FarmSchemaCheckConfig): SchemaOwner[
       models: declaration.models,
       dialect: declaration.dialect,
       dependsOn: declaration.dependsOn,
+      version: declaration.version,
       resolveClient: (resolved) => declaration.resolveClient(resolved),
     });
   }
@@ -494,7 +503,38 @@ export async function checkSchema(
           onDelete: reference.onDelete,
         };
       }
-      await checkOwnerTables(owner, models, database.dialect, database.executor, issues);
+      const plan = await checkOwnerTables(
+        owner,
+        models,
+        database.dialect,
+        database.executor,
+        issues,
+      );
+      // An installed version whose changes have not been applied here yet.
+      const pending = plan.statements.length + (plan.upgrades?.length ?? 0);
+      const state =
+        pending > 0
+          ? await readSchemaState(database.executor, database.dialect, owner.name)
+          : undefined;
+      const changes = state
+        ? diffSchemaSnapshots(state.snapshot, createSchemaSnapshot(models))
+        : undefined;
+      if (state && changes && hasSchemaChanges(changes)) {
+        const versions =
+          state.version && owner.version && state.version !== owner.version
+            ? `upgraded ${state.version} → ${owner.version}`
+            : "changed since it was last migrated";
+        issues.push({
+          severity: "warning",
+          code: "schema-upgrade",
+          owner: owner.name,
+          message: `${owner.name} ${versions}, and ${pending} change(s) are not applied yet.`,
+          hint:
+            owner.kind === "plugin"
+              ? `Run \`farm ${owner.name} migrate\` to review and apply them.`
+              : "Apply them with your migration tool.",
+        });
+      }
       await checkReferences(owner, models, database, databases, resolveTarget, issues);
       await checkExtensions(
         owner,
@@ -530,7 +570,30 @@ async function checkOwnerTables(
   issues: FarmSchemaCheckIssue[],
 ) {
   const plan = await planSchemaMigration(models, dialect, executor);
-  const present = new Set([...plan.upToDate, ...plan.drift.map((drift) => drift.table)]);
+  const present = new Set([
+    ...plan.upToDate,
+    ...plan.drift.map((drift) => drift.table),
+    ...(plan.upgrades ?? []).map((upgrade) => upgrade.table),
+  ]);
+  const command =
+    owner.kind === "plugin" ? `\`farm ${owner.name} migrate\`` : "your migration tool";
+
+  // Additions migrate can make: still missing, so a missing column is an error.
+  for (const upgrade of plan.upgrades ?? []) {
+    const column =
+      upgrade.kind === "column" ? upgrade.target.slice(upgrade.table.length + 1) : undefined;
+    issues.push({
+      severity: column ? "error" : "warning",
+      code: column ? "column-missing" : "index-missing",
+      owner: owner.name,
+      table: upgrade.table,
+      ...(column ? { column } : {}),
+      message: column
+        ? `"${upgrade.table}" has no column "${column}".`
+        : `"${upgrade.table}" is missing the index ${upgrade.target}.`,
+      hint: `Add it with ${command}.`,
+    });
+  }
 
   for (const model of models) {
     if (present.has(model.modelName)) continue;
@@ -553,7 +616,7 @@ async function checkOwnerTables(
         table: drift.table,
         column,
         message: `"${drift.table}" has no column "${column}".`,
-        hint: "Farm never alters existing tables. Add the column with your migration tool.",
+        hint: "It is required with no default, so Farm cannot add it to a table that may have rows. Add it with a migration step or your migration tool.",
       });
     }
     for (const change of drift.changedColumns) {
@@ -603,6 +666,7 @@ async function checkOwnerTables(
           : `Allow it with \`${describeForeignKeyApproval({ owner: owner.name, modelKey: key.modelKey })}\` in farm.config, then run \`farm ${owner.name} migrate --apply\`. Rows that point at nothing are checked first.`,
     });
   }
+  return plan;
 }
 
 async function checkReferences(

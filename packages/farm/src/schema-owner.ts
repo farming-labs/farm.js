@@ -38,6 +38,8 @@ export interface FarmSchemaTablesDeclaration {
   dialect?: FarmSqlDialect;
   /** Owners whose tables must exist first, by owner name. */
   dependsOn?: readonly string[];
+  /** The owner's release, shown when an upgrade changes its tables. */
+  version?: string;
 }
 
 /**

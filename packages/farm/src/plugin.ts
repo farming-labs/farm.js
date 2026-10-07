@@ -1698,6 +1698,7 @@ function pluginSchemaName(pluginName: string): string {
 function declarePluginSchema<
   TPlugin extends {
     name: string;
+    version?: string;
     schema?: FarmSchema;
     database?: FarmPluginDatabase;
     dependsOn?: readonly string[];
@@ -1720,6 +1721,7 @@ function declarePluginSchema<
     // Also listed by key, which tooling from before `external` existed reads.
     models: Object.keys(models).filter((key) => !models[key]!.external),
     ...(plugin.dependsOn ? { dependsOn: plugin.dependsOn.map(pluginShortName) } : {}),
+    ...(plugin.version ? { version: plugin.version } : {}),
     dialect: database?.dialect,
     resolveClient: async (config) => {
       if (database?.client !== undefined && database.client !== null) {
