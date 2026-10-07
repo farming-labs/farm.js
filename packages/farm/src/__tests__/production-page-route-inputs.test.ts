@@ -25,11 +25,17 @@ function runtime(pageRoutes: readonly Route[]) {
     .replace(
       "function decodeRouteSegment(segment) {",
       "function decodeRouteSegment(segment) { decodes++;",
-    );
+    )
+    .replace(
+      "function matchRuntimePathSegments(patternSegments, pathnameSegments) {",
+      "function matchRuntimePathSegments(patternSegments, pathnameSegments) { genericCalls++;",
+    )
+    .replaceAll("segment.match(", "matchSegment(segment, ");
   return new Function(
     "pageRoutes",
     `
-    let splits = 0, decodes = 0;
+    let splits = 0, decodes = 0, regexCalls = 0, genericCalls = 0;
+    function matchSegment(segment, pattern) { regexCalls++; return segment.match(pattern); }
     ${matcher}
     ${emit(source.slice(tableStart, tableEnd))}
     ${emit(source.slice(selectStart, selectEnd))}
@@ -46,7 +52,9 @@ function runtime(pageRoutes: readonly Route[]) {
     return {
       select: matchPageRoute, previous,
       capture: params => Object.getOwnPropertyDescriptor(params, farmCatchAllParamSegments),
-      counts: () => ({ splits, decodes }), reset: () => { splits = 0; decodes = 0; }
+      counts: () => ({ splits, decodes }),
+      matchingWork: () => ({ regexCalls, genericCalls }),
+      reset: () => { splits = 0; decodes = 0; regexCalls = 0; genericCalls = 0; }
     };
   `,
   )(pageRoutes) as {
@@ -54,6 +62,7 @@ function runtime(pageRoutes: readonly Route[]) {
     previous(pathname: string): Match;
     capture(params: Record<string, string>): PropertyDescriptor | undefined;
     counts(): { splits: number; decodes: number };
+    matchingWork(): { regexCalls: number; genericCalls: number };
     reset(): void;
   };
 }
@@ -147,5 +156,118 @@ describe("production page route input preparation", () => {
     expect(r.select("/users/two")?.params).toEqual({ group: "users", id: "two" });
     expect(r.select("/missing")).toBeNull();
     expect(r.select("/users/one")?.params.id).toBe("one");
+  });
+
+  it.each(["/route99/a%252Fb", "/missing/value", "/route99", "/route99/one/two"])(
+    "does not re-parse fixed-length patterns or create backtracking state for %s",
+    (pathname) => {
+      const r = runtime(routes(Array.from({ length: 100 }, (_, i) => `/route${i}/[id]`)));
+      const expected = r.previous(pathname);
+      r.reset();
+      expect(r.select(pathname)).toEqual(expected);
+      expect(r.matchingWork()).toEqual({ regexCalls: 0, genericCalls: 0 });
+    },
+  );
+
+  it.each([
+    "/docs/[[...slug]]",
+    "/docs/[...slug]",
+    "/docs/:rest*/end",
+    "/docs/*tail?/end",
+    "/docs/*tail/end",
+    "/docs/*/end",
+    "/docs/a*b/[id]",
+    "/docs/[...]/[id]",
+    "/docs/[[...]]/[id]",
+  ])("retains the complete matcher for unsupported preparation: %s", (pattern) => {
+    const r = runtime(routes([pattern]));
+    for (const pathname of ["/docs", "/docs/end", "/docs/a%2Fb/%ZZ/end"]) {
+      const expected = r.previous(pathname);
+      r.reset();
+      const selected = r.select(pathname);
+      expect(selected).toEqual(expected);
+      expect(r.matchingWork().genericCalls).toBe(1);
+      if (selected && expected)
+        expect(r.capture(selected.params)).toEqual(r.capture(expected.params));
+    }
+  });
+
+  it("preserves generic matching semantics across fixed-length segment combinations", () => {
+    const segments = [
+      "literal",
+      "[id]",
+      ":id",
+      "[constructor]",
+      "[__proto__]",
+      "[[id]]",
+      "[]",
+      "a:b",
+      "[unterminated",
+      "café",
+      "a%2Fb",
+      "[a\nb]",
+    ];
+    const paths = [
+      "/literal/value",
+      "/literal/value/",
+      "/literal//value",
+      "/%6Citeral/a%252Fb",
+      "/%ZZ/%E0%A4",
+      "/caf%C3%A9/a%252Fb",
+      "/[]/[a%0Ab]",
+      "/a:b/[[id]]",
+      "/a/b/c",
+      "/a",
+      "/",
+    ];
+    for (const first of segments) {
+      for (const second of segments) {
+        const r = runtime(routes([`/${first}/${second}`]));
+        for (const pathname of paths) {
+          const expected = r.previous(pathname);
+          const selected = r.select(pathname);
+          expect(selected, `${first}/${second} against ${pathname}`).toEqual(expected);
+          if (selected && expected)
+            expect(r.capture(selected.params)).toEqual(r.capture(expected.params));
+        }
+      }
+    }
+  });
+
+  it("keeps params and hidden capture objects fresh for every fixed-length match", () => {
+    const r = runtime(routes(["/[id]/:id"]));
+    const first = r.select("/one/two")!;
+    const second = r.select("/one/two")!;
+    expect(first.params).toEqual({ id: "two" });
+    expect(first.params).not.toBe(second.params);
+    expect(r.capture(first.params)).toEqual({
+      value: {},
+      writable: false,
+      enumerable: false,
+      configurable: false,
+    });
+    expect(r.capture(first.params)!.value).not.toBe(r.capture(second.params)!.value);
+    r.capture(first.params)!.value.id = ["changed"];
+    first.params.id = "changed";
+    expect(second.params).toEqual({ id: "two" });
+    expect(r.capture(second.params)!.value).toEqual({});
+  });
+
+  it("preserves first-match order across prepared and fallback routes", () => {
+    for (const patterns of [
+      ["/docs/[[...parts]]", "/docs/[id]"],
+      ["/docs/[id]", "/docs/[[...parts]]"],
+      ["/docs/:parts*/end", "/docs/[id]/end"],
+      ["/docs/[id]/end", "/docs/:parts*/end"],
+    ]) {
+      const input = routes(patterns);
+      const r = runtime(input);
+      const pathname = patterns[0].endsWith("/end") ? "/docs/a%2Fb/end" : "/docs/a%2Fb";
+      const selected = r.select(pathname)!;
+      const expected = r.previous(pathname)!;
+      expect(selected.route).toBe(input[0]);
+      expect(selected).toEqual(expected);
+      expect(r.capture(selected.params)).toEqual(r.capture(expected.params));
+    }
   });
 });

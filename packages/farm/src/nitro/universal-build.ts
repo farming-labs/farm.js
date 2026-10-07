@@ -1933,6 +1933,32 @@ function decodeRouteSegment(segment) {
 
 const farmCatchAllParamSegments = Symbol("farm.catch-all-param-segments");
 
+function prepareRuntimePageSegments(segments) {
+  const prepared = [];
+  for (const segment of segments) {
+    // Only fixed-length patterns use this path. Leave all wildcard/catch-all
+    // forms (including ambiguous spellings) to the complete backtracking matcher.
+    if (segment.includes("*") || segment.startsWith("[...") || segment.startsWith("[[...")) {
+      return null;
+    }
+    const dynamic = segment.match(/^\\[(.+)\\]$/) || segment.match(/^:([^/]+)$/);
+    prepared.push({ literal: segment, param: dynamic ? dynamic[1] : null });
+  }
+  return prepared;
+}
+
+function matchPreparedRuntimePageSegments(prepared, pathnameSegments) {
+  if (prepared.length !== pathnameSegments.length) return null;
+  const params = {};
+  for (let i = 0; i < prepared.length; i++) {
+    const segment = prepared[i];
+    if (segment.param !== null) params[segment.param] = pathnameSegments[i];
+    else if (segment.literal !== pathnameSegments[i]) return null;
+  }
+  Object.defineProperty(params, farmCatchAllParamSegments, { value: {} });
+  return params;
+}
+
 function matchRuntimePathPattern(pattern, pathname) {
   const patternSegments = splitRuntimePath(pattern);
   const pathnameSegments = splitRuntimePath(pathname).map(decodeRouteSegment);
@@ -5889,7 +5915,8 @@ const exactPageRoutes = new Map();
 const patternPageRoutes = [];
 for (const route of pageRoutes) {
   if (/[\\[\\]*:]/.test(route.pattern)) {
-    patternPageRoutes.push({ route, segments: splitRuntimePath(route.pattern) });
+    const segments = splitRuntimePath(route.pattern);
+    patternPageRoutes.push({ route, segments, prepared: prepareRuntimePageSegments(segments) });
   } else {
     const exactPath = normalizeRuntimePath(route.pattern);
     if (!exactPageRoutes.has(exactPath)) exactPageRoutes.set(exactPath, route);
@@ -6822,8 +6849,10 @@ function matchPageRoute(pathname) {
   // The page manifest is immutable. Reuse its pattern parts and decode this
   // request once, while each match retains its own params and backtracking state.
   const pathnameSegments = splitRuntimePath(pathname).map(decodeRouteSegment);
-  for (const { route, segments } of patternPageRoutes) {
-    const params = matchRuntimePathSegments(segments, pathnameSegments);
+  for (const { route, segments, prepared } of patternPageRoutes) {
+    const params = prepared
+      ? matchPreparedRuntimePageSegments(prepared, pathnameSegments)
+      : matchRuntimePathSegments(segments, pathnameSegments);
     if (params !== null) return { route, params };
   }
   return null;
