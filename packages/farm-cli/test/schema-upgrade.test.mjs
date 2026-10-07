@@ -162,3 +162,57 @@ test("keeps no record in a project whose ORM tracks its own migrations", async (
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("fails --apply while a migration step cannot run, and says why", async () => {
+  const { root, database } = await app();
+  try {
+    await mkdir(root, { recursive: true });
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      `import { DatabaseSync } from "node:sqlite";
+import { definePlugin, defineSchema } from "@farm.js/core";
+const database = new DatabaseSync(${JSON.stringify(database)});
+database.exec('CREATE TABLE IF NOT EXISTS "member" ("id" TEXT PRIMARY KEY, "role" TEXT, "permission" TEXT)');
+export default {
+  storage: { client: database },
+  plugins: [
+    definePlugin({
+      name: "farm:teams",
+      version: "2.0.0",
+      schema: defineSchema({
+        models: {
+          member: {
+            fields: {
+              id: { type: "string", primaryKey: true },
+              permission: { type: "string", nullable: true },
+            },
+          },
+        },
+      }),
+      migrations: [
+        { id: "2.0.0-role", renameColumn: { model: "member", from: "role", to: "permission" } },
+      ],
+    }),
+  ],
+};
+`,
+    );
+    const result = await run(process.execPath, [
+      bin,
+      "teams",
+      "migrate",
+      "--apply",
+      "--root",
+      root,
+    ]).then(
+      ({ stdout, stderr }) => ({ code: 0, output: stdout + stderr }),
+      (error) => ({ code: error.code, output: `${error.stdout}${error.stderr}` }),
+    );
+    assert.equal(result.code, 1, result.output);
+    assert.match(result.output, /Stopped at migration step "2\.0\.0-role"/);
+    assert.match(result.output, /both "role" and "permission" exist/);
+    assert.match(result.output, /still missing: migration step "2\.0\.0-role"/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

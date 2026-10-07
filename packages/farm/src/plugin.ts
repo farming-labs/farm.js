@@ -34,6 +34,7 @@ import type { FarmSqlDialect } from "./schema-sql";
 import { declareSchemaTables, readSchemaTables } from "./schema-owner";
 import { pluginShortName } from "./plugin-dependencies";
 import { collectSchemaExtensions } from "./schema-extend";
+import { validateSchemaSteps, type FarmSchemaMigrationStep } from "./schema-step-types";
 import { resolveSchemaModels } from "./schema-resolve";
 import { normalizeFarmBasePath, stripFarmBasePath } from "./base-path";
 import {
@@ -569,6 +570,12 @@ export interface FarmPlugin<
    * and migrations run dependencies first.
    */
   dependsOn?: readonly string[];
+  /**
+   * Ordered steps for what a release changes in its tables that Farm will not
+   * infer, such as a renamed column. Each runs once per database, through
+   * `farm <name> migrate`. Additions need no step.
+   */
+  migrations?: readonly FarmSchemaMigrationStep[];
 
   /** @internal Carries the expected integration instance type without runtime data. */
   readonly [FARM_PLUGIN_INTEGRATION_INSTANCE]?: (instance: TIntegrationInstance) => void;
@@ -1702,8 +1709,14 @@ function declarePluginSchema<
     schema?: FarmSchema;
     database?: FarmPluginDatabase;
     dependsOn?: readonly string[];
+    migrations?: readonly FarmSchemaMigrationStep[];
   },
 >(plugin: TPlugin): TPlugin {
+  if (plugin.migrations && !plugin.schema) {
+    throw new Error(
+      `Plugin "${plugin.name}" sets \`migrations\` without a \`schema\`: its steps change the schema's tables.`,
+    );
+  }
   if (plugin.database && !plugin.schema) {
     throw new Error(
       `Plugin "${plugin.name}" sets \`database\` without a \`schema\`: it only says where the schema's tables live.`,
@@ -1714,6 +1727,7 @@ function declarePluginSchema<
   // Fail while the config loads, not at the first migrate or query.
   const models = resolveSchemaModels(name, plugin.schema);
   collectSchemaExtensions(name, plugin.schema);
+  validateSchemaSteps(name, plugin.schema, plugin.migrations);
   const database = plugin.database;
   return declareSchemaTables(plugin, {
     name,
@@ -1722,6 +1736,7 @@ function declarePluginSchema<
     models: Object.keys(models).filter((key) => !models[key]!.external),
     ...(plugin.dependsOn ? { dependsOn: plugin.dependsOn.map(pluginShortName) } : {}),
     ...(plugin.version ? { version: plugin.version } : {}),
+    ...(plugin.migrations?.length ? { migrations: plugin.migrations } : {}),
     dialect: database?.dialect,
     resolveClient: async (config) => {
       if (database?.client !== undefined && database.client !== null) {

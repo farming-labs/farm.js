@@ -18,6 +18,8 @@ export * from "./schema-migrate";
 export * from "./schema-tables";
 export { collectSchemaDependencies, orderSchemaOwners } from "./schema-dependencies";
 export type { FarmCrossOwnerReference } from "./schema-foreign-keys";
+export { FARM_SCHEMA_STEPS_TABLE, type FarmSchemaStepPlan } from "./schema-steps";
+export type { FarmSchemaMigrationStep } from "./schema-step-types";
 export {
   FARM_SCHEMA_STATE_TABLE,
   type FarmSchemaChanges,
