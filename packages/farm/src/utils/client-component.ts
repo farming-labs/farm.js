@@ -572,9 +572,6 @@ export function getClientModuleHydrationPlan(
   options: FarmClientHydrationPlanOptions = {},
 ): ClientModuleHydrationPlan {
   const metadata = getClientModuleMetadata(modulePath, root);
-  const resolvedPath = resolveModuleSourcePath(modulePath, root);
-  const content = readIfExists(resolvedPath ?? "");
-  const parsed = parseClientModuleMetadata(content, true);
   const emptyPlan = (
     fallbackReason?: string,
     costGuardExceeded = false,
@@ -599,6 +596,12 @@ export function getClientModuleHydrationPlan(
     metadata.suppressedAsyncHydration === true && options.asyncOwnerIslands === true;
 
   if (mode === "off" && !asyncOwner) return emptyPlan();
+
+  // Legacy metadata already inspected the owner. Only reread it when isolation
+  // analysis is needed, including async-owner islands with the experiment off.
+  const resolvedPath = resolveModuleSourcePath(modulePath, root);
+  const content = readIfExists(resolvedPath ?? "");
+  const parsed = parseClientModuleMetadata(content, true);
   if (!resolvedPath) return emptyPlan("the owner source could not be resolved");
   if (parsed.isClientComponent) {
     return emptyPlan("the owner is already a client component");
