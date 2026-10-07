@@ -151,6 +151,9 @@
       "image/sharp": [
         "./dist/image/sharp.d.ts"
       ],
+      "og": [
+        "./dist/og.d.ts"
+      ],
       "i18n": [
         "./dist/i18n/index.d.ts"
       ],
@@ -553,6 +556,11 @@
       "types": "./dist/image/sharp.d.ts",
       "import": "./dist/image/sharp.mjs",
       "require": "./dist/image/sharp.cjs"
+    },
+    "./og": {
+      "types": "./dist/og.d.ts",
+      "import": "./dist/og.mjs",
+      "require": "./dist/og.cjs"
     },
     "./i18n": {
       "types": "./dist/i18n/index.d.ts",

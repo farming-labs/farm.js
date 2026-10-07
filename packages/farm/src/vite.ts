@@ -42,6 +42,7 @@ import {
   resolveMarkdownMirrorTarget,
 } from "./markdown";
 import { resolveFarmLlmsTxtConfig } from "./llms-txt";
+import { resolveFarmAgentCrawlers } from "./agent-crawlers";
 import {
   FARM_MARKDOWN_CONTENT_TYPE,
   createFarmMarkdownErrorBody,
@@ -158,6 +159,14 @@ function farmLlmsTxtGeneratedPaths(config: { agent?: { llmsTxt?: unknown } }): s
   return llms.full ? ["/llms.txt", "/llms-full.txt"] : ["/llms.txt"];
 }
 
+/** Paths `agent.llmsTxt` and `agent.crawlers` serve without a route file. */
+function farmAgentGeneratedPaths(config: {
+  agent?: { llmsTxt?: unknown; crawlers?: unknown };
+}): string[] {
+  const crawlers = resolveFarmAgentCrawlers(config.agent?.crawlers as never);
+  return [...farmLlmsTxtGeneratedPaths(config), ...(crawlers.enabled ? ["/robots.txt"] : [])];
+}
+
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
   images?: FarmUserConfig["images"];
@@ -243,6 +252,29 @@ export function farmI18nClientBridgePlugin(): Plugin {
     load(id) {
       if (id !== FARM_I18N_CLIENT_BRIDGE_ID) return null;
       return 'export { createTranslator, format, getLocale, getLocaleSource, t } from "@farm.js/core/i18n/client";';
+    },
+  };
+}
+
+/** Core entries whose runtime must never ship to the browser. */
+const FARM_SERVER_ONLY_ENTRIES = new Set(["@farm.js/core/og"]);
+
+/**
+ * Fail a browser graph that imports a server-only core entry, instead of
+ * bundling its server runtime (for `@farm.js/core/og`, the `@vercel/og` wasm
+ * renderer) into client code.
+ */
+export function farmServerOnlyEntriesPlugin(): Plugin {
+  return {
+    name: "farm:server-only-entries",
+    enforce: "pre",
+    resolveId(id, importer, options) {
+      if (options?.ssr || !FARM_SERVER_ONLY_ENTRIES.has(id)) return null;
+      this.error(
+        `${id} is server-only and cannot be imported into client code${
+          importer ? ` (imported by ${importer})` : ""
+        }. Use it from an API route or another server module.`,
+      );
     },
   };
 }
@@ -1850,10 +1882,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // Vite loading a `.md` file as a module is not a request for docs or Markdown.
           const viteModuleRequest = isViteModuleRequest(parsedRequestUrl, req.headers);
           // An app's own llms.txt, llms-full.txt, sitemap.xml, and robots.txt (agent.llmsTxt,
-          // a root llms.ts, llms-full.ts, sitemap.ts, or robots.ts, or a public file) take
-          // those paths from the docs engine, as in production.
+          // agent.crawlers, a root llms.ts, llms-full.ts, sitemap.ts, or robots.ts, or a public
+          // file) take those paths from the docs engine, as in production.
           const appOwnsDocsEnginePath = farmAppOwnsDocsEnginePath(requestPathname, {
-            generatedPaths: farmLlmsTxtGeneratedPaths(farmConfig),
+            generatedPaths: farmAgentGeneratedPaths(farmConfig),
             routeManager: farmApp.getRouteManager(),
             publicDir: server.config.publicDir,
           });
@@ -2388,7 +2420,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               requestPathname,
               farmApp?.getRouteManager(),
               [server.config.publicDir, server.config.root],
-              farmLlmsTxtGeneratedPaths(farmConfig),
+              farmAgentGeneratedPaths(farmConfig),
             )
           ) {
             return next();
@@ -5856,6 +5888,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
       ...(rendererVitePlugins as any[]),
       viteBrowserExternalPlugin,
       farmI18nClientBridgePlugin(),
+      farmServerOnlyEntriesPlugin(),
       farmPlugin(config),
       farmEnvironmentFunctionsPlugin(),
       farmBrandingPlugin,

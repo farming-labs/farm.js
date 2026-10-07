@@ -1,5 +1,6 @@
 export * from "./types";
 export type { FarmAgentUserConfig, FarmAgentJsonLd } from "./agent-config";
+export type { FarmAgentCrawlers, FarmCrawlerPolicy } from "./agent-crawlers";
 export { defineRenderer, REACT_RENDERER } from "./renderer";
 export type {
   FarmRenderer,
@@ -17,6 +18,12 @@ export * from "./schema-migrate";
 export * from "./schema-tables";
 export { collectSchemaDependencies, orderSchemaOwners } from "./schema-dependencies";
 export type { FarmCrossOwnerReference } from "./schema-foreign-keys";
+export {
+  FARM_SCHEMA_STATE_TABLE,
+  type FarmSchemaChanges,
+  type FarmSchemaSnapshot,
+  type FarmSchemaState,
+} from "./schema-state";
 export {
   collectSchemaExtensions,
   isSchemaExtensionAllowed,

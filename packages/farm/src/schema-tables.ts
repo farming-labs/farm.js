@@ -5,6 +5,16 @@ import {
   isSchemaExtensionAllowed,
 } from "./schema-extend";
 import {
+  FARM_SCHEMA_STATE_TABLE,
+  createSchemaSnapshot,
+  describeSchemaChanges,
+  diffSchemaSnapshots,
+  hasSchemaChanges,
+  readSchemaState,
+  writeSchemaState,
+  type FarmSchemaChanges,
+} from "./schema-state";
+import {
   describeForeignKeyApproval,
   isForeignKeyAllowed,
   planCrossOwnerReferences,
@@ -106,6 +116,10 @@ export interface MigrateSchemaTablesResult {
     /** Allowed, but rows already point at nothing. */
     blocked: Array<{ key: FarmSchemaAddableForeignKey; orphans: number }>;
   };
+  /** What the installed version changes compared with the last applied one. */
+  upgrade?: { from?: string; to?: string; changes: FarmSchemaChanges };
+  /** Statements `--apply` would run. */
+  planned: number;
   /** Columns the owner adds to tables it does not own. */
   extensions: FarmSchemaExtensionPlan & {
     /** Additions the app has not allowed in `schema.allowExtend`. */
@@ -148,6 +162,7 @@ export async function migrateSchemaTables(
       applied: [],
       extensions: { ...emptyExtensionPlan(), unapproved: [], pending: [] },
       foreignKeys: { waiting: [], unapproved: [], unsupported: [], blocked: [] },
+      planned: 0,
     };
   }
 
@@ -169,6 +184,35 @@ export async function migrateSchemaTables(
     };
   }
   const plan = await planSchemaMigration(models, dialect, executor);
+
+  // What this version changes compared with what was last applied here.
+  const snapshot = createSchemaSnapshot(models);
+  const state = await readSchemaState(executor, dialect, owner.name);
+  const changes = state ? diffSchemaSnapshots(state.snapshot, snapshot) : undefined;
+  const upgrade =
+    state && changes && hasSchemaChanges(changes)
+      ? { from: state.version, to: owner.version, changes }
+      : undefined;
+  if (upgrade) {
+    const versions =
+      upgrade.from && upgrade.to && upgrade.from !== upgrade.to
+        ? `${owner.name} ${upgrade.from} → ${upgrade.to} changes its tables:`
+        : `${owner.name}'s tables changed since they were last migrated:`;
+    log([versions, ...describeSchemaChanges(changes!)].join("\n"));
+  }
+  // An ORM's migrations own the app's tables there, and track their own
+  // history; an extra table would only show up as drift in its tooling.
+  const recordState = async () => {
+    if (options.extensions === "report") return;
+    try {
+      await writeSchemaState(executor, dialect, owner.name, { version: owner.version, snapshot });
+    } catch (error) {
+      // The migration itself succeeded; only the record of it did not.
+      log(
+        `Applied, but could not record it in "${FARM_SCHEMA_STATE_TABLE}" (${error instanceof Error ? error.message : String(error)}). The next upgrade of ${owner.name} will be compared with the database instead of this version.`,
+      );
+    }
+  };
 
   const addable = plan.addableForeignKeys ?? [];
   const foreignKeysUnsupported = dialect === "sqlite" ? addable : [];
@@ -228,6 +272,8 @@ export async function migrateSchemaTables(
       unsupported: foreignKeysUnsupported,
       blocked,
     },
+    upgrade,
+    planned: pendingStatements,
   });
 
   // A table created now without its foreign key, because the other plugin
@@ -255,7 +301,11 @@ export async function migrateSchemaTables(
   }
   logExtensionProblems(owner.name, extensionsPlan, log);
 
-  const pendingStatements = plan.statements.length + approved.length + foreignKeysAllowed.length;
+  const pendingStatements =
+    plan.statements.length +
+    (plan.upgrades?.length ?? 0) +
+    approved.length +
+    foreignKeysAllowed.length;
   if (
     pendingStatements === 0 &&
     unapproved.length === 0 &&
@@ -263,6 +313,8 @@ export async function migrateSchemaTables(
     (!reportOnly || extensionsPlan.statements.length === 0)
   ) {
     log("Nothing to create.");
+    // A first --apply on an up-to-date database records where it stands.
+    if (options.apply) await recordState();
     return result([]);
   }
 
@@ -319,6 +371,7 @@ export async function migrateSchemaTables(
     );
   }
   if (applied.length > 0) log(`Created: ${applied.join(", ")}`);
+  await recordState();
   return result(applied);
 }
 

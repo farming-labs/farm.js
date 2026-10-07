@@ -62,31 +62,63 @@ $ pnpm farm jobs migrate
 No plugin named "jobs" owns tables in this app. Available: sync.
 ```
 
-### It only ever creates
+### It adds, and never changes or drops
 
-A table that exists but no longer matches the schema is reported, not altered:
+When a plugin's tables already exist, `migrate` adds what a table that may hold
+rows can safely take, and reports the rest:
+
+- **Added:** missing columns that are nullable or have a default (existing rows
+  get the default), and missing plain indexes.
+- **Reported, never applied:** a required column without a default, a unique
+  column or index (existing rows could break it), a changed column, and
+  anything the database has that the schema does not.
 
 ```
 [info] These tables exist but no longer match the schema. Farm will not change them:
   tasks
-    missing in the database: priority
+    missing in the database: slug
     not in the schema: legacy_note
     changed column status: default expected "open", found none
-    missing indexes: tasks_list_id_idx (list_id)
-⚠️  Tables that differ from the schema were left unchanged.
 ```
 
-Farm compares the parts of the table contract it can declare: column types,
-nullability, defaults, primary and unique constraints, indexes, and internal
-foreign keys. Matching column names alone are not treated as proof that a table
-is up to date.
-
-A create is derivable from the schema alone. A change is not: a rename and a
-drop-plus-add look identical from here, and one of them destroys data. That call
-stays with the person who knows which one it was — take the column change to
+A create or an addition is derivable from the schema alone. A change is not: a
+rename and a drop-plus-add look identical from here, and one of them destroys
+data. That call stays with the person who knows which one it was, so take it to
 your own migration tooling.
 
-Statements are emitted as `IF NOT EXISTS`, so `--apply` is safe to re-run.
+Statements are written so `--apply` is safe to re-run.
+
+### Upgrading a plugin
+
+Farm remembers what it last applied for each plugin, in a `farm_schema_state`
+table in your database, with the plugin's `version`. When you upgrade the plugin
+and run `migrate`, it shows what that version changed before touching anything:
+
+```
+$ pnpm farm teams migrate
+teams 1.0.2 → 1.1.0 changes its tables:
+  + invitation  new table
+  + member.role  string
+  + member_role_idx  index
+
+Apply these changes to teams's tables now? (y/N)
+```
+
+In a terminal it asks; in scripts and CI it prints the plan and stops, and
+`--apply` applies it. Changes a release makes that Farm will not apply on its
+own, such as a removed or redefined column, are listed with `~`.
+`farm schema check` also warns while an upgrade is waiting:
+
+```
+! teams (plugin, postgres)
+    warning teams upgraded 1.0.2 → 1.1.0, and 3 change(s) are not applied yet.
+```
+
+Set `version` in `definePlugin` so the summary can name the versions. Without
+it, Farm says the tables changed since they were last migrated. In a project
+with Prisma or Drizzle, no `farm_schema_state` table is created: their own
+migrations track history there, and `farm generate --orm` carries the plugin's
+new tables and columns into their schema.
 
 ### When it does not apply
 

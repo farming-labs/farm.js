@@ -24,6 +24,7 @@ A compact map of the main package exports and where to learn more.
 | @farm.js/core/cache           | Data cache, revalidation, cache keys.                                                |
 | @farm.js/cache-redis          | Distributed Redis cache, tag versions, and regeneration leases.                      |
 | @farm.js/core/after           | Post-response server work with `after()`.                                            |
+| @farm.js/core/og              | Server-only `ImageResponse` for PNG images rendered from JSX in API routes.          |
 | @farm.js/core/cron            | Cron route authorization, schedule types, manifests, and deployment adapter helpers. |
 | @farm.js/core/observability   | Farm events, request tracing, custom spans, and active trace context.                |
 | @farm.js/core/instrumentation | Startup and shutdown convention types for development and production runtimes.       |

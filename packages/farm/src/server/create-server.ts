@@ -1,6 +1,6 @@
 import { createServer as createViteServer, type ViteDevServer } from "vite";
 import type { FarmConfig } from "../types";
-import { farmI18nClientBridgePlugin, farmPlugin } from "../vite";
+import { farmI18nClientBridgePlugin, farmPlugin, farmServerOnlyEntriesPlugin } from "../vite";
 import { logger } from "../utils";
 import { loadConfig, resolveConfig } from "../config";
 import { FarmRuntimeShutdownError, PluginManager } from "../plugin";
@@ -258,6 +258,7 @@ export async function createServer(config: FarmConfig = {}) {
             ...(rendererVitePlugins as any[]),
             createDevDependencyStubsPlugin(),
             farmI18nClientBridgePlugin(),
+            farmServerOnlyEntriesPlugin(),
             farmPlugin(finalConfig, pluginManager),
             farmEnvironmentFunctionsPlugin(),
             createBrandingPlugin(),

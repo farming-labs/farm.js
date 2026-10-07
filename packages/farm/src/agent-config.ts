@@ -5,6 +5,11 @@
  * unaffected.
  */
 import {
+  resolveFarmAgentCrawlers,
+  type FarmAgentCrawlers,
+  type ResolvedFarmAgentCrawlers,
+} from "./agent-crawlers";
+import {
   resolveFarmLlmsTxtConfig,
   type FarmLlmsTxtUserConfig,
   type ResolvedFarmLlmsTxtConfig,
@@ -61,12 +66,22 @@ export interface FarmAgentUserConfig {
    * @default false
    */
   llmsTxt?: boolean | FarmLlmsTxtUserConfig;
+  /**
+   * Serve a generated `/robots.txt` that allows or blocks AI search agents
+   * (`search`) and AI training crawlers (`training`), plus your own `rules`.
+   * `true` serves only `User-agent: *` / `Allow: /` and the sitemap. A
+   * `public/robots.txt` or `src/app/robots.ts` replaces the generated file.
+   *
+   * @default false
+   */
+  crawlers?: boolean | FarmAgentCrawlers;
 }
 
 export interface ResolvedFarmAgentConfig {
   jsonLd: FarmAgentJsonLd | false;
   noindexPreviews: boolean;
   llmsTxt: ResolvedFarmLlmsTxtConfig;
+  crawlers: ResolvedFarmAgentCrawlers;
 }
 
 export function resolveFarmAgentConfig(
@@ -77,6 +92,7 @@ export function resolveFarmAgentConfig(
     jsonLd: !jsonLd ? false : jsonLd === true ? {} : jsonLd,
     noindexPreviews: resolveFarmNoindexPreviews(input?.noindexPreviews),
     llmsTxt: resolveFarmLlmsTxtConfig(input?.llmsTxt),
+    crawlers: resolveFarmAgentCrawlers(input?.crawlers),
   };
 }
 

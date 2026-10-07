@@ -431,6 +431,26 @@ describe("resolveConfig", () => {
     expect(customized.agent.jsonLd).toEqual({ type: "SoftwareApplication", name: "Farm.js" });
   });
 
+  it("keeps the crawler policy off by default", async () => {
+    const defaults = await resolveConfig({}, "production");
+    expect(defaults.agent.crawlers).toEqual({ enabled: false, rules: [] });
+
+    const configured = await resolveConfig(
+      { agent: { crawlers: { search: "allow", training: "block" } } },
+      "production",
+    );
+    expect(configured.agent.crawlers).toEqual({
+      enabled: true,
+      search: "allow",
+      training: "block",
+      rules: [],
+    });
+
+    await expect(
+      resolveConfig({ agent: { crawlers: { training: "deny" as never } } }, "production"),
+    ).rejects.toThrow('agent.crawlers.training must be "allow" or "block".');
+  });
+
   it("keeps isolated client hydration off by default and preserves its rollout mode", async () => {
     const defaults = await resolveConfig({}, "production");
     const configured = await resolveConfig(
