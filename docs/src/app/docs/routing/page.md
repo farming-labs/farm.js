@@ -165,6 +165,11 @@ export function Nav() {
 }
 ```
 
+Same-page fragment links (such as `#settings`) and Back/Forward between those
+fragments keep the current page mounted without loading route data. Native
+anchor scrolling and `hashchange` listeners still work. A different pathname,
+query string, or intercepted-route context still performs route navigation.
+
 ## Lightweight router helpers
 
 Use the lightweight router when client components, layouts, breadcrumbs, tabs, or tests need to match app routes without adding a separate routing library.
