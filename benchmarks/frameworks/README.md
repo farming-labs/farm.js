@@ -6,10 +6,25 @@ server-rendered framework stacks. It does not treat their underlying build tools
 ## Fixture and validation
 
 Each pinned fixture serves one dynamic SSR route with the same CSS and 120-item DOM workload. Every
-timed response must return HTTP 200, `framework-benchmark-v1`, an item count of 120, and a numeric
-server-render timestamp. The runner also requests the exact same URL again and requires a different
-timestamp before measuring it, which prevents an accidentally static or per-URL cached fixture from
-being accepted.
+timed response must return HTTP 200 and exactly one real `<main>` with the benchmark marker and item
+count. The HTML parser validates all 120 ordered `<li>` rows, identifiers, and labels inside that
+fixture; marker strings or rows in scripts, comments, and inert templates do not count. The numeric
+server-render timestamp comes from that same element, not embedded serialized data. Framework
+comments, whitespace, extra attributes, and HTML entities are supported.
+
+Full-body response and first-page clocks stop before HTML parsing/validation. Every readiness,
+warm-up, and measured response must also have a render timestamp within that request's local
+wall-clock window, from immediately before the request until its full body has been read. This
+rejects stale responses even when caching begins after startup or partway through measurement, and
+rejects future timestamps or backwards request windows. The wall-clock snapshots and validation
+stay outside the monotonic response timer; no extra measured requests, sleeps, or cache-busting URLs
+are added. The separate startup check still requests the exact same URL again and requires a
+different timestamp before measurement.
+
+These controls require the fixture servers and runner to share one host and a stable wall clock.
+Timestamps have millisecond resolution: fresh renders may legitimately share a timestamp, and reuse
+within the same millisecond cannot be distinguished. Timestamp validation is a cache guard, not
+proof of unique execution for every response. Timing metrics still use the monotonic clock.
 
 The fixtures live in an isolated pnpm workspace under this directory. Farm.js links to the local
 `packages/farm` and `packages/farm-cli`; the other framework versions are pinned in the benchmark
@@ -29,15 +44,31 @@ It verifies the installed package versions against every label in the report bef
 - **Production boot:** production-process spawn to the first validated, fully read response.
 - **Production response:** sequential full-body loopback requests after warmups, reported as p50 and
   p95. Each request uses a fresh connection.
-- **HTML:** bytes in the production response body, reported because response size affects full-body
-  latency.
+- **Decoded HTML:** production body bytes after content decoding. `responseBytes` remains a
+  compatibility alias for `decodedResponseBodyBytes`.
+- **Encoded body:** production HTTP body bytes before decompression, counted from the received
+  chunks, not inferred from `Content-Length`. This excludes HTTP headers, chunk framing, TCP and TLS.
+  Summary byte metrics use each round's production-readiness response; raw per-response records also
+  retain byte counts and actual encoding for readiness, startup verification, warmups and measurements.
+
+Requests explicitly send `Accept-Encoding: identity` by default. Use `--encoding gzip` or
+`--encoding br` for separate compression diagnostics. A server may return identity; reports record
+that fallback rather than claiming compression was used. Unrequested encodings, corrupt/truncated
+bodies and response deadlines fail the run. Redirects are not followed: the fixture URL itself must
+return the validated HTTP 200 workload.
+
+Schema v2 uses Node HTTP/1.1 with a fresh connection and explicit content decoding, replacing the
+previous Fetch transport's implicit encoding/decompression. Full-body latency includes decoding;
+it is not isolated rendering time. **Do not compare these timings directly with schema-v1 reports.**
+Rerun all compared frameworks under the same encoding and transport. Existing published results are
+not rewritten by this change.
 
 All durations use Node's external monotonic clock. Readiness is checked every 2 ms so single-digit
 production-boot differences are not hidden by the polling interval. One unmeasured burn-in pass over
 every selected framework is discarded before collection. Measured orders use a seeded,
 position-balanced cyclic schedule: every complete block gives each framework every ordinal position
 exactly once, and partial blocks differ by at most one appearance per position. Raw JSON retains every
-timing sample.
+timing sample at full precision; displayed summary statistics are rounded.
 
 ## Cache and server policy
 
@@ -78,14 +109,18 @@ corepack pnpm install --frozen-lockfile
 corepack pnpm --dir benchmarks/frameworks install --frozen-lockfile
 ```
 
-An ordinary run prints a report but does **not** replace the checked-in results:
+An ordinary run saves raw samples and a report in a unique, Git-ignored `results/run-*/` directory
+and prints its path. It does **not** replace the checked-in results or landing-page data:
 
 ```sh
 node benchmarks/frameworks/run.mjs --runs 1 --requests 3 --warmups 1
+node benchmarks/frameworks/run.mjs --only farm,tanstack --encoding gzip --runs 1 --requests 3 --warmups 1
+node benchmarks/frameworks/run.mjs --only farm,tanstack --encoding br --runs 1 --requests 3 --warmups 1
 ```
 
-Validate scheduling, readiness precision, numeric options, environment sanitization, and publish
-guards without starting framework servers:
+Validate rendered fixtures, scheduling, readiness precision, numeric options, environment sanitization,
+and publish guards without starting framework servers (fixture tests use a temporary loopback HTTP
+server):
 
 ```sh
 corepack pnpm --dir benchmarks/frameworks self-check
@@ -98,7 +133,8 @@ node benchmarks/frameworks/run.mjs --runs 7 --requests 30 --warmups 30 --publish
 ```
 
 `--publish` requires all five frameworks, at least seven measured rounds, 30 measured requests, 30
-warmups, the discarded burn-in, and a fresh untimed build of the local Farm packages. It writes:
+warmups, identity encoding, the discarded burn-in, and a fresh untimed build of the local Farm
+packages. Compressed runs remain diagnostic-only so they cannot replace the canonical report. It writes:
 
 - `results/latest.json` — metadata, per-round data, and every raw sample.
 - `results/latest.md` — the concise human-readable report.
@@ -110,6 +146,54 @@ benchmark harness and fixture inputs, clean Farm sources, and a clean root lockf
 records the benchmark SHA-256 and whether the wider workspace was dirty. An exclusive PID lock
 prevents simultaneous suite runs. Publishing is also rejected when a measured round shows correlated
 contention: at least three frameworks with build times above 1.5× their own measured median.
+The report marks this assessment **unavailable** with fewer than three selected frameworks or three
+measured rounds. Otherwise, “not detected” is not proof of an idle host. Publication eligibility also
+requires the full methodology and clean inputs described above; partial runs are diagnostic only.
+
+### Generated-output ownership
+
+The fixture generators own these exact paths, relative to this benchmark directory:
+
+- `apps/farm/src/farm.d.ts`, the legacy `farm-routes.d.ts`, `farm-env.d.ts`, `farm-images.d.ts`
+  and `farm-i18n.d.ts` in the same directory, and `apps/farm/src/lib/api.generated.ts`.
+- `apps/tanstack/src/routeTree.gen.ts`.
+- `apps/next/next-env.d.ts`.
+
+They are outputs, not authored benchmark inputs: their creation, regeneration or removal does not
+invalidate source identity or make a run unpublishable. Reports retain their exact before/after
+SHA-256 values (or `null` for absent files) under `inputs.generatedOutputs`. A run refuses an existing
+reserved path without the expected generator marker, or a non-regular file such as a symlink, before
+fixture cleanup. The marker is an ownership check, not proof that a file was never manually edited.
+
+Keep handwritten types and code outside these generator-owned paths. There is no broad exclusion
+for `farm-*.d.ts`, other declarations or `*.generated.ts`: route sources, configuration, manifests,
+lockfiles and the exclusion policy itself remain fingerprinted. Their mid-run changes still fail.
+Generators may overwrite their owned outputs; use a disposable clean checkout if any existing
+generated version needs preserving. This policy does not reset, restore, stage or commit files, and
+the broader workspace-dirty flag still discloses tracked generated-output changes.
+
+## Buffered-response diagnostic
+
+For the focused buffered-HTML response ablation, build the local core runtime and Farm fixture,
+then run the diagnostic under Node 24.11+:
+
+```sh
+pnpm --filter @farm.js/core build:runtime
+pnpm --dir benchmarks/frameworks/apps/farm build
+node benchmarks/frameworks/preload-response.mjs > /tmp/farm-preload-response.json
+```
+
+For an isolated-runner check, manually dispatch the CI workflow with
+`preload-response-benchmark` enabled. Its opt-in diagnostic job builds the maintained fixture,
+collects two independent comparisons, and retains the raw JSON artifact for review. It does not
+assert timing thresholds or replace canonical results; check the recorded load and distributions
+before drawing a performance conclusion.
+
+This runs five alternating fresh-process pairs against the same built SSR entry, with 1,000 warmups
+and 3,000 measured requests per process. The baseline forces the old buffered-body path; both arms
+retain the no-candidate preload scanner guard. Every response is checked for equivalent HTML and
+same-URL freshness. Output includes raw batch samples, CPU time, and machine load. It is an
+in-process diagnostic, not network latency or a canonical cross-framework result.
 
 ## Limitations
 

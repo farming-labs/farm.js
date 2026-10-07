@@ -664,6 +664,12 @@ evicted on its next read, and a periodic background sweep also removes expired e
 consumer is watching, so unread keys do not accumulate in long-lived sessions. Older runtimes
 without `WeakRef` retain the existing strong subscription, so avoid repeatedly creating callers
 there. Request-local server caches do not subscribe to the global invalidation channel.
+Lazy expiry checks ownership only for the expired key and its aliases. Unrelated subscriptions
+and requests are not scanned on each expired read; aliases and invalidation metadata remain
+available while a related consumer or request still owns them.
+Explicit entry deletion follows the same metadata cleanup rules: unowned aliases and invalidation
+marks are released, while observed keys retain them until their last owner leaves. Deleting a key
+that has never held an entry does not discard an explicit invalidation made before its first write.
 
 Use `scope: "shared"` only for public data requested with `credentials: "omit"` and no custom
 headers that intentionally shares a structured key with route data or another API client:
@@ -829,6 +835,13 @@ them through the ordinary client invalidation path. Mounted stale queries theref
 their existing inputs, cache policy, and current browser credentials. Native `EventSource`
 reconnection handles transient disconnects; Farm's existing focus and reconnect revalidation covers
 events missed while the browser was offline.
+
+The stream is best-effort, not a durable event log: reconnects do not replay missed keys.
+To bound memory for slow clients, Farm limits queued encoded output to 64 KiB and each pending
+microtask batch to 1,024 distinct keys / 64 KiB of UTF-16 key data. Overflow (including an oversized
+key or encoded batch) errors the stream and releases its listener and heartbeat; EventSource can
+reconnect normally. Heartbeats are skipped while output is queued. Apps requiring guaranteed
+delivery should use a durable event source and explicitly resynchronize reads after reconnecting.
 
 The stream forwards events from the current server process. A multi-instance deployment needs a
 shared pub/sub backplane feeding each instance's invalidation bus. That is intentionally outside the

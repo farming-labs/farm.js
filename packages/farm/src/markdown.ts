@@ -1,3 +1,27 @@
+/** Content type for Markdown responses, including agent-facing error bodies. */
+export const FARM_MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8";
+
+export function farmRequestWantsMarkdown(
+  pathname: string,
+  accept: string | null | undefined,
+): boolean {
+  return pathname.toLowerCase().endsWith(".md") || requestAcceptsMarkdown(accept);
+}
+
+export function createFarmMarkdownErrorBody(
+  status: number,
+  pathname: string,
+  homeHref = "/",
+): string {
+  const heading = status === 404 ? "Page not found" : `Request failed (${status})`;
+  return (
+    `# ${heading}\n\n` +
+    `No page is available at \`${pathname}\`. The URL may be incorrect, ` +
+    `or the page has not been published.\n\n` +
+    `Browse [the site homepage](${homeHref}) to find available pages.\n`
+  );
+}
+
 export type FarmMarkdownRouteInput =
   | string
   | {
@@ -184,14 +208,11 @@ export function applyMarkdownNegotiationHeaders(
     return response;
   }
 
-  const target = resolveMarkdownMirrorTarget(options.config, options.pathname, {
-    accept: "text/markdown",
-  });
-  if (!target) {
+  const alternatePath = getFarmMarkdownAlternatePath(options.config, options.pathname);
+  if (!alternatePath) {
     return response;
   }
 
-  const alternatePath = getMarkdownAlternatePath(target.pathname);
   const headers = new Headers(response.headers);
   appendHeaderToken(headers, "Vary", "Accept");
   headers.append("Link", `<${alternatePath}>; rel="alternate"; type="text/markdown"`);
@@ -423,6 +444,19 @@ function getMarkdownAlternatePath(pathname: string): string {
 /** @internal The `.md` URL that serves a page's Markdown mirror. */
 export function getFarmMarkdownMirrorPath(pathname: string): string {
   return getMarkdownAlternatePath(pathname);
+}
+
+/**
+ * @internal The `.md` URL to advertise for the HTML page at `pathname`, or
+ * null when it has no Markdown mirror. Both the `Link` response header and the
+ * `<link rel="alternate">` in the document head come from this.
+ */
+export function getFarmMarkdownAlternatePath(
+  config: FarmMarkdownResolvedConfig | undefined,
+  pathname: string,
+): string | null {
+  const target = resolveMarkdownMirrorTarget(config, pathname, { accept: "text/markdown" });
+  return target ? getMarkdownAlternatePath(target.pathname) : null;
 }
 
 /** @internal Whether `pathname` has a Markdown mirror under `config`. */

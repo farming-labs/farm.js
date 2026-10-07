@@ -8,6 +8,18 @@ import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
+import {
+  marker,
+  requestPage,
+  isFreshFixtureResponse,
+  measureRequests,
+  responseEncodings,
+} from "./fixture.mjs";
+import {
+  generatedBenchmarkOutputs,
+  generatedOutputExclusions,
+  inspectGeneratedOutputs,
+} from "./input-policy.mjs";
 
 const benchmarkDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(benchmarkDir, "../..");
@@ -21,7 +33,6 @@ const appsRoot = path.join(benchmarkDir, "apps");
 const resultsDir = path.join(benchmarkDir, "results");
 const benchmarkGitPath = path.relative(repoRoot, benchmarkDir).split(path.sep).join("/");
 const lockPath = path.join(benchmarkDir, ".benchmark.lock");
-const marker = "framework-benchmark-v1";
 const basePort = 46100;
 const processTimeoutMs = 8 * 60 * 1000;
 const readinessPollIntervalMs = 2;
@@ -255,6 +266,7 @@ function parseOptions(argv) {
     prepare: true,
     publish: false,
     burnIn: true,
+    encoding: "identity",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -266,6 +278,14 @@ function parseOptions(argv) {
       if (inlineValue === undefined) index += 1;
       const key = name.slice(2);
       options[key] = parseIntegerOption(name, nextValue);
+      continue;
+    }
+
+    if (name === "--encoding") {
+      if (inlineValue === undefined) index += 1;
+      if (!responseEncodings.includes(nextValue))
+        throw new Error("--encoding must be identity, gzip, or br");
+      options.encoding = nextValue;
       continue;
     }
 
@@ -314,22 +334,24 @@ function parseOptions(argv) {
   if (unknown.length) throw new Error("Unknown framework: " + unknown.join(", "));
   if (!options.only.length) throw new Error("Select at least one framework");
 
-  if (options.publish) {
-    const canonicalIds = frameworks.map((framework) => framework.id);
-    const isCanonicalSet =
-      options.only.length === canonicalIds.length &&
-      canonicalIds.every((id) => options.only.includes(id));
-    if (!isCanonicalSet || options.runs < 7 || options.requests < 30 || options.warmups < 30) {
-      throw new Error(
-        "Publishing requires all frameworks, at least 7 rounds, 30 requests, and 30 warmups",
-      );
-    }
-    if (!options.burnIn) throw new Error("Publishing requires the unmeasured burn-in round");
-    if (!options.prepare) {
-      throw new Error("Publishing requires rebuilding the local Farm packages");
-    }
-  }
+  if (options.publish) assertPublishableOptions(options);
   return options;
+}
+
+function assertPublishableOptions(options) {
+  const canonicalIds = frameworks.map((framework) => framework.id);
+  const isCanonicalSet =
+    options.only.length === canonicalIds.length &&
+    canonicalIds.every((id) => options.only.includes(id));
+  if (!isCanonicalSet || options.runs < 7 || options.requests < 30 || options.warmups < 30) {
+    throw new Error(
+      "Publishing requires all frameworks, at least 7 rounds, 30 requests, and 30 warmups",
+    );
+  }
+  if (!options.burnIn) throw new Error("Publishing requires the unmeasured burn-in round");
+  if (!options.prepare) throw new Error("Publishing requires rebuilding the local Farm packages");
+  if (options.encoding !== "identity")
+    throw new Error("Publishing requires identity encoding; compressed runs are diagnostic only");
 }
 
 function printHelp() {
@@ -342,6 +364,7 @@ function printHelp() {
       "  --runs N          cold dev/build/boot rounds (default: 7)",
       "  --requests N      measured requests per server and round (default: 30)",
       "  --warmups N       excluded warm-up requests per server and round (default: 30)",
+      "  --encoding MODE   identity (default), gzip, or br; records actual response encoding",
       "  --only LIST       comma-separated framework ids",
       "  --seed N          deterministic round-order seed",
       "  --skip-prepare    skip the untimed local Farm package build",
@@ -390,7 +413,7 @@ function summarize(samples) {
     p95: round(percentile(sorted, 0.95)),
     min: round(sorted[0] || 0),
     max: round(sorted[sorted.length - 1] || 0),
-    samples: samples.map(round),
+    samples: [...samples],
   };
 }
 
@@ -466,7 +489,14 @@ function assertPositionBalanced(orders, values) {
   }
 }
 
-function runSelfChecks() {
+async function runSelfChecks() {
+  const fixtureChecks = await runCommand(process.execPath, [
+    "--test",
+    path.join(benchmarkDir, "fixture.test.mjs"),
+    path.join(benchmarkDir, "encoding.test.mjs"),
+    path.join(benchmarkDir, "input-identity.test.mjs"),
+  ]);
+  console.log(fixtureChecks.output.trim());
   if (readinessPollIntervalMs > 2) {
     throw new Error("Readiness polling must retain single-digit millisecond precision");
   }
@@ -552,7 +582,212 @@ function runSelfChecks() {
     }
   }
 
+  const canonical = parseOptions([]);
+  assertEncodingOptions();
+  const rounds = Array.from({ length: 7 }, (_, index) => ({
+    index: index + 1,
+    frameworks: Object.fromEntries(
+      frameworks.map(({ id }) => [
+        id,
+        {
+          buildMs: 100,
+          responses: {
+            dev: [{ contentEncoding: "identity" }],
+            production: [{ contentEncoding: "identity" }],
+          },
+        },
+      ]),
+    ),
+  }));
+  const assert = (condition, message) => {
+    if (!condition) throw new Error(message);
+  };
+  assert(summarize([0.123456789]).samples[0] === 0.123456789, "Raw samples must not be rounded");
+  for (const count of [1, 2]) {
+    const selected = frameworks.slice(0, count);
+    const quality = createReportQuality(
+      { ...canonical, only: selected.map(({ id }) => id) },
+      selected,
+      rounds,
+      cleanIdentity,
+    );
+    assert(
+      quality.contentionAssessment.status === "unavailable",
+      "Partial selection must not imply no contention",
+    );
+    assert(!quality.publishable, "Partial selection must not be publishable");
+  }
+  assert(
+    createReportQuality(canonical, frameworks, rounds.slice(0, 1), cleanIdentity)
+      .contentionAssessment.status === "unavailable",
+    "One round cannot assess correlated contention",
+  );
+  const quiet = createReportQuality(canonical, frameworks, rounds, cleanIdentity);
+  assert(
+    quiet.contentionAssessment.status === "not-detected" && quiet.publishable,
+    "Qualifying quiet run should remain publishable",
+  );
+  const contended = createReportQuality(
+    canonical,
+    frameworks,
+    [
+      ...rounds,
+      {
+        index: 8,
+        frameworks: Object.fromEntries(frameworks.map(({ id }) => [id, { buildMs: 200 }])),
+      },
+    ],
+    cleanIdentity,
+  );
+  assert(
+    contended.contentionAssessment.status === "detected" && !contended.publishable,
+    "Correlated contention must block publication",
+  );
+  for (const overrides of [
+    { runs: 1 },
+    { requests: 1 },
+    { warmups: 0 },
+    { burnIn: false },
+    { prepare: false },
+  ]) {
+    assert(
+      !createReportQuality({ ...canonical, ...overrides }, frameworks, rounds, cleanIdentity)
+        .publishable,
+      "Insufficient methodology must block publication",
+    );
+  }
+  for (const key of Object.keys(cleanIdentity)) {
+    assert(
+      !createReportQuality(canonical, frameworks, rounds, { ...cleanIdentity, [key]: true })
+        .publishable,
+      "Dirty report must not be publishable",
+    );
+  }
+
+  // Construct a fresh report instead of loading a saved one: serialization tests
+  // alone cannot catch failures between collecting samples and writing them.
+  const rawSamples = Object.fromEntries(
+    [
+      "devFirstPageMs",
+      "devFirstRequestMs",
+      "devWarmResponseMs",
+      "buildMs",
+      "productionBootMs",
+      "productionResponseMs",
+      "responseBytes",
+      "encodedResponseBodyBytes",
+      "decodedResponseBodyBytes",
+    ].map((key, index) => [key, [index + 0.123456789, index + 2.987654321]]),
+  );
+  const report = createReport(
+    canonical,
+    frameworks,
+    new Map(frameworks.map(({ id }) => [id, rawSamples])),
+    rounds,
+    {
+      ...cleanIdentity,
+      commit: "self-check-revision",
+      branch: "self-check",
+      inputSha256: "self-check-inputs",
+      rootLockSha256: "self-check-lockfile",
+      workspaceDirty: false,
+    },
+  );
+  assert(report.fixture.marker === "framework-benchmark-v1", "Report must identify the fixture");
+  assert(
+    report.schemaVersion === 2 && report.methodology.requestEncoding === "identity",
+    "Report must disclose the transport and encoding methodology",
+  );
+  assert(report.revision.commit === "self-check-revision", "Report must retain its revision");
+  assert(report.frameworks.length === frameworks.length, "Report must retain every framework");
+  for (const framework of report.frameworks) {
+    for (const [metric, values] of Object.entries(rawSamples)) {
+      assert(
+        JSON.stringify(framework.metrics[metric].samples) === JSON.stringify(values),
+        "Fresh report must retain unrounded samples: " + framework.id + "/" + metric,
+      );
+    }
+  }
+  const published = createPublishedReport(report);
+  assert(
+    published.frameworks.every(
+      (framework) => framework.responseEncodings.production.join() === "identity",
+    ),
+    "Actual encoding must survive aggregation and publication",
+  );
+  assert(
+    published.methodology.requestEncoding === "identity",
+    "Published report must retain encoding",
+  );
+  assert(
+    createMarkdown(report).includes("Encoded body"),
+    "Markdown must distinguish body byte metrics",
+  );
+  assert(published.fixture.marker === report.fixture.marker, "Published fixture must match");
+  assert(
+    published.frameworks.every((framework) =>
+      Object.values(framework.metrics).every((metric) => !("samples" in metric)),
+    ),
+    "Compact published data must omit raw samples",
+  );
+  report.quality = createReportQuality(
+    { ...canonical, only: ["farm"] },
+    [frameworks[0]],
+    rounds,
+    cleanIdentity,
+  );
+  assert(
+    createMarkdown(report).includes("unavailable"),
+    "Markdown must disclose unavailable contention assessment",
+  );
+  assert(
+    !createMarkdown(report).includes("latest.json"),
+    "Unsaved report must not link older canonical samples",
+  );
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "farm-benchmark-report-test-"));
+  try {
+    const first = await writeDiagnosticReport(report, temporary);
+    const second = await writeDiagnosticReport(report, temporary);
+    assert(first.jsonPath !== second.jsonPath, "Diagnostic runs must have unique artifacts");
+    assert(
+      JSON.stringify(JSON.parse(await fs.readFile(first.jsonPath, "utf8"))) ===
+        JSON.stringify(report),
+      "Diagnostic JSON must retain all raw samples",
+    );
+    const markdown = await fs.readFile(first.markdownPath, "utf8");
+    assert(
+      markdown.includes("raw.json") && !markdown.includes("latest.json"),
+      "Diagnostic Markdown must link its own samples",
+    );
+    assert(
+      (await fs.readdir(temporary)).length === 2,
+      "Diagnostic writes must not create canonical outputs",
+    );
+  } finally {
+    await fs.rm(temporary, { recursive: true, force: true });
+  }
   console.log("Benchmark harness self-checks passed");
+}
+
+function assertEncodingOptions() {
+  for (const encoding of responseEncodings) {
+    if (parseOptions(["--encoding=" + encoding]).encoding !== encoding)
+      throw new Error("Encoding option was lost");
+  }
+  for (const args of [
+    ["--encoding"],
+    ["--encoding=deflate"],
+    ["--encoding=gzip", "--publish"],
+    ["--encoding=br", "--publish"],
+  ]) {
+    let rejected = false;
+    try {
+      parseOptions(args);
+    } catch {
+      rejected = true;
+    }
+    if (!rejected) throw new Error("Invalid encoding/publication options were accepted");
+  }
 }
 
 function appendOutput(state, chunk) {
@@ -712,51 +947,31 @@ async function runCommand(command, args, options = {}) {
   return { durationMs, output: output.value };
 }
 
-async function requestPage(url, timeoutMs = 60000) {
-  const startedAt = performance.now();
-  const response = await fetch(url, {
-    cache: "no-store",
-    headers: { connection: "close" },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const body = await response.text();
-  const renderedAtMatch = body.match(/data-rendered-at="(\d+)"/);
-  return {
-    body,
-    bytes: Buffer.byteLength(body),
-    durationMs: performance.now() - startedAt,
-    renderedAt: renderedAtMatch ? Number.parseInt(renderedAtMatch[1], 10) : null,
-    status: response.status,
-  };
-}
-
-function isValidFixtureResponse(response) {
-  return (
-    response.status === 200 &&
-    response.body.includes(marker) &&
-    response.body.includes('data-item-count="120"') &&
-    Number.isFinite(response.renderedAt)
-  );
-}
-
-async function waitForRenderedPage(child, output, url, startedAt) {
+async function waitForRenderedPage(child, output, url, startedAt, options) {
   const deadline = performance.now() + 180000;
   while (performance.now() < deadline) {
     if (hasExited(child)) {
       throw new Error("Server exited before rendering the fixture.\n" + output.value);
     }
     try {
-      const response = await requestPage(url);
-      if (isValidFixtureResponse(response)) {
+      const response = await requestPage(url, 60000, options.encoding);
+      if (isFreshFixtureResponse(response)) {
+        options.onResponse(response, "ready");
         return {
-          elapsedMs: performance.now() - startedAt,
+          elapsedMs: response.completedAt - startedAt,
           firstRequestMs: response.durationMs,
           responseBytes: response.bytes,
+          encodedBodyBytes: response.encodedBodyBytes,
+          decodedBodyBytes: response.decodedBodyBytes,
           renderedAt: response.renderedAt,
         };
       }
-    } catch {
-      // The port is not listening yet.
+    } catch (error) {
+      // Retry only a server that has not started listening. Bad encodings,
+      // broken bodies and request deadlines are failures, not readiness signals.
+      const failures = error instanceof AggregateError ? error.errors : [error];
+      if (!failures.length || failures.some((failure) => failure.code !== "ECONNREFUSED"))
+        throw error;
     }
     await new Promise((resolve) => setTimeout(resolve, readinessPollIntervalMs));
   }
@@ -769,39 +984,21 @@ async function launchServer(command, args, options) {
   const startedAt = performance.now();
   const { child, output } = spawnProcess(command, args, options);
   try {
-    const ready = await waitForRenderedPage(child, output, options.url, startedAt);
+    const ready = await waitForRenderedPage(child, output, options.url, startedAt, options);
     await new Promise((resolve) => setTimeout(resolve, 6));
-    const dynamicResponse = await requestPage(options.url);
+    const dynamicResponse = await requestPage(options.url, 60000, options.encoding);
     if (
-      !isValidFixtureResponse(dynamicResponse) ||
+      !isFreshFixtureResponse(dynamicResponse) ||
       dynamicResponse.renderedAt === ready.renderedAt
     ) {
       throw new Error("Fixture did not produce a fresh dynamic SSR response");
     }
+    options.onResponse(dynamicResponse, "verification");
     return { child, output, ready };
   } catch (error) {
     await stopProcess(child);
     throw error;
   }
-}
-
-async function measureRequests(url, warmups, count) {
-  for (let index = 0; index < warmups; index += 1) {
-    const response = await requestPage(url);
-    if (!isValidFixtureResponse(response)) {
-      throw new Error("Fixture validation failed during warm-up");
-    }
-  }
-
-  const samples = [];
-  for (let index = 0; index < count; index += 1) {
-    const response = await requestPage(url);
-    if (!isValidFixtureResponse(response)) {
-      throw new Error("Fixture validation failed during measured request");
-    }
-    samples.push(response.durationMs);
-  }
-  return samples;
 }
 
 async function cleanFramework(framework) {
@@ -866,15 +1063,33 @@ async function runRound(framework, round, options) {
   const port = basePort + round * 20 + frameworks.findIndex((item) => item.id === framework.id);
   const url = "http://" + (framework.devHost || "127.0.0.1") + ":" + port + "/";
   const cliPath = path.join(appDir, framework.cli);
+  const responses = { dev: [], production: [] };
+  const recordResponses = (mode) => ({
+    encoding: options.encoding,
+    onResponse: (response, phase) =>
+      responses[mode].push({
+        phase,
+        durationMs: response.durationMs,
+        contentEncoding: response.contentEncoding,
+        encodedBodyBytes: response.encodedBodyBytes,
+        decodedBodyBytes: response.decodedBodyBytes,
+      }),
+  });
 
   await cleanFramework(framework);
   const devServer = await launchServer(process.execPath, [cliPath, ...framework.devArgs(port)], {
     cwd: appDir,
     url,
+    ...recordResponses("dev"),
   });
   let devWarmSamples;
   try {
-    devWarmSamples = await measureRequests(url, options.warmups, options.requests);
+    devWarmSamples = await measureRequests(
+      url,
+      options.warmups,
+      options.requests,
+      recordResponses("dev"),
+    );
   } finally {
     await stopProcess(devServer.child);
   }
@@ -891,10 +1106,16 @@ async function runRound(framework, round, options) {
     cwd: appDir,
     env: production.env,
     url: productionUrl,
+    ...recordResponses("production"),
   });
   let productionSamples;
   try {
-    productionSamples = await measureRequests(productionUrl, options.warmups, options.requests);
+    productionSamples = await measureRequests(
+      productionUrl,
+      options.warmups,
+      options.requests,
+      recordResponses("production"),
+    );
   } finally {
     await stopProcess(productionServer.child);
   }
@@ -907,6 +1128,9 @@ async function runRound(framework, round, options) {
     productionBootMs: productionServer.ready.elapsedMs,
     productionResponseMs: productionSamples,
     responseBytes: productionServer.ready.responseBytes,
+    encodedResponseBodyBytes: productionServer.ready.encodedBodyBytes,
+    decodedResponseBodyBytes: productionServer.ready.decodedBodyBytes,
+    responses,
   };
 }
 
@@ -935,8 +1159,7 @@ async function collectBenchmarkInputFiles(directory = benchmarkDir, relativeDire
     }
     if (
       relativePath === ".benchmark.lock" ||
-      /^apps\/farm\/src\/farm-.*\.d\.ts$/.test(relativePath) ||
-      relativePath === "apps/farm/src/lib/api.generated.ts"
+      Object.hasOwn(generatedBenchmarkOutputs, relativePath)
     ) {
       continue;
     }
@@ -968,6 +1191,9 @@ function readCommand(command, args = []) {
 }
 
 async function collectRunIdentity() {
+  // Validate ownership before any fixture cleanup or generator can overwrite a
+  // reserved output. Hash outputs separately so their normal churn is visible.
+  const generatedOutputs = await inspectGeneratedOutputs(benchmarkDir);
   const farmSourceStatus = readCommand("git", [
     "status",
     "--porcelain",
@@ -989,6 +1215,7 @@ async function collectRunIdentity() {
     "--",
     benchmarkGitPath,
     ":(exclude)" + benchmarkGitPath + "/results/**",
+    ...generatedOutputExclusions(benchmarkGitPath),
   ]);
   return {
     benchmarkInputsDirty: benchmarkInputStatus !== "",
@@ -1002,6 +1229,7 @@ async function collectRunIdentity() {
       .update(await fs.readFile(path.join(repoRoot, "pnpm-lock.yaml")))
       .digest("hex"),
     inputSha256: await hashBenchmarkInputs(),
+    generatedOutputs,
   };
 }
 
@@ -1068,9 +1296,8 @@ function detectContendedRounds(rounds) {
 }
 
 function createReport(options, selected, samplesByFramework, rounds, identity) {
-  const contendedRounds = detectContendedRounds(rounds);
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     revision: {
       benchmarkInputsDirty: identity.benchmarkInputsDirty,
@@ -1084,6 +1311,7 @@ function createReport(options, selected, samplesByFramework, rounds, identity) {
     inputs: {
       sha256: identity.inputSha256,
       rootLockSha256: identity.rootLockSha256,
+      generatedOutputs: identity.generatedOutputs,
     },
     fixture: {
       name: "small-dynamic-ssr",
@@ -1105,22 +1333,22 @@ function createReport(options, selected, samplesByFramework, rounds, identity) {
         "Ambient Node compile-cache controls removed; framework CLIs retain their normal compile-cache behavior",
       readinessPollIntervalMs,
       timer: "External monotonic wall clock",
+      requestEncoding: options.encoding,
+      responseTransport:
+        "Node HTTP/1.1 with explicit decoding (v2; not directly comparable to the prior Fetch transport)",
+      responseBodyBytes:
+        "Encoded and decoded HTTP body bytes; excludes headers, chunk framing, and TLS. responseBytes is the legacy decoded-size alias.",
       devFirstPage:
         "Framework process spawn to the first HTTP 200 containing the expected rendered marker",
       cleanBuild: "Framework build process spawn to successful exit after generated-cache removal",
       productionBoot:
         "Built production process spawn to the first HTTP 200 containing the expected marker",
       responseLatency:
-        "Sequential full-body loopback HTTP requests with a fresh connection; warmups excluded",
+        "Sequential full-body loopback HTTP requests with a fresh connection, including decompression and UTF-8 decoding; validation and warmups excluded",
       productionCommand:
         "Recommended framework production command; Next.js uses next start and every other row uses a generated server entry",
     },
-    quality: {
-      contendedRounds,
-      contentionRule:
-        "Publishing is blocked when at least three frameworks exceed 1.5× their own median build time in the same round",
-      publishable: contendedRounds.length === 0,
-    },
+    quality: createReportQuality(options, selected, rounds, identity),
     system: collectSystemMetadata(),
     rounds,
     frameworks: selected.map((framework) => {
@@ -1130,6 +1358,20 @@ function createReport(options, selected, samplesByFramework, rounds, identity) {
         label: framework.label,
         version: framework.version,
         stack: framework.stack,
+        responseEncodings: Object.fromEntries(
+          ["dev", "production"].map((mode) => [
+            mode,
+            [
+              ...new Set(
+                rounds.flatMap((round) =>
+                  (round.frameworks[framework.id]?.responses?.[mode] || []).map(
+                    (response) => response.contentEncoding,
+                  ),
+                ),
+              ),
+            ],
+          ]),
+        ),
         metrics: {
           devFirstPageMs: summarize(samples.devFirstPageMs),
           devFirstRequestMs: summarize(samples.devFirstRequestMs),
@@ -1138,14 +1380,54 @@ function createReport(options, selected, samplesByFramework, rounds, identity) {
           productionBootMs: summarize(samples.productionBootMs),
           productionResponseMs: summarize(samples.productionResponseMs),
           responseBytes: summarize(samples.responseBytes),
+          encodedResponseBodyBytes: summarize(samples.encodedResponseBodyBytes),
+          decodedResponseBodyBytes: summarize(samples.decodedResponseBodyBytes),
         },
       };
     }),
   };
 }
 
+function createReportQuality(options, selected, rounds, identity) {
+  const available = selected.length >= 3 && rounds.length >= 3;
+  const contendedRounds = available ? detectContendedRounds(rounds) : [];
+  const contentionAssessment = {
+    status: !available ? "unavailable" : contendedRounds.length ? "detected" : "not-detected",
+    ...(!available
+      ? { reason: "Requires at least three selected frameworks and three measured rounds" }
+      : {}),
+  };
+  const publicationBlockers = [];
+  if (rounds.length !== options.runs)
+    publicationBlockers.push("Measured round count does not match the requested methodology");
+  for (const check of [
+    () => assertPublishableOptions(options),
+    () => assertPublishableRunIdentity(identity),
+  ]) {
+    try {
+      check();
+    } catch (error) {
+      publicationBlockers.push(error.message);
+    }
+  }
+  if (!available) publicationBlockers.push(contentionAssessment.reason);
+  if (contendedRounds.length)
+    publicationBlockers.push(
+      "Correlated host contention in measured round(s): " + contendedRounds.join(", "),
+    );
+  return {
+    contendedRounds,
+    contentionAssessment,
+    contentionRule:
+      "At least three frameworks exceeding 1.5× their own median build time in the same round; assessment requires at least three frameworks and three measured rounds",
+    publicationBlockers,
+    publishable: publicationBlockers.length === 0,
+  };
+}
+
 function createPublishedReport(report) {
   return {
+    schemaVersion: report.schemaVersion,
     generatedAt: report.generatedAt,
     revision: {
       benchmarkInputsDirty: report.revision.benchmarkInputsDirty,
@@ -1168,6 +1450,9 @@ function createPublishedReport(report) {
       cache: report.methodology.cache,
       nodeCompileCache: report.methodology.nodeCompileCache,
       readinessPollIntervalMs: report.methodology.readinessPollIntervalMs,
+      requestEncoding: report.methodology.requestEncoding,
+      responseTransport: report.methodology.responseTransport,
+      responseBodyBytes: report.methodology.responseBodyBytes,
     },
     system: report.system,
     frameworks: report.frameworks.map((framework) => ({
@@ -1175,6 +1460,7 @@ function createPublishedReport(report) {
       label: framework.label,
       version: framework.version,
       stack: framework.stack,
+      responseEncodings: framework.responseEncodings,
       metrics: Object.fromEntries(
         Object.entries(framework.metrics).map(([key, value]) => [key, withoutSamples(value)]),
       ),
@@ -1182,7 +1468,7 @@ function createPublishedReport(report) {
   };
 }
 
-function createMarkdown(report) {
+function createMarkdown(report, samplesPath = null, readmePath = "../README.md") {
   const lines = [
     "# Meta-framework benchmark",
     "",
@@ -1192,8 +1478,8 @@ function createMarkdown(report) {
       report.revision.commit.slice(0, 12) +
       ".",
     "",
-    "| Framework | First dev page | Warm dev | Fixture build | Production boot | Production response p50 / p95 | HTML |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| Framework | First dev page | Warm dev | Fixture build | Production boot | Production response p50 / p95 | Decoded HTML | Encoded body | Actual encoding (dev / prod) |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
   ];
 
   for (const framework of report.frameworks) {
@@ -1217,7 +1503,13 @@ function createMarkdown(report) {
         formatMs(metrics.productionResponseMs.p95) +
         " | " +
         Math.round(metrics.responseBytes.median).toLocaleString("en") +
-        " B |",
+        " B | " +
+        Math.round(metrics.encodedResponseBodyBytes.median).toLocaleString("en") +
+        " B | " +
+        framework.responseEncodings.dev.join(", ") +
+        " / " +
+        framework.responseEncodings.production.join(", ") +
+        " |",
     );
   }
 
@@ -1228,6 +1520,11 @@ function createMarkdown(report) {
     "## Scope",
     "",
     "- Fixture: " + report.fixture.description,
+    "- Requested Accept-Encoding: " +
+      report.methodology.requestEncoding +
+      ". Identity fallback is recorded, not treated as compressed output.",
+    "- Transport: " + report.methodology.responseTransport + ".",
+    "- Body sizes: " + report.methodology.responseBodyBytes,
     "- Build metric: complete fixture-project production build; local Farm package preparation is excluded.",
     "- Warm responses: " +
       report.methodology.warmupRequestsPerRun +
@@ -1250,21 +1547,43 @@ function createMarkdown(report) {
       ".",
     "- Runtime: Node " + report.system.node + ", pnpm " + report.system.pnpm + ".",
     "- Benchmark input SHA-256: " + report.inputs.sha256 + ".",
+    "- Known generator-owned outputs are excluded from source identity and fingerprinted separately in JSON; authored inputs remain guarded.",
     "- Benchmark inputs dirty: " + (report.revision.benchmarkInputsDirty ? "yes" : "no") + ".",
     "- Farm source dirty: " + (report.revision.farmSourceDirty ? "yes" : "no") + ".",
     "- Root lockfile dirty: " + (report.revision.rootLockDirty ? "yes" : "no") + ".",
     "- Workspace dirty: " +
       (report.revision.workspaceDirty ? "yes; the broader workspace state is recorded" : "no") +
       ".",
-    "- Contended measured rounds detected: " +
-      (report.quality.contendedRounds.length ? report.quality.contendedRounds.join(", ") : "none") +
+    "- Correlated-contention assessment: " +
+      (report.quality.contentionAssessment?.status === "unavailable"
+        ? "unavailable — " + report.quality.contentionAssessment.reason
+        : report.quality.contendedRounds.length
+          ? "detected in round(s) " + report.quality.contendedRounds.join(", ")
+          : "not detected (not proof of an idle host)") +
       ".",
+    "- Publication eligible: " + (report.quality.publishable ? "yes" : "no") + ".",
     "",
-    "See ../README.md for metric boundaries, controls, limitations, and reproduction steps. " +
-      "The complete samples are in latest.json.",
+    "See " +
+      readmePath +
+      " for metric boundaries, controls, limitations, and reproduction steps. " +
+      (samplesPath
+        ? "The complete samples are in " + samplesPath + "."
+        : "Raw samples have not been saved."),
     "",
   );
   return lines.join("\n");
+}
+
+async function writeDiagnosticReport(report, directory = resultsDir) {
+  await fs.mkdir(directory, { recursive: true });
+  const runDirectory = await fs.mkdtemp(path.join(directory, "run-"));
+  const jsonPath = path.join(runDirectory, "raw.json");
+  const markdownPath = path.join(runDirectory, "report.md");
+  await fs.writeFile(jsonPath, JSON.stringify(report, null, 2) + "\n", { flag: "wx" });
+  await fs.writeFile(markdownPath, createMarkdown(report, "raw.json", "../../README.md"), {
+    flag: "wx",
+  });
+  return { jsonPath, markdownPath };
 }
 
 async function writeReports(report) {
@@ -1280,7 +1599,7 @@ async function writeReports(report) {
       path: path.join(resultsDir, "latest.json"),
       contents: JSON.stringify(report, null, 2) + "\n",
     },
-    { path: path.join(resultsDir, "latest.md"), contents: createMarkdown(report) },
+    { path: path.join(resultsDir, "latest.md"), contents: createMarkdown(report, "latest.json") },
     {
       path: path.join(repoRoot, "docs/src/lib/benchmark-results.generated.ts"),
       contents: generatedModule,
@@ -1316,7 +1635,7 @@ async function main() {
   if (arguments_.includes("--self-check")) {
     if (arguments_.length !== 1)
       throw new Error("--self-check cannot be combined with other options");
-    runSelfChecks();
+    await runSelfChecks();
     return;
   }
   await acquireBenchmarkLock();
@@ -1352,6 +1671,8 @@ async function runBenchmark() {
         productionBootMs: [],
         productionResponseMs: [],
         responseBytes: [],
+        encodedResponseBodyBytes: [],
+        decodedResponseBodyBytes: [],
       },
     ]),
   );
@@ -1402,6 +1723,8 @@ async function runBenchmark() {
       samples.productionBootMs.push(result.productionBootMs);
       samples.productionResponseMs.push(...result.productionResponseMs);
       samples.responseBytes.push(result.responseBytes);
+      samples.encodedResponseBodyBytes.push(result.encodedResponseBodyBytes);
+      samples.decodedResponseBodyBytes.push(result.decodedResponseBodyBytes);
       roundRecord.frameworks[framework.id] = {
         devFirstPageMs: Math.round(result.devFirstPageMs * 100) / 100,
         devWarmResponseMs: summarize(result.devWarmResponseMs).median,
@@ -1409,6 +1732,9 @@ async function runBenchmark() {
         productionBootMs: Math.round(result.productionBootMs * 100) / 100,
         productionResponseMs: summarize(result.productionResponseMs).median,
         responseBytes: result.responseBytes,
+        encodedResponseBodyBytes: result.encodedResponseBodyBytes,
+        decodedResponseBodyBytes: result.decodedResponseBodyBytes,
+        responses: result.responses,
       };
       console.log(
         "dev " +
@@ -1424,19 +1750,31 @@ async function runBenchmark() {
 
   const endIdentity = await collectRunIdentity();
   assertRunIdentityUnchanged(startIdentity, endIdentity);
-  const report = createReport(options, selected, samplesByFramework, roundRecords, startIdentity);
-  console.log("\n" + createMarkdown(report));
-
+  const report = createReport(options, selected, samplesByFramework, roundRecords, {
+    ...startIdentity,
+    generatedOutputs: {
+      before: startIdentity.generatedOutputs,
+      after: endIdentity.generatedOutputs,
+    },
+  });
   if (options.publish) {
     if (!report.quality.publishable) {
-      throw new Error(
-        "Refusing to publish: correlated host contention detected in measured round(s) " +
-          report.quality.contendedRounds.join(", "),
-      );
+      throw new Error("Refusing to publish: " + report.quality.publicationBlockers.join("; "));
     }
     await writeReports(report);
+    console.log("\n" + createMarkdown(report, "latest.json"));
     console.log("Raw samples: " + path.relative(repoRoot, path.join(resultsDir, "latest.json")));
   } else {
+    const saved = await writeDiagnosticReport(report);
+    console.log(
+      "\n" +
+        createMarkdown(
+          report,
+          path.relative(repoRoot, saved.jsonPath),
+          "benchmarks/frameworks/README.md",
+        ),
+    );
+    console.log("Raw samples: " + path.relative(repoRoot, saved.jsonPath));
     console.log("Canonical result files unchanged. Pass --publish for a qualifying full run.");
   }
 }

@@ -1,6 +1,8 @@
 import {
   assertNoSchemaListField,
+  collectSchemaExtensions,
   collectSchemaModels,
+  describeSchemaReference,
   escapeSqlString,
   findSchemaTableOwners,
   generateFarmTypeArtifacts,
@@ -14,6 +16,7 @@ import {
   toCamelCase,
   type CollectedSchemaModel,
   type FarmSchema,
+  type FarmSchemaExtension,
   type FarmSchemaReference,
   type ResolvedSchemaField,
 } from "@farm.js/core";
@@ -245,6 +248,9 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
   }
 
   const collectedModels = collectSchemaModels(schemaEntries);
+  const extensions = schemaEntries.flatMap(([owner, schema, models]) =>
+    collectSchemaExtensions(owner, schema, models),
+  );
 
   switch (orm) {
     case "prisma": {
@@ -260,6 +266,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
 
       await writePrismaSchema(schemaPath, collectedModels);
       logger.success(`Generated Prisma integration schema in ${path.relative(root, schemaPath)}.`);
+      warnAboutExtensions(extensions, "prisma", "postgres");
       return typeArtifacts;
     }
 
@@ -278,6 +285,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
         : path.join(root, "farm-integrations.generated.ts");
       await writeGeneratedFile(outputPath, generateDrizzleSchema(collectedModels, dialect));
       logger.success(`Generated Drizzle integration schema in ${path.relative(root, outputPath)}.`);
+      warnAboutExtensions(extensions, "drizzle", dialect);
       return typeArtifacts;
     }
 
@@ -433,6 +441,69 @@ async function detectDrizzleDialect(
   }
 
   return candidates.size === 1 ? Array.from(candidates)[0]! : null;
+}
+
+/**
+ * Generated files only hold the tables Farm's owners create. Columns they add
+ * to the app's own tables belong in the app's schema, so say exactly what.
+ */
+function warnAboutExtensions(
+  extensions: readonly FarmSchemaExtension[],
+  orm: "prisma" | "drizzle",
+  dialect: GenerateFarmSqlDialect,
+) {
+  for (const extension of extensions) {
+    logger.warn(
+      `${extension.owner} adds columns to "${extension.table}", which your ${orm === "prisma" ? "Prisma" : "Drizzle"} schema owns. Add them there and run its migration:\n${renderSchemaExtensionForOrm(orm, extension, dialect)}`,
+    );
+  }
+}
+
+/**
+ * ORMs whose schema files own this app's tables. A column added behind their
+ * back is drift their next migration would undo, so Farm reports instead.
+ */
+export function detectOrmSchemaOwners(root: string): Array<"prisma" | "drizzle"> {
+  const owners: Array<"prisma" | "drizzle"> = [];
+  if (existsSync(path.join(root, "prisma", "schema.prisma"))) owners.push("prisma");
+  if (
+    findExistingPath(root, [
+      "drizzle.config.ts",
+      "drizzle.config.mts",
+      "drizzle.config.js",
+      "drizzle.config.mjs",
+      "drizzle.config.cjs",
+    ])
+  ) {
+    owners.push("drizzle");
+  }
+  return owners;
+}
+
+/** What to add to the app's own Prisma or Drizzle schema for an extension. */
+export function renderSchemaExtensionForOrm(
+  orm: "prisma" | "drizzle",
+  extension: FarmSchemaExtension,
+  dialect: GenerateFarmSqlDialect,
+): string {
+  if (orm === "prisma") {
+    return [
+      `// In the Prisma model mapped to "${extension.table}":`,
+      ...extension.fields.map(({ fieldKey, field }) => {
+        const attributes = [
+          getPrismaDefaultAttribute(field),
+          field.name !== fieldKey ? `@map("${escapeDoubleQuoted(field.name)}")` : undefined,
+        ].filter(Boolean);
+        return `${fieldKey} ${getPrismaFieldType(field)}${isNullableField(field) ? "?" : ""}${attributes.length ? ` ${attributes.join(" ")}` : ""}`;
+      }),
+    ].join("\n");
+  }
+  return [
+    `// In the Drizzle table for "${extension.table}":`,
+    ...extension.fields.map(
+      ({ fieldKey, field }) => `${fieldKey}: ${renderDrizzleColumn(field, dialect)},`,
+    ),
+  ].join("\n");
 }
 
 function findExistingPath(root: string, relativePaths: readonly string[]) {
@@ -740,7 +811,7 @@ function renderDrizzleModel(
 
     if (field.reference && !reference) {
       lines.push(
-        `  // ${fieldKey} references ${field.reference.model}.${field.reference.field}${field.reference.onDelete ? ` (onDelete: ${field.reference.onDelete})` : ""}`,
+        `  // ${fieldKey} references ${describeSchemaReference(model, fieldKey)}${field.reference.onDelete ? ` (onDelete: ${field.reference.onDelete})` : ""}`,
       );
     }
 
@@ -1065,7 +1136,7 @@ function generateMongoBootstrap(models: readonly CollectedSchemaModel[]) {
 
       if (field.reference) {
         lines.push(
-          `  // ${fieldKey} references ${field.reference.model}.${field.reference.field}${field.reference.onDelete ? ` (onDelete: ${field.reference.onDelete})` : ""}`,
+          `  // ${fieldKey} references ${describeSchemaReference(model, fieldKey)}${field.reference.onDelete ? ` (onDelete: ${field.reference.onDelete})` : ""}`,
         );
       }
     }

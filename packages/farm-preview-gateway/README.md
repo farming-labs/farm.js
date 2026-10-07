@@ -14,6 +14,15 @@ The gateway limits public request bodies and local preview response bodies to 5 
 
 Public disconnects are propagated through the request queue. The polling agent aborts the matching localhost fetch instead of leaving abandoned app work running until its timeout.
 
+`authorizeSession` is an optional, required-when-configured access hook. It receives only
+session ID, name, verified owner/project/key/grant IDs, and expiry—not transport tokens.
+Return `true` to allow access; denial returns 403 and exceptions return a generic 503.
+The gateway checks registration, public/control requests, queued dispatch and waiting responses.
+Unlike `observer`, errors never fail open. Bound your authority request with a timeout;
+the Infra example uses five seconds. Session DELETE remains available for cleanup.
+Omitting the hook preserves self-hosted behavior. The persistent relay offers the same
+hook, also checking idle sockets every five seconds and dispatch from its coordinator.
+
 Managed deployments can configure `auth` with a GitHub OAuth client id and a signing secret. The gateway then exposes the CLI login exchange, issues account-bound tunnel grants scoped to one preview name and absolute expiry, and requires a grant before creating a session:
 
 ```ts

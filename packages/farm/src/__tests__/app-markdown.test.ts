@@ -2,6 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
+  FARM_MARKDOWN_CONTENT_TYPE,
   createFarmMarkdownErrorBody,
   createFarmMarkdownRouteModule,
   createFarmMarkdownSourceResponse,
@@ -9,8 +10,21 @@ import {
   parseMarkdownFrontmatter,
   resolveMdxConfig,
 } from "../app-markdown";
+import * as markdown from "../markdown";
+import * as appMarkdownRuntime from "../app-markdown-runtime";
 
 describe("markdown request negotiation and errors", () => {
+  it("preserves the response helpers through both existing entry points", () => {
+    expect(FARM_MARKDOWN_CONTENT_TYPE).toBe(markdown.FARM_MARKDOWN_CONTENT_TYPE);
+    expect(createFarmMarkdownErrorBody).toBe(markdown.createFarmMarkdownErrorBody);
+    expect(farmRequestWantsMarkdown).toBe(markdown.farmRequestWantsMarkdown);
+    expect(appMarkdownRuntime.FARM_MARKDOWN_CONTENT_TYPE).toBe(markdown.FARM_MARKDOWN_CONTENT_TYPE);
+    expect(appMarkdownRuntime.createFarmMarkdownErrorBody).toBe(
+      markdown.createFarmMarkdownErrorBody,
+    );
+    expect(appMarkdownRuntime.farmRequestWantsMarkdown).toBe(markdown.farmRequestWantsMarkdown);
+  });
+
   it("detects Markdown requests by extension or Accept header", () => {
     expect(farmRequestWantsMarkdown("/guide.md", null)).toBe(true);
     expect(farmRequestWantsMarkdown("/guide", "text/markdown")).toBe(true);

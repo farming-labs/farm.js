@@ -4,6 +4,8 @@ import type { PreviewFarmOptions, PreviewTarget } from "./preview";
 import { formatCompactPreviewDuration } from "./preview-duration";
 
 export interface PreviewGatewayPlan {
+  project?: string;
+  dashboardUrl?: string;
   provider: "farm-gateway";
   gatewayUrl: string;
   relayUrl: string;
@@ -155,6 +157,8 @@ export async function runPreviewGateway(
 
   logger.success("Preview URL ready.");
   logger.info(`Public: ${session.publicUrl}`);
+  if (plan.dashboardUrl)
+    logger.info(`Dashboard: ${plan.dashboardUrl}/${encodeURIComponent(session.id)}`);
   if (session.expiresAt) {
     logger.info(`Expires: ${new Date(session.expiresAt).toLocaleString()}`);
   }
@@ -548,6 +552,7 @@ export function formatGatewayPlan(plan: PreviewGatewayPlan) {
     `Gateway: ${plan.gatewayUrl}`,
     `Relay:   ${plan.relayUrl}`,
     `Local:   ${plan.target.localUrl}`,
+    ...(plan.project ? [`Project: ${plan.project}`] : []),
     `Public:  ${plan.requestedPublicUrl}`,
     ...(plan.expiresInMs
       ? [`Expires: after ${formatCompactPreviewDuration(plan.expiresInMs)}`]
