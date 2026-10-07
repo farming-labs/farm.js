@@ -1268,7 +1268,7 @@ async function buildClient(
   hydrationPlanCache: Map<string, ClientModuleHydrationPlan> = new Map(),
 ) {
   const viteBuild = productionVite.build;
-  const { farmPlugin } = await import("../vite");
+  const { farmPlugin, farmServerOnlyEntriesPlugin } = await import("../vite");
   const { PluginManager } = await import("../plugin");
   const fs = await import("fs/promises");
 
@@ -1697,6 +1697,7 @@ async function buildClient(
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
         ...(rendererVitePlugins as any[]),
         ...(config.vite.plugins || []),
+        farmServerOnlyEntriesPlugin(),
         // Plugin to redirect @farm.js/core imports to client-only exports
         {
           name: "farm-client-only-imports",

@@ -4119,6 +4119,50 @@ export default function OpenGraphImage() {
     }
   }, 120_000);
 
+  it("rejects @farm.js/core/og in a client component at build time", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "share-button.tsx"),
+        `
+"use client";
+
+import { ImageResponse } from "@farm.js/core/og";
+
+export default function ShareButton() {
+  return <button onClick={() => new ImageResponse(<div />)}>share</button>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+import ShareButton from "./share-button";
+
+export default function Page() {
+  return <main><ShareButton /></main>;
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "og-image-response-client-test",
+        },
+        "production",
+      );
+
+      await expect(build(config, { root, preset: "node-server" })).rejects.toThrow(
+        "@farm.js/core/og is server-only and cannot be imported into client code",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("serves a React.lazy opengraph-image as a PNG from a built universal node-server", async () => {
     const root = await createProductionFixture();
 
@@ -4225,6 +4269,52 @@ export function GET(request) {
           expect(imageSize(bytes)).toMatchObject({ width: 600, height: 315, type: "png" });
         },
         "/api/card?title=Shared",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("serves an @farm.js/core/og ImageResponse from an API route on a built node-server", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      // The import reaches @vercel/og through core's bundled og entry, not the app.
+      await fs.mkdir(path.join(root, "src", "app", "api", "card"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "api", "card", "route.tsx"),
+        `
+import { ImageResponse } from "@farm.js/core/og";
+
+export function GET() {
+  return new ImageResponse(<div style={{ display: "flex" }}>core og route</div>, {
+    width: 600,
+    height: 315,
+  });
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "core-og-api-route-node-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(response.headers.get("content-type")).toBe("image/png");
+          const bytes = Buffer.from(await response.arrayBuffer());
+          expect(imageSize(bytes)).toMatchObject({ width: 600, height: 315, type: "png" });
+        },
+        "/api/card",
       );
     } finally {
       await fs.rm(root, { recursive: true, force: true });

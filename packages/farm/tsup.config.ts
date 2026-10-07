@@ -59,6 +59,7 @@ export const farmPackageBuildOptions = {
     image: "src/image.tsx",
     "image/server": "src/image-server.ts",
     "image/sharp": "src/image-sharp.ts",
+    og: "src/og.ts",
     "i18n/index": "src/i18n/index.ts",
     "i18n/server": "src/i18n/server.ts",
     "i18n/client": "src/i18n/client.tsx",
