@@ -22,6 +22,7 @@ import type { FarmClientPlugin } from "./client/plugin";
 import { getResolvedEnv, type ResolvedFarmEnv } from "./env";
 import {
   clearRequestContext,
+  copyRequestContext,
   deleteRequestContext,
   getRequestContext,
   getRequestContextSnapshot,
@@ -854,15 +855,7 @@ export class PluginManager {
   }
 
   private copyRequestStore(source: FarmRequest | Request, target: FarmRequest | Request): void {
-    const requestContext = this.context.requestContext;
-    const values = requestContext.getAll(source);
-    const exposed = requestContext.getAll(source, { exposedOnly: true });
-
-    for (const [key, value] of values) {
-      requestContext.set(target, key, value, {
-        exposeToPage: exposed.has(key),
-      });
-    }
+    copyRequestContext(source, target);
   }
 
   private copyRuntimeRequestContext(source: Request, target: Request): void {
