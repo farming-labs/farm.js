@@ -523,6 +523,11 @@ export async function checkSchema(
             tables: models.map((model) => model.modelName),
             dialect: database.dialect,
             executor: database.executor,
+            othersTables: new Set(
+              [...ownedModels]
+                .filter(([name]) => name !== owner.name)
+                .flatMap(([, entries]) => entries.map((entry) => entry.modelName)),
+            ),
           })
         : undefined;
       checkSteps(owner, stepPlan, issues);
@@ -709,7 +714,7 @@ function checkSteps(
       severity: "warning",
       code: "migration-step-pending",
       owner: owner.name,
-      message: `${owner.name} has ${pending.length} migration step(s) not run yet: ${pending.map((planned) => planned.summary).join("; ")}.`,
+      message: `${owner.name} has ${pending.length} migration step(s) not run yet: ${pending.map((planned) => `${planned.summary}${planned.destructive ? " (deletes data)" : ""}`).join("; ")}.`,
       hint: `Run ${command} to review and apply them.`,
     });
   }

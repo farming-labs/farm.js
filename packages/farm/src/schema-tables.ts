@@ -105,6 +105,8 @@ export interface MigrateSchemaTablesOptions {
    * only reported, so the ORM's migrations stay the source of truth.
    */
   extensions?: "apply" | "report";
+  /** Run migration steps that delete data, such as dropping a column. */
+  allowDestructive?: boolean;
   log?: (message: string) => void;
 }
 
@@ -189,6 +191,17 @@ export async function migrateSchemaTables(
   const stepsRan: string[] = [];
   let stepsStopped: FarmPlannedSchemaStep | undefined;
   if (steps.length > 0) {
+    const othersTables = new Set(
+      (options.config ? findSchemaTableOwners(options.config as never) : [])
+        .filter((other) => other.name !== owner.name)
+        .flatMap((other) => {
+          try {
+            return collectOwnerModels(other).map((model) => model.modelName);
+          } catch {
+            return [];
+          }
+        }),
+    );
     stepPlan = await planOwnerSchemaSteps({
       owner: owner.name,
       schema: owner.schema,
@@ -197,6 +210,7 @@ export async function migrateSchemaTables(
       dialect,
       executor,
       readApplied: !reportOnly,
+      othersTables,
     });
     for (const id of stepPlan.edited) {
       log(
@@ -208,6 +222,13 @@ export async function migrateSchemaTables(
     for (const planned of stepPlan?.steps ?? []) {
       if (stepsStopped) return;
       if (planned.phase !== phase) continue;
+      if (planned.state === "run" && planned.destructive && !options.allowDestructive) {
+        stepsStopped = planned;
+        log(
+          `Stopped at migration step "${planned.step.id}" (${planned.summary}): it deletes data. Run again with --allow-destructive to let it. Later steps wait.`,
+        );
+        return;
+      }
       if (planned.state === "blocked") {
         stepsStopped = planned;
         log(
@@ -257,7 +278,7 @@ export async function migrateSchemaTables(
     log(
       [
         versions,
-        ...describeStepChanges(stepPlan),
+        ...describeStepChanges(stepPlan, Boolean(options.allowDestructive)),
         ...describeSchemaChanges(withoutStepChanges(changes, stepPlan)),
         ...renameHints(withoutStepChanges(changes, stepPlan)),
       ].join("\n"),
@@ -267,6 +288,12 @@ export async function migrateSchemaTables(
   // history; an extra table would only show up as drift in its tooling.
   const recordState = async () => {
     if (options.extensions === "report") return;
+    // The snapshot moves to this version only once every step has run: a
+    // drop step proves what the plugin created from the previous snapshot.
+    const unfinished = (stepPlan?.steps ?? []).some(
+      (planned) => !stepsRan.includes(planned.step.id),
+    );
+    if (stepsStopped || unfinished) return;
     try {
       await writeSchemaState(executor, dialect, owner.name, { version: owner.version, snapshot });
     } catch (error) {
@@ -377,8 +404,13 @@ export async function migrateSchemaTables(
     (plan.upgrades?.length ?? 0) +
     approved.length +
     foreignKeysAllowed.length;
-  // Steps still to run (or record) here, up to the first one that cannot.
-  const blockedAt = (stepPlan?.steps ?? []).findIndex((planned) => planned.state === "blocked");
+  // Steps still to run (or record) here, up to the first one that cannot:
+  // blocked, or deleting data without --allow-destructive.
+  const blockedAt = (stepPlan?.steps ?? []).findIndex(
+    (planned) =>
+      planned.state === "blocked" ||
+      (planned.state === "run" && planned.destructive && !options.allowDestructive),
+  );
   const runnableSteps = (stepPlan?.steps ?? [])
     .slice(0, blockedAt === -1 ? undefined : blockedAt)
     .filter((planned) => !stepsRan.includes(planned.step.id)).length;
@@ -520,12 +552,21 @@ function formatForeignKeys(
 }
 
 /** The steps, numbered, as the upgrade summary shows them. */
-function describeStepChanges(stepPlan: FarmSchemaStepPlan | undefined): string[] {
+function describeStepChanges(
+  stepPlan: FarmSchemaStepPlan | undefined,
+  allowDestructive: boolean,
+): string[] {
   const pending = (stepPlan?.steps ?? []).filter((planned) => planned.state !== "record");
   return pending.map((planned, index) => {
     const when = planned.phase === "after" ? " (after the changes below)" : "";
+    const deletes =
+      planned.destructive && planned.state === "run"
+        ? allowDestructive
+          ? "  ⚠ deletes data"
+          : "  ⚠ deletes data, needs --allow-destructive"
+        : "";
     const blocked = planned.state === "blocked" ? `  ✗ blocked: ${planned.reason}` : "";
-    return `  ${index + 1}. ${planned.summary}${when}${blocked}`;
+    return `  ${index + 1}. ${planned.summary}${when}${deletes}${blocked}`;
   });
 }
 
@@ -598,7 +639,9 @@ function formatSteps(
       : "-- Migration steps, run after the changes above:";
   const lines = [heading];
   for (const entry of planned) {
-    lines.push(`-- ${entry.step.id}: ${entry.summary}`);
+    lines.push(
+      `-- ${entry.step.id}: ${entry.summary}${entry.destructive ? "  (deletes data)" : ""}`,
+    );
     if (entry.state === "blocked") {
       lines.push(`--   blocked: ${entry.reason}`);
       continue;

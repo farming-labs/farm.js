@@ -244,6 +244,7 @@ schemaCommand
   .option("-c, --config <config>", "Path to farm config file")
   .option("-w, --write <file>", "Write the statements to one file instead of printing them")
   .option("--apply", "Execute the statements against the database")
+  .option("--allow-destructive", "Also run migration steps that delete data")
   .action(async (options) => {
     try {
       const { askToConfirm, migrateAllSchemas } = require("../dist/index.js");
@@ -252,6 +253,7 @@ schemaCommand
         configPath: options.config,
         write: options.write,
         apply: options.apply,
+        allowDestructive: options.allowDestructive,
         // Only a person at a terminal is asked; scripts and CI print and stop.
         confirm: process.stdin.isTTY && process.stdout.isTTY ? askToConfirm : undefined,
       });
@@ -672,6 +674,7 @@ async function dispatchSchemaMigrate() {
     .option("-c, --config <config>", "Path to farm config file")
     .option("-w, --write <file>", "Write the statements to a file instead of printing them")
     .option("--apply", "Execute the statements against the database")
+    .option("--allow-destructive", "Also run migration steps that delete data")
     .action(async (options) => {
       const { askToConfirm, migrateSchema } = require("../dist/index.js");
       await migrateSchema(name, {
@@ -679,6 +682,7 @@ async function dispatchSchemaMigrate() {
         configPath: options.config,
         write: options.write,
         apply: options.apply,
+        allowDestructive: options.allowDestructive,
         confirm: process.stdin.isTTY && process.stdout.isTTY ? askToConfirm : undefined,
       });
     });
