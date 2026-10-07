@@ -429,6 +429,7 @@ describe("production prebuilt SSR output", () => {
             "two items",
           ],
           ["/docs/a%2Fb/guide", ["root", "docs", "page"], "a/b/guide"],
+          ["/reports/a%252Fb/activity", ["root", "reports", "item", "page"], "a%2Fb"],
           ["/", ["root"], undefined],
         ] as const) {
           const response = await fetch(new URL(pathname, initial.url));
@@ -443,6 +444,9 @@ describe("production prebuilt SSR output", () => {
         const malformed = await fetch(new URL("/docs/%ZZ", initial.url));
         expect(malformed.status).toBe(400);
         await malformed.arrayBuffer();
+        const missing = await fetch(new URL("/unknown/route", initial.url));
+        expect(missing.status).toBe(404);
+        await missing.arrayBuffer();
       });
     } finally {
       await fs.rm(root, { recursive: true, force: true });

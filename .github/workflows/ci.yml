@@ -11,6 +11,10 @@ on:
         description: Collect production layout-order diagnostic samples on an isolated runner
         type: boolean
         default: false
+      page-route-inputs-benchmark:
+        description: Collect production page-route input diagnostic samples on an isolated runner
+        type: boolean
+        default: false
   push:
     branches: [main]
   pull_request:
@@ -84,6 +88,57 @@ jobs:
         with:
           name: layout-order-${{ github.sha }}
           path: ${{ runner.temp }}/layout-order-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  page-route-inputs-benchmark:
+    name: Page Route Inputs Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.page-route-inputs-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - name: Verify generated route matching
+        run: pnpm --filter @farm.js/core exec vitest run src/__tests__/production-page-route-inputs.test.ts src/__tests__/universal-build-router-runtime.test.ts src/__tests__/route-matcher-parity.test.ts src/__tests__/guard-pathname-canonicalization.test.ts
+      - name: Collect two independent alternating comparisons
+        run: |
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-first.json"
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-second.json"
+      - name: Isolate catch-all measurements from preceding scenarios
+        env:
+          FARM_PAGE_ROUTE_SCENARIO: catchAll
+        run: |
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-catchall-short-first.json"
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-catchall-short-second.json"
+      - name: Measure warmed catch-all matching separately
+        env:
+          FARM_PAGE_ROUTE_SCENARIO: catchAll
+          FARM_PAGE_ROUTE_WARMUPS: "100000"
+          FARM_PAGE_ROUTE_ITERATIONS: "1000000"
+        run: |
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-catchall-long-first.json"
+          node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-catchall-long-second.json"
+      - name: Measure warmed unchanged-path controls separately
+        env:
+          FARM_PAGE_ROUTE_WARMUPS: "100000"
+          FARM_PAGE_ROUTE_ITERATIONS: "1000000"
+        run: |
+          for scenario in staticHit genericControl; do
+            for repetition in first second; do
+              FARM_PAGE_ROUTE_SCENARIO="$scenario" node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-$scenario-long-$repetition.json"
+            done
+          done
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: page-route-inputs-${{ github.sha }}
+          path: ${{ runner.temp }}/page-route-inputs-*.json
           if-no-files-found: warn
           retention-days: 14
 

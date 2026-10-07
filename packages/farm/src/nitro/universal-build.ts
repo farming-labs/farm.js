@@ -1935,6 +1935,10 @@ const farmCatchAllParamSegments = Symbol("farm.catch-all-param-segments");
 function matchRuntimePathPattern(pattern, pathname) {
   const patternSegments = splitRuntimePath(pattern);
   const pathnameSegments = splitRuntimePath(pathname).map(decodeRouteSegment);
+  return matchRuntimePathSegments(patternSegments, pathnameSegments);
+}
+
+function matchRuntimePathSegments(patternSegments, pathnameSegments) {
   const failedStates = new Set();
 
   function matchFrom(patternIndex, pathIndex, params, catchAllParamSegments) {
@@ -5909,7 +5913,7 @@ const exactPageRoutes = new Map();
 const patternPageRoutes = [];
 for (const route of pageRoutes) {
   if (/[\\[\\]*:]/.test(route.pattern)) {
-    patternPageRoutes.push(route);
+    patternPageRoutes.push({ route, segments: splitRuntimePath(route.pattern) });
   } else {
     const exactPath = normalizeRuntimePath(route.pattern);
     if (!exactPageRoutes.has(exactPath)) exactPageRoutes.set(exactPath, route);
@@ -6838,8 +6842,12 @@ function matchPageRoute(pathname) {
   const exactRoute = exactPageRoutes.get(normalizeRuntimePath(pathname));
   if (exactRoute) return { route: exactRoute, params: {} };
 
-  for (const route of patternPageRoutes) {
-    const params = matchRuntimePathPattern(route.pattern, pathname);
+  if (patternPageRoutes.length === 0) return null;
+  // The page manifest is immutable. Reuse its pattern parts and decode this
+  // request once, while each match retains its own params and backtracking state.
+  const pathnameSegments = splitRuntimePath(pathname).map(decodeRouteSegment);
+  for (const { route, segments } of patternPageRoutes) {
+    const params = matchRuntimePathSegments(segments, pathnameSegments);
     if (params !== null) return { route, params };
   }
   return null;
