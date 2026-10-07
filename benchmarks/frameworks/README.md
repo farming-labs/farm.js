@@ -126,6 +126,26 @@ server):
 corepack pnpm --dir benchmarks/frameworks self-check
 ```
 
+### Investigating failed runs
+
+A failed burn-in or measured round reports the framework, round, and phase (development startup
+or requests, production build, or production startup or requests). Server startup/request failures
+also include the URL and the captured server-output tail. Nested causes and connection-error entries
+retain their codes, addresses, and ports. A final process-cleanup failure is logged separately
+without hiding the original failure. Keep the command output when investigating an incomplete run:
+
+```sh
+node benchmarks/frameworks/run.mjs --only farm,tanstack > /tmp/farm-benchmark.log 2>&1
+```
+
+Failures still abort the run with a nonzero exit status; incomplete runs do not produce a scored
+report or replace canonical results. Readiness retries only connection-refused errors from a server
+that has not started listening. Connection resets, deadlines, invalid encodings and broken bodies
+remain failures, not reasons to retry a timed request or extend its timeout. Error context is assembled
+only after failure and does not change the successful request timers or validation.
+
+### Publishing results
+
 To reproduce and publish the canonical report and landing-page data:
 
 ```sh
