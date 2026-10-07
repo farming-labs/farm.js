@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import robots from "../app/robots";
 import { launchPost } from "./blog";
 import { SITE_URL } from "./site";
-import { createSiteSitemapResponse, getSiteSitemap, SITE_SITEMAP_PATH } from "./site-sitemap";
+import { createSiteSitemapResponse, getSiteSitemap } from "./site-sitemap";
 
 const appDir = fileURLToPath(new URL("../app/", import.meta.url));
 
@@ -45,9 +45,6 @@ describe("site sitemap", () => {
   });
 
   it("is listed in robots.txt next to the docs sitemap", () => {
-    expect(robots().sitemap).toEqual([
-      `${SITE_URL}/sitemap.xml`,
-      `${SITE_URL}${SITE_SITEMAP_PATH}`,
-    ]);
+    expect(robots().sitemap).toEqual([`${SITE_URL}/sitemap.xml`, `${SITE_URL}/sitemap-site.xml`]);
   });
 });

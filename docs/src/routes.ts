@@ -1,6 +1,11 @@
 import { handleUIRegistryRequest, UI_REGISTRY_ROUTE_PATTERN } from "@farm.js/cli/ui-registry";
 import { defineRoutes } from "@farm.js/core";
-import { createSiteSitemapResponse, SITE_SITEMAP_PATH } from "./lib/site-sitemap";
+import {
+  createSiteSitemapResponse,
+  LEGACY_SITE_SITEMAP_PATH,
+  SITE_SITEMAP_PATH,
+} from "./lib/site-sitemap";
+import { SITE_URL } from "./lib/site";
 
 // farmjs.dev serves the shadcn registry that `farm add integration --ui` writes
 // into every generated `components.json` as `https://farmjs.dev/r/{name}.json`.
@@ -20,5 +25,9 @@ export default defineRoutes(({ api }) => [
   }),
   api(SITE_SITEMAP_PATH, {
     GET: () => createSiteSitemapResponse(),
+  }),
+  // robots.txt listed the extensionless path before, so crawlers may still ask for it.
+  api(LEGACY_SITE_SITEMAP_PATH, {
+    GET: () => Response.redirect(`${SITE_URL}${SITE_SITEMAP_PATH}`, 301),
   }),
 ]);
