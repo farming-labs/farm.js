@@ -43,6 +43,52 @@ interface CachedMiddlewareConfig {
 
 const compiledConfigCache = new WeakMap<MiddlewareConfig, CachedMiddlewareConfig>();
 
+interface FileMiddlewareRoute {
+  path: string;
+}
+
+const compiledRouteCache = new WeakMap<
+  FileMiddlewareRoute,
+  {
+    path: string;
+    exact: CompiledPattern;
+    nested: CompiledPattern;
+  }
+>();
+
+/** Internal file-route preparation shared by discovery and the production runner. */
+export function compileMiddlewareRoute(entry: FileMiddlewareRoute) {
+  const path = entry.path;
+  if (path === "/") return undefined;
+  const cached = compiledRouteCache.get(entry);
+  if (cached?.path === path) return cached;
+  const compiled = {
+    path,
+    exact: compilePattern(path),
+    nested: compilePattern(`${path}/:__farmRest*`),
+  };
+  compiledRouteCache.set(entry, compiled);
+  return compiled;
+}
+
+export function matchesMiddlewareRoute(
+  pathname: string,
+  entry: FileMiddlewareRoute,
+): { matched: boolean; params?: Record<string, string> } {
+  // Compare the live path so edits through getMiddlewares() remain observable.
+  // Weak ownership also releases old patterns when discovery/HMR replaces entries.
+  const compiled = compileMiddlewareRoute(entry);
+  if (!compiled) return { matched: true };
+  const canonicalPathname = canonicalizeRequestPathname(pathname);
+  const exactMatch = matchPattern(compiled.exact, canonicalPathname);
+  if (exactMatch.matched) return exactMatch;
+  const nestedMatch = matchPattern(compiled.nested, canonicalPathname);
+  if (!nestedMatch.matched) return { matched: false };
+  const params = { ...nestedMatch.params };
+  delete params.__farmRest;
+  return { matched: true, params: Object.keys(params).length > 0 ? params : undefined };
+}
+
 function sameEntries<T>(
   current: readonly T[] | undefined,
   previous: readonly T[] | undefined,
