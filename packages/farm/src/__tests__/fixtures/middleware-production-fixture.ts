@@ -73,6 +73,8 @@ export default {
       summary: "Pages served by the production fixture.",
       exclude: ["/rewrite-target"],
     },
+    // The fixture's root robots.ts keeps /robots.txt.
+    crawlers: { training: "block" },
   },
   deploy: {
     target: "vercel",

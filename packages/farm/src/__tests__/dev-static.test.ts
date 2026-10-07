@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   devServableFileExists,
-  farmAppOwnsLlmsPath,
+  farmAppOwnsDocsEnginePath,
   shouldBypassFarmRouterForDottedPath,
 } from "../dev-static";
 
@@ -162,7 +162,7 @@ describe("shouldBypassFarmRouterForDottedPath", () => {
 
   it("treats a public llms file as the app's own, ahead of the docs engine", () => {
     const owns = (pathname: string, generatedPaths: string[] = [], metadata: string[] = []) =>
-      farmAppOwnsLlmsPath(pathname, {
+      farmAppOwnsDocsEnginePath(pathname, {
         generatedPaths,
         routeManager: createRouteManager({ metadata }),
         publicDir,
@@ -185,7 +185,30 @@ describe("shouldBypassFarmRouterForDottedPath", () => {
     } finally {
       fs.rmSync(path.join(root, "llms.txt"));
     }
-    expect(owns("/robots.txt", ["/robots.txt"])).toBe(false);
+  });
+
+  it("treats a root sitemap.ts or robots.ts as the app's own, ahead of the docs engine", () => {
+    const owns = (pathname: string, metadata: string[] = []) =>
+      farmAppOwnsDocsEnginePath(pathname, {
+        generatedPaths: [],
+        routeManager: createRouteManager({ metadata }),
+        publicDir,
+      });
+
+    // No sitemap.ts or robots.ts: the docs engine keeps both.
+    expect(owns("/sitemap.xml")).toBe(false);
+    expect(owns("/robots.txt")).toBe(false);
+    expect(owns("/sitemap.xml", ["/sitemap.xml"])).toBe(true);
+    expect(owns("/robots.txt", ["/robots.txt"])).toBe(true);
+    fs.writeFileSync(path.join(publicDir, "robots.txt"), "User-agent: *\n");
+    try {
+      expect(owns("/robots.txt")).toBe(true);
+    } finally {
+      fs.rmSync(path.join(publicDir, "robots.txt"));
+    }
+    // The docs engine's other sitemap paths and other metadata files stay out of scope.
+    expect(owns("/sitemap.md", ["/sitemap.md"])).toBe(false);
+    expect(owns("/manifest.webmanifest", ["/manifest.webmanifest"])).toBe(false);
   });
 
   it("never bypasses undotted or html paths", () => {

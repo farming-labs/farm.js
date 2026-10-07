@@ -3,7 +3,12 @@
 import { transform } from "esbuild";
 import { describe, expect, it } from "vitest";
 import type { FarmDocsResolvedConfig } from "../config";
-import { generateFarmDocsRuntimeConfigExpression } from "../nitro/universal-build";
+import {
+  generateFarmDocsRuntimeConfigExpression,
+  getFarmAppOwnedDocsEnginePaths,
+} from "../nitro/universal-build";
+import { resolveFarmLlmsTxtConfig } from "../llms-txt";
+import { resolveFarmAgentCrawlers } from "../agent-crawlers";
 
 const docsConfig: FarmDocsResolvedConfig = {
   enabled: true,
@@ -68,5 +73,56 @@ describe("universal docs build", () => {
       entry: "/docs",
       config: { entry: "docs", docsPath: "/docs" },
     });
+  });
+
+  it("leaves the docs engine every root file the app does not serve itself", () => {
+    const llmsOff = { llmsTxt: resolveFarmLlmsTxtConfig(undefined) };
+    expect(getFarmAppOwnedDocsEnginePaths(llmsOff, [])).toEqual([]);
+    // Nested metadata routes do not answer the docs engine's root paths.
+    expect(
+      getFarmAppOwnedDocsEnginePaths(llmsOff, [
+        { kind: "sitemap", pattern: "/blog" },
+        { kind: "robots", pattern: "/blog" },
+      ]),
+    ).toEqual([]);
+    // The manifest is not a docs engine path.
+    expect(getFarmAppOwnedDocsEnginePaths(llmsOff, [{ kind: "manifest", pattern: "/" }])).toEqual(
+      [],
+    );
+  });
+
+  it("hands the app the root files it serves itself", () => {
+    const llmsOff = { llmsTxt: resolveFarmLlmsTxtConfig(undefined) };
+    expect(getFarmAppOwnedDocsEnginePaths(llmsOff, [{ kind: "sitemap", pattern: "/" }])).toEqual([
+      "/sitemap.xml",
+    ]);
+    expect(getFarmAppOwnedDocsEnginePaths(llmsOff, [{ kind: "robots", pattern: "/" }])).toEqual([
+      "/robots.txt",
+    ]);
+    expect(
+      getFarmAppOwnedDocsEnginePaths({ llmsTxt: resolveFarmLlmsTxtConfig(true) }, [
+        { kind: "sitemap", pattern: "/" },
+        { kind: "robots", pattern: "/" },
+      ]),
+    ).toEqual(["/llms.txt", "/llms-full.txt", "/sitemap.xml", "/robots.txt"]);
+    expect(
+      getFarmAppOwnedDocsEnginePaths(llmsOff, [
+        { kind: "llms", pattern: "/" },
+        { kind: "llms-full", pattern: "/" },
+      ]),
+    ).toEqual(["/llms.txt", "/llms-full.txt"]);
+  });
+
+  it("hands the app /robots.txt when agent.crawlers generates it", () => {
+    const llmsOff = { llmsTxt: resolveFarmLlmsTxtConfig(undefined) };
+    expect(
+      getFarmAppOwnedDocsEnginePaths({ ...llmsOff, crawlers: resolveFarmAgentCrawlers(true) }, []),
+    ).toEqual(["/robots.txt"]);
+    expect(
+      getFarmAppOwnedDocsEnginePaths(
+        { ...llmsOff, crawlers: resolveFarmAgentCrawlers(undefined) },
+        [],
+      ),
+    ).toEqual([]);
   });
 });

@@ -48,6 +48,34 @@ export function resolveFarmRequestURL(req: FarmRequest, options: FarmRequestURLO
   return new URL(req.url || "/", resolveRequestOrigin(proto, forwardedHost, fallbackHost));
 }
 
+/**
+ * The public origin of a web `Request`, for the production runtime. The
+ * adapter's `request.url` is authoritative unless `trustProxy` is on; then
+ * `X-Forwarded-Host` and `X-Forwarded-Proto` override it with the same
+ * validation `resolveFarmRequestURL` applies to a Node request in development.
+ */
+export function resolveFarmWebRequestOrigin(
+  request: Request,
+  options: Pick<FarmRequestURLOptions, "trustProxy"> = {},
+): string {
+  const url = new URL(request.url);
+  if (!options.trustProxy) return url.origin;
+
+  const forwardedHost = firstForwardedHeaderValue(
+    request.headers.get("x-forwarded-host") ?? undefined,
+  );
+  const forwardedProto = firstForwardedHeaderValue(
+    request.headers.get("x-forwarded-proto") ?? undefined,
+  )?.toLowerCase();
+  const proto =
+    forwardedProto === "https" || forwardedProto === "http"
+      ? forwardedProto
+      : url.protocol === "https:"
+        ? "https"
+        : "http";
+  return resolveRequestOrigin(proto, forwardedHost, url.host);
+}
+
 export function createWebRequestFromFarmRequest(
   req: FarmRequest,
   options: FarmRequestURLOptions = {},

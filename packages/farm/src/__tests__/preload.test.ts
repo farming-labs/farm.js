@@ -15,6 +15,98 @@ afterEach(() => {
 });
 
 describe("smart preload manager", () => {
+  it.each([null, undefined, 42, {}])("preserves the runtime error for invalid HTML %j", (html) => {
+    const config = resolveFarmPerformanceConfig(undefined).preload;
+    expect(() => manageFarmHtmlPreloads(html as unknown as string, config)).toThrow(TypeError);
+    expect(() => manageFarmDocumentPreloads(html as unknown as string, "", config)).toThrow(
+      TypeError,
+    );
+  });
+
+  it.each(["enforce", "warn"] as const)(
+    "avoids full-document normalization without preload candidates in %s mode",
+    (mode) => {
+      const config = resolveFarmPerformanceConfig({ preload: { mode } }).preload;
+      const html = [
+        '<!doctype html><html><head><link rel="stylesheet" href="/app.css">',
+        '<link rel="MODULEPRELOAD" href="/app.js"></head><body>',
+        '<p data-state="preloading">ordinary content</p>'.repeat(120),
+        "</body></html>",
+      ].join("");
+      const lowercase = vi.spyOn(String.prototype, "toLowerCase");
+
+      const htmlResult = manageFarmHtmlPreloads(html, config);
+      const documentResult = manageFarmDocumentPreloads(html, "", config);
+      const normalizedDocument = lowercase.mock.contexts.some((value) => value === html);
+      lowercase.mockRestore();
+
+      // Assert avoided work, not a machine-dependent timing threshold.
+      expect(normalizedDocument).toBe(false);
+      expect(htmlResult).toEqual({ value: html, warnings: [] });
+      expect(documentResult).toEqual({ html, linkHeader: "", warnings: [] });
+    },
+  );
+
+  it.each(["enforce", "warn"] as const)(
+    "still budgets Link headers when HTML has no candidates in %s mode",
+    (mode) => {
+      const config = resolveFarmPerformanceConfig({
+        preload: { mode, maxImages: 1, maxFonts: 1 },
+      }).preload;
+      const html = '<link rel="modulepreload" href="/app.js"><main>no hints</main>';
+      const links = [
+        "</below.webp>; rel=preload; as=image",
+        "</hero.webp>; rel=preload; as=image; fetchpriority=high",
+        "</body.woff2>; rel=preload; as=font",
+        "</mono.woff2>; rel=preload; as=font",
+        "<https://api.example.test>; rel=preconnect",
+      ];
+      const linkHeader = links.join(", ");
+      expect(manageFarmDocumentPreloads(html, linkHeader, config)).toEqual({
+        html,
+        linkHeader: mode === "warn" ? linkHeader : [links[1], links[2], links[4]].join(", "),
+        warnings: [
+          { kind: "image", count: 2, budget: 1, removed: mode === "warn" ? 0 : 1 },
+          { kind: "font", count: 2, budget: 1, removed: mode === "warn" ? 0 : 1 },
+        ],
+      });
+    },
+  );
+
+  it.each(["PRELOAD", "alternate\tpreload", "preload\nalternate", "alternate\u00a0pReLoAd"])(
+    "retains the parser for the preload relation %j",
+    (rel) => {
+      const config = resolveFarmPerformanceConfig({
+        preload: { maxImages: 0 },
+      }).preload;
+      const html = `<LINK\nREL="${rel}" AS='IMAGE' HREF=/hero.webp><main>keep</main>`;
+      const result = manageFarmDocumentPreloads(html, "", config);
+      expect(result).toEqual({
+        html: "<main>keep</main>",
+        linkHeader: "",
+        warnings: [{ kind: "image", count: 1, budget: 0, removed: 1 }],
+      });
+    },
+  );
+
+  it("does not mistake preload-looking content for budgeted links", () => {
+    const config = resolveFarmPerformanceConfig({
+      preload: { maxImages: 0, maxFonts: 0 },
+    }).preload;
+    const html = [
+      "<p>preload image</p>",
+      '<link rel="modulepreload" href="/preload.js">',
+      '<!-- <link rel="preload" as="image" href="/comment.webp"> -->',
+      '<script>"<link rel=preload as=image href=/script.webp>"</script>',
+      `<div data-note='<link rel="preload" as="font" href="/font.woff2">'>keep</div>`,
+    ].join("");
+    expect(manageFarmDocumentPreloads(html, "", config)).toEqual({
+      html,
+      linkHeader: "",
+      warnings: [],
+    });
+  });
+
   it("defaults to one image and two font preloads in enforce mode", () => {
     expect(resolveFarmPerformanceConfig(undefined)).toEqual({
       preload: { mode: "enforce", maxImages: 1, maxFonts: 2 },

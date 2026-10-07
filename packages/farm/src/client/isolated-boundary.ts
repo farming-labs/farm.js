@@ -154,6 +154,7 @@ type FarmIsolatedRoot = {
 
 interface FarmIsolatedRootRecord {
   root: FarmIsolatedRoot;
+  dispose(): void;
   reference: string;
   exportName: string;
   props: Record<string, unknown>;
@@ -163,6 +164,16 @@ interface FarmIsolatedRootRecord {
 
 interface FarmIsolatedHydrationRootOptions {
   onUncaughtError?: (error: unknown) => void;
+  onRecoverableError?: (error: unknown) => void;
+}
+
+function isEarlyHydrationUpdate(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.message ===
+      "This root received an early update, before anything was able hydrate. Switched the entire root to client rendering." ||
+      error.message.startsWith("Minified React error #424;"))
+  );
 }
 
 export interface FarmIsolatedHydrationRuntimeOptions {
@@ -355,11 +366,28 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
                   props as Record<string, unknown>,
                   restore,
                 );
+                let disposing = false;
                 const root = options.hydrateRoot(container, graphElement, {
                   onUncaughtError: restore,
+                  onRecoverableError(error) {
+                    // React 18/19 also report an early update when unmount cancels a root
+                    // before its first commit. Only that synchronous teardown diagnostic
+                    // is expected; live-root updates and real mismatches still report.
+                    if (disposing && isEarlyHydrationUpdate(error)) return;
+                    if (typeof globalThis.reportError === "function") globalThis.reportError(error);
+                    else console.error(error);
+                  },
                 });
                 roots.set(container, {
                   root,
+                  dispose() {
+                    disposing = true;
+                    try {
+                      root.unmount();
+                    } finally {
+                      disposing = false;
+                    }
+                  },
                   reference,
                   exportName,
                   props: props as Record<string, unknown>,
@@ -441,7 +469,7 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
     for (const [container, record] of roots) {
       if (container === scope || scope.contains(container)) {
         try {
-          record.root.unmount();
+          record.dispose();
         } catch {
           // The DOM owner may already have removed a failed root.
         }

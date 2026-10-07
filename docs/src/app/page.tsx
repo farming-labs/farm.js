@@ -70,6 +70,7 @@ import type {
 } from "../components/home/highlighted-code";
 import { InstallCommand } from "../components/home/install-command";
 import { FileTree } from "../components/ui/file-tree";
+import { RouteExplorer } from "../components/home/route-explorer";
 import type { FileTreeNode } from "../components/ui/file-tree";
 import { FlickeringGrid } from "../components/ui/flickering-grid";
 import { farmBenchmark, formatBenchmarkDuration } from "../lib/framework-benchmark";
@@ -1312,6 +1313,7 @@ function FileTreeVisual() {
         className="farm-illustration-surface absolute -bottom-px -right-px top-4 w-[calc(100%-1.5rem)] sm:w-[calc(100%-2.5rem)]"
         data={nodes}
         defaultSelectedPath="app/page.tsx"
+        explorer={(path) => <RouteExplorer path={path} />}
       />
     </FoundationCanvas>
   );
