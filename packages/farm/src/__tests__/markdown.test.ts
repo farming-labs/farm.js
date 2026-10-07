@@ -5,6 +5,7 @@ import { resolveConfig } from "../config";
 import {
   applyMarkdownNegotiationHeaders,
   createMarkdownMirrorResponse,
+  getFarmMarkdownAlternatePath,
   htmlToMarkdown,
   resolveMarkdownConfig,
   resolveMarkdownMirrorTarget,
@@ -285,6 +286,19 @@ describe("applyMarkdownNegotiationHeaders", () => {
         pathname: "/pricing",
       }),
     ).toBe(json);
+  });
+});
+
+describe("getFarmMarkdownAlternatePath", () => {
+  it("returns the .md URL a page advertises, or null when it has no mirror", () => {
+    const everyPage = resolveMarkdownConfig(undefined);
+    expect(getFarmMarkdownAlternatePath(everyPage, "/")).toBe("/index.md");
+    expect(getFarmMarkdownAlternatePath(everyPage, "/docs/intro/")).toBe("/docs/intro.md");
+
+    const pricingOnly = resolveMarkdownConfig({ expose: ["/pricing"] });
+    expect(getFarmMarkdownAlternatePath(pricingOnly, "/pricing")).toBe("/pricing.md");
+    expect(getFarmMarkdownAlternatePath(pricingOnly, "/account")).toBeNull();
+    expect(getFarmMarkdownAlternatePath(resolveMarkdownConfig(false), "/pricing")).toBeNull();
   });
 });
 

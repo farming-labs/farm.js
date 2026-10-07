@@ -208,14 +208,11 @@ export function applyMarkdownNegotiationHeaders(
     return response;
   }
 
-  const target = resolveMarkdownMirrorTarget(options.config, options.pathname, {
-    accept: "text/markdown",
-  });
-  if (!target) {
+  const alternatePath = getFarmMarkdownAlternatePath(options.config, options.pathname);
+  if (!alternatePath) {
     return response;
   }
 
-  const alternatePath = getMarkdownAlternatePath(target.pathname);
   const headers = new Headers(response.headers);
   appendHeaderToken(headers, "Vary", "Accept");
   headers.append("Link", `<${alternatePath}>; rel="alternate"; type="text/markdown"`);
@@ -447,6 +444,19 @@ function getMarkdownAlternatePath(pathname: string): string {
 /** @internal The `.md` URL that serves a page's Markdown mirror. */
 export function getFarmMarkdownMirrorPath(pathname: string): string {
   return getMarkdownAlternatePath(pathname);
+}
+
+/**
+ * @internal The `.md` URL to advertise for the HTML page at `pathname`, or
+ * null when it has no Markdown mirror. Both the `Link` response header and the
+ * `<link rel="alternate">` in the document head come from this.
+ */
+export function getFarmMarkdownAlternatePath(
+  config: FarmMarkdownResolvedConfig | undefined,
+  pathname: string,
+): string | null {
+  const target = resolveMarkdownMirrorTarget(config, pathname, { accept: "text/markdown" });
+  return target ? getMarkdownAlternatePath(target.pathname) : null;
 }
 
 /** @internal Whether `pathname` has a Markdown mirror under `config`. */

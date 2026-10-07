@@ -1,7 +1,11 @@
 apps/*/node_modules/
 .benchmark.lock
 apps/farm/.farm/
-apps/farm/src/farm-*.d.ts
+apps/farm/src/farm.d.ts
+apps/farm/src/farm-routes.d.ts
+apps/farm/src/farm-env.d.ts
+apps/farm/src/farm-images.d.ts
+apps/farm/src/farm-i18n.d.ts
 apps/farm/src/lib/api.generated.ts
 apps/next/.next/
 apps/sveltekit/.svelte-kit/

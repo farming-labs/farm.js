@@ -1,10 +1,11 @@
-import { Activity, Rocket, TimerReset } from "lucide-react";
+import { Activity, Rocket, Server, TimerReset, Weight } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
 import nextIconUrl from "simple-icons/icons/nextdotjs.svg?url";
 import nuxtIconUrl from "simple-icons/icons/nuxt.svg?url";
 import svelteIconUrl from "simple-icons/icons/svelte.svg?url";
 import tanstackIconUrl from "simple-icons/icons/tanstack.svg?url";
 import { benchmarkReport, formatBenchmarkDuration } from "../../lib/framework-benchmark";
+import { BootFigure, BuildFigure, StartupFigure, WeightFigure } from "./benchmark-figures";
 
 type FrameworkResult = (typeof benchmarkReport.frameworks)[number];
 type MetricKey = keyof FrameworkResult["metrics"];
@@ -186,13 +187,22 @@ function ComparisonPanel({
   );
 }
 
-function AnimatedComparisonTitle({ lead, metric }: { lead: string; metric: MetricKey }) {
+function AnimatedComparisonTitle({
+  lead,
+  metric,
+  comparison = "faster than",
+}: {
+  lead: string;
+  metric: MetricKey;
+  /** How Farm compares: "faster than" for times, "smaller than" for sizes. */
+  comparison?: string;
+}) {
   const comparisons = competitorResults.map((framework) => ({
     framework,
     ratio: getAdvantageAgainst(framework, metric),
   }));
   const accessibleComparison = comparisons
-    .map(({ framework, ratio }) => `${formatRatio(ratio)} faster than ${framework.label}`)
+    .map(({ framework, ratio }) => `${formatRatio(ratio)} ${comparison} ${framework.label}`)
     .join("; ");
 
   return (
@@ -214,7 +224,7 @@ function AnimatedComparisonTitle({ lead, metric }: { lead: string; metric: Metri
             </span>
           ))}
         </span>
-        <span className="whitespace-nowrap">faster than</span>
+        <span className="whitespace-nowrap">{comparison}</span>
         <span className="benchmark-comparison-rotator col-span-2 block h-[1.25em] w-full overflow-hidden sm:w-[14rem] sm:flex-none">
           {comparisons.map(({ framework }) => (
             <span key={framework.id} className="benchmark-comparison-item block">
@@ -224,139 +234,6 @@ function AnimatedComparisonTitle({ lead, metric }: { lead: string; metric: Metri
         </span>
       </span>
     </>
-  );
-}
-
-function StartupIllustration() {
-  return (
-    <div
-      aria-hidden
-      className="benchmark-illustration relative mt-4 flex h-52 items-center justify-center sm:h-56"
-    >
-      <svg
-        className="h-full w-full max-w-[28rem] text-white"
-        fill="none"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        viewBox="0 0 520 300"
-      >
-        <g className="benchmark-startup-stack">
-          <path d="M106 145L260 227L414 145" stroke="currentColor" strokeOpacity="0.2" />
-          <path d="M106 145V165L260 247L414 165V145" stroke="currentColor" strokeOpacity="0.2" />
-          <path d="M106 185L260 267L414 185" stroke="currentColor" strokeOpacity="0.11" />
-          <path d="M106 185V205L260 287L414 205V185" stroke="currentColor" strokeOpacity="0.11" />
-          <path d="M106 126V185" stroke="currentColor" strokeDasharray="2 7" strokeOpacity="0.13" />
-          <path d="M414 126V185" stroke="currentColor" strokeDasharray="2 7" strokeOpacity="0.13" />
-          <path d="M260 208V267" stroke="currentColor" strokeDasharray="2 7" strokeOpacity="0.1" />
-        </g>
-
-        <g className="benchmark-startup-top">
-          <path
-            d="M106 104L260 22L414 104L260 186L106 104Z"
-            fill="currentColor"
-            fillOpacity="0.025"
-            stroke="currentColor"
-            strokeOpacity="0.5"
-            strokeWidth="1.2"
-          />
-          <path
-            d="M106 104V126L260 208L414 126V104"
-            stroke="currentColor"
-            strokeOpacity="0.38"
-            strokeWidth="1.2"
-          />
-
-          <g className="benchmark-startup-page">
-            <path
-              d="M176 104L260 59L344 104L260 149L176 104Z"
-              fill="currentColor"
-              fillOpacity="0.018"
-              stroke="currentColor"
-              strokeOpacity="0.34"
-            />
-            <path d="M190 104L260 67L330 104" stroke="currentColor" strokeOpacity="0.24" />
-            <path d="M208 108L260 81L312 108" stroke="currentColor" strokeOpacity="0.32" />
-            <path d="M222 116L260 96L298 116" stroke="currentColor" strokeOpacity="0.19" />
-            <path d="M238 124L260 113L282 124" stroke="currentColor" strokeOpacity="0.11" />
-            <circle cx="260" cy="104" fill="currentColor" fillOpacity="0.66" r="2.5" />
-          </g>
-        </g>
-      </svg>
-    </div>
-  );
-}
-
-function BuildIllustration() {
-  return (
-    <div
-      aria-hidden
-      className="benchmark-illustration relative mt-4 flex h-52 items-center justify-center sm:h-56"
-    >
-      <svg
-        className="h-full w-full max-w-[28rem] text-white"
-        fill="none"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        viewBox="0 0 520 300"
-      >
-        <g className="benchmark-build-module benchmark-build-module--back">
-          <path
-            d="M194 72L260 37L326 72L260 107L194 72Z"
-            fill="currentColor"
-            fillOpacity="0.018"
-            stroke="currentColor"
-            strokeOpacity="0.24"
-          />
-          <path d="M194 72V125L260 160L326 125V72" stroke="currentColor" strokeOpacity="0.17" />
-        </g>
-
-        <g className="benchmark-build-module benchmark-build-module--left">
-          <path
-            d="M78 139L149 101L220 139L149 177L78 139Z"
-            fill="currentColor"
-            fillOpacity="0.022"
-            stroke="currentColor"
-            strokeOpacity="0.36"
-          />
-          <path d="M78 139V198L149 236L220 198V139" stroke="currentColor" strokeOpacity="0.25" />
-          <path d="M123 139L149 125L175 139" stroke="currentColor" strokeOpacity="0.18" />
-        </g>
-
-        <g className="benchmark-build-module benchmark-build-module--right">
-          <path
-            d="M300 139L371 101L442 139L371 177L300 139Z"
-            fill="currentColor"
-            fillOpacity="0.018"
-            stroke="currentColor"
-            strokeOpacity="0.3"
-          />
-          <path d="M300 139V198L371 236L442 198V139" stroke="currentColor" strokeOpacity="0.2" />
-        </g>
-
-        <g className="benchmark-build-output">
-          <path
-            d="M190 190L260 153L330 190L260 227L190 190Z"
-            fill="currentColor"
-            fillOpacity="0.035"
-            stroke="currentColor"
-            strokeOpacity="0.55"
-            strokeWidth="1.2"
-          />
-          <path
-            d="M190 190V242L260 279L330 242V190"
-            fill="currentColor"
-            fillOpacity="0.012"
-            stroke="currentColor"
-            strokeOpacity="0.42"
-            strokeWidth="1.2"
-          />
-          <path d="M260 227V279" stroke="currentColor" strokeOpacity="0.28" />
-          <path d="M218 190L260 168L302 190" stroke="currentColor" strokeOpacity="0.32" />
-          <path d="M231 198L260 183L289 198" stroke="currentColor" strokeOpacity="0.17" />
-          <circle cx="260" cy="190" fill="currentColor" fillOpacity="0.68" r="2.5" />
-        </g>
-      </svg>
-    </div>
   );
 }
 
@@ -804,7 +681,7 @@ export function BenchmarkSection() {
         <ComparisonPanel
           description="Cold dev startup through the first rendered SSR page, measured against the same routed fixture."
           icon={Rocket}
-          illustration={<StartupIllustration />}
+          illustration={<StartupFigure />}
           label="Startup advantage"
           title={
             <AnimatedComparisonTitle
@@ -817,9 +694,38 @@ export function BenchmarkSection() {
           <ComparisonPanel
             description="A complete production compile of the same SSR project, with generated output ready to boot."
             icon={TimerReset}
-            illustration={<BuildIllustration />}
+            illustration={<BuildFigure />}
             label="Production build"
             title={<AnimatedComparisonTitle lead="Farm builds the same fixture" metric="buildMs" />}
+          />
+        </div>
+        <div className="border-t border-white/12">
+          <ComparisonPanel
+            description="Production server spawn to the first validated, fully read response, from the same build output."
+            icon={Server}
+            illustration={<BootFigure />}
+            label="Production boot"
+            title={
+              <AnimatedComparisonTitle
+                lead="Farm's server is up and answering"
+                metric="productionBootMs"
+              />
+            }
+          />
+        </div>
+        <div className="border-t border-white/12 lg:border-l">
+          <ComparisonPanel
+            description="Bytes in the production response body for the same page. A lighter page finishes downloading sooner."
+            icon={Weight}
+            illustration={<WeightFigure />}
+            label="HTML size"
+            title={
+              <AnimatedComparisonTitle
+                comparison="smaller than"
+                lead="Farm sends a lighter first page"
+                metric="responseBytes"
+              />
+            }
           />
         </div>
 

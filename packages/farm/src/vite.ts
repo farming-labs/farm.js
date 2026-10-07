@@ -35,8 +35,14 @@ import {
   scanProgrammaticPagePaths,
 } from "./routes-shared";
 import type { FarmDocsAPIHandler } from "./docs";
-import { createMarkdownMirrorResponse, resolveMarkdownMirrorTarget } from "./markdown";
+import {
+  createMarkdownMirrorResponse,
+  getFarmMarkdownAlternatePath,
+  getFarmMarkdownMirrorPath,
+  resolveMarkdownMirrorTarget,
+} from "./markdown";
 import { resolveFarmLlmsTxtConfig } from "./llms-txt";
+import { resolveFarmAgentCrawlers } from "./agent-crawlers";
 import {
   FARM_MARKDOWN_CONTENT_TYPE,
   createFarmMarkdownErrorBody,
@@ -81,7 +87,7 @@ import { _withAfterNodeMiddleware } from "./after";
 import { _runWithAPIRequestRuntime } from "./api/server-context";
 import type { APIRequestRuntime } from "./api/server-client-bridge";
 import {
-  farmAppOwnsLlmsPath,
+  farmAppOwnsDocsEnginePath,
   isViteModuleRequest,
   shouldBypassFarmRouterForDottedPath,
 } from "./dev-static";
@@ -103,13 +109,14 @@ import { resolveFarmLayoutFonts } from "./font";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { isFarmI18nCatalogFile, resolveFarmI18nMessagePath } from "./i18n/config";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
-import { localizeFarmPathname } from "./i18n/routing";
+import { renderFarmLocaleAlternateLinks } from "./i18n/alternates";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
 import {
   createFarmClientOptimizeDepsConfig,
   createFarmClientOptimizeDepsEntries,
   createFarmSourceAlias,
 } from "./server/vite-config";
+import { generateFarmDocsAdapterClientRuntime } from "./docs/adapter-client";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "./docs/fonts";
 import {
   createFarmNodeRequestAbortSignal,
@@ -139,8 +146,10 @@ import {
   parseFarmLayoutChainHeader,
 } from "./navigation/render-plan";
 import { resolveFarmPageDataFailure } from "./navigation/page-data-error";
-import { mergeMetadata } from "./metadata";
+import { addMetadataMarkdownAlternate, mergeMetadata } from "./metadata";
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
+import { isFarmPreviewDeploymentEnvironment } from "./deployment-environment";
+import { FARM_PREVIEW_ROBOTS_TAG } from "./preview-noindex";
 import { resolveFarmRequestURL } from "./server/request";
 import { reportOpenAPIDevGenerationResult } from "./openapi/dev-status";
 
@@ -149,6 +158,14 @@ function farmLlmsTxtGeneratedPaths(config: { agent?: { llmsTxt?: unknown } }): s
   const llms = resolveFarmLlmsTxtConfig(config.agent?.llmsTxt as never);
   if (!llms.enabled) return [];
   return llms.full ? ["/llms.txt", "/llms-full.txt"] : ["/llms.txt"];
+}
+
+/** Paths `agent.llmsTxt` and `agent.crawlers` serve without a route file. */
+function farmAgentGeneratedPaths(config: {
+  agent?: { llmsTxt?: unknown; crawlers?: unknown };
+}): string[] {
+  const crawlers = resolveFarmAgentCrawlers(config.agent?.crawlers as never);
+  return [...farmLlmsTxtGeneratedPaths(config), ...(crawlers.enabled ? ["/robots.txt"] : [])];
 }
 
 interface FarmVitePluginOptions extends FarmConfig {
@@ -240,6 +257,29 @@ export function farmI18nClientBridgePlugin(): Plugin {
   };
 }
 
+/** Core entries whose runtime must never ship to the browser. */
+const FARM_SERVER_ONLY_ENTRIES = new Set(["@farm.js/core/og"]);
+
+/**
+ * Fail a browser graph that imports a server-only core entry, instead of
+ * bundling its server runtime (for `@farm.js/core/og`, the `@vercel/og` wasm
+ * renderer) into client code.
+ */
+export function farmServerOnlyEntriesPlugin(): Plugin {
+  return {
+    name: "farm:server-only-entries",
+    enforce: "pre",
+    resolveId(id, importer, options) {
+      if (options?.ssr || !FARM_SERVER_ONLY_ENTRIES.has(id)) return null;
+      this.error(
+        `${id} is server-only and cannot be imported into client code${
+          importer ? ` (imported by ${importer})` : ""
+        }. Use it from an API route or another server module.`,
+      );
+    },
+  };
+}
+
 const FARM_CONFIG_FILENAMES = new Set([
   "farm.config.ts",
   "farm.config.tsx",
@@ -282,18 +322,9 @@ function renderFarmI18nStaticHead(
   const runtime = `<script>window.__FARM_I18N__ = ${serializeFarmInlineValue(snapshot)};</script>`;
   if (snapshot.routing === "none") return runtime;
 
-  const links = snapshot.locales.map(
-    (locale) =>
-      `<link rel="alternate" hreflang="${escapeFarmHtmlAttribute(locale)}" href="${escapeFarmHtmlAttribute(
-        localizeFarmPathname(requestPath, locale, snapshot),
-      )}">`,
-  );
-  links.push(
-    `<link rel="alternate" hreflang="x-default" href="${escapeFarmHtmlAttribute(
-      localizeFarmPathname(requestPath, snapshot.defaultLocale, snapshot),
-    )}">`,
-  );
-  return `${links.join("")}${runtime}`;
+  // Pre-rendered without a request or route metadata, so there is no origin to
+  // resolve against and the hrefs stay paths.
+  return `${renderFarmLocaleAlternateLinks(requestPath, snapshot)}${runtime}`;
 }
 
 function getPublicEnvDefine(config: FarmVitePluginOptions): Record<string, unknown> {
@@ -1094,6 +1125,16 @@ export function farmPlugin(
       await farmApp.initialize();
 
       const farmConfig = farmApp.getConfig();
+      // agent.noindexPreviews marks every dev response, Vite's own included, when
+      // the environment says this is a preview (`FARM_PREVIEW=1 farm dev`).
+      if (farmConfig.agent?.noindexPreviews) {
+        server.middlewares.use((_req, res, next) => {
+          if (isFarmPreviewDeploymentEnvironment(process.env)) {
+            res.setHeader("X-Robots-Tag", FARM_PREVIEW_ROBOTS_TAG);
+          }
+          next();
+        });
+      }
       const apiServerBasePath = resolveFarmAPIServerBasePath(farmConfig.api);
       const serverConfig = resolveFarmServerConfig(farmConfig.server);
       let imageHandler: FarmImageHandler | null = null;
@@ -1841,14 +1882,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
           // Vite loading a `.md` file as a module is not a request for docs or Markdown.
           const viteModuleRequest = isViteModuleRequest(parsedRequestUrl, req.headers);
-          // An app's own llms.txt and llms-full.txt (agent.llmsTxt, llms.ts, llms-full.ts,
-          // or a public file) take those paths from the docs engine, as in production.
-          const appOwnsLlmsTxt = farmAppOwnsLlmsPath(requestPathname, {
-            generatedPaths: farmLlmsTxtGeneratedPaths(farmConfig),
+          // An app's own llms.txt, llms-full.txt, sitemap.xml, and robots.txt (agent.llmsTxt,
+          // agent.crawlers, a root llms.ts, llms-full.ts, sitemap.ts, or robots.ts, or a public
+          // file) take those paths from the docs engine, as in production.
+          const appOwnsDocsEnginePath = farmAppOwnsDocsEnginePath(requestPathname, {
+            generatedPaths: farmAgentGeneratedPaths(farmConfig),
             routeManager: farmApp.getRouteManager(),
             publicDir: server.config.publicDir,
           });
-          if (farmDocsHandler && !appOwnsLlmsTxt && !viteModuleRequest) {
+          if (farmDocsHandler && !appOwnsDocsEnginePath && !viteModuleRequest) {
             const docsRequest = new Request(fullUrl, {
               method: requestMethod,
               headers: docsHeaders,
@@ -1952,10 +1994,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             if (!varyValues.some((value) => value.toLowerCase() === "accept")) {
               res.setHeader("Vary", [...varyValues, "Accept"].join(", "));
             }
-            const alternatePath =
-              markdownPageTarget.pathname === "/"
-                ? "/index.md"
-                : `${markdownPageTarget.pathname}.md`;
+            const alternatePath = getFarmMarkdownMirrorPath(markdownPageTarget.pathname);
             const alternateLink = `<${alternatePath}>; rel="alternate"; type="text/markdown"`;
             const currentLink = res.getHeader("Link");
             res.setHeader(
@@ -2382,7 +2421,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               requestPathname,
               farmApp?.getRouteManager(),
               [server.config.publicDir, server.config.root],
-              farmLlmsTxtGeneratedPaths(farmConfig),
+              farmAgentGeneratedPaths(farmConfig),
             )
           ) {
             return next();
@@ -2543,6 +2582,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     await (routeModule as any).generateMetadata(routeProps),
                   );
                 }
+                mergedMetadata = addMetadataMarkdownAlternate(
+                  mergedMetadata,
+                  getFarmMarkdownAlternatePath(farmApp.getConfig().md, targetRequestUrl.pathname),
+                );
 
                 const routeSlots = await Promise.all(
                   slots.map(async (slot) => {
@@ -4049,22 +4092,7 @@ function generateClientCode(
   const isolatedHydrationImport = isolatedHydrationEnabled
     ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'`
     : "";
-  const docsAdapterImportBlock = docsAdapterReact
-    ? `import * as FarmDocsAdapterReact from ${JSON.stringify(docsAdapterReact)};
-
-async function hydrateFarmDocsAdapterRuntime() {
-  const runtime = window.__FARM_DOCS_ADAPTER__;
-  if (!runtime) return false;
-  if (typeof FarmDocsAdapterReact.hydrateFarmDocs !== 'function') {
-    throw new Error('The configured Farm docs adapter does not export hydrateFarmDocs().');
-  }
-  FarmDocsAdapterReact.hydrateFarmDocs({
-    config: runtime.config || {},
-    data: runtime.data,
-  });
-  return true;
-}`
-    : `async function hydrateFarmDocsAdapterRuntime() { return false; }`;
+  const docsAdapterImportBlock = generateFarmDocsAdapterClientRuntime(docsAdapterReact);
   const isolatedHydrationRuntime = isolatedHydrationEnabled
     ? `const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
   ReactRuntime: React,
@@ -5846,6 +5874,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
       ...(rendererVitePlugins as any[]),
       viteBrowserExternalPlugin,
       farmI18nClientBridgePlugin(),
+      farmServerOnlyEntriesPlugin(),
       farmPlugin(config),
       farmEnvironmentFunctionsPlugin(),
       farmBrandingPlugin,

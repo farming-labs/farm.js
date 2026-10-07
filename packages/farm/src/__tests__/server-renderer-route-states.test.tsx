@@ -363,6 +363,93 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain("<loc>https://farm.test/dashboard?locale=am</loc>");
   });
 
+  describe("generated robots.txt", () => {
+    const rootSitemapModulePath = "/test/src/app/sitemap.ts";
+    const rootRobotsModulePath = "/test/src/app/robots.ts";
+    const pages = {
+      [layoutModulePath]: {
+        default: ({ children }: any) => children,
+        metadata: { title: "Acme", metadataBase: new URL("https://acme.test") },
+      },
+      [routeModulePath]: { default: () => null, metadata: { title: "Dashboard" } },
+      [rootSitemapModulePath]: { default: () => [{ url: "https://acme.test/dashboard" }] },
+      [rootRobotsModulePath]: {
+        default: () => ({ rules: { userAgent: "*", disallow: "/private/" } }),
+      },
+    };
+    const sitemapRoute = {
+      kind: "sitemap" as const,
+      pattern: "/",
+      modulePath: rootSitemapModulePath,
+      outputName: "sitemap.xml" as const,
+    };
+
+    async function requestRobots(options: Parameters<typeof createRenderer>[1]) {
+      const response = createMockResponse();
+      await createRenderer(pages, { layouts: { "/": layoutModulePath }, ...options }).renderPage(
+        createMockRequest("/robots.txt"),
+        response,
+      );
+      return response;
+    }
+
+    it("serves agent.crawlers with the app's sitemap", async () => {
+      const response = await requestRobots({
+        applicationMetadata: sitemapRoute,
+        agent: { crawlers: { training: "block" } },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+      expect(response.body).toBe(
+        [
+          "User-agent: GPTBot",
+          "User-agent: ClaudeBot",
+          "User-agent: Google-Extended",
+          "User-agent: CCBot",
+          "User-agent: Applebot-Extended",
+          "User-agent: Meta-ExternalAgent",
+          "User-agent: Bytespider",
+          "Disallow: /",
+          "",
+          "User-agent: *",
+          "Allow: /",
+          "",
+          "Sitemap: https://acme.test/sitemap.xml",
+          "",
+        ].join("\n"),
+      );
+    });
+
+    it("lets a root robots.ts win over agent.crawlers", async () => {
+      const response = await requestRobots({
+        applicationMetadata: {
+          kind: "robots",
+          pattern: "/",
+          modulePath: rootRobotsModulePath,
+          outputName: "robots.txt",
+        },
+        agent: { crawlers: { training: "block" } },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toBe("User-agent: *\nDisallow: /private/\n");
+    });
+
+    it("leaves /robots.txt alone without agent.crawlers", async () => {
+      for (const agent of [
+        undefined,
+        { crawlers: { enabled: false, training: "block" as const } },
+      ]) {
+        const response = await requestRobots({ agent });
+        // This mock matches every path to the dashboard page, so "off" means the
+        // request fell through to page rendering instead of a robots.txt response.
+        expect(response.headers.get("content-type")).not.toBe("text/plain; charset=utf-8");
+        expect(response.body).not.toContain("User-agent");
+      }
+    });
+  });
+
   describe("llms.txt", () => {
     const pricingModulePath = "/test/src/app/pricing/page.tsx";
     const postModulePath = "/test/src/app/blog/[slug]/page.tsx";
@@ -1283,6 +1370,8 @@ function createRenderer(
     staticImage?: { modulePath: string; staticInfo: any };
     applicationMetadata?: {
       kind: "sitemap" | "robots" | "manifest" | "llms" | "llms-full";
+      /** Route segment that owns the file; `/dashboard` unless set. */
+      pattern?: string;
       modulePath: string;
       outputName:
         | "sitemap.xml"
@@ -1332,9 +1421,10 @@ function createRenderer(
       ],
     },
   };
+  const applicationMetadataPattern = options.applicationMetadata?.pattern ?? "/dashboard";
   const applicationMetadataEntry = options.applicationMetadata
     ? {
-        pattern: "/dashboard",
+        pattern: applicationMetadataPattern,
         modulePath: options.applicationMetadata.modulePath,
         kind: options.applicationMetadata.kind,
         fileName: options.applicationMetadata.kind,
@@ -1360,16 +1450,17 @@ function createRenderer(
     getLayouts: () => toRouteEntries(options.layouts),
     getIsolatedClientBoundaryModules: () => new Set(options.isolatedClientBoundaryModules ?? []),
     matchMetadataRoute(pathname: string) {
+      const segmentPath = applicationMetadataPattern === "/" ? "" : applicationMetadataPattern;
       if (
         !applicationMetadataEntry ||
-        pathname !== `/dashboard/${applicationMetadataEntry.outputName}`
+        pathname !== `${segmentPath}/${applicationMetadataEntry.outputName}`
       ) {
         return null;
       }
       return {
         metadata: applicationMetadataEntry,
         params: {},
-        routePath: "/dashboard",
+        routePath: applicationMetadataPattern,
       };
     },
     matchMetadataImage(pathname: string) {
