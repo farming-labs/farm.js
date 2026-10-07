@@ -94,6 +94,14 @@ const scenarios = {
     genericPattern: "/users/[id]",
   },
 };
+const scenarioName = process.env.FARM_PAGE_ROUTE_SCENARIO;
+assert.ok(scenarioName === undefined || Object.hasOwn(scenarios, scenarioName), "Unknown scenario");
+const selectedScenarios = scenarioName ? { [scenarioName]: scenarios[scenarioName] } : scenarios;
+const count = (name, fallback) => {
+  const value = process.env[name] === undefined ? fallback : Number(process.env[name]);
+  assert.ok(Number.isSafeInteger(value) && value > 0, `${name} must be a positive integer`);
+  return value;
+};
 const signature = (result) =>
   result && {
     route: result.route,
@@ -103,12 +111,13 @@ const signature = (result) =>
       Object.getOwnPropertyDescriptor(result.params, key),
     ]),
   };
-const warmups = 1000,
-  iterations = 10000;
+const warmups = count("FARM_PAGE_ROUTE_WARMUPS", 1000),
+  iterations = count("FARM_PAGE_ROUTE_ITERATIONS", 10000);
 const arm = process.argv[2];
 if (arm === "baseline" || arm === "candidate") {
   const results = {};
-  for (const [name, { routes, paths, genericPattern }] of Object.entries(scenarios)) {
+  for (const [name, { routes, paths, genericPattern }] of Object.entries(selectedScenarios)) {
+    assert.equal(iterations % paths.length, 0, "Iterations must cover complete path cycles");
     const before = factories.baseline(routes, genericPattern),
       after = factories.candidate(routes, genericPattern);
     for (const pathname of paths) {
@@ -121,12 +130,14 @@ if (arm === "baseline" || arm === "candidate") {
     const select = arm === "baseline" ? before : after;
     for (let i = 0; i < warmups; i++) select(paths[i % paths.length]);
     let checksum = 0;
+    const threadCpu = process.threadCpuUsage?.();
     const cpu = process.cpuUsage(),
       begin = performance.now();
     for (let i = 0; i < iterations; i++)
       checksum += select(paths[i % paths.length])?.route.id ?? -1;
     const wall = performance.now() - begin,
       used = process.cpuUsage(cpu);
+    const threadUsed = threadCpu && process.threadCpuUsage(threadCpu);
     assert.equal(checksum, expected);
     for (let i = 0; i < 20; i++) factories[arm](routes, genericPattern);
     const setupCpu = process.cpuUsage(),
@@ -139,6 +150,9 @@ if (arm === "baseline" || arm === "candidate") {
     results[name] = {
       wallMsPerLookup: wall / iterations,
       cpuMsPerLookup: (used.user + used.system) / 1000 / iterations,
+      ...(threadUsed && {
+        threadCpuMsPerLookup: (threadUsed.user + threadUsed.system) / 1000 / iterations,
+      }),
       wallMsPerSetup: setupWall / 100,
       cpuMsPerSetup: (setupUsed.user + setupUsed.system) / 1000 / 100,
     };
@@ -171,7 +185,7 @@ if (arm === "baseline" || arm === "candidate") {
   }
   const median = (values) => values.toSorted((a, b) => a - b)[Math.floor(values.length / 2)];
   const summary = Object.fromEntries(
-    Object.keys(scenarios).map((scenario) => [
+    Object.keys(selectedScenarios).map((scenario) => [
       scenario,
       Object.fromEntries(
         ["baseline", "candidate"].map((arm) => [
@@ -202,8 +216,10 @@ if (arm === "baseline" || arm === "candidate") {
         cpu: os.cpus()[0]?.model,
         loadBefore,
         loadAfter: os.loadavg(),
-        methodology:
-          "Seven alternating fresh-process pairs; 1000 warmups and 10000 lookups per arm/scenario. Actual emitted matcher/table/selector; baseline restores the old preparation boundary without modifying the algorithm. Route identity, params and hidden capture descriptors checked outside timing. Setup (100 creations after 20 warmups) measured separately. Selector-only, not SSR/HTTP/application performance.",
+        scenarios: Object.keys(selectedScenarios),
+        warmups,
+        iterations,
+        methodology: `Seven alternating fresh-process pairs; ${warmups} warmups and ${iterations} lookups per arm/scenario. Actual emitted matcher/table/selector; baseline restores the old preparation boundary without modifying the algorithm. Route identity, params and hidden capture descriptors checked outside timing. Setup (100 creations after 20 warmups) measured separately. Selector-only, not SSR/HTTP/application performance.`,
         helperBytes,
         summary,
         pairs,
