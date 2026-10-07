@@ -2,6 +2,7 @@ import { createServer as createViteServer, type ViteDevServer } from "vite";
 import type { FarmConfig } from "../types";
 import { farmI18nClientBridgePlugin, farmPlugin, farmServerOnlyEntriesPlugin } from "../vite";
 import { logger } from "../utils";
+import { readSchemaTables } from "../schema-owner";
 import { loadConfig, resolveConfig } from "../config";
 import { FarmRuntimeShutdownError, PluginManager } from "../plugin";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
@@ -319,6 +320,7 @@ export async function createServer(config: FarmConfig = {}) {
     );
 
     (server as any).__farmPluginManager = pluginManager;
+    (server as any).__farmResolvedConfig = resolvedConfig;
     (server as any).__farmInstrumentation = instrumentation;
     const closeViteServer = server.close.bind(server);
 
@@ -441,6 +443,27 @@ export async function createServer(config: FarmConfig = {}) {
 }
 
 /**
+ * Say, once the server is up, which plugins have table changes migrate would
+ * apply. Not awaited, and loaded only when some plugin or integration owns
+ * tables, so it costs nothing otherwise and can never delay startup.
+ */
+/** @internal Exported for tests. True when the notice was started. */
+export function noticeSchemaChangesInBackground(
+  config: Awaited<ReturnType<typeof resolveConfig>> | null | undefined,
+): boolean {
+  if (!config) return false;
+  const candidates = [
+    ...(config.plugins ?? []),
+    ...Object.values((config.integrations ?? {}) as Record<string, unknown>),
+  ];
+  if (!candidates.some((candidate) => readSchemaTables(candidate))) return false;
+  void import("../schema-dev-notice")
+    .then(({ noticePendingSchemaChanges }) => noticePendingSchemaChanges(config as never))
+    .catch(() => {});
+  return true;
+}
+
+/**
  * Start the development server
  */
 export async function startDevServer(config: FarmConfig = {}, port?: number) {
@@ -452,6 +475,7 @@ export async function startDevServer(config: FarmConfig = {}, port?: number) {
     // Shutdown is owned by the close() installed in createServer, which awaits
     // the plugin runtime and reports failures rather than swallowing them.
     await pluginManager?.startRuntime();
+    noticeSchemaChangesInBackground((server as any).__farmResolvedConfig);
   } catch (error) {
     // createServer already opened watchers, instrumentation, and plugin
     // resources. A failure here — an occupied port is the common one — would

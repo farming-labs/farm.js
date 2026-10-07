@@ -114,6 +114,16 @@ own, such as a removed or redefined column, are listed with `~`.
     warning teams upgraded 1.0.2 → 1.1.0, and 3 change(s) are not applied yet.
 ```
 
+The dev server says so too, once it is up:
+
+```
+⚠️  teams 1.0.2 → 1.1.0 has 3 change(s) to its tables that are not applied yet. Run `farm teams migrate` to review them.
+```
+
+It only reads, runs in the background after startup, and stays quiet when a
+database is unreachable, so it never slows `farm dev` down. Apps whose plugins
+own no tables never run it.
+
 Set `version` in `definePlugin` so the summary can name the versions. Without
 it, Farm says the tables changed since they were last migrated. In a project
 with Prisma or Drizzle, no `farm_schema_state` table is created: their own
