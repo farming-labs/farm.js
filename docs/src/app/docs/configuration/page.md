@@ -245,35 +245,36 @@ mount, and shortcut together.
 
 ## Important options
 
-| Option        | Use it for                                                                            |
-| ------------- | ------------------------------------------------------------------------------------- |
-| extends       | Composing local or package Farm layers with project-first overrides.                  |
-| srcDir        | Changing the app source folder from the default src.                                  |
-| renderer      | Selecting React (default) or an adapter such as Preact, Svelte, Vue, or Solid.        |
-| api           | Configuring the public root used by Farm's typed browser API client.                  |
-| integrations  | Registering built-in or custom integrations.                                          |
-| auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.           |
-| mcp           | Composing API routes and standalone tools in one authenticated MCP server.            |
-| agent         | Opt-in agent readiness: an llms.txt index and schema.org JSON-LD.                     |
-| theme         | Enabling light, dark, and system modes with client and server APIs.                   |
-| storage       | Configuring KV drivers/mounts and, in the current beta, an integration DB client.     |
-| migrations    | Running one-shot schema/provider commands with `farm migrate`.                        |
-| cron          | Mapping portable UTC schedules to ordinary GET API routes.                            |
-| i18n          | Configuring locale routes, detection, message catalogs, typing, and direction.        |
-| docs          | Serving the built-in docs runtime and docs API.                                       |
-| md            | Restricting or disabling automatic markdown mirrors like /pricing.md.                 |
-| mdx           | Rendering `page.md` and `page.mdx` app routes, plus MDX components.                   |
-| telemetry     | Controlling automatic production-site reporting to Farm's usage dashboard.            |
-| deploy        | Selecting a target, preset, and output directory.                                     |
-| deploymentId  | Detecting stale browser requests during rolling deployments.                          |
-| trailingSlash | Choosing the canonical URL shape for application page routes and links.               |
-| routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns.     |
-| security      | Applying an app-wide CSP with an enforcing or report-only response header.            |
-| serverActions | Restricting trusted action origins and request body size.                             |
-| images        | Configuring responsive widths, remote allowlists, formats, and optimizer limits.      |
-| performance   | Budgeting image and font preload hints without changing the rendered resources.       |
-| experimental  | Auditing or enabling opt-in rendering experiments such as isolated hydration and PPR. |
-| openapi       | Publishing API reference docs.                                                        |
+| Option        | Use it for                                                                             |
+| ------------- | -------------------------------------------------------------------------------------- |
+| extends       | Composing local or package Farm layers with project-first overrides.                   |
+| srcDir        | Changing the app source folder from the default src.                                   |
+| renderer      | Selecting React (default) or an adapter such as Preact, Svelte, Vue, or Solid.         |
+| api           | Configuring the public root used by Farm's typed browser API client.                   |
+| integrations  | Registering built-in or custom integrations.                                           |
+| auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.            |
+| mcp           | Composing API routes and standalone tools in one authenticated MCP server.             |
+| agent         | Opt-in agent readiness: llms.txt, schema.org JSON-LD, and AI crawler rules.            |
+| theme         | Enabling light, dark, and system modes with client and server APIs.                    |
+| storage       | Configuring KV drivers/mounts and, in the current beta, an integration DB client.      |
+| migrations    | Running one-shot schema/provider commands with `farm migrate`.                         |
+| schema        | Allowing plugins to add columns (`allowExtend`) and foreign keys (`allowForeignKeys`). |
+| cron          | Mapping portable UTC schedules to ordinary GET API routes.                             |
+| i18n          | Configuring locale routes, detection, message catalogs, typing, and direction.         |
+| docs          | Serving the built-in docs runtime and docs API.                                        |
+| md            | Restricting or disabling automatic markdown mirrors like /pricing.md.                  |
+| mdx           | Rendering `page.md` and `page.mdx` app routes, plus MDX components.                    |
+| telemetry     | Controlling automatic production-site reporting to Farm's usage dashboard.             |
+| deploy        | Selecting a target, preset, and output directory.                                      |
+| deploymentId  | Detecting stale browser requests during rolling deployments.                           |
+| trailingSlash | Choosing the canonical URL shape for application page routes and links.                |
+| routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns.      |
+| security      | Applying an app-wide CSP with an enforcing or report-only response header.             |
+| serverActions | Restricting trusted action origins and request body size.                              |
+| images        | Configuring responsive widths, remote allowlists, formats, and optimizer limits.       |
+| performance   | Budgeting image and font preload hints without changing the rendered resources.        |
+| experimental  | Auditing or enabling opt-in rendering experiments such as isolated hydration and PPR.  |
+| openapi       | Publishing API reference docs.                                                         |
 
 ## Application base path
 
@@ -377,8 +378,9 @@ mixed declarations, the resolved catalog, and permission checks.
 
 ## Agent readiness
 
-`agent` holds opt-in features that help AI agents and crawlers understand a public site. Both are
-off by default, so internal tools and private dashboards are unaffected.
+`agent` holds opt-in features that help AI agents and crawlers understand a public site, and decide
+which of them may use it. All of them are off by default, so internal tools and private dashboards
+are unaffected.
 
 ```ts title="farm.config.ts"
 import { defineConfig } from "@farm.js/core";
@@ -390,10 +392,16 @@ export default defineConfig({
       summary: "Billing for small teams.",
       exclude: ["/admin/[...path]"],
     },
+    noindexPreviews: true,
     jsonLd: true,
+    crawlers: { search: "allow", training: "block" },
   },
 });
 ```
+
+`noindexPreviews: true` adds `X-Robots-Tag: noindex, nofollow` to every response from Farm's server
+on a preview deployment; [Preview deployments](/docs/deployment#preview-deployments) covers how
+Farm detects one.
 
 `llmsTxt: true` serves [`/llms.txt`](https://llmstxt.org): a Markdown index of every static page,
 with each page's metadata title and description, linking to its [Markdown mirror](/docs/markdown)
@@ -420,6 +428,102 @@ structured format, and receives the generated pages and defaults to build on. Wh
 `jsonLd: true` adds a schema.org `Organization` to page heads, built from the site's metadata: the
 site name or title, `metadataBase`, and description. A page with none of those gets no JSON-LD. An
 object sets the `type` (emitted as `@type`) and fields such as `name`, `url`, `logo`, and `sameAs`.
+
+Pages and layouts add their own structured data with `metadata.jsonLd`, an object or an array of
+objects. It works without `agent.jsonLd`; when both are set, the site script comes first.
+
+```tsx title="src/app/blog/[slug]/page.tsx"
+import type { MetadataProps } from "@farm.js/core";
+
+export async function generateMetadata({ params }: MetadataProps<"/blog/[slug]">) {
+  const post = await getPost(params.slug);
+
+  return {
+    title: post.title,
+    jsonLd: {
+      "@context": "https://schema.org",
+      "@type": "BlogPosting",
+      headline: post.title,
+      datePublished: post.publishedAt,
+    },
+  };
+}
+```
+
+Each object renders its own `<script type="application/ld+json">` with `<` escaped, so values
+cannot close the tag. Entries from layouts render first and accumulate with the page's instead of
+replacing them. Client navigation swaps page and layout JSON-LD for the next route's and leaves
+the site script and any `ld+json` script the app renders itself in place.
+
+Instead of writing those objects by hand, use the typed builders in `@farm.js/core/json-ld`:
+`article`, `breadcrumbList`, `faqPage`, `product`, and `softwareApplication`. Each returns a plain
+object with `@context` and `@type` set and unset fields left out. Pass one, or an array of them, as
+`metadata.jsonLd`:
+
+```tsx title="src/app/docs/[slug]/page.tsx"
+import type { Metadata } from "@farm.js/core";
+import * as jsonLd from "@farm.js/core/json-ld";
+
+export const metadata: Metadata = {
+  jsonLd: [
+    jsonLd.article({
+      type: "TechArticle",
+      headline: "Routing",
+      datePublished: new Date("2026-10-01"),
+      author: { name: "Acme", type: "Organization" },
+    }),
+    jsonLd.breadcrumbList([{ name: "Docs", url: "https://acme.test/docs" }, { name: "Routing" }]),
+  ],
+};
+```
+
+Values are passed through as written, so use absolute URLs. Spread a result to add schema.org
+properties the builder does not model, for example `{ ...jsonLd.product(input), gtin13: "..." }`.
+
+### AI crawlers
+
+`crawlers` serves a generated `/robots.txt` with a group per category you set:
+
+| Option     | User agents                                                                                                |
+| ---------- | ---------------------------------------------------------------------------------------------------------- |
+| `search`   | `OAI-SearchBot`, `ChatGPT-User`, `Claude-SearchBot`, `Claude-User`, `PerplexityBot`, `Perplexity-User`     |
+| `training` | `GPTBot`, `ClaudeBot`, `Google-Extended`, `CCBot`, `Applebot-Extended`, `Meta-ExternalAgent`, `Bytespider` |
+
+`"allow"` writes `Allow: /` for that group and `"block"` writes `Disallow: /`. A category you leave
+out gets no group, so those agents follow the `User-agent: *` rules. `search` covers agents that
+fetch pages to cite or link them in answers, including ones acting on a user's request, which some
+vendors say may not follow robots.txt. `training` covers crawlers and tokens that decide whether
+content trains models; blocking them does not affect search engines such as Googlebot.
+
+The file ends with `User-agent: *` / `Allow: /`, then a `Sitemap:` line when the app has a
+`sitemap.ts` and the root layout sets `metadataBase`. Farm does not build that URL from the request's
+`Host` header, since CDNs cache robots.txt. `crawlers: true` serves only those default lines.
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  agent: {
+    crawlers: {
+      search: "allow",
+      training: "block",
+      // Written after the generated groups. A `*` rule replaces the default allow-all group.
+      rules: [{ userAgent: "*", allow: "/", disallow: ["/admin/", "/api/"] }],
+      // Absolute URLs. Replaces the sitemap.ts default; [] leaves the line out.
+      sitemap: ["https://acme.test/sitemap.xml"],
+    },
+  },
+});
+```
+
+Crawlers combine groups that name the same agent, so a rule for `GPTBot` with `allow: "/blog/"`
+next to `training: "block"` lets GPTBot read `/blog/` only. A named group replaces the `*` group for
+that agent, so the `*` rule's `disallow` paths do not apply to agents in an `"allow"` group.
+
+The app's own file wins. Farm serves `/robots.txt` from, in order:
+
+1. `public/robots.txt`, served as-is.
+2. A root [`robots.ts` metadata route](/docs/routing#application-metadata-routes) in `src/app`.
+3. The generated file from `agent.crawlers`.
+4. The [docs engine](/docs/docs-engine)'s robots.txt, when the docs engine is enabled.
 
 ## Isolated client hydration
 
@@ -542,6 +646,10 @@ Farm keeps one image preload—the explicitly high-priority hint first—and two
 default. Lower-priority hints above those budgets are removed from buffered HTML and `Link` response
 headers, while the actual image and font elements remain unchanged and load normally. Route scripts,
 stylesheets, and module preloads are not removed.
+
+Production responses reuse buffered HTML without a body decode/re-encode when Farm can prove it
+contains no preload candidates. `Link` header budgets still apply, and HTML transformed by plugins
+is checked after those transforms. Candidate-bearing documents retain the full combined budget.
 
 ```ts
 import { defineConfig } from "@farm.js/core";

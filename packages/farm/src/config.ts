@@ -1,3 +1,5 @@
+import type { FarmSchemaConfig } from "./schema";
+import { assertPluginDependencies } from "./plugin-dependencies";
 import type {
   FarmConfig as BaseFarmConfig,
   FarmMigrationCommand,
@@ -390,6 +392,31 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   vite?: ViteUserConfig | ((config: ViteUserConfig) => ViteUserConfig);
 
   [key: string]: any;
+}
+
+/** Validate the app's schema rules while the config loads. */
+function resolveSchemaConfig(config: FarmSchemaConfig | undefined): FarmSchemaConfig {
+  if (config === undefined) return {};
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    throw new TypeError("`schema` in farm.config must be an object.");
+  }
+  for (const key of ["allowExtend", "allowForeignKeys"] as const) {
+    const entries = config[key];
+    if (entries === undefined) continue;
+    if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
+      throw new TypeError(
+        `\`schema.${key}\` must map a plugin's migrate name to a list of model or table names.`,
+      );
+    }
+    for (const [owner, tables] of Object.entries(entries)) {
+      if (!Array.isArray(tables) || tables.some((table) => typeof table !== "string")) {
+        throw new TypeError(
+          `\`schema.${key}.${owner}\` must be a list of model or table names, such as ["user"].`,
+        );
+      }
+    }
+  }
+  return config;
 }
 
 export interface ResolvedFarmConfig extends Required<
@@ -1057,6 +1084,7 @@ export async function resolveConfig(
     telemetry: userConfig.telemetry !== false,
     devtools: resolveFarmDevtoolsConfig(userConfig.devtools, mode),
     storage: userConfig.storage || {},
+    schema: resolveSchemaConfig(userConfig.schema),
     cache: userConfig.cache || {},
     auth,
     mcp,
@@ -1106,6 +1134,9 @@ export async function resolveConfig(
     env,
     vite: typeof userConfig.vite === "function" ? userConfig.vite({}) : userConfig.vite || {},
   };
+
+  // Every plugin is known now, including those integrations contribute.
+  assertPluginDependencies(resolved.plugins, resolved.integrations as never);
 
   return resolved;
 }

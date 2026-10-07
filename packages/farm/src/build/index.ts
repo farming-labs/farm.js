@@ -361,7 +361,8 @@ async function buildClient(
   srcDir: string,
   outputDir: string,
 ) {
-  const { farmI18nClientBridgePlugin, farmPlugin } = await import("../vite");
+  const { farmI18nClientBridgePlugin, farmPlugin, farmServerOnlyEntriesPlugin } =
+    await import("../vite");
   const { PluginManager } = await import("../plugin");
 
   const pluginManager = new PluginManager({
@@ -382,6 +383,7 @@ async function buildClient(
     },
     plugins: [
       farmI18nClientBridgePlugin(),
+      farmServerOnlyEntriesPlugin(),
       farmPlugin(config, pluginManager),
       farmEnvironmentFunctionsPlugin(),
     ],

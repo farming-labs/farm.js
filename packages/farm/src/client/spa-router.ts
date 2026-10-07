@@ -1,6 +1,7 @@
 "use client";
 
 import { readDeferredDataResponse } from "../deferred";
+import { createClientCancellation } from "../client-cancellation";
 import { notifyHistoryChange, notifyRouterHistoryChange } from "./history-sync";
 import {
   createFarmDeploymentMismatchError,
@@ -77,6 +78,12 @@ export interface RouterOptions {
 interface CacheEntry {
   data: PageData;
   timestamp: number;
+}
+
+interface PendingPrefetch {
+  data: Promise<PageData | undefined>;
+  resolve: (data: PageData | undefined) => void;
+  cacheable: boolean;
 }
 
 interface ViewportPrefetchTask {
@@ -161,6 +168,8 @@ let routerInstance: SPARouter | null = null;
 export class SPARouter {
   private cache: Map<string, CacheEntry> = new Map();
   private prefetchingUrls: Set<string> = new Set();
+  private pendingPrefetches: Map<string, PendingPrefetch> = new Map();
+  private cacheGeneration = 0;
   private prefetchObserver?: IntersectionObserver;
   private observedPrefetchLinks: Map<HTMLAnchorElement, string> = new Map();
   private prefetchTimers: Map<Element, ReturnType<typeof setTimeout>> = new Map();
@@ -251,6 +260,7 @@ export class SPARouter {
     if (typeof window === "undefined") return;
     this.destroyed = true;
     this.cancelActiveNavigation();
+    this.clearCache();
     this.prefetchObserver?.disconnect();
     this.prefetchObserver = undefined;
     for (const timer of this.prefetchTimers.values()) clearTimeout(timer);
@@ -421,6 +431,7 @@ export class SPARouter {
    * Prefetch a URL
    */
   async prefetch(href: string): Promise<void> {
+    if (this.destroyed) return;
     if (isFarmLocaleChangeHref(href)) return;
     const url = resolveFarmNavigationURL(href, window.location.href);
     if (isFarmExternalNavigationURL(url, window.location.origin)) return;
@@ -717,6 +728,72 @@ export class SPARouter {
     // Fetch from server. The active layout chain lets the server omit shared
     // shell HTML from the fragment without inspecting component source.
     const activeLayoutChain = getActiveLayoutChainHeader();
+    const prefetchKey = JSON.stringify([path, interceptFrom, activeLayoutChain]);
+    let generation = this.cacheGeneration;
+    const pending = this.pendingPrefetches.get(prefetchKey);
+    if (pending && recover) {
+      if (fresh) {
+        // An explicit refresh must not reuse, or later be overwritten by, old work.
+        pending.cacheable = false;
+        pending.resolve(undefined);
+        this.pendingPrefetches.delete(prefetchKey);
+      } else {
+        // Cancelling this navigation must not cancel the background prefetch.
+        const cancellation = createClientCancellation(signal);
+        try {
+          const data = await cancellation.run(() => pending.data);
+          cancellation.check();
+          if (data && pending.cacheable && generation === this.cacheGeneration) return data;
+        } finally {
+          cancellation.dispose();
+        }
+      }
+    }
+
+    // A cleared cache releases a waiter into a new, independently cacheable request.
+    generation = this.cacheGeneration;
+    let prefetch: PendingPrefetch | undefined;
+    if (!recover) {
+      let resolve!: PendingPrefetch["resolve"];
+      const data = new Promise<PageData | undefined>((done) => {
+        resolve = done;
+      });
+      prefetch = { data, resolve, cacheable: true };
+      this.pendingPrefetches.set(prefetchKey, prefetch);
+    }
+    const cacheData = (data: PageData) => {
+      if (!this.destroyed && generation === this.cacheGeneration && prefetch?.cacheable !== false) {
+        this.cachePageData(cacheKey, data);
+      }
+    };
+    try {
+      return await this.requestPageData(
+        path,
+        recover,
+        interceptFrom,
+        activeLayoutChain,
+        signal,
+        cacheData,
+        prefetch?.resolve,
+      );
+    } finally {
+      // Release joiners on failure too: navigation retries through its own recovery path.
+      prefetch?.resolve(undefined);
+      if (prefetch && this.pendingPrefetches.get(prefetchKey) === prefetch) {
+        this.pendingPrefetches.delete(prefetchKey);
+      }
+    }
+  }
+
+  private async requestPageData(
+    path: string,
+    recover: boolean,
+    interceptFrom: string | undefined,
+    activeLayoutChain: string | undefined,
+    signal: AbortSignal | undefined,
+    cacheData: (data: PageData) => void,
+    resolvePrefetch?: PendingPrefetch["resolve"],
+  ): Promise<PageData> {
     const response = await fetch(`/__farm/page-data?path=${encodeURIComponent(path)}`, {
       signal,
       headers: createFarmDeploymentRequestHeaders(this.options.deploymentId, {
@@ -749,10 +826,14 @@ export class SPARouter {
 
     if (!isDeferredResponse) {
       const data = await readDeferredDataResponse<PageData>(response);
-      this.cachePageData(cacheKey, data);
+      cacheData(data);
+      resolvePrefetch?.(data);
       return data;
     }
 
+    // Deferred streams keep independent ownership and abort behavior. Release
+    // navigation at the response headers; do not wait for deferred values.
+    resolvePrefetch?.(undefined);
     // The first deferred stream line is available before its promises settle.
     // Do not cache that object until the stream closes normally: an aborted
     // navigation otherwise leaves rejected deferreds in the page-data cache.
@@ -760,12 +841,12 @@ export class SPARouter {
     let streamCompleted = false;
     const markStreamComplete = () => {
       streamCompleted = true;
-      if (data) this.cachePageData(cacheKey, data);
+      if (data) cacheData(data);
     };
     data = await readDeferredDataResponse<PageData>(response, {
       onComplete: markStreamComplete,
     });
-    if (streamCompleted) this.cachePageData(cacheKey, data);
+    if (streamCompleted) cacheData(data);
 
     return data;
   }
@@ -1132,7 +1213,13 @@ export class SPARouter {
    * Clear the page cache
    */
   clearCache(): void {
+    this.cacheGeneration += 1;
     this.cache.clear();
+    for (const pending of this.pendingPrefetches.values()) {
+      pending.cacheable = false;
+      pending.resolve(undefined);
+    }
+    this.pendingPrefetches.clear();
   }
 }
 

@@ -16,7 +16,7 @@ export default function HomePage() {
         <GreetingPanel />
 
         <nav class="links" aria-label="Project resources">
-          <a href="https://farm.js.dev">Docs</a>
+          <a href="https://farmjs.dev">Docs</a>
           <span aria-hidden="true">/</span>
           <a href="https://github.com/farming-labs/farm.js">GitHub</a>
         </nav>

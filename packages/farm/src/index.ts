@@ -1,5 +1,6 @@
 export * from "./types";
 export type { FarmAgentUserConfig, FarmAgentJsonLd } from "./agent-config";
+export type { FarmAgentCrawlers, FarmCrawlerPolicy } from "./agent-crawlers";
 export { defineRenderer, REACT_RENDERER } from "./renderer";
 export type {
   FarmRenderer,
@@ -15,12 +16,28 @@ export * from "./schema";
 export * from "./schema-sql";
 export * from "./schema-migrate";
 export * from "./schema-tables";
+export { collectSchemaDependencies, orderSchemaOwners } from "./schema-dependencies";
+export type { FarmCrossOwnerReference } from "./schema-foreign-keys";
+export { FARM_SCHEMA_STEPS_TABLE, type FarmSchemaStepPlan } from "./schema-steps";
+export type { FarmSchemaMigrationStep } from "./schema-step-types";
+export {
+  FARM_SCHEMA_STATE_TABLE,
+  type FarmSchemaChanges,
+  type FarmSchemaSnapshot,
+  type FarmSchemaState,
+} from "./schema-state";
+export {
+  collectSchemaExtensions,
+  isSchemaExtensionAllowed,
+  type FarmSchemaExtension,
+} from "./schema-extend";
 export * from "./integrations";
 export * from "./integration-orm";
 export * from "./integration-api";
 export { createFarmApp } from "./app";
 export { FarmProvider } from "./provider";
 export { getCurrentRequest } from "./server/request";
+export { renameSchema, type FarmSchemaRenames } from "./schema-rename";
 export {
   checkSchema,
   collectSchemaOwners,
@@ -33,7 +50,12 @@ export {
   type FarmSchemaCheckReport,
   type FarmSchemaCheckSeverity,
 } from "./schema-check";
-export { definePlugin, FarmRuntimeShutdownError, PluginManager } from "./plugin";
+export {
+  definePlugin,
+  FarmRuntimeShutdownError,
+  PluginManager,
+  type FarmPluginDatabase,
+} from "./plugin";
 export {
   defineConfig,
   defineFarmConfig,

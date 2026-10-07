@@ -1,3 +1,4 @@
+import { isFarmProductionDeploymentEnvironment } from "./deployment-environment";
 import { FARM_VERSION } from "./version";
 
 export const FARM_PRODUCTION_SITE_TELEMETRY_SCHEMA_VERSION = 1 as const;
@@ -153,7 +154,7 @@ export function createFarmProductionSiteReporter(
     },
     report(requestUrl, waitUntil) {
       if (productionTelemetryDisabled()) return;
-      if (!isProductionDeploymentEnvironment()) {
+      if (!isFarmProductionDeploymentEnvironment()) {
         debug("production-site check-in skipped outside a production deployment");
         return;
       }
@@ -268,43 +269,6 @@ function productionTelemetryDisabled(): boolean {
   if (process.env.DO_NOT_TRACK !== undefined && !isFalse(process.env.DO_NOT_TRACK)) return true;
   if (isTrue(process.env.FARM_TELEMETRY_DISABLED)) return true;
   return isFalse(process.env.FARM_TELEMETRY);
-}
-
-/**
- * Only a provider's production environment represents a production site;
- * preview, branch, and development deployments must not create dashboard
- * entries. Each provider exposes this differently, so every signal we can read
- * is checked. A deployment whose provider exposes no environment metadata stays
- * eligible, so self-hosted sites continue to report.
- *
- * Cloudflare Pages is deliberately absent: it exposes `CF_PAGES_BRANCH` for both
- * production and preview deployments and no environment flag that distinguishes
- * them, so there is nothing here that could be read without guessing.
- */
-function isProductionDeploymentEnvironment(): boolean {
-  // Vercel exposes the deployment environment at build and runtime.
-  const environment = normalizeEnvironment(process.env.VERCEL_ENV);
-  const targetEnvironment = normalizeEnvironment(process.env.VERCEL_TARGET_ENV);
-  if (environment && environment !== "production") return false;
-  if (targetEnvironment && targetEnvironment !== "production") return false;
-
-  // Netlify: CONTEXT is production | deploy-preview | branch-deploy | dev.
-  // CONTEXT is a generic name, so it is only trusted when NETLIFY marks the
-  // build as Netlify's.
-  if (isTrue(process.env.NETLIFY)) {
-    const context = normalizeEnvironment(process.env.CONTEXT);
-    if (context && context !== "production") return false;
-  }
-
-  // Render marks pull-request preview services.
-  if (isTrue(process.env.IS_PULL_REQUEST)) return false;
-
-  return true;
-}
-
-function normalizeEnvironment(value: string | undefined): string | undefined {
-  const normalized = value?.trim().toLowerCase();
-  return normalized || undefined;
 }
 
 function sanitizeDetail(value: string | undefined, fallback: string): string {

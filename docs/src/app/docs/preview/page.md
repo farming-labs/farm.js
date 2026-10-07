@@ -61,6 +61,68 @@ developer to sign in again. Pass `--login` to replace that saved login. In an in
 omitting `--expires` prompts for a duration and defaults to one hour. In CI and other
 non-interactive terminals, the hosted default is used.
 
+### Farm Infra authentication and dashboard
+
+Gateways configured with `FARM_INFRA_URL` use your Farm Infra account instead of the
+legacy GitHub device flow. You do not need to link GitHub in the dashboard.
+
+1. With an existing dashboard API key, supply it through `FARM_PREVIEW_TOKEN` (use your
+   CI secret store, not a command-line argument). The CLI requests a tunnel grant directly.
+2. Without a key or saved login, the CLI opens Farm Infra, displays a code, and waits
+   for you to confirm the matching code and explicitly authorize your terminal.
+3. Return to the CLI. Choose the preview duration when prompted, or pass `--expires`.
+4. Once the tunnel is ready, the CLI prints its public URL and a dashboard link.
+
+CI never waits for browser approval: provide a credential, otherwise the command fails
+with instructions. Device approval signs the first-party CLI into your Infra account;
+the saved credential is a Better Auth session token, not a third-party OAuth access token.
+The gateway verifies that credential or API key whenever it issues a new, name-scoped
+grant. A grant cannot outlive the verified account session or API key expiry. API keys
+may be restricted to one project slug: pass the matching `--project` when starting a preview.
+With the matching Infra access-control gateway, revoking a key also blocks existing
+preview traffic. **Stop preview** in the detail page revokes that grant across reconnects
+without stopping your local app; start a new `farm preview` to get another grant.
+Both transports check access before forwarding. WebSocket relays also check idle connections
+every five seconds; authority requests have a five-second timeout and fail closed.
+Work already executed locally cannot be undone. Older gateways without the access hook
+only enforce key revocation on new grants, so deploy the matching Infra migrations and
+access endpoint before updating the gateway. Revoking a device account session prevents
+new grants; stop existing previews separately.
+
+The Previews dashboard shows account-owned connections, expiry, and the latest 200
+request metadata records per preview. It refreshes every five seconds and marks missing
+heartbeats as **Stale**, not live. Paths, methods, statuses, durations, and times are
+recorded; query strings, headers, and bodies are excluded. Paths may still contain app
+identifiers or embedded credentials; never put secrets in URL paths. This is best-effort activity reporting, not an audit log
+or your application's stdout/stderr. Your app still runs on your computer or CI runner.
+
+### Projects and preview details
+
+One API key can create multiple previews across multiple projects. The key authenticates
+your account; it does not define a project. Each run has its own preview ID, detail URL,
+expiry, and request history. Use a different `--name` for simultaneously running previews.
+
+```bash
+farm preview --project storefront --name checkout-review --expires 2h
+farm preview --project storefront --name payment-review --expires 1h
+farm preview --project docs --name docs-review --expires 1h
+```
+
+The managed CLI defaults the project to a normalized `package.json` name under `--root`
+(or the directory name when no package name exists). Set `--project` or
+`FARM_PREVIEW_PROJECT` to a stable lowercase slug to group runs from different checkouts.
+Projects are scoped to your account. Older clients are grouped by their preview name.
+
+Filter projects on `/dashboard/previews`, then open a preview to inspect its transport,
+credential ID (never the key itself), request paths, response statuses, and timings.
+Search requests or filter error responses without collecting payloads. The CLI's
+dashboard link opens that preview directly. Activity is retained until seven days
+after preview expiry; it is best-effort metadata, not a complete request archive.
+
+This requires matching CLI, gateway, and Infra releases plus database/environment setup.
+Deploying the dashboard alone does not change existing gateway authentication. Gateways
+without `FARM_INFRA_URL` retain their GitHub or self-hosted authentication behavior.
+
 During the relay rollout, the CLI warns and falls back to compatibility gateway polling if the hosted endpoint cannot accept the native WebSocket connection. An explicitly configured `FARM_PREVIEW_RELAY_URL` is tried first as well.
 
 If a managed native relay disconnects before the printed expiry, the same CLI process reuses its
@@ -106,6 +168,7 @@ farm preview --port 3000
 farm preview --host 127.0.0.1 --port 3000
 farm preview --url http://localhost:4319
 farm preview --name stripe-webhook
+farm preview --project storefront --name checkout-review
 farm preview --expires 2h
 farm preview --login
 farm preview --dry-run
@@ -125,6 +188,7 @@ http://localhost:4319/console` forwards the public preview root to `/console/` a
 | `--host <host>`         | Expose a specific local host. Defaults to `localhost`.                              |
 | `--url <url>`           | Expose a full local URL.                                                            |
 | `--name <name>`         | Request a readable preview URL name.                                                |
+| `--project <slug>`      | Group managed previews under an account-owned dashboard project.                    |
 | `--expires <duration>`  | Keep the URL live for a duration such as `30m`, `2h`, or `1d`.                      |
 | `--login`               | Sign in again instead of reusing the saved Farm Preview account.                    |
 | `--dry-run`             | Validate target detection and print the preview plan without opening a session.     |
@@ -296,6 +360,12 @@ not the GitHub client secret and must never be placed on developer machines. Set
 or neither; a partial setup fails during gateway startup. `FARM_PREVIEW_DEFAULT_TTL_MS` and
 `FARM_PREVIEW_MAX_TTL_MS` optionally control the default and maximum hosted durations.
 
+Alternatively, connect a Farm Infra installation with `FARM_INFRA_URL` and
+`FARM_PREVIEW_GATEWAY_SECRET` on the gateway. Set the same backchannel secret on Infra,
+and keep `FARM_PREVIEW_AUTH_SECRET` only on the gateway. Infra must have its auth,
+API-key, and preview-activity migrations applied before switching the gateway's provider.
+See the gateway example README for the deployment order and activity cleanup contract.
+
 For a private domain such as `preview.example.com`, configure:
 
 - `preview.example.com` for the gateway root.
@@ -322,16 +392,17 @@ Use this path only when the hosted Farm gateway is not appropriate for your envi
 
 ## Environment Variables
 
-| Variable                        | Purpose                                                   |
-| ------------------------------- | --------------------------------------------------------- |
-| `FARM_PREVIEW_GATEWAY_URL`      | Override the hosted gateway URL.                          |
-| `FARM_PREVIEW_RELAY_URL`        | Override the persistent WebSocket relay URL.              |
-| `FARM_PREVIEW_DOMAIN`           | Override the preview domain used for generated hostnames. |
-| `FARM_PREVIEW_NAME`             | Provide a default readable preview name.                  |
-| `FARM_PREVIEW_PROVIDER`         | Select `farm` or `local`.                                 |
-| `FARM_PREVIEW_TUNNEL_COMMAND`   | Command template for a custom local tunnel provider.      |
-| `FARM_PREVIEW_TOKEN`            | Non-interactive Farm account credential for CI.           |
-| `FARM_PREVIEW_CREDENTIALS_PATH` | Override the local managed-preview credential file.       |
+| Variable                        | Purpose                                                                                              |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `FARM_PREVIEW_GATEWAY_URL`      | Override the hosted gateway URL.                                                                     |
+| `FARM_PREVIEW_RELAY_URL`        | Override the persistent WebSocket relay URL.                                                         |
+| `FARM_PREVIEW_DOMAIN`           | Override the preview domain used for generated hostnames.                                            |
+| `FARM_PREVIEW_NAME`             | Provide a default readable preview name.                                                             |
+| `FARM_PREVIEW_PROJECT`          | Stable dashboard project slug; overridden by `--project`.                                            |
+| `FARM_PREVIEW_PROVIDER`         | Select `farm` or `local`.                                                                            |
+| `FARM_PREVIEW_TUNNEL_COMMAND`   | Command template for a custom local tunnel provider.                                                 |
+| `FARM_PREVIEW_TOKEN`            | Farm Infra API key or saved account credential for CI; accepted format depends on gateway auth mode. |
+| `FARM_PREVIEW_CREDENTIALS_PATH` | Override the local managed-preview credential file.                                                  |
 
 ## Troubleshooting
 

@@ -1,5 +1,4 @@
 import {
-  declareSchemaTables,
   definePlugin,
   describeIntegrationOriginRejection,
   resolveIntegrationAllowedOrigins,
@@ -105,8 +104,17 @@ export function sync(options: SyncPluginOptions) {
     return ormPromise;
   };
 
-  const plugin = definePlugin({
+  return definePlugin({
     name: "farm:sync",
+    // `farm sync migrate` creates the tables of the models the app exposed.
+    // The rest of the app's schema is described, not created: those tables
+    // are the app's.
+    schema: syncOwnedSchema(options.schema, models),
+    // The database the app gave sync, not storage.client.
+    database: {
+      client: () => resolveSyncConnection(options),
+      dialect: options.dialect,
+    },
 
     client: {
       // Serializable descriptor the browser runtime reads at startup.
@@ -196,28 +204,6 @@ export function sync(options: SyncPluginOptions) {
         allowedOrigins,
       });
       if (response) await sendNodeResponse(res, response);
-    },
-  });
-
-  // Declare the tables sync owns, so `farm sync migrate` can create them
-  // without re-reading or re-validating configuration.
-  return declareSchemaTables(plugin, {
-    name: "sync",
-    schema: options.schema,
-    // A model the app has not opened to the browser is not sync's to create.
-    models: Array.from(models.keys()),
-    dialect: options.dialect,
-    resolveClient: async () => {
-      if (options.client) {
-        return typeof options.client === "function"
-          ? await (options.client as () => unknown | Promise<unknown>)()
-          : options.client;
-      }
-      if (options.storage) {
-        const { getStorage } = await import("@farm.js/core/storage");
-        return getStorage(options.storage);
-      }
-      return undefined;
     },
   });
 }
@@ -333,35 +319,68 @@ async function runMiddleware(
   return context;
 }
 
-async function resolveSyncClient(
-  options: SyncPluginOptions,
-  models: Map<string, ResolvedSyncModel>,
-): Promise<SyncOrmClient> {
-  if (options.client) {
-    const provided =
-      typeof options.client === "function"
-        ? await (options.client as () => unknown | Promise<unknown>)()
-        : options.client;
+/**
+ * The app's schema as sync owns it: exposed models are sync's tables, the rest
+ * are described but never created. `extend` is folded into the models first,
+ * so the app composing its own schema is never read as sync asking to add
+ * columns to the app's tables.
+ */
+function syncOwnedSchema(schema: FarmSchema, exposed: ReadonlyMap<string, unknown>): FarmSchema {
+  const models: FarmSchema["models"] = { ...schema.models };
+  for (const [key, extension] of Object.entries(schema.extend ?? {})) {
+    const existing = models[key];
+    models[key] = {
+      ...(existing ?? { fields: {} }),
+      ...(extension.name ? { name: extension.name } : {}),
+      ...(extension.description ? { description: extension.description } : {}),
+      fields: { ...existing?.fields, ...extension.fields },
+      constraints: [...(existing?.constraints ?? []), ...(extension.constraints ?? [])],
+      meta: { ...existing?.meta, ...extension.meta },
+    };
+  }
+  return {
+    ...schema,
+    extend: undefined,
+    models: Object.fromEntries(
+      Object.entries(models).map(([key, model]) => [
+        key,
+        { ...model, external: !exposed.has(key) },
+      ]),
+    ),
+  };
+}
 
-    // Already model-shaped: an @farming-labs/orm client, or anything exposing
-    // the same four methods. Use it directly.
-    if (isModelClient(provided, models)) return provided;
-    return buildOrm(options.schema, provided);
+/** The connection or storage mount the app gave sync. */
+async function resolveSyncConnection(options: SyncPluginOptions): Promise<unknown> {
+  if (options.client) {
+    return typeof options.client === "function"
+      ? await (options.client as () => unknown | Promise<unknown>)()
+      : options.client;
   }
 
   if (options.storage) {
-    const mount = options.storage;
     // Imported lazily so the storage runtime never reaches a browser bundle.
     const { getStorage } = await import("@farm.js/core/storage");
     // A mount is an unstorage instance, which the orm runtime drives like any
     // other backend — so this is the same code path as a real database.
-    return buildOrm(options.schema, getStorage(mount));
+    return getStorage(options.storage);
   }
 
   throw new Error(
     "sync(): no data source is configured. Set `storage` to a mount name from " +
       "storage.mounts in farm.config.ts, or pass `client` with your database connection.",
   );
+}
+
+async function resolveSyncClient(
+  options: SyncPluginOptions,
+  models: Map<string, ResolvedSyncModel>,
+): Promise<SyncOrmClient> {
+  const provided = await resolveSyncConnection(options);
+  // Already model-shaped: an @farming-labs/orm client, or anything exposing
+  // the same four methods. Use it directly.
+  if (options.client && isModelClient(provided, models)) return provided;
+  return buildOrm(options.schema, provided);
 }
 
 /** Let the orm runtime detect the driver and build the model client. */

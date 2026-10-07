@@ -20,6 +20,9 @@ export const FARM_NAVIGATION_HEAD_SELECTOR = [
   'link[rel~="pingback"]',
   'link[rel~="privacy-policy"]',
   'link[rel~="terms-of-service"]',
+  // Page and layout `metadata.jsonLd` (FARM_METADATA_ATTRIBUTE). The site-level
+  // agent JSON-LD and app-authored scripts carry no marker and stay in place.
+  'script[type="application/ld+json"][data-farm-metadata]',
 ].join(",");
 
 export function reconcileFarmDocumentHead(nextDocument: Document): void {
