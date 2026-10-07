@@ -116,6 +116,7 @@ import {
   createFarmClientOptimizeDepsEntries,
   createFarmSourceAlias,
 } from "./server/vite-config";
+import { generateFarmDocsAdapterClientRuntime } from "./docs/adapter-client";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "./docs/fonts";
 import {
   createFarmNodeRequestAbortSignal,
@@ -4091,22 +4092,7 @@ function generateClientCode(
   const isolatedHydrationImport = isolatedHydrationEnabled
     ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'`
     : "";
-  const docsAdapterImportBlock = docsAdapterReact
-    ? `import * as FarmDocsAdapterReact from ${JSON.stringify(docsAdapterReact)};
-
-async function hydrateFarmDocsAdapterRuntime() {
-  const runtime = window.__FARM_DOCS_ADAPTER__;
-  if (!runtime) return false;
-  if (typeof FarmDocsAdapterReact.hydrateFarmDocs !== 'function') {
-    throw new Error('The configured Farm docs adapter does not export hydrateFarmDocs().');
-  }
-  FarmDocsAdapterReact.hydrateFarmDocs({
-    config: runtime.config || {},
-    data: runtime.data,
-  });
-  return true;
-}`
-    : `async function hydrateFarmDocsAdapterRuntime() { return false; }`;
+  const docsAdapterImportBlock = generateFarmDocsAdapterClientRuntime(docsAdapterReact);
   const isolatedHydrationRuntime = isolatedHydrationEnabled
     ? `const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
   ReactRuntime: React,
