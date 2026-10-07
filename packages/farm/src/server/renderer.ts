@@ -100,6 +100,7 @@ import {
   resolveFarmLlmsTxtConfig,
 } from "../llms-txt";
 import { getFarmMarkdownAlternatePath, resolveMarkdownConfig } from "../markdown";
+import { createFarmAgentRobots, resolveFarmAgentCrawlers } from "../agent-crawlers";
 import {
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
@@ -1237,6 +1238,12 @@ export class ServerRenderer {
         return;
       }
 
+      if (pathname === "/robots.txt" && this.getAgentCrawlers().enabled) {
+        await this.renderGeneratedRobotsTxt(req, res);
+        completeRender(res.statusCode || 200, pathname);
+        return;
+      }
+
       const metadataImageMatch = this.routeManager.matchMetadataImage(pathname);
       if (metadataImageMatch) {
         await this.renderMetadataImage(req, res, {
@@ -2227,6 +2234,44 @@ export class ServerRenderer {
       );
     } catch (error) {
       logger.error(`Generated ${kind}.txt failed: ${error}`);
+      await sendWebResponse(
+        res as any,
+        new Response("Internal Server Error", {
+          status: 500,
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        }),
+      );
+    }
+  }
+
+  private getAgentCrawlers() {
+    return resolveFarmAgentCrawlers(this.config.agent?.crawlers);
+  }
+
+  /** `/robots.txt` from `agent.crawlers` when no robots.ts owns it. */
+  private async renderGeneratedRobotsTxt(req: FarmRequest, res: FarmResponse): Promise<void> {
+    try {
+      const sitemapPath =
+        this.routeManager.matchMetadataRoute("/sitemap.xml")?.metadata.kind === "sitemap"
+          ? "/sitemap.xml"
+          : undefined;
+      const rootLayout = this.routeManager.getLayouts().get("/");
+      const rootMetadata =
+        sitemapPath && rootLayout
+          ? (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).metadata
+          : undefined;
+      const robots = createFarmAgentRobots({
+        crawlers: this.getAgentCrawlers(),
+        sitemapPath,
+        metadataBase: (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
+        basePath: this.config.basePath,
+      });
+      await sendWebResponse(
+        res as any,
+        createFarmMetadataRouteResponse("robots", robots, {}, { method: req.method }),
+      );
+    } catch (error) {
+      logger.error(`Generated robots.txt failed: ${error}`);
       await sendWebResponse(
         res as any,
         new Response("Internal Server Error", {

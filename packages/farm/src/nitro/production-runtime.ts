@@ -47,6 +47,7 @@ export {
   renderMetadataHead,
 } from "../metadata";
 export { createFarmMetadataRouteResponse } from "../metadata-route";
+export { createFarmAgentRobots } from "../agent-crawlers";
 export {
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,

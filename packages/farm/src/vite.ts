@@ -42,6 +42,7 @@ import {
   resolveMarkdownMirrorTarget,
 } from "./markdown";
 import { resolveFarmLlmsTxtConfig } from "./llms-txt";
+import { resolveFarmAgentCrawlers } from "./agent-crawlers";
 import {
   FARM_MARKDOWN_CONTENT_TYPE,
   createFarmMarkdownErrorBody,
@@ -156,6 +157,14 @@ function farmLlmsTxtGeneratedPaths(config: { agent?: { llmsTxt?: unknown } }): s
   const llms = resolveFarmLlmsTxtConfig(config.agent?.llmsTxt as never);
   if (!llms.enabled) return [];
   return llms.full ? ["/llms.txt", "/llms-full.txt"] : ["/llms.txt"];
+}
+
+/** Paths `agent.llmsTxt` and `agent.crawlers` serve without a route file. */
+function farmAgentGeneratedPaths(config: {
+  agent?: { llmsTxt?: unknown; crawlers?: unknown };
+}): string[] {
+  const crawlers = resolveFarmAgentCrawlers(config.agent?.crawlers as never);
+  return [...farmLlmsTxtGeneratedPaths(config), ...(crawlers.enabled ? ["/robots.txt"] : [])];
 }
 
 interface FarmVitePluginOptions extends FarmConfig {
@@ -1850,10 +1859,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // Vite loading a `.md` file as a module is not a request for docs or Markdown.
           const viteModuleRequest = isViteModuleRequest(parsedRequestUrl, req.headers);
           // An app's own llms.txt, llms-full.txt, sitemap.xml, and robots.txt (agent.llmsTxt,
-          // a root llms.ts, llms-full.ts, sitemap.ts, or robots.ts, or a public file) take
-          // those paths from the docs engine, as in production.
+          // agent.crawlers, a root llms.ts, llms-full.ts, sitemap.ts, or robots.ts, or a public
+          // file) take those paths from the docs engine, as in production.
           const appOwnsDocsEnginePath = farmAppOwnsDocsEnginePath(requestPathname, {
-            generatedPaths: farmLlmsTxtGeneratedPaths(farmConfig),
+            generatedPaths: farmAgentGeneratedPaths(farmConfig),
             routeManager: farmApp.getRouteManager(),
             publicDir: server.config.publicDir,
           });
@@ -2388,7 +2397,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               requestPathname,
               farmApp?.getRouteManager(),
               [server.config.publicDir, server.config.root],
-              farmLlmsTxtGeneratedPaths(farmConfig),
+              farmAgentGeneratedPaths(farmConfig),
             )
           ) {
             return next();
