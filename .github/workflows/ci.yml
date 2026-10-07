@@ -123,6 +123,16 @@ jobs:
         run: |
           node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-catchall-long-first.json"
           node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-catchall-long-second.json"
+      - name: Measure warmed unchanged-path controls separately
+        env:
+          FARM_PAGE_ROUTE_WARMUPS: "100000"
+          FARM_PAGE_ROUTE_ITERATIONS: "1000000"
+        run: |
+          for scenario in staticHit genericControl; do
+            for repetition in first second; do
+              FARM_PAGE_ROUTE_SCENARIO="$scenario" node benchmarks/page-route-inputs/run.mjs > "${{ runner.temp }}/page-route-inputs-$scenario-long-$repetition.json"
+            done
+          done
       - name: Retain raw samples for review
         if: always()
         uses: actions/upload-artifact@v7

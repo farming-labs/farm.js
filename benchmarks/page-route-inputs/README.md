@@ -58,7 +58,8 @@ if they were the same workload.
 Manually dispatch the existing `CI` workflow with `page-route-inputs-benchmark` enabled. The
 `Page Route Inputs Diagnostic` job runs focused correctness tests, then two full timing comparisons,
 two isolated short catch-all comparisons and two warmed catch-all comparisons sequentially without
-other work in that job. Artifact `page-route-inputs-<commit>` retains all six JSON
+other work in that job. Two warmed comparisons each also isolate the static-hit and generic-matcher
+controls. Artifact `page-route-inputs-<commit>` retains all ten JSON
 files for 14 days. This optional job is skipped on ordinary PR/push runs. The workflow also runs its
 normal CI jobs. A successful diagnostic means it ran and its controls passed; inspect distributions,
 static/generic controls and setup costs before claiming a speedup.
