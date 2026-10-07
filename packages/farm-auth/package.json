@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/auth",
-  "version": "0.1.2-beta.0",
+  "version": "0.1.2-beta.1",
   "description": "Farm-native authentication with email/password, server helpers, and React hooks",
   "license": "MIT",
   "repository": {
