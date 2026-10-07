@@ -24,8 +24,13 @@ const fields = {
   ${version === "1.1.0" ? 'role: { type: "string", default: "member" },' : ""}
 };
 
+// The tests that load this config in-process close these before removing the
+// file: Windows cannot delete a database file that is still open.
+const database = new DatabaseSync(${JSON.stringify(database)});
+(globalThis.__farmFixtureDatabases ??= []).push(database);
+
 export default {
-  storage: { client: new DatabaseSync(${JSON.stringify(database)}) },
+  storage: { client: database },
   plugins: [
     definePlugin({
       name: "farm:teams",
@@ -50,6 +55,18 @@ async function app({ prisma = false } = {}) {
   const install = (version) =>
     writeFile(path.join(root, "farm.config.mjs"), config(database, version));
   return { root, database, install };
+}
+
+/** Close every database the in-process configs opened. */
+function closeFixtureDatabases() {
+  for (const database of globalThis.__farmFixtureDatabases ?? []) {
+    try {
+      database.close();
+    } catch {
+      // Already closed.
+    }
+  }
+  globalThis.__farmFixtureDatabases = [];
 }
 
 async function columns(database) {
@@ -110,6 +127,7 @@ test("names the upgrade, then applies it only when the person says yes", async (
     });
     assert.equal(asked, false);
   } finally {
+    closeFixtureDatabases();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -140,6 +158,7 @@ test("keeps no record in a project whose ORM tracks its own migrations", async (
     await migrateSchema("teams", { root, apply: true });
     assert.deepEqual(await tables(database), ["member"]);
   } finally {
+    closeFixtureDatabases();
     await rm(root, { recursive: true, force: true });
   }
 });
