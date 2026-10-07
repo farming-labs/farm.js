@@ -59,7 +59,10 @@ export function createProgrammaticRouteModuleId(
   kind: "page" | "layout" | "api",
   routePath: string,
 ): string {
-  return `${filePath}?farm-route=${kind}:${encodeURIComponent(normalizeProgrammaticRoutePath(routePath))}`;
+  // The id ends in the route path, so a path like /feed.xml would make the
+  // production transform read the module as XML. The generated module is
+  // plain JavaScript; a trailing `lang.js` marker says so whatever the path.
+  return `${filePath}?farm-route=${kind}:${encodeURIComponent(normalizeProgrammaticRoutePath(routePath))}&lang.js`;
 }
 
 export function parseProgrammaticRouteModuleId(moduleId: string): {
