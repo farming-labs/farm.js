@@ -5263,6 +5263,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   configureFarmObservability,
   createDefaultErrorMarkup,
   createFarmInstrumentationLifecycle,
+  createFarmLayoutSelector,
   createFarmCacheKey,
   createFarmMetadataRouteResponse,
   createFarmAgentRobots,
@@ -5918,6 +5919,7 @@ for (const route of pageRoutes) {
 // Layout routes bundled at build time (sorted by depth, root first)
 const layoutRoutes = [${layoutRegistrations.join(",")}
 ];
+const selectApplicableLayouts = createFarmLayoutSelector(layoutRoutes);
 
 const routeSlots = [${routeSlotRegistrations.join(",")}
 ];
@@ -7052,17 +7054,7 @@ function getFarmPluginRequestOptions(request) {
  * Get applicable layouts for a page path (from root to most specific)
  */
 function getApplicableLayouts(pathname) {
-  const applicable = [];
-  const normalizedPath = pathname.replace(/\\/$/, '') || '/';
-  
-  for (const layout of layoutRoutes) {
-    // Root layout (/) applies to everything
-    // Other layouts apply to their path and sub-paths
-    if (layout.pattern === '/' || isFarmRouteActive(layout.pattern, normalizedPath, { exact: false })) {
-      applicable.push(layout);
-    }
-  }
-  
+  const applicable = selectApplicableLayouts(pathname);
   // buildSSRInMemory already emits these immutable descriptors in stable depth
   // order. Filtering preserves that order, including equal-depth ties.
   return applicable;

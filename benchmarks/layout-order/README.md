@@ -18,6 +18,10 @@ both outputs outside timing. Seven fresh-process pairs alternate arm order; each
 environment, host load and isolated minified-selector sizes. This is not full SSR, HTTP latency,
 hydration, throughput or a cross-framework comparison. Do not run builds/tests alongside it.
 
+Both arms use the current layout matcher, including subsequent pattern-preparation optimizations.
+This diagnostic isolates sorting only; use `benchmarks/layout-matching/run.mjs` for pattern preparation.
+The historical measurements below predate that optimization and are not current-matcher predictions.
+
 For isolated-runner evidence, manually dispatch the existing `CI` workflow on this branch with
 `layout-order-benchmark` enabled. Its separate job builds the current router, runs the layout-order
 regression suite, then runs two complete comparisons sequentially without concurrent work in that job.
