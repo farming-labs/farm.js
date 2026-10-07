@@ -11,7 +11,11 @@ import { chromium } from "@playwright/test";
 import { imageSize } from "image-size";
 import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
-import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
+import {
+  loadFarmProductionVite,
+  supportsRolldownVite,
+  type FarmProductionViteRuntime,
+} from "../build/production-vite";
 import { resolveConfig } from "../config";
 import { defineIntegration } from "../integrations";
 import { definePlugin } from "../plugin";
@@ -4542,4 +4546,83 @@ export function GET() {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 180_000);
+  // Programmatic routes load through a virtual id that ends in the route path
+  // (`routes.tsx?farm-route=api:%2Ffeed.xml`). A path ending in a file extension
+  // used to make the production transform read the id as an .xml or .json file.
+  it.each(["rolldown", "rollup"] as const)(
+    "builds programmatic routes whose path ends in a file extension with %s",
+    async (builder) => {
+      if (builder === "rolldown" && !supportsRolldownVite()) return;
+      const root = await createProductionFixture();
+
+      try {
+        await fs.writeFile(
+          path.join(root, "src", "routes.tsx"),
+          `
+import { defineRoutes } from "@farm.js/core";
+
+function Guide() {
+  return <main data-dotted-page="true">guide v2</main>;
+}
+
+export default defineRoutes(({ api, page }) => [
+  api("/feed.xml", {
+    GET: () =>
+      new Response("<rss><channel><title>feed</title></channel></rss>", {
+        headers: { "content-type": "application/rss+xml" },
+      }),
+  }),
+  api("/data.json", { GET: () => Response.json({ ok: true }) }),
+  page("/guide.v2", { component: Guide }),
+]);
+`.trim(),
+        );
+
+        const config = await resolveConfig(
+          {
+            root,
+            srcDir: "src",
+            images: { provider: "none" },
+            generateBuildId: () => `dotted-programmatic-routes-${builder}`,
+          },
+          "production",
+        );
+        await build(config, {
+          root,
+          preset: "node-server",
+          productionVite: await loadFarmProductionVite(builder),
+        });
+
+        const serverDir = path.join(root, ".farm", ".output", "server");
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            expect(response.headers.get("content-type")).toContain("application/rss+xml");
+            await expect(response.text()).resolves.toContain("<title>feed</title>");
+          },
+          "/feed.xml",
+        );
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            await expect(response.json()).resolves.toEqual({ ok: true });
+          },
+          "/data.json",
+        );
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            await expect(response.text()).resolves.toContain('data-dotted-page="true"');
+          },
+          "/guide.v2",
+        );
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+    180_000,
+  );
 });
