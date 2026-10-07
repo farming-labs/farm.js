@@ -128,6 +128,9 @@ timestamp is newer than the invalidation or its canonical key is learned only on
 The original caller still receives its result. Enabled mounted consumers refresh after the old
 work settles; an imperative read with `swr: false` waits for fresh data on the next call.
 Unrelated invalidations and invalidations before a read starts do not invalidate that read.
+Broadcast invalidations for keys a client cache does not own are retained only by active
+request-lifetime trackers, not indefinitely by every cache. Cached, subscribed, and pending keys
+still receive invalidations, including keys reached through provisional aliases.
 
 Use `fetchServerQuery(productQuery, input)` for an imperative browser read that should participate in deduplication and SWR. Calling the generated `productQuery(input)` reference directly still returns plain typed data, but the fetch helper supplies the browser cache lifecycle.
 
@@ -229,6 +232,10 @@ canonical key, a late older response cannot replace a newer request's cached res
 still receives its own result. Once both references' keys are known, newer pending and error states
 are protected too. A key cannot be associated with a previously unknown reference until a Farm
 transport returns its cache metadata; plain-data transports remain scoped to the function and input.
+
+Expired shared-cache entries keep their aliases and invalidation marks while a related subscription
+or request is active. Releasing an owner rechecks that key without scanning unrelated pending
+entries. Retargeting an alias also releases the previous target's metadata once it has no owner.
 
 ### Share optimistic updates
 

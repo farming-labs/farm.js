@@ -4,6 +4,7 @@ import { NodeSDK } from "@opentelemetry/sdk-node";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { _runWithFarmRequestSpan } from "../tracing";
 import {
   configureFarmObservability,
   emitFarmEvent,
@@ -26,6 +27,7 @@ describe("observability", () => {
     resetFarmObservability();
     exporter.reset();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   afterAll(async () => {
@@ -45,6 +47,91 @@ describe("observability", () => {
 
     expect(configEvents.map((event) => event.type)).toEqual(["cache.hit", "cache.miss"]);
     expect(runtimeEvents.map((event) => event.type)).toEqual(["cache.hit"]);
+  });
+
+  it.each([false, { spans: ["render"] }] as const)(
+    "does not parse a tracing URL when request spans are disabled: %j",
+    async (tracing) => {
+      configureFarmObservability({ tracing });
+      const request = new Request("https://farm.test/path?x=1");
+      const response = new Response("ok", { status: 201 });
+      const NativeURL = globalThis.URL;
+      const construct = vi.fn((target, args, newTarget) =>
+        Reflect.construct(target, args, newTarget),
+      );
+      vi.stubGlobal("URL", new Proxy(NativeURL, { construct }));
+      const onStart = vi.fn(),
+        onComplete = vi.fn(),
+        onError = vi.fn();
+      const result = await _runWithFarmRequestSpan(request, async () => response, {
+        onStart,
+        onComplete,
+        onError,
+      });
+      expect(result).toBe(response);
+      expect(construct).not.toHaveBeenCalled();
+      expect(onStart).toHaveBeenCalledOnce();
+      expect(onComplete).toHaveBeenCalledWith(201, expect.any(Number));
+      expect(onError).not.toHaveBeenCalled();
+      const failure = new Error("handler failure");
+      await expect(
+        _runWithFarmRequestSpan(
+          request,
+          () => {
+            throw failure;
+          },
+          { onError },
+        ),
+      ).rejects.toBe(failure);
+      expect(onError).toHaveBeenCalledWith(failure, expect.any(Number));
+      expect(construct).not.toHaveBeenCalled();
+    },
+  );
+
+  it("retains request lifecycle events and status resolution when tracing is off", async () => {
+    const events: FarmEvent[] = [];
+    configureFarmObservability({ tracing: false, onEvent: (event) => events.push(event) });
+    const response = new Response("accepted");
+    await runWithFarmRequestSpan(new Request("https://farm.test/rewritten?q=1"), () => response, {
+      getStatusCode: () => 202,
+    });
+    expect(events.map(({ type }) => type)).toEqual(["request.start", "request.complete"]);
+    expect(events[1]).toMatchObject({ pathname: "/rewritten", status: 200, method: "GET" });
+    await runWithFarmRequestSpan(new Request("https://farm.test/adapter"), () => undefined, {
+      getStatusCode: () => 202,
+    });
+    expect(events[3]).toMatchObject({ pathname: "/adapter", status: 202, method: "GET" });
+  });
+
+  it("honors ignored paths and fresh request URLs after tracing is re-enabled", async () => {
+    configureFarmObservability({ tracing: false });
+    await runWithFarmRequestSpan(new Request("https://farm.test/old"), () => new Response("ok"));
+    configureFarmObservability({ tracing: { ignorePaths: ["/ignored"] } });
+    await Promise.all([
+      runWithFarmRequestSpan(
+        new Request("https://farm.test/ignored/path"),
+        () => new Response("ignored"),
+      ),
+      runWithFarmRequestSpan(
+        new Request("https://one.test:8443/rewritten?q=1"),
+        async () => new Response("one"),
+      ),
+      runWithFarmRequestSpan(new Request("http://two.test/other"), async () => new Response("two")),
+    ]);
+    await processor.forceFlush();
+    const spans = exporter.getFinishedSpans();
+    expect(spans.map(({ name }) => name).sort()).toEqual(["GET /other", "GET /rewritten"]);
+    expect(spans.find(({ name }) => name === "GET /rewritten")?.attributes).toMatchObject({
+      "url.path": "/rewritten",
+      "url.scheme": "https",
+      "server.address": "one.test",
+      "server.port": 8443,
+    });
+    expect(spans.find(({ name }) => name === "GET /other")?.attributes).toMatchObject({
+      "url.path": "/other",
+      "url.scheme": "http",
+      "server.address": "two.test",
+    });
   });
 
   it("filters events when event types are configured", () => {

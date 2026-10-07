@@ -7,6 +7,7 @@ import { IndexedLabel } from "../../components/site-chrome";
 import { launchPost } from "../../lib/blog";
 
 export const metadata = {
+  openGraph: { title: "Blog — Farm.js", url: "/blog" },
   title: "Blog — Farm.js",
   description: "Releases, engineering notes, and ideas from the people building Farm.js.",
 } satisfies Metadata;

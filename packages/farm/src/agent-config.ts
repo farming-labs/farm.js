@@ -5,10 +5,16 @@
  * unaffected.
  */
 import {
+  resolveFarmAgentCrawlers,
+  type FarmAgentCrawlers,
+  type ResolvedFarmAgentCrawlers,
+} from "./agent-crawlers";
+import {
   resolveFarmLlmsTxtConfig,
   type FarmLlmsTxtUserConfig,
   type ResolvedFarmLlmsTxtConfig,
 } from "./llms-txt";
+import { resolveFarmNoindexPreviews } from "./preview-noindex";
 
 /** schema.org JSON-LD emitted in the document head to identify the site. */
 export interface FarmAgentJsonLd {
@@ -43,6 +49,15 @@ export interface FarmAgentUserConfig {
    */
   jsonLd?: boolean | FarmAgentJsonLd;
   /**
+   * On a preview deployment, send `X-Robots-Tag: noindex, nofollow` with every
+   * response from Farm's server. Previews are detected from `FARM_PREVIEW`,
+   * `VERCEL_ENV=preview`, Netlify's deploy-preview and branch-deploy contexts,
+   * and Render pull request previews. Production is unaffected.
+   *
+   * @default false
+   */
+  noindexPreviews?: boolean;
+  /**
    * Serve `/llms.txt` (https://llmstxt.org): a Markdown index of the app's static
    * pages, linking to their Markdown mirrors. `true` builds it from page metadata;
    * an object sets the title, summary, details, and which routes to list. A
@@ -51,11 +66,22 @@ export interface FarmAgentUserConfig {
    * @default false
    */
   llmsTxt?: boolean | FarmLlmsTxtUserConfig;
+  /**
+   * Serve a generated `/robots.txt` that allows or blocks AI search agents
+   * (`search`) and AI training crawlers (`training`), plus your own `rules`.
+   * `true` serves only `User-agent: *` / `Allow: /` and the sitemap. A
+   * `public/robots.txt` or `src/app/robots.ts` replaces the generated file.
+   *
+   * @default false
+   */
+  crawlers?: boolean | FarmAgentCrawlers;
 }
 
 export interface ResolvedFarmAgentConfig {
   jsonLd: FarmAgentJsonLd | false;
+  noindexPreviews: boolean;
   llmsTxt: ResolvedFarmLlmsTxtConfig;
+  crawlers: ResolvedFarmAgentCrawlers;
 }
 
 export function resolveFarmAgentConfig(
@@ -64,7 +90,9 @@ export function resolveFarmAgentConfig(
   const jsonLd = input?.jsonLd;
   return {
     jsonLd: !jsonLd ? false : jsonLd === true ? {} : jsonLd,
+    noindexPreviews: resolveFarmNoindexPreviews(input?.noindexPreviews),
     llmsTxt: resolveFarmLlmsTxtConfig(input?.llmsTxt),
+    crawlers: resolveFarmAgentCrawlers(input?.crawlers),
   };
 }
 
@@ -87,7 +115,7 @@ function pruneUndefined(object: Record<string, unknown>): Record<string, unknown
  * Serialize a JSON-LD object for inline `<script>` embedding, escaping `<` so a
  * value containing `</script>` cannot break out of the tag.
  */
-function serializeJsonLd(value: unknown): string {
+export function serializeJsonLd(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 

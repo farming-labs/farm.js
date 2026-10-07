@@ -1,6 +1,6 @@
 <template>
   <nav aria-label="Project resources">
-    <a href="https://farm.js.dev">
+    <a href="https://farmjs.dev">
       <svg
         viewBox="0 0 24 24"
         fill="none"

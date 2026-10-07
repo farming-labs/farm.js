@@ -9,7 +9,41 @@ import { createPersistentPreviewRelay, startTypeScriptPreviewAgent } from "../di
 
 const RELAY_TOKEN = "relay-token-for-tests";
 
+test("localhost wildcard previews preserve their port for scripts and navigation", async () => {
+  const relay = createPersistentPreviewRelay({
+    registrationToken: RELAY_TOKEN,
+    publicDomain: "localhost",
+  });
+  const address = await relay.listen();
+  const target = createServer((request, response) => {
+    response.setHeader("content-type", "text/javascript");
+    response.end(request.url);
+  });
+  await listen(target);
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: address.websocketUrl,
+    token: RELAY_TOKEN,
+    name: "interactive",
+    targetUrl: `http://127.0.0.1:${target.address().port}`,
+  });
+  try {
+    assert.equal(agent.publicUrl, `http://interactive.localhost:${address.port}`);
+    const response = await requestWithHost(
+      `${address.httpUrl}/@farm/client.js`,
+      new URL(agent.publicUrl).host,
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.body, "/@farm/client.js");
+  } finally {
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
 test("forwards requests over one persistent websocket and closes with the agent", async () => {
+  const activity = [];
+  const sessions = [];
   const target = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -26,7 +60,18 @@ test("forwards requests over one persistent websocket and closes with the agent"
   await listen(target);
   const targetAddress = target.address();
 
-  const relay = createPersistentPreviewRelay({ registrationToken: RELAY_TOKEN });
+  const relay = createPersistentPreviewRelay({
+    registrationToken: RELAY_TOKEN,
+    observer: {
+      session(event) {
+        sessions.push(event);
+      },
+      request(event) {
+        activity.push(event);
+        return Promise.reject(new Error("optional reporter failed"));
+      },
+    },
+  });
   const relayAddress = await relay.listen();
   const agent = await startTypeScriptPreviewAgent({
     relayUrl: relayAddress.websocketUrl,
@@ -50,12 +95,20 @@ test("forwards requests over one persistent websocket and closes with the agent"
       url: "/hello?from=test",
       body: "farm",
     });
+    assert.equal(activity.length, 1);
+    assert.equal(activity[0].path, "/hello");
+    assert.equal(activity[0].status, 201);
+    assert.equal(activity[0].headers, undefined);
+    assert.equal(activity[0].body, undefined);
+    assert.equal(sessions[0].state, "connected");
 
     await close(target);
     await expectInactive(agent.publicUrl);
   } finally {
     await agent.close();
     await relay.close();
+    assert.equal(sessions.at(-1).state, "disconnected");
+    assert.equal(sessions.at(-1).token, undefined);
     await close(target);
   }
 });
@@ -455,8 +508,11 @@ test("falls through to an existing HTTP gateway when no native session matches",
 });
 
 test("coordinates requests across separate relay instances", async () => {
+  let allowed = true;
+  let forwarded = 0;
   const coordinator = new MemoryRelayCoordinator();
   const relayA = createPersistentPreviewRelay({
+    authorizeSession: async () => allowed,
     registrationToken: RELAY_TOKEN,
     publicBaseUrl: "https://preview.example.com",
     publicDomain: "preview.example.com",
@@ -473,7 +529,10 @@ test("coordinates requests across separate relay instances", async () => {
     requestTimeoutMs: 2_000,
   });
   const [addressA, addressB] = await Promise.all([relayA.listen(), relayB.listen()]);
-  const target = createServer((request, response) => response.end(`shared:${request.url}`));
+  const target = createServer((request, response) => {
+    forwarded++;
+    response.end(`shared:${request.url}`);
+  });
   await listen(target);
   const targetAddress = target.address();
   const agent = await startTypeScriptPreviewAgent({
@@ -491,6 +550,14 @@ test("coordinates requests across separate relay instances", async () => {
     );
     assert.equal(response.status, 200);
     assert.equal(response.body, "shared:/from/another/instance?coordinated=true");
+    const before = forwarded;
+    allowed = false;
+    const denied = await requestWithHost(
+      `${addressB.httpUrl}/denied`,
+      "shared-agent.preview.example.com",
+    );
+    assert.notEqual(denied.status, 200);
+    assert.equal(forwarded, before);
   } finally {
     await agent.close();
     await Promise.all([relayA.close(), relayB.close()]);
@@ -663,7 +730,7 @@ test("refuses an agent registration that does not present the relay credential",
       name: "victim",
       token: RELAY_TOKEN,
     });
-    assert.equal(accepted.ready.publicUrl, "http://victim.preview.example.com");
+    assert.equal(accepted.ready.publicUrl, `http://victim.preview.example.com:${address.port}`);
   } finally {
     await relay.close();
   }
@@ -810,7 +877,7 @@ test("keeps a name an authenticated gateway session owns out of relay claims", a
       name: "unclaimed",
       token: RELAY_TOKEN,
     });
-    assert.equal(accepted.ready.publicUrl, "http://unclaimed.preview.example.com");
+    assert.equal(accepted.ready.publicUrl, `http://unclaimed.preview.example.com:${address.port}`);
   } finally {
     await relay.close();
   }

@@ -110,7 +110,13 @@ export {
   type FrameworkMigrationPlan,
 } from "./migrate";
 export { migrateFarmAuth, type MigrateFarmAuthOptions } from "./auth";
-export { listSchemaTableOwners, migrateSchema, type MigrateSchemaOptions } from "./schema-migrate";
+export {
+  listSchemaTableOwners,
+  askToConfirm,
+  migrateAllSchemas,
+  migrateSchema,
+  type MigrateSchemaOptions,
+} from "./schema-migrate";
 export { formatSchemaCheck, runSchemaCheck, type CheckSchemaOptions } from "./schema-check";
 export {
   createFarmUpgradePlan,

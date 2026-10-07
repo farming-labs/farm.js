@@ -1,10 +1,20 @@
-import type { LayoutProps } from "@farm.js/core";
+import type { LayoutProps, Metadata } from "@farm.js/core";
 import { ArrowLeft } from "lucide-react";
 import { BlogAuthor } from "../../../components/blog/author";
 import { BlogExplore } from "../../../components/blog/explore";
 import { ReleaseArtwork } from "../../../components/blog/release-artwork";
 import { BlogContents } from "../../../components/blog/contents";
 import { launchPost, launchSections } from "../../../lib/blog";
+
+// The post's title and description come from page.md; Open Graph needs its own.
+export const metadata = {
+  openGraph: {
+    title: launchPost.title,
+    description: launchPost.description,
+    type: "article",
+    url: launchPost.href,
+  },
+} satisfies Metadata;
 
 export default function LaunchPostLayout({ children }: LayoutProps) {
   return (

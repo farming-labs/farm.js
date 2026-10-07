@@ -18,7 +18,30 @@ export type CollectedSchemaModel = {
   exportName: string;
   prismaModelName: string;
   model: ResolvedSchemaModel;
+  /**
+   * Real table and column for references to models this owner describes but
+   * does not create (external, or outside its `models`), keyed by field. Only
+   * shown in comments: Farm never creates a foreign key to them.
+   */
+  referenceTargets?: Record<string, { table: string; column: string }>;
+  /**
+   * References to tables other owners create that may carry a real foreign
+   * key, keyed by field. Set by migrate after checking the database; only a
+   * table created now gets one inline.
+   */
+  foreignKeys?: Record<
+    string,
+    { table: string; column: string; onDelete: NonNullable<FarmSchemaReference["onDelete"]> }
+  >;
 };
+
+/** `table.column` a field's reference points at, using real names when known. */
+export function describeSchemaReference(model: CollectedSchemaModel, fieldKey: string): string {
+  const field = model.model.fields[fieldKey];
+  const target = model.referenceTargets?.[fieldKey];
+  if (target) return `${target.table}.${target.column}`;
+  return `${field?.reference?.model}.${field?.reference?.field}`;
+}
 
 const SQL_ON_DELETE_ACTIONS = {
   cascade: "CASCADE",
@@ -45,6 +68,8 @@ export function collectSchemaModels(
 
     for (const [modelKey, model] of Object.entries(resolvedModels)) {
       if (only && !only.includes(modelKey)) continue;
+      // Someone else creates it; it is only described to resolve references.
+      if (model.external) continue;
 
       const collisionKey = model.name.toLowerCase();
       const previousOwner = seenModelNames.get(collisionKey);
@@ -57,6 +82,20 @@ export function collectSchemaModels(
 
       seenModelNames.set(collisionKey, `${ownerKey}.${modelKey}`);
 
+      const referenceTargets: Record<string, { table: string; column: string }> = {};
+      for (const [fieldKey, field] of Object.entries(model.fields)) {
+        const reference = field.reference;
+        if (!reference || !Object.prototype.hasOwnProperty.call(resolvedModels, reference.model)) {
+          continue;
+        }
+        const target = resolvedModels[reference.model]!;
+        if (!target.external && (!only || only.includes(reference.model))) continue;
+        referenceTargets[fieldKey] = {
+          table: target.name,
+          column: target.fields[reference.field]?.name ?? reference.field,
+        };
+      }
+
       collectedModels.push({
         ownerKey,
         modelKey,
@@ -64,6 +103,7 @@ export function collectSchemaModels(
         exportName: toCamelCase(`${ownerKey}_${modelKey}`),
         prismaModelName: toPascalCase(`${ownerKey}_${modelKey}`),
         model,
+        ...(Object.keys(referenceTargets).length > 0 ? { referenceTargets } : {}),
       });
     }
   }
@@ -72,7 +112,7 @@ export function collectSchemaModels(
 }
 
 export type FarmSqlStatement = {
-  kind: "table" | "index";
+  kind: "table" | "index" | "column";
   /** The object this statement creates, for drift reporting. */
   target: string;
   sql: string;
@@ -168,12 +208,17 @@ function renderSqlTable(
       parts.push(`DEFAULT ${defaultValue}`);
     }
 
-    const reference = internalReferences.get(fieldKey);
+    const crossOwner = model.foreignKeys?.[fieldKey];
+    const reference =
+      internalReferences.get(fieldKey) ??
+      (crossOwner
+        ? `REFERENCES ${quoteSqlIdentifier(dialect, crossOwner.table)} (${quoteSqlIdentifier(dialect, crossOwner.column)})${crossOwner.onDelete !== "noAction" ? ` ON DELETE ${SQL_ON_DELETE_ACTIONS[crossOwner.onDelete]}` : ""}`
+        : undefined);
     if (reference) {
       parts.push(reference);
     } else if (field.reference) {
       parts.push(
-        `/* references ${field.reference.model}.${field.reference.field}${field.reference.onDelete ? ` on delete ${field.reference.onDelete}` : ""} */`,
+        `/* references ${describeSchemaReference(model, fieldKey)}${field.reference.onDelete ? ` on delete ${field.reference.onDelete}` : ""} */`,
       );
     }
 

@@ -233,9 +233,37 @@ program
     }
   });
 
-program
+const schemaCommand = program
   .command("schema")
-  .description("Inspect the database tables integrations and plugins declare")
+  .description("Inspect and create the database tables integrations and plugins declare");
+
+schemaCommand
+  .command("migrate")
+  .description("Create every plugin's tables, dependencies first")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("-c, --config <config>", "Path to farm config file")
+  .option("-w, --write <file>", "Write the statements to one file instead of printing them")
+  .option("--apply", "Execute the statements against the database")
+  .action(async (options) => {
+    try {
+      const { askToConfirm, migrateAllSchemas } = require("../dist/index.js");
+      await migrateAllSchemas({
+        root: options.root,
+        configPath: options.config,
+        write: options.write,
+        apply: options.apply,
+        // Only a person at a terminal is asked; scripts and CI print and stop.
+        confirm: process.stdin.isTTY && process.stdout.isTTY ? askToConfirm : undefined,
+      });
+    } catch (error) {
+      console.error("Failed to migrate:", error?.message ?? error);
+      process.exit(1);
+    }
+    // Database clients can keep the event loop alive.
+    process.exit(0);
+  });
+
+schemaCommand
   .command("check")
   .description("Compare declared tables and their references with the live database")
   .option("-r, --root <root>", "Root directory", process.cwd())
@@ -344,6 +372,7 @@ program
     process.env.FARM_PREVIEW_PROVIDER,
   )
   .option("--name <name>", "Readable preview URL name")
+  .option("--project <slug>", "Dashboard project (defaults to the app package name)")
   .option("--expires <duration>", "Preview lifetime, for example 30m, 2h, or 1d")
   .option("--login", "Sign in again instead of reusing the saved Farm Preview account")
   .option("--dry-run", "Validate target detection and print the preview plan without opening it")
@@ -359,6 +388,7 @@ program
         url: options.url,
         gatewayUrl: options.gateway,
         name: options.name,
+        project: options.project,
         expires: options.expires,
         login: options.login,
         dryRun: options.dryRun,
@@ -633,9 +663,7 @@ async function dispatchSchemaMigrate() {
   const registered = new Set(
     program.commands.flatMap((command) => [command.name(), ...command.aliases()]),
   );
-  // `farm schema` only has `check`, so a plugin that owns tables under the
-  // name "schema" can still be migrated.
-  if (registered.has(name) && name !== "schema") return false;
+  if (registered.has(name)) return false;
 
   const dynamic = new Command()
     .name(`farm ${name} migrate`)
@@ -645,12 +673,13 @@ async function dispatchSchemaMigrate() {
     .option("-w, --write <file>", "Write the statements to a file instead of printing them")
     .option("--apply", "Execute the statements against the database")
     .action(async (options) => {
-      const { migrateSchema } = require("../dist/index.js");
+      const { askToConfirm, migrateSchema } = require("../dist/index.js");
       await migrateSchema(name, {
         root: options.root,
         configPath: options.config,
         write: options.write,
         apply: options.apply,
+        confirm: process.stdin.isTTY && process.stdout.isTTY ? askToConfirm : undefined,
       });
     });
 
