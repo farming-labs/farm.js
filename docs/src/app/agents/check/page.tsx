@@ -15,6 +15,7 @@ import "../../../components/agents/check.css";
 import "../agents.css";
 
 export const metadata = {
+  openGraph: { title: "Agent-ready check — Farm.js", url: "/agents/check" },
   title: "Agent-ready check — Farm.js",
   description:
     "Score any website on what AI agents can read and call: Markdown, llms.txt, robots.txt, MCP, OpenAPI and structured data, with a fix for each gap.",
@@ -171,9 +172,9 @@ export default function AgentCheckPage() {
               </div>
               <div className="agents-open-copy">
                 <p>
-                  Farm.js apps answer most of these checks by default. The agent infrastructure
-                  we're building goes further: one gateway for your tools, and a trace of every
-                  agent run.
+                  Farm.js apps pass the readable and Markdown checks by default, and one agent block
+                  in farm.config.ts adds llms.txt and JSON-LD. The agent infrastructure we're
+                  building goes further: one gateway for your tools, and a trace of every agent run.
                 </p>
                 <div className="agents-links">
                   <a href="/agents">

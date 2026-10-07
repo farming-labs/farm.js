@@ -15,7 +15,7 @@ import {
   Route,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 export type FileTreeNode = {
   name: string;
@@ -31,6 +31,11 @@ export type FileTreeProps = {
   className?: string;
   defaultSelectedPath?: string;
   label?: string;
+  /**
+   * A pane beside the tree that shows what the selected file becomes. A wire
+   * draws from the selected row into the pane each time the selection moves.
+   */
+  explorer?: (activePath: string) => ReactNode;
 };
 
 type FileTreeItemProps = {
@@ -60,6 +65,21 @@ function countFiles(nodes: readonly FileTreeNode[]): number {
   );
 }
 
+/** A wire from a row to a point, with one rounded elbow where it turns. */
+function routeWire([x0, y0]: [number, number], [x1, y1]: [number, number], end: [number, number]) {
+  const radius = Math.min(6, Math.abs(y1 - y0) / 2);
+  const down = y1 >= y0 ? 1 : -1;
+  if (radius < 0.5) return `M${x0},${y0}H${end[0]}`;
+  return [
+    `M${x0},${y0}`,
+    `H${x1 - radius}`,
+    `Q${x1},${y0} ${x1},${y0 + down * radius}`,
+    `V${y1 - down * radius}`,
+    `Q${x1},${y1} ${x1 + radius},${y1}`,
+    `H${end[0]}`,
+  ].join("");
+}
+
 function getFileIcon(extension?: string): LucideIcon {
   if (extension === "tsx" || extension === "jsx") return Atom;
   if (extension === "ts" || extension === "js") return FileCode2;
@@ -86,13 +106,10 @@ function FileTreeItem({ node, path, depth, activePath, onSelect }: FileTreeItemP
           isFolder ? `${node.name} folder` : `${path}${node.meta ? `, ${node.meta}` : ""}`
         }
         className={cn(
-          "group/file relative flex h-7 w-full min-w-0 items-center gap-1.5 border border-transparent px-2 text-left font-mono text-[9px] font-normal tracking-normal transition-[background-color,border-color,color,box-shadow] duration-150 focus-visible:z-10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-1px] focus-visible:outline-white sm:text-[10px]",
-          isFolder && !isSelected && "text-white/68 hover:bg-white/[0.045] hover:text-white",
-          !isFolder &&
-            !isSelected &&
-            "text-white/42 hover:border-white/8 hover:bg-white/[0.04] hover:text-white/74",
-          isSelected &&
-            "border-white/16 bg-white/[0.075] text-white shadow-[inset_2px_0_0_rgba(255,255,255,0.78)]",
+          "group/file relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded-[3px] px-2 text-left font-mono text-[9px] font-normal tracking-normal transition-[background-color,color] duration-150 focus-visible:z-10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-1px] focus-visible:outline-white/60 sm:text-[10px]",
+          isFolder && !isSelected && "text-white/62 hover:bg-white/[0.035] hover:text-white/88",
+          !isFolder && !isSelected && "text-white/40 hover:bg-white/[0.035] hover:text-white/72",
+          isSelected && "bg-white/[0.055] text-white/92",
         )}
         onClick={() => {
           if (isFolder) setIsOpen((current) => !current);
@@ -100,13 +117,6 @@ function FileTreeItem({ node, path, depth, activePath, onSelect }: FileTreeItemP
         }}
         type="button"
       >
-        {depth > 0 ? (
-          <span
-            aria-hidden
-            className="absolute -left-px top-1/2 h-px w-2 bg-white/14 transition-colors duration-150 group-hover/file:bg-white/28"
-          />
-        ) : null}
-
         {isFolder ? (
           <ChevronRight
             aria-hidden
@@ -154,7 +164,7 @@ function FileTreeItem({ node, path, depth, activePath, onSelect }: FileTreeItemP
           )}
           inert={!isOpen}
         >
-          <ul className="ml-4 min-h-0 overflow-hidden border-l border-white/10">
+          <ul className="farm-tree-guide ml-[13.5px] min-h-0 overflow-hidden border-l border-white/[0.08] pl-px">
             {node.children?.map((child) => {
               const childPath = `${path}/${child.name}`;
               return (
@@ -180,12 +190,61 @@ export function FileTree({
   className,
   defaultSelectedPath,
   label = "Application route file tree",
+  explorer,
 }: FileTreeProps) {
   const filePaths = useMemo(() => collectFilePaths(data), [data]);
   const routeCount = useMemo(() => countFiles(data), [data]);
   const [activePath, setActivePath] = useState(defaultSelectedPath ?? filePaths[0] ?? "");
   const [isPaused, setIsPaused] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
+  const hasExplorer = Boolean(explorer);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const [wireAt, setWireAt] = useState<{
+    row: number;
+    edge: number;
+    to: number;
+    end: number;
+  } | null>(null);
+
+  // Where the wire runs: from the selected row's right end, across the divider,
+  // down or up to the explorer's address bar.
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    const list = listRef.current;
+    if (!hasExplorer || !body || !list) return;
+    const measure = () => {
+      const row = list.querySelector<HTMLElement>('[aria-current="true"]');
+      const target = body.querySelector<HTMLElement>("[data-route-explorer-anchor]");
+      if (!row || !target) return setWireAt(null);
+      const box = body.getBoundingClientRect();
+      const rowBox = row.getBoundingClientRect();
+      const targetBox = target.getBoundingClientRect();
+      const next = {
+        row: Math.round(rowBox.top + rowBox.height / 2 - box.top),
+        edge: Math.round(list.getBoundingClientRect().right - box.left),
+        to: Math.round(targetBox.top + targetBox.height / 2 - box.top),
+        end: Math.round(targetBox.left - box.left),
+      };
+      setWireAt((current) =>
+        current?.row === next.row &&
+        current.edge === next.edge &&
+        current.to === next.to &&
+        current.end === next.end
+          ? current
+          : next,
+      );
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, [activePath, hasExplorer]);
+
+  const wireStart: [number, number] = wireAt ? [wireAt.edge - 4, wireAt.row] : [0, 0];
+  const wire = wireAt
+    ? routeWire(wireStart, [wireAt.edge + 8, wireAt.to], [wireAt.end, wireAt.to])
+    : null;
 
   useEffect(() => {
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -235,18 +294,49 @@ export function FileTree({
         </span>
       </div>
 
-      <ul className="min-h-0 flex-1 overflow-hidden px-2 py-1.5">
-        {data.map((node) => (
-          <FileTreeItem
-            key={node.name}
-            activePath={activePath}
-            depth={0}
-            node={node}
-            onSelect={setActivePath}
-            path={node.name}
-          />
-        ))}
-      </ul>
+      <div className="relative flex min-h-0 flex-1" ref={bodyRef}>
+        <ul
+          className={cn(
+            "min-h-0 flex-1 overflow-hidden px-2 py-1.5",
+            explorer && "sm:max-w-[54%] sm:flex-none sm:basis-[54%]",
+          )}
+          ref={listRef}
+        >
+          {data.map((node) => (
+            <FileTreeItem
+              key={node.name}
+              activePath={activePath}
+              depth={0}
+              node={node}
+              onSelect={setActivePath}
+              path={node.name}
+            />
+          ))}
+        </ul>
+        {explorer ? (
+          <>
+            <div className="hidden min-w-0 flex-1 border-l border-white/10 sm:block">
+              {explorer(activePath)}
+            </div>
+            {wire ? (
+              <svg
+                aria-hidden
+                className="farm-route-wire pointer-events-none absolute inset-0 hidden h-full w-full sm:block"
+                key={activePath}
+              >
+                <path d={wire} pathLength={1} />
+                <circle cx={wireStart[0]} cy={wireStart[1]} r={1.75} />
+                <rect
+                  height={3}
+                  width={3}
+                  x={(wireAt?.end ?? 0) - 1.5}
+                  y={(wireAt?.to ?? 0) - 1.5}
+                />
+              </svg>
+            ) : null}
+          </>
+        ) : null}
+      </div>
 
       <div className="flex h-8 shrink-0 items-center justify-between border-t border-white/10 px-3 text-[8px] uppercase tracking-normal text-white/34 sm:px-3.5">
         <span className="flex items-center gap-1.5">

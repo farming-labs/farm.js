@@ -115,7 +115,8 @@ Common config fields:
 - `integrations`: provider integrations object
 - `auth`: built-in email/password auth and sessions
 - `mcp`: authenticated MCP transport for opted-in typed API routes
-- `agent`: opt-in agent readiness: an `llmsTxt` index of static pages and schema.org `jsonLd`
+- `agent`: opt-in agent readiness: an `llmsTxt` index of static pages, schema.org `jsonLd`,
+  and AI `crawlers` robots.txt rules
 - `theme`: light, dark, and system behavior
 - `storage.mounts`: named storage instances
 - `migrations`: one-shot schema and provider commands
@@ -446,11 +447,19 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
 - Configure `theme` for no-flash light/dark/system rendering and typed client/server access.
 - Use Farm image helpers plus the `images` allowlist and format policy for optimization.
 - Use `docs` for human docs, shared search, markdown, `llms.txt`, sitemap, robots, and agent APIs.
+  A root `sitemap.ts`, `robots.ts`, `llms.ts`, or `llms-full.ts` (or the same file in `public/`)
+  takes its path from the docs engine.
 - Use `agent.llmsTxt` for an app's own `/llms.txt` and `/llms-full.txt` (`full: false` skips the
   second). A static `public/llms.txt` or `public/llms-full.txt` overrides each, and so do
   `src/app/llms.ts` and `src/app/llms-full.ts`, which return the whole file as a string or the
   structured format and receive the generated `pages` and `defaults`.
+- Use `agent.crawlers: { search, training }` (`"allow"` or `"block"`, plus `rules` and `sitemap`)
+  for a generated `/robots.txt` naming AI search and training crawlers. `public/robots.txt`, then
+  `src/app/robots.ts`, win over it; it wins over the docs engine's robots.txt.
 - Use `md`/`mdx` for page mirrors and content routes; use `openapi` for API references.
+- Use `agent.noindexPreviews: true` to send `X-Robots-Tag: noindex, nofollow` on preview
+  deployments (`FARM_PREVIEW=1`, `VERCEL_ENV=preview`, Netlify deploy-preview/branch-deploy at
+  build time, Render PR previews). Test locally with `FARM_PREVIEW=1 farm dev`.
 - Use `after()` only for short post-response work and a jobs integration for durable work.
 - Configure OpenTelemetry and Farm runtime events for correlated traces.
 

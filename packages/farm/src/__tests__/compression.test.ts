@@ -1,4 +1,5 @@
-import { brotliDecompressSync, gunzipSync } from "node:zlib";
+import { brotliDecompressSync, constants, createBrotliCompress, gunzipSync } from "node:zlib";
+import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { PluginManager } from "../plugin";
 import { createCompressionPlugin } from "../plugins/compression";
@@ -34,6 +35,30 @@ describe("compression plugin", () => {
     expect(response.headers.get("vary")).toBe("Accept-Encoding");
     expect(response.headers.get("etag")).toBe('W/"identity"');
     expect(gunzipSync(Buffer.from(await response.arrayBuffer())).toString()).toBe(body);
+  });
+
+  it("uses bounded Brotli effort while retaining streaming flushes", async () => {
+    const body = "dynamic-response-".repeat(128);
+    const manager = createManager();
+    const response = await manager.runRuntimeRequest(
+      new Request("https://farm.test/", { headers: { "accept-encoding": "br" } }),
+      () => new Response(body, { headers: { "content-type": "text/html" } }),
+    );
+
+    const actual = Buffer.from(await response.arrayBuffer());
+    const reference = Readable.from([body]).pipe(
+      createBrotliCompress({
+        flush: constants.BROTLI_OPERATION_FLUSH,
+        params: { [constants.BROTLI_PARAM_QUALITY]: 5 },
+      }),
+    );
+    const expected: Buffer[] = [];
+    for await (const chunk of reference) expected.push(Buffer.from(chunk));
+
+    expect(brotliDecompressSync(actual).toString()).toBe(body);
+    // Compare against the same Node version's real streaming encoder, avoiding
+    // a timing assertion or a compressed-byte snapshot tied to a zlib release.
+    expect(actual).toEqual(Buffer.concat(expected));
   });
 
   it("honors encoding quality values and never selects a disabled encoding", async () => {
@@ -313,41 +338,47 @@ describe("compression plugin", () => {
     await reader.cancel();
   });
 
-  it("propagates source stream failures to the compressed response", async () => {
-    const manager = createManager();
-    const source = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode("partial response"));
-        queueMicrotask(() => controller.error(new Error("source stream failed")));
-      },
-    });
-    const response = await manager.runRuntimeRequest(
-      new Request("https://farm.test/", { headers: { "accept-encoding": "gzip" } }),
-      () => new Response(source, { headers: { "content-type": "text/plain" } }),
-    );
+  it.each(["br", "gzip"])(
+    "propagates source stream failures to the %s response",
+    async (encoding) => {
+      const manager = createManager();
+      const source = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("partial response"));
+          queueMicrotask(() => controller.error(new Error("source stream failed")));
+        },
+      });
+      const response = await manager.runRuntimeRequest(
+        new Request("https://farm.test/", { headers: { "accept-encoding": encoding } }),
+        () => new Response(source, { headers: { "content-type": "text/plain" } }),
+      );
 
-    await expect(response.arrayBuffer()).rejects.toThrow("source stream failed");
-  });
+      await expect(response.arrayBuffer()).rejects.toThrow("source stream failed");
+    },
+  );
 
-  it("cancels the source when the compressed response consumer disconnects", async () => {
-    const manager = createManager();
-    const cancel = vi.fn();
-    const chunk = new TextEncoder().encode("streamed response".repeat(256));
-    const source = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        controller.enqueue(chunk);
-      },
-      cancel,
-    });
-    const response = await manager.runRuntimeRequest(
-      new Request("https://farm.test/", { headers: { "accept-encoding": "gzip" } }),
-      () => new Response(source, { headers: { "content-type": "text/plain" } }),
-    );
+  it.each(["br", "gzip"])(
+    "cancels the source when the %s response consumer disconnects",
+    async (encoding) => {
+      const manager = createManager();
+      const cancel = vi.fn();
+      const chunk = new TextEncoder().encode("streamed response".repeat(256));
+      const source = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(chunk);
+        },
+        cancel,
+      });
+      const response = await manager.runRuntimeRequest(
+        new Request("https://farm.test/", { headers: { "accept-encoding": encoding } }),
+        () => new Response(source, { headers: { "content-type": "text/plain" } }),
+      );
 
-    const reader = response.body!.getReader();
-    await reader.read();
-    await reader.cancel("client disconnected");
+      const reader = response.body!.getReader();
+      await reader.read();
+      await reader.cancel("client disconnected");
 
-    await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce());
-  });
+      await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    },
+  );
 });

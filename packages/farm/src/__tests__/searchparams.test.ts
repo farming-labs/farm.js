@@ -246,7 +246,7 @@ describe("SearchParams in the production runtime", () => {
     const source = readSource("nitro", "universal-build.ts");
 
     expect(source).toContain(
-      'import { createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";',
+      'import { createClientCancellation, createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";',
     );
     expect(source).toContain(
       "const searchParams = searchParamsToObject(new URLSearchParams(window.location.search));",

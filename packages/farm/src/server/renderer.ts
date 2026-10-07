@@ -60,6 +60,7 @@ import {
 } from "../navigation-errors";
 import {
   addMetadataImageReference,
+  addMetadataMarkdownAlternate,
   mergeMetadata,
   renderMetadataHead,
   type FarmMetadataImageReference,
@@ -77,7 +78,11 @@ import {
   type FarmI18nRuntime,
 } from "../i18n/server";
 import { createFarmLocaleCookie, getFarmLocaleVaryHeaders } from "../i18n/resolver";
-import { localizeFarmHref, localizeFarmPathname } from "../i18n/routing";
+import { localizeFarmHref } from "../i18n/routing";
+import {
+  renderFarmLocaleAlternateLinks,
+  type FarmLocaleAlternateLinkOptions,
+} from "../i18n/alternates";
 import {
   createLateNotFoundRecovery,
   createLateRedirectRecovery,
@@ -94,7 +99,8 @@ import {
   renderFarmLlmsFullTxt,
   resolveFarmLlmsTxtConfig,
 } from "../llms-txt";
-import { resolveMarkdownConfig } from "../markdown";
+import { getFarmMarkdownAlternatePath, resolveMarkdownConfig } from "../markdown";
+import { createFarmAgentRobots, resolveFarmAgentCrawlers } from "../agent-crawlers";
 import {
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
@@ -225,6 +231,12 @@ interface PPRShellCacheOptions {
    * can run outside the request context that resolved the locale.
    */
   locale: string;
+  /**
+   * Origin the shell's hreflang alternates resolved against, or "" when the
+   * shell emits none. Kept in the key so one host never serves another host's
+   * absolute alternate URLs.
+   */
+  origin?: string;
   revalidate?: number;
 }
 
@@ -338,19 +350,14 @@ function appendResponseVary(res: FarmResponse, value: string): void {
   res.setHeader("Vary", Array.from(values).join(", "));
 }
 
-function renderI18nAlternateLinks(requestPath: string, snapshot: FarmI18nClientSnapshot): string {
+function renderI18nAlternateLinks(
+  requestPath: string,
+  snapshot: FarmI18nClientSnapshot,
+  options: FarmLocaleAlternateLinkOptions,
+): string {
   if (snapshot.routing === "none") return "";
   const url = new URL(requestPath, "http://farm.local");
-  const links = snapshot.locales.map((locale) => {
-    const href = localizeFarmPathname(url.pathname, locale, snapshot);
-    return `<link rel="alternate" hreflang="${escapeHtmlAttribute(locale)}" href="${escapeHtmlAttribute(href)}">`;
-  });
-  links.push(
-    `<link rel="alternate" hreflang="x-default" href="${escapeHtmlAttribute(
-      localizeFarmPathname(url.pathname, snapshot.defaultLocale, snapshot),
-    )}">`,
-  );
-  return links.join("");
+  return renderFarmLocaleAlternateLinks(url.pathname, snapshot, options);
 }
 
 /**
@@ -873,8 +880,9 @@ export class ServerRenderer {
     return createFarmCacheKey(["ssg", normalizeRevalidatePath(urlPath)]);
   }
 
-  private getPPRCacheKey(pathname: string, search = "", locale = ""): string {
-    return createFarmCacheKey(["ppr", locale, normalizeRevalidatePath(pathname), search]);
+  private getPPRCacheKey(pathname: string, search = "", locale = "", origin = ""): string {
+    const key = ["ppr", locale, normalizeRevalidatePath(pathname), search];
+    return createFarmCacheKey(origin ? [...key, origin] : key);
   }
 
   private getCachedSSGPage(urlPath: string) {
@@ -900,14 +908,19 @@ export class ServerRenderer {
     );
   }
 
-  private getCachedPPRShell(pathname: string, search: string, locale = "") {
+  private getCachedPPRShell(pathname: string, search: string, locale = "", origin = "") {
     return this.dataCache.getEntryAsync<CachedPPRShell>(
-      this.getPPRCacheKey(pathname, search, locale),
+      this.getPPRCacheKey(pathname, search, locale, origin),
     );
   }
 
   private async cachePPRShell(options: PPRShellCacheOptions, html: string): Promise<void> {
-    const key = this.getPPRCacheKey(options.pathname, options.search, options.locale);
+    const key = this.getPPRCacheKey(
+      options.pathname,
+      options.search,
+      options.locale,
+      options.origin,
+    );
     await this.dataCache.setAsync(
       key,
       { html },
@@ -1066,11 +1079,14 @@ export class ServerRenderer {
           const metadataHead = `${
             hasFavicon ? "" : '<link rel="icon" href="data:,">\n  '
           }<title>${title}</title>${tags}`;
+          // No request drives a background regeneration, so the cached document's
+          // hreflang alternates resolve against metadataBase only.
           const fullDocument = this.createFullHTML(
             html,
             pageMetadata.shouldHydrate === true,
             page.urlPath,
             metadataHead,
+            { metadata: mergedMetadata },
           );
 
           await this.cacheSSGPage(page, fullDocument, { document: true });
@@ -1100,7 +1116,7 @@ export class ServerRenderer {
       res.write(
         cached.value.document
           ? cached.value.html
-          : this.createFullHTML(cached.value.html, false, page.urlPath),
+          : this.createFullHTML(cached.value.html, false, page.urlPath, undefined, { req }),
       );
       res.end();
       return true;
@@ -1218,6 +1234,12 @@ export class ServerRenderer {
       const generatedLlmsKind = this.getGeneratedLlmsKind(pathname);
       if (generatedLlmsKind) {
         await this.renderGeneratedLlmsTxt(req, res, generatedLlmsKind);
+        completeRender(res.statusCode || 200, pathname);
+        return;
+      }
+
+      if (pathname === "/robots.txt" && this.getAgentCrawlers().enabled) {
+        await this.renderGeneratedRobotsTxt(req, res);
         completeRender(res.statusCode || 200, pathname);
         return;
       }
@@ -1373,11 +1395,13 @@ export class ServerRenderer {
         ? this.getPPRShellBypassReason(req, middlewareMap, middlewareContext, pluginExposedContext)
         : undefined;
       const canCachePPRShell = renderingConfig.ppr && !pprBypassReason;
+      const pprI18nSnapshot = canCachePPRShell ? getFarmI18nClientSnapshot() : undefined;
       const pprShellOptions: PPRShellCacheOptions | undefined = canCachePPRShell
         ? {
             pathname,
             search: url.search,
-            locale: getFarmI18nClientSnapshot()?.locale ?? "",
+            locale: pprI18nSnapshot?.locale ?? "",
+            origin: pprI18nSnapshot && pprI18nSnapshot.routing !== "none" ? url.origin : "",
             revalidate: renderingConfig.revalidate,
           }
         : undefined;
@@ -1402,11 +1426,17 @@ export class ServerRenderer {
 
       if (pprShellOptions) {
         // Same locale for the lookup and the later store, so the two cannot diverge.
-        const pprCacheKey = this.getPPRCacheKey(pathname, url.search, pprShellOptions.locale);
+        const pprCacheKey = this.getPPRCacheKey(
+          pathname,
+          url.search,
+          pprShellOptions.locale,
+          pprShellOptions.origin,
+        );
         const cachedPPRShell = await this.getCachedPPRShell(
           pathname,
           url.search,
           pprShellOptions.locale,
+          pprShellOptions.origin,
         );
         if (cachedPPRShell) {
           emitFarmEvent({
@@ -2040,6 +2070,18 @@ export class ServerRenderer {
       }
     }
 
+    // Advertise the Markdown mirror in the head as well as the Link header,
+    // using the public path the .md request will be resolved against.
+    const snapshot = getFarmI18nClientSnapshot();
+    const publicPathname = applyFarmBasePath(
+      snapshot ? localizeFarmHref(options.pathname, snapshot.locale, snapshot) : options.pathname,
+      this.config.basePath,
+    );
+    metadata = addMetadataMarkdownAlternate(
+      metadata,
+      getFarmMarkdownAlternatePath(resolveMarkdownConfig(this.config.md as any), publicPathname),
+    );
+
     return metadata;
   }
 
@@ -2192,6 +2234,44 @@ export class ServerRenderer {
       );
     } catch (error) {
       logger.error(`Generated ${kind}.txt failed: ${error}`);
+      await sendWebResponse(
+        res as any,
+        new Response("Internal Server Error", {
+          status: 500,
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        }),
+      );
+    }
+  }
+
+  private getAgentCrawlers() {
+    return resolveFarmAgentCrawlers(this.config.agent?.crawlers);
+  }
+
+  /** `/robots.txt` from `agent.crawlers` when no robots.ts owns it. */
+  private async renderGeneratedRobotsTxt(req: FarmRequest, res: FarmResponse): Promise<void> {
+    try {
+      const sitemapPath =
+        this.routeManager.matchMetadataRoute("/sitemap.xml")?.metadata.kind === "sitemap"
+          ? "/sitemap.xml"
+          : undefined;
+      const rootLayout = this.routeManager.getLayouts().get("/");
+      const rootMetadata =
+        sitemapPath && rootLayout
+          ? (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).metadata
+          : undefined;
+      const robots = createFarmAgentRobots({
+        crawlers: this.getAgentCrawlers(),
+        sitemapPath,
+        metadataBase: (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
+        basePath: this.config.basePath,
+      });
+      await sendWebResponse(
+        res as any,
+        createFarmMetadataRouteResponse("robots", robots, {}, { method: req.method }),
+      );
+    } catch (error) {
+      logger.error(`Generated robots.txt failed: ${error}`);
       await sendWebResponse(
         res as any,
         new Response("Internal Server Error", {
@@ -2462,7 +2542,12 @@ export class ServerRenderer {
       if (typeof res.removeHeader === "function") {
         res.removeHeader("X-Farm-PPR");
       }
-      res.write(this.secureDocumentHTML(req, this.createFullHTML(html, false, options.pathname)));
+      res.write(
+        this.secureDocumentHTML(
+          req,
+          this.createFullHTML(html, false, options.pathname, undefined, { req }),
+        ),
+      );
       res.end();
       return true;
     } catch (renderError) {
@@ -2605,7 +2690,11 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       const rendererHasTitle = /<title[\s>]/i.test(rendererHead);
       const i18nSnapshot = getFarmI18nClientSnapshot();
       const alternateTags = i18nSnapshot
-        ? renderI18nAlternateLinks((req as any).__FARM_ROUTE__ || req.url || "/", i18nSnapshot)
+        ? renderI18nAlternateLinks(
+            (req as any).__FARM_ROUTE__ || req.url || "/",
+            i18nSnapshot,
+            this.getI18nAlternateOptions(req, (req as any).__FARM_METADATA__),
+          )
         : "";
       const themeDocument = createFarmThemeDocumentParts(
         this.config.theme,
@@ -2888,7 +2977,11 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       });
       const i18nSnapshot = getFarmI18nClientSnapshot();
       const i18nAlternateTags = i18nSnapshot
-        ? renderI18nAlternateLinks((req as any).__FARM_ROUTE__ || req.url || "/", i18nSnapshot)
+        ? renderI18nAlternateLinks(
+            (req as any).__FARM_ROUTE__ || req.url || "/",
+            i18nSnapshot,
+            this.getI18nAlternateOptions(req, (req as any).__FARM_METADATA__),
+          )
         : "";
       const fontHead = renderFarmFontDevHead(this.config.root || process.cwd());
       const themeDocument = createFarmThemeDocumentParts(
@@ -3272,7 +3365,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           // Render to string
           const content = await this.rendererRuntime.renderToString(element);
 
-          const html = this.createFullHTML(content, false, pathname);
+          const html = this.createFullHTML(content, false, pathname, undefined, { req });
           res.setHeader("Content-Type", "text/html; charset=utf-8");
           res.write(this.secureDocumentHTML(req, html));
           res.end();
@@ -3286,7 +3379,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     // Render the shared adaptive fallback when the app does not provide its own page.
     const defaultContent = this.defaultNotFoundContent();
 
-    const html = this.createFullHTML(defaultContent, false, pathname);
+    const html = this.createFullHTML(defaultContent, false, pathname, undefined, { req });
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.write(this.secureDocumentHTML(req, html));
     res.end();
@@ -3334,6 +3427,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       false,
       requestUrl.pathname,
       `<link rel="icon" href="data:,">\n  <title>${statusCode} - ${statusText}</title>`,
+      { req },
     );
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -3343,11 +3437,29 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     res.end();
   }
 
+  /**
+   * Where i18n hreflang alternates resolve to absolute URLs: the route's
+   * metadataBase, otherwise the request origin under the same trustProxy rule
+   * as every other request URL.
+   */
+  private getI18nAlternateOptions(
+    req: FarmRequest | undefined,
+    metadata: unknown,
+  ): FarmLocaleAlternateLinkOptions {
+    return {
+      metadataBase: (metadata as { metadataBase?: unknown } | undefined)?.metadataBase,
+      origin: req
+        ? resolveFarmRequestURL(req, { trustProxy: this.config.server?.trustProxy }).origin
+        : undefined,
+    };
+  }
+
   private createFullHTML(
     content: string,
     isClientComponent = false,
     requestPath = "/",
     metadataHead?: string,
+    alternates: { req?: FarmRequest; metadata?: unknown } = {},
   ): string {
     const i18nSnapshot = getFarmI18nClientSnapshot();
     const clientScript = isClientComponent
@@ -3358,7 +3470,13 @@ window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(this.getDeploymentId())};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
 ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};` : ""}
 </script>`;
-    const alternateLinks = i18nSnapshot ? renderI18nAlternateLinks(requestPath, i18nSnapshot) : "";
+    const alternateLinks = i18nSnapshot
+      ? renderI18nAlternateLinks(
+          requestPath,
+          i18nSnapshot,
+          this.getI18nAlternateOptions(alternates.req, alternates.metadata),
+        )
+      : "";
     const fontHead = renderFarmFontDevHead(this.config.root || process.cwd());
     const themeDocument = createFarmThemeDocumentParts(
       this.config.theme,

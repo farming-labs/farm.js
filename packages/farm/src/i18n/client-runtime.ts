@@ -1,4 +1,5 @@
 import IntlMessageFormat from "intl-messageformat";
+import { resolveFarmNavigationURL } from "../client/navigation-url";
 import { getActiveFarmI18nSnapshot } from "./bridge";
 import { localizeFarmHref, resolveFarmLocalePath } from "./routing";
 import type {
@@ -80,7 +81,7 @@ export function isFarmLocaleChangeHref(href: string): boolean {
   const snapshot = getFarmI18nClientState();
   if (!snapshot || typeof window === "undefined") return false;
   if (snapshot.routing === "none") return false;
-  const target = new URL(href, window.location.origin);
+  const target = resolveFarmNavigationURL(href, window.location.href);
   const match = resolveFarmLocalePath(target.pathname, snapshot);
   const targetLocale = match.locale || snapshot.defaultLocale;
   return targetLocale !== snapshot.locale;

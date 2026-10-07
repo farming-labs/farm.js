@@ -4,6 +4,14 @@ import type { Metadata, RouteModule } from "./types";
 import { requestAcceptsMarkdown } from "./markdown";
 import type { FarmMdxComponents, FarmMdxResolvedConfig } from "./app-markdown-config";
 
+// Preserve the existing entry points while keeping response-only imports
+// independent of the MDX compiler's dynamic dependency graph.
+export {
+  FARM_MARKDOWN_CONTENT_TYPE,
+  createFarmMarkdownErrorBody,
+  farmRequestWantsMarkdown,
+} from "./markdown";
+
 export interface FarmMarkdownPageSource {
   source: string;
   filePath: string;
@@ -16,30 +24,6 @@ export interface FarmMarkdownPageModuleInput extends FarmMarkdownPageSource {
 
 export function isFarmMarkdownPageFile(filePath: string): boolean {
   return /(^|[/\\])page\.mdx?$/i.test(filePath);
-}
-
-/** Content type for Markdown responses, including agent-facing error bodies. */
-export const FARM_MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8";
-
-export function farmRequestWantsMarkdown(
-  pathname: string,
-  accept: string | null | undefined,
-): boolean {
-  return pathname.toLowerCase().endsWith(".md") || requestAcceptsMarkdown(accept);
-}
-
-export function createFarmMarkdownErrorBody(
-  status: number,
-  pathname: string,
-  homeHref = "/",
-): string {
-  const heading = status === 404 ? "Page not found" : `Request failed (${status})`;
-  return (
-    `# ${heading}\n\n` +
-    `No page is available at \`${pathname}\`. The URL may be incorrect, ` +
-    `or the page has not been published.\n\n` +
-    `Browse [the site homepage](${homeHref}) to find available pages.\n`
-  );
 }
 
 export function normalizeFarmMarkdownRoutePath(pathname: string): string {

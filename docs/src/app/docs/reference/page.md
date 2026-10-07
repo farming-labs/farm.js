@@ -18,12 +18,14 @@ A compact map of the main package exports and where to learn more.
 | @farm.js/core/plugin/client   | Advanced browser lifecycle manager and client plugin event types.                    |
 | @farm.js/core/navigation      | Next-compatible redirect, notFound, and client navigation hooks.                     |
 | @farm.js/core/headers         | Next-compatible request headers and cookies helpers.                                 |
+| @farm.js/core/json-ld         | Typed schema.org JSON-LD builders for `metadata.jsonLd`.                             |
 | @farm.js/core/router          | Lightweight route matching, href building, and active-route checks.                  |
 | @farm.js/core/query           | Query and route param types.                                                         |
 | @farm.js/core/storage         | Key/value clients, drivers, mounts, and `getStorage()`.                              |
 | @farm.js/core/cache           | Data cache, revalidation, cache keys.                                                |
 | @farm.js/cache-redis          | Distributed Redis cache, tag versions, and regeneration leases.                      |
 | @farm.js/core/after           | Post-response server work with `after()`.                                            |
+| @farm.js/core/og              | Server-only `ImageResponse` for PNG images rendered from JSX in API routes.          |
 | @farm.js/core/cron            | Cron route authorization, schedule types, manifests, and deployment adapter helpers. |
 | @farm.js/core/observability   | Farm events, request tracing, custom spans, and active trace context.                |
 | @farm.js/core/instrumentation | Startup and shutdown convention types for development and production runtimes.       |
@@ -57,6 +59,7 @@ A compact map of the main package exports and where to learn more.
 | `@farm.js/core/navigation`                                                    | `redirect`, `permanentRedirect`, `notFound`, `useRouter`, `usePathname`, `useSearchParams`.                |
 | `@farm.js/core/font`                                                          | Build-time `localFont` and `remoteFont` loaders with generated CSS, hashed assets, and preload hints.      |
 | `@farm.js/core/headers`                                                       | `headers`, `cookies`.                                                                                      |
+| `@farm.js/core/json-ld`                                                       | `article`, `breadcrumbList`, `faqPage`, `product`, and `softwareApplication` JSON-LD builders.             |
 | `@farm.js/core/router`                                                        | `createFarmRouter`, `matchFarmRoute`, `buildFarmRoutePath`, `isFarmRouteActive`.                           |
 | `@farm.js/core/storage`                                                       | `sqliteStorage`, `postgresStorage`, `redisStorage`, `createStorageClient`, `defineStorageClient`.          |
 | `@farm.js/cache-redis`                                                        | `redisCache` distributed cache adapter.                                                                    |

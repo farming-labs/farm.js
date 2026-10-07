@@ -1,6 +1,7 @@
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  authorizePreviewAccount,
   exchangeGitHubPreviewToken,
   getPreviewAuthPublicConfig,
   issuePreviewTunnelGrant,
@@ -29,7 +30,21 @@ export {
   type PreviewTunnelGrantClaims,
 } from "./auth.js";
 
+export interface PreviewSessionAccess {
+  id: string;
+  name: string;
+  ownerId?: string;
+  project?: string;
+  keyId?: string;
+  grantId?: string;
+  expiresAt?: number;
+}
+
 export interface PreviewGatewayOptions {
+  /** Required access control when supplied. Denials and errors fail closed, unlike telemetry. */
+  authorizeSession?: (session: PreviewSessionAccess) => Promise<boolean>;
+  /** Optional metadata-only telemetry. Failures never interrupt a preview. */
+  observer?: PreviewGatewayObserver;
   domain?: string;
   baseUrl?: string;
   store?: PreviewGatewayStore;
@@ -45,6 +60,10 @@ export interface PreviewGatewayOptions {
 }
 
 export interface PreviewGatewaySession {
+  grantId?: string;
+  project?: string;
+  keyId?: string;
+  ownerId?: string;
   id: string;
   name: string;
   hostname: string;
@@ -98,6 +117,8 @@ export interface PreviewGatewayStore {
 }
 
 interface PreviewGatewayRuntimeConfig {
+  authorizeSession?: PreviewGatewayOptions["authorizeSession"];
+  observer?: PreviewGatewayObserver;
   domain: string;
   baseUrl?: string;
   sessionTtlMs: number;
@@ -108,6 +129,60 @@ interface PreviewGatewayRuntimeConfig {
   maxBodyBytes: number;
   maxResponseBodyBytes: number;
   auth?: PreviewManagedAuthOptions;
+}
+
+export interface PreviewGatewayObserver {
+  session?(event: {
+    grantId?: string;
+    project?: string;
+    keyId?: string;
+    id: string;
+    name: string;
+    ownerId?: string;
+    publicUrl: string;
+    expiresAt?: number;
+    state: "connected" | "disconnected";
+    at: number;
+  }): void | Promise<void>;
+  request?(event: {
+    sessionId: string;
+    method: string;
+    path: string;
+    status: number;
+    durationMs: number;
+    at: number;
+  }): void | Promise<void>;
+}
+
+function observe(callback: (() => void | Promise<void>) | undefined) {
+  if (!callback) return;
+  try {
+    void Promise.resolve(callback()).catch(() => undefined);
+  } catch {
+    /* Optional telemetry. */
+  }
+}
+
+function reportSession(
+  config: PreviewGatewayRuntimeConfig,
+  session: PreviewGatewaySession,
+  state: "connected" | "disconnected",
+) {
+  if (!config.observer?.session) return;
+  observe(() =>
+    config.observer!.session!({
+      id: session.id,
+      grantId: session.grantId,
+      name: session.name,
+      project: session.project,
+      keyId: session.keyId,
+      ownerId: session.ownerId,
+      publicUrl: session.publicUrl,
+      expiresAt: session.expiresAt,
+      state,
+      at: Date.now(),
+    }),
+  );
 }
 
 const DEFAULT_DOMAIN = "preview.farmjs.dev";
@@ -168,6 +243,8 @@ export function createPreviewGatewayHandler(
   if (options.auth) getPreviewAuthPublicConfig(options.auth);
   const store = options.store || createPreviewGatewayStoreFromEnv();
   const config = {
+    authorizeSession: options.authorizeSession,
+    observer: options.observer,
     domain: normalizeDomain(options.domain || process.env.FARM_PREVIEW_DOMAIN || DEFAULT_DOMAIN),
     baseUrl: options.baseUrl || process.env.FARM_PREVIEW_GATEWAY_URL,
     sessionTtlMs: options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS,
@@ -217,6 +294,10 @@ export function createPreviewGatewayHandler(
 
       if (request.method === "POST" && url.pathname === "/api/tunnel/grants") {
         if (!config.auth) return text("Managed preview authentication is not configured.", 404);
+        if (config.auth.deviceAuth) {
+          const limited = await limitPreviewAccountExchange(request, config.auth);
+          if (limited) return limited;
+        }
         return await createTunnelGrant(request, config.auth);
       }
 
@@ -315,9 +396,10 @@ async function createTunnelGrant(request: Request, auth: PreviewManagedAuthOptio
   if (!accountToken) {
     throw new PreviewAuthError(401, "Sign in with Farm Preview before creating a tunnel grant.");
   }
-  const account = verifyPreviewAccountToken(accountToken, auth);
+  const account = await authorizePreviewAccount(accountToken, auth);
   const input = (await request.json().catch(() => ({}))) as {
     name?: string;
+    project?: string;
     expiresInMs?: number;
   };
   const name = sanitizePreviewName(input.name);
@@ -328,6 +410,7 @@ async function createTunnelGrant(request: Request, auth: PreviewManagedAuthOptio
       account,
       {
         name,
+        project: input.project,
         ...(input.expiresInMs !== undefined ? { expiresInMs: input.expiresInMs } : {}),
       },
       auth,
@@ -632,6 +715,10 @@ async function createSession(
   let name = requestedName || randomPreviewName();
   let expiresAt = Date.now() + config.sessionTtlMs;
   let slidingExpiration = true;
+  let ownerId: string | undefined;
+  let project: string | undefined;
+  let keyId: string | undefined;
+  let grantId: string | undefined;
 
   if (config.auth) {
     const grantToken = readPreviewBearerToken(request);
@@ -644,6 +731,10 @@ async function createSession(
         ...(requestedName ? { name: requestedName } : {}),
       });
       name = grant.name;
+      ownerId = `${grant.provider || "github"}:${grant.subject}`;
+      project = grant.project ?? grant.name;
+      keyId = grant.keyId;
+      grantId = grant.nonce;
       expiresAt = grant.expiresAt;
       slidingExpiration = false;
     } catch (error) {
@@ -679,6 +770,10 @@ async function createSession(
 
   const hostname = `${name}.${config.domain}`;
   const session: PreviewGatewaySession = {
+    ...(grantId ? { grantId } : {}),
+    ...(project ? { project } : {}),
+    ...(keyId ? { keyId } : {}),
+    ...(ownerId ? { ownerId } : {}),
     id: randomId("sess"),
     name,
     hostname,
@@ -691,7 +786,9 @@ async function createSession(
     lastHeartbeatAt: Date.now(),
   };
 
+  await requireSessionAccess(config, session);
   await store.createSession(session, Math.max(1, expiresAt - Date.now()));
+  reportSession(config, session, "connected");
 
   return json({
     id: session.id,
@@ -714,6 +811,9 @@ async function handleSessionRoute(
     route.sessionId,
     readPreviewBearerToken(request) || url.searchParams.get("token"),
   );
+
+  // Cleanup is still possible when the authority is unavailable or the grant is revoked.
+  if (request.method !== "DELETE" || route.action) await requireSessionAccess(config, session);
 
   if (request.method === "GET" && route.action === "requests") {
     return await pollSessionRequests(url, store, config, session);
@@ -754,6 +854,7 @@ async function handleSessionRoute(
 
   if (request.method === "DELETE" && !route.action) {
     await store.deleteSession(session);
+    reportSession(config, session, "disconnected");
     return json({ ok: true });
   }
 
@@ -810,12 +911,18 @@ async function pollSessionRequests(
 ) {
   const waitMs = clamp(Number(url.searchParams.get("wait") || config.pollTimeoutMs), 1000, 25000);
   const deadline = Date.now() + waitMs;
+  let nextAccessCheckAt = Date.now() + 1000;
 
   await markSessionOnline(store, config, session);
 
   while (Date.now() < deadline) {
+    if (Date.now() >= nextAccessCheckAt) {
+      await requireSessionAccess(config, session);
+      nextAccessCheckAt = Date.now() + 1000;
+    }
     const requests = await store.takeRequests(session.id, DEFAULT_POLL_REQUEST_LIMIT);
     if (requests.length) {
+      await requireSessionAccess(config, session);
       await markSessionOnline(store, config, session);
       return json({ requests });
     }
@@ -839,71 +946,97 @@ async function proxyPublicRequest(
   }
   if (!isPreviewClientOnline(session, config)) {
     await store.deleteSession(session);
+    reportSession(config, session, "disconnected");
     return inactivePreviewResponse(request, route.name);
   }
 
-  const previewRequest = await serializePreviewRequest(
-    request,
-    url,
-    route.path,
-    config.maxBodyBytes,
-  );
-  await store.enqueueRequest(session.id, previewRequest, remainingSessionTtl(session, config));
-  await store.touchSession(session, remainingSessionTtl(session, config));
+  await requireSessionAccess(config, session);
 
-  const response = await waitForPreviewResponse(
-    store,
-    config,
-    session,
-    previewRequest.id,
-    request.signal,
-  );
-  if (response === "cancelled") {
-    await store.enqueueRequest(
-      session.id,
-      {
-        ...previewRequest,
-        body: undefined,
-        encoding: undefined,
-        cancelled: true,
-        createdAt: Date.now(),
-      },
-      remainingSessionTtl(session, config),
+  const startedAt = Date.now();
+  let status = 500;
+  try {
+    const previewRequest = await serializePreviewRequest(
+      request,
+      url,
+      route.path,
+      config.maxBodyBytes,
     );
-    return new Response(null, { status: 499 });
-  }
-  if (response === "stale") {
-    return inactivePreviewResponse(request, route.name);
-  }
-  if (!response) {
-    return text("The local Farm preview did not respond before the gateway timed out.", 504);
-  }
+    await store.enqueueRequest(session.id, previewRequest, remainingSessionTtl(session, config));
+    await store.touchSession(session, remainingSessionTtl(session, config));
 
-  const headers = new Headers();
-  const responseHopByHopHeaders = getHopByHopHeaderNames(response.headers || {});
-  for (const [key, value] of Object.entries(response.headers || {})) {
-    const normalized = key.toLowerCase();
-    if (responseHopByHopHeaders.has(normalized) || normalized === "content-encoding") {
-      continue;
+    const response = await waitForPreviewResponse(
+      store,
+      config,
+      session,
+      previewRequest.id,
+      request.signal,
+    );
+    if (response === "cancelled") {
+      status = 499;
+      await store.enqueueRequest(
+        session.id,
+        {
+          ...previewRequest,
+          body: undefined,
+          encoding: undefined,
+          cancelled: true,
+          createdAt: Date.now(),
+        },
+        remainingSessionTtl(session, config),
+      );
+      return new Response(null, { status: 499 });
     }
-    // Append multi-valued headers (Set-Cookie) so every value reaches the
-    // visitor; Headers.set would keep only the last.
-    for (const single of Array.isArray(value) ? value : [value]) {
-      headers.append(key, single);
+    if (response === "stale") {
+      status = 503;
+      return inactivePreviewResponse(request, route.name);
     }
-  }
-  headers.set("cache-control", "no-store");
-  headers.set("x-farm-preview", session.name);
+    if (!response) {
+      status = 504;
+      return text("The local Farm preview did not respond before the gateway timed out.", 504);
+    }
 
-  return new Response(
-    response.body
-      ? Buffer.from(response.body, response.encoding === "base64" ? "base64" : "utf8")
-      : null,
-    {
-      status: response.status || 200,
-      headers,
-    },
-  );
+    const headers = new Headers();
+    const responseHopByHopHeaders = getHopByHopHeaderNames(response.headers || {});
+    for (const [key, value] of Object.entries(response.headers || {})) {
+      const normalized = key.toLowerCase();
+      if (responseHopByHopHeaders.has(normalized) || normalized === "content-encoding") {
+        continue;
+      }
+      // Append multi-valued headers (Set-Cookie) so every value reaches the
+      // visitor; Headers.set would keep only the last.
+      for (const single of Array.isArray(value) ? value : [value]) {
+        headers.append(key, single);
+      }
+    }
+    headers.set("cache-control", "no-store");
+    headers.set("x-farm-preview", session.name);
+
+    status = response.status || 200;
+    return new Response(
+      response.body
+        ? Buffer.from(response.body, response.encoding === "base64" ? "base64" : "utf8")
+        : null,
+      {
+        status,
+        headers,
+      },
+    );
+  } catch (error) {
+    if (error instanceof GatewayHttpError) status = error.status;
+    throw error;
+  } finally {
+    if (config.observer?.request)
+      observe(() =>
+        config.observer!.request!({
+          sessionId: session.id,
+          method: request.method,
+          path: route.path.split(/[?#]/, 1)[0].slice(0, 2048),
+          status,
+          durationMs: Date.now() - startedAt,
+          at: Date.now(),
+        }),
+      );
+  }
 }
 
 async function waitForPreviewResponse(
@@ -919,6 +1052,7 @@ async function waitForPreviewResponse(
   while (Date.now() < deadline) {
     if (signal.aborted) return "cancelled";
     if (Date.now() >= nextLivenessCheckAt) {
+      await requireSessionAccess(config, session);
       const latestSession = await store.getSessionById(session.id);
       if (!latestSession || !isPreviewClientOnline(latestSession, config)) {
         if (latestSession) await store.deleteSession(latestSession);
@@ -929,6 +1063,7 @@ async function waitForPreviewResponse(
 
     const response = await store.getResponse(session.id, requestId);
     if (response) {
+      await requireSessionAccess(config, session);
       await store.deleteResponse(session.id, requestId);
       return response;
     }
@@ -943,6 +1078,29 @@ async function waitForPreviewResponse(
   return undefined;
 }
 
+async function requireSessionAccess(
+  config: PreviewGatewayRuntimeConfig,
+  session: PreviewGatewaySession,
+) {
+  if (!config.authorizeSession) return;
+  const { id, name, ownerId, project, keyId, grantId, expiresAt } = session;
+  let allowed;
+  try {
+    allowed = await config.authorizeSession({
+      id,
+      name,
+      ownerId,
+      project,
+      keyId,
+      grantId,
+      expiresAt,
+    });
+  } catch {
+    throw new GatewayHttpError(503, "Preview access verification is temporarily unavailable.");
+  }
+  if (allowed !== true) throw new GatewayHttpError(403, "This preview is no longer authorized.");
+}
+
 async function markSessionOnline(
   store: PreviewGatewayStore,
   config: PreviewGatewayRuntimeConfig,
@@ -954,6 +1112,7 @@ async function markSessionOnline(
     session.expiresAt = now + config.sessionTtlMs;
   }
   await store.touchSession(session, remainingSessionTtl(session, config));
+  reportSession(config, session, "connected");
 }
 
 function remainingSessionTtl(session: PreviewGatewaySession, config: PreviewGatewayRuntimeConfig) {
@@ -1124,6 +1283,13 @@ function headerValue(headers: IncomingHttpHeaders, key: string) {
 }
 
 function createPublicUrl(request: Request, config: PreviewGatewayRuntimeConfig, name: string) {
+  // Each browser preview needs its own origin: a path prefix cannot relocate
+  // root-relative scripts, imports, fetches, or client-side navigation.
+  if (config.domain === "localhost" || config.domain.endsWith(".localhost")) {
+    const base = new URL(config.baseUrl || request.url);
+    base.hostname = `${name}.${config.domain}`;
+    return base.origin;
+  }
   if (config.baseUrl) {
     const base = new URL(config.baseUrl);
     if (isLocalHost(base.hostname)) {
@@ -1216,7 +1382,12 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function isLocalHost(hostname: string) {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  return (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1"
+  );
 }
 
 class GatewayHttpError extends Error {

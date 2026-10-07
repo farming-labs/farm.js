@@ -29,6 +29,7 @@ export function createSyncModelTypeDeclarations(
 
     for (const [modelKey, model] of Object.entries(models)) {
       if (exposed && !exposed.has(modelKey)) continue;
+      if (model.external) continue;
       rowEntries.push(renderModelEntry(modelKey, model.fields, "row"));
       insertEntries.push(renderModelEntry(modelKey, model.fields, "insert"));
     }
