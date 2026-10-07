@@ -7,10 +7,12 @@ import { SITE_URL } from "./site";
  * the docs pages, so these pages get a second sitemap that robots.ts lists.
  *
  * It sits at the root because a sitemap only covers URLs under its own directory
- * unless it is submitted in Search Console, and it has no extension because a
- * dotted final segment in a programmatic API route breaks the production build.
+ * unless it is submitted in Search Console.
  */
-export const SITE_SITEMAP_PATH = "/sitemap-site";
+export const SITE_SITEMAP_PATH = "/sitemap-site.xml";
+
+/** Where robots.txt pointed before the sitemap took its extension back. */
+export const LEGACY_SITE_SITEMAP_PATH = "/sitemap-site";
 
 const posts = [launchPost];
 
