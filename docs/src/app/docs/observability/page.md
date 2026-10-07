@@ -179,6 +179,7 @@ onFarmEvent((event) => {
 | PPR                  | ppr.shell.hit, ppr.shell.cached, ppr.shell.invalidated                           |
 | Middleware           | middleware.start, middleware.complete, middleware.shortCircuit, middleware.error |
 | Integrations         | integration.ready, integration.api.call.start, integration.webhook.verified      |
+| MCP                  | mcp.tool.complete (registered callback outcome, not an agent run)                |
 | Integration database | storage.query.start, storage.schema.ready                                        |
 | Build                | build.start, routes.generated, types.generated, manifest.generated               |
 
@@ -230,11 +231,16 @@ unsubscribe();
 | Cache                | `cache.hit`, `cache.miss`, `cache.set`, `cache.stale`, `cache.bypass`, `cache.invalidated`, `cache.revalidatePath`, `cache.revalidateTag`, `cache.updateTag`, `cache.error`                                                        |
 | PPR                  | `ppr.shell.hit`, `ppr.shell.miss`, `ppr.shell.cached`, `ppr.shell.bypass`, `ppr.shell.invalidated`, `ppr.suspense.holeDetected`, `ppr.refresh.start`, `ppr.refresh.complete`, `ppr.refresh.error`                                  |
 | API                  | `api.request.start`, `api.request.complete`, `api.validation.failed`, `api.error`                                                                                                                                                  |
+| MCP                  | `mcp.tool.complete` — configured server, transport route, tool name, outcome and duration; no tool payloads                                                                                                                        |
 | Integrations         | `integration.registered`, `integration.config.validated`, `integration.ready`, `integration.disposed`, `integration.api.call.start`, `integration.api.call.complete`, `integration.webhook.verified`, `integration.webhook.failed` |
 | Middleware           | `middleware.start`, `middleware.complete`, `middleware.shortCircuit`, `middleware.error`                                                                                                                                           |
 | Integration database | `storage.query.start`, `storage.query.complete`, `storage.query.error`, `storage.schema.ready`, `storage.schema.error`                                                                                                             |
 
 Middleware events include the matched middleware route, request pathname, middleware file/config name, duration for completes, status for short circuits, and the thrown error for failures.
+
+MCP completion events distinguish tool errors from successful HTTP transport responses. They cover
+registered callbacks only, excluding authorization and SDK rejections before callback execution.
+See [MCP tool observability](/docs/plugins/mcp#observe-tool-executions) for payload and coverage details.
 
 ## Middleware event payloads
 

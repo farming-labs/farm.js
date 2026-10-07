@@ -123,6 +123,43 @@ async function verifyPolicy(
   );
   expect(malformed.result.isError).toBe(true);
   expect((await request(new Request("http://farm.test/api/search_projects"))).status).toBe(404);
+  const events = await (
+    await request(
+      new Request("http://farm.test/api/events", {
+        headers: { authorization: "Bearer writer" },
+      }),
+    )
+  ).json();
+  expect(events.map(({ tool, outcome }) => ({ tool, outcome }))).toEqual([
+    ...(standaloneOnly
+      ? []
+      : [
+          { tool: "create_project", outcome: "success" },
+          { tool: "read_projects", outcome: "success" },
+        ]),
+    { tool: "search_projects", outcome: "success" },
+    { tool: "search_projects", outcome: "error" },
+    { tool: "private_tool", outcome: "success" },
+  ]);
+  for (const event of events) {
+    expect(event).toMatchObject({
+      type: "mcp.tool.complete",
+      route: "/api/mcp",
+      server: "projects",
+      durationMs: expect.any(Number),
+    });
+    expect(Object.keys(event).sort()).toEqual([
+      "durationMs",
+      "level",
+      "outcome",
+      "route",
+      "server",
+      "timestamp",
+      "tool",
+      "type",
+    ]);
+  }
+  expect(JSON.stringify(events)).not.toMatch(/Bearer|private output|credential|subject/);
 }
 
 describe("MCP composition and authorization", () => {
@@ -131,6 +168,7 @@ describe("MCP composition and authorization", () => {
     async (standaloneOnly) => {
       const packageRoot = process.cwd();
       const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-mcp-policy-"));
+      const eventKey = `mcp-test-${path.basename(root)}`;
       try {
         await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
         for (const [name, source] of [
@@ -141,6 +179,16 @@ describe("MCP composition and authorization", () => {
         }
         await fs.writeFile(path.join(root, "package.json"), '{"type":"module","private":true}');
         await fs.mkdir(path.join(root, "src", "app", "api", "projects"), { recursive: true });
+        await fs.mkdir(path.join(root, "src", "app", "api", "events"), { recursive: true });
+        await fs.writeFile(
+          path.join(root, "src", "app", "api", "events", "route.ts"),
+          `
+export function GET(request) {
+  if (request.headers.get("authorization") !== "Bearer writer") return new Response(null, { status: 403 });
+  return Response.json((globalThis[${JSON.stringify(eventKey)}] ?? []).splice(0));
+}
+`,
+        );
         await fs.writeFile(
           path.join(root, "src", "app", "page.tsx"),
           "export default function Page() { return <main>MCP policy</main>; }",
@@ -176,6 +224,10 @@ ${standaloneOnly ? "" : 'import { GET, POST } from "./src/app/api/projects/route
 let privateCalls = 0;
 export default defineConfig({
   telemetry: false,
+  observability: {
+    events: ["mcp.tool.complete"],
+    onEvent(event) { (globalThis[${JSON.stringify(eventKey)}] ??= []).push(event); },
+  },
   images: { provider: "none" },
   vite: { server: { host: "127.0.0.1", strictPort: false } },
   mcp: {
@@ -247,6 +299,7 @@ export default defineConfig({
           );
         }
       } finally {
+        delete (globalThis as any)[eventKey];
         await fs.rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
       }
     },

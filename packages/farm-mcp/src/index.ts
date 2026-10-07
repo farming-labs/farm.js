@@ -23,6 +23,7 @@ import type {
   FarmMCPExecuteContext,
 } from "@farm.js/core";
 import { parseRouteSchema } from "@farm.js/core/api/runtime";
+import { emitFarmEvent } from "@farm.js/core/observability";
 import { toJSONSchema } from "zod";
 
 const TOOL_NAME = /^[A-Za-z0-9_.-]{1,128}$/;
@@ -151,18 +152,35 @@ function createHandler(options: NormalizedOptions, tools: readonly BoundTool[]) 
         },
         async (input, context) => {
           const request = context.http?.req ?? requestInfo;
-          if (tool.kind === "endpoint") {
-            return invokeTool(tool, input as JSONRecord, request, context.mcpReq.signal);
+          const startedAt = performance.now();
+          let outcome: "success" | "error" = "error";
+          try {
+            const authorization = authInfo?.extra?.farmAuthorization as
+              | FarmMCPAuthorization
+              | undefined;
+            const result =
+              tool.kind === "endpoint"
+                ? await invokeTool(tool, input as JSONRecord, request, context.mcpReq.signal)
+                : !request || !authorization
+                  ? toolError("Missing MCP authorization context.")
+                  : await invokeStandaloneTool(tool, input, {
+                      request,
+                      authorization,
+                      signal: AbortSignal.any([request.signal, context.mcpReq.signal]),
+                    });
+            outcome = "isError" in result && result.isError ? "error" : "success";
+            return result;
+          } finally {
+            emitFarmEvent({
+              type: "mcp.tool.complete",
+              level: outcome === "error" ? "error" : "info",
+              route: options.path,
+              server: options.name,
+              tool: tool.config.name,
+              outcome,
+              durationMs: Math.max(0, performance.now() - startedAt),
+            });
           }
-          const authorization = authInfo?.extra?.farmAuthorization as
-            | FarmMCPAuthorization
-            | undefined;
-          if (!request || !authorization) return toolError("Missing MCP authorization context.");
-          return invokeStandaloneTool(tool, input, {
-            request,
-            authorization,
-            signal: AbortSignal.any([request.signal, context.mcpReq.signal]),
-          });
         },
       );
     }

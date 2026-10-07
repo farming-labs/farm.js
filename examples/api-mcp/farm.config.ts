@@ -8,6 +8,17 @@ const DEMO_TOKEN = "demo-token";
 
 export default defineConfig({
   images: { provider: "none" },
+  observability:
+    process.env.MCP_OBSERVABILITY === "1"
+      ? {
+          events: ["mcp.tool.complete"],
+          onEvent(event) {
+            if (event.type === "mcp.tool.complete") {
+              console.log("[mcp]", event.tool, event.outcome, event.durationMs);
+            }
+          },
+        }
+      : false,
   mcp: {
     name: "projects",
     tools: [
