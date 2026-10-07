@@ -1,6 +1,12 @@
 import type { FarmSchema, FarmSchemaConfig } from "./schema";
 import { collectSchemaDependencies, orderSchemaOwners } from "./schema-dependencies";
 import { describeForeignKeyApproval, planCrossOwnerReferences } from "./schema-foreign-keys";
+import type { FarmSchemaMigrationStep } from "./schema-step-types";
+import {
+  planOwnerSchemaSteps,
+  withoutRenameTargets,
+  type FarmSchemaStepPlan,
+} from "./schema-steps";
 import {
   createSchemaSnapshot,
   diffSchemaSnapshots,
@@ -69,7 +75,10 @@ export type FarmSchemaCheckCode =
   | "extend-column-missing"
   | "extend-column-type"
   | "extend-column-shared"
-  | "schema-upgrade";
+  | "schema-upgrade"
+  | "migration-step-pending"
+  | "migration-step-blocked"
+  | "migration-step-edited";
 
 export interface FarmSchemaCheckIssue {
   severity: FarmSchemaCheckSeverity;
@@ -145,6 +154,7 @@ type SchemaOwner = {
   dialect?: FarmSqlDialect;
   dependsOn?: readonly string[];
   version?: string;
+  migrations?: readonly FarmSchemaMigrationStep[];
   resolveClient(config: FarmSchemaCheckConfig): Promise<unknown>;
 };
 
@@ -178,6 +188,7 @@ export function collectSchemaOwners(config: FarmSchemaCheckConfig): SchemaOwner[
       dialect: declaration.dialect,
       dependsOn: declaration.dependsOn,
       version: declaration.version,
+      migrations: declaration.migrations,
       resolveClient: (resolved) => declaration.resolveClient(resolved),
     });
   }
@@ -503,9 +514,22 @@ export async function checkSchema(
           onDelete: reference.onDelete,
         };
       }
+      // Migration steps, read the way migrate reads them.
+      const stepPlan = owner.migrations?.length
+        ? await planOwnerSchemaSteps({
+            owner: owner.name,
+            schema: owner.schema,
+            steps: owner.migrations,
+            tables: models.map((model) => model.modelName),
+            dialect: database.dialect,
+            executor: database.executor,
+          })
+        : undefined;
+      checkSteps(owner, stepPlan, issues);
       const plan = await checkOwnerTables(
         owner,
-        models,
+        // What a pending rename will produce is not missing yet.
+        withoutRenameTargets(models, stepPlan),
         database.dialect,
         database.executor,
         issues,
@@ -667,6 +691,46 @@ async function checkOwnerTables(
     });
   }
   return plan;
+}
+
+function checkSteps(
+  owner: SchemaOwner,
+  stepPlan: FarmSchemaStepPlan | undefined,
+  issues: FarmSchemaCheckIssue[],
+) {
+  if (!stepPlan) return;
+  const command = `\`farm ${owner.name} migrate\``;
+  const blockedAt = stepPlan.steps.findIndex((planned) => planned.state === "blocked");
+  const pending = stepPlan.steps
+    .slice(0, blockedAt === -1 ? undefined : blockedAt)
+    .filter((planned) => planned.state === "run");
+  if (pending.length > 0) {
+    issues.push({
+      severity: "warning",
+      code: "migration-step-pending",
+      owner: owner.name,
+      message: `${owner.name} has ${pending.length} migration step(s) not run yet: ${pending.map((planned) => planned.summary).join("; ")}.`,
+      hint: `Run ${command} to review and apply them.`,
+    });
+  }
+  if (blockedAt !== -1) {
+    const blocked = stepPlan.steps[blockedAt]!;
+    issues.push({
+      severity: "error",
+      code: "migration-step-blocked",
+      owner: owner.name,
+      message: `${owner.name}'s migration step "${blocked.step.id}" (${blocked.summary}) cannot run: ${blocked.reason}`,
+      hint: "Later steps wait for it. Fix the database, then run migrate again.",
+    });
+  }
+  for (const id of stepPlan.edited) {
+    issues.push({
+      severity: "warning",
+      code: "migration-step-edited",
+      owner: owner.name,
+      message: `${owner.name}'s migration step "${id}" changed after it ran here; it will not run again.`,
+    });
+  }
 }
 
 async function checkReferences(

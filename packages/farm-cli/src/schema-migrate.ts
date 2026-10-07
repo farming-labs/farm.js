@@ -153,6 +153,8 @@ async function migrateOwner(
     // but rows that point at nothing kept out.
     pending: [
       ...result.extensions.pending,
+      // Under --apply, a step still pending was blocked or held behind one.
+      ...(options.apply ? result.steps.pending.map((id) => `migration step "${id}"`) : []),
       ...result.foreignKeys.blocked.map(
         ({ key, orphans }) =>
           `${key.table}.${key.column} → ${key.referencedTable} (${orphans} orphan row(s))`,

@@ -45,6 +45,8 @@ export type FarmSchemaChanges = {
   addedIndexes: string[];
   /** Removed or redefined: never applied on their own. */
   otherChanges: string[];
+  /** Columns the new version no longer has, with their old type. */
+  removedColumns?: Array<{ table: string; column: string; type: string }>;
 };
 
 export function createSchemaSnapshot(models: readonly CollectedSchemaModel[]): FarmSchemaSnapshot {
@@ -83,6 +85,7 @@ export function diffSchemaSnapshots(
     addedColumns: [],
     addedIndexes: [],
     otherChanges: [],
+    removedColumns: [],
   };
   for (const [table, definition] of Object.entries(next.tables)) {
     const before = previous.tables[table];
@@ -98,8 +101,10 @@ export function diffSchemaSnapshots(
         changes.otherChanges.push(`${table}.${column} is redefined`);
       }
     }
-    for (const column of Object.keys(before.columns)) {
-      if (!definition.columns[column]) changes.otherChanges.push(`${table}.${column} is removed`);
+    for (const [column, old] of Object.entries(before.columns)) {
+      if (definition.columns[column]) continue;
+      changes.otherChanges.push(`${table}.${column} is removed`);
+      changes.removedColumns!.push({ table, column, type: old.type });
     }
     for (const index of definition.indexes) {
       if (!before.indexes.includes(index)) changes.addedIndexes.push(index);

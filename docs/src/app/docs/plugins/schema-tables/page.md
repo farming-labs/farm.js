@@ -62,7 +62,7 @@ $ pnpm farm jobs migrate
 No plugin named "jobs" owns tables in this app. Available: sync.
 ```
 
-### It adds, and never changes or drops
+### On its own, it only adds
 
 When a plugin's tables already exist, `migrate` adds what a table that may hold
 rows can safely take, and reports the rest:
@@ -83,8 +83,9 @@ rows can safely take, and reports the rest:
 
 A create or an addition is derivable from the schema alone. A change is not: a
 rename and a drop-plus-add look identical from here, and one of them destroys
-data. That call stays with the person who knows which one it was, so take it to
-your own migration tooling.
+data. That call stays with whoever knows which one it was: the plugin, through a
+[migration step](#renames-and-other-changes-migration-steps), or you, with your
+own migration tooling.
 
 Statements are written so `--apply` is safe to re-run.
 
@@ -129,6 +130,69 @@ it, Farm says the tables changed since they were last migrated. In a project
 with Prisma or Drizzle, no `farm_schema_state` table is created: their own
 migrations track history there, and `farm generate --orm` carries the plugin's
 new tables and columns into their schema.
+
+### Renames and other changes: migration steps
+
+Farm adds on its own, but it never guesses at a rename: from the database, a
+renamed column looks exactly like one removed and one added, and applying that
+would leave the data behind. A release that renames ships a step:
+
+```ts title="src/index.ts"
+definePlugin({
+  name: "farm:teams",
+  version: "2.0.0",
+  schema: teamsSchema,
+  migrations: [
+    {
+      id: "2.0.0-role-to-permission",
+      renameColumn: { model: "member", from: "role", to: "permission" },
+    },
+    {
+      id: "2.0.0-backfill-owners",
+      description: "mark the first member of each team as owner",
+      sql: {
+        postgres: `UPDATE "member" SET "permission" = 'owner' WHERE ...`,
+        mysql: "UPDATE `member` SET `permission` = 'owner' WHERE ...",
+        sqlite: `UPDATE "member" SET "permission" = 'owner' WHERE ...`,
+      },
+    },
+  ],
+});
+```
+
+| Step           | What it does                                                       |
+| -------------- | ------------------------------------------------------------------ |
+| `renameColumn` | `model` and `to` are your current names; `from` is the old column  |
+| `renameTable`  | `to` is the current model; `from` is the old table                 |
+| `sql`          | your SQL per database; runs after this release's new columns exist |
+
+```
+$ pnpm farm teams migrate
+teams 1.1.0 → 2.0.0 changes its tables:
+  1. rename member.role → member.permission
+  2. mark the first member of each team as owner (after the changes below)
+```
+
+- Each step runs **once per database**, in order. Farm records it in a
+  `farm_schema_steps` table, and notices a step edited after it ran instead of
+  running it again.
+- Renames run first, then the release's additions, then custom SQL, so a
+  backfill can fill a column this release adds. Set `before: true` on a `sql`
+  step to run it with the renames.
+- A **fresh install** runs no steps: tables created at this version already
+  have their effect. A rename someone already did is detected and only
+  recorded.
+- A step that cannot run safely, such as a rename whose target column already
+  exists, **stops** there: later steps wait, `--apply` exits with an error, and
+  `farm schema check` says why.
+- Each step is one transaction on Postgres and SQLite. MySQL commits schema
+  changes immediately, so a failed step there can leave part of it applied.
+- With Prisma or Drizzle, steps are printed for their migrations, never run.
+
+Steps use your plugin's own names, so they follow the app's renames. A plugin
+that renames without a step gets a hint in the summary:
+`? if member.role was renamed to member.permission, the plugin needs a
+migration step`.
 
 ### When it does not apply
 

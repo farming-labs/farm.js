@@ -5,6 +5,13 @@ import {
   isSchemaExtensionAllowed,
 } from "./schema-extend";
 import {
+  planOwnerSchemaSteps,
+  withoutRenameTargets,
+  runSchemaStep,
+  type FarmPlannedSchemaStep,
+  type FarmSchemaStepPlan,
+} from "./schema-steps";
+import {
   FARM_SCHEMA_STATE_TABLE,
   createSchemaSnapshot,
   describeSchemaChanges,
@@ -118,7 +125,9 @@ export interface MigrateSchemaTablesResult {
   };
   /** What the installed version changes compared with the last applied one. */
   upgrade?: { from?: string; to?: string; changes: FarmSchemaChanges };
-  /** Statements `--apply` would run. */
+  /** The owner's migration steps: what ran now, and what is still to do. */
+  steps: { plan?: FarmSchemaStepPlan; ran: string[]; pending: string[] };
+  /** Statements and steps `--apply` would run. */
   planned: number;
   /** Columns the owner adds to tables it does not own. */
   extensions: FarmSchemaExtensionPlan & {
@@ -162,6 +171,7 @@ export async function migrateSchemaTables(
       applied: [],
       extensions: { ...emptyExtensionPlan(), unapproved: [], pending: [] },
       foreignKeys: { waiting: [], unapproved: [], unsupported: [], blocked: [] },
+      steps: { ran: [], pending: [] },
       planned: 0,
     };
   }
@@ -169,21 +179,66 @@ export async function migrateSchemaTables(
   const { executor } = adapter;
   const dialect = owner.dialect ?? adapter.dialect;
   const schemaConfig = options.config?.schema as FarmSchemaConfig | undefined;
+  const reportOnly = options.extensions === "report";
+  const applying = Boolean(options.apply) && !reportOnly;
+
+  // Migration steps the owner ships: renames run before anything is planned,
+  // so a renamed column is never mistaken for one removed and one added.
+  const steps = owner.migrations ?? [];
+  let stepPlan: FarmSchemaStepPlan | undefined;
+  const stepsRan: string[] = [];
+  let stepsStopped: FarmPlannedSchemaStep | undefined;
+  if (steps.length > 0) {
+    stepPlan = await planOwnerSchemaSteps({
+      owner: owner.name,
+      schema: owner.schema,
+      steps,
+      tables: collectOwnerModels(owner).map((model) => model.modelName),
+      dialect,
+      executor,
+      readApplied: !reportOnly,
+    });
+    for (const id of stepPlan.edited) {
+      log(
+        `Migration step "${id}" changed after it ran here. Farm never runs a step twice; review the change yourself.`,
+      );
+    }
+  }
+  const runSteps = async (phase: "before" | "after") => {
+    for (const planned of stepPlan?.steps ?? []) {
+      if (stepsStopped) return;
+      if (planned.phase !== phase) continue;
+      if (planned.state === "blocked") {
+        stepsStopped = planned;
+        log(
+          `Stopped at migration step "${planned.step.id}" (${planned.summary}): ${planned.reason} Later steps wait for it.`,
+        );
+        return;
+      }
+      await runSchemaStep(executor, dialect, owner.name, planned);
+      stepsRan.push(planned.step.id);
+    }
+  };
+  if (applying) await runSteps("before");
 
   // References to other plugins' tables get a real foreign key when it is
   // safe: inline for a table created now, with approval for an existing one.
   const models = collectOwnerModels(owner);
+  // Planned without the columns and tables a pending rename will produce:
+  // until it runs they are missing, and adding them would strand the data.
+  const planningModels = applying ? models : withoutRenameTargets(models, stepPlan);
   const others = options.config ? findSchemaTableOwners(options.config as never) : [];
   const crossOwner = await planCrossOwnerReferences(owner, others, dialect, executor);
   for (const reference of crossOwner.eligible) {
-    const model = models.find((candidate) => candidate.modelKey === reference.modelKey)!;
+    const model = planningModels.find((candidate) => candidate.modelKey === reference.modelKey);
+    if (!model) continue;
     (model.foreignKeys ??= {})[reference.fieldKey] = {
       table: reference.referencedTable,
       column: reference.referencedColumn,
       onDelete: reference.onDelete,
     };
   }
-  const plan = await planSchemaMigration(models, dialect, executor);
+  const plan = await planSchemaMigration(planningModels, dialect, executor);
 
   // What this version changes compared with what was last applied here.
   const snapshot = createSchemaSnapshot(models);
@@ -193,12 +248,20 @@ export async function migrateSchemaTables(
     state && changes && hasSchemaChanges(changes)
       ? { from: state.version, to: owner.version, changes }
       : undefined;
-  if (upgrade) {
+  const pendingSteps = (stepPlan?.steps ?? []).filter((planned) => planned.state !== "record");
+  if (upgrade || pendingSteps.length > 0) {
     const versions =
-      upgrade.from && upgrade.to && upgrade.from !== upgrade.to
+      upgrade?.from && upgrade.to && upgrade.from !== upgrade.to
         ? `${owner.name} ${upgrade.from} → ${upgrade.to} changes its tables:`
         : `${owner.name}'s tables changed since they were last migrated:`;
-    log([versions, ...describeSchemaChanges(changes!)].join("\n"));
+    log(
+      [
+        versions,
+        ...describeStepChanges(stepPlan),
+        ...describeSchemaChanges(withoutStepChanges(changes, stepPlan)),
+        ...renameHints(withoutStepChanges(changes, stepPlan)),
+      ].join("\n"),
+    );
   }
   // An ORM's migrations own the app's tables there, and track their own
   // history; an extra table would only show up as drift in its tooling.
@@ -231,7 +294,6 @@ export async function migrateSchemaTables(
     executor,
   );
   const allowExtend = schemaConfig?.allowExtend;
-  const reportOnly = options.extensions === "report";
   const approved = reportOnly
     ? []
     : extensionsPlan.statements.filter((statement) =>
@@ -241,9 +303,11 @@ export async function migrateSchemaTables(
     ? []
     : extensionsPlan.statements.filter((statement) => !approved.includes(statement));
   const sql =
+    formatSteps(stepPlan, "before", reportOnly) +
     formatSchemaMigration(plan, owner.name, {
       addsColumns: approved.length + foreignKeysAllowed.length > 0,
     }) +
+    formatSteps(stepPlan, "after", reportOnly) +
     formatForeignKeys(owner.name, dialect, foreignKeysAllowed, foreignKeysUnapproved) +
     formatExtensions(owner.name, {
       approved,
@@ -273,7 +337,14 @@ export async function migrateSchemaTables(
       blocked,
     },
     upgrade,
-    planned: pendingStatements,
+    steps: {
+      plan: stepPlan,
+      ran: stepsRan,
+      pending: (stepPlan?.steps ?? [])
+        .filter((planned) => !stepsRan.includes(planned.step.id))
+        .map((planned) => planned.step.id),
+    },
+    planned: pendingStatements + runnableSteps,
   });
 
   // A table created now without its foreign key, because the other plugin
@@ -306,8 +377,15 @@ export async function migrateSchemaTables(
     (plan.upgrades?.length ?? 0) +
     approved.length +
     foreignKeysAllowed.length;
+  // Steps still to run (or record) here, up to the first one that cannot.
+  const blockedAt = (stepPlan?.steps ?? []).findIndex((planned) => planned.state === "blocked");
+  const runnableSteps = (stepPlan?.steps ?? [])
+    .slice(0, blockedAt === -1 ? undefined : blockedAt)
+    .filter((planned) => !stepsRan.includes(planned.step.id)).length;
   if (
     pendingStatements === 0 &&
+    runnableSteps === 0 &&
+    blockedAt === -1 &&
     unapproved.length === 0 &&
     foreignKeysUnapproved.length === 0 &&
     (!reportOnly || extensionsPlan.statements.length === 0)
@@ -371,6 +449,9 @@ export async function migrateSchemaTables(
     );
   }
   if (applied.length > 0) log(`Created: ${applied.join(", ")}`);
+  // Custom SQL last: a backfill can fill this release's new columns.
+  await runSteps("after");
+  if (stepsRan.length > 0) log(`Ran migration steps: ${stepsRan.join(", ")}`);
   await recordState();
   return result(applied);
 }
@@ -436,6 +517,100 @@ function formatForeignKeys(
     );
   }
   return sections.length > 0 ? `\n${sections.join("\n\n")}\n` : "";
+}
+
+/** The steps, numbered, as the upgrade summary shows them. */
+function describeStepChanges(stepPlan: FarmSchemaStepPlan | undefined): string[] {
+  const pending = (stepPlan?.steps ?? []).filter((planned) => planned.state !== "record");
+  return pending.map((planned, index) => {
+    const when = planned.phase === "after" ? " (after the changes below)" : "";
+    const blocked = planned.state === "blocked" ? `  ✗ blocked: ${planned.reason}` : "";
+    return `  ${index + 1}. ${planned.summary}${when}${blocked}`;
+  });
+}
+
+/** The snapshot diff, minus what the owner's rename steps already explain. */
+function withoutStepChanges(
+  changes: FarmSchemaChanges | undefined,
+  stepPlan: FarmSchemaStepPlan | undefined,
+): FarmSchemaChanges {
+  const empty = {
+    addedTables: [],
+    addedColumns: [],
+    addedIndexes: [],
+    otherChanges: [],
+    removedColumns: [],
+  };
+  if (!changes) return empty;
+  const renamedTo = new Set<string>();
+  const renamedFrom = new Set<string>();
+  for (const { summary, step } of stepPlan?.steps ?? []) {
+    const match = /^rename (?:table )?(\S+) → (\S+)$/u.exec(summary);
+    if (!match || !("renameColumn" in step || "renameTable" in step)) continue;
+    renamedFrom.add(match[1]!);
+    renamedTo.add(match[2]!);
+  }
+  return {
+    addedTables: changes.addedTables.filter((table) => !renamedTo.has(table)),
+    addedColumns: changes.addedColumns.filter(
+      ({ table, column }) => !renamedTo.has(`${table}.${column}`),
+    ),
+    addedIndexes: changes.addedIndexes,
+    otherChanges: changes.otherChanges.filter(
+      (change) => ![...renamedFrom].some((from) => change === `${from} is removed`),
+    ),
+    removedColumns: (changes.removedColumns ?? []).filter(
+      ({ table, column }) => !renamedFrom.has(`${table}.${column}`),
+    ),
+  };
+}
+
+/**
+ * A column removed and another of the same type added in one table looks
+ * like a rename the plugin forgot to ship a step for.
+ */
+function renameHints(changes: FarmSchemaChanges): string[] {
+  const hints: string[] = [];
+  for (const removed of changes.removedColumns ?? []) {
+    const added = changes.addedColumns.find(
+      ({ table, type }) => table === removed.table && type === removed.type,
+    );
+    if (!added) continue;
+    hints.push(
+      `  ? if ${removed.table}.${removed.column} was renamed to ${added.table}.${added.column}, the plugin needs a migration step, or the data stays in ${removed.column}`,
+    );
+  }
+  return hints;
+}
+
+function formatSteps(
+  stepPlan: FarmSchemaStepPlan | undefined,
+  phase: "before" | "after",
+  reportOnly: boolean,
+): string {
+  const planned = (stepPlan?.steps ?? []).filter(
+    (entry) => entry.phase === phase && entry.state !== "record",
+  );
+  if (planned.length === 0) return "";
+  const heading =
+    phase === "before"
+      ? "-- Migration steps, run before the changes below:"
+      : "-- Migration steps, run after the changes above:";
+  const lines = [heading];
+  for (const entry of planned) {
+    lines.push(`-- ${entry.step.id}: ${entry.summary}`);
+    if (entry.state === "blocked") {
+      lines.push(`--   blocked: ${entry.reason}`);
+      continue;
+    }
+    for (const statement of entry.statements) {
+      lines.push(reportOnly ? `-- ${statement};` : `${statement.replace(/;\s*$/u, "")};`);
+    }
+  }
+  if (reportOnly) {
+    lines.push("-- Your ORM owns these tables: add the steps to its migrations instead.");
+  }
+  return `${lines.join("\n")}\n\n`;
 }
 
 function formatExtensions(
