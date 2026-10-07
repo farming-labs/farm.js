@@ -387,6 +387,18 @@ describe("resolveConfig", () => {
     expect((disabled.openapi as any).specRoute).toBe(false);
   });
 
+  it("keeps preview noindex off by default", async () => {
+    const defaults = await resolveConfig({}, "production");
+    expect(defaults.agent.noindexPreviews).toBe(false);
+
+    const configured = await resolveConfig({ agent: { noindexPreviews: true } }, "production");
+    expect(configured.agent.noindexPreviews).toBe(true);
+
+    await expect(
+      resolveConfig({ agent: { noindexPreviews: "yes" as never } }, "production"),
+    ).rejects.toThrow("agent.noindexPreviews must be a boolean.");
+  });
+
   it("resolves the agent config with JSON-LD and llms.txt off by default", async () => {
     const defaults = await resolveConfig({}, "production");
     expect(defaults.agent.jsonLd).toBe(false);
@@ -417,6 +429,26 @@ describe("resolveConfig", () => {
       "production",
     );
     expect(customized.agent.jsonLd).toEqual({ type: "SoftwareApplication", name: "Farm.js" });
+  });
+
+  it("keeps the crawler policy off by default", async () => {
+    const defaults = await resolveConfig({}, "production");
+    expect(defaults.agent.crawlers).toEqual({ enabled: false, rules: [] });
+
+    const configured = await resolveConfig(
+      { agent: { crawlers: { search: "allow", training: "block" } } },
+      "production",
+    );
+    expect(configured.agent.crawlers).toEqual({
+      enabled: true,
+      search: "allow",
+      training: "block",
+      rules: [],
+    });
+
+    await expect(
+      resolveConfig({ agent: { crawlers: { training: "deny" as never } } }, "production"),
+    ).rejects.toThrow('agent.crawlers.training must be "allow" or "block".');
   });
 
   it("keeps isolated client hydration off by default and preserves its rollout mode", async () => {

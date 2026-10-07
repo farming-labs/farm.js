@@ -95,7 +95,7 @@ test("prints the report as JSON for scripts", async () => {
   }
 });
 
-test("still migrates a plugin that owns tables under the name schema", async () => {
+test("farm schema migrate also covers a plugin named schema", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-schema-named-"));
   try {
     await writeFile(

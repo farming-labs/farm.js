@@ -1,4 +1,18 @@
 import type { FarmSchema, FarmSchemaConfig } from "./schema";
+import { collectSchemaDependencies, orderSchemaOwners } from "./schema-dependencies";
+import { describeForeignKeyApproval, planCrossOwnerReferences } from "./schema-foreign-keys";
+import type { FarmSchemaMigrationStep } from "./schema-step-types";
+import {
+  planOwnerSchemaSteps,
+  withoutRenameTargets,
+  type FarmSchemaStepPlan,
+} from "./schema-steps";
+import {
+  createSchemaSnapshot,
+  diffSchemaSnapshots,
+  hasSchemaChanges,
+  readSchemaState,
+} from "./schema-state";
 import {
   collectSchemaExtensions,
   describeSchemaExtensionApproval,
@@ -60,7 +74,11 @@ export type FarmSchemaCheckCode =
   | "extend-table-missing"
   | "extend-column-missing"
   | "extend-column-type"
-  | "extend-column-shared";
+  | "extend-column-shared"
+  | "schema-upgrade"
+  | "migration-step-pending"
+  | "migration-step-blocked"
+  | "migration-step-edited";
 
 export interface FarmSchemaCheckIssue {
   severity: FarmSchemaCheckSeverity;
@@ -81,6 +99,8 @@ export interface FarmSchemaCheckOwner {
   /** False when the owner stores data in a key/value mount, which has no tables. */
   relational: boolean;
   tables: string[];
+  /** Owners whose tables this one needs, declared or implied by its schema. */
+  dependsOn: string[];
 }
 
 export interface FarmSchemaCheckReport {
@@ -132,6 +152,9 @@ type SchemaOwner = {
   schema: FarmSchema;
   models?: readonly string[];
   dialect?: FarmSqlDialect;
+  dependsOn?: readonly string[];
+  version?: string;
+  migrations?: readonly FarmSchemaMigrationStep[];
   resolveClient(config: FarmSchemaCheckConfig): Promise<unknown>;
 };
 
@@ -163,6 +186,9 @@ export function collectSchemaOwners(config: FarmSchemaCheckConfig): SchemaOwner[
       schema: declaration.schema,
       models: declaration.models,
       dialect: declaration.dialect,
+      dependsOn: declaration.dependsOn,
+      version: declaration.version,
+      migrations: declaration.migrations,
       resolveClient: (resolved) => declaration.resolveClient(resolved),
     });
   }
@@ -244,7 +270,9 @@ export async function checkSchema(
     throw new TypeError("timeoutMs must be a positive number of milliseconds.");
   }
   const timeoutHint = `Check that the database is reachable from here, or allow longer than ${formatSeconds(timeoutMs)} with \`--timeout <ms>\`.`;
-  const owners = collectSchemaOwners(config);
+  // Dependencies first, so the report reads in the order things get created.
+  const dependencies = collectSchemaDependencies(collectSchemaOwners(config));
+  const owners = orderSchemaOwners(collectSchemaOwners(config), dependencies);
   const issues: FarmSchemaCheckIssue[] = [];
 
   // Owners are found by name, so a second plugin declaring tables under a
@@ -331,6 +359,7 @@ export async function checkSchema(
       kind: owner.kind,
       relational: true,
       tables: models.map((model) => model.modelName),
+      dependsOn: [...(dependencies.get(owner.name) ?? [])],
     };
     summaries.push(summary);
 
@@ -469,7 +498,72 @@ export async function checkSchema(
     const database = databases.get(owner.name);
     if (!models || !database) continue;
     try {
-      await checkOwnerTables(owner, models, database.dialect, database.executor, issues);
+      // The same foreign keys migrate would create, so a missing one can be named.
+      const crossOwner = await planCrossOwnerReferences(
+        owner,
+        findSchemaTableOwners(config),
+        database.dialect,
+        database.executor,
+      );
+      for (const reference of crossOwner.eligible) {
+        const model = models.find((candidate) => candidate.modelKey === reference.modelKey);
+        if (!model) continue;
+        (model.foreignKeys ??= {})[reference.fieldKey] = {
+          table: reference.referencedTable,
+          column: reference.referencedColumn,
+          onDelete: reference.onDelete,
+        };
+      }
+      // Migration steps, read the way migrate reads them.
+      const stepPlan = owner.migrations?.length
+        ? await planOwnerSchemaSteps({
+            owner: owner.name,
+            schema: owner.schema,
+            steps: owner.migrations,
+            tables: models.map((model) => model.modelName),
+            dialect: database.dialect,
+            executor: database.executor,
+            othersTables: new Set(
+              [...ownedModels]
+                .filter(([name]) => name !== owner.name)
+                .flatMap(([, entries]) => entries.map((entry) => entry.modelName)),
+            ),
+          })
+        : undefined;
+      checkSteps(owner, stepPlan, issues);
+      const plan = await checkOwnerTables(
+        owner,
+        // What a pending rename will produce is not missing yet.
+        withoutRenameTargets(models, stepPlan),
+        database.dialect,
+        database.executor,
+        issues,
+      );
+      // An installed version whose changes have not been applied here yet.
+      const pending = plan.statements.length + (plan.upgrades?.length ?? 0);
+      const state =
+        pending > 0
+          ? await readSchemaState(database.executor, database.dialect, owner.name)
+          : undefined;
+      const changes = state
+        ? diffSchemaSnapshots(state.snapshot, createSchemaSnapshot(models))
+        : undefined;
+      if (state && changes && hasSchemaChanges(changes)) {
+        const versions =
+          state.version && owner.version && state.version !== owner.version
+            ? `upgraded ${state.version} → ${owner.version}`
+            : "changed since it was last migrated";
+        issues.push({
+          severity: "warning",
+          code: "schema-upgrade",
+          owner: owner.name,
+          message: `${owner.name} ${versions}, and ${pending} change(s) are not applied yet.`,
+          hint:
+            owner.kind === "plugin"
+              ? `Run \`farm ${owner.name} migrate\` to review and apply them.`
+              : "Apply them with your migration tool.",
+        });
+      }
       await checkReferences(owner, models, database, databases, resolveTarget, issues);
       await checkExtensions(
         owner,
@@ -505,7 +599,30 @@ async function checkOwnerTables(
   issues: FarmSchemaCheckIssue[],
 ) {
   const plan = await planSchemaMigration(models, dialect, executor);
-  const present = new Set([...plan.upToDate, ...plan.drift.map((drift) => drift.table)]);
+  const present = new Set([
+    ...plan.upToDate,
+    ...plan.drift.map((drift) => drift.table),
+    ...(plan.upgrades ?? []).map((upgrade) => upgrade.table),
+  ]);
+  const command =
+    owner.kind === "plugin" ? `\`farm ${owner.name} migrate\`` : "your migration tool";
+
+  // Additions migrate can make: still missing, so a missing column is an error.
+  for (const upgrade of plan.upgrades ?? []) {
+    const column =
+      upgrade.kind === "column" ? upgrade.target.slice(upgrade.table.length + 1) : undefined;
+    issues.push({
+      severity: column ? "error" : "warning",
+      code: column ? "column-missing" : "index-missing",
+      owner: owner.name,
+      table: upgrade.table,
+      ...(column ? { column } : {}),
+      message: column
+        ? `"${upgrade.table}" has no column "${column}".`
+        : `"${upgrade.table}" is missing the index ${upgrade.target}.`,
+      hint: `Add it with ${command}.`,
+    });
+  }
 
   for (const model of models) {
     if (present.has(model.modelName)) continue;
@@ -528,7 +645,7 @@ async function checkOwnerTables(
         table: drift.table,
         column,
         message: `"${drift.table}" has no column "${column}".`,
-        hint: "Farm never alters existing tables. Add the column with your migration tool.",
+        hint: "It is required with no default, so Farm cannot add it to a table that may have rows. Add it with a migration step or your migration tool.",
       });
     }
     for (const change of drift.changedColumns) {
@@ -553,7 +670,7 @@ async function checkOwnerTables(
         message: `"${drift.table}" is missing the ${index.unique ? "unique " : ""}index on (${index.columns.join(", ")}).`,
       });
     }
-    for (const reference of drift.missingReferences) {
+    for (const reference of drift.missingReferences ?? []) {
       issues.push({
         severity: "warning",
         code: "foreign-key-missing",
@@ -563,6 +680,61 @@ async function checkOwnerTables(
         message: `"${drift.table}.${reference.column}" has no foreign key to "${reference.referencedTable}.${reference.referencedColumn}".`,
       });
     }
+  }
+  for (const key of plan.addableForeignKeys ?? []) {
+    issues.push({
+      severity: "warning",
+      code: "foreign-key-missing",
+      owner: owner.name,
+      table: key.table,
+      column: key.column,
+      message: `"${key.table}.${key.column}" has no foreign key to "${key.referencedTable}.${key.referencedColumn}", which ${owner.name} could have.`,
+      hint:
+        dialect === "sqlite"
+          ? "SQLite can only add a foreign key when it creates the table."
+          : `Allow it with \`${describeForeignKeyApproval({ owner: owner.name, modelKey: key.modelKey })}\` in farm.config, then run \`farm ${owner.name} migrate --apply\`. Rows that point at nothing are checked first.`,
+    });
+  }
+  return plan;
+}
+
+function checkSteps(
+  owner: SchemaOwner,
+  stepPlan: FarmSchemaStepPlan | undefined,
+  issues: FarmSchemaCheckIssue[],
+) {
+  if (!stepPlan) return;
+  const command = `\`farm ${owner.name} migrate\``;
+  const blockedAt = stepPlan.steps.findIndex((planned) => planned.state === "blocked");
+  const pending = stepPlan.steps
+    .slice(0, blockedAt === -1 ? undefined : blockedAt)
+    .filter((planned) => planned.state === "run");
+  if (pending.length > 0) {
+    issues.push({
+      severity: "warning",
+      code: "migration-step-pending",
+      owner: owner.name,
+      message: `${owner.name} has ${pending.length} migration step(s) not run yet: ${pending.map((planned) => `${planned.summary}${planned.destructive ? " (deletes data)" : ""}`).join("; ")}.`,
+      hint: `Run ${command} to review and apply them.`,
+    });
+  }
+  if (blockedAt !== -1) {
+    const blocked = stepPlan.steps[blockedAt]!;
+    issues.push({
+      severity: "error",
+      code: "migration-step-blocked",
+      owner: owner.name,
+      message: `${owner.name}'s migration step "${blocked.step.id}" (${blocked.summary}) cannot run: ${blocked.reason}`,
+      hint: "Later steps wait for it. Fix the database, then run migrate again.",
+    });
+  }
+  for (const id of stepPlan.edited) {
+    issues.push({
+      severity: "warning",
+      code: "migration-step-edited",
+      owner: owner.name,
+      message: `${owner.name}'s migration step "${id}" changed after it ran here; it will not run again.`,
+    });
   }
 }
 
@@ -635,9 +807,9 @@ async function checkReferences(
       const mine = columnTypeFamily(expected);
       const theirs = columnTypeFamily(column.type);
       if (mine && theirs && mine !== theirs) {
-        // A warning, not an error: Farm never puts a foreign key on a reference
-        // that leaves the owner, and lookups by value still work. Joins in SQL
-        // need a cast.
+        // A warning, not an error: lookups by value still work, and Farm only
+        // creates a foreign key across owners when the types match, so this
+        // reference simply stays without one. Joins in SQL need a cast.
         issues.push({
           severity: "warning",
           code: "reference-type",
@@ -730,7 +902,12 @@ export function formatSchemaCheck(report: FarmSchemaCheckReport): string {
   const lines: string[] = [];
   for (const owner of report.owners) {
     const ownIssues = report.issues.filter((issue) => issue.owner === owner.name);
-    const label = `${owner.name} (${owner.kind}${owner.dialect ? `, ${owner.dialect}` : ""})`;
+    const details = [
+      owner.kind,
+      ...(owner.dialect ? [owner.dialect] : []),
+      ...(owner.dependsOn?.length ? [`needs ${owner.dependsOn.join(", ")}`] : []),
+    ];
+    const label = `${owner.name} (${details.join(", ")})`;
     if (!owner.relational) {
       lines.push(`- ${label}: stores data in a key/value mount, nothing to check`);
       continue;

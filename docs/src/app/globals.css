@@ -826,6 +826,224 @@
   overflow: visible;
 }
 
+/* The routing card's explorer (route-explorer.tsx) and the wire from the
+   selected file into it: hairlines that draw in on each selection, one bright
+   edge on the part of the page the file renders. */
+.farm-route-explorer path,
+.farm-route-explorer circle {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.26);
+  stroke-width: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  transition: stroke 200ms linear;
+}
+
+.farm-route-explorer .farm-route-faint {
+  stroke: rgb(255 255 255 / 0.14);
+}
+
+.farm-route-explorer [data-hot] path {
+  stroke: rgb(255 255 255 / 0.52);
+}
+
+.farm-route-explorer [data-hot] .farm-route-faint {
+  stroke: rgb(255 255 255 / 0.28);
+}
+
+.farm-route-explorer .farm-route-dot {
+  stroke: rgb(255 255 255 / 0.22);
+}
+
+.farm-route-explorer [data-hot] path[pathLength] {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: farm-route-draw 520ms cubic-bezier(0.22, 1, 0.36, 1) var(--route-draw-delay, 0ms)
+    forwards;
+}
+
+.farm-route-text {
+  fill: rgb(255 255 255 / 0.46);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 7px;
+  white-space: pre;
+}
+
+.farm-route-strong {
+  fill: rgb(255 255 255 / 0.86);
+}
+
+.farm-route-caption {
+  fill: rgb(255 255 255 / 0.4);
+  font-size: 6.5px;
+}
+
+.farm-route-json {
+  opacity: 0;
+  animation: farm-route-fade 260ms ease-out var(--route-draw-delay, 0ms) forwards;
+}
+
+.farm-route-caret {
+  animation: farm-route-caret 1s steps(1) infinite;
+}
+
+.farm-route-wire path {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.32);
+  stroke-width: 1;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: farm-route-draw 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.farm-route-wire circle {
+  fill: rgb(255 255 255 / 0.6);
+}
+
+.farm-route-wire rect {
+  fill: #000;
+  stroke: rgb(255 255 255 / 0.4);
+  opacity: 0;
+  animation: farm-route-fade 160ms ease-out 360ms forwards;
+}
+
+@keyframes farm-route-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes farm-route-fade {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes farm-route-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .farm-route-explorer [data-hot] path[pathLength],
+  .farm-route-wire path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+
+  .farm-route-wire rect {
+    animation: none;
+    opacity: 1;
+  }
+
+  .farm-route-json {
+    animation: none;
+    opacity: 1;
+  }
+
+  .farm-route-caret {
+    animation: none;
+  }
+}
+
+/* The benchmark figures (benchmark-figures.tsx), in hairline: thin outlines
+   on faces the colour of the panel, so solids hide what is behind them, a dim
+   crease inside, and one bright edge for whatever matters right now. */
+.benchmark-hairline :is(polygon, path, ellipse) {
+  fill: #000;
+  stroke: rgb(255 255 255 / 0.3);
+  stroke-width: 1;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  transition: stroke 180ms linear;
+}
+
+.benchmark-hairline :is(.iso-detail-line, .hl-crease, .hl-tick, .hl-sign) {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.14);
+}
+
+.benchmark-hairline .hl-hand {
+  stroke: rgb(255 255 255 / 0.55);
+}
+
+.benchmark-hairline .hl-bar {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.4);
+}
+
+.benchmark-hairline .hl-led-on {
+  fill: #fff;
+  stroke: none;
+}
+
+.benchmark-hairline :is(.hl-beam, .hl-hanger) {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.36);
+}
+
+.benchmark-hairline [data-hot] :is(polygon, path, ellipse) {
+  stroke: rgb(255 255 255 / 0.6);
+}
+
+.benchmark-hairline [data-hot] :is(.iso-detail-line, .hl-sign) {
+  stroke: rgb(255 255 255 / 0.3);
+}
+
+.benchmark-hairline svg {
+  touch-action: manipulation;
+}
+
+/* Labels wired to the parts they name: the wire draws out from a dot on the
+   part, then the end mark and the label come in. */
+.benchmark-hairline .iso-callout path {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.22);
+}
+
+.benchmark-hairline .iso-callout circle {
+  fill: rgb(255 255 255 / 0.45);
+  stroke: none;
+}
+
+.benchmark-hairline .iso-callout rect {
+  fill: #000;
+  stroke: rgb(255 255 255 / 0.4);
+  vector-effect: non-scaling-stroke;
+}
+
+.benchmark-hairline .iso-callout text {
+  fill: rgb(255 255 255 / 0.5);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: calc(var(--iso-text) * 1.55px);
+  white-space: pre;
+}
+
+.benchmark-hairline [data-hot] .iso-callout path {
+  stroke: rgb(255 255 255 / 0.5);
+}
+
+.benchmark-hairline [data-hot] .iso-callout text {
+  fill: rgb(255 255 255 / 0.92);
+}
+
+.benchmark-hairline .iso-callout :is(rect, text) {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.benchmark-hairline .iso-callout[data-linked] :is(rect, text) {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .benchmark-hairline .iso-callout :is(rect, text) {
+    transition: none;
+  }
+}
+
 .benchmark-comparison-rotator {
   position: relative;
 }
@@ -856,55 +1074,6 @@
   animation-delay: 8.52s;
 }
 
-.benchmark-startup-top,
-.benchmark-startup-stack,
-.benchmark-startup-page,
-.benchmark-build-module,
-.benchmark-build-output,
-.benchmark-startup-page circle,
-.benchmark-build-output circle {
-  transform-box: fill-box;
-  transform-origin: center;
-  will-change: opacity, transform;
-}
-
-.benchmark-startup-stack {
-  animation: benchmark-startup-stack 8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-
-.benchmark-startup-top {
-  animation: benchmark-startup-lift 8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-
-.benchmark-startup-page {
-  animation: benchmark-startup-reveal 8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-
-.benchmark-startup-page circle,
-.benchmark-build-output circle {
-  animation: benchmark-illustration-signal 2.4s ease-in-out infinite;
-}
-
-.benchmark-build-module--back {
-  animation: benchmark-build-back 9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-
-.benchmark-build-module--left {
-  animation: benchmark-build-left 9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-
-.benchmark-build-module--right {
-  animation: benchmark-build-right 9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-
-.benchmark-build-output {
-  animation: benchmark-build-output 9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-
-.benchmark-build-output circle {
-  animation-delay: -0.8s;
-}
-
 @keyframes benchmark-comparison-cycle {
   0% {
     opacity: 0;
@@ -921,125 +1090,6 @@
   100% {
     opacity: 0;
     transform: translate3d(0, -42%, 0);
-  }
-}
-
-@keyframes benchmark-startup-stack {
-  0%,
-  18%,
-  82%,
-  100% {
-    transform: translate3d(0, 0, 0);
-  }
-
-  42%,
-  58% {
-    transform: translate3d(0, 4px, 0);
-  }
-}
-
-@keyframes benchmark-startup-lift {
-  0%,
-  18%,
-  82%,
-  100% {
-    transform: translate3d(0, 0, 0);
-  }
-
-  42%,
-  58% {
-    transform: translate3d(0, -9px, 0);
-  }
-}
-
-@keyframes benchmark-startup-reveal {
-  0%,
-  18%,
-  82%,
-  100% {
-    opacity: 0.55;
-    transform: scale(0.985);
-  }
-
-  42%,
-  58% {
-    opacity: 1;
-    transform: scale(1.015);
-  }
-}
-
-@keyframes benchmark-build-back {
-  0%,
-  18%,
-  82%,
-  100% {
-    opacity: 0.72;
-    transform: translate3d(0, 0, 0);
-  }
-
-  42%,
-  58% {
-    opacity: 1;
-    transform: translate3d(0, 8px, 0);
-  }
-}
-
-@keyframes benchmark-build-left {
-  0%,
-  18%,
-  82%,
-  100% {
-    opacity: 0.72;
-    transform: translate3d(0, 0, 0);
-  }
-
-  42%,
-  58% {
-    opacity: 1;
-    transform: translate3d(10px, -2px, 0);
-  }
-}
-
-@keyframes benchmark-build-right {
-  0%,
-  18%,
-  82%,
-  100% {
-    opacity: 0.72;
-    transform: translate3d(0, 0, 0);
-  }
-
-  42%,
-  58% {
-    opacity: 1;
-    transform: translate3d(-10px, -2px, 0);
-  }
-}
-
-@keyframes benchmark-build-output {
-  0%,
-  18%,
-  82%,
-  100% {
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-
-  42%,
-  58% {
-    transform: translate3d(0, -7px, 0) scale(1.015);
-  }
-}
-
-@keyframes benchmark-illustration-signal {
-  0%,
-  100% {
-    opacity: 0.52;
-    transform: scale(0.78);
-  }
-
-  50% {
-    opacity: 1;
-    transform: scale(1.35);
   }
 }
 
@@ -1098,18 +1148,6 @@
 
   .farm-logo-rail-copy[aria-hidden="true"] {
     display: none;
-  }
-
-  .benchmark-startup-top,
-  .benchmark-startup-stack,
-  .benchmark-startup-page,
-  .benchmark-build-module,
-  .benchmark-build-output,
-  .benchmark-startup-page circle,
-  .benchmark-build-output circle {
-    animation: none;
-    opacity: 1;
-    transform: none;
   }
 
   .benchmark-comparison-item {

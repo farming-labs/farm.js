@@ -218,6 +218,8 @@ export default middleware().rateLimit({
 
 Adapters may implement `get(key)` so `getRateLimitStatus()` can inspect a counter. Enforcement itself only depends on atomic `increment()`.
 
+`memoryRateLimitStorage({ maxEntries })` caps active keys (100,000 by default) and rejects a new key when that capacity is full; it never evicts an active counter to admit another key. Expired windows are reclaimed when needed, and repeated capacity rejections skip cleanup scans until a window could expire. Its `increment()` and `get()` results are snapshots: editing a returned counter does not change the stored count or expiry. Use a shared adapter for enforcement across processes or regions.
+
 ## Choosing mounts and drivers
 
 Mount names describe the responsibility; drivers decide where the values live:

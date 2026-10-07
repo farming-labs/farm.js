@@ -233,9 +233,39 @@ program
     }
   });
 
-program
+const schemaCommand = program
   .command("schema")
-  .description("Inspect the database tables integrations and plugins declare")
+  .description("Inspect and create the database tables integrations and plugins declare");
+
+schemaCommand
+  .command("migrate")
+  .description("Create every plugin's tables, dependencies first")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("-c, --config <config>", "Path to farm config file")
+  .option("-w, --write <file>", "Write the statements to one file instead of printing them")
+  .option("--apply", "Execute the statements against the database")
+  .option("--allow-destructive", "Also run migration steps that delete data")
+  .action(async (options) => {
+    try {
+      const { askToConfirm, migrateAllSchemas } = require("../dist/index.js");
+      await migrateAllSchemas({
+        root: options.root,
+        configPath: options.config,
+        write: options.write,
+        apply: options.apply,
+        allowDestructive: options.allowDestructive,
+        // Only a person at a terminal is asked; scripts and CI print and stop.
+        confirm: process.stdin.isTTY && process.stdout.isTTY ? askToConfirm : undefined,
+      });
+    } catch (error) {
+      console.error("Failed to migrate:", error?.message ?? error);
+      process.exit(1);
+    }
+    // Database clients can keep the event loop alive.
+    process.exit(0);
+  });
+
+schemaCommand
   .command("check")
   .description("Compare declared tables and their references with the live database")
   .option("-r, --root <root>", "Root directory", process.cwd())
@@ -635,9 +665,7 @@ async function dispatchSchemaMigrate() {
   const registered = new Set(
     program.commands.flatMap((command) => [command.name(), ...command.aliases()]),
   );
-  // `farm schema` only has `check`, so a plugin that owns tables under the
-  // name "schema" can still be migrated.
-  if (registered.has(name) && name !== "schema") return false;
+  if (registered.has(name)) return false;
 
   const dynamic = new Command()
     .name(`farm ${name} migrate`)
@@ -646,13 +674,16 @@ async function dispatchSchemaMigrate() {
     .option("-c, --config <config>", "Path to farm config file")
     .option("-w, --write <file>", "Write the statements to a file instead of printing them")
     .option("--apply", "Execute the statements against the database")
+    .option("--allow-destructive", "Also run migration steps that delete data")
     .action(async (options) => {
-      const { migrateSchema } = require("../dist/index.js");
+      const { askToConfirm, migrateSchema } = require("../dist/index.js");
       await migrateSchema(name, {
         root: options.root,
         configPath: options.config,
         write: options.write,
         apply: options.apply,
+        allowDestructive: options.allowDestructive,
+        confirm: process.stdin.isTTY && process.stdout.isTTY ? askToConfirm : undefined,
       });
     });
 

@@ -36,6 +36,9 @@ export function memoryRateLimitStorage(
   }
 
   const records = new Map<string, RateLimitIncrementResult>();
+  // A lower bound is sufficient: lazy deletion may leave it earlier than the
+  // next live expiry, which only causes an extra sweep, never a missed expiry.
+  let earliestExpiry = Infinity;
 
   function read(key: string, now: number): RateLimitIncrementResult | null {
     const record = records.get(key);
@@ -48,8 +51,11 @@ export function memoryRateLimitStorage(
   }
 
   function pruneExpired(now: number): void {
+    if (now < earliestExpiry) return;
+    earliestExpiry = Infinity;
     for (const [key, record] of records) {
       if (record.resetAt <= now) records.delete(key);
+      else earliestExpiry = Math.min(earliestExpiry, record.resetAt);
     }
   }
 
@@ -61,9 +67,8 @@ export function memoryRateLimitStorage(
       const now = Date.now();
       const current = read(key, now);
       if (current) {
-        const next = { count: current.count + 1, resetAt: current.resetAt };
-        records.set(key, next);
-        return next;
+        current.count++;
+        return { ...current };
       }
 
       if (records.size >= maxEntries) pruneExpired(now);
@@ -75,7 +80,10 @@ export function memoryRateLimitStorage(
 
       const next = { count: 1, resetAt: now + windowMs };
       records.set(key, next);
-      return next;
+      earliestExpiry = Math.min(earliestExpiry, next.resetAt);
+      // Like get(), return a snapshot so caller mutation cannot change the
+      // stored counter or invalidate the expiration bound.
+      return { ...next };
     },
     get(key) {
       const record = read(key, Date.now());

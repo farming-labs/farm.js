@@ -25,7 +25,12 @@ export {
   type APIRouteParamValue,
   type APIRouteMatch,
 } from "./route-pattern";
-import { matchAPIRoute, type APIRouteParams, type APIRouteMatch } from "./route-pattern";
+import {
+  createStaticAPIRouteMatcher,
+  matchAPIRoute,
+  type APIRouteParams,
+  type APIRouteMatch,
+} from "./route-pattern";
 /**
  * Every method an API route module can export. Route discovery in core and in
  * the plain-Vite plugin reads this list, so a handler exported under any of
@@ -78,6 +83,20 @@ export function matchAPIRouteAtBasePath<T extends { path: string }>(
 
   const canonicalPathname = resolveFarmAPICanonicalPathname(pathname, serverBasePath);
   return canonicalPathname === pathname ? null : matchAPIRoute(routes, canonicalPathname);
+}
+
+/** @internal Prepare the fixed API table owned by a generated production bundle. */
+export function createStaticAPIRouteMatcherAtBasePath<T extends { path: string }>(
+  routes: readonly T[],
+  serverBasePath = DEFAULT_FARM_API_BASE_PATH,
+): (pathname: string) => APIRouteMatch<T> | null {
+  const match = createStaticAPIRouteMatcher(routes);
+  return (pathname) => {
+    const directMatch = match(pathname);
+    if (directMatch) return directMatch;
+    const canonicalPathname = resolveFarmAPICanonicalPathname(pathname, serverBasePath);
+    return canonicalPathname === pathname ? null : match(canonicalPathname);
+  };
 }
 
 /** Test whether a pathname belongs to the configured local API surface. */
