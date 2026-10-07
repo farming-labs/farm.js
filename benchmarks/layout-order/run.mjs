@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { gzipSync } from "node:zlib";
 import { isFarmRouteActive } from "../../packages/farm/dist/router.mjs";
+import { createFarmLayoutSelector } from "../../packages/farm/dist/internal/production-runtime.mjs";
 
 const source = readFileSync(
   new URL("../../packages/farm/src/nitro/universal-build.ts", import.meta.url),
@@ -44,10 +45,12 @@ const scenarios = {
   },
 };
 const create = (code, layouts) =>
-  new Function("layoutRoutes", "isFarmRouteActive", code + "; return getApplicableLayouts;")(
-    layouts,
-    isFarmRouteActive,
-  );
+  new Function(
+    "layoutRoutes",
+    "isFarmRouteActive",
+    "selectApplicableLayouts",
+    code + "; return getApplicableLayouts;",
+  )(layouts, isFarmRouteActive, createFarmLayoutSelector(layouts));
 const arm = process.argv[2];
 if (arm === "baseline" || arm === "candidate") {
   const results = {};

@@ -387,6 +387,7 @@ describe("production prebuilt SSR output", () => {
         ["", "root"],
         ["reports", "reports"],
         ["reports/[id]", "item"],
+        ["docs/[[...slug]]", "docs"],
       ]) {
         const directory = path.join(root, "src", "app", relative);
         await fs.mkdir(directory, { recursive: true });
@@ -401,31 +402,43 @@ describe("production prebuilt SSR output", () => {
         path.join(leaf, "page.tsx"),
         `export default function Page({ params }) { return <main data-layout-order="page">{params.id}</main>; }`,
       );
+      await fs.writeFile(
+        path.join(root, "src", "app", "docs", "[[...slug]]", "page.tsx"),
+        `export default function Page({ params }) { return <main data-layout-order="page">{params.slug}</main>; }`,
+      );
       const config = await resolveConfig(
         { root, srcDir: "src", images: { provider: "none" }, telemetry: false },
         "production",
       );
       await build(config, { root, preset: "node-server" });
       const serverDir = path.join(root, ".farm", ".output", "server");
-      await runProductionRequest(
-        serverDir,
-        async (response) => {
-          expect(response.status).toBe(200);
+      await runProductionRequest(serverDir, async (initial) => {
+        await initial.arrayBuffer();
+        // Several requests to the same live server exercise reuse without leaking
+        // the previous request's URL, params or selected layout array.
+        for (const [pathname, order, text] of [
+          ["/reports/one/activity", ["root", "reports", "item", "page"], "one"],
+          ["/docs", ["root", "docs", "page"], ""],
+          [
+            "/reports/two%20items/activity?source=docs",
+            ["root", "reports", "item", "page"],
+            "two items",
+          ],
+          ["/docs/a%2Fb/guide", ["root", "docs", "page"], "a/b/guide"],
+          ["/", ["root"], undefined],
+        ] as const) {
+          const response = await fetch(new URL(pathname, initial.url));
+          expect(response.status, pathname).toBe(200);
           const html = await response.text();
           expect(
             [...html.matchAll(/data-layout-order="([^"]+)"/g)].map((match) => match[1]),
-          ).toEqual(["root", "reports", "item", "page"]);
-          expect(html).toContain(">one</main>");
-        },
-        "/reports/one/activity",
-      );
-      await runProductionRequest(serverDir, async (response) => {
-        expect(response.status).toBe(200);
-        expect(
-          [...(await response.text()).matchAll(/data-layout-order="([^"]+)"/g)].map(
-            (match) => match[1],
-          ),
-        ).toEqual(["root"]);
+          ).toEqual(order);
+          if (text !== undefined) expect(html).toContain(`>${text}</main>`);
+        }
+        // The Node adapter rejects malformed escapes before layout selection.
+        const malformed = await fetch(new URL("/docs/%ZZ", initial.url));
+        expect(malformed.status).toBe(400);
+        await malformed.arrayBuffer();
       });
     } finally {
       await fs.rm(root, { recursive: true, force: true });
