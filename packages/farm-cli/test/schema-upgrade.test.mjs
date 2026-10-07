@@ -216,3 +216,45 @@ export default {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("drops a column only with --allow-destructive", async () => {
+  const { root, database } = await app();
+  const config = (version, extra) => `import { DatabaseSync } from "node:sqlite";
+import { definePlugin, defineSchema } from "@farm.js/core";
+export default {
+  storage: { client: new DatabaseSync(${JSON.stringify(database)}) },
+  plugins: [
+    definePlugin({
+      name: "farm:teams",
+      version: ${JSON.stringify(version)},
+      schema: defineSchema({ models: { member: { fields: { id: { type: "string", primaryKey: true }${extra} } } } }),
+      ${version === "2.0.0" ? 'migrations: [{ id: "2.0.0-drop-note", dropColumn: { model: "member", column: "note" } }],' : ""}
+    }),
+  ],
+};
+`;
+  const farm = (...args) =>
+    run(process.execPath, [bin, "teams", "migrate", ...args, "--root", root]).then(
+      ({ stdout, stderr }) => ({ code: 0, output: stdout + stderr }),
+      (error) => ({ code: error.code, output: `${error.stdout}${error.stderr}` }),
+    );
+  try {
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      config("1.0.0", ', note: { type: "string", nullable: true }'),
+    );
+    assert.equal((await farm("--apply")).code, 0);
+    await writeFile(path.join(root, "farm.config.mjs"), config("2.0.0", ""));
+
+    const refused = await farm("--apply");
+    assert.equal(refused.code, 1, refused.output);
+    assert.match(refused.output, /it deletes data\. Run again with --allow-destructive/);
+    assert.deepEqual(await columns(database), ["id", "note"]);
+
+    const allowed = await farm("--apply", "--allow-destructive");
+    assert.equal(allowed.code, 0, allowed.output);
+    assert.deepEqual(await columns(database), ["id"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

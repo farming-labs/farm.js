@@ -165,6 +165,8 @@ definePlugin({
 | `renameColumn` | `model` and `to` are your current names; `from` is the old column  |
 | `renameTable`  | `to` is the current model; `from` is the old table                 |
 | `sql`          | your SQL per database; runs after this release's new columns exist |
+| `dropColumn`   | `model` is current; `column` is the one this release removed       |
+| `dropTable`    | `table` is the one this release removed                            |
 
 ```
 $ pnpm farm teams migrate
@@ -188,6 +190,25 @@ teams 1.1.0 → 2.0.0 changes its tables:
 - Each step is one transaction on Postgres and SQLite. MySQL commits schema
   changes immediately, so a failed step there can leave part of it applied.
 - With Prisma or Drizzle, steps are printed for their migrations, never run.
+
+**Dropping deletes data,** so `dropColumn` and `dropTable` never run on their
+own. Without `--allow-destructive` the run stops at the first drop and later
+steps wait; the terminal prompt cannot skip that:
+
+```bash
+pnpm farm teams migrate --apply --allow-destructive
+```
+
+```
+teams 1.1.0 → 2.0.0 changes its tables:
+  1. drop member.legacyNote  ⚠ deletes data, needs --allow-destructive
+```
+
+Farm also only drops what it recorded the plugin creating. A column the app
+added to a plugin's table, a table another plugin creates, or a table the
+plugin only describes is never dropped by a plugin's step: the run stops and
+says so. A step cannot drop something the plugin still declares, and fails when
+the config loads if it tries.
 
 Steps use your plugin's own names, so they follow the app's renames. A plugin
 that renames without a step gets a hint in the summary:

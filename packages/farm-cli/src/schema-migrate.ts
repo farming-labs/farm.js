@@ -18,6 +18,8 @@ export interface MigrateSchemaOptions {
   write?: string;
   /** Execute the statements. */
   apply?: boolean;
+  /** Also run migration steps that delete data, such as dropping a column. */
+  allowDestructive?: boolean;
   /**
    * Asked after printing a plan, when there is something to apply. Only the
    * CLI in an interactive terminal passes one; scripts and CI print and stop.
@@ -111,6 +113,7 @@ async function migrateOwner(
     config,
     write: options.sqlOnly ? undefined : options.write,
     apply: options.apply,
+    allowDestructive: options.allowDestructive,
     extensions: ormOwners.length > 0 ? "report" : "apply",
     // Collecting sql for one combined file: the sql itself is not logged.
     log: (message) => {

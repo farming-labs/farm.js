@@ -1,5 +1,6 @@
 import type { FarmSchema } from "./schema";
 import type { FarmSchemaMigrationStep } from "./schema-step-types";
+import { readSchemaState, type FarmSchemaSnapshot } from "./schema-state";
 import { describeSchemaTable, type FarmSchemaExecutor } from "./schema-migrate";
 import { resolveSchemaModels } from "./schema-resolve";
 import {
@@ -24,6 +25,8 @@ export type FarmPlannedSchemaStep = {
    */
   state: "run" | "record" | "blocked";
   reason?: string;
+  /** Deletes data: runs only with `--allow-destructive`. */
+  destructive?: boolean;
 };
 
 export type FarmSchemaStepPlan = {
@@ -98,6 +101,10 @@ export async function planSchemaSteps(input: {
   applied: ReadonlyMap<string, string>;
   /** None of the owner's tables exist and nothing was recorded. */
   fresh: boolean;
+  /** The tables Farm last recorded this owner having: the only ones a step may drop from. */
+  recorded?: FarmSchemaSnapshot;
+  /** Tables other owners create, which no step of this owner may drop. */
+  othersTables?: ReadonlySet<string>;
 }): Promise<FarmSchemaStepPlan> {
   const { owner, dialect, executor, applied } = input;
   const plan: FarmSchemaStepPlan = { steps: [], edited: [], fresh: input.fresh };
@@ -182,6 +189,58 @@ export async function planSchemaSteps(input: {
             ? { reason: `neither "${from}" nor "${to}" exists.` }
             : {}),
       });
+    } else if ("dropColumn" in step) {
+      const table = models[step.dropColumn.model]!.name;
+      const column = step.dropColumn.column;
+      const columns = await columnsOf(table);
+      const summary = `drop ${table}.${column}`;
+      const created = Boolean(input.recorded?.tables[table]?.columns[column]);
+      const planned: FarmPlannedSchemaStep = {
+        step,
+        summary,
+        phase: "before",
+        statements: [`ALTER TABLE ${q(table)} DROP COLUMN ${q(column)}`],
+        state: "run",
+        destructive: true,
+      };
+      if (!columns) {
+        Object.assign(planned, { state: "blocked", reason: `"${table}" does not exist.` });
+      } else if (!has(columns, column)) {
+        Object.assign(planned, { state: "record", statements: [] });
+      } else if (!created) {
+        Object.assign(planned, {
+          state: "blocked",
+          reason: `Farm has no record of ${owner} creating "${table}.${column}", so it will not drop it. Drop it yourself if it is no longer needed.`,
+        });
+      }
+      plan.steps.push(planned);
+    } else if ("dropTable" in step) {
+      const table = step.dropTable.table;
+      const exists = Boolean(await columnsOf(table));
+      const created = Boolean(input.recorded?.tables[table]);
+      const ownedElsewhere = [...(input.othersTables ?? [])].some(
+        (other) => other.toLowerCase() === table.toLowerCase(),
+      );
+      plan.steps.push({
+        step,
+        summary: `drop table ${table}`,
+        phase: "before",
+        statements: exists ? [`DROP TABLE ${q(table)}`] : [],
+        destructive: true,
+        ...(!exists
+          ? { state: "record" as const }
+          : ownedElsewhere
+            ? {
+                state: "blocked" as const,
+                reason: `another plugin creates "${table}", so ${owner} will not drop it.`,
+              }
+            : !created
+              ? {
+                  state: "blocked" as const,
+                  reason: `Farm has no record of ${owner} creating "${table}", so it will not drop it. Drop it yourself if it is no longer needed.`,
+                }
+              : { state: "run" as const }),
+      });
     } else {
       const sql = step.sql[dialect];
       const statements = sql === undefined ? [] : typeof sql === "string" ? [sql] : [...sql];
@@ -206,6 +265,10 @@ function summarize(step: FarmSchemaMigrationStep, models: ReturnType<typeof reso
   if ("renameTable" in step) {
     return `rename table ${step.renameTable.from} → ${models[step.renameTable.to]!.name}`;
   }
+  if ("dropColumn" in step) {
+    return `drop ${models[step.dropColumn.model]!.name}.${step.dropColumn.column}`;
+  }
+  if ("dropTable" in step) return `drop table ${step.dropTable.table}`;
   return step.description ?? `custom SQL (${step.id})`;
 }
 
@@ -290,6 +353,8 @@ export async function planOwnerSchemaSteps(input: {
   executor: FarmSchemaExecutor;
   /** No record is kept (an ORM owns the tables), so nothing is read. */
   readApplied?: boolean;
+  /** Tables other owners create, which this owner's steps may not drop. */
+  othersTables?: ReadonlySet<string>;
 }): Promise<FarmSchemaStepPlan> {
   const applied =
     input.readApplied === false
@@ -304,5 +369,9 @@ export async function planOwnerSchemaSteps(input: {
     if (!fresh) break;
     if (await describeSchemaTable(input.executor, input.dialect, table)) fresh = false;
   }
-  return planSchemaSteps({ ...input, applied, fresh });
+  const recorded =
+    input.readApplied === false
+      ? undefined
+      : (await readSchemaState(input.executor, input.dialect, input.owner))?.snapshot;
+  return planSchemaSteps({ ...input, applied, fresh, recorded });
 }
