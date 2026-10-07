@@ -10,6 +10,7 @@ import {
   LensContext,
   Line,
   Panel,
+  Poly,
   type Point2,
   type Point3,
   RoundBox,
@@ -772,159 +773,254 @@ export function BootFigure() {
 }
 
 // ---------------------------------------------------------------------------
-// HTML size: a balance, seen face on. Farm's HTML stacks up on the left pan
-// and the named rival's on the right, both at the same rate, a sheet per few
-// kilobytes; the beam tips toward the heavier page.
+// HTML size: two printers on a desk, Farm's in front and the named rival's
+// behind it. Both print their first page at the same rate while the title
+// names the rival, and each stops when its whole response is out, so the
+// paper is as long as the HTML, with a fold every four kilobytes. Farm's
+// sheet is the short one.
 
 const BYTES = "responseBytes";
-const SCALE_CAMERA: Camera = { yaw: 0, pitch: 0.36, scale: 1.25, shift: [0, 0] };
-const SCALE = lens(SCALE_CAMERA);
-const HEAVIEST = Math.max(...RIVALS.map((framework) => framework.metrics[BYTES].median));
-const PIVOT_Z = 2.35;
-const ARM = 2.25;
-const HANG = 1.35;
-const PAN_R = 0.72;
-/** Stack height per kilobyte, and a crease every this many kilobytes. */
-const PER_KB = 0.03;
-const SHEET_KB = 4;
-const MAX_TILT = 0.2;
-const SCALE_VIEW: [number, number, number, number] = [-150, -132, 300, 196];
+const PRINT_CAMERA: Camera = { yaw: Math.PI / 6, pitch: Math.PI / 6, scale: 1.25, shift: [0, 0] };
+const PRINT = lens(PRINT_CAMERA);
+const HEAVIEST_KB = Math.max(...RIVALS.map((framework) => framework.metrics[BYTES].median)) / 1024;
+const PRINTER_X: Point2 = [-2.75, -1.75];
+const PRINTER_TOP = 0.5;
+/** The two lanes, back (the rival) and front (Farm). */
+const LANES: Point2[] = [
+  [-1.05, -0.15],
+  [0.15, 1.05],
+];
+const PAPER_INSET = 0.15;
+const SLOT_Z = 0.33;
+const DESK_Z = 0.03;
+/** Where the paper leaves the slot, curls down, and lies on the desk. */
+const CURL: [number, number][] = [
+  [PRINTER_X[1], SLOT_Z],
+  [-1.6, 0.31],
+  [-1.48, 0.24],
+  [-1.4, 0.13],
+  [-1.33, DESK_Z],
+];
+const PAPER_END_X = 3.1;
+const CURL_LENGTH = CURL.slice(1).reduce(
+  (sum, [x, z], i) => sum + Math.hypot(x - CURL[i]![0], z - CURL[i]![1]),
+  0,
+);
+/** Paper per kilobyte, so the heaviest page just reaches the desk's far end. */
+const PER_KB = (CURL_LENGTH + PAPER_END_X - CURL.at(-1)![0]) / HEAVIEST_KB;
+const FOLD_KB = 4;
+const PRINT_VIEW: [number, number, number, number] = [-130, -88, 272, 170];
+const PRINT_LABEL_TOP = PRINT_VIEW[1] + 10;
+const PRINT_LABEL_BOTTOM = PRINT_VIEW[1] + PRINT_VIEW[3] - 8;
 
 const kilobytes = (framework: Framework) => framework.metrics[BYTES].median / 1024;
 
-/** A stack of HTML sheets on a pan: one block, with a crease every few kilobytes. */
-function Sheets({ x, z, kb }: { x: number; z: number; kb: number }) {
-  if (kb <= 0) return null;
-  const top = z + kb * PER_KB;
-  const creases = [];
-  for (let k = SHEET_KB; k < kb; k += SHEET_KB) creases.push(z + k * PER_KB);
+/** The paper's centre line, from the slot to `kb` kilobytes along. */
+function paperPath(kb: number): [number, number][] {
+  let left = kb * PER_KB;
+  const path: [number, number][] = [CURL[0]!];
+  for (const [x, z] of [...CURL.slice(1), [PAPER_END_X + 1, DESK_Z] as [number, number]]) {
+    const [px, pz] = path.at(-1)!;
+    const length = Math.hypot(x - px, z - pz);
+    if (length >= left) {
+      path.push([px + ((x - px) * left) / length, pz + ((z - pz) * left) / length]);
+      return path;
+    }
+    left -= length;
+    path.push([x, z]);
+  }
+  return path;
+}
+
+/** Word lengths, in kilobytes of paper, for the rows of text printed along the sheet. */
+const WORDS = [0.55, 0.3, 0.75, 0.4, 0.62, 0.25, 0.7, 0.45, 0.35, 0.8, 0.5];
+const ROWS = [0.13, 0.3, 0.47];
+
+function Paper({ lane: [y0, y1], kb }: { lane: Point2; kb: number }) {
+  if (kb <= 0.01) return null;
+  const [a, b] = [y0 + PAPER_INSET, y1 - PAPER_INSET];
+  const path = paperPath(kb);
+  const flatFrom = CURL.at(-1)![0];
+  const end = path.at(-1)![0];
+  // Rows of words along the flat part, a word per kilobyte or so, each row
+  // starting at a different point in the list so they do not line up.
+  const text: Point3[][] = [];
+  ROWS.forEach((row, r) => {
+    let x = flatFrom + 0.08;
+    for (let i = r * 4; ; i++) {
+      const length = WORDS[i % WORDS.length]! * PER_KB;
+      if (x + length > end - 0.06) break;
+      text.push([
+        [x, a + row, DESK_Z],
+        [x + length, a + row, DESK_Z],
+      ]);
+      x += length + PER_KB * 0.3;
+    }
+  });
+  const folds: Point3[][] = [];
+  for (let k = FOLD_KB; ; k += FOLD_KB) {
+    const x = flatFrom + (k - CURL_LENGTH / PER_KB) * PER_KB;
+    if (x >= end) break;
+    if (x > flatFrom) {
+      folds.push([
+        [x, a, DESK_Z],
+        [x, b, DESK_Z],
+      ]);
+    }
+  }
   return (
-    <RoundBox r={0.06} x={[x - 0.42, x + 0.42]} y={[-0.3, 0.3]} z={[z, top]}>
-      <Line
-        className="hl-sign"
-        lines={creases.map((cz): Point3[] => [
-          [x - 0.42, 0.3, cz],
-          [x + 0.42, 0.3, cz],
-        ])}
+    <>
+      <Poly
+        corners={[
+          ...path.map(([x, z]): Point3 => [x, a, z]),
+          ...[...path].reverse().map(([x, z]): Point3 => [x, b, z]),
+        ]}
       />
-      <Line
-        className="hl-sign"
-        lines={[-0.12, 0, 0.12].map((dy, row): Point3[] => [
-          [x - 0.28, dy, top],
-          [x + (row === 1 ? 0.28 : 0.1), dy, top],
-        ])}
-      />
-    </RoundBox>
+      <Line className="hl-crease" lines={folds} />
+      <Line className="hl-sign" lines={text} />
+    </>
   );
 }
 
-type ScaleState = { tilt: number; kb: [number, number]; rival: number; at: number };
+function Printer({ lane: [y0, y1], head, done }: { lane: Point2; head: number; done: boolean }) {
+  const [x0, x1] = PRINTER_X;
+  const middle = (y0 + y1) / 2;
+  const headY = middle + head * 0.22;
+  return (
+    <>
+      <RoundBox r={0.12} x={PRINTER_X} y={[y0, y1]} z={[0, PRINTER_TOP]}>
+        <Inset r={0.08} x={[x0 + 0.12, x1 - 0.32]} y={[y0 + 0.12, y1 - 0.12]} z={PRINTER_TOP} />
+      </RoundBox>
+      <Poly
+        className="hl-crease"
+        corners={[
+          [x1, y0 + PAPER_INSET - 0.03, SLOT_Z - 0.04],
+          [x1, y1 - PAPER_INSET + 0.03, SLOT_Z - 0.04],
+          [x1, y1 - PAPER_INSET + 0.03, SLOT_Z + 0.02],
+          [x1, y0 + PAPER_INSET - 0.03, SLOT_Z + 0.02],
+        ]}
+      />
+      <Panel
+        className={done ? "hl-led-on" : "hl-sign"}
+        x={[x0 + 0.2, x0 + 0.32]}
+        y={y1}
+        z={[0.2, 0.3]}
+      />
+      <RoundBox
+        r={0.04}
+        x={[x1 - 0.28, x1 - 0.12]}
+        y={[headY - 0.1, headY + 0.1]}
+        z={[PRINTER_TOP, PRINTER_TOP + 0.1]}
+      />
+    </>
+  );
+}
+
+/** Which lane a point on screen is nearest, measured at the same screen x. */
+function laneAt([px, py]: Point2) {
+  const distances = LANES.map(([y0, y1]) => {
+    const y = (y0 + y1) / 2;
+    const [ax, ay] = PRINT.at(0, y, DESK_Z);
+    const [bx, by] = PRINT.at(1, y, DESK_Z);
+    return Math.abs(ay + ((px - ax) * (by - ay)) / (bx - ax) - py);
+  });
+  return distances[0]! <= distances[1]! ? 0 : 1;
+}
+
+type PrintState = { kb: [number, number]; head: [number, number]; rival: number; at: number };
 
 export function WeightFigure() {
   const rootRef = useRef<HTMLDivElement>(null);
   const [pointer, handlers] = usePointer();
-  const springs = useRef({ tilt: spring(), left: spring(), right: spring() });
-  const state = useDrawing<ScaleState>(
+  const springs = useRef({ back: spring(), front: spring() });
+  const state = useDrawing<PrintState>(
     rootRef,
-    { tilt: 0, kb: [0, 0], rival: 0, at: 0 },
-    () => {
-      const rival = RIVALS[0]!;
-      return {
-        tilt: (MAX_TILT * (kilobytes(rival) - kilobytes(FARM))) / (HEAVIEST / 1024),
-        kb: [kilobytes(FARM), kilobytes(rival)],
-        rival: 0,
-        at: NAME_OUT * CYCLE_MS,
-      };
-    },
+    { kb: [0, 0], head: [0, 0], rival: 0, at: 0 },
+    () => ({
+      kb: [kilobytes(RIVALS[0]!), kilobytes(FARM)],
+      head: [0, 0],
+      rival: 0,
+      at: NAME_OUT * CYCLE_MS,
+    }),
     (turn, dt) => {
-      const { tilt, left, right } = springs.current;
+      const { back, front } = springs.current;
       const rival = RIVALS[turn.rival]!;
       const into = clamp((turn.at - NAME_IN * turn.cycle) / (CLIMB * turn.cycle));
-      const loaded = into * (HEAVIEST / 1024);
+      const printed = into * HEAVIEST_KB;
       const settled = turn.at > NAME_OUT * turn.cycle;
-      pull(left, settled ? 0 : Math.min(loaded, kilobytes(FARM)), dt, 140, 24);
-      pull(right, settled ? 0 : Math.min(loaded, kilobytes(rival)), dt, 140, 24);
-      // The beam leans toward whichever pan holds more, and swings a little.
-      pull(tilt, (MAX_TILT * (right.x - left.x)) / (HEAVIEST / 1024), dt, 60, 9);
-      return { tilt: tilt.x, kb: [left.x, right.x], rival: turn.rival, at: turn.at };
+      // Paper feeds at a steady rate, so the springs only smooth the start.
+      pull(back, settled ? 0 : Math.min(printed, kilobytes(rival)), dt, 260, 32);
+      pull(front, settled ? 0 : Math.min(printed, kilobytes(FARM)), dt, 260, 32);
+      // A print head shuttles across while its printer is still printing.
+      const shuttle = Math.sin(turn.at / 70);
+      const busy = (kb: number) => !settled && into > 0 && printed < kb;
+      return {
+        kb: [back.x, front.x],
+        head: [busy(kilobytes(rival)) ? shuttle : 0, busy(kilobytes(FARM)) ? shuttle : 0],
+        rival: turn.rival,
+        at: turn.at,
+      };
     },
   );
 
   const rival = RIVALS[state.rival]!;
   const size = (framework: Framework) => formatKilobytes(framework.metrics[BYTES].median);
-  const pickedSide = pointer === null ? null : pointer[0] < 0 ? 0 : 1;
+  const picked = pointer === null ? null : laneAt(pointer);
   const settled = state.at > NAME_OUT * CYCLE_MS;
-  const ends = [-1, 1].map((side) => {
-    const x = side * ARM * Math.cos(state.tilt);
-    const z = PIVOT_Z - side * ARM * Math.sin(-state.tilt);
-    return { x, z, pan: z - HANG };
-  });
-  const sides = [
-    { framework: FARM, kb: state.kb[0] },
-    { framework: rival, kb: state.kb[1] },
+  const lanes = [
+    { framework: rival, kb: state.kb[0], head: state.head[0] },
+    { framework: FARM, kb: state.kb[1], head: state.head[1] },
   ];
+  const printing = lanes.some(({ head }) => head !== 0);
   const readout =
-    pickedSide !== null
-      ? `${sides[pickedSide]!.framework.label} · ${size(sides[pickedSide]!.framework)}`
-      : `Farm.js ${size(FARM)} · ${rival.label} ${size(rival)}`;
+    picked !== null
+      ? `${lanes[picked]!.framework.label} · ${size(lanes[picked]!.framework)}`
+      : printing
+        ? `${formatKilobytes(Math.max(state.kb[0], state.kb[1]) * 1024)} printed`
+        : `Farm.js ${size(FARM)} · ${rival.label} ${size(rival)}`;
 
   return (
     <Stage
-      camera={SCALE}
-      hint="Point at a pan"
+      camera={PRINT}
+      hint="Point at a page"
       pointer={handlers}
       readout={readout}
       rootRef={rootRef}
-      view={SCALE_VIEW}
+      view={PRINT_VIEW}
     >
-      <RoundBox r={0.2} x={[-1, 1]} y={[-0.6, 0.6]} z={[0, 0.22]}>
-        <Inset r={0.12} x={[-0.86, 0.86]} y={[-0.46, 0.46]} z={0.22} />
+      <RoundBox r={0.34} x={[-3, 3.3]} y={[-1.3, 1.3]} z={[-0.22, 0]}>
+        <Inset r={0.24} x={[-2.84, 3.14]} y={[-1.14, 1.14]} z={0} />
       </RoundBox>
-      <RoundBox r={0.06} x={[-0.08, 0.08]} y={[-0.08, 0.08]} z={[0.22, PIVOT_Z]} />
-      <Line
-        className="hl-beam"
-        lines={[
-          [
-            [ends[0]!.x, 0, ends[0]!.z],
-            [ends[1]!.x, 0, ends[1]!.z],
-          ],
-        ]}
-      />
-      <Disc at={[0, 0]} camera={SCALE} r={0.13} z={[PIVOT_Z - 0.06, PIVOT_Z + 0.06]} />
-      {ends.map(({ x, z, pan }, side) => {
-        const { framework, kb } = sides[side]!;
-        const hot = pickedSide === side || (pickedSide === null && kb > 0);
+      {lanes.map(({ framework, kb, head }, lane) => {
+        const done = !settled && kb >= kilobytes(framework) * 0.98;
+        const hot = picked === lane || (picked === null && kb > 0.01);
+        const [y0, y1] = LANES[lane]!;
+        const [ex, ez] = paperPath(kb).at(-1)!;
+        const [ax, ay] = PRINT.at(ex, (y0 + y1) / 2, ez);
+        const route: Point2[] =
+          lane === 0
+            ? [
+                [ax, ay],
+                [ax, PRINT_LABEL_TOP],
+                [ax - 14, PRINT_LABEL_TOP],
+              ]
+            : [
+                [ax, ay],
+                [ax, PRINT_LABEL_BOTTOM],
+                [ax + 14, PRINT_LABEL_BOTTOM],
+              ];
         return (
-          <g data-hot={hot || undefined} key={side}>
-            <Line
-              className="hl-hanger"
-              lines={[
-                [
-                  [x, 0, z],
-                  [x - PAN_R * 0.8, 0, pan + 0.05],
-                ],
-                [
-                  [x, 0, z],
-                  [x + PAN_R * 0.8, 0, pan + 0.05],
-                ],
-              ]}
-            />
-            <Disc at={[x, 0]} camera={SCALE} r={PAN_R} z={[pan, pan + 0.05]} />
-            <Sheets kb={kb} x={x} z={pan + 0.05} />
-            <Callout
-              align={side === 0 ? "end" : "start"}
-              drawn={!settled && kb >= kilobytes(framework) * 0.97 ? 1 : 0}
-              label={`${framework.label}  ${size(framework)}`}
-              route={(() => {
-                const [ax, ay] = SCALE.at(x, 0, pan + 0.05 + kb * PER_KB);
-                const y = SCALE_VIEW[1] + 14;
-                return [
-                  [ax, ay],
-                  [ax, y],
-                  [ax + (side === 0 ? -16 : 16), y],
-                ];
-              })()}
-            />
+          <g data-hot={hot || undefined} key={lane}>
+            <Paper kb={kb} lane={LANES[lane]!} />
+            <Printer done={done} head={head} lane={LANES[lane]!} />
+            {kb > 0.01 && (
+              <Callout
+                align={lane === 0 ? "end" : "start"}
+                drawn={done || (picked === lane && kb > 0.01) ? 1 : 0}
+                label={`${framework.label}  ${size(framework)}`}
+                route={route}
+              />
+            )}
           </g>
         );
       })}
