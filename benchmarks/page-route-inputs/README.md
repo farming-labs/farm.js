@@ -53,6 +53,32 @@ the generic matcher control. Performance evidence belongs in the PR and raw arti
 framework benchmark charts. This is not a full SSR, HTTP latency, throughput, hydration or
 cross-framework benchmark, and it does not establish an improvement for a root-only static app.
 
+## Initial isolated result: not ready to merge
+
+[CI run 37566405466](https://github.com/farming-labs/farm.js/actions/runs/37566405466)
+measured revision `a71c0c68f1546f73d578e1b06e2e04f9ebe860f8` on Linux, Node 24.21.0,
+AMD EPYC 9V45. One-minute load was 1.63 → 1.30 for the first repetition and
+1.30 → 1.15 for the second. Each cell is the median baseline → candidate in microseconds.
+
+| Scenario / metric               | First repetition | Second repetition |
+| ------------------------------- | ---------------- | ----------------- |
+| Late hit, 100 patterns / wall   | 42.660 → 10.756  | 42.182 → 11.097   |
+| Valid miss, 100 patterns / wall | 41.758 → 10.330  | 40.944 → 10.336   |
+| Non-terminal catch-all / wall   | 2.227 → 2.336    | 2.409 → 2.362     |
+| Non-terminal catch-all / CPU    | 2.643 → 3.661    | 2.930 → 3.763     |
+
+The large-table valid workloads used less wall time and CPU in all 14 pairs, but the catch-all
+case used **more CPU in all 14 pairs** (median increases of approximately 39% and 28%). Its wall
+times were mixed, as were static-hit and generic-matcher wall controls. The catch-all CPU result
+is unresolved; passing correctness assertions or a successful CI job does not clear this
+performance gate. Isolate it with additional controlled measurements/profiling before promoting
+this change. Do not discard the original samples or attribute it to JIT/GC without evidence.
+
+The 100-pattern late-hit table's median setup cost rose from 5.114 → 14.251 microseconds and
+6.843 → 15.243 microseconds. Isolated selector size rose from 1,537 → 1,660 minified bytes and
+829 → 866 gzip bytes. The artifact retains all eight scenarios, CPU and startup measurements,
+and individual pairs, including malformed-input and unfavorable controls.
+
 ## Correctness controls
 
 The preparation tests fail without the optimization: a two-segment late hit/miss over 100 dynamic
