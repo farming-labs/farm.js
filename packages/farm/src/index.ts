@@ -55,7 +55,16 @@ export {
   FarmRuntimeShutdownError,
   PluginManager,
   type FarmPluginDatabase,
+  type FarmPluginDefinition,
 } from "./plugin";
+export {
+  FarmPluginOptionsError,
+  type FarmPluginFactory,
+  type FarmPluginOptionsIssue,
+  type FarmPluginOptionsSchema,
+  type InferPluginOptionsInput,
+  type InferPluginOptionsOutput,
+} from "./plugin-options";
 export {
   defineConfig,
   defineFarmConfig,
