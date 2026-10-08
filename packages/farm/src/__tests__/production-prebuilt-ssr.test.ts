@@ -973,6 +973,68 @@ export default function Page() {
     }
   }, 120_000);
 
+  it("negotiates Markdown using the post-middleware pathname", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "middleware.ts"),
+        `export default function middleware(ctx) {
+  if (ctx.pathname === "/to-markdown") {
+    ctx.rewrite("/index.md");
+    ctx.headers.set("x-mirror-rewrite", "markdown");
+  } else if (ctx.pathname === "/from-markdown.md") {
+    ctx.rewrite("/");
+    ctx.headers.set("x-mirror-rewrite", "html");
+  }
+}`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "production-markdown-rewrite-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(response.headers.get("content-type")).toContain("text/markdown");
+          expect(response.headers.get("content-location")).toBe("/index.md");
+          expect(response.headers.get("x-mirror-rewrite")).toBe("markdown");
+          expect(await response.text()).toContain("prebuilt SSR output: src alias resolved");
+
+          const html = await fetch(new URL("/from-markdown.md", response.url), {
+            headers: { accept: "text/html" },
+          });
+          expect(html.status).toBe(200);
+          expect(html.headers.get("content-type")).toContain("text/html");
+          expect(html.headers.get("x-mirror-rewrite")).toBe("html");
+          expect(await html.text()).toContain('data-prebuilt-ssr="ready"');
+
+          const head = await fetch(response.url, {
+            method: "HEAD",
+            headers: { accept: "text/html" },
+          });
+          expect(head.status).toBe(200);
+          expect(head.headers.get("content-type")).toContain("text/markdown");
+          expect(head.headers.get("x-mirror-rewrite")).toBe("markdown");
+          expect(await head.text()).toBe("");
+        },
+        "/to-markdown",
+        { headers: { accept: "text/html" } },
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("hydrates client components inside a Markdown page under a hydrating layout", async () => {
     const root = await createProductionFixture();
 

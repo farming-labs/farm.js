@@ -248,6 +248,33 @@ controls. It reports lookup time, one-time preparation cost and helper size sepa
 framework fixture above has no route slots; do not interpret selector gains as improved HTTP
 latency or a changed framework ranking.
 
+## Markdown request URL diagnostic
+
+This opt-in diagnostic compares the generated SSR entry with a baseline that restores only the
+Markdown helper's unconditional URL parse and removes the caller's parsed-URL hint. It does not
+change Markdown negotiation, the dynamic 120-row workload, or published benchmark scores.
+
+```sh
+pnpm --filter @farm.js/core build
+pnpm --filter @farm.js/cli build
+pnpm --dir benchmarks/frameworks --filter farm-framework-benchmark install --frozen-lockfile
+pnpm --dir benchmarks/frameworks/apps/farm exec farm build --preset node-server
+node benchmarks/frameworks/markdown-request-url.mjs > /tmp/markdown-request-url-first.json
+node benchmarks/frameworks/markdown-request-url.mjs > /tmp/markdown-request-url-second.json
+```
+
+Requires Node 24.11+. Five alternating fresh-process pairs cover HTML with no Accept header,
+browser HTML, negotiated Markdown, and `.md` URLs. Each process uses 1,000 warmups and 3,000
+measured requests. All ordered rows, per-request freshness, normalized bodies and headers are
+checked outside timing; body consumption and lifecycle completion are included. Reports retain
+raw batch times, CPU time, load and source hashes. These are in-process means, not HTTP p50/p95
+or a cross-framework ranking. Do not run other tests or builds alongside timing measurements.
+
+Local results are mixed; one fewer URL parse does not by itself establish a latency benefit.
+Use the CI workflow's `markdown-request-url-benchmark` input for two comparisons on an independent
+runner. The diagnostic job retains raw artifacts without publishing scores or asserting timing
+thresholds. Review all active controls before promoting this optimization.
+
 ## Limitations
 
 This small dynamic-SSR fixture measures local framework baseline overhead on one machine. It does

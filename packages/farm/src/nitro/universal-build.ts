@@ -7557,6 +7557,8 @@ async function handleFarmRequestInContext(
       // The mirror helper only reads metadata and creates its own GET request.
       // Cloning here needlessly tees bodies even when negotiation rejects them.
       request,
+      // Middleware and configured rewrites have already resolved this URL.
+      requestUrl: url,
       config: farmMarkdownConfig,
       routeExists: (targetPathname) =>
         Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),

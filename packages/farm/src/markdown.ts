@@ -70,6 +70,8 @@ export interface ResolveMarkdownMirrorTargetOptions {
 
 export interface CreateMarkdownMirrorResponseOptions {
   request: Request;
+  /** @internal Reuse a parse only while its href still matches this request. */
+  requestUrl?: URL;
   config?: FarmMarkdownResolvedConfig;
   routeExists?: (pathname: string) => boolean;
   renderPage: (request: Request) => Response | Promise<Response>;
@@ -148,7 +150,10 @@ export async function createMarkdownMirrorResponse(
     return null;
   }
 
-  const requestUrl = new URL(options.request.url);
+  const requestUrl =
+    options.requestUrl?.href === options.request.url
+      ? options.requestUrl
+      : new URL(options.request.url);
   const hasMarkdownExtension = requestUrl.pathname.toLowerCase().endsWith(".md");
   const target = resolveMarkdownMirrorTarget(options.config, requestUrl.pathname, {
     accept: options.request.headers.get("accept"),

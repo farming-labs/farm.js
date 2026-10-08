@@ -3,6 +3,10 @@ name: CI
 on:
   workflow_dispatch:
     inputs:
+      markdown-request-url-benchmark:
+        description: Compare Markdown request URL reuse on an isolated runner
+        type: boolean
+        default: false
       hydration-planning-benchmark:
         description: Collect hydration-planning diagnostic samples on an isolated runner
         type: boolean
@@ -34,6 +38,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  markdown-request-url-benchmark:
+    name: Markdown Request URL Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.markdown-request-url-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build local framework packages
+        run: |
+          pnpm --filter @farm.js/core build
+          pnpm --filter @farm.js/cli build
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+      - name: Install and build the maintained fixture
+        run: |
+          pnpm --dir benchmarks/frameworks --filter farm-framework-benchmark install --frozen-lockfile
+          pnpm --dir benchmarks/frameworks/apps/farm exec farm build --preset node-server
+      - name: Collect two independent alternating comparisons
+        run: |
+          node benchmarks/frameworks/markdown-request-url.mjs > "${{ runner.temp }}/markdown-request-url-first.json"
+          node benchmarks/frameworks/markdown-request-url.mjs > "${{ runner.temp }}/markdown-request-url-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: markdown-request-url-${{ github.sha }}
+          path: ${{ runner.temp }}/markdown-request-url-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
   hydration-planning-benchmark:
     name: Hydration Planning Diagnostic
     if: github.event_name == 'workflow_dispatch' && inputs.hydration-planning-benchmark
