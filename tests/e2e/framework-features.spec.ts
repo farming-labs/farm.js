@@ -237,6 +237,16 @@ test.describe("Framework feature integration", () => {
     await expect(page).toHaveURL(/\/slot-lab$/);
     await expect(page.getByTestId("intercepted-photo")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Background count: 1" })).toBeVisible();
+
+    // Reopening must not reuse stale selection/params. A document reload loses
+    // the interception context and must render the canonical page and fallback.
+    await page.getByTestId("open-intercepted-photo").click();
+    await expect(page.getByTestId("intercepted-photo")).toContainText("Intercepted photo 42");
+    await expect(page.getByRole("button", { name: "Background count: 1" })).toBeVisible();
+    await page.reload();
+    await expect(page.getByTestId("canonical-photo")).toContainText("Canonical photo 42");
+    await expect(page.getByTestId("activity-slot-fallback")).toHaveText("Activity fallback");
+    await expect(page.getByTestId("intercepted-photo")).toHaveCount(0);
     expect(pageErrors).toEqual([]);
   });
 

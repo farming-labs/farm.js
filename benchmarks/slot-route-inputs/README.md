@@ -28,6 +28,9 @@ interception, malformed encodings, and non-root owners. Repeated matching fixed
 routes stress stable precedence and specificity scoring; distinct fixed routes
 cover late hits and misses. The 100-candidate cases are deliberately slot-heavy,
 not a claim about a typical app. Owner-prefix matching is not optimized here.
+Malformed-encoding cases exercise matcher compatibility only: the normal
+production H3 server rejects those URLs with HTTP 400 before this selector runs.
+Their timings are not an HTTP performance opportunity.
 
 Preparation trades one-time server startup work and retained pattern records for
 lower request work. Report setup costs alongside lookup gains. Helper minified

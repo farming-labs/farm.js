@@ -1,8 +1,11 @@
 // @vitest-environment node
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { resolveConfig } from "../config";
 import { isFarmRouteActive } from "../router";
+import { RouteManager } from "../routing/route-manager";
 import { runtimeSources, signature } from "../../../../benchmarks/slot-route-inputs/runtime.mjs";
 
 type Slot = {
@@ -270,6 +273,152 @@ describe("production slot route preparation", () => {
       expect(signature(r.select("/one/two"))).toEqual(signature([second]));
       expect(second.module).toBe(input[0].module);
       expect(Object.keys(second).sort()).toEqual([...Object.keys(input[0]), "params"].sort());
+    }
+  });
+
+  it("agrees with development file discovery and keeps rebuilt manifests independent", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-slot-parity-"));
+    const writeRoute = (name: string) => {
+      const target = path.join(root, "src/app", name);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, "export default function Page() { return null; }");
+    };
+    try {
+      for (const name of [
+        "page.tsx",
+        "feed/page.tsx",
+        "feed/photo/[id]/page.tsx",
+        "feed/@activity/page.tsx",
+        "feed/@activity/default.tsx",
+        "feed/@modal/default.tsx",
+        "feed/@modal/(.)photo/[id]/page.tsx",
+        "docs/[[...slug]]/page.tsx",
+        "docs/@panel/[[...slug]]/page.tsx",
+        "shop/[team]/[id]/page.tsx",
+        "shop/[team]/@detail/[id]/page.tsx",
+        "shop/[team]/@detail/default.tsx",
+      ])
+        writeRoute(name);
+      const config = await resolveConfig({ root, srcDir: "src", telemetry: false }, "development");
+      const manager = new RouteManager(config);
+      await manager.discoverRoutes();
+      const snapshot = () =>
+        Array.from(manager.getRouteSlots().values(), (entry, id) => ({
+          id,
+          pattern: entry.pattern,
+          ownerPattern: entry.ownerPattern,
+          name: entry.name,
+          fallback: entry.fallback,
+          interception: entry.interception,
+          containerId: entry.containerId,
+          module: {},
+        }));
+      const project = (
+        matches: Array<{
+          name: string;
+          ownerPattern: string;
+          containerId: string;
+          fallback: boolean;
+          interception: boolean;
+          params: Record<string, string>;
+        }>,
+      ) =>
+        // Dev sorts by selected route depth; production sorts by owner depth.
+        // Compare slot identity here, and preserve exact production ordering
+        // separately against the original selector below.
+        matches
+          .map(({ name, ownerPattern, containerId, fallback, interception, params }) => ({
+            name,
+            ownerPattern,
+            containerId,
+            fallback,
+            interception,
+            params,
+          }))
+          .sort((left, right) => left.containerId.localeCompare(right.containerId));
+      const input = snapshot();
+      const prod = runtime(input);
+      const cases: Array<[string, string?]> = [
+        ["/"],
+        ["/feed"],
+        ["/feed/"],
+        ["/feed/photo/42"],
+        ["/feed/photo/42", "/feed?sort=new#top"],
+        ["/feed/photo/a%252Fb", "/feed"],
+        ["/feed/photo/%ZZ", "/feed"],
+        ["/feed/photo/42", "/outside"],
+        ["/feed/photo/42", "/feedling"],
+        ["/docs"],
+        ["/docs/a%2Fb/c"],
+        ["/docs/%ZZ"],
+        ["/shop/team-a/item-b"],
+        ["/shop/team-b/a%252Fb"],
+        ["/shop/team-a"],
+      ];
+      for (const [pathname, interceptFrom] of cases) {
+        compare(input, [pathname], interceptFrom);
+        expect(project(prod.select(pathname, interceptFrom)), pathname).toEqual(
+          project(manager.matchRoute(pathname, { interceptFrom }).slots),
+        );
+      }
+      // Production snapshots are build-local, not a process-global cache. Dev
+      // rediscovery sees new routes; creating a new runtime must see them too.
+      writeRoute("feed/@activity/photo/[id]/page.tsx");
+      await manager.discoverRoutes();
+      const rebuiltInput = snapshot();
+      const rebuilt = compare(rebuiltInput, ["/feed/photo/42"]);
+      expect(prod.select("/feed/photo/42").find((slot) => slot.name === "activity")?.fallback).toBe(
+        true,
+      );
+      expect(
+        rebuilt.select("/feed/photo/42").find((slot) => slot.name === "activity")?.params,
+      ).toEqual({ id: "42" });
+      expect(project(rebuilt.select("/feed/photo/42"))).toEqual(
+        project(manager.matchRoute("/feed/photo/42").slots),
+      );
+      expect(prod.select("/feed/photo/42").find((slot) => slot.name === "activity")?.fallback).toBe(
+        true,
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves mixed-group selection across deterministic manifest permutations", () => {
+    const patterns = [
+      "/",
+      "/[id]",
+      "/fixed",
+      "/[[...rest]]",
+      "/docs/[id]",
+      "/docs/[[...rest]]",
+      "/docs/:a*/x/:b*/end",
+    ];
+    const paths = [
+      "/",
+      "/fixed",
+      "/docs",
+      "/docs/a%252Fb",
+      "/docs/%ZZ",
+      "/docs/a/x/b/end",
+      "/outside/one",
+    ];
+    let seed = 0x5a17;
+    const next = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0);
+    for (let iteration = 0; iteration < 100; iteration++) {
+      const input = Array.from(
+        { length: 24 },
+        (_, id) =>
+          slots([patterns[next() % patterns.length]], {
+            id,
+            containerId: `slot-${id}`,
+            ownerPattern: ["/", "/docs", "/[group]"][next() % 3],
+            name: ["activity", "modal", "detail"][next() % 3],
+            fallback: next() % 5 === 0,
+            interception: next() % 4 === 0,
+          })[0],
+      );
+      for (const from of [undefined, "/docs?x=1", "/outside"]) compare(input, paths, from);
     }
   });
 });
