@@ -3,6 +3,10 @@ name: CI
 on:
   workflow_dispatch:
     inputs:
+      hydration-planning-benchmark:
+        description: Collect hydration-planning diagnostic samples on an isolated runner
+        type: boolean
+        default: false
       preload-response-benchmark:
         description: Collect buffered-response diagnostic samples on an isolated runner
         type: boolean
@@ -30,6 +34,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  hydration-planning-benchmark:
+    name: Hydration Planning Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.hydration-planning-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build the local framework runtime
+        run: pnpm --filter @farm.js/core build:runtime
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+      - name: Collect two independent alternating comparisons
+        run: |
+          node benchmarks/hydration-planning/run.mjs > "${{ runner.temp }}/hydration-planning-first.json"
+          node benchmarks/hydration-planning/run.mjs > "${{ runner.temp }}/hydration-planning-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hydration-planning-${{ github.sha }}
+          path: ${{ runner.temp }}/hydration-planning-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
   preload-response-benchmark:
     name: Preload Response Diagnostic
     if: github.event_name == 'workflow_dispatch' && inputs.preload-response-benchmark

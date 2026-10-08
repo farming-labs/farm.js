@@ -212,6 +212,49 @@ describe("client component path resolution", () => {
     });
   });
 
+  it.each([
+    ["page.tsx", "export default function Page() { return null; }"],
+    ["client.tsx", '"use client"; export default function Client() { return null; }'],
+    ["hydrate.tsx", "export const hydrate = true; export default function Page() { return null; }"],
+    ["page.svelte", "<script module>export const hydrate = true;</script><h1>Page</h1>"],
+  ])("does not reread %s for disabled isolation analysis", (filename, source) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-disabled-analysis-"));
+    tempDirs.push(root);
+    const sourceFile = path.join(root, filename);
+    fs.writeFileSync(sourceFile, source);
+    const metadata = getClientModuleMetadata(sourceFile, root);
+    const read = vi.spyOn(fs, "readFileSync");
+
+    try {
+      expect(
+        getClientModuleHydrationPlan(sourceFile, root, "off", { asyncOwnerIslands: true }),
+      ).toEqual({
+        ...metadata,
+        mode: "off",
+        legacyShouldHydrate: metadata.shouldHydrate,
+        legacyIslandStrategy: metadata.islandStrategy,
+        estimatedIsolatedRootCount: 0,
+        isolatedHydrationEligible: false,
+        hasIsolatedClientBoundaries: false,
+        isolatedBoundaries: [],
+      });
+      expect(read.mock.calls.filter(([file]) => file === sourceFile)).toHaveLength(1);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it("refreshes disabled-mode hydration metadata after a source edit", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-disabled-refresh-"));
+    tempDirs.push(root);
+    const sourceFile = path.join(root, "page.tsx");
+    fs.writeFileSync(sourceFile, "export default function Page() { return null; }");
+    expect(getClientModuleHydrationPlan(sourceFile, root).shouldHydrate).toBe(false);
+
+    fs.writeFileSync(sourceFile, '"use client"; export default function Page() { return null; }');
+    expect(getClientModuleHydrationPlan(sourceFile, root).shouldHydrate).toBe(true);
+  });
+
   it("isolates a supported client leaf only in enabled mode", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-isolated-client-plan-"));
     tempDirs.push(root);
