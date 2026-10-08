@@ -50,6 +50,7 @@ const DEFAULT_PRELOAD_CONFIG: ResolvedFarmPreloadConfig = {
 };
 
 const reportedWarnings = new Map<string, number>();
+let nextWarningExpiry = Infinity;
 const PRELOAD_WARNING_TTL_MS = 60_000;
 const MAX_REPORTED_PRELOAD_WARNINGS = 256;
 
@@ -178,9 +179,17 @@ export function reportFarmPreloadWarnings(
   warnings: FarmPreloadBudgetWarning[],
   context = "the rendered document",
 ): void {
+  if (warnings.length === 0 && reportedWarnings.size === 0) return;
   const now = Date.now();
-  for (const [key, reportedAt] of reportedWarnings) {
-    if (now - reportedAt >= PRELOAD_WARNING_TTL_MS) reportedWarnings.delete(key);
+  // Most responses arrive before any entry can expire. Keep empty-call cleanup
+  // and wall-clock rollback semantics without scanning live history each time.
+  if (now >= nextWarningExpiry) {
+    nextWarningExpiry = Infinity;
+    for (const [key, reportedAt] of reportedWarnings) {
+      const expiresAt = reportedAt + PRELOAD_WARNING_TTL_MS;
+      if (now >= expiresAt) reportedWarnings.delete(key);
+      else nextWarningExpiry = Math.min(nextWarningExpiry, expiresAt);
+    }
   }
 
   for (const warning of warnings) {
@@ -188,6 +197,7 @@ export function reportFarmPreloadWarnings(
     const reportedAt = reportedWarnings.get(key);
     if (reportedAt !== undefined && now - reportedAt < PRELOAD_WARNING_TTL_MS) continue;
     reportedWarnings.set(key, now);
+    nextWarningExpiry = Math.min(nextWarningExpiry, now + PRELOAD_WARNING_TTL_MS);
     while (reportedWarnings.size > MAX_REPORTED_PRELOAD_WARNINGS) {
       const oldest = reportedWarnings.keys().next().value;
       if (oldest === undefined) break;
@@ -208,6 +218,7 @@ export function reportFarmPreloadWarnings(
 
 export function clearReportedFarmPreloadWarnings(): void {
   reportedWarnings.clear();
+  nextWarningExpiry = Infinity;
 }
 
 interface PreloadCandidate {
