@@ -5931,6 +5931,18 @@ const selectApplicableLayouts = createFarmLayoutSelector(layoutRoutes);
 
 const routeSlots = [${routeSlotRegistrations.join(",")}
 ];
+// The slot manifest is immutable. Share the page matcher's preparation without
+// changing descriptors, owner-prefix checks, grouping, or candidate precedence.
+const preparedRouteSlots = new Map();
+for (const entry of routeSlots) {
+  if (entry.fallback) continue;
+  const segments = splitRuntimePath(entry.pattern);
+  preparedRouteSlots.set(entry, {
+    segments: segments,
+    prepared: prepareRuntimePageSegments(segments),
+    specificity: routeSlotSpecificity(entry),
+  });
+}
 
 // Route-level error boundaries bundled at build time.
 const errorRoutes = [${errorRegistrations.join(",")}
@@ -6890,6 +6902,8 @@ function matchRouteSlots(pathname, interceptFrom) {
       ? new URL(interceptFrom, "http://farm.local").pathname
       : null;
   const matches = [];
+  // Leave empty, fallback-only and ineligible requests unparsed.
+  let pathnameSegments;
 
   for (const entries of groups.values()) {
     const candidates = entries
@@ -6899,9 +6913,14 @@ function matchRouteSlots(pathname, interceptFrom) {
           (normalizedFrom && matchesRoutePrefix(normalizedFrom, entry.ownerPattern));
       })
       .map(function(entry) {
+        const slot = preparedRouteSlots.get(entry);
+        if (!pathnameSegments) pathnameSegments = splitRuntimePath(pathname).map(decodeRouteSegment);
         return {
           entry: entry,
-          params: matchRuntimePathPattern(entry.pattern, pathname),
+          specificity: slot.specificity,
+          params: slot.prepared
+            ? matchPreparedRuntimePageSegments(slot.prepared, pathnameSegments)
+            : matchRuntimePathSegments(slot.segments, pathnameSegments),
         };
       })
       .filter(function(candidate) { return candidate.params !== null; })
@@ -6909,7 +6928,7 @@ function matchRouteSlots(pathname, interceptFrom) {
         if (left.entry.interception !== right.entry.interception) {
           return left.entry.interception ? -1 : 1;
         }
-        return routeSlotSpecificity(right.entry) - routeSlotSpecificity(left.entry);
+        return right.specificity - left.specificity;
       });
 
     if (candidates[0]) {

@@ -28,6 +28,8 @@ test("a boundary handed server-rendered children stays interactive", async ({ pa
 });
 
 test("a client island inside a route slot hydrates in the slot's own root", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.goto("/slots");
 
   await expect(page.getByTestId("panel-slot")).toBeVisible();
@@ -39,6 +41,7 @@ test("a client island inside a route slot hydrates in the slot's own root", asyn
   await expect(slotCounter).toHaveText("count: 100");
   await slotCounter.click();
   await expect(slotCounter).toHaveText("count: 101");
+  expect(pageErrors).toEqual([]);
 });
 
 test("layout islands keep isolating on routes that fell back", async ({ page }) => {
