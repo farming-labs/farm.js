@@ -215,6 +215,14 @@ retain the no-candidate preload scanner guard. Every response is checked for equ
 same-URL freshness. Output includes raw batch samples, CPU time, and machine load. It is an
 in-process diagnostic, not network latency or a canonical cross-framework result.
 
+## Slot-route selector diagnostic
+
+The [slot-route diagnostic](../slot-route-inputs/README.md) compares the generated production
+selector with its unprepared baseline, including no-slot, fallback, catch-all and interception
+controls. It reports lookup time, one-time preparation cost and helper size separately. The
+framework fixture above has no route slots; do not interpret selector gains as improved HTTP
+latency or a changed framework ranking.
+
 ## Limitations
 
 This small dynamic-SSR fixture measures local framework baseline overhead on one machine. It does
