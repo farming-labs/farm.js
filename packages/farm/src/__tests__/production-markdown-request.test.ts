@@ -1,7 +1,7 @@
 // @vitest-environment node
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMarkdownMirrorResponse, resolveMarkdownConfig } from "../markdown";
 
 // Execute the production caller, not just the helper: cloning before the
@@ -25,6 +25,7 @@ function runtime(config = resolveMarkdownConfig(undefined)) {
     "handleFarmRequest",
     "applyProductionMiddlewareHeaders",
     `return async function(request) {
+      const url = new URL(request.url);
       const adapterContext = {};
       const middlewareHeaders = undefined;
       ${source.slice(start, end)}
@@ -42,6 +43,80 @@ function runtime(config = resolveMarkdownConfig(undefined)) {
 }
 
 describe("production Markdown request ownership", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([undefined, "text/html", "text/markdown;q=0", "*/*", "application/json"])(
+    "reuses the caller's URL for ordinary HTML negotiation (%s)",
+    async (accept) => {
+      const request = new Request("https://farm.test/page?q=one&q=two", {
+        headers: accept ? { accept } : undefined,
+      });
+      const r = runtime();
+      const construct = vi.fn((target, args, newTarget) =>
+        Reflect.construct(target, args, newTarget),
+      );
+      vi.stubGlobal("URL", new Proxy(URL, { construct }));
+      expect(await r.run(request)).toBeNull();
+      expect(construct).toHaveBeenCalledTimes(1);
+      expect(r.renderPage).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["/page.md", "/page"])("does not reparse accepted Markdown at %s", async (pathname) => {
+    const request = new Request(`https://farm.test${pathname}?q=one&q=two`, {
+      headers: { accept: "text/markdown" },
+    });
+    const r = runtime();
+    const construct = vi.fn((target, args, newTarget) =>
+      Reflect.construct(target, args, newTarget),
+    );
+    vi.stubGlobal("URL", new Proxy(URL, { construct }));
+    await createMarkdownMirrorResponse({
+      request,
+      config: resolveMarkdownConfig(undefined),
+      renderPage: r.renderPage,
+    });
+    const standaloneParses = construct.mock.calls.length;
+    construct.mockClear();
+    r.renderPage.mockClear();
+    const response = await r.run(request);
+    expect(response?.headers.get("content-type")).toContain("text/markdown");
+    // The caller's parse replaces the helper's parse; Request internals vary by Node version.
+    expect(construct).toHaveBeenCalledTimes(standaloneParses);
+    expect(r.renderPage.mock.calls[0][0].url).toBe("https://farm.test/page?q=one&q=two");
+  });
+
+  it("reparses a stale hint and leaves the caller's URL unchanged", async () => {
+    const originalUrl = new URL("https://old.test/old.md?q=old");
+    const request = new Request("https://farm.test/page.md?q=one&q=two");
+    const renderPage = vi.fn((target: Request) => {
+      expect(target.url).toBe("https://farm.test/page?q=one&q=two");
+      return new Response("<h1>Current page</h1>", { headers: { "content-type": "text/html" } });
+    });
+    const response = await createMarkdownMirrorResponse({
+      request,
+      requestUrl: originalUrl,
+      config: resolveMarkdownConfig(undefined),
+      renderPage,
+    });
+    expect(await response?.text()).toContain("Current page");
+    expect(originalUrl.href).toBe("https://old.test/old.md?q=old");
+    expect(request.url).toBe("https://farm.test/page.md?q=one&q=two");
+  });
+
+  it("does not mutate a matching URL when rendering a mirror", async () => {
+    const request = new Request("https://farm.test/page.md?q=one&q=two");
+    const requestUrl = new URL(request.url);
+    const response = await createMarkdownMirrorResponse({
+      request,
+      requestUrl,
+      config: resolveMarkdownConfig(undefined),
+      renderPage: () => new Response("<h1>Page</h1>", { headers: { "content-type": "text/html" } }),
+    });
+    expect(response?.headers.get("content-location")).toBe("/page.md");
+    expect(requestUrl.href).toBe(request.url);
+  });
+
   it.each([undefined, "text/html", "text/markdown;q=0"])(
     "does not clone ordinary HTML requests (%s)",
     async (accept) => {
