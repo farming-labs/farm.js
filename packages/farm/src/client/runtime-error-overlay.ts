@@ -393,7 +393,12 @@ class DefaultFarmRuntimeErrorOverlay implements FarmRuntimeErrorOverlay {
   }
 
   show(errorLike: unknown, context: FarmRuntimeErrorOverlayContext): void {
-    if (this.destroyed || isChunkLoadError(errorLike) || isChunkLoadError(context.sourceEvent)) {
+    if (
+      this.destroyed ||
+      isChunkLoadError(errorLike) ||
+      isChunkLoadError(context.sourceEvent) ||
+      isResizeObserverLoopNotice(context.sourceEvent)
+    ) {
       return;
     }
 
@@ -917,6 +922,19 @@ function formatDisplaySourceUrl(url: string, clientWindow: Window): string {
   } catch {
     return url.replace(/[?#].*$/, "");
   }
+}
+
+/**
+ * The browser reports a ResizeObserver whose callback changed layout again
+ * as a window error with no error object. It is a spec'd notice, delivered on
+ * the next frame, not an application failure. An app that throws an Error with
+ * the same message still reaches the overlay, because that event carries it.
+ */
+function isResizeObserverLoopNotice(event: Event | undefined): boolean {
+  if (!event || !("message" in event) || (event as ErrorEvent).error != null) return false;
+  return /^ResizeObserver loop (?:completed with undelivered notifications|limit exceeded)/.test(
+    String((event as ErrorEvent).message),
+  );
 }
 
 function isBrowserExtensionUrl(url: string): boolean {
