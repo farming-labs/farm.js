@@ -5154,6 +5154,18 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   }`);
   });
 
+  // Prepare shared slot owners at build time. Root owners already have a
+  // constant-time check. Do not emit caching for empty or unique-owner manifests.
+  const slotOwnerCounts = new Map(routeSlots.map((slot) => [slot.ownerPattern, 0]));
+  for (const slot of routeSlots) {
+    slotOwnerCounts.set(slot.ownerPattern, (slotOwnerCounts.get(slot.ownerPattern) ?? 0) + 1);
+  }
+  const sharedSlotOwners = new Set(
+    [...slotOwnerCounts]
+      .filter(([owner, count]) => owner !== "/" && count > 1)
+      .map(([owner]) => owner),
+  );
+
   const routeSlotImports: string[] = [];
   const routeSlotRegistrations: string[] = [];
   routeSlots.forEach((slot, index) => {
@@ -5943,6 +5955,7 @@ for (const entry of routeSlots) {
     specificity: routeSlotSpecificity(entry),
   });
 }
+${sharedSlotOwners.size > 0 ? `const sharedRouteSlotOwners = new Set(${JSON.stringify([...sharedSlotOwners])});` : ""}
 
 // Route-level error boundaries bundled at build time.
 const errorRoutes = [${errorRegistrations.join(",")}
@@ -6888,9 +6901,25 @@ function routeSlotSpecificity(slot) {
 }
 
 function matchRouteSlots(pathname, interceptFrom) {
-  const groups = new Map();
+  const groups = new Map();${
+    sharedSlotOwners.size > 0
+      ? `
+  // Incoming-owner results belong only to this request. Interception checks
+  // still use their own background pathname and the complete prefix matcher.
+  const ownerMatches = new Map();
+  function matchesSlotOwner(pattern) {
+    if (!sharedRouteSlotOwners.has(pattern)) return matchesRoutePrefix(pathname, pattern);
+    let matched = ownerMatches.get(pattern);
+    if (matched === undefined) {
+      matched = matchesRoutePrefix(pathname, pattern);
+      ownerMatches.set(pattern, matched);
+    }
+    return matched;
+  }`
+      : ""
+  }
   for (const slot of routeSlots) {
-    if (!matchesRoutePrefix(pathname, slot.ownerPattern)) continue;
+    if (!${sharedSlotOwners.size > 0 ? "matchesSlotOwner(slot.ownerPattern)" : "matchesRoutePrefix(pathname, slot.ownerPattern)"}) continue;
     const key = slot.ownerPattern + ":" + slot.name;
     const entries = groups.get(key) || [];
     entries.push(slot);
