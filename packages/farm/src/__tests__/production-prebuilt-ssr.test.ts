@@ -2012,6 +2012,7 @@ await server.listen(Number(process.env.PORT));
               state.__farmIdleCallbacks = [];
               state.__farmIdlePending = new Map();
               state.__farmObserverDisconnects = 0;
+              state.__farmObserverUnobserves = 0;
               state.__farmIdleCancellations = 0;
               state.IntersectionObserver = class {
                 callback: IntersectionObserverCallback;
@@ -2022,6 +2023,10 @@ await server.listen(Number(process.env.PORT));
                 }
                 observe(target: Element) {
                   this.target = target;
+                }
+                unobserve(target: Element) {
+                  if (target === this.target) state.__farmObserverUnobserves++;
+                  // Keep the last target to replay an already-queued entry below.
                 }
                 disconnect() {
                   state.__farmObserverDisconnects++;
@@ -2123,9 +2128,11 @@ await server.listen(Number(process.env.PORT));
             ).toBe(0);
             const cleanup = await page.evaluate(() => ({
               observers: (globalThis as any).__farmObserverDisconnects,
+              targets: (globalThis as any).__farmObserverUnobserves,
               idle: (globalThis as any).__farmIdleCancellations,
             }));
             expect(cleanup.observers).toBeGreaterThanOrEqual(1);
+            expect(cleanup.targets).toBeGreaterThanOrEqual(1);
             expect(cleanup.idle).toBeGreaterThanOrEqual(1);
 
             await page.evaluate(() => {
