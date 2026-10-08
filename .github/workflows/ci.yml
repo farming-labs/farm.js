@@ -3,6 +3,10 @@ name: CI
 on:
   workflow_dispatch:
     inputs:
+      response-pathname-benchmark:
+        description: Compare production response pathname work on an isolated runner
+        type: boolean
+        default: false
       preload-warning-history-benchmark:
         description: Compare preload warning history work on an isolated runner
         type: boolean
@@ -46,6 +50,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  response-pathname-benchmark:
+    name: Response Pathname Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.response-pathname-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Collect two alternating comparisons
+        run: |
+          node benchmarks/response-pathname/run.mjs > "${{ runner.temp }}/response-pathname-first.json"
+          node benchmarks/response-pathname/run.mjs > "${{ runner.temp }}/response-pathname-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: response-pathname-${{ github.sha }}
+          path: ${{ runner.temp }}/response-pathname-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
   preload-warning-history-benchmark:
     name: Preload Warning History Diagnostic
     if: github.event_name == 'workflow_dispatch' && inputs.preload-warning-history-benchmark

@@ -76,7 +76,8 @@ describe("production preload response processing", () => {
       const output = await r.applyFarmPreloadBudget(original, "/");
       expect(output).toBe(original);
       expect(r.headerCopies).not.toHaveBeenCalled();
-      expect(r.report).toHaveBeenCalledExactlyOnceWith([], "route /");
+      // Keep the cleanup call, but no route context is needed without warnings.
+      expect(r.report).toHaveBeenCalledExactlyOnceWith([], undefined);
       expect(output.statusText).toBe("Created");
       expect(output.headers.getSetCookie()).toEqual(["first=1; Path=/", "second=2; Path=/"]);
       expect(original.bodyUsed).toBe(false);
