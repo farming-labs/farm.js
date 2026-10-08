@@ -1202,6 +1202,7 @@ test("uses the invoking package manager throughout generated guidance", async ()
       userAgent: "npm/11.6.0 node/v22.0.0",
       dev: "npm run dev",
       migrate: "npm run auth:migrate",
+      start: "npm run start",
       check: "npm run type-check && npm run build",
     },
     {
@@ -1209,6 +1210,7 @@ test("uses the invoking package manager throughout generated guidance", async ()
       userAgent: "pnpm/11.18.0 npm/? node/v22.0.0",
       dev: "pnpm dev",
       migrate: "pnpm auth:migrate",
+      start: "pnpm start",
       check: "pnpm type-check && pnpm build",
     },
     {
@@ -1216,6 +1218,7 @@ test("uses the invoking package manager throughout generated guidance", async ()
       userAgent: "yarn/4.9.2 npm/? node/v22.0.0",
       dev: "yarn dev",
       migrate: "yarn auth:migrate",
+      start: "yarn start",
       check: "yarn type-check && yarn build",
     },
     {
@@ -1223,6 +1226,7 @@ test("uses the invoking package manager throughout generated guidance", async ()
       userAgent: "bun/1.2.22 npm/? node/v22.0.0",
       dev: "bun run dev",
       migrate: "bun run auth:migrate",
+      start: "bun run start",
       check: "bun run type-check && bun run build",
     },
   ];
@@ -1257,6 +1261,7 @@ test("uses the invoking package manager throughout generated guidance", async ()
       assert.match(readme, new RegExp(escapeRegExp(`${packageManager.name} install`)));
       assert.match(readme, new RegExp(escapeRegExp(packageManager.dev)));
       assert.match(readme, new RegExp(escapeRegExp(packageManager.migrate)));
+      assert.match(readme, new RegExp(escapeRegExp(packageManager.start)));
       assert.match(farmConfig, new RegExp(escapeRegExp(packageManager.migrate)));
       assert.equal(packageJson.scripts.check, packageManager.check);
       assert.match(output, new RegExp(escapeRegExp(packageManager.dev)));
@@ -1289,6 +1294,50 @@ test("uses the invoking package manager throughout generated guidance", async ()
     assert.match(integrationReadme, /npm install/);
     assert.match(integrationReadme, /npm run dev/);
     assert.doesNotMatch(integrationReadme, /pnpm (?:install|dev)/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("generates starters that self-host with farm start and deploy to Vercel explicitly", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-self-host-"));
+  const starters = [
+    { template: "basic" },
+    ...["preact", "solid", "vue", "svelte"].map((renderer) => ({ template: "basic", renderer })),
+    { template: "auth" },
+    { template: "better-auth" },
+    ...betterAuthRenderers.map(({ name }) => ({ template: "better-auth", renderer: name })),
+  ];
+
+  try {
+    for (const { template, renderer } of starters) {
+      const projectName = `${template}-${renderer ?? "react"}-app`;
+      execFileSync(
+        process.execPath,
+        [
+          path.join(packageDir, "bin/create-farm-app.js"),
+          projectName,
+          "--template",
+          template,
+          ...(renderer ? ["--renderer", renderer] : []),
+          "--typescript",
+          "--skip-install",
+        ],
+        { cwd: tempDir, stdio: "pipe" },
+      );
+
+      const generatedDir = path.join(tempDir, projectName);
+      const packageJson = JSON.parse(
+        await readFile(path.join(generatedDir, "package.json"), "utf8"),
+      );
+      const farmConfig = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
+
+      // Without a pinned target, platform builds are detected and every other
+      // host gets the Node server that `farm start` runs.
+      assert.equal(packageJson.scripts.start, "farm start", projectName);
+      assert.equal(packageJson.scripts.deploy, "farm deploy --vercel", projectName);
+      assert.doesNotMatch(farmConfig, /\btarget:/, projectName);
+    }
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

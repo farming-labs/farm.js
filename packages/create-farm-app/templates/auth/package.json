@@ -5,9 +5,10 @@
   "scripts": {
     "dev": "farm dev",
     "build": "farm build",
+    "start": "farm start",
     "auth:migrate": "farm auth migrate",
     "check": "pnpm type-check && pnpm build",
-    "deploy": "farm deploy",
+    "deploy": "farm deploy --vercel",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

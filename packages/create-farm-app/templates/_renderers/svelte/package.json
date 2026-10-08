@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "farm dev",
     "build": "farm build",
-    "deploy": "farm deploy",
+    "deploy": "farm deploy --vercel",
     "start": "farm start",
     "type-check": "svelte-check --tsconfig ./tsconfig.json"
   },

@@ -16,7 +16,4 @@ export default defineConfig({
   experimental: {
     serverComponents: true,
   },
-  deploy: {
-    target: "vercel",
-  },
 });

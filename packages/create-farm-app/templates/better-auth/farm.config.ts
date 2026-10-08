@@ -42,7 +42,4 @@ export default defineConfig({
       },
     }),
   },
-  deploy: {
-    target: "vercel",
-  },
 });

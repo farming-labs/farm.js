@@ -8,7 +8,4 @@ export default defineConfig({
   theme: {
     default: "dark",
   },
-  deploy: {
-    target: "vercel",
-  },
 });
