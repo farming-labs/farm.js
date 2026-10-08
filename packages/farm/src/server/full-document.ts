@@ -29,7 +29,16 @@ export function extractFarmFullDocument(markup: string): string | null {
   const inner = stripContentsWrappers(markup);
   if (!/^<!doctype/i.test(inner) && !/^<html[\s>]/i.test(inner)) return null;
   const start = markup.search(/<!doctype|<html[\s>]/i);
-  const closeIndex = markup.toLowerCase().lastIndexOf("</html>");
+  const lower = markup.toLowerCase();
+  let closeIndex = lower.lastIndexOf("</html>");
+  // Keep the existing search for length-preserving case conversion. Unicode
+  // such as İ expands when lowercased, so only then recover original offsets.
+  if (lower.length !== markup.length) {
+    closeIndex = -1;
+    const closing = /<\/html>/gi;
+    let match;
+    while ((match = closing.exec(markup))) closeIndex = match.index;
+  }
   if (start < 0 || closeIndex < 0) return null;
   const closeEnd = closeIndex + "</html>".length;
   let document = markup.slice(start, closeEnd);

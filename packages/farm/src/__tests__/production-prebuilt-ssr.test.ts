@@ -773,6 +773,94 @@ export default function Page() {
     }
   }, 120_000);
 
+  it.each([
+    { label: "React 18", useReact18: true },
+    { label: "React 19", useReact18: false },
+  ])(
+    "preserves Unicode full-document Suspense output with $label",
+    async ({ useReact18 }) => {
+      const root = await createProductionFixture();
+      try {
+        if (useReact18) await linkReact18(root);
+        await fs.writeFile(
+          path.join(root, "src", "app", "content.tsx"),
+          `
+export default function Content() { return <p id="unicode-reveal">stream complete</p>; }
+`,
+        );
+        await fs.writeFile(
+          path.join(root, "src", "app", "page.tsx"),
+          `
+import React, { lazy, Suspense } from "react";
+export const dynamic = "force-dynamic";
+const Content = lazy(() => import("./content"));
+export default function Page() {
+  return <main><p>İstanbul 🌱</p><Suspense fallback={<p id="unicode-loading">loading</p>}><Content /></Suspense></main>;
+}`,
+        );
+        const config = await resolveConfig(
+          {
+            root,
+            srcDir: "src",
+            images: { provider: "none" },
+            telemetry: false,
+            generateBuildId: () => "production-unicode-document-test",
+          },
+          "production",
+        );
+        await build(config, { root, preset: "node-server" });
+        await runProductionRequest(
+          path.join(root, ".farm", ".output", "server"),
+          async (response) => {
+            expect(response.status).toBe(200);
+            const html = await response.text();
+            expect(html).toContain("İstanbul 🌱");
+            expect(html).toContain('id="unicode-loading"');
+            expect(html).toContain('id="unicode-reveal"');
+            expect(html).toContain("$RC");
+            expect(html.match(/<html\b/gi)).toHaveLength(1);
+            expect(html.slice(html.lastIndexOf("</html>") + 7).trim()).toBe("");
+            expect(html.indexOf('id="unicode-reveal"')).toBeLessThan(html.lastIndexOf("</body>"));
+            const executablePath = await resolveInstalledChromiumExecutable();
+            if (executablePath) {
+              const browser = await chromium.launch({ headless: true, executablePath });
+              try {
+                const page = await browser.newPage();
+                const errors: string[] = [];
+                page.on("pageerror", (error) => errors.push(error.message));
+                const headers = Object.fromEntries(response.headers);
+                delete headers["content-encoding"];
+                delete headers["content-length"];
+                // Inspect this first, suspended response, not a second render with
+                // an already-resolved lazy import. Assets still use the real server.
+                await page.route(
+                  response.url,
+                  (route) =>
+                    route.fulfill({
+                      status: response.status,
+                      headers,
+                      body: html,
+                    }),
+                  { times: 1 },
+                );
+                await page.goto(response.url);
+                await page.locator("#unicode-reveal").waitFor({ state: "visible" });
+                expect(await page.locator("#unicode-loading").count()).toBe(0);
+                expect(await page.locator("#unicode-reveal").textContent()).toBe("stream complete");
+                expect(errors).toEqual([]);
+              } finally {
+                await browser.close();
+              }
+            }
+          },
+        );
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+
   it("matches application routes beneath the configured basePath", async () => {
     const root = await createProductionFixture();
 

@@ -14,6 +14,10 @@ with a `children` snippet. See [Renderers](/docs/renderers) for renderer-specifi
 
 ## Root layout
 
+Farm owns the document shell; return application UI or a fragment from a root layout.
+The compatibility path for existing full-document layouts preserves Unicode content and
+React Suspense reveal payloads in both development and production.
+
 **src/app/layout.tsx**
 
 ```tsx

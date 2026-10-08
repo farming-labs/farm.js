@@ -6319,7 +6319,16 @@ function opensFarmFullDocument(markup) {
 function extractFarmFullDocument(markup) {
   if (!opensFarmFullDocument(markup)) return null;
   const start = markup.search(/<!doctype|<html[\\s>]/i);
-  const closeIndex = markup.toLowerCase().lastIndexOf("</html>");
+  const lower = markup.toLowerCase();
+  let closeIndex = lower.lastIndexOf("</html>");
+  // Case conversion can expand Unicode. Recover original offsets only then;
+  // ordinary documents retain the existing closing-tag search.
+  if (lower.length !== markup.length) {
+    closeIndex = -1;
+    const closing = /<\\/html>/gi;
+    let match;
+    while ((match = closing.exec(markup))) closeIndex = match.index;
+  }
   if (start < 0 || closeIndex < 0) return null;
   const closeEnd = closeIndex + "</html>".length;
   let document = markup.slice(start, closeEnd);
