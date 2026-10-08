@@ -6,6 +6,7 @@ import {
   applyFarmCspNonceToPolicy,
   applyFarmCspNonceToResponse,
   createFarmCspScriptHashes,
+  createFarmCspNonceRewriter,
   farmCspBlocksFrameworkInlineScripts,
   getFarmSecurityHeader,
   removeFarmCspNoncesFromScriptTags,
@@ -230,6 +231,108 @@ describe("security.csp", () => {
     expect(nonce).toBeTruthy();
     expect(await response.text()).toBe(
       `<!doctype html><script nonce="${nonce}" type="module" src="/app.js"></script><script nonce="${nonce}">inline()</script>`,
+    );
+  });
+
+  it.each(["", "<p>İstanbul 🌱</p>"])(
+    "hashes exact Unicode script contents after %j",
+    async (prefix) => {
+      const contents = ['console.log("İİİİİİİİ 🌱")', "next()"];
+      const html = prefix + contents.map((content) => `<script>${content}</script>`).join("");
+      const hashes = await Promise.all(contents.map(sha256));
+      expect(await createFarmCspScriptHashes(html)).toEqual(hashes);
+      const result = await applyFarmCspHashesToHtml(
+        html,
+        resolveFarmSecurityConfig({ csp: { policy: "script-src 'self'", nonce: true } }),
+      );
+      expect(result?.html).toBe(html);
+      expect(result?.header.value).toBe(`script-src 'self' '${hashes[0]}' '${hashes[1]}'`);
+    },
+  );
+
+  it.each(["script", "style", "textarea", "title", "iframe", "noembed", "noframes", "xmp"])(
+    "preserves Unicode in %s and finds following scripts across every chunk boundary",
+    (tag) => {
+      const content = `İİİİİİİİ 🌱 </${tag}x><script>not-a-tag`;
+      const opening = `<${tag} data-label="İ > text">`;
+      const closing = `</${tag.toUpperCase()} >`;
+      const tail = '<script nonce="old">next()</script>';
+      const html = opening + content + closing + tail;
+      const expected =
+        (tag === "script" ? '<script nonce="abc123" data-label="İ > text">' : opening) +
+        content +
+        closing +
+        '<script nonce="abc123">next()</script>';
+      expect(addFarmCspNonceToScriptTags(html, "abc123")).toBe(expected);
+      expect(removeFarmCspNoncesFromScriptTags(html)).toBe(
+        opening + content + closing + "<script>next()</script>",
+      );
+      for (let split = 0; split <= html.length; split++) {
+        const rewriter = createFarmCspNonceRewriter("abc123");
+        expect(rewriter.write(html.slice(0, split)) + rewriter.write(html.slice(split), true)).toBe(
+          expected,
+        );
+      }
+      const rewriter = createFarmCspNonceRewriter("abc123");
+      expect(
+        [...html].map((character) => rewriter.write(character)).join("") + rewriter.write("", true),
+      ).toBe(expected);
+    },
+  );
+
+  it("rewrites Unicode responses identically across every UTF-8 byte boundary", async () => {
+    const contents = ['console.log("İİİİİİİİ 🌱")', "next()"];
+    const html = contents.map((content) => `<script>${content}</script>`).join("");
+    const bytes = new TextEncoder().encode(html);
+    const security = resolveFarmSecurityConfig({
+      csp: { policy: "script-src 'self'", nonce: true },
+    });
+    for (let split = 0; split <= bytes.length; split++) {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes.slice(0, split));
+          controller.enqueue(bytes.slice(split));
+          controller.close();
+        },
+      });
+      const response = applyFarmCspNonceToResponse(
+        new Response(stream, {
+          headers: { "content-type": "text/html", "content-length": String(bytes.length) },
+        }),
+        security,
+      );
+      const nonce = response.headers.get("content-security-policy")?.match(/'nonce-([^']+)'/)?.[1];
+      expect(nonce).toBeTruthy();
+      expect(response.headers.has("content-length")).toBe(false);
+      expect(await response.text()).toBe(
+        contents.map((content) => `<script nonce="${nonce}">${content}</script>`).join(""),
+      );
+    }
+  });
+
+  it("leaves disabled CSP and non-HTML responses untouched", () => {
+    const html = new Response("<script>İstanbul</script>", {
+      headers: { "content-type": "text/html" },
+    });
+    expect(applyFarmCspNonceToResponse(html, resolveFarmSecurityConfig(undefined))).toBe(html);
+    const json = Response.json({ city: "İstanbul" });
+    expect(
+      applyFarmCspNonceToResponse(
+        json,
+        resolveFarmSecurityConfig({ csp: { policy: "script-src 'self'", nonce: true } }),
+      ),
+    ).toBe(json);
+  });
+
+  it("keeps closing-tag searches independent across interleaved responses", () => {
+    const first = createFarmCspNonceRewriter("first");
+    const second = createFarmCspNonceRewriter("second");
+    expect(first.write("<script>İİİİİİİİ</SCR")).toBe('<script nonce="first">İİİİİİİİ');
+    expect(second.write("<script>two()</SCRIPT><script>three()</script>", true)).toBe(
+      '<script nonce="second">two()</SCRIPT><script nonce="second">three()</script>',
+    );
+    expect(first.write("IPT><script>next()</script>", true)).toBe(
+      '</SCRIPT><script nonce="first">next()</script>',
     );
   });
 });

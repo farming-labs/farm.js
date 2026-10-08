@@ -750,6 +750,7 @@ For dynamic HTML, Farm generates a fresh nonce for every response, adds it to th
 governs script elements (`script-src-elem`, then `script-src`, then `default-src`), and stamps every
 script element in the streamed document. Any existing script `nonce` attribute is normalized to the
 fresh response nonce so application-authored inline scripts follow the same policy.
+Script contents, including Unicode text, are preserved across streamed response chunks.
 
 For fully prerendered HTML, the same option keeps the page static. Farm removes the build-time nonce,
 hashes the exact contents of every inline script with SHA-256, and emits a route-specific policy with
