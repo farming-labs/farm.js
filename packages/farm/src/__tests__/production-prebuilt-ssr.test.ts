@@ -828,6 +828,23 @@ export default function Page() {
         `export default function Page({ params }) { return <main data-page-id={params.id}>Item</main>; }`,
       );
       await writeRoute(
+        "items/layout.tsx",
+        `export default function Layout({ children, detail }) { return <section>{children}{detail}</section>; }`,
+      );
+      // Both entries share a non-root owner. Include and exclude that owner in
+      // concurrent requests to exercise the emitted request-local owner cache.
+      await writeRoute(
+        "items/@detail/[id]/page.tsx",
+        `export default async function Detail({ params }) {
+          await Promise.resolve();
+          return <p data-detail-id={params.id}>Detail</p>;
+        }`,
+      );
+      await writeRoute(
+        "items/@detail/default.tsx",
+        `export default function Default() { return null; }`,
+      );
+      await writeRoute(
         "docs/[[...slug]]/page.tsx",
         `export default function Page() { return <main data-docs-page>Docs</main>; }`,
       );
@@ -895,9 +912,11 @@ export default function Page() {
                 expect(html, pathname).toContain("data-docs-page");
                 expect(html, pathname).toContain("data-slot-fallback");
                 expect(html, pathname).not.toContain("data-slot-id=");
+                expect(html, pathname).not.toContain("data-detail-id=");
               } else {
                 expect(html, pathname).toContain(`data-page-id="${id}"`);
                 expect(html, pathname).toContain(`data-slot-id="${id}"`);
+                expect(html, pathname).toContain(`data-detail-id="${id}"`);
                 expect(html, pathname).not.toContain("data-slot-fallback");
               }
             }),

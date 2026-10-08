@@ -16,13 +16,16 @@ const source = readFileSync(
   new URL("../../packages/farm/src/nitro/universal-build.ts", import.meta.url),
   "utf8",
 );
-const code = runtimeSources(source);
-const factories = Object.fromEntries(
-  Object.entries(code).map(([arm, source]) => [
-    arm,
-    new Function("routeSlots", "isFarmRouteActive", source + ";return matchRouteSlots;"),
-  ]),
-);
+const baselineMode = process.env.FARM_SLOT_ROUTE_BASELINE ?? "inputs";
+assert.ok(["inputs", "owners"].includes(baselineMode), "Unknown baseline");
+const sourcesFor = (input) => {
+  const code = runtimeSources(source, input);
+  return {
+    baseline: baselineMode === "owners" ? code.prepared : code.baseline,
+    candidate: code.candidate,
+  };
+};
+const code = sourcesFor([]);
 const slots = (patterns, extra = {}) =>
   patterns.map((pattern, id) => ({
     pattern,
@@ -74,10 +77,66 @@ const scenarios = {
     ],
     paths: [["/app/photo/42", "/app?x=1"], ["/app/photo/42"]],
   },
+  singleNested: {
+    slots: slots(["/app/[id]"], { ownerPattern: "/app" }),
+    paths: [["/app/one"], ["/app/two"]],
+  },
+  sharedOwnerTwo: {
+    slots: slots(["/app/a/[id]", "/app/b/[id]"], { ownerPattern: "/app" }),
+    paths: [["/app/a/one"], ["/app/b/two"]],
+  },
+  uniqueOwners100: {
+    slots: hundred.map((slot, i) => ({
+      ...slot,
+      ownerPattern: `/owner${i}`,
+      pattern: `/owner${i}/[id]`,
+    })),
+    paths: [["/owner99/one"], ["/owner98/two"]],
+  },
+  sparseDuplicate100: {
+    slots: hundred.map((slot, i) => ({
+      ...slot,
+      ownerPattern: i < 2 ? "/app" : `/owner${i}`,
+      pattern: i < 2 ? `/app/route${i}` : `/owner${i}/[id]`,
+    })),
+    paths: [["/app/route1"], ["/owner99/two"]],
+  },
+  mostlyRoot100: {
+    slots: hundred.map((slot, i) => ({
+      ...slot,
+      ownerPattern: i < 2 ? "/app" : "/",
+      pattern: i < 2 ? `/app/route${i}` : `/route${i}/[id]`,
+    })),
+    paths: [["/app/route1"], ["/route99/two"]],
+  },
+  interleavedOwners100: {
+    slots: hundred.map((slot, i) => ({
+      ...slot,
+      ownerPattern: i % 2 ? "/other" : "/app",
+      pattern: `${i % 2 ? "/other" : "/app"}/route${i}/[id]`,
+    })),
+    paths: [["/app/route98/one"], ["/other/route99/two"]],
+  },
 };
 const scenarioName = process.env.FARM_SLOT_ROUTE_SCENARIO;
 assert.ok(scenarioName === undefined || Object.hasOwn(scenarios, scenarioName), "Unknown scenario");
 const selected = scenarioName ? { [scenarioName]: scenarios[scenarioName] } : scenarios;
+// Match production's build-time specialization for each manifest. Compiling
+// these diagnostic factories is outside both lookup and runtime-setup timing.
+const scenarioSources = Object.fromEntries(
+  Object.entries(selected).map(([name, scenario]) => [name, sourcesFor(scenario.slots)]),
+);
+const scenarioFactories = Object.fromEntries(
+  Object.entries(scenarioSources).map(([name, code]) => [
+    name,
+    Object.fromEntries(
+      Object.entries(code).map(([arm, code]) => [
+        arm,
+        new Function("routeSlots", "isFarmRouteActive", code + ";return matchRouteSlots;"),
+      ]),
+    ),
+  ]),
+);
 const count = (name, fallback) => {
   const value = process.env[name] === undefined ? fallback : Number(process.env[name]);
   assert.ok(Number.isSafeInteger(value) && value > 0, `${name} must be a positive integer`);
@@ -90,6 +149,7 @@ const arm = process.argv[2];
 if (arm === "baseline" || arm === "candidate") {
   const results = {};
   for (const [name, scenario] of Object.entries(selected)) {
+    const factories = scenarioFactories[name];
     const input = Object.freeze(scenario.slots.map((slot) => Object.freeze(slot)));
     const before = factories.baseline(input, isFarmRouteActive),
       after = factories.candidate(input, isFarmRouteActive);
@@ -139,14 +199,19 @@ if (arm === "baseline" || arm === "candidate") {
   assert.equal(arm, undefined, "Expected baseline, candidate or no arm argument");
   const require = createRequire(new URL("../../packages/farm/package.json", import.meta.url));
   const { transformSync } = require("esbuild");
-  const helperBytes = Object.fromEntries(
-    Object.entries(code).map(([arm, code]) => {
-      const compact = transformSync(
-        `export function create(routeSlots, isFarmRouteActive) { ${code}; return matchRouteSlots; }`,
-        { format: "esm", minify: true },
-      ).code;
-      return [arm, { minified: Buffer.byteLength(compact), gzip: gzipSync(compact).length }];
-    }),
+  const sizes = (sources) =>
+    Object.fromEntries(
+      Object.entries(sources).map(([arm, code]) => {
+        const compact = transformSync(
+          `export function create(routeSlots, isFarmRouteActive) { ${code}; return matchRouteSlots; }`,
+          { format: "esm", minify: true },
+        ).code;
+        return [arm, { minified: Buffer.byteLength(compact), gzip: gzipSync(compact).length }];
+      }),
+    );
+  const helperBytes = sizes(code);
+  const helperBytesByScenario = Object.fromEntries(
+    Object.entries(scenarioSources).map(([name, code]) => [name, sizes(code)]),
   );
   const loadBefore = os.loadavg(),
     pairs = [];
@@ -188,6 +253,13 @@ if (arm === "baseline" || arm === "candidate") {
         }).trim(),
         generatedRuntimeHash: hash(code.candidate),
         baselineRuntimeHash: hash(code.baseline),
+        baselineMode,
+        scenarioRuntimeHashes: Object.fromEntries(
+          Object.entries(scenarioSources).map(([name, code]) => [
+            name,
+            Object.fromEntries(Object.entries(code).map(([arm, code]) => [arm, hash(code)])),
+          ]),
+        ),
         runnerHash: hash(readFileSync(fileURLToPath(import.meta.url))),
         routerHash: hash(
           readFileSync(new URL("../../packages/farm/dist/router.mjs", import.meta.url)),
@@ -199,9 +271,9 @@ if (arm === "baseline" || arm === "candidate") {
         loadAfter: os.loadavg(),
         warmups,
         iterations,
-        methodology:
-          "Seven alternating fresh-process pairs. Actual generated matcher/selector versus selector from 72cdabb6. Same real owner-prefix matcher in both arms. Complete results and hidden capture descriptors checked outside timing; checksum consumed during timing. Median of process means, warmup per scenario; setup separately (100 creations after 20 warmups). No SSR/HTTP/framework-ranking claim. No-slot control uses more iterations by default. Source hashes identify uncommitted candidates.",
+        methodology: `Seven alternating fresh-process pairs. Actual generated matcher/selector versus selector from ${baselineMode === "owners" ? "b85aee16 (prepared inputs)" : "72cdabb6 (unprepared inputs)"}. Same real owner-prefix matcher in both arms. Complete results and hidden capture descriptors checked outside timing; checksum consumed during timing. Median of process means, warmup per scenario; setup separately (100 creations after 20 warmups). Build-time eligibility and factory compilation excluded. No SSR/HTTP/framework-ranking claim. No-slot control uses more iterations by default. Per-scenario hashes identify specialized emitted code.`,
         helperBytes,
+        helperBytesByScenario,
         summary,
         pairs,
       },

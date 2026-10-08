@@ -20,7 +20,6 @@ type Slot = {
 };
 type Match = Slot & { params: Record<string, string> };
 const source = fs.readFileSync(path.join(process.cwd(), "src/nitro/universal-build.ts"), "utf8");
-const code = runtimeSources(source);
 const slots = (patterns: string[], extra: Partial<Slot> = {}): Slot[] =>
   patterns.map((pattern, id) => ({
     id,
@@ -35,6 +34,7 @@ const slots = (patterns: string[], extra: Partial<Slot> = {}): Slot[] =>
   }));
 
 function runtime(input: readonly Slot[], arm: "baseline" | "candidate" = "candidate") {
+  const code = runtimeSources(source, input);
   const instrumented = code[arm]
     .replace(
       "function splitRuntimePath(pathname) {",
