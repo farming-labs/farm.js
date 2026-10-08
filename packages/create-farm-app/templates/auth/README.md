@@ -71,7 +71,10 @@ production auth schema before serving traffic:
 pnpm auth:migrate
 ```
 
-The FARMJS deployment target is configured in [`farm.config.ts`](./farm.config.ts) for Vercel.
+`pnpm run deploy` deploys to Vercel. `pnpm build` detects Vercel, Netlify, and Cloudflare Pages builds and
+outputs for that platform; anywhere else it builds a Node server that `pnpm start` runs, so the app
+also deploys to Dokploy, Railway, or your own server. Set `deploy.target` in
+[`farm.config.ts`](./farm.config.ts) to pin one.
 
 ## Advanced authentication
 
@@ -85,6 +88,7 @@ app-owned `integrations.auth` configuration using `@farm.js/better-auth`.
 pnpm dev          # start the development server
 pnpm type-check   # run TypeScript checks
 pnpm build        # create the production build without connecting to the database
+pnpm start        # run the production build as a Node server
 pnpm check        # type-check and build
 pnpm auth:migrate # apply the production auth schema
 pnpm run deploy -- --prod

@@ -884,12 +884,12 @@ function getRunCommand(packageManager: PackageManagerName, script: string) {
 function rewritePackageManagerCommands(content: string, packageManager: PackageManagerName) {
   let output = content.replace(/\bpnpm install\b/g, `${packageManager} install`);
   output = output.replace(
-    /\bpnpm run (dev|auth:migrate|type-check|build|check|deploy|experiment)\b/g,
+    /\bpnpm run (dev|auth:migrate|type-check|build|check|deploy|experiment|start)\b/g,
     (match, script: string) =>
       packageManager === "pnpm" ? match : getRunCommand(packageManager, script),
   );
   return output.replace(
-    /\bpnpm (dev|auth:migrate|type-check|build|check|deploy|experiment)\b/g,
+    /\bpnpm (dev|auth:migrate|type-check|build|check|deploy|experiment|start)\b/g,
     (_match, script: string) => getRunCommand(packageManager, script),
   );
 }
