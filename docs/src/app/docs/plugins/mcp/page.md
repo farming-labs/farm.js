@@ -363,6 +363,42 @@ curl http://localhost:3000/api/mcp \
 Do not put production tokens in source, browser code, an MCP tool description, or a checked-in
 client configuration.
 
+## Observe tool executions
+
+Subscribe through the existing [observability API](/docs/observability), not by inspecting MCP
+response bodies. Farm emits `mcp.tool.complete` once a registered tool callback finishes:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  observability: {
+    events: ["mcp.tool.complete"],
+    onEvent(event) {
+      if (event.type !== "mcp.tool.complete") return;
+      console.log(event.tool, event.outcome, event.durationMs);
+    },
+  },
+  // Keep your existing mcp.tools and mcp.authorize configuration.
+});
+```
+
+The event contains the configured MCP `server` name, transport `route`, registered `tool` name,
+`outcome: "success" | "error"`, and callback duration in milliseconds, plus normal event and
+trace metadata. Endpoint failures, execution failures and output validation failures report
+`error` even when MCP responds with HTTP 200. An `isError` property inside returned application
+data is not an MCP error envelope.
+
+These are **tool callback outcomes**, not agent runs, HTTP request totals or proof that the client
+received a response. Authorization failures, hidden/unknown tools and inputs rejected by the MCP
+SDK before the callback do not emit completion events. Validation performed inside Farm's callback
+does emit an error outcome. Keep HTTP request telemetry alongside tool telemetry to understand
+coverage; do not infer successful tool execution from an HTTP status.
+
+No arguments, results, credentials, principal, raw request URL or error message are included in
+this event. Tool/server names and configured paths are application-authored metadata: keep secrets
+out of them. Logging/export is opt-in through observability; this event does not send anything to
+Farm Infra or enable anonymous framework telemetry. Exporters must remain non-blocking and use
+bounded post-response work where the host requires it.
+
 ## Options
 
 | Option                 | Default       | Purpose                                                                                         |

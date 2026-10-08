@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
+import { inspect } from "node:util";
 import {
   marker,
   requestPage,
@@ -495,6 +496,7 @@ async function runSelfChecks() {
     path.join(benchmarkDir, "fixture.test.mjs"),
     path.join(benchmarkDir, "encoding.test.mjs"),
     path.join(benchmarkDir, "input-identity.test.mjs"),
+    path.join(benchmarkDir, "failure.test.mjs"),
   ]);
   console.log(fixtureChecks.output.trim());
   if (readinessPollIntervalMs > 2) {
@@ -997,7 +999,9 @@ async function launchServer(command, args, options) {
     return { child, output, ready };
   } catch (error) {
     await stopProcess(child);
-    throw error;
+    throw new Error("Server startup failed at " + options.url + "\n" + output.value, {
+      cause: error,
+    });
   }
 }
 
@@ -1059,79 +1063,103 @@ async function prepareFarm() {
 }
 
 async function runRound(framework, round, options) {
-  const appDir = path.join(appsRoot, framework.directory);
-  const port = basePort + round * 20 + frameworks.findIndex((item) => item.id === framework.id);
-  const url = "http://" + (framework.devHost || "127.0.0.1") + ":" + port + "/";
-  const cliPath = path.join(appDir, framework.cli);
-  const responses = { dev: [], production: [] };
-  const recordResponses = (mode) => ({
-    encoding: options.encoding,
-    onResponse: (response, phase) =>
-      responses[mode].push({
-        phase,
-        durationMs: response.durationMs,
-        contentEncoding: response.contentEncoding,
-        encodedBodyBytes: response.encodedBodyBytes,
-        decodedBodyBytes: response.decodedBodyBytes,
-      }),
-  });
-
-  await cleanFramework(framework);
-  const devServer = await launchServer(process.execPath, [cliPath, ...framework.devArgs(port)], {
-    cwd: appDir,
-    url,
-    ...recordResponses("dev"),
-  });
-  let devWarmSamples;
+  let phase = "dev cleanup";
   try {
-    devWarmSamples = await measureRequests(
+    const appDir = path.join(appsRoot, framework.directory);
+    const port = basePort + round * 20 + frameworks.findIndex((item) => item.id === framework.id);
+    const url = "http://" + (framework.devHost || "127.0.0.1") + ":" + port + "/";
+    const cliPath = path.join(appDir, framework.cli);
+    const responses = { dev: [], production: [] };
+    const recordResponses = (mode) => ({
+      encoding: options.encoding,
+      onResponse: (response, phase) =>
+        responses[mode].push({
+          phase,
+          durationMs: response.durationMs,
+          contentEncoding: response.contentEncoding,
+          encodedBodyBytes: response.encodedBodyBytes,
+          decodedBodyBytes: response.decodedBodyBytes,
+        }),
+    });
+
+    await cleanFramework(framework);
+    phase = "dev startup";
+    const devServer = await launchServer(process.execPath, [cliPath, ...framework.devArgs(port)], {
+      cwd: appDir,
       url,
-      options.warmups,
-      options.requests,
-      recordResponses("dev"),
-    );
-  } finally {
-    await stopProcess(devServer.child);
+      ...recordResponses("dev"),
+    });
+    let devWarmSamples;
+    try {
+      phase = "dev requests";
+      devWarmSamples = await measureRequests(
+        url,
+        options.warmups,
+        options.requests,
+        recordResponses("dev"),
+      );
+    } catch (error) {
+      throw new Error("Server request failed at " + url + "\n" + devServer.output.value, {
+        cause: error,
+      });
+    } finally {
+      await stopProcess(devServer.child);
+    }
+
+    phase = "production cleanup";
+    await cleanFramework(framework);
+    phase = "production build";
+    const build = await runCommand(process.execPath, [cliPath, ...framework.buildArgs()], {
+      cwd: appDir,
+    });
+    phase = "production output verification";
+    await fs.access(path.join(appDir, framework.outputEntry));
+
+    const production = framework.production(port + 10, appDir);
+    const productionUrl = "http://127.0.0.1:" + (port + 10) + "/";
+    phase = "production startup";
+    const productionServer = await launchServer(production.command, production.args, {
+      cwd: appDir,
+      env: production.env,
+      url: productionUrl,
+      ...recordResponses("production"),
+    });
+    let productionSamples;
+    try {
+      phase = "production requests";
+      productionSamples = await measureRequests(
+        productionUrl,
+        options.warmups,
+        options.requests,
+        recordResponses("production"),
+      );
+    } catch (error) {
+      throw new Error(
+        "Server request failed at " + productionUrl + "\n" + productionServer.output.value,
+        {
+          cause: error,
+        },
+      );
+    } finally {
+      await stopProcess(productionServer.child);
+    }
+
+    return {
+      devFirstPageMs: devServer.ready.elapsedMs,
+      devFirstRequestMs: devServer.ready.firstRequestMs,
+      devWarmResponseMs: devWarmSamples,
+      buildMs: build.durationMs,
+      productionBootMs: productionServer.ready.elapsedMs,
+      productionResponseMs: productionSamples,
+      responseBytes: productionServer.ready.responseBytes,
+      encodedResponseBodyBytes: productionServer.ready.encodedBodyBytes,
+      decodedResponseBodyBytes: productionServer.ready.decodedBodyBytes,
+      responses,
+    };
+  } catch (error) {
+    const sample = round < 0 ? "burn-in" : "round " + (round + 1);
+    throw new Error(framework.label + " " + sample + " failed during " + phase, { cause: error });
   }
-
-  await cleanFramework(framework);
-  const build = await runCommand(process.execPath, [cliPath, ...framework.buildArgs()], {
-    cwd: appDir,
-  });
-  await fs.access(path.join(appDir, framework.outputEntry));
-
-  const production = framework.production(port + 10, appDir);
-  const productionUrl = "http://127.0.0.1:" + (port + 10) + "/";
-  const productionServer = await launchServer(production.command, production.args, {
-    cwd: appDir,
-    env: production.env,
-    url: productionUrl,
-    ...recordResponses("production"),
-  });
-  let productionSamples;
-  try {
-    productionSamples = await measureRequests(
-      productionUrl,
-      options.warmups,
-      options.requests,
-      recordResponses("production"),
-    );
-  } finally {
-    await stopProcess(productionServer.child);
-  }
-
-  return {
-    devFirstPageMs: devServer.ready.elapsedMs,
-    devFirstRequestMs: devServer.ready.firstRequestMs,
-    devWarmResponseMs: devWarmSamples,
-    buildMs: build.durationMs,
-    productionBootMs: productionServer.ready.elapsedMs,
-    productionResponseMs: productionSamples,
-    responseBytes: productionServer.ready.responseBytes,
-    encodedResponseBodyBytes: productionServer.ready.encodedBodyBytes,
-    decodedResponseBodyBytes: productionServer.ready.decodedBodyBytes,
-    responses,
-  };
 }
 
 async function collectBenchmarkInputFiles(directory = benchmarkDir, relativeDirectory = "") {
@@ -1783,7 +1811,16 @@ process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
 main().catch(async (error) => {
-  await stopActiveChildren();
-  console.error(error instanceof Error ? error.stack || error.message : error);
+  // A stack string drops causes; default inspection also collapses nested
+  // AggregateError entries. Retain connection codes, addresses and ports.
+  console.error(inspect(error, { depth: null, customInspect: false }));
+  try {
+    await stopActiveChildren();
+  } catch (cleanupError) {
+    console.error(
+      "Benchmark process cleanup failed:",
+      inspect(cleanupError, { depth: null, customInspect: false }),
+    );
+  }
   process.exitCode = 1;
 });

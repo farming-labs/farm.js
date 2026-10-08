@@ -330,7 +330,7 @@ runtime: {
 },
 ```
 
-Only values marked `exposeToPage: true` appear in `props.context?.data`. Farm preserves the request store when a plugin returns a transformed `Request`.
+Only values marked `exposeToPage: true` appear in `props.context?.data`. Farm preserves the request store when a plugin returns a transformed `Request`, buffers a request body, or clones a request for production dispatch. Private values stay private; these replacements do not expose them to page props or another request.
 
 ## Ordering
 

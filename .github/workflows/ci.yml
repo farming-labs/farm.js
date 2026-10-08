@@ -15,6 +15,11 @@ on:
         description: Collect production page-route input diagnostic samples on an isolated runner
         type: boolean
         default: false
+      page-route-baseline:
+        description: Optimization isolated by the page-route diagnostic
+        type: choice
+        options: [inputs, segments]
+        default: inputs
   push:
     branches: [main]
   pull_request:
@@ -96,6 +101,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.page-route-inputs-benchmark
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      FARM_PAGE_ROUTE_BASELINE: ${{ inputs.page-route-baseline || 'inputs' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -253,7 +260,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run Postgres storage and schema tests
-        run: pnpm --dir packages/farm exec vitest run src/__tests__/storage.test.ts src/__tests__/schema-migrate.test.ts src/__tests__/schema-check.test.ts src/__tests__/plugin-schema.test.ts src/__tests__/schema-extend.test.ts src/__tests__/schema-foreign-keys.test.ts src/__tests__/schema-upgrades.test.ts src/__tests__/schema-steps.test.ts
+        run: pnpm --dir packages/farm exec vitest run src/__tests__/storage.test.ts src/__tests__/schema-migrate.test.ts src/__tests__/schema-check.test.ts src/__tests__/plugin-schema.test.ts src/__tests__/schema-extend.test.ts src/__tests__/schema-foreign-keys.test.ts src/__tests__/schema-upgrades.test.ts src/__tests__/schema-steps.test.ts src/__tests__/schema-destructive.test.ts
         env:
           FARM_REQUIRE_TEST_POSTGRES: "1"
           FARM_TEST_POSTGRES_URL: postgresql://farm:farm@127.0.0.1:5432/farm_test

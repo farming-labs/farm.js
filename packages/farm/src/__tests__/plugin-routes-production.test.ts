@@ -66,13 +66,16 @@ export default async function Page() {
         path.join(root, "farm.config.ts"),
         `
 import { defineConfig, definePlugin } from "@farm.js/core";
+import type { PluginRequestContext } from "@farm.js/core/plugin";
 import { z } from "zod";
+let readContext: PluginRequestContext["get"] = () => undefined;
 export default defineConfig({
   telemetry: false,
   api: { basePath: "/backend/v2" },
   vite: { server: { host: "127.0.0.1", strictPort: false } },
   plugins: [definePlugin({
     name: "test:published-routes",
+    setup({ requestContext }) { readContext = requestContext.get; },
     routes: ({ route }) => {
       const project = route.scope("/api/projects/[projectId]");
       return [
@@ -90,9 +93,13 @@ export default defineConfig({
           },
         }),
         route.post("/api/shared", { handler: () => ({ source: "plugin" }) }),
+        route.post("/api/context", { handler: (request) => ({ preserved: readContext(request, "fixture.private") === "private-context-sentinel" }) }),
       ];
     },
-    runtime: { after({ response }) { const headers = new Headers(response.headers); headers.set("x-plugin-route", "yes"); return new Response(response.body, { status: response.status, headers }); } },
+    runtime: {
+      before({ req }) { req.set("fixture.private", "private-context-sentinel"); },
+      after({ response }) { const headers = new Headers(response.headers); headers.set("x-plugin-route", "yes"); return new Response(response.body, { status: response.status, headers }); }
+    },
   })],
 });
 `,
@@ -109,6 +116,12 @@ export default defineConfig({
         if (!address || typeof address === "string")
           throw new Error("Dev server did not bind a TCP port");
         expect(address.address).toBe("127.0.0.1");
+        const contextResponse = await fetch(`http://127.0.0.1:${address.port}/backend/v2/context`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        });
+        expect(await contextResponse.json()).toEqual({ preserved: true });
         const response = await fetch(
           `http://127.0.0.1:${address.port}/backend/v2/projects/p1/uploads/u1`,
           {
@@ -216,6 +229,14 @@ void check;
 
       const entry = path.join(root, ".vercel", "output", "functions", "__nitro.func", "index.mjs");
       const server = await import(pathToFileURL(entry).href);
+      const contextResponse = await server.default.fetch(
+        new Request("http://farm.test/backend/v2/context", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        }),
+      );
+      expect(await contextResponse.json()).toEqual({ preserved: true });
       const call = (title: string, token = "valid") =>
         server.default.fetch(
           new Request("http://farm.test/backend/v2/projects/p1/uploads/u1", {

@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import { createRequire } from "node:module";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
@@ -47,6 +48,66 @@ describe("observability", () => {
 
     expect(configEvents.map((event) => event.type)).toEqual(["cache.hit", "cache.miss"]);
     expect(runtimeEvents.map((event) => event.type)).toEqual(["cache.hit"]);
+  });
+
+  it("shares listeners, filters and trace configuration across source, ESM and CJS entries", async () => {
+    const esm = await import(
+      /* @vite-ignore */ new URL("../../dist/observability.mjs", import.meta.url).href
+    );
+    const cjs = createRequire(import.meta.url)("../../dist/observability.cjs");
+    const events: FarmEvent[] = [];
+    const listener = vi.fn();
+    const unfiltered = vi.fn();
+    configureFarmObservability({
+      tracing: true,
+      events: ["mcp.tool.complete"],
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+    const dispose = esm.onFarmEvent(listener);
+    cjs.onFarmEvent(unfiltered, { unfiltered: true });
+    const input = {
+      type: "mcp.tool.complete" as const,
+      route: "/api/mcp",
+      server: "tools",
+      tool: "search",
+      outcome: "error" as const,
+      durationMs: 1,
+    };
+    await runWithFarmRequestSpan(new Request("https://farm.test/api/mcp"), () => {
+      cjs.emitFarmEvent(input);
+      return new Response("ok");
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ ...input, traceId: expect.stringMatching(/^[0-9a-f]{32}$/) });
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(unfiltered).toHaveBeenCalledTimes(3);
+    await processor.forceFlush();
+    const spans = exporter.getFinishedSpans();
+    expect(spans).toHaveLength(1);
+    expect(spans[0].events.find((event) => event.name === input.type)?.attributes).toMatchObject({
+      "farm.tool": "search",
+      "farm.outcome": "error",
+    });
+    dispose();
+    emitFarmEvent(input);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(events).toHaveLength(2);
+    cjs.resetFarmObservability();
+    esm.emitFarmEvent(input);
+    expect(events).toHaveLength(2);
+    expect(unfiltered).toHaveBeenCalledTimes(4);
+    await runWithFarmRequestSpan(
+      new Request("https://farm.test/after-reset"),
+      () => new Response("ok"),
+    );
+    await processor.forceFlush();
+    expect(exporter.getFinishedSpans()).toHaveLength(1);
+    const afterReset = vi.fn();
+    onFarmEvent(afterReset);
+    cjs.emitFarmEvent({ type: "cache.hit", key: "safe" });
+    expect(afterReset).toHaveBeenCalledTimes(1);
   });
 
   it.each([false, { spans: ["render"] }] as const)(

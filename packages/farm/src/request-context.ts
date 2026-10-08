@@ -101,3 +101,15 @@ export function getRequestContextSnapshot(
   }
   return new Map(bucket.privateData);
 }
+
+/** Preserve plugin metadata across framework-owned Request replacements. */
+export function copyRequestContext(
+  source: RequestContextCarrier,
+  target: RequestContextCarrier,
+): void {
+  const bucket = getRequestContextStore().get(source);
+  if (!bucket || source === target) return;
+  for (const [key, value] of bucket.privateData) {
+    setRequestContext(target, key, value, { exposeToPage: bucket.exposedData.has(key) });
+  }
+}

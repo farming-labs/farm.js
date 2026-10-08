@@ -72,6 +72,7 @@ import {
   isFarmDocsSearchEnabled,
   resolveFarmDocsSearchClientModule,
 } from "../docs/search-client";
+import { generateFarmDocsAdapterClientRuntime } from "../docs/adapter-client";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "../docs/fonts";
 import { compileFarmDocsManifest } from "../docs/compiler";
 import { compileFarmDocsAdapterEdgeManifest } from "../docs/adapter";
@@ -1932,6 +1933,32 @@ function decodeRouteSegment(segment) {
 
 const farmCatchAllParamSegments = Symbol("farm.catch-all-param-segments");
 
+function prepareRuntimePageSegments(segments) {
+  const prepared = [];
+  for (const segment of segments) {
+    // Only fixed-length patterns use this path. Leave all wildcard/catch-all
+    // forms (including ambiguous spellings) to the complete backtracking matcher.
+    if (segment.includes("*") || segment.startsWith("[...") || segment.startsWith("[[...")) {
+      return null;
+    }
+    const dynamic = segment.match(/^\\[(.+)\\]$/) || segment.match(/^:([^/]+)$/);
+    prepared.push({ literal: segment, param: dynamic ? dynamic[1] : null });
+  }
+  return prepared;
+}
+
+function matchPreparedRuntimePageSegments(prepared, pathnameSegments) {
+  if (prepared.length !== pathnameSegments.length) return null;
+  const params = {};
+  for (let i = 0; i < prepared.length; i++) {
+    const segment = prepared[i];
+    if (segment.param !== null) params[segment.param] = pathnameSegments[i];
+    else if (segment.literal !== pathnameSegments[i]) return null;
+  }
+  Object.defineProperty(params, farmCatchAllParamSegments, { value: {} });
+  return params;
+}
+
 function matchRuntimePathPattern(pattern, pathname) {
   const patternSegments = splitRuntimePath(pattern);
   const pathnameSegments = splitRuntimePath(pathname).map(decodeRouteSegment);
@@ -2661,28 +2688,7 @@ function isFarmDocsPath() {
   return false;
 }
 `;
-  const docsAdapterRuntime = docsAdapterReact
-    ? `
-import * as FarmDocsAdapterReact from ${JSON.stringify(docsAdapterReact)};
-
-async function hydrateFarmDocsAdapterRuntime() {
-  const runtime = window.__FARM_DOCS_ADAPTER__;
-  if (!runtime) return false;
-  if (typeof FarmDocsAdapterReact.hydrateFarmDocs !== "function") {
-    throw new Error("The configured Farm docs adapter does not export hydrateFarmDocs().");
-  }
-  FarmDocsAdapterReact.hydrateFarmDocs({
-    config: runtime.config || {},
-    data: runtime.data,
-  });
-  return true;
-}
-`
-    : `
-async function hydrateFarmDocsAdapterRuntime() {
-  return false;
-}
-`;
+  const docsAdapterRuntime = generateFarmDocsAdapterClientRuntime(docsAdapterReact);
 
   if (
     clientPages.length === 0 &&
@@ -5148,6 +5154,18 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   }`);
   });
 
+  // Prepare shared slot owners at build time. Root owners already have a
+  // constant-time check. Do not emit caching for empty or unique-owner manifests.
+  const slotOwnerCounts = new Map(routeSlots.map((slot) => [slot.ownerPattern, 0]));
+  for (const slot of routeSlots) {
+    slotOwnerCounts.set(slot.ownerPattern, (slotOwnerCounts.get(slot.ownerPattern) ?? 0) + 1);
+  }
+  const sharedSlotOwners = new Set(
+    [...slotOwnerCounts]
+      .filter(([owner, count]) => owner !== "/" && count > 1)
+      .map(([owner]) => owner),
+  );
+
   const routeSlotImports: string[] = [];
   const routeSlotRegistrations: string[] = [];
   routeSlots.forEach((slot, index) => {
@@ -5245,7 +5263,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
     : "";
   const apiRouteHelpersImport =
     apiRoutes.length > 0
-      ? `import { mergePluginAPIRoutes, getAllowedAPIRouteMethods, invokeAPIRouteEndpoint, matchAPIRouteAtBasePath, resolveAPIRouteEndpoint } from "@farm.js/core/api/runtime";`
+      ? `import { mergePluginAPIRoutes, getAllowedAPIRouteMethods, invokeAPIRouteEndpoint, createStaticAPIRouteMatcherAtBasePath, resolveAPIRouteEndpoint } from "@farm.js/core/api/runtime";`
       : "";
   const productionRuntimeImport = `import {
   _runWithAfterRequest,
@@ -5265,6 +5283,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   applyProductionMiddlewareHeaders,
   configureFarmCache,
   configureFarmObservability,
+  cloneFarmRequestWithContext,
   createDefaultErrorMarkup,
   createFarmInstrumentationLifecycle,
   createFarmLayoutSelector,
@@ -5426,14 +5445,10 @@ ${nativeMCP.importSource}
   const apiHandlerCode =
     apiRoutes.length > 0
       ? `
-const apiRouteMap = new Map(apiRoutes.map((route) => [route.path, route]));
+const matchBuiltAPIRoute = createStaticAPIRouteMatcherAtBasePath(apiRoutes, farmLocalAPIBasePath);
 
 function matchLocalAPIRequest(request) {
-  return matchAPIRouteAtBasePath(
-    apiRouteMap,
-    new URL(request.url).pathname,
-    farmLocalAPIBasePath
-  );
+  return matchBuiltAPIRoute(new URL(request.url).pathname);
 }
 
 async function handleAPIRequest(request) {
@@ -5913,7 +5928,8 @@ const exactPageRoutes = new Map();
 const patternPageRoutes = [];
 for (const route of pageRoutes) {
   if (/[\\[\\]*:]/.test(route.pattern)) {
-    patternPageRoutes.push({ route, segments: splitRuntimePath(route.pattern) });
+    const segments = splitRuntimePath(route.pattern);
+    patternPageRoutes.push({ route, segments, prepared: prepareRuntimePageSegments(segments) });
   } else {
     const exactPath = normalizeRuntimePath(route.pattern);
     if (!exactPageRoutes.has(exactPath)) exactPageRoutes.set(exactPath, route);
@@ -5927,6 +5943,19 @@ const selectApplicableLayouts = createFarmLayoutSelector(layoutRoutes);
 
 const routeSlots = [${routeSlotRegistrations.join(",")}
 ];
+// The slot manifest is immutable. Share the page matcher's preparation without
+// changing descriptors, owner-prefix checks, grouping, or candidate precedence.
+const preparedRouteSlots = new Map();
+for (const entry of routeSlots) {
+  if (entry.fallback) continue;
+  const segments = splitRuntimePath(entry.pattern);
+  preparedRouteSlots.set(entry, {
+    segments: segments,
+    prepared: prepareRuntimePageSegments(segments),
+    specificity: routeSlotSpecificity(entry),
+  });
+}
+${sharedSlotOwners.size > 0 ? `const sharedRouteSlotOwners = new Set(${JSON.stringify([...sharedSlotOwners])});` : ""}
 
 // Route-level error boundaries bundled at build time.
 const errorRoutes = [${errorRegistrations.join(",")}
@@ -6846,8 +6875,10 @@ function matchPageRoute(pathname) {
   // The page manifest is immutable. Reuse its pattern parts and decode this
   // request once, while each match retains its own params and backtracking state.
   const pathnameSegments = splitRuntimePath(pathname).map(decodeRouteSegment);
-  for (const { route, segments } of patternPageRoutes) {
-    const params = matchRuntimePathSegments(segments, pathnameSegments);
+  for (const { route, segments, prepared } of patternPageRoutes) {
+    const params = prepared
+      ? matchPreparedRuntimePageSegments(prepared, pathnameSegments)
+      : matchRuntimePathSegments(segments, pathnameSegments);
     if (params !== null) return { route, params };
   }
   return null;
@@ -6870,9 +6901,25 @@ function routeSlotSpecificity(slot) {
 }
 
 function matchRouteSlots(pathname, interceptFrom) {
-  const groups = new Map();
+  const groups = new Map();${
+    sharedSlotOwners.size > 0
+      ? `
+  // Incoming-owner results belong only to this request. Interception checks
+  // still use their own background pathname and the complete prefix matcher.
+  const ownerMatches = new Map();
+  function matchesSlotOwner(pattern) {
+    if (!sharedRouteSlotOwners.has(pattern)) return matchesRoutePrefix(pathname, pattern);
+    let matched = ownerMatches.get(pattern);
+    if (matched === undefined) {
+      matched = matchesRoutePrefix(pathname, pattern);
+      ownerMatches.set(pattern, matched);
+    }
+    return matched;
+  }`
+      : ""
+  }
   for (const slot of routeSlots) {
-    if (!matchesRoutePrefix(pathname, slot.ownerPattern)) continue;
+    if (!${sharedSlotOwners.size > 0 ? "matchesSlotOwner(slot.ownerPattern)" : "matchesRoutePrefix(pathname, slot.ownerPattern)"}) continue;
     const key = slot.ownerPattern + ":" + slot.name;
     const entries = groups.get(key) || [];
     entries.push(slot);
@@ -6884,6 +6931,8 @@ function matchRouteSlots(pathname, interceptFrom) {
       ? new URL(interceptFrom, "http://farm.local").pathname
       : null;
   const matches = [];
+  // Leave empty, fallback-only and ineligible requests unparsed.
+  let pathnameSegments;
 
   for (const entries of groups.values()) {
     const candidates = entries
@@ -6893,9 +6942,14 @@ function matchRouteSlots(pathname, interceptFrom) {
           (normalizedFrom && matchesRoutePrefix(normalizedFrom, entry.ownerPattern));
       })
       .map(function(entry) {
+        const slot = preparedRouteSlots.get(entry);
+        if (!pathnameSegments) pathnameSegments = splitRuntimePath(pathname).map(decodeRouteSegment);
         return {
           entry: entry,
-          params: matchRuntimePathPattern(entry.pattern, pathname),
+          specificity: slot.specificity,
+          params: slot.prepared
+            ? matchPreparedRuntimePageSegments(slot.prepared, pathnameSegments)
+            : matchRuntimePathSegments(slot.segments, pathnameSegments),
         };
       })
       .filter(function(candidate) { return candidate.params !== null; })
@@ -6903,7 +6957,7 @@ function matchRouteSlots(pathname, interceptFrom) {
         if (left.entry.interception !== right.entry.interception) {
           return left.entry.interception ? -1 : 1;
         }
-        return routeSlotSpecificity(right.entry) - routeSlotSpecificity(left.entry);
+        return right.specificity - left.specificity;
       });
 
     if (candidates[0]) {
@@ -7388,7 +7442,7 @@ async function handleFarmRequestInContext(
   ${
     hasServerRuntimeIntegrations
       ? `
-  const integrationDispatch = await handleIntegrationRequest(request.clone());
+  const integrationDispatch = await handleIntegrationRequest(cloneFarmRequestWithContext(request));
   if (integrationDispatch.response) {
     return integrationDispatch.response;
   }
@@ -7453,7 +7507,7 @@ async function handleFarmRequestInContext(
       ? ` && !${JSON.stringify(owned)}.includes(normalizeRuntimePath(routePathname))`
       : "";
   })()}) {
-    const docsResponse = await farmDocsHandler(request.clone());
+    const docsResponse = await farmDocsHandler(cloneFarmRequestWithContext(request));
     if (docsResponse) {
       if (!docsResponse.headers.get("content-type")?.toLowerCase().includes("text/html")) {
         return applyProductionMiddlewareHeaders(docsResponse, middlewareHeaders);
@@ -7481,7 +7535,7 @@ async function handleFarmRequestInContext(
   // The raw markdown source of a page route is the page's content in another
   // representation; middleware guarding the route must run before serving it.
   const markdownSourceResponse = await createFarmMarkdownSourceResponse?.({
-    request: request.clone(),
+    request: cloneFarmRequestWithContext(request),
     config: farmMdxConfig,
     resolveSource: (targetPathname) => {
       const match = matchPageRoute(getFarmRoutePathname(targetPathname));
@@ -7519,7 +7573,7 @@ async function handleFarmRequestInContext(
   ${
     apiRoutes.length > 0
       ? `
-  const apiResponse = await handleAPIRequest(request.clone());
+  const apiResponse = await handleAPIRequest(cloneFarmRequestWithContext(request));
   if (apiResponse) {
     return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
   }
@@ -7580,7 +7634,7 @@ async function handleFarmRequestInContext(
     metadataImageRoutes.length > 0
       ? `
   const metadataImageResponse = await handleMetadataImageRequest(
-    request.clone(),
+    cloneFarmRequestWithContext(request),
     routePathname
   );
   if (metadataImageResponse) {
@@ -7594,7 +7648,7 @@ async function handleFarmRequestInContext(
     applicationMetadataRoutes.length > 0
       ? `
   const applicationMetadataResponse = await handleApplicationMetadataRouteRequest(
-    request.clone(),
+    cloneFarmRequestWithContext(request),
     routePathname
   );
   if (applicationMetadataResponse) {
@@ -7648,7 +7702,7 @@ async function handleFarmRequestInContext(
   ${
     config.docs?.enabled
       ? `if (farmDocsAPIHandler && isFarmDocsAPIRequest(pathname)) {
-    const docsAPIResponse = await farmDocsAPIHandler(request.clone());
+    const docsAPIResponse = await farmDocsAPIHandler(cloneFarmRequestWithContext(request));
     if (docsAPIResponse) {
       return applyProductionMiddlewareHeaders(docsAPIResponse, middlewareHeaders);
     }

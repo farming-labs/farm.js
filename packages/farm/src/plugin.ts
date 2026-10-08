@@ -22,6 +22,7 @@ import type { FarmClientPlugin } from "./client/plugin";
 import { getResolvedEnv, type ResolvedFarmEnv } from "./env";
 import {
   clearRequestContext,
+  copyRequestContext,
   deleteRequestContext,
   getRequestContext,
   getRequestContextSnapshot,
@@ -36,6 +37,14 @@ import { pluginShortName } from "./plugin-dependencies";
 import { collectSchemaExtensions } from "./schema-extend";
 import { validateSchemaSteps, type FarmSchemaMigrationStep } from "./schema-step-types";
 import { resolveSchemaModels } from "./schema-resolve";
+import {
+  isPluginOptionsSchema,
+  parsePluginOptions,
+  type FarmPluginFactory,
+  type FarmPluginOptionsSchema,
+  type InferPluginOptionsInput,
+  type InferPluginOptionsOutput,
+} from "./plugin-options";
 import { normalizeFarmBasePath, stripFarmBasePath } from "./base-path";
 import {
   normalizeFarmPluginRuntimeEndpointPath,
@@ -846,15 +855,7 @@ export class PluginManager {
   }
 
   private copyRequestStore(source: FarmRequest | Request, target: FarmRequest | Request): void {
-    const requestContext = this.context.requestContext;
-    const values = requestContext.getAll(source);
-    const exposed = requestContext.getAll(source, { exposedOnly: true });
-
-    for (const [key, value] of values) {
-      requestContext.set(target, key, value, {
-        exposeToPage: exposed.has(key),
-      });
-    }
+    copyRequestContext(source, target);
   }
 
   private copyRuntimeRequestContext(source: Request, target: Request): void {
@@ -1645,16 +1646,35 @@ export class PluginManager {
   }
 }
 
-export function definePlugin<
+type PluginOptionsSchemaInput = FarmPluginOptionsSchema<any, any>;
+
+/** Parsed options, available to `setup` and `configure` when a plugin declares `options`. */
+type WithPluginOptions<TContext, TSchema> = TSchema extends PluginOptionsSchemaInput
+  ? TContext & { readonly options: InferPluginOptionsOutput<TSchema> }
+  : TContext;
+
+/**
+ * A plugin's state. When it declares `options` and `setup` returns nothing (or
+ * there is no `setup`), the parsed options are its state.
+ */
+type ResolvedPluginState<TState, TSchema> = TSchema extends PluginOptionsSchemaInput
+  ? [TState] extends [undefined | void]
+    ? InferPluginOptionsOutput<TSchema>
+    : TState
+  : TState;
+
+/** What `definePlugin` accepts: a plugin, optionally with an `options` schema. */
+export type FarmPluginDefinition<
   TState = undefined,
   TRequestContext extends object = Record<string, never>,
   TClientState = unknown,
   TClientPublic = undefined,
   TIntegrationInstance = unknown,
-  const TRoutes extends PluginRoutes = PluginRoutes,
->(
-  plugin: FarmPlugin<
-    TState,
+  TRoutes extends PluginRoutes = PluginRoutes,
+  TSchema extends PluginOptionsSchemaInput | undefined = undefined,
+> = Omit<
+  FarmPlugin<
+    ResolvedPluginState<TState, TSchema>,
     TRequestContext,
     TClientState,
     TClientPublic,
@@ -1662,16 +1682,133 @@ export function definePlugin<
     false,
     TRoutes
   >,
-): FarmPlugin<
+  "configure" | "setup"
+> & {
+  /**
+   * Describe the plugin's options with a Standard Schema (Zod, Valibot,
+   * ArkType, ...). `definePlugin` then returns a factory: the app passes typed
+   * options, invalid ones fail while the config loads, and the plugin receives
+   * the parsed result in `setup` and `configure`, and as its state.
+   */
+  options?: TSchema;
+  /** Transform Farm config before the development or production pipeline is created. */
+  configure?: (
+    config: FarmConfig,
+    context: WithPluginOptions<FarmPluginContextFor<TIntegrationInstance, false>, TSchema>,
+  ) => MaybePromise<FarmConfig | void>;
+  /** Initialize private plugin state once for this plugin manager. */
+  setup?: (
+    context: WithPluginOptions<FarmPluginSetupContextFor<TIntegrationInstance, false>, TSchema>,
+  ) => MaybePromise<TState>;
+};
+
+type DefinedPlugin<
   TState,
+  TRequestContext extends object,
+  TClientState,
+  TClientPublic,
+  TIntegrationInstance,
+  TRoutes extends PluginRoutes,
+  TSchema,
+> = FarmPlugin<
+  ResolvedPluginState<TState, TSchema>,
   TRequestContext,
   TClientState,
   TClientPublic,
   TIntegrationInstance,
   false,
   TRoutes
-> {
-  return declarePluginSchema(plugin);
+>;
+
+/**
+ * Define a plugin. Declaring `options` turns the result into a factory:
+ *
+ * ```ts
+ * export const security = definePlugin({
+ *   name: "acme:security",
+ *   options: z.object({ frameAncestors: z.string().default("'none'") }),
+ *   runtime: {
+ *     after({ state, response }) {
+ *       // state.frameAncestors: string
+ *       return response;
+ *     },
+ *   },
+ * });
+ *
+ * // farm.config.ts
+ * plugins: [security({ frameAncestors: "'self'" })]
+ * ```
+ */
+export function definePlugin<
+  TState = undefined,
+  TRequestContext extends object = Record<string, never>,
+  TClientState = unknown,
+  TClientPublic = undefined,
+  TIntegrationInstance = unknown,
+  const TRoutes extends PluginRoutes = PluginRoutes,
+  TSchema extends PluginOptionsSchemaInput | undefined = undefined,
+>(
+  plugin: FarmPluginDefinition<
+    TState,
+    TRequestContext,
+    TClientState,
+    TClientPublic,
+    TIntegrationInstance,
+    TRoutes,
+    TSchema
+  >,
+): TSchema extends PluginOptionsSchemaInput
+  ? FarmPluginFactory<
+      InferPluginOptionsInput<TSchema>,
+      DefinedPlugin<
+        TState,
+        TRequestContext,
+        TClientState,
+        TClientPublic,
+        TIntegrationInstance,
+        TRoutes,
+        TSchema
+      >
+    >
+  : DefinedPlugin<
+      TState,
+      TRequestContext,
+      TClientState,
+      TClientPublic,
+      TIntegrationInstance,
+      TRoutes,
+      TSchema
+    > {
+  // Only a schema turns the plugin into a factory. An untyped plugin that
+  // already carries some other `options` value keeps working as before.
+  if (!isPluginOptionsSchema(plugin.options)) return declarePluginSchema(plugin) as never;
+  return createPluginFactory(
+    plugin as FarmPluginDefinition<any, any, any, any, any, any, any>,
+  ) as never;
+}
+
+function createPluginFactory(
+  definition: FarmPluginDefinition<any, any, any, any, any, any, PluginOptionsSchemaInput>,
+) {
+  const { options: schema, configure, setup, ...plugin } = definition;
+  return (input?: unknown): FarmPlugin => {
+    const options = parsePluginOptions(schema!, input);
+    // When setup returns nothing, the parsed options are the plugin's state.
+    const resolveState = (state: unknown) => (state === undefined ? options : state);
+    return declarePluginSchema({
+      ...plugin,
+      ...(configure
+        ? {
+            configure: (config: FarmConfig, context: FarmPluginContextFor<unknown, false>) =>
+              configure(config, { ...context, options }),
+          }
+        : {}),
+      setup(context: FarmPluginSetupContextFor<unknown, false>) {
+        const state = setup?.({ ...context, options });
+        return state instanceof Promise ? state.then(resolveState) : resolveState(state);
+      },
+    } as FarmPlugin);
+  };
 }
 
 /** The database a plugin's `schema` tables live in, when not `storage.client`. */

@@ -808,6 +808,130 @@ export default function Page() {
     }
   }, 120_000);
 
+  it("keeps production slot params request-local beneath a basePath", async () => {
+    const root = await createProductionFixture();
+    const writeRoute = async (name: string, source: string) => {
+      const target = path.join(root, "src", "app", name);
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, source);
+    };
+
+    try {
+      await writeRoute(
+        "layout.tsx",
+        `export default function Layout({ children, panel, trail }) {
+          return <html><body>{children}<aside>{panel}</aside><nav>{trail}</nav></body></html>;
+        }`,
+      );
+      await writeRoute(
+        "items/[id]/page.tsx",
+        `export default function Page({ params }) { return <main data-page-id={params.id}>Item</main>; }`,
+      );
+      await writeRoute(
+        "items/layout.tsx",
+        `export default function Layout({ children, detail }) { return <section>{children}{detail}</section>; }`,
+      );
+      // Both entries share a non-root owner. Include and exclude that owner in
+      // concurrent requests to exercise the emitted request-local owner cache.
+      await writeRoute(
+        "items/@detail/[id]/page.tsx",
+        `export default async function Detail({ params }) {
+          await Promise.resolve();
+          return <p data-detail-id={params.id}>Detail</p>;
+        }`,
+      );
+      await writeRoute(
+        "items/@detail/default.tsx",
+        `export default function Default() { return null; }`,
+      );
+      await writeRoute(
+        "docs/[[...slug]]/page.tsx",
+        `export default function Page() { return <main data-docs-page>Docs</main>; }`,
+      );
+      await writeRoute(
+        "@panel/items/[id]/page.tsx",
+        `export default async function Panel({ params }) {
+          await Promise.resolve();
+          return <p data-slot-id={params.id}>Panel</p>;
+        }`,
+      );
+      await writeRoute(
+        "@panel/default.tsx",
+        `export default function Fallback() { return <p data-slot-fallback>Fallback</p>; }`,
+      );
+      await writeRoute(
+        "@trail/[[...segments]]/page.tsx",
+        `export default function Trail({ params }) { return <p data-slot-path={params.segments}>Trail</p>; }`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          basePath: "/workspace",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "production-slot-request-isolation-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const initial = await response.text();
+          expect(initial).toContain("data-slot-fallback");
+          expect(initial).toContain('data-slot-path=""');
+          const origin = new URL(response.url).origin;
+          const cases = [
+            { pathname: "/items/first", id: "first", trail: "items/first" },
+            { pathname: "/items/second", id: "second", trail: "items/second" },
+            { pathname: "/items/a%2Fb", id: "a/b", trail: "items/a/b" },
+            { pathname: "/items/a%252Fb", id: "a%2Fb", trail: "items/a%2Fb" },
+            { pathname: "/items/%ZZ", id: null, trail: null },
+            { pathname: "/items/%E0%A4", id: null, trail: null },
+            { pathname: "/docs", id: null, trail: "docs" },
+            { pathname: "/docs/a%2Fb/c", id: null, trail: "docs/a/b/c" },
+          ];
+          // Interleave different fixed/catch-all matches, including repeated
+          // requests, so immutable preparation cannot leak mutable params.
+          await Promise.all(
+            [...cases, ...cases.slice().reverse()].map(async ({ pathname, id, trail }) => {
+              const result = await fetch(`${origin}/workspace${pathname}`);
+              if (trail === null) {
+                // H3 rejects malformed URL encodings before Farm's selector.
+                // Preserve that HTTP boundary as well as matcher-level parity.
+                expect(result.status, pathname).toBe(400);
+                expect(await result.text(), pathname).not.toContain("data-slot-id=");
+                return;
+              }
+              expect(result.status, pathname).toBe(200);
+              const html = await result.text();
+              expect(html, pathname).toContain(`data-slot-path="${trail}"`);
+              if (id === null) {
+                expect(html, pathname).toContain("data-docs-page");
+                expect(html, pathname).toContain("data-slot-fallback");
+                expect(html, pathname).not.toContain("data-slot-id=");
+                expect(html, pathname).not.toContain("data-detail-id=");
+              } else {
+                expect(html, pathname).toContain(`data-page-id="${id}"`);
+                expect(html, pathname).toContain(`data-slot-id="${id}"`);
+                expect(html, pathname).toContain(`data-detail-id="${id}"`);
+                expect(html, pathname).not.toContain("data-slot-fallback");
+              }
+            }),
+          );
+          const head = await fetch(`${origin}/workspace/items/first`, { method: "HEAD" });
+          expect(head.status).toBe(200);
+          expect(await head.text()).toBe("");
+        },
+        "/workspace",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("runs route middleware for pages beneath the configured basePath", async () => {
     const root = await createProductionFixture();
 

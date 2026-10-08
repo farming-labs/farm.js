@@ -16,6 +16,12 @@ import type { FarmSqlDialect } from "./schema-sql";
 export type FarmSchemaMigrationStep = { id: string; description?: string } & (
   | { renameColumn: { model: string; from: string; to: string } }
   | { renameTable: { from: string; to: string } }
+  /**
+   * Deletes data, so it runs only with `--allow-destructive`, and only on a
+   * column or table Farm recorded this plugin creating.
+   */
+  | { dropColumn: { model: string; column: string } }
+  | { dropTable: { table: string } }
   | {
       /** Per dialect; a dialect without SQL cannot run the step. */
       sql: Partial<Record<FarmSqlDialect, string | readonly string[]>>;
@@ -47,9 +53,13 @@ export function validateSchemaSteps(
     if (ids.has(step.id))
       throw new Error(`${owner}: two migration steps share the id "${step.id}".`);
     ids.add(step.id);
-    const kinds = ["renameColumn", "renameTable", "sql"].filter((kind) => kind in step);
+    const kinds = ["renameColumn", "renameTable", "dropColumn", "dropTable", "sql"].filter(
+      (kind) => kind in step,
+    );
     if (kinds.length !== 1) {
-      throw new Error(`${where} must be exactly one of renameColumn, renameTable, or sql.`);
+      throw new Error(
+        `${where} must be exactly one of renameColumn, renameTable, dropColumn, dropTable, or sql.`,
+      );
     }
     if ("renameColumn" in step) {
       const { model, from, to } = step.renameColumn;
@@ -71,6 +81,37 @@ export function validateSchemaSteps(
       }
       if (typeof from !== "string" || from.trim() === "") {
         throw new Error(`${where} needs the old table name in \`from\`.`);
+      }
+    } else if ("dropColumn" in step) {
+      const { model, column } = step.dropColumn;
+      const target = Object.prototype.hasOwnProperty.call(models, model)
+        ? models[model]
+        : undefined;
+      if (!target) {
+        throw new Error(`${where} drops a column of "${model}", which is not a model.`);
+      }
+      if (typeof column !== "string" || column.trim() === "") {
+        throw new Error(`${where} needs the column to drop in \`column\`.`);
+      }
+      // A step can only remove what this release no longer declares.
+      const current = Object.entries(target.fields).find(
+        ([key, field]) => key === column || field.name === column,
+      );
+      if (current) {
+        throw new Error(`${where} drops "${model}.${column}", which is still in the schema.`);
+      }
+    } else if ("dropTable" in step) {
+      const { table } = step.dropTable;
+      if (typeof table !== "string" || table.trim() === "") {
+        throw new Error(`${where} needs the table to drop in \`table\`.`);
+      }
+      const current = Object.entries(models).find(
+        ([key, model]) => key === table || model.name === table,
+      );
+      if (current) {
+        throw new Error(
+          `${where} drops "${table}", which is still in the schema${current[1].external ? " as a table the plugin does not own" : ""}.`,
+        );
       }
     } else {
       const sql = step.sql;

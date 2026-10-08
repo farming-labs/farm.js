@@ -322,6 +322,41 @@ describe("client plugin lifecycle", () => {
     expect(document.querySelector("[data-farm-runtime-error-overlay]")).toBeNull();
   });
 
+  it("keeps ResizeObserver loop notices out of the overlay but still reports them", async () => {
+    const phases: string[] = [];
+    const manager = createManager([
+      {
+        name: "test:errors",
+        definition: {
+          error({ phase }) {
+            phases.push(phase);
+          },
+        },
+      },
+    ]);
+    await manager.start();
+
+    for (const message of [
+      "ResizeObserver loop completed with undelivered notifications.",
+      "ResizeObserver loop limit exceeded",
+    ]) {
+      window.dispatchEvent(new ErrorEvent("error", { message }));
+    }
+    await Promise.resolve();
+    expect(document.querySelector("[data-farm-runtime-error-overlay]")?.hidden ?? true).toBe(true);
+    expect(phases).toEqual(["window", "window"]);
+
+    // An app that throws an Error with the same message is a real failure.
+    const thrown = new Error("ResizeObserver loop completed with undelivered notifications.");
+    window.dispatchEvent(new ErrorEvent("error", { error: thrown, message: thrown.message }));
+    await Promise.resolve();
+    expect(document.querySelector<HTMLElement>("[data-farm-runtime-error-overlay]")?.hidden).toBe(
+      false,
+    );
+
+    await manager.close();
+  });
+
   it("does not install the runtime error overlay in production", async () => {
     const manager = createClientPluginManager([], {
       router: createRouter(),

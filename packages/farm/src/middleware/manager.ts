@@ -8,7 +8,6 @@ import * as fs from "fs";
 import * as path from "path";
 import type { ViteDevServer } from "vite";
 import { toFileModuleUrl } from "../utils/file-module";
-import { canonicalizeRequestPathname } from "../utils/decode";
 import type { IncomingMessage, ServerResponse } from "http";
 import type {
   FarmMiddlewareConfig,
@@ -34,7 +33,12 @@ import { createCliColors } from "../cli-colors";
 import { appendMiddlewareRoutePath } from "./path";
 import type { FarmServerConfig, ResolvedFarmServerConfig } from "../server-http";
 import { resolveFarmRequestURL } from "../server/request";
-import { compileMiddlewareConfig, matchesMiddlewareConfig } from "./matcher";
+import {
+  compileMiddlewareConfig,
+  matchesMiddlewareConfig,
+  compileMiddlewareRoute,
+  matchesMiddlewareRoute,
+} from "./matcher";
 
 export interface DiscoveredMiddleware {
   path: string;
@@ -111,6 +115,7 @@ export class MiddlewareManager {
       const discovered: DiscoveredMiddleware[] = [];
       await this.discoverInDirectory(appDir, "/", discovered);
       for (const middleware of discovered) {
+        compileMiddlewareRoute(middleware);
         middlewareByPath.set(middleware.path, middleware);
       }
     }
@@ -244,7 +249,7 @@ export class MiddlewareManager {
     }> = [
       ...this.configMiddleware.map((mw) => ({ mw, routeMatch: { matched: true } })),
       ...this.middleware
-        .map((mw) => ({ mw, routeMatch: this.matchRoutePath(routePathname, mw.path) }))
+        .map((mw) => ({ mw, routeMatch: matchesMiddlewareRoute(routePathname, mw) }))
         .filter((entry) => entry.routeMatch.matched),
     ];
 
@@ -395,60 +400,6 @@ export class MiddlewareManager {
   }
 
   /**
-   * Match a pattern against pathname
-   */
-  private matchPattern(
-    pattern: string | RegExp,
-    pathname: string,
-  ): { matched: boolean; params?: Record<string, string> } {
-    // Same canonical pathname the production runner and the route matchers
-    // compare against, so a percent-encoded path cannot slip past a guard in
-    // development either.
-    const canonicalPathname = canonicalizeRequestPathname(pathname);
-
-    if (pattern instanceof RegExp) {
-      pattern.lastIndex = 0;
-      const match = pattern.exec(canonicalPathname);
-      return {
-        matched: !!match,
-        params: match?.groups ? { ...match.groups } : undefined,
-      };
-    }
-
-    if (pattern === "*" || pattern === "/(.*)") {
-      return { matched: true };
-    }
-
-    if (pattern.endsWith("(.*)")) {
-      // Strip a trailing slash before the wildcard so `/admin/(.*)` matches the
-      // `/admin` subtree like `/admin/**` does. Without this the prefix keeps
-      // its slash and the check becomes startsWith("/admin//"), which no path
-      // satisfies, so the matcher silently matches nothing.
-      const prefix = pattern.slice(0, -4).replace(/\/$/, "");
-      return {
-        matched: canonicalPathname === prefix || canonicalPathname.startsWith(`${prefix}/`),
-      };
-    }
-
-    const { regex, params } = this.compilePathPattern(pattern);
-    const match = regex.exec(canonicalPathname);
-    if (!match) {
-      return { matched: false };
-    }
-
-    const values: Record<string, string> = {};
-    params.forEach((param, index) => {
-      // Already decoded once by the canonicalization above.
-      values[param] = match[index + 1] || "";
-    });
-
-    return {
-      matched: true,
-      params: Object.keys(values).length > 0 ? values : undefined,
-    };
-  }
-
-  /**
    * Reload middleware (for HMR)
    */
   async reload(): Promise<void> {
@@ -461,30 +412,6 @@ export class MiddlewareManager {
 
   hasMiddleware(): boolean {
     return this.configMiddleware.length > 0 || this.middleware.length > 0;
-  }
-
-  private matchRoutePath(
-    pathname: string,
-    middlewarePath: string,
-  ): { matched: boolean; params?: Record<string, string> } {
-    if (middlewarePath === "/") return { matched: true };
-
-    const exactMatch = this.matchPattern(middlewarePath, pathname);
-    if (exactMatch.matched) {
-      return exactMatch;
-    }
-
-    const nestedMatch = this.matchPattern(`${middlewarePath}/:__farmRest*`, pathname);
-    if (!nestedMatch.matched) {
-      return { matched: false };
-    }
-
-    const params = { ...nestedMatch.params };
-    delete params.__farmRest;
-    return {
-      matched: true,
-      params: Object.keys(params).length > 0 ? params : undefined,
-    };
   }
 
   private getConfigHandlers(
@@ -513,68 +440,5 @@ export class MiddlewareManager {
   ): MiddlewareConfig {
     const { matcher, exclude, runtime } = entry;
     return { matcher, exclude, runtime };
-  }
-
-  private compilePathPattern(pattern: string): { regex: RegExp; params: string[] } {
-    const params: string[] = [];
-    const segments = pattern.split("/").filter(Boolean);
-
-    if (segments.length === 0) {
-      return { regex: /^\/$/, params };
-    }
-
-    const parts = segments.map((segment) => {
-      if (segment === "**") {
-        return "(?:/.*)?";
-      }
-
-      if (segment === "*") {
-        return "/[^/]+";
-      }
-
-      if (segment.startsWith(":")) {
-        const { name, modifier } = this.parseColonParam(segment);
-        params.push(name);
-
-        if (modifier === "*") {
-          return "(?:/(.*))?";
-        }
-        if (modifier === "+") {
-          return "/(.+)";
-        }
-        return "/([^/]+)";
-      }
-
-      if (segment.startsWith("[...") && segment.endsWith("]")) {
-        params.push(segment.slice(4, -1));
-        return "(?:/(.*))?";
-      }
-
-      if (segment.startsWith("[") && segment.endsWith("]")) {
-        params.push(segment.slice(1, -1));
-        return "/([^/]+)";
-      }
-
-      return `/${this.escapeRegex(segment).replace(/\\\*/g, "[^/]*")}`;
-    });
-
-    return {
-      regex: new RegExp(`^${parts.join("")}$`),
-      params,
-    };
-  }
-
-  private parseColonParam(segment: string): { name: string; modifier?: string } {
-    const raw = segment.slice(1);
-    const last = raw[raw.length - 1];
-    const modifier = last === "*" || last === "+" || last === "?" ? last : undefined;
-    return {
-      name: modifier ? raw.slice(0, -1) : raw,
-      modifier,
-    };
-  }
-
-  private escapeRegex(value: string): string {
-    return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
   }
 }

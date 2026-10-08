@@ -90,7 +90,13 @@ const DEFAULT_IGNORED_PATHS = [
 ];
 const FARM_REQUEST_METHOD_CONTEXT_KEY = createContextKey("@farm.js/core/request-method");
 
-let tracingState: FarmResolvedTracingConfig = normalizeFarmTracingConfig(false);
+const TRACING_RUNTIME = Symbol.for("@farm.js/core/tracing-runtime/v1");
+const runtime = globalThis as typeof globalThis & {
+  [TRACING_RUNTIME]?: FarmResolvedTracingConfig;
+};
+// Match the shared event bus across separately loaded core entries. Otherwise an
+// external plugin's events would reach listeners but silently lose trace context.
+const tracingState = (runtime[TRACING_RUNTIME] ??= normalizeFarmTracingConfig(false));
 
 export function normalizeFarmTracingConfig(
   config: FarmTracingUserConfig | undefined,
@@ -128,15 +134,18 @@ export function configureFarmTracing(
   config: FarmTracingUserConfig | FarmResolvedTracingConfig | undefined,
 ): void {
   if (isResolvedFarmTracingConfig(config)) {
-    tracingState = {
+    Object.assign(tracingState, {
       ...config,
       spans: new Set(config.spans),
       attributes: { ...config.attributes },
       ignorePaths: [...config.ignorePaths],
-    };
+    });
     return;
   }
-  tracingState = normalizeFarmTracingConfig(config as FarmTracingUserConfig | undefined);
+  Object.assign(
+    tracingState,
+    normalizeFarmTracingConfig(config as FarmTracingUserConfig | undefined),
+  );
 }
 
 function isResolvedFarmTracingConfig(
@@ -157,7 +166,7 @@ export function getFarmTracingConfig(): FarmResolvedTracingConfig {
 }
 
 export function resetFarmTracing(): void {
-  tracingState = normalizeFarmTracingConfig(false);
+  Object.assign(tracingState, normalizeFarmTracingConfig(false));
 }
 
 export function getFarmTraceContext(): FarmTraceContext | undefined {

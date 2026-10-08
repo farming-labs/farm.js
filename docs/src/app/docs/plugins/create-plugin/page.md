@@ -248,6 +248,56 @@ export function securityPlugin(options: SecurityPluginOptions = {}) {
 
 Keep the public surface small: export the factory, its options, and any intentionally shared types. Consumers should not need to understand the plugin's internal state or lifecycle wiring.
 
+## Validate options
+
+A typed factory already gives the app autocomplete. To also check options at runtime, declare them on the plugin with a [Standard Schema](https://standardschema.dev) (Zod, Valibot, ArkType, and others). `definePlugin` then returns the factory for you:
+
+```ts
+import { definePlugin } from "@farm.js/core";
+import { z } from "zod";
+
+export const securityPlugin = definePlugin({
+  name: "acme:security",
+  options: z.object({
+    frameAncestors: z.string().default("'none'"),
+    reportUri: z.url().optional(),
+  }),
+  runtime: {
+    after({ response, state }) {
+      const headers = new Headers(response.headers);
+      headers.set("content-security-policy", `frame-ancestors ${state.frameAncestors}`);
+      return new Response(response.body, { status: response.status, headers });
+    },
+  },
+});
+```
+
+Apps pass typed options as usual:
+
+```ts
+plugins: [securityPlugin({ frameAncestors: "'self'" })];
+```
+
+One schema gives you three things:
+
+- The app gets the schema's input type: options autocomplete, and wrong or unknown options are type errors.
+- The plugin receives the parsed options, with defaults applied. Without a `setup`, they are the plugin's `state`, so every hook reads `state.frameAncestors`.
+- Invalid options throw a `FarmPluginOptionsError` while the config loads, listing each problem, instead of failing later inside a hook.
+
+When the plugin needs to build something from its options, `setup` and `configure` receive them, and `setup`'s return value becomes the state:
+
+```ts
+export const reporting = definePlugin({
+  name: "acme:reporting",
+  options: z.object({ endpoint: z.url(), sampleRate: z.number().default(1) }),
+  setup({ options }) {
+    return { client: createReporter(options.endpoint, options.sampleRate) };
+  },
+});
+```
+
+When every option is optional, the factory can be called without arguments: `securityPlugin()` validates `{}`. Plugins are created while the config loads, so the schema must validate synchronously; asynchronous refinements are rejected.
+
 ## Depend on another plugin
 
 A plugin that needs another one says so with `dependsOn`, by name (`farm:teams`
