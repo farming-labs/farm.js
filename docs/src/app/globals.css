@@ -979,11 +979,6 @@
   stroke: none;
 }
 
-.benchmark-hairline :is(.hl-beam, .hl-hanger) {
-  fill: none;
-  stroke: rgb(255 255 255 / 0.36);
-}
-
 .benchmark-hairline [data-hot] :is(polygon, path, ellipse) {
   stroke: rgb(255 255 255 / 0.6);
 }

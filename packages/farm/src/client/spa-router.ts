@@ -183,6 +183,8 @@ export class SPARouter {
   private navigationListeners: Set<FarmNavigationListener> = new Set();
   private navigationState: FarmNavigationState = IDLE_NAVIGATION_STATE;
   private currentHistoryPath: string | null = null;
+  private currentHistoryHash = "";
+  private currentInterceptFrom: unknown;
   private currentHistoryIndex: number | null = null;
   private suppressNextPopState = false;
   private navigationSequence = 0;
@@ -234,6 +236,8 @@ export class SPARouter {
       // Track the rendered location and its position in the history stack so
       // popstate can report a real `from` and revert blocked traversals.
       this.currentHistoryPath = window.location.pathname + window.location.search;
+      this.currentHistoryHash = window.location.hash;
+      this.currentInterceptFrom = window.history.state?.[FARM_INTERCEPT_FROM_KEY];
       const existingIndex = readHistoryIndex(window.history.state);
       if (existingIndex == null) {
         try {
@@ -659,6 +663,8 @@ export class SPARouter {
     this.currentHistoryIndex = nextHistoryIndex;
     const resolvedHistoryUrl = resolveFarmNavigationURL(historyPath, window.location.href);
     this.currentHistoryPath = resolvedHistoryUrl.pathname + resolvedHistoryUrl.search;
+    this.currentHistoryHash = resolvedHistoryUrl.hash;
+    this.currentInterceptFrom = historyState[FARM_INTERCEPT_FROM_KEY];
     notifyRouterHistoryChange();
 
     this.updateDocumentMetadata(options.pageData.metadata);
@@ -913,6 +919,21 @@ export class SPARouter {
     // describes `to`; the page still rendered is the tracked current path.
     const from = this.currentHistoryPath ?? path;
 
+    // Native fragment links and their Back/Forward entries also emit popstate.
+    // They stay in the current document: let the browser own anchor scrolling
+    // and history subscribers update local UI without refetching the route.
+    // A changed interception context still needs a route render.
+    if (
+      path === from &&
+      window.location.hash !== this.currentHistoryHash &&
+      event.state?.[FARM_INTERCEPT_FROM_KEY] === this.currentInterceptFrom
+    ) {
+      this.cancelActiveNavigation();
+      this.currentHistoryHash = window.location.hash;
+      this.currentHistoryIndex = readHistoryIndex(event.state);
+      return;
+    }
+
     if (
       await this.shouldBlockNavigation({
         from,
@@ -925,6 +946,8 @@ export class SPARouter {
     }
 
     this.currentHistoryPath = path;
+    this.currentHistoryHash = window.location.hash;
+    this.currentInterceptFrom = event.state?.[FARM_INTERCEPT_FROM_KEY];
     this.currentHistoryIndex = readHistoryIndex(event.state);
 
     const navigation = this.startNavigation({
@@ -1141,6 +1164,8 @@ export class SPARouter {
         this.currentHistoryIndex == null ? null : this.currentHistoryIndex + 1;
     }
     this.currentHistoryPath = nextPath;
+    this.currentHistoryHash = parsedUrl.hash;
+    this.currentInterceptFrom = nextState[FARM_INTERCEPT_FROM_KEY];
 
     if (notify) notifyHistoryChange("page-state");
   }

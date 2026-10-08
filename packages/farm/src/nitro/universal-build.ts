@@ -5154,6 +5154,18 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   }`);
   });
 
+  // Prepare shared slot owners at build time. Root owners already have a
+  // constant-time check. Do not emit caching for empty or unique-owner manifests.
+  const slotOwnerCounts = new Map(routeSlots.map((slot) => [slot.ownerPattern, 0]));
+  for (const slot of routeSlots) {
+    slotOwnerCounts.set(slot.ownerPattern, (slotOwnerCounts.get(slot.ownerPattern) ?? 0) + 1);
+  }
+  const sharedSlotOwners = new Set(
+    [...slotOwnerCounts]
+      .filter(([owner, count]) => owner !== "/" && count > 1)
+      .map(([owner]) => owner),
+  );
+
   const routeSlotImports: string[] = [];
   const routeSlotRegistrations: string[] = [];
   routeSlots.forEach((slot, index) => {
@@ -5271,6 +5283,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   applyProductionMiddlewareHeaders,
   configureFarmCache,
   configureFarmObservability,
+  cloneFarmRequestWithContext,
   createDefaultErrorMarkup,
   createFarmInstrumentationLifecycle,
   createFarmLayoutSelector,
@@ -5930,6 +5943,19 @@ const selectApplicableLayouts = createFarmLayoutSelector(layoutRoutes);
 
 const routeSlots = [${routeSlotRegistrations.join(",")}
 ];
+// The slot manifest is immutable. Share the page matcher's preparation without
+// changing descriptors, owner-prefix checks, grouping, or candidate precedence.
+const preparedRouteSlots = new Map();
+for (const entry of routeSlots) {
+  if (entry.fallback) continue;
+  const segments = splitRuntimePath(entry.pattern);
+  preparedRouteSlots.set(entry, {
+    segments: segments,
+    prepared: prepareRuntimePageSegments(segments),
+    specificity: routeSlotSpecificity(entry),
+  });
+}
+${sharedSlotOwners.size > 0 ? `const sharedRouteSlotOwners = new Set(${JSON.stringify([...sharedSlotOwners])});` : ""}
 
 // Route-level error boundaries bundled at build time.
 const errorRoutes = [${errorRegistrations.join(",")}
@@ -6875,9 +6901,25 @@ function routeSlotSpecificity(slot) {
 }
 
 function matchRouteSlots(pathname, interceptFrom) {
-  const groups = new Map();
+  const groups = new Map();${
+    sharedSlotOwners.size > 0
+      ? `
+  // Incoming-owner results belong only to this request. Interception checks
+  // still use their own background pathname and the complete prefix matcher.
+  const ownerMatches = new Map();
+  function matchesSlotOwner(pattern) {
+    if (!sharedRouteSlotOwners.has(pattern)) return matchesRoutePrefix(pathname, pattern);
+    let matched = ownerMatches.get(pattern);
+    if (matched === undefined) {
+      matched = matchesRoutePrefix(pathname, pattern);
+      ownerMatches.set(pattern, matched);
+    }
+    return matched;
+  }`
+      : ""
+  }
   for (const slot of routeSlots) {
-    if (!matchesRoutePrefix(pathname, slot.ownerPattern)) continue;
+    if (!${sharedSlotOwners.size > 0 ? "matchesSlotOwner(slot.ownerPattern)" : "matchesRoutePrefix(pathname, slot.ownerPattern)"}) continue;
     const key = slot.ownerPattern + ":" + slot.name;
     const entries = groups.get(key) || [];
     entries.push(slot);
@@ -6889,6 +6931,8 @@ function matchRouteSlots(pathname, interceptFrom) {
       ? new URL(interceptFrom, "http://farm.local").pathname
       : null;
   const matches = [];
+  // Leave empty, fallback-only and ineligible requests unparsed.
+  let pathnameSegments;
 
   for (const entries of groups.values()) {
     const candidates = entries
@@ -6898,9 +6942,14 @@ function matchRouteSlots(pathname, interceptFrom) {
           (normalizedFrom && matchesRoutePrefix(normalizedFrom, entry.ownerPattern));
       })
       .map(function(entry) {
+        const slot = preparedRouteSlots.get(entry);
+        if (!pathnameSegments) pathnameSegments = splitRuntimePath(pathname).map(decodeRouteSegment);
         return {
           entry: entry,
-          params: matchRuntimePathPattern(entry.pattern, pathname),
+          specificity: slot.specificity,
+          params: slot.prepared
+            ? matchPreparedRuntimePageSegments(slot.prepared, pathnameSegments)
+            : matchRuntimePathSegments(slot.segments, pathnameSegments),
         };
       })
       .filter(function(candidate) { return candidate.params !== null; })
@@ -6908,7 +6957,7 @@ function matchRouteSlots(pathname, interceptFrom) {
         if (left.entry.interception !== right.entry.interception) {
           return left.entry.interception ? -1 : 1;
         }
-        return routeSlotSpecificity(right.entry) - routeSlotSpecificity(left.entry);
+        return right.specificity - left.specificity;
       });
 
     if (candidates[0]) {
@@ -7393,7 +7442,7 @@ async function handleFarmRequestInContext(
   ${
     hasServerRuntimeIntegrations
       ? `
-  const integrationDispatch = await handleIntegrationRequest(request.clone());
+  const integrationDispatch = await handleIntegrationRequest(cloneFarmRequestWithContext(request));
   if (integrationDispatch.response) {
     return integrationDispatch.response;
   }
@@ -7458,7 +7507,7 @@ async function handleFarmRequestInContext(
       ? ` && !${JSON.stringify(owned)}.includes(normalizeRuntimePath(routePathname))`
       : "";
   })()}) {
-    const docsResponse = await farmDocsHandler(request.clone());
+    const docsResponse = await farmDocsHandler(cloneFarmRequestWithContext(request));
     if (docsResponse) {
       if (!docsResponse.headers.get("content-type")?.toLowerCase().includes("text/html")) {
         return applyProductionMiddlewareHeaders(docsResponse, middlewareHeaders);
@@ -7486,7 +7535,7 @@ async function handleFarmRequestInContext(
   // The raw markdown source of a page route is the page's content in another
   // representation; middleware guarding the route must run before serving it.
   const markdownSourceResponse = await createFarmMarkdownSourceResponse?.({
-    request: request.clone(),
+    request: cloneFarmRequestWithContext(request),
     config: farmMdxConfig,
     resolveSource: (targetPathname) => {
       const match = matchPageRoute(getFarmRoutePathname(targetPathname));
@@ -7524,7 +7573,7 @@ async function handleFarmRequestInContext(
   ${
     apiRoutes.length > 0
       ? `
-  const apiResponse = await handleAPIRequest(request.clone());
+  const apiResponse = await handleAPIRequest(cloneFarmRequestWithContext(request));
   if (apiResponse) {
     return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
   }
@@ -7585,7 +7634,7 @@ async function handleFarmRequestInContext(
     metadataImageRoutes.length > 0
       ? `
   const metadataImageResponse = await handleMetadataImageRequest(
-    request.clone(),
+    cloneFarmRequestWithContext(request),
     routePathname
   );
   if (metadataImageResponse) {
@@ -7599,7 +7648,7 @@ async function handleFarmRequestInContext(
     applicationMetadataRoutes.length > 0
       ? `
   const applicationMetadataResponse = await handleApplicationMetadataRouteRequest(
-    request.clone(),
+    cloneFarmRequestWithContext(request),
     routePathname
   );
   if (applicationMetadataResponse) {
@@ -7653,7 +7702,7 @@ async function handleFarmRequestInContext(
   ${
     config.docs?.enabled
       ? `if (farmDocsAPIHandler && isFarmDocsAPIRequest(pathname)) {
-    const docsAPIResponse = await farmDocsAPIHandler(request.clone());
+    const docsAPIResponse = await farmDocsAPIHandler(cloneFarmRequestWithContext(request));
     if (docsAPIResponse) {
       return applyProductionMiddlewareHeaders(docsAPIResponse, middlewareHeaders);
     }

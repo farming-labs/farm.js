@@ -240,6 +240,14 @@ For an independent-runner check, manually dispatch the CI workflow with
 and uploads both raw JSON files. It does not assert timing thresholds or publish canonical results;
 review the inactive gains alongside active controls and recorded machine load.
 
+## Slot-route selector diagnostic
+
+The [slot-route diagnostic](../slot-route-inputs/README.md) compares the generated production
+selector with its unprepared baseline, including no-slot, fallback, catch-all and interception
+controls. It reports lookup time, one-time preparation cost and helper size separately. The
+framework fixture above has no route slots; do not interpret selector gains as improved HTTP
+latency or a changed framework ranking.
+
 ## Limitations
 
 This small dynamic-SSR fixture measures local framework baseline overhead on one machine. It does
