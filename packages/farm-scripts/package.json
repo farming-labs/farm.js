@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/scripts",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "Typed, lifecycle-aware third-party browser scripts for Farm.js",
   "keywords": [
     "consent",

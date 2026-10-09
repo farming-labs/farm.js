@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/content",
-  "version": "0.1.0-beta.3",
+  "version": "0.1.0-beta.4",
   "description": "Typed local content collections for Farm.js applications",
   "keywords": [
     "content",

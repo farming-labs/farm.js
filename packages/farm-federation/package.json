@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/federation",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "Client-side Module Federation for Farm.js applications",
   "keywords": [
     "farm.js",
