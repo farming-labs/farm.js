@@ -155,6 +155,9 @@ When the application has a `basePath`, the locale prefix stays inside that mount
 `/store/fr/products` for French. Server redirects, `Link`, locale switching, metadata alternates,
 static generation, and production routing all preserve the same order.
 
+Importing `Link` from `@farm.js/core/client` does not by itself load the ICU message formatter.
+Client translation APIs continue to include the formatter without an extra configuration flag.
+
 `Link` preserves the active locale automatically:
 
 ```tsx

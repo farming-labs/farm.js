@@ -12,7 +12,7 @@ import { getHashTargetElement } from "./hash-target";
 import { isFarmExternalNavigationURL, resolveFarmNavigationURL } from "./navigation-url";
 import { applyFarmMetadataToDocument, type NavigationMetadata } from "./metadata-reconciler";
 import type { FarmClientNavigationSession, FarmClientPluginManager } from "./plugin";
-import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-runtime";
+import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-state";
 import type { FarmI18nClientSnapshot } from "../i18n/types";
 import type { FarmIslandStrategy } from "../island";
 import type { FarmRouteRenderPlan } from "../navigation/render-plan";

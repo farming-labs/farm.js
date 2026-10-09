@@ -8,7 +8,7 @@ import {
   type FarmNavigationState,
 } from "./spa-router";
 import { notifyHistoryChange, subscribeHistoryChange } from "./history-sync";
-import { getFarmI18nClientState } from "../i18n/client-runtime";
+import { getFarmI18nClientState } from "../i18n/client-state";
 import { _resolveCurrentRequest } from "../server/request-bridge";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import {
