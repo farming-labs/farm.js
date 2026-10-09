@@ -109,6 +109,8 @@ Farm installs client-side chunk recovery automatically in the generated browser 
 
 This is meant for stale deploy assets, where a user has an older HTML page open while the server now points at newer chunks. Farm stores a short session guard per page before reloading, so repeated chunk failures do not trap the user in a reload loop. Ordinary runtime errors are left alone and should still be handled with route `error.tsx`, programmatic `error` components, monitoring, and tests.
 
+Farm's browser error overlay and its source-map diagnostics are development-only and are excluded from production client bundles. Production client-plugin error hooks and chunk recovery remain available; no configuration change is required.
+
 ## Rolling deployment safety
 
 Farm embeds a deployment ID in each HTML document and sends it with SPA data, RSC navigation, and server action requests. The server also stores the ID in an HttpOnly, `SameSite=Lax` cookie so a progressively enhanced form action carries the same protection before JavaScript loads.

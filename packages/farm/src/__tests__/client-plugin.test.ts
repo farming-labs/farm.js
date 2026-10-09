@@ -358,7 +358,8 @@ describe("client plugin lifecycle", () => {
   });
 
   it("does not install the runtime error overlay in production", async () => {
-    const manager = createClientPluginManager([], {
+    const error = vi.fn();
+    const manager = createClientPluginManager([{ name: "monitoring", definition: { error } }], {
       router: createRouter(),
       isDev: false,
       isProd: true,
@@ -367,8 +368,15 @@ describe("client plugin lifecycle", () => {
     await manager.start();
 
     await manager.reportError(new Error("Production failure"), "window");
+    window.dispatchEvent(new ErrorEvent("error", { error: new Error("Browser failure") }));
+    await vi.waitFor(() => expect(error).toHaveBeenCalledTimes(2));
 
     expect(document.querySelector("[data-farm-runtime-error-overlay]")).toBeNull();
+    const remove = vi.spyOn(window, "removeEventListener");
     await manager.close();
+    expect(remove).toHaveBeenCalledWith("error", expect.any(Function));
+    expect(remove).toHaveBeenCalledWith("unhandledrejection", expect.any(Function));
+    await manager.reportError(new Error("Closed runtime"), "window");
+    expect(error).toHaveBeenCalledTimes(2);
   });
 });
