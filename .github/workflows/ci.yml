@@ -28,6 +28,10 @@ on:
         type: choice
         options: [inputs, segments]
         default: inputs
+      configured-headers-benchmark:
+        description: Compare configured header matching with same-code SSR controls
+        type: boolean
+        default: false
   push:
     branches: [main]
   pull_request:
@@ -38,6 +42,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  configured-headers-benchmark:
+    name: Configured Headers Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.configured-headers-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build local framework packages
+        run: |
+          pnpm --filter @farm.js/core build
+          pnpm --filter @farm.js/cli build
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+      - name: Verify matching and diagnostic controls
+        run: |
+          pnpm --filter @farm.js/core exec vitest run src/__tests__/configured-header-runtime.test.ts src/__tests__/universal-build-router-runtime.test.ts src/__tests__/route-matcher-parity.test.ts src/__tests__/config-route-plugins.test.ts
+          node --test benchmarks/configured-headers/production.test.mjs
+      - name: Install and build the maintained fixture
+        run: |
+          pnpm --dir benchmarks/frameworks --filter farm-framework-benchmark install --frozen-lockfile
+          pnpm --dir benchmarks/frameworks/apps/farm exec farm build --preset node-server
+      - name: Collect independent comparisons sequentially
+        run: |
+          node benchmarks/configured-headers/run.mjs > "${{ runner.temp }}/configured-headers-helper-first.json"
+          node benchmarks/configured-headers/run.mjs > "${{ runner.temp }}/configured-headers-helper-second.json"
+          node benchmarks/configured-headers/production.mjs > "${{ runner.temp }}/configured-headers-ssr-first.json"
+          node benchmarks/configured-headers/production.mjs > "${{ runner.temp }}/configured-headers-ssr-second.json"
+      - name: Retain every sample for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: configured-headers-${{ github.sha }}
+          path: ${{ runner.temp }}/configured-headers-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
   markdown-request-url-benchmark:
     name: Markdown Request URL Diagnostic
     if: github.event_name == 'workflow_dispatch' && inputs.markdown-request-url-benchmark

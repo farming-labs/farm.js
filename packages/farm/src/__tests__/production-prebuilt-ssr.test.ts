@@ -2875,6 +2875,25 @@ export default function DynamicPage({ params }) {
               source: "/:path*",
               headers: [{ key: "X-Production-Header", value: "standalone" }],
             },
+            {
+              source: "/:slug",
+              headers: [
+                { key: "X-Header-Order", value: "dynamic" },
+                { key: "Set-Cookie", value: "shared=1; Path=/" },
+              ],
+            },
+            {
+              source: "/about",
+              headers: [
+                { key: "X-Header-Order", value: "exact" },
+                { key: "Set-Cookie", value: "shared=1; Path=/" },
+                { key: "set-cookie", value: "about=1; Path=/" },
+              ],
+            },
+            {
+              source: "/docs/:parts*",
+              headers: [{ key: "X-Header-Order", value: "catch-all" }],
+            },
           ],
           generateBuildId: () => "prebuilt-ssr-test",
         },
@@ -2918,6 +2937,7 @@ export default function DynamicPage({ params }) {
       await runProductionRequest(serverDir, async (response) => {
         expect(response.status).toBe(200);
         expect(response.headers.get("x-production-header")).toBe("standalone");
+        expect(response.headers.has("x-header-order")).toBe(false);
         expect(response.headers.get("cache-control")).toBe("private, no-store");
         const html = await response.text();
         expect(html).toContain("prebuilt SSR output");
@@ -2947,11 +2967,18 @@ export default function DynamicPage({ params }) {
         for (const pathname of ["/about", "/about/"]) {
           const exactResponse = await fetch(new URL(pathname, response.url));
           expect(exactResponse.status).toBe(200);
+          expect(exactResponse.headers.get("x-header-order")).toBe("exact");
+          expect(exactResponse.headers.getSetCookie()).toEqual([
+            "shared=1; Path=/",
+            "about=1; Path=/",
+          ]);
           await expect(exactResponse.text()).resolves.toContain("exact production route");
         }
 
         const dynamicResponse = await fetch(new URL("/contact", response.url));
         expect(dynamicResponse.status).toBe(200);
+        expect(dynamicResponse.headers.get("x-header-order")).toBe("dynamic");
+        expect(dynamicResponse.headers.getSetCookie()).toEqual(["shared=1; Path=/"]);
         const dynamicHtml = await dynamicResponse.text();
         expect(dynamicHtml).toContain("dynamic production route");
         expect(dynamicHtml).toContain("contact");
@@ -2959,6 +2986,7 @@ export default function DynamicPage({ params }) {
         for (const pathname of ["/docs", "/docs/routing/production"]) {
           const catchAllResponse = await fetch(new URL(pathname, response.url));
           expect(catchAllResponse.status).toBe(200);
+          expect(catchAllResponse.headers.get("x-header-order")).toBe("catch-all");
           await expect(catchAllResponse.text()).resolves.toContain(
             "optional catch-all production route",
           );
