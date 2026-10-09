@@ -1,5 +1,6 @@
 import type { Metadata } from "./types";
-import { renderFarmAgentJsonLd, serializeJsonLd, type FarmAgentJsonLd } from "./agent-config";
+import type { FarmAgentJsonLd } from "./agent-config";
+import { renderFarmAgentJsonLd, serializeJsonLd } from "./agent-json-ld";
 
 export type MetadataImageKind = "opengraph" | "twitter";
 
