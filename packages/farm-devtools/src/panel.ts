@@ -128,24 +128,26 @@ export function startPanel(root: HTMLElement) {
       snapshot!.diagnostics
         .map(
           (item) =>
-            `<article class="fd-diagnostic"><span class="${item.severity === "error" ? "fd-danger" : "fd-amber"}">${icon(item.severity === "error" ? "activity" : "shield")}</span><div><div class="fd-label">${esc(item.code)} · ${esc(item.severity)}</div><h3>${esc(item.title)}</h3><p>${esc(item.message)}</p>${item.action ? `<p>${esc(item.action)}</p>` : ""}</div></article>`,
+            `<article class="fd-diagnostic" data-severity="${esc(item.severity)}"><span class="${item.severity === "error" ? "fd-danger" : "fd-amber"}">${icon("activity")}</span><div><div class="fd-diagnostic-head"><h3>${esc(item.title)}</h3><span class="fd-tag" data-tone="${item.severity === "error" ? "bad" : item.severity === "warning" ? "warn" : "info"}">${esc(item.severity)}</span></div><div class="fd-label">${esc(item.code)}</div><p>${esc(item.message)}</p>${item.action ? `<p class="fd-diagnostic-action">${esc(item.action)}</p>` : ""}</div></article>`,
         )
         .join("") ||
-      `<div class="fd-diagnostic"><span class="fd-green">${icon("shield")}</span><div><h3>Framework checks passed</h3><p>No runtime configuration diagnostics in this snapshot.</p></div></div>`
+      `<div class="fd-diagnostic" data-severity="ok"><span class="fd-green">${icon("shield")}</span><div><h3>Framework checks passed</h3><p>No runtime configuration diagnostics in this snapshot.</p></div></div>`
     );
   }
   function overview() {
     const data = snapshot!;
     main.innerHTML =
       heading("Overview", `${data.project.name} · ${data.project.srcDir}`, "Development") +
-      `<div class="fd-stats">${[
-        ["PAGES", data.counts.pages],
-        ["API ROUTES", data.counts.apiRoutes],
-        ["INTEGRATIONS", data.counts.integrations],
-      ]
+      `<div class="fd-stats">${(
+        [
+          ["Pages", data.counts.pages, "route"],
+          ["API routes", data.counts.apiRoutes, "api"],
+          ["Integrations", data.counts.integrations, "blocks"],
+        ] as const
+      )
         .map(
-          ([name, value]) =>
-            `<div class="fd-stat"><span class="fd-label">${name}</span><span class="fd-stat-value">${value}</span></div>`,
+          ([name, value, image]) =>
+            `<div class="fd-stat"><span class="fd-label">${icon(image)}${name}</span><span class="fd-stat-value">${value}</span></div>`,
         )
         .join(
           "",
@@ -159,7 +161,7 @@ export function startPanel(root: HTMLElement) {
               `<button type="button" class="fd-preview-row" data-route="${index}">${inlineCode(route.pattern)}<span class="fd-preview-meta">${esc(runtime(route.runtime))}</span>${icon("chevron")}</button>`,
           )
           .join("") || empty("No page routes discovered.")
-      }</div></section><section class="fd-section"><div class="fd-section-heading"><h3>Diagnostics</h3><button type="button" class="fd-link-button" data-go="diagnostics"><span class="fd-button-label">${data.counts.diagnostics} notices</span>${icon("external")}</button></div>${diagnosticRows()}</section>`;
+      }</div></section><section class="fd-section"><div class="fd-section-heading"><h3>Diagnostics</h3><button type="button" class="fd-link-button" data-go="diagnostics"><span class="fd-button-label">${data.counts.diagnostics} ${data.counts.diagnostics === 1 ? "notice" : "notices"}</span>${icon("external")}</button></div>${diagnosticRows()}</section>`;
     main.querySelectorAll<HTMLButtonElement>("[data-route]").forEach(
       (button) =>
         (button.onclick = () => {
@@ -239,7 +241,7 @@ export function startPanel(root: HTMLElement) {
     const data = snapshot!;
     main.innerHTML =
       heading("Systems", "Configured integrations, middleware, and storage.") +
-      `<section class="fd-section fd-flush-top"><div class="fd-section-heading"><h3>Integrations</h3><span class="fd-label">${data.integrations.length} REGISTERED</span></div>${data.integrations.map((item) => `<details><summary>${esc(item.key)} <span class="fd-muted">/ ${esc(item.type)}</span></summary><dl class="fd-properties">${property("Category", item.category)}${property("Runtime", item.serverRuntime ? "Server" : "Platform")}${property("Middleware", String(item.middlewareCount))}${property("Providers", String(item.providerCount))}${property("Schema models", String(item.schemaModelCount))}</dl>${item.routes.map((route) => `<div class="fd-tree-item">${inlineCode(route.methods.join(" / ") + " " + route.path)}</div>`).join("")}</details>`).join("") || empty("No integrations configured.")}</section><section class="fd-section"><h3>Request middleware</h3>${data.middleware.map((item) => `<div class="fd-system-row">${icon("shield")}<div>${inlineCode(item.path)}<p>${esc(item.filePath || item.source)}</p></div><span class="fd-tag">${item.handlerCount} handlers</span></div>`).join("") || empty("No request middleware configured.")}</section><section class="fd-section"><h3>KV mounts</h3>${data.storage.map((item) => `<div class="fd-system-row">${icon("database")}<div>${inlineCode(item.mount)}<p>${esc(item.driver)}</p></div><span class="fd-tag">${item.default ? "Default" : "Configured"}</span></div>`).join("") || empty("No storage mounts.")}</section>`;
+      `<section class="fd-section fd-flush-top"><div class="fd-section-heading"><h3>Integrations</h3><span class="fd-label">${data.integrations.length} REGISTERED</span></div>${data.integrations.map((item) => `<details><summary>${esc(item.key)} <span class="fd-muted">/ ${esc(item.type)}</span></summary><dl class="fd-properties">${property("Category", item.category)}${property("Runtime", item.serverRuntime ? "Server" : "Platform")}${property("Middleware", String(item.middlewareCount))}${property("Providers", String(item.providerCount))}${property("Schema models", String(item.schemaModelCount))}</dl>${item.routes.map((route) => `<div class="fd-tree-item">${inlineCode(route.methods.join(" / ") + " " + route.path)}</div>`).join("")}</details>`).join("") || empty("No integrations configured.")}</section><section class="fd-section"><h3>Request middleware</h3>${data.middleware.map((item) => `<div class="fd-system-row">${icon("shield")}<div>${inlineCode(item.path)}<p>${esc(item.filePath || item.source)}</p></div><span class="fd-tag">${item.handlerCount} ${item.handlerCount === 1 ? "handler" : "handlers"}</span></div>`).join("") || empty("No request middleware configured.")}</section><section class="fd-section"><h3>KV mounts</h3>${data.storage.map((item) => `<div class="fd-system-row">${icon("database")}<div>${inlineCode(item.mount)}<p>${esc(item.driver)}</p></div><span class="fd-tag">${item.default ? "Default" : "Configured"}</span></div>`).join("") || empty("No storage mounts.")}</section>`;
   }
   function renderRuntime() {
     const data = snapshot!;
