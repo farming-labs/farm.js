@@ -25,9 +25,8 @@ describe("generateConfiguredResponseHeadersRuntimeSource", () => {
     const source = generateConfiguredResponseHeadersRuntimeSource();
     const applyConfiguredResponseHeaders = new Function(
       "configuredHeaderRoutes",
-      "matchRuntimePathPattern",
       "appendFarmLinkHeader",
-      `${source}; return applyConfiguredResponseHeaders;`,
+      `${generateRuntimePathMatcherSource()}\n${source}; return applyConfiguredResponseHeaders;`,
     )(
       [
         {
@@ -38,7 +37,6 @@ describe("generateConfiguredResponseHeadersRuntimeSource", () => {
           ],
         },
       ],
-      (source: string, pathname: string) => source === pathname,
       (headers: Headers, value: string) => headers.append("Link", value),
     ) as (response: Response, pathname: string) => Response;
     const handlerHeaders = new Headers();
@@ -60,9 +58,8 @@ describe("generateConfiguredResponseHeadersRuntimeSource", () => {
     const source = generateConfiguredResponseHeadersRuntimeSource();
     const applyConfiguredResponseHeaders = new Function(
       "configuredHeaderRoutes",
-      "matchRuntimePathPattern",
       "appendFarmLinkHeader",
-      `${source}; return applyConfiguredResponseHeaders;`,
+      `${generateRuntimePathMatcherSource()}\n${source}; return applyConfiguredResponseHeaders;`,
     )(
       [
         {
@@ -70,7 +67,6 @@ describe("generateConfiguredResponseHeadersRuntimeSource", () => {
           headers: [{ key: "Set-Cookie", value: "theme=dark; Path=/" }],
         },
       ],
-      () => true,
       (headers: Headers, value: string) => headers.append("Link", value),
     ) as (response: Response, pathname: string) => Response;
 

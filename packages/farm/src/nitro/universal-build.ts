@@ -4749,6 +4749,13 @@ function withFarmIntegrationSetCookies(headers, cookies) {
 
 export function generateConfiguredResponseHeadersRuntimeSource(): string {
   return `
+// Configured patterns are immutable build output. Reuse the page matcher's
+// fixed-segment preparation, retaining the complete matcher for catch-alls.
+const preparedHeaderRoutes = configuredHeaderRoutes.map(function(route) {
+  const segments = splitRuntimePath(route.source);
+  return { headers: route.headers, segments, prepared: prepareRuntimePageSegments(segments) };
+});
+
 function getConfiguredSetCookieHeaders(headers) {
   const getSetCookie = headers.getSetCookie;
   if (typeof getSetCookie === "function") return getSetCookie.call(headers);
@@ -4757,9 +4764,14 @@ function getConfiguredSetCookieHeaders(headers) {
 }
 
 function applyConfiguredResponseHeaders(response, pathname) {
+  if (preparedHeaderRoutes.length === 0) return response;
+  const pathnameSegments = splitRuntimePath(pathname).map(decodeRouteSegment);
   let headers;
-  for (const headerRoute of configuredHeaderRoutes) {
-    if (!matchRuntimePathPattern(headerRoute.source, pathname)) continue;
+  for (const headerRoute of preparedHeaderRoutes) {
+    const matched = headerRoute.prepared
+      ? matchPreparedRuntimePageSegments(headerRoute.prepared, pathnameSegments)
+      : matchRuntimePathSegments(headerRoute.segments, pathnameSegments);
+    if (!matched) continue;
     for (const header of headerRoute.headers) {
       const currentHeaders = headers || response.headers;
       const normalizedKey = header.key.toLowerCase();
