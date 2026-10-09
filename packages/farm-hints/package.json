@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/hints",
-  "version": "0.1.0-beta.5",
+  "version": "0.1.0-beta.6",
   "description": "Development accessibility, performance, HTML, and third-party hints for Farm.js",
   "keywords": [
     "accessibility",

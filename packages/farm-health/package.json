@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/health",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "Dependency-aware health probes for Farm.js applications",
   "keywords": [
     "farm.js",

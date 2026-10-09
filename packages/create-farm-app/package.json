@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/create-app",
-  "version": "0.1.3-beta.0",
+  "version": "0.1.3",
   "description": "Create a new FARMJS application",
   "keywords": [
     "@farm.js/create-app",
