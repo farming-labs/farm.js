@@ -1299,8 +1299,9 @@ test("uses the invoking package manager throughout generated guidance", async ()
   }
 });
 
-test("generates starters that self-host with farm start and deploy to Vercel explicitly", async () => {
+test("generates starters that start the built server and deploy to Vercel explicitly", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-self-host-"));
+  const builtServer = "node .farm/.output/server/index.mjs";
   const starters = [
     { template: "basic" },
     ...["preact", "solid", "vue", "svelte"].map((renderer) => ({ template: "basic", renderer })),
@@ -1332,12 +1333,29 @@ test("generates starters that self-host with farm start and deploy to Vercel exp
       );
       const farmConfig = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
 
-      // Without a pinned target, platform builds are detected and every other
-      // host gets the Node server that `farm start` runs.
-      assert.equal(packageJson.scripts.start, "farm start", projectName);
+      // Hosts that prune devDependencies before `start` would lose the `farm`
+      // CLI, so `start` runs the self-contained server that `farm build` emits.
+      assert.equal(packageJson.scripts.start, builtServer, projectName);
       assert.equal(packageJson.scripts.deploy, "farm deploy --vercel", projectName);
       assert.doesNotMatch(farmConfig, /\btarget:/, projectName);
     }
+
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageDir, "bin/create-farm-app.js"),
+        "react-compiler-app",
+        "--template",
+        "react-compiler",
+        "--typescript",
+        "--skip-install",
+      ],
+      { cwd: tempDir, stdio: "pipe" },
+    );
+    const compilerPackage = JSON.parse(
+      await readFile(path.join(tempDir, "react-compiler-app/package.json"), "utf8"),
+    );
+    assert.equal(compilerPackage.scripts.start, builtServer);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

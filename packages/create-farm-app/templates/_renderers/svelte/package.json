@@ -7,7 +7,7 @@
     "dev": "farm dev",
     "build": "farm build",
     "deploy": "farm deploy --vercel",
-    "start": "farm start",
+    "start": "node .farm/.output/server/index.mjs",
     "type-check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
