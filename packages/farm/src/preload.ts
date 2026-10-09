@@ -330,7 +330,12 @@ function findHtmlLinkElements(html: string): HtmlLinkElement[] {
   if (typeof html === "string" && !/\bpreload\b/i.test(html)) return [];
 
   const elements: HtmlLinkElement[] = [];
-  const lowerHtml = html.toLowerCase();
+  let lowerHtml = html.toLowerCase();
+  if (lowerHtml.length !== html.length) {
+    // Unicode lowercasing can expand UTF-16 offsets (for example, İ -> i̇).
+    // Tag names only need ASCII folding; preserve source offsets for the scan.
+    lowerHtml = html.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+  }
   // Sticky matches stay anchored at this tag without slicing the rest of the
   // document. Keep their cursors local to this synchronous scan.
   const rawTextTag = /<(script|style|template|textarea|title|noscript|svg)(?=[\s/>])/y;
