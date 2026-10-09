@@ -184,9 +184,9 @@ pnpm build
 HOST=0.0.0.0 PORT=3000 pnpm start
 ```
 
-`farm start` is equivalent for the `node` target and adds `--port`/`--host` flags plus clear errors when the configured target has no local server.
+`farm start` is equivalent for the `node` target and adds `--port`/`--host` flags plus clear errors when the configured target has no local server. It runs through the `farm` CLI, which is a devDependency, so on hosts that remove devDependencies before starting the app, use the `node` command instead. New starters use it as their `start` script.
 
-For Docker, copy the app, install production dependencies, run `farm build`, expose the selected port, and start `node .output/server/index.mjs`. For a VPS, run the same start command behind nginx, Caddy, systemd, or a process manager such as PM2. Environment variables should be provided by the host at runtime, not committed into the bundle.
+For Docker, copy the app, install its dependencies including devDependencies (`farm build` needs the CLI), run `farm build`, expose the selected port, and start `node .output/server/index.mjs`. The generated server is self-contained, so the runtime image only needs the output directory, not `node_modules`. For a VPS, run the same start command behind nginx, Caddy, systemd, or a process manager such as PM2. Environment variables should be provided by the host at runtime, not committed into the bundle.
 
 ## Nitro preset pass-through
 

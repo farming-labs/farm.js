@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "farm dev",
     "build": "farm build",
-    "start": "farm start",
+    "start": "node .farm/.output/server/index.mjs",
     "experiment": "pnpm run build && node scripts/verify-experiment.mjs",
     "type-check": "tsc --noEmit"
   },
