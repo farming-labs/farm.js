@@ -65,6 +65,7 @@ export const farmPackageBuildOptions = {
     "i18n/server": "src/i18n/server.ts",
     "i18n/client": "src/i18n/client.tsx",
     "internal/client-runtime": "src/client/production-runtime.ts",
+    "internal/client-error-overlay": "src/client/runtime-error-overlay.ts",
     "internal/isolated-boundary": "src/client/isolated-boundary.ts",
     "internal/production-runtime": "src/nitro/production-runtime.ts",
     "internal/product-telemetry-runtime": "src/product-telemetry.ts",
@@ -86,6 +87,9 @@ export const farmPackageBuildOptions = {
   dts: true,
   clean: true,
   external: [
+    // Preserve the guarded import in CJS too, rather than inlining a retained
+    // __esm initializer for the development-only diagnostics graph.
+    "@farm.js/core/internal/client-error-overlay",
     "react",
     "react-dom",
     "@vercel/og",

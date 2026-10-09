@@ -181,6 +181,9 @@
       "internal/client-runtime": [
         "./dist/internal/client-runtime.d.ts"
       ],
+      "internal/client-error-overlay": [
+        "./dist/internal/client-error-overlay.d.ts"
+      ],
       "internal/isolated-boundary": [
         "./dist/internal/isolated-boundary.d.ts"
       ],
@@ -619,6 +622,11 @@
       "types": "./dist/internal/client-runtime.d.ts",
       "import": "./dist/internal/client-runtime.mjs",
       "require": "./dist/internal/client-runtime.cjs"
+    },
+    "./internal/client-error-overlay": {
+      "types": "./dist/internal/client-error-overlay.d.ts",
+      "import": "./dist/internal/client-error-overlay.mjs",
+      "require": "./dist/internal/client-error-overlay.cjs"
     },
     "./internal/isolated-boundary": {
       "types": "./dist/internal/isolated-boundary.d.ts",
