@@ -48,3 +48,33 @@ These are helper measurements, not full HTTP/SSR throughput or cross-framework r
 maintained framework benchmark fixtures and published result files must remain unchanged. This
 optimization affects production header matching only; development already prepares its configured
 patterns, and neither development code nor the prerender/header contract is changed.
+
+## Full-response and same-code controls
+
+With the maintained Farm benchmark fixture built, Node 24.11+ can run the production diagnostic:
+
+```sh
+node --test benchmarks/configured-headers/production.test.mjs
+node benchmarks/configured-headers/production.mjs > /tmp/configured-headers-ssr-first.json
+node benchmarks/configured-headers/production.mjs > /tmp/configured-headers-ssr-second.json
+```
+
+This measures the built fixture's `fetch` entry, full response body consumption, and after-response
+completion. All 120 ordered rows, fresh timestamps, cache headers, and normalized document hashes
+are checked outside timing on every request. No fixture or built file is edited. A guarded import
+hook restores the previous matching implementation for the baseline and rejects unexpected build
+shapes. The candidate and two control arms load identical source, verified by hashes; all four
+arms install the same hook. Ambient runtime/benchmark environment overrides are removed in child
+processes. Only the header matcher changes between baseline and candidate.
+
+Seven process groups reverse order on alternating rounds. Each arm warms 1,000 requests and
+measures 5,000, retaining ten batch means. The report includes every paired change, every identical-
+code control change, and host load. Outliers are not discarded. If same-code differences are similar
+to the proposed gain/regression, the run is inconclusive; a successful run is not a performance
+approval. These checks do not measure network throughput, cold starts, or cross-framework scores.
+
+The existing `CI` workflow has an opt-in `configured-headers-benchmark` dispatch input. Its separate
+runner builds and tests before measuring, then collects two helper and two full-response runs
+sequentially. Normal PR/push runs skip this job. Artifact `configured-headers-<commit>` retains all
+raw samples for 14 days. Dispatch on the candidate branch and inspect both the changed-code and
+same-code distributions before proposing the optimization for merge.
