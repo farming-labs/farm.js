@@ -453,7 +453,11 @@ export class FarmClientDataCache {
 
   private emit(key: string, event?: "invalidate"): void {
     this.notifyListeners(key, event);
+    if (this.listeners.size === 0) return;
     for (const [alias, target] of this.aliases) {
+      // Check live subscriptions in alias order: earlier listeners may add or
+      // remove subscribers while notification is in progress.
+      if (!this.listeners.has(alias)) continue;
       if (this.resolveKey(target) === key) {
         this.notifyListeners(alias, event);
       }
