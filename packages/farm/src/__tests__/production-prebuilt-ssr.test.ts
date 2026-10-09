@@ -462,7 +462,7 @@ describe("production prebuilt SSR output", () => {
         transformHTML(html) {
           return html.replace(
             "</head>",
-            '<link rel="preload" as="image" href="/plugin.webp" fetchpriority="high"></head>',
+            `<meta name="unicode-preload" content="İstanbul"><script>globalThis.__preloadLiteral = '<link rel="preload" as="image" href="/inert.webp">';</script><link rel="preload" as="image" href="/plugin.webp" fetchpriority="high"></head>`,
           );
         },
       });
@@ -509,6 +509,9 @@ describe("production prebuilt SSR output", () => {
             expect(html).toContain("prebuilt SSR output");
             if (withPlugin) {
               expect(html).toContain('href="/plugin.webp"');
+              expect(html).toContain(
+                `globalThis.__preloadLiteral = '<link rel="preload" as="image" href="/inert.webp">';`,
+              );
               expect(response.headers.get("link") || "").not.toContain(".webp");
             } else {
               expect(response.headers.get("link")).toContain("/first.webp");

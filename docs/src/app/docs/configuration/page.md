@@ -646,6 +646,8 @@ Farm keeps one image preload—the explicitly high-priority hint first—and two
 default. Lower-priority hints above those budgets are removed from buffered HTML and `Link` response
 headers, while the actual image and font elements remain unchanged and load normally. Route scripts,
 stylesheets, and module preloads are not removed.
+Preload-looking text inside comments, scripts, and other inert content is left unchanged, including
+when surrounding Unicode text changes length during case conversion.
 
 Production responses reuse buffered HTML without a body decode/re-encode when Farm can prove it
 contains no preload candidates. `Link` header budgets still apply, and HTML transformed by plugins
