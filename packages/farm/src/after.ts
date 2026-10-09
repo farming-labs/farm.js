@@ -268,7 +268,9 @@ export async function _runWithAfterNodeResponse<T>(
 
   response.once("finish", finish);
   response.once("close", finish);
-  if (response.writableEnded) finishSoon(state);
+  // Completion events may have fired before this middleware was entered.
+  // Use the same cleanup path, deferred so the handler can register its work.
+  if (response.writableEnded || response.destroyed) setTimeout(finish, 0);
   registerPlatformLifetime(state, context);
 
   return await afterStorage.run(state, handler);

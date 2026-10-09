@@ -78,6 +78,8 @@ The same API works in layouts, request middleware, server functions, and form ac
 - Calling `after()` outside an active server request throws a clear runtime error.
 
 On serverless adapters, Farm registers the queue with the provider's `waitUntil` lifecycle. On a Node server, Farm uses the response `finish` and `close` events. This keeps supported invocations alive without making the browser wait for the callback.
+If the Node response has already ended or been destroyed when Farm's middleware starts, Farm
+still completes the queue and removes its response listeners without waiting for another event.
 
 ## Best practices
 
