@@ -7,6 +7,7 @@ import {
   createCompiledComponentWithFeatures,
   keyedRowsIdentityRuntimeFeature,
   keyedRowsIdentityFilterHintedRuntimeFeature,
+  keyedRowsIdentityFilterOnlyRuntimeFeature,
   type CompilerStateUpdater,
 } from "../compiler-runtime";
 
@@ -50,6 +51,7 @@ describe.each([
   undefined,
   keyedRowsIdentityRuntimeFeature,
   keyedRowsIdentityFilterHintedRuntimeFeature,
+  keyedRowsIdentityFilterOnlyRuntimeFeature,
 ])("compiled keyed identity targets (feature: %s)", (feature) => {
   beforeEach(() => {
     createCompiledComponent = feature

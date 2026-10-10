@@ -6,13 +6,18 @@ import {
   createCompiledComponentWithFeatures,
   keyedRowsIdentityRuntimeFeature,
   keyedRowsIdentityFilterHintedRuntimeFeature,
+  keyedRowsIdentityFilterOnlyRuntimeFeature,
   keyedRowsFilterHintedRuntimeFeature,
   keyedRowsMapLookupRuntimeFeature,
   keyedRowsMembershipRuntimeFeature,
   type CompilerStateUpdater,
 } from "../compiler-runtime";
 
-it("refreshes a filtered list when its target capabilities change", () => {
+it.each([
+  [keyedRowsIdentityFilterHintedRuntimeFeature, keyedRowsFilterHintedRuntimeFeature],
+  [keyedRowsIdentityFilterOnlyRuntimeFeature, keyedRowsFilterHintedRuntimeFeature],
+  [keyedRowsIdentityFilterOnlyRuntimeFeature, keyedRowsIdentityFilterHintedRuntimeFeature],
+])("refreshes $0.name when changing to $1.name", (initialFeature, feature) => {
   const definition = {
     displayName: "FilteredTargetsRefresh",
     hmrId: `filtered-targets-refresh-${Math.random()}`,
@@ -21,18 +26,10 @@ it("refreshes a filtered list when its target capabilities change", () => {
     render: () => <section />,
     bindings: [],
   };
-  const Initial = createCompiledComponentWithFeatures(definition, [
-    keyedRowsIdentityFilterHintedRuntimeFeature,
-  ]);
-  const Compatible = createCompiledComponentWithFeatures(definition, [
-    keyedRowsIdentityFilterHintedRuntimeFeature,
-  ]);
-  const Mixed = createCompiledComponentWithFeatures(definition, [
-    keyedRowsFilterHintedRuntimeFeature,
-  ]);
-  const SpecializedAgain = createCompiledComponentWithFeatures(definition, [
-    keyedRowsIdentityFilterHintedRuntimeFeature,
-  ]);
+  const Initial = createCompiledComponentWithFeatures(definition, [initialFeature]);
+  const Compatible = createCompiledComponentWithFeatures(definition, [initialFeature]);
+  const Mixed = createCompiledComponentWithFeatures(definition, [feature]);
+  const SpecializedAgain = createCompiledComponentWithFeatures(definition, [initialFeature]);
   expect(Compatible).toBe(Initial);
   expect(Mixed).not.toBe(Initial);
   expect(SpecializedAgain).not.toBe(Mixed);
@@ -41,6 +38,7 @@ it("refreshes a filtered list when its target capabilities change", () => {
 it.each([
   keyedRowsIdentityRuntimeFeature,
   keyedRowsIdentityFilterHintedRuntimeFeature,
+  keyedRowsIdentityFilterOnlyRuntimeFeature,
   keyedRowsMembershipRuntimeFeature,
   keyedRowsMapLookupRuntimeFeature,
 ])("$name falls back before patching a definition with another target kind", async (feature) => {
@@ -49,7 +47,8 @@ it.each([
   let update!: (value: CompilerStateUpdater) => void;
   const actualKind =
     feature === keyedRowsIdentityRuntimeFeature ||
-    feature === keyedRowsIdentityFilterHintedRuntimeFeature
+    feature === keyedRowsIdentityFilterHintedRuntimeFeature ||
+    feature === keyedRowsIdentityFilterOnlyRuntimeFeature
       ? "membershipTarget"
       : "identityTarget";
   const target = (key: string) => (actualKind === "membershipTarget" ? new Set([key]) : key);

@@ -6,7 +6,7 @@ import { normalizeReactCompilerOptions } from "../index";
 describe("keyed target runtime selection", () => {
   it.each([
     ["row.id", "keyedRowsFilterHintedRuntimeFeature"],
-    ["selected === row.id", "keyedRowsIdentityFilterHintedRuntimeFeature"],
+    ["selected === row.id", "keyedRowsIdentityFilterOnlyRuntimeFeature"],
     ["marked.has(row.id)", "keyedRowsFilterHintedRuntimeFeature"],
     ["lookup.get(row.id)", "keyedRowsFilterHintedRuntimeFeature"],
     ["selected === row.id} data-marked={marked.has(row.id)", "keyedRowsFilterHintedRuntimeFeature"],
@@ -63,6 +63,87 @@ describe("keyed target runtime selection", () => {
       child ? "keyedListRuntimeFeature" : "keyedRowsFilterHintedRuntimeFeature",
     );
     expect(result.code).not.toContain("keyedRowsIdentityFilterHintedRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsIdentityFilterOnlyRuntimeFeature");
+  });
+
+  describe.each(["hybrid", "static"] as const)("%s update capabilities", (reactivity) => {
+    it.each([
+      ["current.filter(row => row.id !== 'a')", "keyedArrayFilterHints"],
+      ["current.slice(1)", "keyedArraySliceHints"],
+    ] as const)("specializes identity rows with only %s", async (update, hint) => {
+      const result = await compileReactModule(
+        `import { useState } from "react";
+        export function Rows() {
+          const [rows, setRows] = useState([{id: "a", label: "A"}, {id: "b", label: "B"}]);
+          const [selected, setSelected] = useState("a");
+          return <main>
+            <button onClick={() => setRows(current => ${update})}>Remove</button>
+            <ul>{rows.map(row => <li key={row.id} data-selected={selected === row.id}
+              onClick={() => setSelected(row.id)}>{row.label}</li>)}</ul>
+          </main>;
+        }`,
+        "/app/Rows.tsx",
+        normalizeReactCompilerOptions({ reactivity }),
+      );
+      expect(result.compiled).toEqual(["Rows"]);
+      expect(result.diagnostics).toEqual([]);
+      expect(result.optimizations[hint]).toBe(1);
+      expect(result.code).toContain("keyedRowsIdentityFilterOnlyRuntimeFeature");
+      expect(result.code).not.toContain("keyedRowsIdentityFilterHintedRuntimeFeature");
+    });
+
+    it.each([
+      [
+        "map",
+        "setRows(current => current.map(row => row.id === 'b' ? {...row, label: row.label + '!'} : row))",
+        "",
+      ],
+      ["append", "setRows(current => [...current, {id: 'c', label: 'C'}])", ""],
+      [
+        "queued map/filter",
+        "setRows(current => current.map(row => row.id === 'b' ? {...row, label: row.label + '!'} : row)); setRows(current => current.filter(row => row.id !== 'a'))",
+        "",
+      ],
+      [
+        "queued filter/map",
+        "setRows(current => current.filter(row => row.id !== 'a')); setRows(current => current.map(row => row.id === 'b' ? {...row, label: row.label + '!'} : row))",
+        "",
+      ],
+      [
+        "queued append/filter",
+        "setRows(current => [...current, {id: 'c', label: 'C'}]); setRows(current => current.filter(row => row.id !== 'a'))",
+        "",
+      ],
+      [
+        "sibling map",
+        "setOther(current => current.map(row => row.id === 'c' ? {...row, label: row.label + '!'} : row))",
+        "other",
+      ],
+      ["sibling append", "setOther(current => [...current, {id: 'd', label: 'D'}])", "other"],
+    ])("preserves %s capabilities", async (_name, update, sibling) => {
+      const list = (items: string) => `<ul>{${items}.map(row => <li key={row.id}
+        data-selected={selected === row.id} onClick={() => setSelected(row.id)}>{row.label}</li>)}</ul>`;
+      const result = await compileReactModule(
+        `import { useState } from "react";
+        export function Rows() {
+          const [rows, setRows] = useState([{id: "a", label: "A"}, {id: "b", label: "B"}]);
+          const [other, setOther] = useState([{id: "c", label: "C"}]);
+          const [selected, setSelected] = useState("a");
+          return <main>
+            <button onClick={() => setRows(current => current.filter(row => row.id !== "a"))}>Remove</button>
+            <button onClick={() => { ${update}; }}>Update</button>
+            ${list("rows")}${sibling ? list(sibling) : ""}
+          </main>;
+        }`,
+        "/app/Rows.tsx",
+        normalizeReactCompilerOptions({ reactivity }),
+      );
+      expect(result.compiled).toEqual(["Rows"]);
+      expect(result.diagnostics).toEqual([]);
+      expect(result.optimizations.keyedArrayFilterHints).toBeGreaterThan(0);
+      expect(result.code).toMatch(/createCompilerKeyed(?:MapUpdate|Array(?:Append|.*Map))/);
+      expect(result.code).not.toContain("keyedRowsIdentityFilterOnlyRuntimeFeature");
+    });
   });
 
   it.each([

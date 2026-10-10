@@ -6783,6 +6783,15 @@ const keyedFilterUpdateRuntime: KeyedUpdateRuntime = {
   filter: reconcileCompilerKeyedArrayFilter,
 };
 
+// Only selected when the compiler emits removal hints without map/append hints.
+// Other updates continue through the existing full keyed reconciliation path.
+const keyedFilterOnlyUpdateRuntime: KeyedUpdateRuntime = {
+  append: () => undefined,
+  commit: commitCompilerKeyedCollection,
+  reconcile: () => undefined,
+  filter: reconcileCompilerKeyedArrayFilter,
+};
+
 const keyedPrependUpdateRuntime: KeyedUpdateRuntime = {
   ...keyedUpdateRuntime,
   prepend: reconcileCompilerKeyedArrayPrepend,
@@ -10890,6 +10899,16 @@ export const keyedRowsIdentityFilterHintedRuntimeFeature: CompilerRuntimeFeature
     KeyedRows: createKeyedRowsBlockComponentCore(owner, {
       keyedTargets: createKeyedIdentityTargetRuntime,
       keyedUpdates: keyedFilterUpdateRuntime,
+    }),
+  }),
+};
+
+export const keyedRowsIdentityFilterOnlyRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:identity-filter-only",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponentCore(owner, {
+      keyedTargets: createKeyedIdentityTargetRuntime,
+      keyedUpdates: keyedFilterOnlyUpdateRuntime,
     }),
   }),
 };
