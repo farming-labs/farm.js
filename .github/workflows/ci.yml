@@ -3,6 +3,10 @@ name: CI
 on:
   workflow_dispatch:
     inputs:
+      preload-scanning-benchmark:
+        description: Compare preload tag scanning against main on an isolated runner
+        type: boolean
+        default: false
       response-pathname-benchmark:
         description: Compare production response pathname work on an isolated runner
         type: boolean
@@ -50,6 +54,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  preload-scanning-benchmark:
+    name: Preload Scanning Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.preload-scanning-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Verify output equivalence and collect two comparisons
+        run: |
+          baseline="$(git merge-base HEAD origin/main)"
+          node benchmarks/preload-scanning/verify.mjs "$baseline"
+          node benchmarks/preload-scanning/run.mjs "$baseline" > "${{ runner.temp }}/preload-scanning-first.json"
+          node benchmarks/preload-scanning/run.mjs "$baseline" > "${{ runner.temp }}/preload-scanning-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: preload-scanning-${{ github.sha }}
+          path: ${{ runner.temp }}/preload-scanning-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
   response-pathname-benchmark:
     name: Response Pathname Diagnostic
     if: github.event_name == 'workflow_dispatch' && inputs.response-pathname-benchmark

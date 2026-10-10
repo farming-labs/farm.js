@@ -52,6 +52,8 @@ const fragments = [
     `<${tag.toUpperCase()} data-x=">">${priority}</${tag.toUpperCase()}>`,
     `<${tag}>${hint}</${tag}x>${font}</${tag}>`,
     `<${tag}/>tail${hint}`,
+    // The last token is inert text whose element closes far past the scan bound.
+    `<${tag}>preload${" ".repeat(48)}</${tag.toUpperCase()} >tail`,
   ]),
   `<svg/>${hint}<svg>${priority}</svg>${font}`,
   '<link\nrel="alternate\u00a0pReLoAd" as=font href=/space.woff2>',

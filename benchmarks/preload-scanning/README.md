@@ -83,3 +83,29 @@ point or renderer changes are required. Production verification uses the existin
 `production-prebuilt-ssr.test.ts` case `enforces final preload budgets after HTML
 transforms`, both with and without a plugin, exercising a built Node server, final
 HTML/Link budgets, priority selection, cookies and internal-marker cleanup.
+
+## Bounded candidate scan
+
+Candidates can only appear in a `<link>` tag that contains a standalone `preload`
+token, so no link that starts after the last token can be budgeted. The scanner now
+finds that last token, stops walking tags once a tag starts past it, and case-folds
+only the prefix it can reach. A raw-text element that opens before the last token
+but closes after it folds the rest of the document on demand, so inert text keeps
+its existing handling. Non-candidate links after the bound only contributed position
+indexes, and the remaining indexes keep their relative order, so budgets, priority
+selection and output editing are unchanged. Documents without a token still return
+before any normalization.
+
+This targets the common Farm shape: Farm fonts and the docs handler emit font
+preloads in `<head>`, so every page of a font-using app previously walked and
+lowercased the entire body. The `head-font-hints` workload measures that shape.
+`html-hints` (hints at the end of the body) is the control: its bound is the end of
+the document, so it should not change.
+
+```sh
+node benchmarks/preload-scanning/verify.mjs <baseline>
+node benchmarks/preload-scanning/run.mjs <baseline>
+```
+
+`verify.mjs` now includes raw-text fragments whose element closes well past the last
+token, for every raw-text category, so the on-demand folding path is compared too.
