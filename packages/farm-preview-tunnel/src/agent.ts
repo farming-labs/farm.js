@@ -8,6 +8,7 @@ import type {
 } from "./protocol.js";
 import { isRelayToAgentMessage } from "./protocol.js";
 import { getHopByHopHeaderNames, getRecordHeader } from "./headers.js";
+import { closeWebSocket } from "./websocket.js";
 
 export interface TypeScriptPreviewAgentOptions {
   relayUrl: string;
@@ -91,7 +92,7 @@ export async function startTypeScriptPreviewAgent(
     async close() {
       stopWatchingTarget();
       abortInFlight();
-      await closeSocket(socket);
+      await closeWebSocket(socket, 1000, "Preview agent stopped");
     },
   };
 }
@@ -336,14 +337,6 @@ class PreviewResponseLimitError extends Error {
     super(`The local preview response exceeded the ${maxBytes} byte limit.`);
     this.name = "PreviewResponseLimitError";
   }
-}
-
-function closeSocket(socket: WebSocket) {
-  if (socket.readyState === socket.CLOSED) return Promise.resolve();
-  return new Promise<void>((resolve) => {
-    socket.once("close", () => resolve());
-    socket.close(1000, "Preview agent stopped");
-  });
 }
 
 function terminateSocket(socket: WebSocket) {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { Socket } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import {
@@ -11,6 +12,7 @@ import {
   type TunnelResponseMessage,
 } from "./protocol.js";
 import { getHopByHopHeaderNames, getRecordHeader } from "./headers.js";
+import { closeWebSocket } from "./websocket.js";
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
@@ -368,7 +370,25 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
     }
   });
 
+  // server.close() only reaps keep-alive sockets between requests. Track the
+  // rest so shutdown can release sockets that never sent a complete request
+  // (browser preconnects, stalled headers) without cutting off active responses.
+  let closing = false;
+  const connections = new Set<Socket>();
+  const responses = new Set<ServerResponse>();
+  server.on("connection", (socket) => {
+    connections.add(socket);
+    socket.once("close", () => connections.delete(socket));
+  });
+  server.on("request", (_request, response) => {
+    if (closing) response.setHeader("connection", "close");
+    responses.add(response);
+    response.once("close", () => responses.delete(response));
+  });
+
   server.on("upgrade", (request, socket, head) => {
+    // Upgraded sockets are closed through the WebSocket handshake instead.
+    connections.delete(socket as Socket);
     const url = new URL(request.url || "/", "http://localhost");
     if (url.pathname !== "/agent") {
       socket.destroy();
@@ -609,18 +629,31 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
       return address;
     },
     async close() {
+      closing = true;
       if (accessTimer) clearInterval(accessTimer);
       if (activityTimer) clearInterval(activityTimer);
-      for (const session of agents.values()) session.socket.close(1001, "Relay shutting down");
+      const serverClosed = closeServer(server);
+      for (const response of responses) {
+        if (!response.headersSent) response.setHeader("connection", "close");
+      }
       for (const { response, timeout, cleanup } of pending.values()) {
         clearTimeout(timeout);
         cleanup();
-        if (!response.headersSent)
-          sendText(response, 503, "Persistent preview relay is shutting down.");
+        sendText(response, 503, "Persistent preview relay is shutting down.");
       }
       pending.clear();
+      const busy = new Set<Socket>();
+      for (const response of responses) busy.add(response.socket as Socket);
+      for (const socket of connections) {
+        if (!busy.has(socket)) socket.destroy();
+      }
+      await Promise.all(
+        Array.from(websocketServer.clients, (socket) =>
+          closeWebSocket(socket, 1001, "Relay shutting down"),
+        ),
+      );
       await closeWebSocketServer(websocketServer);
-      await closeServer(server);
+      await serverClosed;
       address = undefined;
     },
   };
