@@ -9352,19 +9352,18 @@ function createKeyedRowsBlockComponentCore(
       );
     }
 
-    private pruneEventHandlers(keys: readonly string[]): void {
+    // Call only after committing this.instances: it is the authoritative live-key set.
+    private pruneEventHandlers(): void {
       if (this.eventHandlers.size === 0) return;
-      const active = new Set(keys);
       for (const key of this.eventHandlers.keys()) {
-        if (!active.has(key)) this.eventHandlers.delete(key);
+        if (!this.instances.has(key)) this.eventHandlers.delete(key);
       }
     }
 
-    private pruneConditionalListeners(keys: readonly string[]): void {
+    private pruneConditionalListeners(): void {
       if (this.conditionalListeners.size === 0) return;
-      const active = new Set(keys);
       for (const key of this.conditionalListeners.keys()) {
-        if (!active.has(key)) this.conditionalListeners.delete(key);
+        if (!this.instances.has(key)) this.conditionalListeners.delete(key);
       }
     }
 
@@ -9430,8 +9429,8 @@ function createKeyedRowsBlockComponentCore(
       this.cleanupHostScopes();
       this.instances = instances;
       this.rebuildElementIndex(instances);
-      this.pruneEventHandlers(rows.keys);
-      this.pruneConditionalListeners(rows.keys);
+      this.pruneEventHandlers();
+      this.pruneConditionalListeners();
       this.commitCurrentCollection();
       return true;
     }
@@ -9923,8 +9922,8 @@ function createKeyedRowsBlockComponentCore(
       }
       this.instances = keyedRowInstancesByKey(nextInstances);
       this.rebuildElementIndex(this.instances);
-      this.pruneEventHandlers(rows.keys);
-      this.pruneConditionalListeners(rows.keys);
+      this.pruneEventHandlers();
+      this.pruneConditionalListeners();
       this.commitCurrentCollection(dirtyState);
       this.notifyConditionalChanges(conditionalChanges, afterCommit);
     }
@@ -9976,9 +9975,8 @@ function createKeyedRowsBlockComponentCore(
           if (positionedInstances !== this.instances) {
             this.instances = new Map(positionedInstances);
             this.rebuildElementIndex(this.instances);
-            const keys = [...this.instances.keys()];
-            this.pruneEventHandlers(keys);
-            this.pruneConditionalListeners(keys);
+            this.pruneEventHandlers();
+            this.pruneConditionalListeners();
           }
           this.commitCurrentCollection(dirtyState);
           afterCommit?.();
@@ -10001,9 +9999,8 @@ function createKeyedRowsBlockComponentCore(
             // Pure reorders keep the same element -> instance associations;
             // those instances already hold their current item and index.
             this.rebuildElementIndex(this.instances);
-            const keys = [...this.instances.keys()];
-            this.pruneEventHandlers(keys);
-            this.pruneConditionalListeners(keys);
+            this.pruneEventHandlers();
+            this.pruneConditionalListeners();
           }
           this.commitCurrentCollection(dirtyState);
           afterCommit?.();
@@ -10034,9 +10031,8 @@ function createKeyedRowsBlockComponentCore(
             }
           } else {
             this.rebuildElementIndex(this.instances);
-            const keys = [...this.instances.keys()];
-            this.pruneEventHandlers(keys);
-            this.pruneConditionalListeners(keys);
+            this.pruneEventHandlers();
+            this.pruneConditionalListeners();
           }
           this.commitCurrentCollection(dirtyState);
           afterCommit?.();
@@ -10052,9 +10048,8 @@ function createKeyedRowsBlockComponentCore(
         if (filteredInstances) {
           this.instances = filteredInstances;
           this.rebuildElementIndex(this.instances);
-          const keys = [...this.instances.keys()];
-          this.pruneEventHandlers(keys);
-          this.pruneConditionalListeners(keys);
+          this.pruneEventHandlers();
+          this.pruneConditionalListeners();
           this.commitCurrentCollection(dirtyState);
           afterCommit?.();
           return;

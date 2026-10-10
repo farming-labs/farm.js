@@ -137,6 +137,41 @@ Regression coverage includes hybrid/static compiler selection, same-list and sib
 hints, queued map/filter and append/filter updates, legacy exports, HMR capability changes,
 hydration, Strict Mode, randomized removals, and unexpected map/append updates followed by removals.
 
+## Committed row membership during cleanup
+
+Keyed-row cleanup now checks the already-committed row Map directly. It no longer snapshots all
+live keys after filter, position, structural reorder, or rolling-window updates, or constructs a
+temporary Set for each populated event-handler/conditional-listener registry. Adoption and full
+reconciliation use the same committed Map. Empty registries still return immediately, removed
+callbacks are pruned, and retained callback identity and unsubscribe ownership are unchanged.
+
+Removing one of 10,000 rows avoids a 9,999-key cleanup array, even when both registries are empty.
+With 10,000 live keys and both registries populated, a cleanup pair also avoids two Sets and
+20,000 key insertions. These are deterministic allocation reductions, not operation-time claims.
+The two focused regression files cover all six cleanup call sites, empty/populated registries,
+1,000/10,000-key membership, callback identity, independent lists, failed adoption, and stale
+unsubscribe after re-registration:
+
+```bash
+pnpm --filter @farm.js/react exec vitest run src/__tests__/compiler-runtime-keyed-cleanup.test.ts src/__tests__/compiler-runtime-keyed-cleanup-commits.test.ts
+```
+
+Against merged commit `10daf746`, using the pinned upstream application and identical React
+19.2.0 / Vite 5.4.21 build settings described above, the actual source change measures:
+
+| Build  |       Raw |     Gzip |   Brotli |
+| ------ | --------: | -------: | -------: |
+| Before | 236,081 B | 73,081 B | 62,498 B |
+| After  | 235,879 B | 73,028 B | 62,487 B |
+| Saved  |     202 B |     53 B |     11 B |
+
+Both builds pass the same 12 production-browser controls in Chrome 154.0.8037.99 on macOS arm64
+with Node 24.21.0, including 10,000-row removal, DOM identity, and selection after removal; neither
+logs page/console errors. The runtime-size and target-specialization gates pass, with direct-binding
+and isolated-core controls unchanged. No public API, eligibility rules, native method evaluation,
+React fallback, other renderer, or compiler-disabled path changes. Browser CPU, first paint, and
+framework-ranking improvements have not been measured.
+
 ## Existing production benchmark audit
 
 The existing js-framework-benchmark application was also rebuilt before and after runtime

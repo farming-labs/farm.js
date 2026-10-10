@@ -232,8 +232,8 @@ describe("compiled keyed-array batch insertion hints", () => {
           descriptors: 3,
           bindings: 3,
         });
-        // Keep the existing final-map cleanup; eliminate only the preparation copy.
-        expect(resultEnumerations).toBe(1);
+        // Neither preparation nor cleanup needs to copy the committed keys.
+        expect(resultEnumerations).toBe(0);
         expect(sourceEnumerations).toBe(0);
       }
     });
