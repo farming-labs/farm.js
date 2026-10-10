@@ -36,12 +36,18 @@ const htmlHints =
   '<link rel="preload" as="image" href="/below.webp">' +
   '<link rel="preload" as="image" href="/hero.webp" fetchpriority="high">';
 const headerHints = "</body.woff2>; rel=preload; as=font, </mono.woff2>; rel=preload; as=font";
+// Farm fonts emit font preloads in <head>, so candidates end before the body.
+const headFontHints =
+  '<link rel="preload" href="/sans.woff2" as="font" type="font/woff2" crossorigin>' +
+  '<link rel="preload" href="/mono.woff2" as="font" type="font/woff2" crossorigin>';
 
 for (const items of [120, 1_200, 12_000]) {
-  for (const workload of ["no-hints", "header-only", "html-hints"]) {
+  for (const workload of ["no-hints", "header-only", "html-hints", "head-font-hints"]) {
     const html =
       '<html><head><link rel="stylesheet" href="/app.css">' +
-      '<link rel="modulepreload" href="/app.js"></head><body><ul>' +
+      '<link rel="modulepreload" href="/app.js">' +
+      (workload === "head-font-hints" ? headFontHints : "") +
+      "</head><body><ul>" +
       "<li><span>123</span><strong>Benchmark item 123</strong></li>".repeat(items) +
       "</ul>" +
       (workload === "html-hints" ? htmlHints : "") +
@@ -57,6 +63,15 @@ for (const items of [120, 1_200, 12_000]) {
         html.replace('<link rel="preload" as="image" href="/below.webp">', ""),
       );
       assert.deepEqual(expected.warnings, [{ kind: "image", count: 2, budget: 1, removed: 1 }]);
+    } else if (workload === "head-font-hints") {
+      assert.equal(
+        expected.html,
+        html.replace(
+          '<link rel="preload" href="/mono.woff2" as="font" type="font/woff2" crossorigin>',
+          "",
+        ),
+      );
+      assert.deepEqual(expected.warnings, [{ kind: "font", count: 2, budget: 1, removed: 1 }]);
     } else {
       assert.equal(expected.html, html);
       assert.equal(expected.linkHeader, "</body.woff2>; rel=preload; as=font");

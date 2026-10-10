@@ -78,6 +78,77 @@ describe("smart preload manager", () => {
     expect(lowercase.mock.contexts).not.toContain(html);
   });
 
+  it("stops scanning after the last preload token when hints sit in the head", () => {
+    // Farm fonts emit font preloads in <head>. No link after the last `preload`
+    // token can be a candidate, so the body is neither case-folded nor walked.
+    const config = resolveFarmPerformanceConfig({ preload: { maxFonts: 1 } }).preload;
+    const first = '<link rel="preload" href="/sans.woff2" as="font" type="font/woff2" crossorigin>';
+    const second =
+      '<link rel="preload" href="/mono.woff2" as="font" type="font/woff2" crossorigin>';
+    const head = `<html><head><link rel="stylesheet" href="/app.css">${first}${second}</head>`;
+    const body =
+      "<body><ul>" +
+      "<li><span>123</span><strong>Item</strong></li>".repeat(2_000) +
+      '<link rel="stylesheet" href="/late.css"><link rel="modulepreload" href="/late.js"></ul></body></html>';
+    const html = head + body;
+    const lowercase = vi.spyOn(String.prototype, "toLowerCase");
+    const indexOf = vi.spyOn(String.prototype, "indexOf");
+    let result: ReturnType<typeof manageFarmDocumentPreloads>;
+    let foldedDocument: boolean;
+    let tagSearches: number;
+    try {
+      result = manageFarmDocumentPreloads(html, "", config);
+      // Read the spies before restoring them; restoring clears their records.
+      foldedDocument = lowercase.mock.contexts.includes(html);
+      tagSearches = indexOf.mock.calls.filter(
+        (args, index) => indexOf.mock.contexts[index] === html && args[0] === "<",
+      ).length;
+    } finally {
+      vi.restoreAllMocks();
+    }
+
+    expect(result).toEqual({
+      html: html.replace(second, ""),
+      linkHeader: "",
+      warnings: [{ kind: "font", count: 2, budget: 1, removed: 1 }],
+    });
+    expect(foldedDocument).toBe(false);
+    // The walk ends at the first tag past the last token instead of visiting
+    // every one of the body's thousands of tags.
+    expect(tagSearches).toBeLessThan(10);
+  });
+
+  it.each(["enforce", "warn"] as const)(
+    "finds a raw-text closing tag beyond the last preload token in %s mode",
+    (mode) => {
+      const config = resolveFarmPerformanceConfig({ preload: { mode, maxImages: 1 } }).preload;
+      const first = '<link rel="preload" as="image" href="/hero.webp" fetchpriority="high">';
+      const second = '<link rel="preload" as="image" href="/below.webp">';
+      // The last token is inert script text; the script closes far past it.
+      const script = `<SCRIPT>const hint = "preload";${" ".repeat(512)}</SCRIPT >`;
+      const tail = '<main><link rel="stylesheet" href="/late.css"></main>';
+      const html = first + second + script + tail;
+
+      expect(manageFarmDocumentPreloads(html, "", config)).toEqual({
+        html: mode === "enforce" ? first + script + tail : html,
+        linkHeader: "",
+        warnings: [{ kind: "image", count: 2, budget: 1, removed: mode === "enforce" ? 1 : 0 }],
+      });
+    },
+  );
+
+  it("keeps hints before an unterminated raw-text element that holds the last token", () => {
+    const config = resolveFarmPerformanceConfig({ preload: { maxImages: 0 } }).preload;
+    const hint = '<link rel="preload" as="image" href="/hero.webp">';
+    const html = `${hint}<textarea>preload ${"x".repeat(256)}<link rel="preload" as="image" href="/fake">`;
+
+    expect(manageFarmDocumentPreloads(html, "", config)).toEqual({
+      html: html.slice(hint.length),
+      linkHeader: "",
+      warnings: [{ kind: "image", count: 1, budget: 0, removed: 1 }],
+    });
+  });
+
   it.each(["enforce", "warn"] as const)(
     "preserves Unicode comments, unclosed raw text and close-tag lookalikes in %s mode",
     (mode) => {
