@@ -383,6 +383,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-batch-every-hinted"
   | "keyed-rows-window-every-hinted"
   | "keyed-rows-filter-hinted"
+  | "keyed-rows-identity-filter-hinted"
   | "keyed-rows-structural-append-hinted"
   | "keyed-rows-structural-append-map-hinted"
   | "keyed-rows-structural-prepend-hinted"
@@ -469,6 +470,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-batch-every-hinted": "keyedRowsBatchEveryHintedRuntimeFeature",
   "keyed-rows-window-every-hinted": "keyedRowsWindowEveryHintedRuntimeFeature",
   "keyed-rows-filter-hinted": "keyedRowsFilterHintedRuntimeFeature",
+  "keyed-rows-identity-filter-hinted": "keyedRowsIdentityFilterHintedRuntimeFeature",
   "keyed-rows-structural-append-hinted": "keyedRowsStructuralAppendHintedRuntimeFeature",
   "keyed-rows-structural-append-map-hinted": "keyedRowsStructuralAppendMapHintedRuntimeFeature",
   "keyed-rows-structural-prepend-hinted": "keyedRowsStructuralPrependHintedRuntimeFeature",
@@ -646,11 +648,20 @@ function runtimeFeaturesForPlans(
                                   : keyedMapUpdateHints
                                     ? "-hinted"
                                     : "";
-    features.add(
-      keyedTargetKinds.size <= 1 && keyedRowsFeature === "keyed-rows" && hintSuffix === ""
-        ? (`keyed-rows-${[...keyedTargetKinds][0] ?? "plain"}` as CompilerRuntimeFeatureName)
-        : (`${keyedRowsFeature}${hintSuffix}` as CompilerRuntimeFeatureName),
-    );
+    if (
+      keyedRowsFeature === "keyed-rows" &&
+      hintSuffix === "-filter-hinted" &&
+      keyedTargetKinds.size === 1 &&
+      keyedTargetKinds.has("identity")
+    ) {
+      features.add("keyed-rows-identity-filter-hinted");
+    } else {
+      features.add(
+        keyedTargetKinds.size <= 1 && keyedRowsFeature === "keyed-rows" && hintSuffix === ""
+          ? (`keyed-rows-${[...keyedTargetKinds][0] ?? "plain"}` as CompilerRuntimeFeatureName)
+          : (`${keyedRowsFeature}${hintSuffix}` as CompilerRuntimeFeatureName),
+      );
+    }
   }
   return [...features].sort();
 }

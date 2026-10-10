@@ -5,13 +5,42 @@ import { expect, it, vi } from "vitest";
 import {
   createCompiledComponentWithFeatures,
   keyedRowsIdentityRuntimeFeature,
+  keyedRowsIdentityFilterHintedRuntimeFeature,
+  keyedRowsFilterHintedRuntimeFeature,
   keyedRowsMapLookupRuntimeFeature,
   keyedRowsMembershipRuntimeFeature,
   type CompilerStateUpdater,
 } from "../compiler-runtime";
 
+it("refreshes a filtered list when its target capabilities change", () => {
+  const definition = {
+    displayName: "FilteredTargetsRefresh",
+    hmrId: `filtered-targets-refresh-${Math.random()}`,
+    stateSignature: "0",
+    initialize: () => [],
+    render: () => <section />,
+    bindings: [],
+  };
+  const Initial = createCompiledComponentWithFeatures(definition, [
+    keyedRowsIdentityFilterHintedRuntimeFeature,
+  ]);
+  const Compatible = createCompiledComponentWithFeatures(definition, [
+    keyedRowsIdentityFilterHintedRuntimeFeature,
+  ]);
+  const Mixed = createCompiledComponentWithFeatures(definition, [
+    keyedRowsFilterHintedRuntimeFeature,
+  ]);
+  const SpecializedAgain = createCompiledComponentWithFeatures(definition, [
+    keyedRowsIdentityFilterHintedRuntimeFeature,
+  ]);
+  expect(Compatible).toBe(Initial);
+  expect(Mixed).not.toBe(Initial);
+  expect(SpecializedAgain).not.toBe(Mixed);
+});
+
 it.each([
   keyedRowsIdentityRuntimeFeature,
+  keyedRowsIdentityFilterHintedRuntimeFeature,
   keyedRowsMembershipRuntimeFeature,
   keyedRowsMapLookupRuntimeFeature,
 ])("$name falls back before patching a definition with another target kind", async (feature) => {
@@ -19,7 +48,10 @@ it.each([
   const read = vi.fn((item) => item);
   let update!: (value: CompilerStateUpdater) => void;
   const actualKind =
-    feature === keyedRowsIdentityRuntimeFeature ? "membershipTarget" : "identityTarget";
+    feature === keyedRowsIdentityRuntimeFeature ||
+    feature === keyedRowsIdentityFilterHintedRuntimeFeature
+      ? "membershipTarget"
+      : "identityTarget";
   const target = (key: string) => (actualKind === "membershipTarget" ? new Set([key]) : key);
   const Rows = createCompiledComponentWithFeatures(
     {

@@ -6,6 +6,7 @@ import {
   createCompiledComponent as createCompleteCompiledComponent,
   createCompiledComponentWithFeatures,
   keyedRowsIdentityRuntimeFeature,
+  keyedRowsIdentityFilterHintedRuntimeFeature,
   type CompilerStateUpdater,
 } from "../compiler-runtime";
 
@@ -45,11 +46,14 @@ function items(count: number): Item[] {
   }));
 }
 
-describe.each([false, true])("compiled keyed identity targets (specialized: %s)", (specialized) => {
+describe.each([
+  undefined,
+  keyedRowsIdentityRuntimeFeature,
+  keyedRowsIdentityFilterHintedRuntimeFeature,
+])("compiled keyed identity targets (feature: %s)", (feature) => {
   beforeEach(() => {
-    createCompiledComponent = specialized
-      ? (definition) =>
-          createCompiledComponentWithFeatures(definition, [keyedRowsIdentityRuntimeFeature])
+    createCompiledComponent = feature
+      ? (definition) => createCompiledComponentWithFeatures(definition, [feature])
       : createCompleteCompiledComponent;
   });
   it("evaluates only the previous and next keyed instances", async () => {

@@ -4,8 +4,10 @@ import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  createCompiledComponent,
+  createCompiledComponent as createCompleteCompiledComponent,
+  createCompiledComponentWithFeatures,
   createCompilerKeyedArrayFilter,
+  keyedRowsIdentityFilterHintedRuntimeFeature,
   type CompilerKeyedRowElement,
 } from "../compiler-runtime";
 
@@ -27,6 +29,7 @@ interface Counters {
 }
 
 const roots: Root[] = [];
+let createCompiledComponent: typeof createCompleteCompiledComponent;
 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -139,7 +142,15 @@ function createFilterHarness(initialItems: Item[], readsCollection = false) {
   };
 }
 
-describe("compiled keyed-array filter hints", () => {
+describe.each([false, true])("filter hints (identity-only: %s)", (specialized) => {
+  beforeEach(() => {
+    createCompiledComponent = specialized
+      ? (definition) =>
+          createCompiledComponentWithFeatures(definition, [
+            keyedRowsIdentityFilterHintedRuntimeFeature,
+          ])
+      : createCompleteCompiledComponent;
+  });
   it("removes only rejected rows and preserves every surviving DOM identity", async () => {
     const initialItems = Array.from(
       { length: 2_048 },

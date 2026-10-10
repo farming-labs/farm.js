@@ -10881,6 +10881,16 @@ export const keyedRowsFilterHintedRuntimeFeature: CompilerRuntimeFeature = {
   }),
 };
 
+export const keyedRowsIdentityFilterHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:identity-filter-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponentCore(owner, {
+      keyedTargets: createKeyedIdentityTargetRuntime,
+      keyedUpdates: keyedFilterUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsStructuralAppendHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:structural-append-hinted",
   create: (owner) => ({
