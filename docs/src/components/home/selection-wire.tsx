@@ -4,6 +4,8 @@ import { useEffect, useRef } from "react";
 
 // The launch video's look: characters run through these signs before they settle.
 const GLYPHS = "#%&/_<>*+=!?01";
+// How often a `glitch` element changes sign while it flickers.
+const GLITCH_MS = 70;
 
 // One loop, in milliseconds. A cursor drags a selection over a word (which may
 // scramble into another), drags a wire from the selection into a target and
@@ -200,6 +202,13 @@ export type SelectionWireProps = {
   over?: string;
   /** For the "hug" route: more copy the wire must pass on its right, such as a paragraph. */
   clear?: string;
+  /**
+   * Selector, within the word, of characters that flicker through the signs
+   * while the selection is dragged over them, such as a trailing "?", and
+   * settle as the selection lets go. Their width is held, so a centred line
+   * never shifts.
+   */
+  glitch?: string;
 };
 
 /**
@@ -225,6 +234,7 @@ export function SelectionWire({
   fitInk = false,
   over,
   clear,
+  glitch: glitchSelector,
 }: SelectionWireProps) {
   const layerRef = useRef<HTMLDivElement>(null);
   const selectRef = useRef<HTMLDivElement>(null);
@@ -280,6 +290,21 @@ export function SelectionWire({
     const swapping = Boolean(text && swapFrom && swapTo);
     const fromText = swapFrom ?? "";
     const toText = swapTo ?? "";
+    // `glitch`: laid out on its own box from the start, so holding its width
+    // while it flickers never moves the line.
+    const glitchBox = glitchSelector ? wordBox.querySelector<HTMLElement>(glitchSelector) : null;
+    const glitchRest = glitchBox?.textContent ?? "";
+    let glitchWidth = 0;
+    let glitchTick = -1;
+    let glitchShown = glitchRest;
+    if (glitchBox) glitchBox.style.display = "inline-block";
+    const showGlitch = (next: string) => {
+      if (!glitchBox || glitchBox.textContent === next) return;
+      if (next === glitchRest) glitchBox.style.removeProperty("width");
+      else glitchBox.style.width = `${glitchWidth}px`;
+      glitchBox.style.textAlign = next === glitchRest ? "" : "center";
+      glitchBox.textContent = next;
+    };
 
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let fromWidth = 0;
@@ -310,6 +335,9 @@ export function SelectionWire({
         const fontAscent = inks[0]!.fontBoundingBoxAscent;
         wordInkTop = fontAscent - Math.max(...inks.map((ink) => ink.actualBoundingBoxAscent));
         wordInkBottom = fontAscent + Math.max(...inks.map((ink) => ink.actualBoundingBoxDescent));
+      }
+      if (glitchBox && glitchBox.textContent === glitchRest) {
+        glitchWidth = glitchBox.getBoundingClientRect().width;
       }
       if (!swapping || !text) return;
       const savedText = text.textContent;
@@ -387,6 +415,7 @@ export function SelectionWire({
           labelWritten = labelFrom;
           target.style.removeProperty("min-width");
         }
+        showGlitch(glitchRest);
         return;
       }
 
@@ -488,6 +517,24 @@ export function SelectionWire({
         select.toggleAttribute("data-corners", rect[2] - rect[0] > 12);
       } else {
         select.style.opacity = "0";
+      }
+
+      // `glitch`: flickers from when the dragged selection reaches it until the
+      // beat after release, then settles.
+      if (glitchBox) {
+        const glitchLeft = relative(glitchBox.getBoundingClientRect(), origin).left;
+        const flickering =
+          !still &&
+          t < AT.scramble + DURATION.scramble &&
+          (t >= AT.release || (t >= AT.drag && rect !== null && rect[2] >= glitchLeft));
+        if (flickering) {
+          const tick = Math.floor(t / GLITCH_MS);
+          if (tick !== glitchTick) {
+            glitchTick = tick;
+            glitchShown = Array.from(glitchRest, () => randomGlyph()).join("");
+          }
+        }
+        showGlitch(flickering ? glitchShown : glitchRest);
       }
 
       // Wire: drawn from the port to the cursor, then connected to the target.
@@ -683,6 +730,8 @@ export function SelectionWire({
       }
       target.style.removeProperty("--sw-fade");
       if (!placeTargetUnderHeading) target.style.transform = "";
+      showGlitch(glitchRest);
+      glitchBox?.style.removeProperty("display");
     };
   }, [
     wordSelector,
@@ -702,6 +751,7 @@ export function SelectionWire({
     fitInk,
     over,
     clear,
+    glitchSelector,
   ]);
 
   return (
