@@ -32,12 +32,23 @@ function generated(name, next) {
       "();",
   )();
 }
+// Configured header matching uses the shared runtime path matcher. Its template
+// body contains top-level function declarations, so slice to the next export.
+const matcherStart = source.indexOf("export function generateRuntimePathMatcherSource(");
+const matcherEnd = source.indexOf("\nexport function ", matcherStart + 1);
+assert.ok(matcherStart >= 0 && matcherEnd > matcherStart);
+const matcher = new Function(
+  stripTypeScriptTypes(source.slice(matcherStart, matcherEnd)).replace("export ", "") +
+    "\nreturn generateRuntimePathMatcherSource();",
+)();
 const start = source.indexOf(
   "        const prepareResponse = async (runtimeRequest, responsePromise) => {",
 );
 const end = source.indexOf("        const runRequest = ", start);
 assert.ok(start >= 0 && end > start);
 const candidate =
+  matcher +
+  "\n" +
   generated(
     "generateConfiguredResponseHeadersRuntimeSource",
     "parseRouteRenderingDirectiveFromDisk",
@@ -83,7 +94,6 @@ function runtime(arm, scenario, URLConstructor = URL) {
     "URL",
     "getFarmRoutePathname",
     "configuredHeaderRoutes",
-    "matchRuntimePathPattern",
     "appendFarmLinkHeader",
     "applyFarmCspNonceToResponse",
     "farmSecurityConfig",
@@ -98,7 +108,6 @@ function runtime(arm, scenario, URLConstructor = URL) {
     scenario.headers
       ? [{ source: "/target", headers: [{ key: "Cache-Control", value: "private, no-store" }] }]
       : [],
-    (pattern, pathname) => pattern === pathname,
     (headers, value) => headers.append("Link", value),
     (response) => response,
     { csp: false },
@@ -228,7 +237,7 @@ if (arm) {
         loadBefore,
         loadAfter: os.loadavg(),
         methodology:
-          "Generated response-preparation helpers and real preload manager/reporter; identity CSP-disabled adapter, exact header matcher and basePath normalizer. Five alternating fresh-process pairs; 500 warmups, five batches of 2000 responses. Includes response creation/preparation/body reads; all bodies and headers checked outside timing. URL counts separate. Microseconds per helper pipeline, not SSR/network latency or published scores.",
+          "Generated response-preparation helpers, the generated runtime path matcher, and the real preload manager/reporter; identity CSP-disabled adapter and basePath normalizer. Five alternating fresh-process pairs; 500 warmups, five batches of 2000 responses. Includes response creation/preparation/body reads; all bodies and headers checked outside timing. URL counts separate. Microseconds per helper pipeline, not SSR/network latency or published scores.",
         generatedBytes: {
           baseline: { raw: Buffer.byteLength(baseline), gzip: gzipSync(baseline).length },
           candidate: { raw: Buffer.byteLength(candidate), gzip: gzipSync(candidate).length },

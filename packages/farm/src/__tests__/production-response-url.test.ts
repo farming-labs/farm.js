@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   generateConfiguredResponseHeadersRuntimeSource,
   generatePreloadResponseRuntimeSource,
+  generateRuntimePathMatcherSource,
 } from "../nitro/universal-build";
 import { manageFarmDocumentPreloads, manageFarmLinkHeaderPreloads } from "../preload";
 import { applyFarmCspNonceToResponse, resolveFarmSecurityConfig } from "../security";
@@ -24,7 +25,6 @@ function runtime(options: { headers?: boolean; warn?: boolean; nonce?: boolean }
     "URL",
     "getFarmRoutePathname",
     "configuredHeaderRoutes",
-    "matchRuntimePathPattern",
     "appendFarmLinkHeader",
     "applyFarmCspNonceToResponse",
     "farmSecurityConfig",
@@ -32,7 +32,7 @@ function runtime(options: { headers?: boolean; warn?: boolean; nonce?: boolean }
     "manageFarmLinkHeaderPreloads",
     "farmPreloadConfig",
     "reportFarmPreloadWarnings",
-    `${generateConfiguredResponseHeadersRuntimeSource()}\n${generatePreloadResponseRuntimeSource()}\n${source.slice(start, end)}\nreturn prepareResponse;`,
+    `${generateRuntimePathMatcherSource()}\n${generateConfiguredResponseHeadersRuntimeSource()}\n${generatePreloadResponseRuntimeSource()}\n${source.slice(start, end)}\nreturn prepareResponse;`,
   )(
     new Proxy(URL, {
       construct(target, args) {
@@ -53,7 +53,6 @@ function runtime(options: { headers?: boolean; warn?: boolean; nonce?: boolean }
           },
         ]
       : [],
-    (pattern: string, pathname: string) => pattern === pathname,
     (headers: Headers, value: string) => headers.append("Link", value),
     applyFarmCspNonceToResponse,
     resolveFarmSecurityConfig(
