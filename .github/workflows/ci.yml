@@ -3,6 +3,10 @@ name: CI
 on:
   workflow_dispatch:
     inputs:
+      preload-warning-history-benchmark:
+        description: Compare preload warning history work on an isolated runner
+        type: boolean
+        default: false
       markdown-request-url-benchmark:
         description: Compare Markdown request URL reuse on an isolated runner
         type: boolean
@@ -42,6 +46,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  preload-warning-history-benchmark:
+    name: Preload Warning History Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.preload-warning-history-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Collect two alternating comparisons
+        run: |
+          node benchmarks/preload-warning-history/run.mjs > "${{ runner.temp }}/preload-warning-history-first.json"
+          node benchmarks/preload-warning-history/run.mjs > "${{ runner.temp }}/preload-warning-history-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: preload-warning-history-${{ github.sha }}
+          path: ${{ runner.temp }}/preload-warning-history-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
   configured-headers-benchmark:
     name: Configured Headers Diagnostic
     if: github.event_name == 'workflow_dispatch' && inputs.configured-headers-benchmark
