@@ -103,3 +103,87 @@ describe("production request URL ownership", () => {
     expect(r.parses).toHaveBeenCalledTimes(2);
   });
 });
+
+function postMiddlewareRuntime() {
+  // Execute the generated block that adopts the Request middleware returned.
+  const source = fs.readFileSync(path.join(process.cwd(), "src/nitro/universal-build.ts"), "utf8");
+  const start = source.indexOf("  request = middlewareResult.request;");
+  const end = source.indexOf(
+    "  // Middleware may replace the Request when it rewrites a URL.",
+    start,
+  );
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  const block = new Function(
+    "hasServerRuntimeIntegrations",
+    `return \`${source.slice(start, end)}\`;`,
+  )(false);
+  const parses = vi.fn();
+  const adopt = new Function(
+    "URL",
+    "getFarmRoutePathname",
+    "request",
+    "middlewareResult",
+    "url",
+    "pathname",
+    "routePathname",
+    `${block}\nreturn { request, url, pathname, routePathname };`,
+  ).bind(
+    null,
+    new Proxy(URL, {
+      construct(target, args) {
+        parses(...args);
+        return Reflect.construct(target, args);
+      },
+    }),
+    (pathname: string) => pathname.replace(/^\/base/, "") || "/",
+  ) as (
+    request: Request,
+    middlewareResult: { request: Request; headers: Headers },
+    url: URL,
+    pathname: string,
+    routePathname: string,
+  ) => { request: Request; url: URL; pathname: string; routePathname: string };
+  return { parses, adopt };
+}
+
+describe("production request URL after middleware", () => {
+  const before = new Request("https://farm.test/base/page?q=one&q=two");
+  const url = new URL(before.url);
+
+  it("reuses the pre-middleware URL when middleware keeps it", () => {
+    const r = postMiddlewareRuntime();
+    // Middleware commonly returns a new Request that only changes headers.
+    const kept = new Request(before, { headers: { "x-from-middleware": "1" } });
+    const result = r.adopt(
+      before,
+      { request: kept, headers: new Headers() },
+      url,
+      "/base/page",
+      "/page",
+    );
+    expect(r.parses).not.toHaveBeenCalled();
+    expect(result.request).toBe(kept);
+    expect(result.url).toBe(url);
+    expect(result).toMatchObject({ pathname: "/base/page", routePathname: "/page" });
+  });
+
+  it.each([
+    ["a rewritten path", "https://farm.test/base/other?q=one&q=two", "/base/other", "/other"],
+    ["a rewritten query", "https://farm.test/base/page?q=three", "/base/page", "/page"],
+  ])("reparses %s", (_label, href, pathname, routePathname) => {
+    const r = postMiddlewareRuntime();
+    const rewritten = new Request(href);
+    const result = r.adopt(
+      before,
+      { request: rewritten, headers: new Headers() },
+      url,
+      "/base/page",
+      "/page",
+    );
+    expect(r.parses).toHaveBeenCalledExactlyOnceWith(href);
+    expect(result.url).not.toBe(url);
+    expect(result.url.href).toBe(href);
+    expect(result).toMatchObject({ pathname, routePathname });
+  });
+});

@@ -7489,9 +7489,13 @@ async function handleFarmRequestInContext(
       ? "withFarmIntegrationSetCookies(middlewareResult.headers, farmIntegrationSetCookies)"
       : "middlewareResult.headers"
   };
-  url = new URL(request.url);
-  pathname = url.pathname;
-  routePathname = getFarmRoutePathname(pathname);
+  // A Request's url is already serialized, so an unchanged href means middleware
+  // kept the URL and the pre-middleware parse still describes it.
+  if (request.url !== url.href) {
+    url = new URL(request.url);
+    pathname = url.pathname;
+    routePathname = getFarmRoutePathname(pathname);
+  }
 
   // Middleware may replace the Request when it rewrites a URL. Re-enter the
   // request store so pages, layouts, and route context observe that rewritten
