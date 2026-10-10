@@ -3,6 +3,10 @@ name: CI
 on:
   workflow_dispatch:
     inputs:
+      preload-marker-copy-benchmark:
+        description: Compare the preload marker-strip rebuild on the maintained fixture
+        type: boolean
+        default: false
       preload-scanning-benchmark:
         description: Compare preload tag scanning against main on an isolated runner
         type: boolean
@@ -54,6 +58,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  preload-marker-copy-benchmark:
+    name: Preload Marker Copy Diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.preload-marker-copy-benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - name: Build local framework packages
+        run: |
+          pnpm --filter @farm.js/core build
+          pnpm --filter @farm.js/cli build
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+      - name: Install and build the maintained fixture
+        run: |
+          pnpm --dir benchmarks/frameworks --filter farm-framework-benchmark install --frozen-lockfile
+          pnpm --dir benchmarks/frameworks/apps/farm exec farm build --preset node-server
+      - name: Collect two independent alternating comparisons
+        run: |
+          node benchmarks/frameworks/preload-marker-copy.mjs > "${{ runner.temp }}/preload-marker-copy-first.json"
+          node benchmarks/frameworks/preload-marker-copy.mjs > "${{ runner.temp }}/preload-marker-copy-second.json"
+      - name: Retain raw samples for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: preload-marker-copy-${{ github.sha }}
+          path: ${{ runner.temp }}/preload-marker-copy-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
   preload-scanning-benchmark:
     name: Preload Scanning Diagnostic
     if: github.event_name == 'workflow_dispatch' && inputs.preload-scanning-benchmark

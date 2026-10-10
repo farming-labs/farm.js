@@ -4826,8 +4826,22 @@ function getFarmBufferedPreloadMarker(html) {
   return typeof html === "string" && html.charCodeAt(0) !== 0xfeff && !/\\bpreload\\b/i.test(html) ? "none" : "1";
 }
 
+// The Response constructor already copies its init headers, so edit the new
+// response's own copy instead of copying them a second time. The input
+// response's headers are never mutated.
+function rebuildFarmPreloadResponse(response, body) {
+  const output = new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+  output.headers.delete("x-farm-preload-streaming");
+  output.headers.delete("x-farm-preload-buffered");
+  return output;
+}
+
 async function applyFarmPreloadBudget(response, pathname, request) {
-  let headers = response.headers;
+  const headers = response.headers;
   const linkHeader = headers.get("Link") || "";
   const isHtml = headers.get("Content-Type")?.toLowerCase().includes("text/html");
   const isStreaming = headers.get("x-farm-preload-streaming") === "1";
@@ -4836,14 +4850,7 @@ async function applyFarmPreloadBudget(response, pathname, request) {
   const isBuffered = bufferedMarker === "1" || hasNoHtmlPreloads;
   if (!isHtml) {
     if (!isStreaming && !isBuffered) return response;
-    headers = new Headers(headers);
-    headers.delete("x-farm-preload-streaming");
-    headers.delete("x-farm-preload-buffered");
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    });
+    return rebuildFarmPreloadResponse(response, response.body);
   }
 
   if (isStreaming || !isBuffered || response.body === null) {
@@ -4856,36 +4863,24 @@ async function applyFarmPreloadBudget(response, pathname, request) {
     if (!headers.has("x-farm-preload-streaming") &&
         !headers.has("x-farm-preload-buffered") &&
         (managed.value || null) === headers.get("Link")) return response;
-    headers = new Headers(headers);
-    headers.delete("x-farm-preload-streaming");
-    headers.delete("x-farm-preload-buffered");
-    if (managed.value) headers.set("Link", managed.value);
-    else headers.delete("Link");
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    });
+    const output = rebuildFarmPreloadResponse(response, response.body);
+    if (managed.value) output.headers.set("Link", managed.value);
+    else output.headers.delete("Link");
+    return output;
   }
 
   // Keep the document/header budget semantics (including unchanged Link
   // formatting), but do not consume and re-encode a proven preload-free body.
-  headers = new Headers(headers);
-  headers.delete("x-farm-preload-streaming");
-  headers.delete("x-farm-preload-buffered");
   const html = hasNoHtmlPreloads ? "" : await response.text();
   const managed = manageFarmDocumentPreloads(html, linkHeader, farmPreloadConfig);
-  if (managed.linkHeader) headers.set("Link", managed.linkHeader);
-  else headers.delete("Link");
-  if (managed.html !== html) headers.delete("Content-Length");
+  const output = rebuildFarmPreloadResponse(response, hasNoHtmlPreloads ? response.body : managed.html);
+  if (managed.linkHeader) output.headers.set("Link", managed.linkHeader);
+  else output.headers.delete("Link");
+  if (managed.html !== html) output.headers.delete("Content-Length");
   reportFarmPreloadWarnings(managed.warnings, managed.warnings.length > 0
     ? "route " + (pathname ?? getFarmRoutePathname(new URL(request.url).pathname))
     : undefined);
-  return new Response(hasNoHtmlPreloads ? response.body : managed.html, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  return output;
 }
 `.trim();
 }
