@@ -71,6 +71,12 @@ const scenarios = {
   newWarnings: { history: 256, active: true, unique: true },
   expiredHistory: { history: 256, active: true, expire: true },
   expiredCollectedHistory: { history: 256, active: true, expire: true, collect: true },
+  // One warm instance, like the single module in production: seeding stays
+  // outside timing and only the expiring call is timed.
+  expiredWarmHistory: { history: 256, active: true, expire: true, warm: true },
+  // Amortized traffic: 32 routes, 5ms apart, a warning on every fourth response,
+  // so the history expires roughly every 12,000 responses.
+  steadyTraffic: { history: 0, stream: true },
 };
 const selected = process.env.FARM_WARNING_SCENARIO;
 assert.ok(selected === undefined || Object.hasOwn(scenarios, selected));
@@ -96,6 +102,12 @@ if (arm) {
   };
   const input = scenario.active ? warning : [];
   const invoke = () => {
+    if (scenario.stream) {
+      now += 5;
+      const request = index++;
+      api.reportFarmPreloadWarnings(request % 4 ? [] : warning, `route /${request % 32}`);
+      return;
+    }
     if (scenario.expire) {
       seedHistory();
       now += 60000;
@@ -103,14 +115,31 @@ if (arm) {
     api.reportFarmPreloadWarnings(input, scenario.unique ? `route /new-${index++}` : "route /255");
   };
   seedHistory();
-  const warmups = scenario.expire ? 100 : 20000;
+  const warmups = scenario.warm ? 1000 : scenario.expire ? 100 : 20000;
   const requests = scenario.expire ? 1000 : 100000;
   for (let i = 0; i < warmups; i++) invoke();
   const samples = [];
   for (let batch = 0; batch < 5; batch++) {
     // Prepare separate histories outside timing so the expiry control measures
     // expiry itself, not the much faster insertion path hiding its cost.
-    const expired = scenario.expire
+    if (scenario.warm) {
+      let wallNs = 0n,
+        cpuMicros = 0;
+      for (let i = 0; i < requests; i++) {
+        seedHistory();
+        now += 60000;
+        const cpu = process.cpuUsage(),
+          begin = process.hrtime.bigint();
+        api.reportFarmPreloadWarnings(warning, "route /255");
+        wallNs += process.hrtime.bigint() - begin;
+        const used = process.cpuUsage(cpu);
+        cpuMicros += used.user + used.system;
+      }
+      samples.push({ wallUs: Number(wallNs) / 1000 / requests, cpuUs: cpuMicros / requests });
+      assert.ok(api.reportedWarnings.size <= 256);
+      continue;
+    }
+    const expired = scenario.expire && !scenario.warm
       ? Array.from({ length: requests }, () => {
           const target = runtime(
             arm,
@@ -199,7 +228,7 @@ if (arm) {
         loadBefore,
         loadAfter: os.loadavg(),
         methodology:
-          "Reporter-only microseconds/call; 5 alternating fresh-process pairs and 5 batches/process. Fake clock isolates expiry behavior; logging is counted, not printed. Expired-history controls pre-seed 256 warnings per instance outside timing; only expiredCollectedHistory explicitly collects setup garbage before timing. 5000 differential steps verify logs, history, clock rollback, reset and eviction before timing. Median of process means, not SSR/network latency or a framework score.",
+          "Reporter-only microseconds/call; 5 alternating fresh-process pairs and 5 batches/process. Fake clock isolates expiry behavior; logging is counted, not printed. expiredHistory and expiredCollectedHistory time the first sweep of 1,000 freshly compiled instances (cold code; the baseline's seeding already ran its sweep loop, the candidate's did not); only expiredCollectedHistory explicitly collects setup garbage before timing. expiredWarmHistory times the expiring call on one warm instance with seeding outside timing (per-call timers, so it includes timer overhead in both arms). steadyTraffic times 100,000 responses over 32 routes with a warning on every fourth and periodic expiry. 5000 differential steps verify logs, history, clock rollback, reset and eviction before timing. Median of process means, not SSR/network latency or a framework score.",
         sourceBytes: {
           baseline: { raw: Buffer.byteLength(baseline), gzip: gzipSync(baseline).length },
           candidate: { raw: Buffer.byteLength(candidate), gzip: gzipSync(candidate).length },
