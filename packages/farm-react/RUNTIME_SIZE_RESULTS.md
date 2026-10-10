@@ -102,6 +102,43 @@ reduces raw JS from 238,454 to 238,445 bytes. Gzip stays at 73,691 bytes; Brotli
 to 63,076 bytes (+84 bytes). Both builds pass the same production-browser correctness controls;
 these payload measurements do not establish a browser-timing improvement.
 
+## Owned position and prepend Maps
+
+Position, batch-insert, exact-window, and prepend fast paths commit their runtime-owned row Maps
+without cloning them. Binding-only position/window updates retain the original Map and still skip
+the element-index rebuild. Validation, fallback eligibility, DOM updates, event indexing, and
+cleanup are unchanged; there is no public API or compiler-selection change.
+
+The deterministic allocation regression is reproducible with:
+
+```bash
+pnpm --filter @farm.js/react exec vitest run src/__tests__/compiler-runtime-keyed-owned-maps.test.tsx
+```
+
+It counts only Map-to-Map row-instance copies during updates and checks order, text, retained DOM
+identity, and event indexes. With 1,000 initial rows, a single insert/prepend previously copied
+1,001 entries, removal copied 999, and fresh-key replacement copied 1,000; all now copy zero.
+Preparing the result Map is still required. Against baseline `10daf746`, 21 of the 26 tests fail
+on the copy assertion; all 26 pass with this change. Same-key controls already avoided copies.
+Coverage includes complete/specialized runtimes, queued windows, empty results, structural/mapped
+prepends, and independent lists through repeated clear/refill cycles. Non-delegated events exercise
+the existing React-owned fallback, not the optimized path.
+
+On macOS 26.2 arm64 / Node 24.21.0, the pinned upstream application described above
+(React 19.2.0 / Vite 5.4.21) changes from 236,081 to 236,063 B raw, 73,081 to 73,077 B gzip,
+and 62,498 to 62,513 B Brotli: **-18 B raw, -4 B gzip, +15 B Brotli**. Source, compiler,
+dependencies, minification, and compression are held fixed; only the baseline/current built
+runtime differs. Direct-binding and isolated-core controls remain unchanged; runtime-size gates pass.
+
+Both production builds pass the same 12 upstream browser controls in Chrome 154.0.8037.99.
+That application does not emit position/prepend hints, so these controls establish compatibility,
+not an operation speedup. The maintained `keyed-position`, `keyed-batch-position`,
+`keyed-window-position`, `keyed-prepend`, `keyed-structural-prepend`, and
+`keyed-structural-prepend-map` runtime-size fixtures were also compiled to production bundles
+(React 19.2.8 / Vite 5.4.21). Real button clicks pass exact text/order and retained-DOM-identity
+checks on both builds, with no page/console errors. These are allocation, payload, and correctness
+results, not browser CPU, first-paint, or framework-ranking claims.
+
 ## Filter-only identity runtime
 
 Plain identity-targeted rows with compiler-emitted filter/slice hints, but no map or append hints,
