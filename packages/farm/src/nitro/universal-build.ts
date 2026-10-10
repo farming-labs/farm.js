@@ -4826,7 +4826,7 @@ function getFarmBufferedPreloadMarker(html) {
   return typeof html === "string" && html.charCodeAt(0) !== 0xfeff && !/\\bpreload\\b/i.test(html) ? "none" : "1";
 }
 
-async function applyFarmPreloadBudget(response, pathname) {
+async function applyFarmPreloadBudget(response, pathname, request) {
   let headers = response.headers;
   const linkHeader = headers.get("Link") || "";
   const isHtml = headers.get("Content-Type")?.toLowerCase().includes("text/html");
@@ -4848,7 +4848,9 @@ async function applyFarmPreloadBudget(response, pathname) {
 
   if (isStreaming || !isBuffered || response.body === null) {
     const managed = manageFarmLinkHeaderPreloads(linkHeader, farmPreloadConfig);
-    reportFarmPreloadWarnings(managed.warnings, "route " + pathname);
+    reportFarmPreloadWarnings(managed.warnings, managed.warnings.length > 0
+      ? "route " + (pathname ?? getFarmRoutePathname(new URL(request.url).pathname))
+      : undefined);
     // Unknown streams retain their body and ownership when no headers change.
     // Empty Link values and even unrecognized internal markers still need cleanup.
     if (!headers.has("x-farm-preload-streaming") &&
@@ -4876,7 +4878,9 @@ async function applyFarmPreloadBudget(response, pathname) {
   if (managed.linkHeader) headers.set("Link", managed.linkHeader);
   else headers.delete("Link");
   if (managed.html !== html) headers.delete("Content-Length");
-  reportFarmPreloadWarnings(managed.warnings, "route " + pathname);
+  reportFarmPreloadWarnings(managed.warnings, managed.warnings.length > 0
+    ? "route " + (pathname ?? getFarmRoutePathname(new URL(request.url).pathname))
+    : undefined);
   return new Response(hasNoHtmlPreloads ? response.body : managed.html, {
     status: response.status,
     statusText: response.statusText,
@@ -8800,14 +8804,18 @@ async function handleFarmFetch(request, context) {
         const runtimeOptions = farmPluginRuntime ? getFarmPluginRequestOptions(request) : null;
         const prepareResponse = async (runtimeRequest, responsePromise) => {
           const response = await responsePromise;
-          const pathname = new URL(runtimeRequest.url).pathname;
-          const routePathname = getFarmRoutePathname(pathname);
+          // Headers need the path eagerly; preload reporting needs it only for
+          // actual warnings. Keep the current plugin request, not a render URL.
+          const routePathname = configuredHeaderRoutes.length > 0
+            ? getFarmRoutePathname(new URL(runtimeRequest.url).pathname)
+            : undefined;
           return applyFarmPreloadBudget(
             applyFarmCspNonceToResponse(
               applyConfiguredResponseHeaders(response, routePathname),
               farmSecurityConfig,
             ),
             routePathname,
+            runtimeRequest,
           );
         };
         const runRequest = () => farmPluginRuntime
