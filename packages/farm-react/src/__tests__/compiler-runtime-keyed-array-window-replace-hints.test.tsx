@@ -695,7 +695,7 @@ describe("compiled keyed-array window replacement hints", () => {
           await flushCompilerUpdates();
         });
         expect(indexWrites).toBe(initialItems.length);
-        expect(keyEnumerations).toBe(1);
+        expect(keyEnumerations).toBe(0);
         expect(initialRows[32].isConnected).toBe(false);
         const freshRow = container.querySelector('[data-key="fresh"]');
         expect(freshRow?.textContent).toBe("Fresh row");
@@ -715,7 +715,7 @@ describe("compiled keyed-array window replacement hints", () => {
     );
 
     it.each(["disjoint", "overlapping", "mixed"] as const)(
-      `enumerates only the committed result for %s queued replacements in ${reactivity}`,
+      `avoids key enumeration for %s queued replacements in ${reactivity}`,
       async (mode) => {
         const initialItems = Array.from(
           { length: 256 },
@@ -765,9 +765,8 @@ describe("compiled keyed-array window replacement hints", () => {
             await flushCompilerUpdates();
           });
 
-          // Structural commits still enumerate the new map for listener pruning.
-          // Preparation must not also copy every old key into a temporary set.
-          expect(keyEnumerations).toBe(1);
+          // Both preparation and cleanup use the owned maps for membership.
+          expect(keyEnumerations).toBe(0);
           const rows = [...container.querySelectorAll("li")];
           expect(rows.map((row) => row.textContent)).toEqual(expected.map((item) => item.label));
           expect(rows.map((row) => row.getAttribute("data-key"))).toEqual(
