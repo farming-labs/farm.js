@@ -6710,13 +6710,14 @@ interface KeyedUpdateRuntime {
     root: Element,
     reactOwnedRows: boolean,
   ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined;
+  // Returns a fresh runtime-owned native map after validating all retained rows.
   filter?(
     props: CompilerKeyedRowsBlockProps,
     dirtyState: ReadonlySet<number>,
     collectionToken: object | undefined,
     instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
     reactOwnedRows: boolean,
-  ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined;
+  ): Map<string, CompilerKeyedRowInstance> | undefined;
   prepend?(
     props: CompilerKeyedRowsBlockProps,
     dirtyState: ReadonlySet<number>,
@@ -8963,7 +8964,7 @@ function reconcileCompilerKeyedArrayFilter(
   collectionToken: object | undefined,
   instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
   reactOwnedRows: boolean,
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   if (
     reactOwnedRows ||
     props.hostBlocks ||
@@ -10040,7 +10041,7 @@ function createKeyedRowsBlockComponentCore(
           this.hasReactOwnedRows(),
         );
         if (filteredInstances) {
-          this.instances = new Map(filteredInstances);
+          this.instances = filteredInstances;
           this.rebuildElementIndex(this.instances);
           const keys = [...this.instances.keys()];
           this.pruneEventHandlers(keys);

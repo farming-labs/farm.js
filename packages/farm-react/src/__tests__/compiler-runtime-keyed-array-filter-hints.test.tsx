@@ -2,11 +2,12 @@ import React, { StrictMode, useState } from "react";
 import { act } from "react";
 import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCompiledComponent as createCompleteCompiledComponent,
   createCompiledComponentWithFeatures,
   createCompilerKeyedArrayFilter,
+  createCompilerKeyedArraySlice,
   keyedRowsIdentityFilterHintedRuntimeFeature,
   type CompilerKeyedRowElement,
 } from "../compiler-runtime";
@@ -47,6 +48,34 @@ async function flushCompilerUpdates(): Promise<void> {
   await Promise.resolve();
 }
 
+async function copiedRowMapSizes(update: () => void): Promise<number[]> {
+  const NativeMap = Map;
+  const sizes: number[] = [];
+  vi.stubGlobal(
+    "Map",
+    class extends NativeMap {
+      constructor(...args: ConstructorParameters<typeof Map>) {
+        super(...args);
+        const source = args[0];
+        if (!(source instanceof NativeMap)) return;
+        const first = source.values().next().value;
+        // Only count copies of row-instance maps (including an empty result),
+        // not unrelated maps allocated while React flushes the update.
+        if (source.size === 0 || first?.element instanceof Element) sizes.push(source.size);
+      }
+    },
+  );
+  try {
+    await act(async () => {
+      update();
+      await flushCompilerUpdates();
+    });
+  } finally {
+    vi.unstubAllGlobals();
+  }
+  return sizes;
+}
+
 function hintedFilter(items: Item[], removed: ReadonlySet<string>): Item[] {
   return createCompilerKeyedArrayFilter(
     items,
@@ -74,6 +103,8 @@ function createFilterHarness(initialItems: Item[], readsCollection = false) {
     bindingReads: 0,
   };
   let remove: (ids: readonly string[]) => void = () => undefined;
+  let slice: (start: number, end?: number) => void = () => undefined;
+  let reset: () => void = () => undefined;
   let plainThenFilter: (id: string) => void = () => undefined;
   const Inventory = createCompiledComponent({
     displayName: "FilterInventory",
@@ -82,6 +113,11 @@ function createFilterHarness(initialItems: Item[], readsCollection = false) {
       counters.executions += 1;
       const items = () => state[0].get() as Item[];
       remove = (ids) => state[0].set((previous) => hintedFilter(previous as Item[], new Set(ids)));
+      slice = (start, end) =>
+        state[0].set((previous) =>
+          createCompilerKeyedArraySlice(previous, (previous as Item[]).slice, start, end),
+        );
+      reset = () => state[0].set([...initialItems]);
       plainThenFilter = (id) => {
         state[0].set((previous) => [...(previous as Item[])]);
         state[0].set((previous) => hintedFilter(previous as Item[], new Set([id])));
@@ -139,6 +175,8 @@ function createFilterHarness(initialItems: Item[], readsCollection = false) {
     counters,
     plainThenFilter: (id: string) => plainThenFilter(id),
     remove: (ids: readonly string[]) => remove(ids),
+    slice: (start: number, end?: number) => slice(start, end),
+    reset: () => reset(),
   };
 }
 
@@ -151,6 +189,120 @@ describe.each([false, true])("filter hints (identity-only: %s)", (specialized) =
           ])
       : createCompleteCompiledComponent;
   });
+
+  it.each(["remove", "keep-all", "queued", "slice", "clear"] as const)(
+    "does not copy the owned row map after %s",
+    async (operation) => {
+      const initialItems = Array.from(
+        { length: 1_000 },
+        (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+      );
+      const harness = createFilterHarness(initialItems);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      roots.push(root);
+      await act(async () => root.render(<harness.Inventory />));
+      const before = [...container.querySelectorAll("li")];
+      harness.counters.keyReads = 0;
+      harness.counters.descriptorReads = 0;
+      harness.counters.bindingReads = 0;
+      let expected = before;
+
+      const copiedSizes = await copiedRowMapSizes(() => {
+        switch (operation) {
+          case "remove":
+            harness.remove(["row-500"]);
+            expected = before.filter((_, index) => index !== 500);
+            break;
+          case "keep-all":
+            harness.remove([]);
+            break;
+          case "queued":
+            harness.remove(["row-1"]);
+            harness.remove(["row-998"]);
+            expected = before.filter((_, index) => index !== 1 && index !== 998);
+            break;
+          case "slice":
+            harness.slice(10, -10);
+            expected = before.slice(10, -10);
+            break;
+          case "clear":
+            harness.remove(initialItems.map((item) => item.id));
+            expected = [];
+            break;
+        }
+      });
+
+      const after = [...container.querySelectorAll("li")];
+      expect(after).toHaveLength(expected.length);
+      after.forEach((row, index) => expect(row).toBe(expected[index]));
+      expect(harness.counters.executions).toBe(1);
+      expect(harness.counters.listRenders).toBe(1);
+      expect(harness.counters.keyReads).toBe(operation === "slice" ? 0 : expected.length);
+      expect(harness.counters.descriptorReads).toBe(0);
+      expect(harness.counters.bindingReads).toBe(0);
+      expect(copiedSizes).toEqual([]);
+    },
+  );
+
+  it("keeps row maps independent across mounted lists and clear/reset cycles", async () => {
+    const initialItems: Item[] = [
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ];
+    const first = createFilterHarness(initialItems);
+    const second = createFilterHarness(initialItems);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () =>
+      root.render(
+        <>
+          <first.Inventory />
+          <second.Inventory />
+        </>,
+      ),
+    );
+    const [firstList, secondList] = container.querySelectorAll("ul");
+    const secondRows = [...secondList.children];
+
+    await act(async () => {
+      first.remove(["b"]);
+      await flushCompilerUpdates();
+    });
+    await act(async () => {
+      first.remove(["a", "c"]);
+      await flushCompilerUpdates();
+    });
+    expect(firstList.children).toHaveLength(0);
+    await act(async () => {
+      first.reset();
+      await flushCompilerUpdates();
+    });
+    const resetRows = [...firstList.children];
+    await act(async () => {
+      first.remove(["a"]);
+      await flushCompilerUpdates();
+    });
+
+    expect([...firstList.children]).toHaveLength(2);
+    expect(firstList.children[0]).toBe(resetRows[1]);
+    expect(firstList.children[1]).toBe(resetRows[2]);
+    expect(secondList.children).toHaveLength(3);
+    secondRows.forEach((row, index) => expect(secondList.children[index]).toBe(row));
+    await act(async () => {
+      second.remove(["c"]);
+      await flushCompilerUpdates();
+    });
+    expect(secondList.children).toHaveLength(2);
+    expect(secondList.children[0]).toBe(secondRows[0]);
+    expect(secondList.children[1]).toBe(secondRows[1]);
+    expect([...firstList.children].map((row) => row.textContent)).toEqual(["Beta", "Gamma"]);
+  });
+
   it("removes only rejected rows and preserves every surviving DOM identity", async () => {
     const initialItems = Array.from(
       { length: 2_048 },
