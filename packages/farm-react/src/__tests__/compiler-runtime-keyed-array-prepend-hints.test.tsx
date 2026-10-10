@@ -2,9 +2,10 @@ import React, { StrictMode, useState } from "react";
 import { act } from "react";
 import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCompiledComponent,
+  createCompiledComponentWithFeatures,
   createCompilerKeyedArrayFilter,
   createCompilerKeyedArrayMapPipeline,
   createCompilerKeyedArrayMappedStructuralPrepend,
@@ -13,7 +14,11 @@ import {
   createCompilerKeyedArraySlice,
   createCompilerKeyedArrayStructuralPrepend,
   createCompilerKeyedArrayStructuralPrependMapPipeline,
+  keyedRowsFilterPrependHintedRuntimeFeature,
+  keyedRowsPrependHintedRuntimeFeature,
+  type CompiledComponentDefinition,
   type CompilerKeyedRowElement,
+  type CompilerRuntimeFeature,
 } from "../compiler-runtime";
 
 declare global {
@@ -33,6 +38,8 @@ interface Counters {
   bindingReads: number;
 }
 
+type PreparationPhase = "key" | "descriptor" | "binding";
+
 const roots: Root[] = [];
 const stressIt = process.env.FARM_REACT_STRESS === "1" ? it : it.skip;
 
@@ -41,6 +48,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await act(async () => {
     for (const root of roots.splice(0)) root.unmount();
   });
@@ -110,7 +118,16 @@ function rowDescriptor(item: Item, text = item.label): CompilerKeyedRowElement {
   };
 }
 
-function createPrependHarness(initialItems: Item[], readsCollection = false) {
+function createPrependHarness(
+  initialItems: Item[],
+  readsCollection = false,
+  features?: readonly CompilerRuntimeFeature[],
+) {
+  const compile = <Props,>(definition: CompiledComponentDefinition<Props>) =>
+    features
+      ? createCompiledComponentWithFeatures(definition, features)
+      : createCompiledComponent(definition);
+  let observePreparation: ((phase: PreparationPhase, item: Item) => void) | undefined;
   const counters: Counters = {
     executions: 0,
     listRenders: 0,
@@ -159,7 +176,7 @@ function createPrependHarness(initialItems: Item[], readsCollection = false) {
     undefined;
   let plainThenPrepend: (addition: Item) => void = () => undefined;
   let mismatchedPrepend: (addition: Item) => void = () => undefined;
-  const Feed = createCompiledComponent({
+  const Feed = compile({
     displayName: "PrependFeed",
     initialize: () => [initialItems],
     render(_props: Record<string, never>, state, blocks) {
@@ -273,11 +290,13 @@ function createPrependHarness(initialItems: Item[], readsCollection = false) {
             }}
             rowKey={(item) => {
               counters.keyReads += 1;
+              observePreparation?.("key", item as Item);
               return (item as Item).id;
             }}
             create={(item) => {
               counters.descriptorReads += 1;
               const row = item as Item;
+              observePreparation?.("descriptor", row);
               return rowDescriptor(row, text(row));
             }}
             bindings={[
@@ -287,6 +306,7 @@ function createPrependHarness(initialItems: Item[], readsCollection = false) {
                 dependencies: readsCollection ? [0] : [],
                 read: (item) => {
                   counters.bindingReads += 1;
+                  observePreparation?.("binding", item as Item);
                   return [text(item as Item)];
                 },
               },
@@ -322,6 +342,9 @@ function createPrependHarness(initialItems: Item[], readsCollection = false) {
       second: readonly Item[],
     ) => filterThenPrependTwice(removed, first, second),
     mismatchedPrepend: (addition: Item) => mismatchedPrepend(addition),
+    observePreparation: (observer: ((phase: PreparationPhase, item: Item) => void) | undefined) => {
+      observePreparation = observer;
+    },
     mapFilterThenPrepend: (
       removed: ReadonlySet<string>,
       additions: readonly Item[],
@@ -1323,4 +1346,210 @@ describe("compiled keyed-array prepend hints", () => {
     await flushCompilerUpdates();
     expect(container.innerHTML).toBe("");
   });
+});
+
+describe.each([
+  ["complete", undefined],
+  ["compiler-selected prepend", [keyedRowsPrependHintedRuntimeFeature]],
+  ["compiler-selected filter-prepend", [keyedRowsFilterPrependHintedRuntimeFeature]],
+] as const)("plain prepend validation in the %s runtime", (_runtime, features) => {
+  async function mount(initialItems: Item[]) {
+    const harness = createPrependHarness(initialItems, false, features);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<harness.Feed />));
+    harness.counters.keyReads = 0;
+    harness.counters.descriptorReads = 0;
+    harness.counters.bindingReads = 0;
+    return { container, harness };
+  }
+
+  function rowTexts(container: Element): Array<string | null> {
+    return [...container.querySelectorAll("li")].map((row) => row.textContent);
+  }
+
+  it.each([256, 2_048])("checks collisions without copying %i committed keys", async (size) => {
+    const initialItems = Array.from(
+      { length: size },
+      (_, index): Item => ({ id: `row-${index}`, label: `Row ${index}` }),
+    );
+    const { container, harness } = await mount(initialItems);
+    const before = [...container.querySelectorAll("li")];
+    const first = before[0];
+    let committedKeyEnumerations = 0;
+    let committedMembershipChecks = 0;
+    // Only the block's committed row Map holds the mounted first row at this size.
+    const isCommitted = (map: Map<unknown, unknown>) =>
+      map.size === size &&
+      (map.get("row-0") as { element?: Element } | undefined)?.element === first;
+    const nativeKeys = Map.prototype.keys;
+    const nativeHas = Map.prototype.has;
+    vi.spyOn(Map.prototype, "keys").mockImplementation(function (this: Map<unknown, unknown>) {
+      if (isCommitted(this)) committedKeyEnumerations += 1;
+      return nativeKeys.call(this);
+    });
+    vi.spyOn(Map.prototype, "has").mockImplementation(function (
+      this: Map<unknown, unknown>,
+      key: unknown,
+    ) {
+      if (isCommitted(this)) committedMembershipChecks += 1;
+      return nativeHas.call(this, key);
+    });
+
+    try {
+      await act(async () => {
+        harness.prepend([
+          { id: "row-new-0", label: "New 0" },
+          { id: "row-new-1", label: "New 1" },
+        ]);
+        await flushCompilerUpdates();
+      });
+    } finally {
+      vi.restoreAllMocks();
+    }
+
+    const rows = [...container.querySelectorAll("li")];
+    expect(rows).toHaveLength(size + 2);
+    expect(rows.slice(0, 3).map((row) => row.textContent)).toEqual(["New 0", "New 1", "Row 0"]);
+    expect(rows.slice(2).every((row, index) => row === before[index])).toBe(true);
+    expect(harness.counters).toEqual({
+      executions: 1,
+      listRenders: 1,
+      keyReads: 2,
+      descriptorReads: 2,
+      bindingReads: 2,
+    });
+    // Membership checks prove the spy sees the committed Map, so zero copies is not vacuous.
+    expect(committedKeyEnumerations).toBe(0);
+    expect(committedMembershipChecks).toBeGreaterThanOrEqual(2);
+  });
+
+  it("falls back before mutation when the prefix reuses a committed key", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { container, harness } = await mount([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+      { id: "c", label: "Gamma" },
+    ]);
+    const originalDOM = container.innerHTML;
+    const reused: Item = { id: "b", label: "Beta reused" };
+    let validationDOM: string | undefined;
+    harness.observePreparation((phase, item) => {
+      if (phase === "key" && item === reused && validationDOM === undefined) {
+        validationDOM = container.innerHTML;
+      }
+    });
+
+    await act(async () => {
+      harness.prepend([{ id: "d", label: "Delta" }, reused]);
+      await flushCompilerUpdates();
+    });
+
+    expect(validationDOM).toBe(originalDOM);
+    expect(rowTexts(container)).toEqual(["Delta", "Beta reused", "Alpha", "Beta", "Gamma"]);
+    // The rejected prefix takes the complete React reconciliation path.
+    expect(harness.counters.listRenders).toBe(2);
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it("falls back for duplicate keys inside one prefix and across queued prefixes", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { container, harness } = await mount([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+    ]);
+
+    await act(async () => {
+      harness.prepend([
+        { id: "c", label: "Gamma one" },
+        { id: "c", label: "Gamma two" },
+      ]);
+      await flushCompilerUpdates();
+    });
+    expect(rowTexts(container)).toEqual(["Gamma one", "Gamma two", "Alpha", "Beta"]);
+    expect(harness.counters.listRenders).toBe(2);
+
+    await act(async () => {
+      harness.prepend([{ id: "d", label: "Delta one" }]);
+      harness.prepend([{ id: "d", label: "Delta two" }]);
+      await flushCompilerUpdates();
+    });
+    expect(rowTexts(container)).toEqual([
+      "Delta two",
+      "Delta one",
+      "Gamma one",
+      "Gamma two",
+      "Alpha",
+      "Beta",
+    ]);
+    expect(harness.counters.listRenders).toBe(3);
+    expect(harness.counters.executions).toBe(1);
+  });
+
+  it("keeps committed rows for an empty prefix", async () => {
+    const { container, harness } = await mount([
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta" },
+    ]);
+    const before = [...container.querySelectorAll("li")];
+
+    await act(async () => {
+      harness.prepend([]);
+      await flushCompilerUpdates();
+    });
+    expect([...container.querySelectorAll("li")]).toEqual(before);
+    expect(rowTexts(container)).toEqual(["Alpha", "Beta"]);
+    expect(harness.counters.descriptorReads).toBe(0);
+    // An empty prefix is unhinted, so complete keyed reconciliation reads each retained row.
+    expect(harness.counters.keyReads).toBe(2);
+    harness.counters.keyReads = 0;
+
+    await act(async () => {
+      harness.prepend([{ id: "c", label: "Gamma" }]);
+      await flushCompilerUpdates();
+    });
+    expect(rowTexts(container)).toEqual(["Gamma", "Alpha", "Beta"]);
+    expect([...container.querySelectorAll("li")].slice(1)).toEqual(before);
+    // The next hinted prepend starts from the new committed collection and stays on the fast path.
+    expect(harness.counters.keyReads).toBe(1);
+    expect(harness.counters.descriptorReads).toBe(1);
+    expect(harness.counters.listRenders).toBe(1);
+    expect(harness.counters.executions).toBe(1);
+  });
+
+  it.each(["key", "descriptor", "binding"] as const)(
+    "falls back before mutation after a late %s failure",
+    async (failure) => {
+      const { container, harness } = await mount([
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Beta" },
+      ]);
+      const before = [...container.querySelectorAll("li")];
+      const originalDOM = container.innerHTML;
+      const late: Item = { id: "d", label: "Delta" };
+      let failureDOM: string | undefined;
+      harness.observePreparation((phase, item) => {
+        if (phase === failure && item === late && failureDOM === undefined) {
+          failureDOM = container.innerHTML;
+          throw new Error(`late ${phase} failure`);
+        }
+      });
+
+      await act(async () => {
+        harness.prepend([{ id: "c", label: "Gamma" }, late]);
+        await flushCompilerUpdates();
+      });
+      harness.observePreparation(undefined);
+
+      expect(failureDOM).toBe(originalDOM);
+      expect(rowTexts(container)).toEqual(["Gamma", "Delta", "Alpha", "Beta"]);
+      expect([...container.querySelectorAll("li")].slice(2)).toEqual(before);
+      expect(container.querySelectorAll('[data-key="c"]')).toHaveLength(1);
+      // Two prefix reads by the rejected fast path, then four by complete keyed reconciliation.
+      expect(harness.counters.keyReads).toBe(6);
+      expect(harness.counters.executions).toBe(1);
+    },
+  );
 });

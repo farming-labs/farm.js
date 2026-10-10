@@ -8632,14 +8632,15 @@ function reconcileCompilerKeyedArrayPrepend(
     }
   }
 
-  const knownKeys = new Set(instances.keys());
+  // Check committed rows in place; only the incoming prefix needs its own key set.
+  const incomingKeys = new Set<string>();
   const prepended: CompilerKeyedRowInstance[] = [];
   try {
     for (let index = 0; index < prefixLength; index += 1) {
       const item = finalValue[index];
       const key = keyedRowIdentity(props.rowKey(item, index));
-      if (knownKeys.has(key)) return undefined;
-      knownKeys.add(key);
+      if (instances.has(key) || incomingKeys.has(key)) return undefined;
+      incomingKeys.add(key);
       const descriptor = props.create(item, index);
       prepended.push({
         key,
