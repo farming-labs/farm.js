@@ -510,7 +510,7 @@ export function CodebaseFigure() {
       t < TO_DEPTH ? 1 : Math.max(1 - sunk, ease(clamp((t - start - RIDE_MS) / RISE_MS)));
     return {
       ride: t >= start ? clamp((t - start) / RIDE_MS) : 0,
-      rise: steer !== null ? 1 : risen,
+      rise: risen,
     };
   });
   const shipping = ship.findIndex(({ ride }, k) => ride > 0 && ship[k]!.rise < 1);
@@ -554,7 +554,7 @@ export function CodebaseFigure() {
     >
       <LensContext.Provider value={lens(camera)}>
         {STREET}
-        {shipping >= 0 && steer === null && (
+        {shipping >= 0 && (
           <Line
             className="iso-trail"
             lines={[partial(route(shipping), ease(ship[shipping]!.ride))]}
@@ -611,7 +611,7 @@ export function CodebaseFigure() {
             </g>
           );
         })}
-        {shipping >= 0 && ship[shipping]!.ride < 1 && steer === null && (
+        {shipping >= 0 && ship[shipping]!.ride < 1 && (
           <Packet at={along(route(shipping), ease(ship[shipping]!.ride))} />
         )}
       </LensContext.Provider>
@@ -891,9 +891,25 @@ export function ReadinessFigure() {
     }
     kickRef.current();
   }
+  // Where the scan was when a pointer or the keyboard took over, so letting go
+  // picks it up there instead of starting over.
+  const resumeRef = useRef<{ stop: Stop | null; elapsed: number } | null>(null);
   const hold = (at: Stop | null) => {
-    setSteer(at);
-    visit(at);
+    if (at !== null) {
+      resumeRef.current ??= {
+        stop: state.current.stop,
+        elapsed: performance.now() - state.current.changedAt,
+      };
+      setSteer(at);
+      visit(at);
+      return;
+    }
+    const resume = resumeRef.current;
+    if (!resume) return;
+    resumeRef.current = null;
+    setSteer(null);
+    visit(resume.stop);
+    state.current.changedAt = performance.now() - resume.elapsed;
   };
   const onKeyDown = (event: KeyboardEvent) => {
     const order: Stop[] = [...LAYERS.map((_, i) => i), "card"];
@@ -1048,7 +1064,6 @@ const POWER_OFF = 4400;
 const BOOT_AT = 4800;
 const SWING_BACK = 6600;
 const DEV_LOOP = 8600;
-const DEV_UP = 3000;
 const DEV_START = 0;
 const BODY_X: Point2 = [0.5, 2.7];
 const BODY_Y: Point2 = [0.3, 2.1];
@@ -1216,7 +1231,7 @@ export function DevFigure() {
   const [steer, setSteer] = useState<"computer" | "keyboard" | null>(null);
   const t = useLoop(rootRef, DEV_LOOP, DEV_START, steer !== null);
   // Pointing at either part freezes the scene with everything up on the screen.
-  const now = steer === null ? t : DEV_UP;
+  const now = t;
   const swung = ease(clamp((t - SWING_IN) / TURN_MS)) - ease(clamp((t - SWING_BACK) / TURN_MS));
 
   const booting = now >= BOOT_AT;
