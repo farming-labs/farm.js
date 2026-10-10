@@ -6718,6 +6718,7 @@ interface KeyedUpdateRuntime {
     instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
     reactOwnedRows: boolean,
   ): Map<string, CompilerKeyedRowInstance> | undefined;
+  // Transfers a fresh runtime-owned native map after validating the full update.
   prepend?(
     props: CompilerKeyedRowsBlockProps,
     dirtyState: ReadonlySet<number>,
@@ -6725,7 +6726,7 @@ interface KeyedUpdateRuntime {
     instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
     root: Element,
     reactOwnedRows: boolean,
-  ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined;
+  ): Map<string, CompilerKeyedRowInstance> | undefined;
   rollingWindow?(
     props: CompilerKeyedRowsBlockProps,
     dirtyState: ReadonlySet<number>,
@@ -6734,14 +6735,15 @@ interface KeyedUpdateRuntime {
     root: Element,
     reactOwnedRows: boolean,
   ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined;
+  // Returns the owned input for binding-only updates, or a fresh owned native map.
   position?(
     props: CompilerKeyedRowsBlockProps,
     dirtyState: ReadonlySet<number>,
     collectionToken: object | undefined,
-    instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+    instances: Map<string, CompilerKeyedRowInstance>,
     root: Element,
     reactOwnedRows: boolean,
-  ): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined;
+  ): Map<string, CompilerKeyedRowInstance> | undefined;
   // Returns a runtime-owned native map containing only retained row instances:
   // reorders may remove rows, but never create or replace their root elements.
   reorder?(
@@ -7648,10 +7650,10 @@ function reconcileCompilerKeyedArrayPosition(
   props: CompilerKeyedRowsBlockProps,
   dirtyState: ReadonlySet<number>,
   collectionToken: object | undefined,
-  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  instances: Map<string, CompilerKeyedRowInstance>,
   root: Element,
   reactOwnedRows: boolean,
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   if (
     reactOwnedRows ||
     props.hostBlocks ||
@@ -7766,7 +7768,7 @@ function reconcileCompilerKeyedArrayBatchInsert(
   instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
   root: Element,
   reactOwnedRows: boolean,
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   if (
     reactOwnedRows ||
     props.hostBlocks ||
@@ -8001,10 +8003,10 @@ function reconcileCompilerKeyedArrayWindowReplace(
   props: CompilerKeyedRowsBlockProps,
   dirtyState: ReadonlySet<number>,
   collectionToken: object | undefined,
-  instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
+  instances: Map<string, CompilerKeyedRowInstance>,
   root: Element,
   reactOwnedRows: boolean,
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   if (
     reactOwnedRows ||
     props.hostBlocks ||
@@ -8262,7 +8264,7 @@ function reconcileCompilerKeyedArrayWindowReplace(
 
 function reconcileCompilerKeyedArrayPositionWithBatch(
   ...args: Parameters<typeof reconcileCompilerKeyedArrayPosition>
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   return (
     reconcileCompilerKeyedArrayBatchInsert(...args) || reconcileCompilerKeyedArrayPosition(...args)
   );
@@ -8270,7 +8272,7 @@ function reconcileCompilerKeyedArrayPositionWithBatch(
 
 function reconcileCompilerKeyedArrayPositionWithWindow(
   ...args: Parameters<typeof reconcileCompilerKeyedArrayPosition>
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   return (
     reconcileCompilerKeyedArrayWindowReplace(...args) ||
     reconcileCompilerKeyedArrayBatchInsert(...args) ||
@@ -8601,7 +8603,7 @@ function reconcileCompilerKeyedArrayPrepend(
   instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
   root: Element,
   reactOwnedRows: boolean,
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   if (
     reactOwnedRows ||
     props.hostBlocks ||
@@ -8673,7 +8675,7 @@ function reconcileCompilerKeyedArrayStructuralPrepend(
   instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
   root: Element,
   reactOwnedRows: boolean,
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   if (
     reactOwnedRows ||
     props.hostBlocks ||
@@ -8777,7 +8779,7 @@ function reconcileCompilerKeyedArrayStructuralPrependMap(
   instances: ReadonlyMap<string, CompilerKeyedRowInstance>,
   root: Element,
   reactOwnedRows: boolean,
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   if (
     reactOwnedRows ||
     props.hostBlocks ||
@@ -8951,7 +8953,7 @@ function reconcileCompilerKeyedArrayStructuralPrependMap(
 
 function reconcileCompilerKeyedArrayPrependWithStructural(
   ...args: Parameters<typeof reconcileCompilerKeyedArrayPrepend>
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   return (
     reconcileCompilerKeyedArrayStructuralPrepend(...args) ||
     reconcileCompilerKeyedArrayPrepend(...args)
@@ -8960,7 +8962,7 @@ function reconcileCompilerKeyedArrayPrependWithStructural(
 
 function reconcileCompilerKeyedArrayPrependMapWithStructural(
   ...args: Parameters<typeof reconcileCompilerKeyedArrayPrepend>
-): ReadonlyMap<string, CompilerKeyedRowInstance> | undefined {
+): Map<string, CompilerKeyedRowInstance> | undefined {
   return (
     reconcileCompilerKeyedArrayStructuralPrependMap(...args) ||
     reconcileCompilerKeyedArrayStructuralPrepend(...args) ||
@@ -9974,7 +9976,7 @@ function createKeyedRowsBlockComponentCore(
           // Position refreshes return the original map only when row instances,
           // order, and elements are unchanged; their item/binding data is current.
           if (positionedInstances !== this.instances) {
-            this.instances = new Map(positionedInstances);
+            this.instances = positionedInstances;
             this.rebuildElementIndex(this.instances);
             this.pruneEventHandlers();
             this.pruneConditionalListeners();
@@ -10064,7 +10066,7 @@ function createKeyedRowsBlockComponentCore(
           this.hasReactOwnedRows(),
         );
         if (prependedInstances) {
-          this.instances = new Map(prependedInstances);
+          this.instances = prependedInstances;
           this.rebuildElementIndex(this.instances);
           this.commitCurrentCollection(dirtyState);
           afterCommit?.();
