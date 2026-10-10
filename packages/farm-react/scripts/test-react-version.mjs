@@ -65,6 +65,7 @@ const testSource = String.raw`
     keyedRowsMappedRollingWindowHintedRuntimeFeature,
     keyedRowsStructuralAppendMapHintedRuntimeFeature,
     keyedRowsIdentityRuntimeFeature,
+    keyedRowsIdentityFilterHintedRuntimeFeature,
     keyedRowsMembershipRuntimeFeature,
     keyedRowsMapLookupRuntimeFeature,
   } = await import(
@@ -76,12 +77,14 @@ const testSource = String.raw`
   // under both supported React majors, including Strict Mode's mount replay.
   for (const [feature, kind] of [
     [keyedRowsIdentityRuntimeFeature, "identityTarget"],
+    [keyedRowsIdentityFilterHintedRuntimeFeature, "identityTarget"],
     [keyedRowsMembershipRuntimeFeature, "membershipTarget"],
     [keyedRowsMapLookupRuntimeFeature, "mapLookupTarget"],
   ]) {
     const targetFor = (key) => kind === "identityTarget" ? key : kind === "membershipTarget" ? new Set([key]) : new Map([[key, "yes"]]);
     const isSelected = (value, key) => kind === "identityTarget" ? value === key : kind === "membershipTarget" ? value.has(key) : value.get(key) === "yes";
     let select;
+    let remove;
     const TargetRows = createCompiledComponentWithFeatures({
       displayName: "CompatibilitySingleTargetRows",
       initialize: () => [["a", "b"], targetFor("a")],
@@ -90,8 +93,10 @@ const testSource = String.raw`
         const target = () => state[1].get();
         const selected = (item) => isSelected(target(), item) ? "yes" : "no";
         select = (key) => state[1].set(targetFor(key));
+        remove = (key) => state[0].set((previous) => createCompilerKeyedArrayFilter(previous, previous.filter, (item) => item !== key));
         return React.createElement("section", null, React.createElement(blocks.KeyedRows, {
           id: 0, items, rowKey: (item) => item, structureDependencies: [0],
+          collectionDependency: 0, dependencies: [0, 1], filterIndexIndependent: true,
           bindings: [{ kind: "attribute", name: "data-selected", path: [], dependencies: [1], [kind]: { dependency: 1, read: target }, read: selected }],
           create: (item) => ({ kind: "element", tag: "li", attributes: [{ name: "data-selected", value: selected(item) }], styles: [], children: [item] }),
           render: () => React.createElement("ul", null, items().map((item) => React.createElement("li", { key: item, "data-selected": selected(item) }, item))),
@@ -109,6 +114,18 @@ const testSource = String.raw`
     await Promise.resolve();
     assert.deepEqual([...targetContainer.querySelectorAll("li")], originalRows);
     assert.deepEqual(originalRows.map((row) => row.getAttribute("data-selected")), ["no", "yes"]);
+    remove("a");
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.deepEqual([...targetContainer.querySelectorAll("li")], [originalRows[1]]);
+    select("a");
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(originalRows[1].getAttribute("data-selected"), "no");
+    select("b");
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(originalRows[1].getAttribute("data-selected"), "yes");
     flushSync(() => targetRoot.unmount());
   }
 

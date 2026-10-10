@@ -40,6 +40,10 @@ automatic and does not add a configuration option or asynchronous runtime loadin
 `createCompiledComponent` export remains a complete compatibility entry for hand-authored
 definitions, while generated code uses the tree-shakable feature entry.
 
+Plain keyed lists with filter hints and only identity-based selection also use the single-kind
+target runtime. Filtering keeps its existing native-method checks and fallback; mixed Set/Map
+targets, conditional rows, and nested host blocks keep their existing runtime capabilities.
+
 The persisted production-size fixtures and regression gate live in
 [`RUNTIME_SIZE_RESULTS.md`](./RUNTIME_SIZE_RESULTS.md). The recorded compiler-selected core runtime
 premium is 85.4% smaller than the complete compatibility runtime premium; the feature-heavy keyed

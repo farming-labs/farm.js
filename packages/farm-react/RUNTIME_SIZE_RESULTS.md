@@ -62,6 +62,16 @@ Unrelated bundles reject the optional position and reorder runtime markers, and 
 rejects every structural runtime marker. The checked machine-readable result is
 [`RUNTIME_SIZE_RESULTS.json`](./RUNTIME_SIZE_RESULTS.json).
 
+## Identity selection with filter hints
+
+`test:runtime-size` also compares `keyed-identity-filter.tsx` with an otherwise identical build
+that selects the existing combined-target filter runtime. With Node 24.21.0, React 19.2.8, and
+Vite 5.4.20 on macOS arm64, the control is 239,427 B raw / 73,565 B gzip and the specialized build
+is 234,393 B raw / 72,501 B gzip: **1,064 B gzip saved**. The gate requires at least 512 B savings
+and verifies both builds retain their intended filter capability. This is a bundle-size comparison,
+not a browser operation or first-paint timing result. Mixed targets and structural row extensions
+continue to use their existing capabilities.
+
 ## Existing production benchmark audit
 
 The existing js-framework-benchmark application was also rebuilt before and after runtime

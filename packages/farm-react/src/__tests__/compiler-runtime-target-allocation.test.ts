@@ -2,6 +2,7 @@ import React from "react";
 import { expect, it, vi } from "vitest";
 import {
   keyedRowsIdentityRuntimeFeature,
+  keyedRowsIdentityFilterHintedRuntimeFeature,
   keyedRowsMapLookupRuntimeFeature,
   keyedRowsMembershipRuntimeFeature,
   keyedRowsRuntimeFeature,
@@ -41,6 +42,7 @@ function allocatedMaps(
 
 it.each([
   [keyedRowsIdentityRuntimeFeature, "identityTarget"],
+  [keyedRowsIdentityFilterHintedRuntimeFeature, "identityTarget"],
   [keyedRowsMembershipRuntimeFeature, "membershipTarget"],
   [keyedRowsMapLookupRuntimeFeature, "mapLookupTarget"],
 ] as const)("allocates four fewer target maps with $0.name", (feature, kind) => {

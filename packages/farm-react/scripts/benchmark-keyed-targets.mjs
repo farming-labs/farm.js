@@ -23,10 +23,12 @@ async function bundle(kind, fullControl) {
         transform(code, id) {
           if (!fullControl || !id.endsWith(`keyed-${kind}.tsx`)) return;
           const control = code.replace(
-            /keyedRows(?:Identity|Membership|MapLookup)RuntimeFeature/g,
+            /keyedRows(?:IdentityFilterHinted|Identity|Membership|MapLookup)RuntimeFeature/g,
             () => {
               replaced = true;
-              return "keyedRowsRuntimeFeature";
+              return kind === "identity-filter"
+                ? "keyedRowsFilterHintedRuntimeFeature"
+                : "keyedRowsRuntimeFeature";
             },
           );
           return { code: control, map: null };
@@ -50,10 +52,14 @@ async function bundle(kind, fullControl) {
 }
 
 const results = [];
-for (const kind of ["identity", "membership", "map-lookup"]) {
+for (const kind of ["identity", "membership", "map-lookup", "identity-filter"]) {
   const full = await bundle(kind, true);
   const specialized = await bundle(kind, false);
-  assert.ok(specialized.code.includes(`keyed-rows:${kind}`));
+  assert.ok(
+    specialized.code.includes(
+      `keyed-rows:${kind === "identity-filter" ? "identity-filter-hinted" : kind}`,
+    ),
+  );
   if (kind === "identity") {
     for (const marker of ["Set.prototype.has", "Map.prototype.get"]) {
       assert.ok(full.code.includes(marker), `control must retain ${marker}`);
@@ -61,6 +67,13 @@ for (const kind of ["identity", "membership", "map-lookup"]) {
     }
   }
   assert.ok(specialized.gzip < full.gzip, `${kind} specialization must reduce gzip payload`);
+  if (kind === "identity-filter") {
+    assert.ok(full.code.includes("keyed-rows:filter-hinted"), "control must keep filter hints");
+    assert.ok(
+      full.gzip - specialized.gzip >= 512,
+      "identity/filter specialization must save at least 512 B gzip",
+    );
+  }
   results.push({
     kind,
     full: { raw: full.raw, gzip: full.gzip },
