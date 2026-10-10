@@ -410,7 +410,6 @@ function createFarmScriptTagRewriter(transformScriptTag: (tag: string) => string
       let output = "";
 
       while (pending) {
-        const lower = pending.toLowerCase();
         if (rawTextElement) {
           if (rawTextElement === "plaintext") {
             output += pending;
@@ -418,13 +417,13 @@ function createFarmScriptTagRewriter(transformScriptTag: (tag: string) => string
             break;
           }
           const closing = `</${rawTextElement}`;
-          const start = findHtmlToken(lower, closing);
+          const start = findRawTextEnd(pending, rawTextElement);
           if (start === -1) {
             if (final) {
               output += pending;
               pending = "";
             } else {
-              const keep = matchingSuffixLength(lower, closing);
+              const keep = matchingSuffixLength(pending, closing);
               output += pending.slice(0, pending.length - keep);
               pending = pending.slice(pending.length - keep);
             }
@@ -455,7 +454,6 @@ function createFarmScriptTagRewriter(transformScriptTag: (tag: string) => string
         }
         output += pending.slice(0, start);
         pending = pending.slice(start);
-        const lowerTag = pending.toLowerCase();
 
         if (pending.startsWith("<!--")) {
           const end = pending.indexOf("-->", 4);
@@ -472,7 +470,7 @@ function createFarmScriptTagRewriter(transformScriptTag: (tag: string) => string
         }
         if (!final && "<!--".startsWith(pending)) break;
 
-        const tagNameMatch = lowerTag.match(/^<\/?([a-z][a-z0-9:-]*)\b/);
+        const tagNameMatch = pending.match(/^<\/?([a-z][a-z0-9:-]*)\b/i);
         if (!tagNameMatch) {
           if (!final && /^<\/?[a-z][a-z0-9:-]*$/i.test(pending)) break;
           output += pending[0];
@@ -490,7 +488,7 @@ function createFarmScriptTagRewriter(transformScriptTag: (tag: string) => string
 
         const tag = pending.slice(0, end + 1);
         const tagName = tagNameMatch[1]!.toLowerCase();
-        const isClosing = lowerTag.startsWith("</");
+        const isClosing = pending.startsWith("</");
         const isSelfClosing = /\/\s*>$/.test(tag);
         output += !isClosing && tagName === "script" ? transformScriptTag(tag) : tag;
         pending = pending.slice(end + 1);
@@ -504,16 +502,16 @@ function createFarmScriptTagRewriter(transformScriptTag: (tag: string) => string
   };
 }
 
-const rawTextElements = new Set([
-  "iframe",
-  "noembed",
-  "noframes",
-  "plaintext",
-  "script",
-  "style",
-  "textarea",
-  "title",
-  "xmp",
+const rawTextElements = new Map<string, RegExp | null>([
+  ["iframe", /<\/iframe(?=[\s/>]|$)/gi],
+  ["noembed", /<\/noembed(?=[\s/>]|$)/gi],
+  ["noframes", /<\/noframes(?=[\s/>]|$)/gi],
+  ["plaintext", null],
+  ["script", /<\/script(?=[\s/>]|$)/gi],
+  ["style", /<\/style(?=[\s/>]|$)/gi],
+  ["textarea", /<\/textarea(?=[\s/>]|$)/gi],
+  ["title", /<\/title(?=[\s/>]|$)/gi],
+  ["xmp", /<\/xmp(?=[\s/>]|$)/gi],
 ]);
 
 function stampScriptTag(tag: string, nonce: string): string {
@@ -547,7 +545,7 @@ function collectFarmInlineScriptContents(html: string): string[] {
     }
 
     const remaining = html.slice(start);
-    const tagNameMatch = remaining.toLowerCase().match(/^<\/?([a-z][a-z0-9:-]*)\b/);
+    const tagNameMatch = remaining.match(/^<\/?([a-z][a-z0-9:-]*)\b/i);
     if (!tagNameMatch) {
       offset = start + 1;
       continue;
@@ -562,8 +560,8 @@ function collectFarmInlineScriptContents(html: string): string[] {
     if (isClosing || isSelfClosing || !rawTextElements.has(tagName)) continue;
 
     if (tagName === "plaintext") break;
-    const closingStart = findHtmlToken(html.toLowerCase().slice(offset), `</${tagName}`);
-    const contentEnd = closingStart === -1 ? html.length : offset + closingStart;
+    const closingStart = findRawTextEnd(html, tagName, offset);
+    const contentEnd = closingStart === -1 ? html.length : closingStart;
     if (tagName === "script" && !findScriptTagAttributeRange(tag, "src")) {
       contents.push(html.slice(offset, contentEnd));
     }
@@ -610,22 +608,20 @@ function findScriptTagAttributeRange(
   return undefined;
 }
 
-function findHtmlToken(input: string, token: string): number {
-  let offset = 0;
-  while (offset < input.length) {
-    const index = input.indexOf(token, offset);
-    if (index === -1) return -1;
-    const boundary = input[index + token.length];
-    if (boundary === undefined || /[\s/>]/.test(boundary)) return index;
-    offset = index + 1;
-  }
-  return -1;
+function findRawTextEnd(input: string, tagName: string, offset = 0): number {
+  // Search the original string with ASCII case-insensitive closing tags:
+  // lowercasing entire HTML can expand Unicode (İ → i̇) and invalidate offsets.
+  const closing = rawTextElements.get(tagName)!;
+  // Each synchronous search resets the cursor; separate streamed responses
+  // must not inherit another response's match position.
+  closing.lastIndex = offset;
+  return closing.exec(input)?.index ?? -1;
 }
 
 function matchingSuffixLength(input: string, token: string): number {
   const limit = Math.min(token.length - 1, input.length);
   for (let length = limit; length > 0; length--) {
-    if (token.startsWith(input.slice(-length))) return length;
+    if (token.startsWith(input.slice(-length).toLowerCase())) return length;
   }
   return 0;
 }

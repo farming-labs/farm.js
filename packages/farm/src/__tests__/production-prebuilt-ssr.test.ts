@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import { createServer } from "node:net";
 import os from "node:os";
@@ -717,7 +718,8 @@ export default function Page() {
   return (
     <main data-csp-nonce-page>
       Nonce-protected production output
-      <script nonce="stale-build-nonce">window.appReady=true</script>
+      <script nonce="stale-build-nonce" dangerouslySetInnerHTML={{ __html: "window.city='İİİİİİİİ 🌱';" }} />
+      <script>window.appReady=true</script>
     </main>
   );
 }
@@ -753,6 +755,7 @@ export default function Page() {
 
           expect(firstNonce).toBeTruthy();
           expect(firstPolicy).not.toContain("'unsafe-inline'");
+          expect(firstHtml).toContain("window.city='İİİİİİİİ 🌱';");
           expect(firstScripts.length).toBeGreaterThan(0);
           expect(firstScripts.every((tag) => tag.includes(`nonce="${firstNonce}"`))).toBe(true);
 
@@ -769,6 +772,57 @@ export default function Page() {
           expect(secondNonce).not.toBe(firstNonce);
           expect(secondScripts.length).toBeGreaterThan(0);
           expect(secondScripts.every((tag) => tag.includes(`nonce="${secondNonce}"`))).toBe(true);
+        },
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("hashes Unicode inline scripts exactly in prerendered production HTML", async () => {
+    const root = await createProductionFixture();
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+export const ssg = true;
+export default function Page() {
+  return <main>İstanbul
+    <script nonce="old" dangerouslySetInnerHTML={{ __html: "window.city='İİİİİİİİ 🌱';" }} />
+    <script>window.appReady=true</script>
+  </main>;
+}`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "production-csp-unicode-hash-test",
+          security: { csp: { nonce: true, policy: "script-src 'self'" } },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          const policy = response.headers.get("content-security-policy");
+          expect(html).toContain("window.city='İİİİİİİİ 🌱';");
+          expect(html).not.toMatch(/<script\b[^>]*\bnonce\s*=/i);
+          expect(policy).not.toContain("'nonce-");
+          const contents = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
+            .filter(([, attributes]) => !/(?:^|\s)src\s*=/i.test(attributes!))
+            .map(([, , content]) => content!);
+          expect(contents.length).toBeGreaterThanOrEqual(2);
+          for (const content of contents) {
+            expect(policy).toContain(
+              `'sha256-${createHash("sha256").update(content).digest("base64")}'`,
+            );
+          }
         },
       );
     } finally {
