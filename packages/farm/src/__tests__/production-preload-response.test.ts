@@ -102,6 +102,41 @@ describe("production preload response processing", () => {
     expect(await output.text()).toBe("html");
   });
 
+  it.each([
+    ["a proven preload-free body", "<p>no hints</p>", "none", "text/html"],
+    [
+      "a buffered body with hints",
+      '<link rel="preload" as="image" href="/a"><link rel="preload" as="image" href="/b">',
+      "1",
+      "text/html",
+    ],
+    ["an unknown HTML body", "<p>unknown</p>", "future", "text/html"],
+    ["a non-HTML body", '{"ok":true}', "none", "application/json"],
+  ])(
+    "strips markers from %s without a separate header copy",
+    async (_label, body, marker, contentType) => {
+      const r = runtime();
+      const original = new Response(body, {
+        status: 201,
+        statusText: "Created",
+        headers: { "content-type": contentType, "x-farm-preload-buffered": marker },
+      });
+      original.headers.append("set-cookie", "a=1; Path=/");
+      original.headers.append("set-cookie", "b=2; Path=/");
+      const output = await r.applyFarmPreloadBudget(original, "/");
+
+      // The Response constructor copies init headers; a second explicit copy is waste.
+      expect(r.headerCopies).not.toHaveBeenCalled();
+      expect(output).not.toBe(original);
+      expect(output.status).toBe(201);
+      expect(output.statusText).toBe("Created");
+      expect(output.headers.has("x-farm-preload-buffered")).toBe(false);
+      expect(output.headers.getSetCookie()).toEqual(["a=1; Path=/", "b=2; Path=/"]);
+      // The input response is never mutated.
+      expect(original.headers.get("x-farm-preload-buffered")).toBe(marker);
+    },
+  );
+
   it("still strips unrecognized internal markers from HTML responses", async () => {
     const r = runtime();
     const original = new Response("html", {
