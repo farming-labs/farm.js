@@ -86,6 +86,22 @@ React 19.2.0, and Vite 5.4.21, the two guards add 83 raw bytes and 14 gzip bytes
 builds pass the same create, select, update, swap, append, remove, clear, and row-identity controls
 in Chromium 151; no browser timing improvement is claimed.
 
+## Owned filtered-row Maps
+
+Filter and slice fast paths commit their freshly prepared row Map directly instead of copying it
+a second time. Removing one row from 10,000 eliminates one Map allocation and 9,999 copied entries;
+the survivor Map, validation, DOM updates, event indexing, and cleanup remain unchanged. This is an
+allocation reduction, not a browser-latency claim.
+
+The regression covers removal, keep-all filters, queued removals, slices, empty results, and
+independent mounted lists across clear/reset cycles in both complete and identity-filter runtimes:
+`pnpm --filter @farm.js/react exec vitest run src/__tests__/compiler-runtime-keyed-array-filter-hints.test.tsx`.
+
+With the pinned upstream application, React 19.2.0, and Vite 5.4.21 described above, this change
+reduces raw JS from 238,454 to 238,445 bytes. Gzip stays at 73,691 bytes; Brotli changes from 62,992
+to 63,076 bytes (+84 bytes). Both builds pass the same production-browser correctness controls;
+these payload measurements do not establish a browser-timing improvement.
+
 ## Existing production benchmark audit
 
 The existing js-framework-benchmark application was also rebuilt before and after runtime
