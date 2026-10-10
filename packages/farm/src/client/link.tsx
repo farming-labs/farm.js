@@ -10,7 +10,7 @@ import {
 } from "../router";
 import { resolveFarmNavigationURL } from "./navigation-url";
 import type { FarmViewTransitionMode } from "./spa-router";
-import { isFarmLocaleChangeHref, localizeActiveFarmHref } from "../i18n/client-runtime";
+import { isFarmLocaleChangeHref, localizeActiveFarmHref } from "../i18n/client-state";
 import type { FarmI18nLocale } from "../i18n/types";
 import { getFarmTrailingSlashPreference } from "../trailing-slash";
 import { applyFarmBasePath, getFarmBasePath } from "../base-path";
