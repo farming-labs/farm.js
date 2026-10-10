@@ -72,6 +72,20 @@ and verifies both builds retain their intended filter capability. This is a bund
 not a browser operation or first-paint timing result. Mixed targets and structural row extensions
 continue to use their existing capabilities.
 
+## Empty keyed cleanup registries
+
+Keyed-row cleanup skips building an active-key Set when its event-handler or conditional-listener
+registry is empty. For 10,000 active keys with both registries empty, this removes two Set
+allocations and 20,000 key insertions per cleanup pair. Populated registries retain their existing
+pruning behavior, including removal of stale entries and preservation of live callback identity.
+The allocation regression covers 0, 1,000, and 10,000 keys and re-registration after cleanup:
+`pnpm --filter @farm.js/react exec vitest run src/__tests__/compiler-runtime-keyed-cleanup.test.ts`.
+These are allocation counts, not a browser-latency claim. With the
+[upstream benchmark application pinned at `bf894b6`](https://github.com/krausest/js-framework-benchmark/blob/bf894b681fb56433ccb6efb4a3c93e35eda2b20d/frameworks/keyed/farm-react/src/main.tsx),
+React 19.2.0, and Vite 5.4.21, the two guards add 83 raw bytes and 14 gzip bytes. Both production
+builds pass the same create, select, update, swap, append, remove, clear, and row-identity controls
+in Chromium 151; no browser timing improvement is claimed.
+
 ## Existing production benchmark audit
 
 The existing js-framework-benchmark application was also rebuilt before and after runtime

@@ -9343,6 +9343,7 @@ function createKeyedRowsBlockComponentCore(
     }
 
     private pruneEventHandlers(keys: readonly string[]): void {
+      if (this.eventHandlers.size === 0) return;
       const active = new Set(keys);
       for (const key of this.eventHandlers.keys()) {
         if (!active.has(key)) this.eventHandlers.delete(key);
@@ -9350,6 +9351,7 @@ function createKeyedRowsBlockComponentCore(
     }
 
     private pruneConditionalListeners(keys: readonly string[]): void {
+      if (this.conditionalListeners.size === 0) return;
       const active = new Set(keys);
       for (const key of this.conditionalListeners.keys()) {
         if (!active.has(key)) this.conditionalListeners.delete(key);
