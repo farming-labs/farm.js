@@ -66,6 +66,7 @@ const testSource = String.raw`
     keyedRowsStructuralAppendMapHintedRuntimeFeature,
     keyedRowsIdentityRuntimeFeature,
     keyedRowsIdentityFilterHintedRuntimeFeature,
+    keyedRowsIdentityFilterOnlyRuntimeFeature,
     keyedRowsMembershipRuntimeFeature,
     keyedRowsMapLookupRuntimeFeature,
   } = await import(
@@ -78,6 +79,7 @@ const testSource = String.raw`
   for (const [feature, kind] of [
     [keyedRowsIdentityRuntimeFeature, "identityTarget"],
     [keyedRowsIdentityFilterHintedRuntimeFeature, "identityTarget"],
+    [keyedRowsIdentityFilterOnlyRuntimeFeature, "identityTarget"],
     [keyedRowsMembershipRuntimeFeature, "membershipTarget"],
     [keyedRowsMapLookupRuntimeFeature, "mapLookupTarget"],
   ]) {

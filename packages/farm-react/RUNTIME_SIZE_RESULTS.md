@@ -102,6 +102,41 @@ reduces raw JS from 238,454 to 238,445 bytes. Gzip stays at 73,691 bytes; Brotli
 to 63,076 bytes (+84 bytes). Both builds pass the same production-browser correctness controls;
 these payload measurements do not establish a browser-timing improvement.
 
+## Filter-only identity runtime
+
+Plain identity-targeted rows with compiler-emitted filter/slice hints, but no map or append hints,
+now select a separate filter-only runtime. It omits the unused map/append fast paths while keeping
+the same validated removal path and full keyed reconciliation for other updates. Capability
+selection considers every keyed list in the component; mixed updates, mixed target kinds, host
+blocks, and conditional rows retain their existing runtimes. The previous identity/filter export
+is unchanged for previously generated code. No compiler option or public app API changes.
+
+`pnpm --filter @farm.js/react test:runtime-size` compares the same `keyed-identity-filter.tsx`
+fixture against both the legacy identity/filter runtime and the combined-target filter runtime.
+With Node 24.21.0, React 19.2.8, and Vite 5.4.20 on macOS arm64:
+
+| Runtime                        |       Raw |     Gzip |
+| ------------------------------ | --------: | -------: |
+| Legacy identity/filter         | 234,467 B | 72,515 B |
+| Filter-only identity           | 232,103 B | 71,927 B |
+| Combined-target filter control | 239,501 B | 73,577 B |
+
+The new runtime saves **588 B gzip** against the legacy identity/filter control. A separate gate
+requires at least 512 B of incremental savings; the existing combined-target gate remains active.
+The direct-binding and isolated-core runtime-size controls are unchanged.
+
+In the pinned upstream application described above (React 19.2.0 / Vite 5.4.21), selecting the
+legacy export as the before control yields 238,445 B raw / 73,691 B gzip / 63,076 B Brotli. The new
+compiler-selected export yields 236,081 B raw / 73,081 B gzip / 62,498 B Brotli: **610 B gzip saved**.
+Both production builds pass the same 12 browser controls in Chromium 151.0.7922.34: create/select,
+update every tenth label, swap, append, remove, clear/recreate, and 10,000-row operations, including
+surviving DOM identity and selection after removal. There are no page or console errors. These
+are payload and correctness results, not browser CPU, first-paint, or framework-ranking results.
+
+Regression coverage includes hybrid/static compiler selection, same-list and sibling-list mixed
+hints, queued map/filter and append/filter updates, legacy exports, HMR capability changes,
+hydration, Strict Mode, randomized removals, and unexpected map/append updates followed by removals.
+
 ## Existing production benchmark audit
 
 The existing js-framework-benchmark application was also rebuilt before and after runtime

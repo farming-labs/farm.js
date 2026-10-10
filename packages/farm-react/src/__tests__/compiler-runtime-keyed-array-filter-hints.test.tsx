@@ -6,9 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCompiledComponent as createCompleteCompiledComponent,
   createCompiledComponentWithFeatures,
+  createCompilerKeyedArrayAppend,
   createCompilerKeyedArrayFilter,
   createCompilerKeyedArraySlice,
+  createCompilerKeyedMapUpdate,
   keyedRowsIdentityFilterHintedRuntimeFeature,
+  keyedRowsIdentityFilterOnlyRuntimeFeature,
   type CompilerKeyedRowElement,
 } from "../compiler-runtime";
 
@@ -106,12 +109,14 @@ function createFilterHarness(initialItems: Item[], readsCollection = false) {
   let slice: (start: number, end?: number) => void = () => undefined;
   let reset: () => void = () => undefined;
   let plainThenFilter: (id: string) => void = () => undefined;
+  let update: (next: (items: Item[]) => unknown) => void = () => undefined;
   const Inventory = createCompiledComponent({
     displayName: "FilterInventory",
     initialize: () => [initialItems],
     render(_props: Record<string, never>, state, blocks) {
       counters.executions += 1;
       const items = () => state[0].get() as Item[];
+      update = (next) => state[0].set((previous) => next(previous as Item[]));
       remove = (ids) => state[0].set((previous) => hintedFilter(previous as Item[], new Set(ids)));
       slice = (start, end) =>
         state[0].set((previous) =>
@@ -177,16 +182,18 @@ function createFilterHarness(initialItems: Item[], readsCollection = false) {
     remove: (ids: readonly string[]) => remove(ids),
     slice: (start: number, end?: number) => slice(start, end),
     reset: () => reset(),
+    update: (next: (items: Item[]) => unknown) => update(next),
   };
 }
 
-describe.each([false, true])("filter hints (identity-only: %s)", (specialized) => {
+describe.each([
+  undefined,
+  keyedRowsIdentityFilterHintedRuntimeFeature,
+  keyedRowsIdentityFilterOnlyRuntimeFeature,
+])("filter hints (feature: %s)", (feature) => {
   beforeEach(() => {
-    createCompiledComponent = specialized
-      ? (definition) =>
-          createCompiledComponentWithFeatures(definition, [
-            keyedRowsIdentityFilterHintedRuntimeFeature,
-          ])
+    createCompiledComponent = feature
+      ? (definition) => createCompiledComponentWithFeatures(definition, [feature])
       : createCompleteCompiledComponent;
   });
 
@@ -368,6 +375,52 @@ describe.each([false, true])("filter hints (identity-only: %s)", (specialized) =
     expect(container.textContent).toBe("Gamma");
     expect(harness.counters.bindingReads).toBeGreaterThan(0);
   });
+
+  it.each(["plain-map", "hinted-map", "hinted-append"] as const)(
+    "preserves %s updates followed by removals",
+    async (operation) => {
+      const harness = createFilterHarness([
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Beta" },
+        { id: "c", label: "Gamma" },
+      ]);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      roots.push(root);
+      await act(async () => root.render(<harness.Inventory />));
+      const before = [...container.querySelectorAll("li")];
+      await act(async () => {
+        harness.update((items) => {
+          if (operation === "hinted-append") {
+            return createCompilerKeyedArrayAppend(items, [...items, { id: "d", label: "Delta" }]);
+          }
+          const mapped = items.map((item, index) =>
+            index === 1 ? { ...item, label: "Updated" } : item,
+          );
+          return operation === "hinted-map"
+            ? createCompilerKeyedMapUpdate(items, mapped, [1])
+            : mapped;
+        });
+        await flushCompilerUpdates();
+      });
+      const updated = [...container.querySelectorAll("li")];
+      before.forEach((row, index) => expect(updated[index]).toBe(row));
+      expect(updated.map((row) => row.textContent)).toEqual(
+        operation === "hinted-append"
+          ? ["Alpha", "Beta", "Gamma", "Delta"]
+          : ["Alpha", "Updated", "Gamma"],
+      );
+      await act(async () => {
+        harness.remove(["a"]);
+        await flushCompilerUpdates();
+      });
+      expect([...container.querySelectorAll("li")]).toEqual(updated.slice(1));
+      expect(container.querySelector("li")?.textContent).toBe(
+        operation === "hinted-append" ? "Beta" : "Updated",
+      );
+    },
+  );
 
   it("keeps collection-reading rows on complete reconciliation", async () => {
     const harness = createFilterHarness(

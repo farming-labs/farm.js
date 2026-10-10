@@ -384,6 +384,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-window-every-hinted"
   | "keyed-rows-filter-hinted"
   | "keyed-rows-identity-filter-hinted"
+  | "keyed-rows-identity-filter-only"
   | "keyed-rows-structural-append-hinted"
   | "keyed-rows-structural-append-map-hinted"
   | "keyed-rows-structural-prepend-hinted"
@@ -471,6 +472,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-window-every-hinted": "keyedRowsWindowEveryHintedRuntimeFeature",
   "keyed-rows-filter-hinted": "keyedRowsFilterHintedRuntimeFeature",
   "keyed-rows-identity-filter-hinted": "keyedRowsIdentityFilterHintedRuntimeFeature",
+  "keyed-rows-identity-filter-only": "keyedRowsIdentityFilterOnlyRuntimeFeature",
   "keyed-rows-structural-append-hinted": "keyedRowsStructuralAppendHintedRuntimeFeature",
   "keyed-rows-structural-append-map-hinted": "keyedRowsStructuralAppendMapHintedRuntimeFeature",
   "keyed-rows-structural-prepend-hinted": "keyedRowsStructuralPrependHintedRuntimeFeature",
@@ -556,7 +558,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
 
 function runtimeFeaturesForPlans(
   plans: readonly ComposableBlockPlan[],
-  keyedMapUpdateHints: boolean,
+  keyedUpdateHints: boolean,
   keyedArrayFilterHints: boolean,
   keyedArrayStructuralAppendHints: boolean,
   keyedArrayStructuralAppendMapHints: boolean,
@@ -570,6 +572,7 @@ function runtimeFeaturesForPlans(
   keyedArrayMapReorderHints: boolean,
   keyedArrayMappedRollingWindowChainHints: boolean,
   keyedArrayRollingWindowHints: boolean,
+  keyedMapOrAppendHints: boolean,
 ): CompilerRuntimeFeatureName[] {
   const features = new Set<CompilerRuntimeFeatureName>();
   let keyedRowsHaveConditionals = false;
@@ -645,7 +648,7 @@ function runtimeFeaturesForPlans(
                                 ? "-filter-hinted"
                                 : keyedArrayPrependHints
                                   ? "-prepend-hinted"
-                                  : keyedMapUpdateHints
+                                  : keyedUpdateHints
                                     ? "-hinted"
                                     : "";
     if (
@@ -654,7 +657,13 @@ function runtimeFeaturesForPlans(
       keyedTargetKinds.size === 1 &&
       keyedTargetKinds.has("identity")
     ) {
-      features.add("keyed-rows-identity-filter-hinted");
+      // Features are shared by every keyed list in this component. Keep map
+      // and append support when any accepted rewrite needs either capability.
+      features.add(
+        keyedMapOrAppendHints
+          ? "keyed-rows-identity-filter-hinted"
+          : "keyed-rows-identity-filter-only",
+      );
     } else {
       features.add(
         keyedTargetKinds.size <= 1 && keyedRowsFeature === "keyed-rows" && hintSuffix === ""
@@ -9974,6 +9983,7 @@ function compileCandidate(
       appliedQueuedStructuralMapHints > 0,
     appliedMappedRollingWindowChainHints > 0,
     appliedKeyedArrayRollingWindowHints > appliedMappedRollingWindowHints,
+    appliedKeyedMapUpdateHints > 0 || appliedKeyedArrayAppendHints > 0,
   );
   markShortCircuitBindings(analysis.bindings || []);
   assignStableBindingTargets(analysis.bindings || []);

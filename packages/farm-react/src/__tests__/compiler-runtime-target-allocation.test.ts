@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import {
   keyedRowsIdentityRuntimeFeature,
   keyedRowsIdentityFilterHintedRuntimeFeature,
+  keyedRowsIdentityFilterOnlyRuntimeFeature,
   keyedRowsMapLookupRuntimeFeature,
   keyedRowsMembershipRuntimeFeature,
   keyedRowsRuntimeFeature,
@@ -43,6 +44,7 @@ function allocatedMaps(
 it.each([
   [keyedRowsIdentityRuntimeFeature, "identityTarget"],
   [keyedRowsIdentityFilterHintedRuntimeFeature, "identityTarget"],
+  [keyedRowsIdentityFilterOnlyRuntimeFeature, "identityTarget"],
   [keyedRowsMembershipRuntimeFeature, "membershipTarget"],
   [keyedRowsMapLookupRuntimeFeature, "mapLookupTarget"],
 ] as const)("allocates four fewer target maps with $0.name", (feature, kind) => {

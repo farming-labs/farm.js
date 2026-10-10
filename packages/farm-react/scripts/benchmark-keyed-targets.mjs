@@ -6,7 +6,7 @@ import { build } from "vite";
 import { createFarmRendererPlugin } from "../dist/vite.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/runtime-size");
-async function bundle(kind, fullControl) {
+async function bundle(kind, controlFeature) {
   let replaced = false;
   const result = await build({
     root,
@@ -21,14 +21,12 @@ async function bundle(kind, fullControl) {
         name: "full-target-runtime-control",
         enforce: "post",
         transform(code, id) {
-          if (!fullControl || !id.endsWith(`keyed-${kind}.tsx`)) return;
+          if (!controlFeature || !id.endsWith(`keyed-${kind}.tsx`)) return;
           const control = code.replace(
-            /keyedRows(?:IdentityFilterHinted|Identity|Membership|MapLookup)RuntimeFeature/g,
+            /keyedRows(?:IdentityFilterOnly|Identity|Membership|MapLookup)RuntimeFeature/g,
             () => {
               replaced = true;
-              return kind === "identity-filter"
-                ? "keyedRowsFilterHintedRuntimeFeature"
-                : "keyedRowsRuntimeFeature";
+              return controlFeature;
             },
           );
           return { code: control, map: null };
@@ -41,7 +39,7 @@ async function bundle(kind, fullControl) {
       rollupOptions: { input: join(root, `keyed-${kind}.tsx`) },
     },
   });
-  if (fullControl) assert.ok(replaced, "control must replace a specialized compiler feature");
+  if (controlFeature) assert.ok(replaced, "control must replace a specialized compiler feature");
   const code = [result]
     .flat()
     .flatMap((output) => output.output)
@@ -53,11 +51,14 @@ async function bundle(kind, fullControl) {
 
 const results = [];
 for (const kind of ["identity", "membership", "map-lookup", "identity-filter"]) {
-  const full = await bundle(kind, true);
-  const specialized = await bundle(kind, false);
+  const full = await bundle(
+    kind,
+    kind === "identity-filter" ? "keyedRowsFilterHintedRuntimeFeature" : "keyedRowsRuntimeFeature",
+  );
+  const specialized = await bundle(kind);
   assert.ok(
     specialized.code.includes(
-      `keyed-rows:${kind === "identity-filter" ? "identity-filter-hinted" : kind}`,
+      `keyed-rows:${kind === "identity-filter" ? "identity-filter-only" : kind}`,
     ),
   );
   if (kind === "identity") {
@@ -73,6 +74,18 @@ for (const kind of ["identity", "membership", "map-lookup", "identity-filter"]) 
       full.gzip - specialized.gzip >= 512,
       "identity/filter specialization must save at least 512 B gzip",
     );
+    const legacy = await bundle(kind, "keyedRowsIdentityFilterHintedRuntimeFeature");
+    assert.ok(legacy.code.includes("keyed-rows:identity-filter-hinted"));
+    assert.ok(
+      legacy.gzip - specialized.gzip >= 512,
+      "filter-only specialization must save at least 512 B gzip over the legacy identity/filter runtime",
+    );
+    results.push({
+      kind: "identity-filter-only-vs-legacy",
+      full: { raw: legacy.raw, gzip: legacy.gzip },
+      specialized: { raw: specialized.raw, gzip: specialized.gzip },
+      savedGzip: legacy.gzip - specialized.gzip,
+    });
   }
   results.push({
     kind,
