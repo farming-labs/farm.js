@@ -29,6 +29,10 @@ if (arm === "baseline" || arm === "candidate") {
       // header copy. The baseline restores the explicit copy before building.
       const rebuild = /function rebuildFarmPreloadResponse\(response, body\) \{[\s\S]*?\n\}/g;
       assert.equal([...source.matchAll(rebuild)].length, 1, "build the candidate first");
+      // Both arms must pass the module source through the same replacement.
+      // A three-arm control showed an untouched source string runs measurably
+      // slower than an identical replaced one, which biased the unpatched arm.
+      if (arm === "candidate") source = source.replace(rebuild, (match) => match);
       if (arm === "baseline")
         source = source.replace(
           rebuild,
@@ -153,7 +157,7 @@ if (arm === "baseline" || arm === "candidate") {
       {
         provisional: true,
         methodology:
-          "In-process SSR plus full body consumption and correctness validation; identity encoding; five alternating process pairs; median of round means. The page has no preload hints, so every request takes the proven preload-free path and its one marker-strip rebuild. Baseline restores the explicit Headers copy before that rebuild. Not network latency or a publishable comparison.",
+          "In-process SSR plus full body consumption and correctness validation; identity encoding; five alternating process pairs; median of round means. The page has no preload hints, so every request takes the proven preload-free path and its one marker-strip rebuild. Baseline restores the explicit Headers copy before that rebuild; both arms load the module source through the same string replacement. Not network latency or a publishable comparison.",
         node: process.version,
         platform: process.platform,
         arch: process.arch,
