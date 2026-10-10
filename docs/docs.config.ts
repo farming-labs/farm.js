@@ -285,6 +285,7 @@ const sidebar = [
             slug: "integrations/cf-agent",
             icon: "brand-cloudflare",
           },
+          { label: "TanStack AI", slug: "integrations/tanstack-ai", icon: "sparkles" },
         ],
       },
       {
