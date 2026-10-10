@@ -139,17 +139,18 @@ if (arm) {
       assert.ok(api.reportedWarnings.size <= 256);
       continue;
     }
-    const expired = scenario.expire && !scenario.warm
-      ? Array.from({ length: requests }, () => {
-          const target = runtime(
-            arm,
-            () => now,
-            () => output++,
-          );
-          seedHistory(target);
-          return target;
-        })
-      : undefined;
+    const expired =
+      scenario.expire && !scenario.warm
+        ? Array.from({ length: requests }, () => {
+            const target = runtime(
+              arm,
+              () => now,
+              () => output++,
+            );
+            seedHistory(target);
+            return target;
+          })
+        : undefined;
     if (expired) now += 60000;
     // Separate control for old histories: keep the fresh-allocation control too.
     if (scenario.collect) {
