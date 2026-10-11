@@ -19,6 +19,7 @@ import {
   resolveConfigRoutePathname,
 } from "../plugins/route-pattern";
 import { resolveFarmI18nConfig } from "../i18n/config";
+import { isFarmOwnedResponse, ownFarmResponse } from "../response-headers";
 
 describe("generateConfiguredResponseHeadersRuntimeSource", () => {
   it("preserves handler and configured Set-Cookie fields separately", () => {
@@ -26,6 +27,8 @@ describe("generateConfiguredResponseHeadersRuntimeSource", () => {
     const applyConfiguredResponseHeaders = new Function(
       "configuredHeaderRoutes",
       "appendFarmLinkHeader",
+      "isFarmOwnedResponse",
+      "ownFarmResponse",
       `${generateRuntimePathMatcherSource()}\n${source}; return applyConfiguredResponseHeaders;`,
     )(
       [
@@ -38,6 +41,8 @@ describe("generateConfiguredResponseHeadersRuntimeSource", () => {
         },
       ],
       (headers: Headers, value: string) => headers.append("Link", value),
+      isFarmOwnedResponse,
+      ownFarmResponse,
     ) as (response: Response, pathname: string) => Response;
     const handlerHeaders = new Headers();
     handlerHeaders.append("Set-Cookie", "session=abc; Path=/; HttpOnly");
@@ -59,6 +64,8 @@ describe("generateConfiguredResponseHeadersRuntimeSource", () => {
     const applyConfiguredResponseHeaders = new Function(
       "configuredHeaderRoutes",
       "appendFarmLinkHeader",
+      "isFarmOwnedResponse",
+      "ownFarmResponse",
       `${generateRuntimePathMatcherSource()}\n${source}; return applyConfiguredResponseHeaders;`,
     )(
       [
@@ -68,6 +75,8 @@ describe("generateConfiguredResponseHeadersRuntimeSource", () => {
         },
       ],
       (headers: Headers, value: string) => headers.append("Link", value),
+      isFarmOwnedResponse,
+      ownFarmResponse,
     ) as (response: Response, pathname: string) => Response;
 
     const response = applyConfiguredResponseHeaders(
@@ -94,6 +103,8 @@ describe("configured response headers locale-prefix parity (production fetch ent
   const prod = new Function(
     "configuredHeaderRoutes",
     "appendFarmLinkHeader",
+    "isFarmOwnedResponse",
+    "ownFarmResponse",
     `${matcherSource}\n${headersSource}\nreturn { matchRuntimePathPattern, applyConfiguredResponseHeaders };`,
   ) as (
     configuredHeaderRoutes: Array<{
@@ -101,6 +112,8 @@ describe("configured response headers locale-prefix parity (production fetch ent
       headers: Array<{ key: string; value: string }>;
     }>,
     appendFarmLinkHeader: (headers: Headers, value: string) => void,
+    isOwned: typeof isFarmOwnedResponse,
+    own: typeof ownFarmResponse,
   ) => {
     matchRuntimePathPattern: (pattern: string, pathname: string) => Record<string, string> | null;
     applyConfiguredResponseHeaders: (response: Response, pathname: string) => Response;
@@ -133,7 +146,7 @@ describe("configured response headers locale-prefix parity (production fetch ent
     // is prefix-unaware, so the strip must happen at the call site, exactly as
     // the sibling redirects/rewrites path uses getFarmRoutePathname.
     const routePathname = resolveConfigRoutePathname(requestPathname, i18n).pathname;
-    const runtime = prod(routes, appendFarmLinkHeader);
+    const runtime = prod(routes, appendFarmLinkHeader, isFarmOwnedResponse, ownFarmResponse);
     return runtime.applyConfiguredResponseHeaders(new Response("ok"), routePathname);
   }
 
@@ -233,7 +246,7 @@ describe("configured response headers locale-prefix parity (production fetch ent
     const label = expectedApplied ? "applies" : "does not apply";
     it(`production ${label} ${headerKey} for ${source} against ${requestPathname} in parity with dev`, () => {
       const routes = [{ source, headers: [{ key: headerKey, value: headerValue }] }];
-      const runtime = prod(routes, appendFarmLinkHeader);
+      const runtime = prod(routes, appendFarmLinkHeader, isFarmOwnedResponse, ownFarmResponse);
 
       // Pre-fix behavior: feeding the RAW locale-prefixed pathname to the
       // production matcher reproduces the bug for route-specific sources
