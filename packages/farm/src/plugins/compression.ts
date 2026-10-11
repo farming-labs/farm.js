@@ -1,6 +1,7 @@
 import type { FarmPlugin, FarmPluginContext } from "../plugin";
 import type { FarmRequest, FarmResponse } from "../types";
 import { pipeline, Readable } from "node:stream";
+import { editFarmResponseHeaders } from "../response-headers";
 import { brotliCompress, constants, createBrotliCompress, createGzip, gzip } from "node:zlib";
 
 type SupportedEncoding = "br" | "gzip";
@@ -215,14 +216,7 @@ function compressResponse(response: Response, encoding: SupportedEncoding): Resp
 }
 
 function varyIdentityResponse(response: Response): Response {
-  const headers = new Headers(response.headers);
-  appendVary(headers, "Accept-Encoding");
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  return editFarmResponseHeaders(response, (headers) => appendVary(headers, "Accept-Encoding"));
 }
 
 /**

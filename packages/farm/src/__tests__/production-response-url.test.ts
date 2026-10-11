@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { editFarmResponseHeaders, isFarmOwnedResponse, ownFarmResponse } from "../response-headers";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -32,6 +33,9 @@ function runtime(options: { headers?: boolean; warn?: boolean; nonce?: boolean }
     "manageFarmLinkHeaderPreloads",
     "farmPreloadConfig",
     "reportFarmPreloadWarnings",
+    "editFarmResponseHeaders",
+    "isFarmOwnedResponse",
+    "ownFarmResponse",
     `${generateRuntimePathMatcherSource()}\n${generateConfiguredResponseHeadersRuntimeSource()}\n${generatePreloadResponseRuntimeSource()}\n${source.slice(start, end)}\nreturn prepareResponse;`,
   )(
     new Proxy(URL, {
@@ -62,6 +66,9 @@ function runtime(options: { headers?: boolean; warn?: boolean; nonce?: boolean }
     manageFarmLinkHeaderPreloads,
     { mode: options.warn ? "warn" : "enforce", maxImages: 1, maxFonts: 1 },
     report,
+    editFarmResponseHeaders,
+    isFarmOwnedResponse,
+    ownFarmResponse,
   ) as (request: Request, response: Response | Promise<Response>) => Promise<Response>;
   return { run, parses, normalize, report };
 }

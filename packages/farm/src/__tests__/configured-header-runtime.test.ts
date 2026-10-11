@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { HeaderConfig } from "../config";
 import { appendFarmLinkHeader } from "../nitro/production-runtime";
+import { isFarmOwnedResponse, ownFarmResponse } from "../response-headers";
 import {
   generateConfiguredResponseHeadersRuntimeSource,
   generateRuntimePathMatcherSource,
@@ -30,8 +31,18 @@ function createRuntime(routes: HeaderConfig[]) {
     "split",
     "decode",
     "fallback",
+    "isFarmOwnedResponse",
+    "ownFarmResponse",
     `${matcher}\n${generateConfiguredResponseHeadersRuntimeSource()}\nreturn { applyConfiguredResponseHeaders, matchRuntimePathPattern };`,
-  )(routes, appendFarmLinkHeader, split, decode, fallback) as {
+  )(
+    routes,
+    appendFarmLinkHeader,
+    split,
+    decode,
+    fallback,
+    isFarmOwnedResponse,
+    ownFarmResponse,
+  ) as {
     applyConfiguredResponseHeaders: (response: Response, pathname: string) => Response;
     matchRuntimePathPattern: (pattern: string, pathname: string) => object | null;
   };
@@ -192,5 +203,18 @@ describe("prepared configured response header routes", () => {
       },
     });
     expect(runtime.applyConfiguredResponseHeaders(alreadySet, "/account")).toBe(alreadySet);
+  });
+
+  it("edits a response Farm built in place and copies any other", () => {
+    const runtime = createRuntime([{ source: "/page", headers: [{ key: "X-Rule", value: "1" }] }]);
+    const owned = ownFarmResponse(new Response("ok"));
+    expect(runtime.applyConfiguredResponseHeaders(owned, "/page")).toBe(owned);
+    expect(owned.headers.get("x-rule")).toBe("1");
+
+    const foreign = new Response("ok");
+    const copied = runtime.applyConfiguredResponseHeaders(foreign, "/page");
+    expect(copied).not.toBe(foreign);
+    expect(foreign.headers.has("x-rule")).toBe(false);
+    expect(copied.headers.get("x-rule")).toBe("1");
   });
 });

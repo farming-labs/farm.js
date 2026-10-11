@@ -1,3 +1,5 @@
+import { editFarmResponseHeaders } from "./response-headers";
+
 /** Content type for Markdown responses, including agent-facing error bodies. */
 export const FARM_MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8";
 
@@ -218,14 +220,9 @@ export function applyMarkdownNegotiationHeaders(
     return response;
   }
 
-  const headers = new Headers(response.headers);
-  appendHeaderToken(headers, "Vary", "Accept");
-  headers.append("Link", `<${alternatePath}>; rel="alternate"; type="text/markdown"`);
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
+  return editFarmResponseHeaders(response, (headers) => {
+    appendHeaderToken(headers, "Vary", "Accept");
+    headers.append("Link", `<${alternatePath}>; rel="alternate"; type="text/markdown"`);
   });
 }
 

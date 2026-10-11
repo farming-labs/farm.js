@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { editFarmResponseHeaders, ownFarmResponse } from "../response-headers";
 import { describe, expect, it, vi } from "vitest";
 import { generatePreloadResponseRuntimeSource } from "../nitro/universal-build";
 import {
@@ -21,6 +22,8 @@ function runtime(mode: FarmPreloadMode = "enforce") {
     "farmPreloadConfig",
     "reportFarmPreloadWarnings",
     "Headers",
+    "editFarmResponseHeaders",
+    "ownFarmResponse",
     `${generatePreloadResponseRuntimeSource()}; return { getFarmBufferedPreloadMarker, rememberFarmBufferedHtml, getFarmOwnedBufferedHtml, applyFarmPreloadBudget };`,
   )(
     manageFarmDocumentPreloads,
@@ -33,6 +36,13 @@ function runtime(mode: FarmPreloadMode = "enforce") {
         return Reflect.construct(target, args);
       },
     }),
+    // The shared helper copies with the global Headers; count any copy it makes.
+    (response: Response, edit: (headers: Headers) => void) => {
+      const output = editFarmResponseHeaders(response, edit);
+      if (output !== response) headerCopies();
+      return output;
+    },
+    ownFarmResponse,
   ) as {
     getFarmBufferedPreloadMarker(html: unknown): string;
     rememberFarmBufferedHtml(response: Response, html: string): Response;
@@ -243,6 +253,21 @@ describe("production preload response processing", () => {
       // Response.text() drops a leading BOM; the output keeps that behavior.
       expect(await output.text()).toBe(html.replace(below, ""));
     });
+  });
+
+  it("strips markers from a response Farm built without rebuilding it", async () => {
+    const r = runtime();
+    const html = "<p>no hints</p>";
+    const response = ownFarmResponse(
+      r.response(html, { headers: { link: '</a>; rel="alternate"' } }),
+    );
+    const output = await r.applyFarmPreloadBudget(response, "/");
+
+    expect(output).toBe(response);
+    expect(r.headerCopies).not.toHaveBeenCalled();
+    expect(output.headers.has("x-farm-preload-buffered")).toBe(false);
+    expect(output.headers.get("link")).toBe('</a>; rel="alternate"');
+    expect(await output.text()).toBe(html);
   });
 
   it("still strips unrecognized internal markers from HTML responses", async () => {
