@@ -26,7 +26,6 @@ import { z } from "zod";
 
 export const POST = createEndpoint(
   {
-    method: "POST",
     body: z.object({
       name: z.string().min(1),
     }),
@@ -36,6 +35,25 @@ export const POST = createEndpoint(
   },
 );
 ```
+
+The export name sets the HTTP method, so route files don't pass `method`. An endpoint without
+schemas or other options can take the handler alone:
+
+**src/app/api/stars/route.ts**
+
+```ts
+import { createEndpoint } from "@farm.js/core/api";
+
+export const GET = createEndpoint(async () =>
+  Response.json(await getStars(), {
+    headers: { "cache-control": "public, s-maxage=600, stale-while-revalidate=3600" },
+  }),
+);
+```
+
+`method` only matters for endpoints created with an explicit path, such as
+`createEndpoint("/api/settings", { method: "POST" }, handler)`, which have no export name to read it
+from. There it defaults to `GET`.
 
 Use [`createApiClients()`](/docs/api-client) in one shared `src/lib/api.ts` to return `{ api, apiClient }`
 from the generated router. Both callers reuse this route definition: `api` dispatches locally on
@@ -50,7 +68,6 @@ with `mcp: true` or explicit tool metadata:
 ```ts
 export const GET = createEndpoint(
   {
-    method: "GET",
     mcp: {
       name: "list_projects",
       description: "List projects visible to the current user.",
@@ -123,7 +140,6 @@ This also applies to production RSC builds. They support `QUERY` exports, prefer
 ```ts
 export const GET = createEndpoint(
   {
-    method: "GET",
     query: z.object({
       q: z.string().optional(),
       page: z.coerce.number().int().positive().default(1),
@@ -223,7 +239,6 @@ type ImportEvent = { phase: "accepted"; bytes: number } | { phase: "complete"; i
 
 export const POST = createEndpoint(
   {
-    method: "POST",
     body: importBody,
   },
   async ({ body }) => {
@@ -300,7 +315,6 @@ async function loadProject({
 
 export const PATCH = createEndpoint(
   {
-    method: "PATCH",
     body: z.object({ name: z.string().min(1) }),
     middleware: [requireAuth, requireRole("admin"), loadProject],
   },
@@ -339,7 +353,6 @@ Declare failures that are part of an endpoint's public contract, then return the
 ```ts
 export const POST = createEndpoint(
   {
-    method: "POST",
     body: z.object({
       name: z.string().min(1),
     }),
@@ -422,7 +435,6 @@ endpoint instead of repeating client-side invalidation:
 ```ts
 export const PATCH = createEndpoint(
   {
-    method: "PATCH",
     body: z.object({
       id: z.string(),
       name: z.string().min(1),

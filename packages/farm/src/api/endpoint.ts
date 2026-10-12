@@ -398,13 +398,18 @@ type CreatedEndpointFromOptions<TOptions, TResponse> = CreatedEndpoint<
  * Create a Farm.js API endpoint
  *
  * Supports two patterns:
- * 1. File-based routing (path auto-inferred from file location):
- *    `export const POST = createEndpoint({ method: 'POST', body: schema }, handler)`
- *    `createEndpoint({ method: 'GET', query: z.object({...}) }, handler)`
+ * 1. File-based routing (path auto-inferred from file location). The export name
+ *    (`GET`, `POST`, ...) is the HTTP method, so `method` can be omitted:
+ *    `export const GET = createEndpoint(handler)`
+ *    `export const POST = createEndpoint({ body: schema }, handler)`
  *
- * 2. Explicit path (for routes.ts at project root):
- *    `createEndpoint('/api/hello', { method: 'GET', query: z.object({...}) }, handler)`
+ * 2. Explicit path (for routes.ts at project root), where `method` selects the
+ *    HTTP method and defaults to GET:
+ *    `createEndpoint('/api/hello', { method: 'POST', body: schema }, handler)`
  */
+export function createEndpoint<TResponse = any>(
+  handler: EndpointHandler<never, never, never, TResponse>,
+): CreatedEndpoint<never, never, never, TResponse>;
 export function createEndpoint<const TOptions extends AnyEndpointOptions, TResponse = any>(
   options: TOptions,
   handler: ValidatedEndpointHandlerFromOptions<TOptions, TResponse>,
@@ -436,12 +441,13 @@ export function createEndpoint<
 export function createEndpoint(
   pathOrOptions:
     | string
-    | EndpointOptions<any, any, any, readonly AnyEndpointMiddleware[], EndpointErrorDefinitions>,
-  optionsOrHandler:
+    | EndpointOptions<any, any, any, readonly AnyEndpointMiddleware[], EndpointErrorDefinitions>
+    | EndpointHandler<any, any, any, any, any, any>,
+  optionsOrHandler?:
     | EndpointOptions<any, any, any, readonly AnyEndpointMiddleware[], EndpointErrorDefinitions>
     | EndpointHandler<any, any, any, any, any, EndpointErrorDefinitions>,
   maybeHandler?: EndpointHandler<any, any, any, any, any, EndpointErrorDefinitions>,
-): TypedEndpoint<any, any, any, any> {
+): any {
   // Determine if first arg is path or options
   let path: string;
   let options: EndpointOptions<
@@ -453,7 +459,12 @@ export function createEndpoint(
   >;
   let handler: EndpointHandler<any, any, any, any, any, EndpointErrorDefinitions>;
 
-  if (typeof pathOrOptions === "string") {
+  if (typeof pathOrOptions === "function") {
+    // createEndpoint(handler) - no options; the route file's export name picks the method
+    path = "";
+    options = {};
+    handler = pathOrOptions as typeof handler;
+  } else if (typeof pathOrOptions === "string") {
     // createEndpoint('/path', options, handler)
     path = pathOrOptions;
     options = optionsOrHandler as typeof options;
