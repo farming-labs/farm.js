@@ -67,7 +67,10 @@ const footerGroups = [
     icon: GitFork,
     brand: githubIconUrl,
     action: ["View source", "https://github.com/farming-labs/farm.js"],
-    links: [["GitHub", "https://github.com/farming-labs/farm.js"]],
+    links: [
+      ["GitHub", "https://github.com/farming-labs/farm.js"],
+      ["Design", "/design"],
+    ],
   },
 ] as const;
 
