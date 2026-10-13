@@ -29,14 +29,13 @@ export default function DesignLayout({ children }: LayoutProps) {
                 <IndexedLabel index="00" label="Design" />
               </div>
               <HeroTitle
-                after=""
                 className="max-w-full text-[clamp(1.125rem,7.5vw,2.5rem)] font-medium leading-[1.07] tracking-[-0.055em] text-white min-[601px]:text-[clamp(40px,5vw,64px)]"
                 href="/design.md"
                 lead="the design behind"
                 linkLabel="Read design.md as markdown"
                 swap="your app"
                 tag="/design.md"
-                word="farmjs.dev"
+                word="farmjs"
               />
             </header>
             <div className="design-prose">{children}</div>
