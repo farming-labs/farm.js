@@ -539,13 +539,15 @@ describe("first-class provider runtime output", () => {
 
   it("runs the Netlify output through the Netlify request pipeline", async () => {
     const { root, outputDir } = await createProviderFixture("netlify");
+    // Netlify Build and `netlify deploy` package functions from
+    // `.netlify/functions-internal` without configuration, so a Git-connected site
+    // deploys the server. @netlify/dev only scans the configured functions
+    // directory, so point it at the same directory here.
+    expect(outputDir).toBe(path.join(root, ".netlify", "functions-internal"));
+    await fs.access(path.join(outputDir, "server", "server.mjs"));
     await fs.writeFile(
       path.join(root, "netlify.toml"),
-      `
-[build]
-publish = "dist"
-functions = ${JSON.stringify(path.relative(root, path.join(outputDir, "server")))}
-`.trim(),
+      `[build]\npublish = "dist"\nfunctions = ".netlify/functions-internal"\n`,
     );
     const runtime = new NetlifyDev({
       projectRoot: root,

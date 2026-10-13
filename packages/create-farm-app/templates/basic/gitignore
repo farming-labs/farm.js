@@ -5,6 +5,7 @@ node_modules/
 .farm/
 .output/
 .vercel/
+.netlify/
 dist/
 
 # Local environment files

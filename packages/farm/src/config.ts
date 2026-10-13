@@ -535,6 +535,9 @@ export function getDeployTargetForPreset(preset?: string): FarmDeployTarget | un
   return undefined;
 }
 
+/** Netlify's build and CLI pick up functions from this directory without configuration. */
+export const NETLIFY_INTERNAL_FUNCTIONS_DIR = ".netlify/functions-internal";
+
 export function getDefaultDeployOutputDir(
   target: FarmDeployTarget | undefined,
   preset: string | undefined,
@@ -542,6 +545,11 @@ export function getDefaultDeployOutputDir(
 ): string {
   const normalizedTarget = normalizeDeployTarget(target) || getDeployTargetForPreset(preset);
   if (normalizedTarget === "vercel") return ".vercel/output";
+  // Netlify discovers the server function only in its internal functions directory,
+  // so a Git-connected site deploys it without a `netlify.toml` functions setting.
+  if (normalizedTarget === "netlify" && (!preset || preset === "netlify")) {
+    return NETLIFY_INTERNAL_FUNCTIONS_DIR;
+  }
   return `${distDir}/.output`;
 }
 

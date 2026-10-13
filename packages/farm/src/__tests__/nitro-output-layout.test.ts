@@ -47,4 +47,24 @@ describe("Farm Nitro output layout", () => {
     expect(options.output?.publicDir).not.toBe(path.join(outputDir, "public"));
     expect(options.output?.serverDir).toContain("_worker.js");
   });
+
+  it("matches Nitro's own Netlify layout with Farm's default Netlify output", async () => {
+    const rootDir = process.cwd();
+    const native = await loadOptions({ preset: "netlify", rootDir, serverDir: rootDir });
+    const farm = await loadOptions({
+      preset: "netlify",
+      rootDir,
+      serverDir: rootDir,
+      output: resolveFarmNitroOutputConfig(
+        "netlify",
+        path.join(rootDir, ".netlify", "functions-internal"),
+      ),
+    });
+
+    expect(farm.output?.serverDir).toBe(native.output?.serverDir);
+    expect(farm.output?.publicDir).toBe(native.output?.publicDir);
+    expect(path.resolve(farm.output?.serverDir ?? "")).toBe(
+      path.join(rootDir, ".netlify", "functions-internal", "server"),
+    );
+  });
 });

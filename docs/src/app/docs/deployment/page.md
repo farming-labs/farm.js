@@ -27,12 +27,12 @@ export default defineConfig({
 
 ## First-class targets
 
-| Target     | Preset           | Default output                  |
-| ---------- | ---------------- | ------------------------------- |
-| vercel     | vercel           | `.vercel/output`                |
-| cloudflare | cloudflare-pages | `.farm/.output`                 |
-| netlify    | netlify          | `dist` + `.farm/.output/server` |
-| node       | node-server      | `.farm/.output`                 |
+| Target     | Preset           | Default output                         |
+| ---------- | ---------------- | -------------------------------------- |
+| vercel     | vercel           | `.vercel/output`                       |
+| cloudflare | cloudflare-pages | `.farm/.output`                        |
+| netlify    | netlify          | `dist` + `.netlify/functions-internal` |
+| node       | node-server      | `.farm/.output`                        |
 
 These targets get the most polished Farm defaults. They map `deploy.target` to a Nitro preset, output directory, and the matching `farm deploy` command when Farm has a deploy wrapper for that platform.
 
@@ -56,12 +56,12 @@ are still served directly from the CDN and never enter the Farm server function.
 
 Use `deploy.target` when you want one config file to control the platform output. Farm maps that target to the Nitro preset, default output directory, and deploy command shape.
 
-| Platform         | Config                 | Build command                              | Deploy command                        | Output to inspect               |
-| ---------------- | ---------------------- | ------------------------------------------ | ------------------------------------- | ------------------------------- |
-| Vercel           | `target: "vercel"`     | `FARM_DEPLOY_TARGET=vercel farm build`     | `farm deploy --vercel --prod`         | `.vercel/output`                |
-| Cloudflare Pages | `target: "cloudflare"` | `FARM_DEPLOY_TARGET=cloudflare farm build` | `farm deploy --cloudflare`            | `.farm/.output`                 |
-| Netlify          | `target: "netlify"`    | `FARM_DEPLOY_TARGET=netlify farm build`    | `farm deploy --netlify`               | `dist` + `.farm/.output/server` |
-| Self-hosted Node | `target: "node"`       | `FARM_DEPLOY_TARGET=node farm build`       | `node .farm/.output/server/index.mjs` | `.farm/.output`                 |
+| Platform         | Config                 | Build command                              | Deploy command                        | Output to inspect                      |
+| ---------------- | ---------------------- | ------------------------------------------ | ------------------------------------- | -------------------------------------- |
+| Vercel           | `target: "vercel"`     | `FARM_DEPLOY_TARGET=vercel farm build`     | `farm deploy --vercel --prod`         | `.vercel/output`                       |
+| Cloudflare Pages | `target: "cloudflare"` | `FARM_DEPLOY_TARGET=cloudflare farm build` | `farm deploy --cloudflare`            | `.farm/.output`                        |
+| Netlify          | `target: "netlify"`    | `FARM_DEPLOY_TARGET=netlify farm build`    | `farm deploy --netlify`               | `dist` + `.netlify/functions-internal` |
+| Self-hosted Node | `target: "node"`       | `FARM_DEPLOY_TARGET=node farm build`       | `node .farm/.output/server/index.mjs` | `.farm/.output`                        |
 
 **farm.config.ts**
 
@@ -263,15 +263,19 @@ export default defineConfig({
 });
 ```
 
-When `target` is `vercel`, Farm uses the Vercel Nitro preset and writes Build Output API output to `.vercel/output`. Other targets default to `.farm/.output` unless you override `output` or `outputDir`. When `preset` is set directly, Farm passes that value through to Nitro.
+When `target` is `vercel`, Farm uses the Vercel Nitro preset and writes Build Output API output to `.vercel/output`. Netlify writes the server function to `.netlify/functions-internal`. Other targets default to `.farm/.output` unless you override `output` or `outputDir`. When `preset` is set directly, Farm passes that value through to Nitro.
 
 `farm deploy --vercel` requires `.vercel/output` because the Vercel CLI reads that fixed directory
 for `--prebuilt` uploads. Keep the default output for Farm-managed Vercel deploys. A custom Vercel
 output directory is only suitable when another deployment workflow uploads the build itself.
 
 For Netlify, Nitro writes static assets to `dist` and the server function to
-`.farm/.output/server`. `farm deploy --netlify` uploads both directories with `--no-build`, so the
-provider deploys the exact artifact Farm just verified instead of starting a second build.
+`.netlify/functions-internal`, the directory Netlify reads functions from without configuration. A
+Git-connected Netlify site needs only `farm build` as the build command and `dist` as the publish
+directory. `farm deploy --netlify` uploads the same output with `--no-build`, so the provider deploys
+the exact artifact Farm just verified instead of starting a second build. With a custom Netlify
+`output`, set `[build] functions` to `<output>/server` in `netlify.toml`.
+`farm deploy --netlify` passes that path for you.
 
 ## Override output
 

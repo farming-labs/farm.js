@@ -248,12 +248,30 @@ test("reports Netlify deploys as production operations", async () => {
     const plan = await createFarmDeployPlan({ root });
 
     assert.equal(plan.production, true);
-    assert.equal(
-      plan.deploy.command,
-      "netlify deploy --prod --no-build --dir=dist --functions=.farm/.output/server",
-    );
+    assert.equal(plan.deploy.command, "netlify deploy --prod --no-build --dir=dist");
     assert.equal(plan.deploy.cwd, root);
     assert.match(formatFarmDeployPlan(plan), /Production: yes/);
+  } finally {
+    if (root) await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("points Netlify at the server function in a custom output directory", async () => {
+  let root;
+
+  try {
+    root = await mkdtemp(path.join(tmpdir(), "farm-cli-netlify-custom-output-"));
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      "export default { deploy: { target: 'netlify', output: '.output' } };\n",
+    );
+
+    const plan = await createFarmDeployPlan({ root });
+
+    assert.equal(
+      plan.deploy.command,
+      "netlify deploy --prod --no-build --dir=dist --functions=.output/server",
+    );
   } finally {
     if (root) await rm(root, { recursive: true, force: true });
   }
@@ -280,7 +298,6 @@ test("binds an untrusted Netlify site value to the intended option", async () =>
       "--prod",
       "--no-build",
       "--dir=dist",
-      "--functions=.farm/.output/server",
       `--site=${site}`,
     ]);
     assert.match(

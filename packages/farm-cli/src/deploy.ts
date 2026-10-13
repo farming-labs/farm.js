@@ -271,12 +271,20 @@ function createDeployCommand(
 }
 
 function createNetlifyDeployArgs(root: string, outputDir: string, site?: string): string[] {
+  // The Netlify CLI always deploys its internal functions directory, Farm's default
+  // Netlify output. Only a custom output directory needs an explicit functions path.
+  const usesInternalFunctionsDir =
+    path.resolve(root, outputDir) === path.resolve(root, ".netlify", "functions-internal");
   return [
     "deploy",
     "--prod",
     "--no-build",
     "--dir=dist",
-    `--functions=${path.relative(root, path.join(outputDir, "server")).split(path.sep).join(path.posix.sep)}`,
+    ...(usesInternalFunctionsDir
+      ? []
+      : [
+          `--functions=${path.relative(root, path.join(outputDir, "server")).split(path.sep).join(path.posix.sep)}`,
+        ]),
     ...(site ? [`--site=${site}`] : []),
   ];
 }

@@ -1190,6 +1190,21 @@ describe("resolveDeployConfig", () => {
       outputDir: "custom-output",
     });
   });
+
+  it("writes Netlify output to Netlify's internal functions directory by default", () => {
+    expect(resolveDeployConfig({ deploy: { target: "netlify" } }).outputDir).toBe(
+      ".netlify/functions-internal",
+    );
+    expect(resolveDeployConfig({}, { env: { NETLIFY: "true" } }).outputDir).toBe(
+      ".netlify/functions-internal",
+    );
+  });
+
+  it("keeps Farm's output directory for Netlify Edge, which sets its own server directory", () => {
+    expect(resolveDeployConfig({ deploy: { preset: "netlify-edge" } }).outputDir).toBe(
+      ".farm/.output",
+    );
+  });
 });
 
 describe("resolveDocsConfig", () => {

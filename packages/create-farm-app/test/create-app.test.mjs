@@ -314,6 +314,7 @@ test("generates a buildable starter application", async () => {
       "utf8",
     );
     assert.match(generatedGitignore, /^\.env$/m);
+    assert.match(generatedGitignore, /^\.netlify\/?$/m);
     assert.match(generatedGitignore, /^\.env\.local$/m);
     assert.match(generatedGitignore, /^\*\.sqlite$/m);
     assert.match(generatedGitignore, /^\*\.sqlite-\*$/m);
@@ -924,6 +925,7 @@ for (const template of [
 
       const generatedGitignore = await readFile(path.join(generatedDir, ".gitignore"), "utf8");
       assert.match(generatedGitignore, /^\.env\.local$/m);
+      assert.match(generatedGitignore, /^\.netlify\/?$/m);
       const generatedConfig = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
       assert.match(generatedConfig, /theme:\s*\{\s*default: "dark"/s);
       await readFile(path.join(generatedDir, ".env.example"), "utf8");

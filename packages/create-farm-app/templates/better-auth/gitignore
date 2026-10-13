@@ -1,6 +1,7 @@
 node_modules
 .farm
 .vercel
+.netlify
 .data
 .env
 .env.local
