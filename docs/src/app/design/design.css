@@ -34,48 +34,33 @@
 .design-main {
   border-top: 1px solid var(--design-line);
 }
-.design-source {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* The homepage hero's heading: a cursor selects a word, scrambles it, and wires it
+   to the /design.md tag. HeroTitle pads itself for the selection, so pull it back
+   onto the text column. */
+.design-hero {
   max-width: 824px;
   margin: 0 auto;
-  padding: 24px 72px 0;
-  color: var(--design-muted);
-  font-family: var(--font-geist-mono);
-  font-size: 10px;
-  text-transform: uppercase;
+  padding: 40px 72px 8px;
 }
-.design-source span {
-  color: rgb(255 255 255 / 0.26);
-}
-.design-source a {
-  margin-left: auto;
-  color: #ededed;
-  text-decoration: underline;
-  text-decoration-color: rgb(255 255 255 / 0.4);
-  text-underline-offset: 3px;
-  text-transform: none;
+.design-hero .farm-hero-title {
+  margin-left: -16px;
 }
 .design-prose {
   max-width: 824px;
   margin: 0 auto;
-  padding: 24px 72px 96px;
+  padding: 16px 72px 96px;
   color: var(--design-copy);
   font-size: 16px;
   font-weight: 300;
   line-height: 1.85;
   overflow-wrap: break-word;
 }
-.design-prose h1 {
-  margin: 0 0 20px;
-  color: #ededed;
-  font-size: clamp(40px, 5vw, 64px);
-  font-weight: 400;
-  line-height: 1.07;
-  letter-spacing: -0.055em;
+/* The animated heading above is the page's h1; the markdown keeps its own title
+   for /design.md readers. */
+.design-prose .farm-markdown > h1:first-child {
+  display: none;
 }
-.design-prose h1 + p {
+.design-prose .farm-markdown > h1:first-child + p {
   color: #e0e0e0;
   font-size: 19px;
   line-height: 1.7;
@@ -143,16 +128,19 @@
   font-size: 0.84em;
   font-weight: 350;
 }
+/* The panel (border, legend, copy button) is .blog-code-block from blog.css; the
+   pre inside it stays unframed so the block has a single border. */
 .design-prose pre {
   overflow-x: auto;
-  padding: 16px 18px;
-  border: 1px solid rgb(255 255 255 / 0.14);
-  border-radius: 3px;
-  background: #070707;
+  max-width: 100%;
+  margin: 0;
+  padding: 24px 22px 20px;
+  border: 0;
+  background: transparent;
   color: #a1a1a1;
-  font-family: var(--font-geist-mono);
+  font-family: var(--font-geist-mono), monospace;
   font-size: 13px;
-  line-height: 1.75;
+  line-height: 1.8;
 }
 .design-prose table {
   width: 100%;
@@ -183,8 +171,13 @@
 .design-prose :is(th, td) + :is(th, td) {
   border-left: 1px solid rgb(255 255 255 / 0.07);
 }
+@media (min-width: 640px) {
+  .design-hero .farm-hero-title {
+    margin-left: -20px;
+  }
+}
 @media (max-width: 767px) {
-  .design-source,
+  .design-hero,
   .design-prose {
     padding-inline: 20px;
   }
