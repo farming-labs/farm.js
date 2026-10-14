@@ -3144,6 +3144,7 @@ function getCompilerHmrRegistry(): CompilerHmrRegistry {
 }
 
 function renderTextValue(value: unknown): string {
+  if (typeof value === "string") return value;
   if (Array.isArray(value)) {
     return value.length === 1 ? renderTextValue(value[0]) : value.map(renderTextValue).join("");
   }
@@ -9328,6 +9329,8 @@ function createKeyedRowsBlockComponentCore(
       keySet?: Set<KeyedRowKey>;
       /** Set when the keys are the committed keys followed by new ones. */
       appended?: boolean;
+      /** Set when the keys are exactly the committed keys, in order. */
+      unchanged?: boolean;
       /**
        * Set when the keys are the committed keys reordered among these
        * ascending positions only, such as a swap. A moved row's committed
@@ -9363,7 +9366,9 @@ function createKeyedRowsBlockComponentCore(
         (displaced ??= []).push(committedKey);
       }
       // The committed keys are unique, so the same sequence needs no recheck.
-      if (prefix === committedSize && keys.length === committedSize) return { items, keys };
+      if (prefix === committedSize && keys.length === committedSize) {
+        return { items, keys, unchanged: true };
+      }
       if (moved && displaced) {
         // Every other position holds its committed key, so the keys are the
         // committed (unique) keys in a new order exactly when the moved
@@ -9798,15 +9803,18 @@ function createKeyedRowsBlockComponentCore(
     }
 
     private reconcileStableRows(
-      rows: { items: unknown[]; keys: KeyedRowKey[] },
+      rows: { items: unknown[]; keys: KeyedRowKey[]; unchanged?: boolean },
       afterCommit?: () => void,
       dirtyState?: ReadonlySet<number>,
     ): boolean {
-      if (rows.keys.length !== this.instances.size) return false;
-      let index = 0;
-      for (const key of this.instances.keys()) {
-        if (rows.keys[index] !== key) return false;
-        index += 1;
+      // readRows already compared every key with the committed order.
+      if (!rows.unchanged) {
+        if (rows.keys.length !== this.instances.size) return false;
+        let index = 0;
+        for (const key of this.instances.keys()) {
+          if (rows.keys[index] !== key) return false;
+          index += 1;
+        }
       }
 
       // Keys match the committed order, so instances line up with rows.
@@ -9844,6 +9852,10 @@ function createKeyedRowsBlockComponentCore(
       }
 
       const conditionalChanges: RowConditionalChange[] = [];
+      // Most row sets have no conditionals: skip the per-row read and its empty map.
+      const readsConditionals = Boolean(
+        options.conditionals && this.currentProps.conditionals?.length,
+      );
       for (let index = 0; index < rows.items.length; index += 1) {
         const key = rows.keys[index];
         const existing = ordered[index];
@@ -9856,9 +9868,17 @@ function createKeyedRowsBlockComponentCore(
         }
         const bindingUpdates = preparedBindings?.[index];
         if (bindingUpdates) {
-          applyPreparedKeyedRowBindingUpdates(this.currentProps, existing, bindingUpdates);
+          if (bindingUpdates.length > 0) {
+            applyPreparedKeyedRowBindingUpdates(this.currentProps, existing, bindingUpdates);
+          }
         } else {
           applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
+        }
+        existing.item = rows.items[index];
+        existing.index = index;
+        if (!readsConditionals) {
+          existing.conditionalValues = EMPTY_KEYED_ROW_CONDITIONAL_VALUES;
+          continue;
         }
         const conditionalValues = this.readConditionalValues(
           this.currentProps,
@@ -9876,8 +9896,6 @@ function createKeyedRowsBlockComponentCore(
           }
         }
         existing.conditionalValues = conditionalValues;
-        existing.item = rows.items[index];
-        existing.index = index;
       }
       return conditionalChanges;
     }
