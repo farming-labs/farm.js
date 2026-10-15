@@ -781,7 +781,13 @@ test("shows browser visitors a friendly expired preview page", async () => {
       headers: { accept: "text/html" },
     });
     assert.equal(response.status, 410);
-    assert.match(await response.text(), /This Farm preview has expired/);
+    const page = await response.text();
+    assert.match(page, /This Farm preview has expired/);
+    assert.match(page, /<a href="https:\/\/farmjs\.dev">Farm\.js<\/a>/);
+    assert.match(
+      page,
+      /<a class="start" href="https:\/\/farmjs\.dev\/docs\/preview">Try farm preview<\/a>/,
+    );
     assert.deepEqual(deletedSessionIds, [expiredSession.id]);
     assert.equal(await store.getSessionById(expiredSession.id), undefined);
   } finally {
