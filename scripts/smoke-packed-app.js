@@ -168,11 +168,25 @@ async function serveAndCheck(appDirectory) {
 }
 
 async function verifyCompilerStarter(appDirectory, browserPath) {
+  const {
+    assertNoProductionRefresh,
+    verifyCompilerDevelopment,
+  } = require("./smoke-packed-compiler-dev");
   const screenshot = path.parse(
     process.env.FARM_EXPERIMENT_SCREENSHOT ||
       path.join(os.tmpdir(), "farm-packed-react-compiler.png"),
   );
   for (const enabled of [true, false]) {
+    console.log(`Checking the packed compiler starter's hot updates (compiler: ${enabled})...`);
+    await verifyCompilerDevelopment(appDirectory, {
+      browserPath,
+      enabled,
+      port: await freePort(),
+      screenshot: path.join(
+        screenshot.dir,
+        `${screenshot.name}-dev-${enabled ? "on" : "off"}${screenshot.ext || ".png"}`,
+      ),
+    });
     console.log(`Building and checking the packed compiler starter (compiler: ${enabled})...`);
     execFileSync(pnpm, ["run", "experiment"], {
       cwd: appDirectory,
@@ -188,6 +202,7 @@ async function verifyCompilerStarter(appDirectory, browserPath) {
         ),
       },
     });
+    await assertNoProductionRefresh(path.join(appDirectory, ".farm/client"));
   }
 }
 

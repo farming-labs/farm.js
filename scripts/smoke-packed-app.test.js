@@ -49,6 +49,66 @@ test("fails before packing when the compiler browser is unavailable", () => {
   }
 });
 
+test("reports a dev server startup failure and preserves the temporary component", async () => {
+  const { verifyCompilerDevelopment } = require("./smoke-packed-compiler-dev");
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "farm-compiler-dev-failure-"));
+  const component = path.join(temporaryRoot, "src/components/compiler-comparison.tsx");
+  const cli = path.join(temporaryRoot, "node_modules/@farm.js/cli/bin/farm.js");
+  const source = fs.readFileSync(
+    path.join(
+      __dirname,
+      "../packages/create-farm-app/templates/react-compiler/src/components/compiler-comparison.tsx",
+    ),
+    "utf8",
+  );
+  try {
+    fs.mkdirSync(path.dirname(component), { recursive: true });
+    fs.mkdirSync(path.dirname(cli), { recursive: true });
+    fs.writeFileSync(component, source);
+    fs.writeFileSync(
+      cli,
+      'process.stderr.write("intentional dev startup failure\\n"); process.exit(7);',
+    );
+    await assert.rejects(
+      verifyCompilerDevelopment(temporaryRoot, {
+        enabled: true,
+        port: 0,
+        browserPath: path.join(temporaryRoot, "unused-browser"),
+        screenshot: path.join(temporaryRoot, "unused.png"),
+      }),
+      /Compiler development smoke failed.*\nintentional dev startup failure/,
+    );
+    assert.equal(fs.readFileSync(component, "utf8"), source);
+    assert.ok(!fs.existsSync(path.join(temporaryRoot, "unused.png")));
+  } finally {
+    fs.rmSync(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
+test("rejects Refresh code in nested production chunks without rejecting ordinary React", async () => {
+  const { assertNoProductionRefresh } = require("./smoke-packed-compiler-dev");
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "farm-compiler-production-chunks-"));
+  try {
+    fs.mkdirSync(path.join(temporaryRoot, "chunks"));
+    const chunk = path.join(temporaryRoot, "chunks/page.js");
+    fs.writeFileSync(chunk, 'import React from "react";');
+    await assertNoProductionRefresh(temporaryRoot);
+    for (const source of [
+      'import "/@react-refresh";',
+      'import "/@farm/react-refresh";',
+      '$RefreshReg$(Counter, "Counter");',
+    ]) {
+      fs.writeFileSync(chunk, source);
+      await assert.rejects(
+        assertNoProductionRefresh(temporaryRoot),
+        /Development Refresh must not enter/,
+      );
+    }
+  } finally {
+    fs.rmSync(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
 test("packs only workspace packages reachable from the template", () => {
   const packages = new Map(
     ["@farm.js/core", "@farm.js/cli", "@farm.js/devtools", "@farm.js/react", "@farm.js/vue"].map(

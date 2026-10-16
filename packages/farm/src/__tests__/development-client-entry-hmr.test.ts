@@ -25,7 +25,9 @@ afterEach(async () => {
 });
 
 async function createProject(): Promise<string> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-client-entry-hmr-"));
+  const root = await fs.realpath(
+    await fs.mkdtemp(path.join(os.tmpdir(), "farm-client-entry-hmr-")),
+  );
   temporaryRoots.add(root);
 
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
@@ -57,6 +59,38 @@ export default function Layout({ children }) {
 }
 
 describe("development client entry HMR teardown", () => {
+  it("registers named React boundaries and initializes refresh before the client runtime", async () => {
+    const root = await createProject();
+    await fs.writeFile(
+      path.join(root, "src/app/counter.tsx"),
+      `"use client";
+import { useState } from "react";
+export function Counter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(count + 1)}>{count}</button>;
+}`,
+    );
+    const server = await createServer({
+      root,
+      images: { provider: "none" },
+      vite: { optimizeDeps: { noDiscovery: true, include: [] } },
+    } as never);
+    servers.add(server);
+    await server.listen(await getAvailablePort());
+    const entry = await server.transformRequest("/@farm/client");
+    expect(entry?.code).toContain('import "/@farm/react-refresh"');
+    expect(entry!.code.indexOf("/@farm/react-refresh")).toBeLessThan(
+      entry!.code.indexOf("react-dom"),
+    );
+    const preamble = await server.transformRequest("/@farm/react-refresh");
+    expect(preamble?.code).toContain("injectIntoGlobalHook");
+    const boundary = await server.transformRequest("/src/app/counter.tsx");
+    expect(boundary?.code).toContain("registerExportsForReactRefresh");
+    expect(boundary?.code).not.toContain("newModule.default");
+    const ssr = await server.transformRequest("/src/app/counter.tsx", { ssr: true });
+    expect(ssr?.code).not.toContain("registerExportsForReactRefresh");
+  }, 60_000);
+
   it("awaits plugin close and destroys the router on entry dispose", async () => {
     const root = await createProject();
     const server = await createServer({
@@ -147,6 +181,10 @@ export function Counter() { return <button>count</button>; }`,
     expect(await runHotUpdate()).toEqual([]);
     expect(invalidateModule).toHaveBeenCalledWith(clientModule);
     expect(send).toHaveBeenCalledWith({ type: "full-reload", path: "*" });
+    const isolated = await server.transformRequest("/src/app/async/counter.tsx");
+    expect(isolated?.code).toContain("__farm_client_boundary_originals__");
+    expect(isolated?.code).toContain(".updateModule(");
+    expect(isolated?.code).not.toContain("registerExportsForReactRefresh");
 
     const warn = vi.spyOn(logger, "warn");
     invalidateModule.mockClear();
@@ -172,5 +210,16 @@ export const island = "load";
 export function Counter() { return <button>count</button>; }`,
     );
     warn.mockRestore();
+
+    // Removing the directive must clear metadata from the earlier island
+    // transform, otherwise the post-transform would keep skipping Refresh.
+    await fs.writeFile(
+      boundaryPath,
+      `export function Counter() { return <button>plain</button>; }`,
+    );
+    server.moduleGraph.invalidateModule(server.moduleGraph.getModuleById(boundaryPath)!);
+    const ordinary = await server.transformRequest("/src/app/async/counter.tsx");
+    expect(ordinary?.code).not.toContain("__farm_client_boundary_originals__");
+    expect(ordinary?.code).toContain("registerExportsForReactRefresh");
   }, 60_000);
 });

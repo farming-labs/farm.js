@@ -62,6 +62,14 @@ export function Counter() {
 
 ## Shared client state
 
+During `farm dev`, React Fast Refresh updates ordinary named or default-exported client
+components, including components that fall back from the AOT compiler. Compatible edits preserve
+local state and replace event handlers without reloading the page. Hook-signature or export-boundary
+changes may remount a component or invalidate the module; they are not guaranteed to preserve state.
+Isolated client boundaries keep Farm's existing island-update lifecycle. Refresh is development-only
+and does not add a production browser runtime. If you already supply Vite's React Refresh plugin,
+Farm leaves that plugin and its matching preamble setup under your application's control.
+
 `createStore` from `@farm.js/core/client` provides an in-memory React store with typed field
 selectors. String, numeric, and symbol state keys work with `use`, `get`, `set`, `subscribe`,
 and direct field accessors:

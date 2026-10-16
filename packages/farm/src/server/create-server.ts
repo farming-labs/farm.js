@@ -32,6 +32,7 @@ import {
   type FarmInstrumentationLifecycle,
 } from "../instrumentation";
 import { loadFarmRendererVitePlugins, resolveFarmRenderer } from "../renderer";
+import { createFarmReactRefreshPlugins } from "./react-refresh";
 
 export const DEFAULT_FARM_DEV_SERVER_PORT = 3000;
 
@@ -248,6 +249,10 @@ export async function createServer(config: FarmConfig = {}, options: { port?: nu
       projectRoot,
       { ssr: true },
     );
+    const reactRefreshPlugins = await createFarmReactRefreshPlugins(
+      finalConfig.renderer,
+      finalConfig.vite?.plugins,
+    );
 
     let tailwindVitePlugin: any = undefined;
     const shouldUseProjectPostcss = hasProjectPostcssConfig(projectRoot);
@@ -273,6 +278,7 @@ export async function createServer(config: FarmConfig = {}, options: { port?: nu
             createFarmThemeCssPlugin(finalConfig.theme, finalConfig.basePath),
             ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
             ...(rendererVitePlugins as any[]),
+            ...reactRefreshPlugins,
             createDevDependencyStubsPlugin(),
             farmI18nClientBridgePlugin(),
             farmServerOnlyEntriesPlugin(),

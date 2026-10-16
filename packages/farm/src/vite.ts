@@ -3312,9 +3312,14 @@ export const manifest = getManifest();
         // and svelte's hot API) which preserves component state, so leave the
         // module for them to accept: appending our own `import.meta.hot.accept`
         // here would swallow the update instead of letting theirs run.
-        const hmrCode = !shouldEmitFarmClientRootHmr(currentConfig.renderer)
-          ? ""
-          : `
+        const reactRefreshOwnsBoundary =
+          !isolatedModuleReference &&
+          isReactRenderer(resolveFarmRenderer(currentConfig.renderer)) &&
+          server?.config.plugins.some((plugin) => plugin.name === "vite:react-refresh");
+        const hmrCode =
+          !shouldEmitFarmClientRootHmr(currentConfig.renderer) || reactRefreshOwnsBoundary
+            ? ""
+            : `
 if (import.meta.hot) {
   import.meta.hot.accept((newModule) => {
     ${isolatedHmrUpdate}
@@ -3341,10 +3346,15 @@ if (import.meta.hot) {
         return {
           code: transformedCode + "\n" + hmrCode,
           map: null,
+          meta: { farmIsolatedClientBoundary: isolatedModuleReference !== null },
         };
       }
 
-      return transformed ? { code: transformedCode, map: null } : null;
+      // A later edit can remove "use client" from a formerly isolated module.
+      // Do not leave its previous transform metadata suppressing React Refresh.
+      return transformed || this.getModuleInfo(id)?.meta?.farmIsolatedClientBoundary
+        ? { code: transformedCode, map: null, meta: { farmIsolatedClientBoundary: false } }
+        : null;
     },
 
     async generateBundle(options, bundle) {
