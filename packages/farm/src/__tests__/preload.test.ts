@@ -459,6 +459,53 @@ describe("smart preload manager", () => {
     expect(result.warnings).toEqual([{ kind: "font", count: 3, budget: 2, removed: 1 }]);
   });
 
+  it("counts a font hinted in both the HTML and the Link header once", () => {
+    // A document renderer (the docs adapter) hints its fonts both ways.
+    const config = resolveFarmPerformanceConfig(undefined).preload;
+    const html = [
+      '<link rel="preload" href="/fonts/body.woff2" as="font" type="font/woff2" crossorigin>',
+      '<link rel="preload" href="/fonts/mono.woff2" as="font" type="font/woff2" crossorigin>',
+    ].join("");
+    const header = [
+      "</fonts/body.woff2>; rel=preload; as=font; type=font/woff2; crossorigin",
+      "</fonts/mono.woff2>; rel=preload; as=font; type=font/woff2; crossorigin",
+    ].join(", ");
+
+    expect(manageFarmDocumentPreloads(html, header, config)).toEqual({
+      html,
+      linkHeader: header,
+      warnings: [],
+    });
+  });
+
+  it("keeps or removes every hint for the same URL together", () => {
+    const config = resolveFarmPerformanceConfig(undefined).preload;
+    const html = [
+      '<link rel="preload" as="font" href="/fonts/body.woff2">',
+      '<link rel="preload" as="font" href="/fonts/mono.woff2">',
+    ].join("");
+    const header = [
+      "</fonts/display.woff2>; rel=preload; as=font",
+      "</fonts/body.woff2>; rel=preload; as=font",
+      "</fonts/display.woff2>; rel=preload; as=font",
+    ].join(", ");
+
+    const result = manageFarmDocumentPreloads(html, header, config);
+
+    expect(result.html).toBe(html);
+    expect(result.linkHeader).toBe("</fonts/body.woff2>; rel=preload; as=font");
+    expect(result.warnings).toEqual([{ kind: "font", count: 3, budget: 2, removed: 1 }]);
+    expect(
+      manageFarmLinkHeaderPreloads(
+        "</a.woff2>; rel=preload; as=font, </a.woff2>; rel=preload; as=font",
+        resolveFarmPerformanceConfig({ preload: { maxFonts: 1 } }).preload,
+      ),
+    ).toEqual({
+      value: "</a.woff2>; rel=preload; as=font, </a.woff2>; rel=preload; as=font",
+      warnings: [],
+    });
+  });
+
   it("supports warning-only mode without changing the document", () => {
     const config = resolveFarmPerformanceConfig({
       preload: { mode: "warn", maxImages: 1 },

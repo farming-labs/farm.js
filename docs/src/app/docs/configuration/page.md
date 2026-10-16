@@ -646,7 +646,8 @@ Remote sources are denied by default. See [Images](/docs/images) for static impo
 Farm keeps one image preload—the explicitly high-priority hint first—and two font preloads by
 default. Lower-priority hints above those budgets are removed from buffered HTML and `Link` response
 headers, while the actual image and font elements remain unchanged and load normally. Route scripts,
-stylesheets, and module preloads are not removed.
+stylesheets, and module preloads are not removed. Budgets count resources, not hints: a URL preloaded
+in both the HTML and the `Link` header counts once, and its hints are kept or removed together.
 Preload-looking text inside comments, scripts, and other inert content is left unchanged, including
 when surrounding Unicode text changes length during case conversion.
 

@@ -83,6 +83,7 @@ export function manageFarmHtmlPreloads(
           {
             index,
             kind,
+            href: readHtmlAttribute(element.value, "href"),
             highPriority:
               readHtmlAttribute(element.value, "fetchpriority")?.toLowerCase() === "high",
           },
@@ -116,6 +117,7 @@ export function manageFarmLinkHeaderPreloads(
           {
             index,
             kind,
+            href: getLinkHeaderTarget(link),
             highPriority: getLinkHeaderParameter(link, "fetchpriority")?.toLowerCase() === "high",
           },
         ]
@@ -149,6 +151,7 @@ export function manageFarmDocumentPreloads(
     candidates.push({
       index,
       kind,
+      href: readHtmlAttribute(element.value, "href"),
       highPriority: readHtmlAttribute(element.value, "fetchpriority")?.toLowerCase() === "high",
     });
   }
@@ -158,6 +161,7 @@ export function manageFarmDocumentPreloads(
     candidates.push({
       index: headerOffset + index,
       kind,
+      href: getLinkHeaderTarget(link),
       highPriority: getLinkHeaderParameter(link, "fetchpriority")?.toLowerCase() === "high",
     });
   }
@@ -224,6 +228,8 @@ export function clearReportedFarmPreloadWarnings(): void {
 interface PreloadCandidate {
   index: number;
   kind: FarmPreloadKind;
+  /** The hinted URL, when the hint names one. */
+  href?: string;
   highPriority: boolean;
 }
 
@@ -235,31 +241,42 @@ function selectPreloadsWithinBudget(
   const warnings: FarmPreloadBudgetWarning[] = [];
 
   for (const kind of ["image", "font"] as const) {
-    const matching = candidates.filter((candidate) => candidate.kind === kind);
+    // The budget is per resource: a URL hinted in both the HTML and the Link header
+    // (as a document renderer may do for its fonts) is one download, so it counts once
+    // and all of its hints stay or go together.
+    const resources = new Map<string, PreloadCandidate[]>();
+    for (const candidate of candidates) {
+      if (candidate.kind !== kind) continue;
+      const key = candidate.href ?? `#${candidate.index}`;
+      const hints = resources.get(key);
+      if (hints) hints.push(candidate);
+      else resources.set(key, [candidate]);
+    }
     const limit = kind === "image" ? config.maxImages : config.maxFonts;
-    if (matching.length <= limit) continue;
+    if (resources.size <= limit) continue;
 
-    const retained = new Set(
-      [...matching]
-        .sort(
-          (left, right) =>
-            Number(right.highPriority) - Number(left.highPriority) || left.index - right.index,
-        )
-        .slice(0, limit)
-        .map((candidate) => candidate.index),
-    );
+    const ranked = [...resources.values()]
+      .map((hints) => ({
+        hints,
+        index: hints[0].index,
+        highPriority: hints.some((hint) => hint.highPriority),
+      }))
+      .sort(
+        (left, right) =>
+          Number(right.highPriority) - Number(left.highPriority) || left.index - right.index,
+      );
 
     if (config.mode === "enforce") {
-      for (const candidate of matching) {
-        if (!retained.has(candidate.index)) removed.add(candidate.index);
+      for (const resource of ranked.slice(limit)) {
+        for (const hint of resource.hints) removed.add(hint.index);
       }
     }
 
     warnings.push({
       kind,
-      count: matching.length,
+      count: resources.size,
       budget: limit,
-      removed: config.mode === "enforce" ? matching.length - retained.size : 0,
+      removed: config.mode === "enforce" ? resources.size - limit : 0,
     });
   }
 
@@ -276,6 +293,12 @@ function getLinkHeaderPreloadKind(link: string): FarmPreloadKind | undefined {
   const relations = getLinkHeaderParameter(link, "rel")?.toLowerCase().split(/\s+/) ?? [];
   if (!relations.includes("preload")) return undefined;
   return normalizePreloadKind(getLinkHeaderParameter(link, "as"));
+}
+
+function getLinkHeaderTarget(link: string): string | undefined {
+  const start = link.indexOf("<");
+  const end = link.indexOf(">", start + 1);
+  return start === -1 || end === -1 ? undefined : link.slice(start + 1, end).trim();
 }
 
 function getLinkHeaderParameter(link: string, name: string): string | undefined {
