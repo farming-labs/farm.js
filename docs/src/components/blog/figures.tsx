@@ -45,7 +45,7 @@ const ICONS: Record<IconKey, ReactNode> = {
       <path d="M49.28 66.94 75.03 34.96h-6.89L47.91 60.11l-5.49 6.83h6.86ZM0 34.96h42.4v5.11H0zm0 13.32h27.66v5.11H0zm0 13.54h27.66v5.11H0zm69.63-26.86H102v5.11H69.63zm4.71 13.32H102v5.11H74.34zm0 13.54H102v5.11H74.34z" />
     </svg>
   ),
-  farm: <img src="/favicon.svg" alt="" />,
+  farm: <img src="/favicon.svg" alt="" loading="lazy" decoding="async" />,
   agent: <Bot aria-hidden strokeWidth={1.5} />,
   phone: <Smartphone aria-hidden strokeWidth={1.5} />,
   browser: <Monitor aria-hidden strokeWidth={1.5} />,

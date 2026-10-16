@@ -78,8 +78,18 @@ function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
+// Decorative and never the largest paint: low priority keeps React from preloading each one.
 function BrandIcon({ src, className }: { src: string; className?: string }) {
-  return <img alt="" aria-hidden className={cx("brightness-0 invert", className)} src={src} />;
+  return (
+    <img
+      alt=""
+      aria-hidden
+      className={cx("brightness-0 invert", className)}
+      decoding="async"
+      fetchPriority="low"
+      src={src}
+    />
+  );
 }
 
 function GithubIcon({ className }: { className?: string }) {

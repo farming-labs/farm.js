@@ -48,6 +48,9 @@ const geistPixel = localFont({
   weight: 500,
   variable: "--font-geist-pixel",
   fallback: ["monospace"],
+  // Only feature headings below the fold use it; preloading it pushed Geist Sans
+  // out of the two-font preload budget.
+  preload: false,
 });
 
 export const fonts = defineLayoutFonts({

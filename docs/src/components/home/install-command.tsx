@@ -182,6 +182,8 @@ export function InstallCommand() {
                 <img
                   alt=""
                   aria-hidden="true"
+                  decoding="async"
+                  fetchPriority="low"
                   className={`size-2.5 shrink-0 select-none transition-[filter,opacity] duration-150 ${
                     activeIndex === index
                       ? "brightness-0 opacity-90"
