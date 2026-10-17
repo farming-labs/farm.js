@@ -372,7 +372,7 @@ domain only gets the header on responses from Farm's server.
 ## Production checklist
 
 - Run `farm build` before `farm deploy`.
-- For self-hosting, run `node .output/server/index.mjs` behind your process manager or container runtime.
+- For self-hosting, run the generated server (`node .farm/.output/server/index.mjs` with the default output directory) behind your process manager or container runtime.
 - Confirm the selected target or preset matches `deploy.target`, `deploy.preset`, or the CLI/env override.
 - For non-first-class platforms, confirm the Nitro preset name and provider deploy command from Nitro's docs.
 - Check generated output exists at the resolved output directory.

@@ -59,7 +59,7 @@ export default function DashboardLayout({ children }: LayoutProps) {
 
 - `loading.*` provides pending UI for a route segment.
 - `error.*` catches render failures in that segment.
-- `not-found.*` renders when the route intentionally returns a 404.
+- `not-found.*` at the root of `src/app` renders when a route calls `notFound()` or no route matches.
 
 The extension follows the selected renderer: `.tsx`/`.jsx` for React, Preact, or Solid, `.vue` for
 Vue, and `.svelte` for Svelte.
@@ -98,18 +98,20 @@ export default function DashboardError({ error, reset }: { error: Error; reset: 
 
 ## Not found UI
 
-Use `not-found.tsx` for segment-specific missing states. A docs page might show docs navigation, while an account page might link back to settings.
+Add `not-found.tsx` at the root of `src/app` to replace Farm's built-in 404 page. It renders inside
+the root layout for `notFound()` calls and for URLs that match no route. Farm reads only the root
+file; a `not-found.tsx` inside a nested folder is ignored.
 
-**src/app/docs/not-found.tsx**
+**src/app/not-found.tsx**
 
 ```tsx
 import { Link } from "@farm.js/core/client";
 
-export default function DocsNotFound() {
+export default function NotFound() {
   return (
     <main>
       <h1>Page not found</h1>
-      <Link href="/docs">Back to docs</Link>
+      <Link href="/">Back home</Link>
     </main>
   );
 }

@@ -207,16 +207,16 @@ Rerun Phase 8.
 
 ## Failure symptoms and recovery
 
-| Symptom                                                                                    | Cause and fix                                                                                                                                                                 |
-| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hydration errors, duplicate Svelte plugin, or `$app/*` import errors in `farm dev`         | A root `vite.config.*` with `sveltekit()` is still loaded. Delete it.                                                                                                         |
-| Buttons and `onclick` handlers do nothing                                                  | The route does not hydrate. Export `hydrate = true` from the page or a parent layout module script.                                                                           |
-| `createServerFn handlers run only on the server, but ... is being bundled into the client` | Browser code imports a server-function or server-query module. Expose it through an API route and call `apiClient`.                                                           |
-| `Failed to resolve import "react"` in the browser                                          | A Svelte component imports `@farm.js/core/client`. Use `@farm.js/svelte/bindings` or `@farm.js/core/api/client`.                                                              |
-| `middleware.data` is `undefined` after client navigation                                   | SPA page-data responses carry `params`, `search`, and `path` but not middleware data. Reach that route with a plain `<a>` (document load) or fetch the data with `apiClient`. |
-| `searchParams.then` errors or mismatched query values                                      | `searchParams` is a Promise during SSR and a plain object after hydration. Read the `search` prop.                                                                            |
-| `pnpm start` cannot find the server                                                        | Start script points at `.output`. Use `node .farm/.output/server/index.mjs`.                                                                                                  |
-| Static files 404                                                                           | `static/` was not renamed to `public/` and `publicDir` is unset.                                                                                                              |
+| Symptom                                                                                    | Cause and fix                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Hydration errors, duplicate Svelte plugin, or `$app/*` import errors in `farm dev`         | A root `vite.config.*` with `sveltekit()` is still loaded. Delete it.                                                                                                                      |
+| Buttons and `onclick` handlers do nothing                                                  | The route does not hydrate. Export `hydrate = true` from the page or a parent layout module script.                                                                                        |
+| `createServerFn handlers run only on the server, but ... is being bundled into the client` | Browser code imports a server-function or server-query module. Expose it through an API route and call `apiClient`.                                                                        |
+| `Failed to resolve import "react"` in the browser                                          | A Svelte component imports `@farm.js/core/client`. Use `@farm.js/svelte/bindings` or `@farm.js/core/api/client`.                                                                           |
+| `middleware.data` is `undefined` after client navigation                                   | Farm before 0.1.17 skipped middleware for development page-data requests. Upgrade `@farm.js/core`; client navigation now runs the target route's middleware in development and production. |
+| `searchParams.then` errors or mismatched query values                                      | `searchParams` is a Promise during SSR and a plain object after hydration. Read the `search` prop.                                                                                         |
+| `pnpm start` cannot find the server                                                        | Start script points at `.output`. Use `node .farm/.output/server/index.mjs`.                                                                                                               |
+| Static files 404                                                                           | `static/` was not renamed to `public/` and `publicDir` is unset.                                                                                                                           |
 
 ## Feature parity: project and configuration
 
@@ -291,13 +291,13 @@ SSR is buffered, so `loading.svelte` never streams a fallback.
 | `setHeaders`                        | `ctx.headers.set(name, value)` in middleware, or `routeRules` headers                            | `different` |
 | `cookies.get/set/delete`            | `ctx.cookies.get/set/delete` in middleware; `cookies()` from `@farm.js/core` is read-only        | `different` |
 | `depends`, `invalidate(url)`        | none. Refetch client data, or `location.reload()` for middleware data                            | `none`      |
-| `invalidateAll()`                   | `router.refresh()` reruns page props but not middleware data; reload for those                   | `different` |
+| `invalidateAll()`                   | `router.refresh()` reruns the route's middleware and page props                                  | `different` |
 | streaming promises in returned data | none for Svelte (buffered SSR, no `defer()` on file routes). Fetch after mount with `{#await}`.  | `none`      |
 | `error(404)` in load                | `notFound()` from `@farm.js/core/navigation` in middleware                                       | `different` |
 | `redirect(303, "/x")` in load       | `redirect("/x", 303)` from `@farm.js/core/navigation` or `ctx.redirect("/x", 303)` in middleware | `different` |
 
-Middleware data is serialized into the page, so store only client-safe values. SPA page-data
-responses do not include middleware data: link to those routes with a plain `<a>`.
+Middleware data is serialized into the page, so store only client-safe values. Client navigation
+runs the target route's middleware, so `middleware.data` is set after in-app navigation too.
 
 A `+page.server.ts` `load` that reads a post, calls `error(404)` when it is missing, and returns
 `{ post }` becomes route middleware plus page props:
