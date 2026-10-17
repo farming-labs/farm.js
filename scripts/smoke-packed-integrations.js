@@ -219,6 +219,21 @@ function assertInstalledManifests(fixtureDirectory, packageNames) {
         );
       }
     }
+
+    const binaries =
+      typeof manifest.bin === "string"
+        ? { [manifest.name.split("/").at(-1)]: manifest.bin }
+        : manifest.bin || {};
+    for (const [binary, target] of Object.entries(binaries)) {
+      const binaryPath = path.resolve(path.dirname(manifestPath), target);
+      if (!fs.existsSync(binaryPath)) {
+        throw new Error(`${name} binary ${binary} points to missing packed file at ${target}.`);
+      }
+      const shebang = fs.readFileSync(binaryPath, "utf8").split(/\r?\n/, 1)[0];
+      if (shebang !== "#!/usr/bin/env node") {
+        throw new Error(`${name} binary ${binary} has no Node shebang at ${target}.`);
+      }
+    }
   }
 }
 

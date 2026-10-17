@@ -1,4 +1,5 @@
 import type { API, StrapiClient } from "@strapi/client";
+import type { GeneratedStrapiCollection, StrapiGeneratedResource } from "./schema-types.js";
 
 export type StrapiQueryParams = API.BaseQueryParams;
 export type StrapiDocument = API.Document;
@@ -39,10 +40,22 @@ function assertDocument(value: unknown, operation: string): asserts value is Str
  * unwraps the REST `data` envelope. Use the returned methods inside
  * `createServerQuery` so provider credentials remain on the server.
  */
-export function createStrapiCollection<TDocument extends StrapiDocument = StrapiDocument>(
+export function createStrapiCollection<const TResource extends StrapiGeneratedResource>(
+  client: StrapiClient,
+  resource: TResource,
+): GeneratedStrapiCollection<TResource>;
+export function createStrapiCollection<TDocument extends StrapiDocument>(
   client: StrapiClient,
   resource: string,
-): TypedStrapiCollection<TDocument> {
+): TypedStrapiCollection<TDocument>;
+export function createStrapiCollection(
+  client: StrapiClient,
+  resource: string,
+): TypedStrapiCollection<StrapiDocument>;
+export function createStrapiCollection(
+  client: StrapiClient,
+  resource: string,
+): TypedStrapiCollection<StrapiDocument> {
   assertResourceName(resource);
   const manager = client.collection(resource);
 
@@ -55,13 +68,13 @@ export function createStrapiCollection<TDocument extends StrapiDocument = Strapi
       for (const document of response.data) {
         assertDocument(document, `Strapi collection ${JSON.stringify(resource)}`);
       }
-      return response.data as TDocument[];
+      return response.data;
     },
     async findOne(documentId, query) {
       assertDocumentId(documentId);
       const response = await manager.findOne(documentId, query);
       assertDocument(response?.data, `Strapi collection ${JSON.stringify(resource)}`);
-      return response.data as TDocument;
+      return response.data;
     },
   };
 }

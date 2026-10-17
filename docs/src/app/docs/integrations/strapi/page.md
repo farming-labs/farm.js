@@ -38,6 +38,49 @@ With no options, the integration reads its configuration from the environment.
 
 A missing API URL fails while the config loads, with a message naming `STRAPI_API_URL`.
 
+## Generate content types
+
+When the Farm and Strapi projects share a repository, generate a declaration directly from the
+Strapi project's content-type and component schemas.
+
+```json
+{
+  "scripts": {
+    "strapi:types": "farm-strapi generate --strapi-root ../cms --output src/strapi.generated.d.ts",
+    "strapi:types:check": "farm-strapi generate --strapi-root ../cms --output src/strapi.generated.d.ts --check"
+  }
+}
+```
+
+Run `pnpm strapi:types` after a content model changes and commit `src/strapi.generated.d.ts`.
+`--check` does not write; it exits unsuccessfully when the declaration is missing or stale, making
+it suitable for CI.
+
+With the declaration included by the application's TypeScript configuration, the literal resource,
+`fields`, and `populate` values determine the response:
+
+```ts
+// src/lib/cms.server.ts
+import { createStrapiClient, createStrapiCollection, resolveStrapiConfig } from "@farm.js/strapi";
+
+export const cms = createStrapiClient(resolveStrapiConfig({}));
+export const articles = createStrapiCollection(cms, "articles");
+
+const posts = await articles.find({
+  fields: ["title", "slug"],
+  populate: ["cover", "category"],
+});
+```
+
+Unpopulated relations and media do not appear in the result type. Top-level population is inferred;
+a nested object or dotted-path `populate` returns `unknown` because its response shape is not
+validated. Unknown provider relations, such as plugin-owned users, are also `unknown`. Validate
+these values at the server-query boundary before returning them to application code.
+
+The generator reads local `src/api/**/schema.json` and `src/components/**/*.json` files. Its API is
+also exported from the server-only `@farm.js/strapi/schema` entry; importing the ordinary package
+entry does not add filesystem code to the application runtime.
+
 ## Choose client ownership
 
 The application can own the official Strapi client. Build it once, use it from server queries, and
@@ -102,10 +145,10 @@ export const postsQuery = createServerQuery({
 });
 ```
 
-`createStrapiCollection<T>` accepts the official client's `populate`, `fields`, `filters`, `sort`,
-`pagination`, `locale`, and `status` query options and unwraps the REST `data` envelope. Its generic
-describes what the application expects, while the server query's `output` validates what permissions
-and population actually returned.
+`createStrapiCollection` accepts the official client's `populate`, `fields`, `filters`, `sort`,
+`pagination`, `locale`, and `status` query options and unwraps the REST `data` envelope. With no
+generated declaration, its optional generic describes what the application expects. In either
+mode, the server query's `output` validates what permissions and population actually returned.
 
 ## Serve images
 
