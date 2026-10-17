@@ -4695,10 +4695,10 @@ function cleanJsxText(value: string): string {
 
 function isTextExpression(
   expression: t.Expression,
-  statesByValue: ReadonlyMap<string, StateBinding>,
+  dependencies: readonly number[],
   safeGlobals: ReadonlySet<string>,
 ): boolean {
-  if (collectStateDependencies(expression, statesByValue).length > 0) {
+  if (dependencies.length > 0) {
     return validateDerivedExpression(expression, safeGlobals) === undefined;
   }
 
@@ -8324,13 +8324,14 @@ function analyzeComposableBlocks(
       }
 
       if (insideConditional) {
-        if (!isTextExpression(expression, statesByValue, safeGlobals)) {
+        const textDependencies = collectStateDependencies(expression, statesByValue);
+        if (!isTextExpression(expression, textDependencies, safeGlobals)) {
           return {
             dependencies,
             reason: "conditional block children must keep one supported block or static host tree",
           };
         }
-        mergeDependencies(dependencies, collectStateDependencies(expression, statesByValue));
+        mergeDependencies(dependencies, textDependencies);
       }
     }
 
@@ -8734,12 +8735,19 @@ function analyzeHostTree(
     const expressionChildren = element.children.filter((child): child is t.JSXExpressionContainer =>
       t.isJSXExpressionContainer(child),
     );
+    // Reuse dependencies only within this read-only visit. All text validation
+    // still runs before deciding whether mixed stateful children need fallback.
+    let textDependencies: Set<number> | undefined;
     for (const child of expressionChildren) {
       if (t.isJSXEmptyExpression(child.expression)) continue;
       if (conditionalExpressions.has(child.expression)) continue;
       if (keyedExpressions.has(child.expression)) continue;
-      if (!isTextExpression(child.expression, statesByValue, safeGlobals)) {
+      const dependencies = collectStateDependencies(child.expression, statesByValue);
+      if (!isTextExpression(child.expression, dependencies, safeGlobals)) {
         return "dynamic child structures require React reconciliation";
+      }
+      for (const dependency of dependencies) {
+        (textDependencies ??= new Set()).add(dependency);
       }
     }
 
@@ -8758,37 +8766,26 @@ function analyzeHostTree(
           (conditionalExpressions.has(child.expression) || keyedExpressions.has(child.expression)),
       );
     if (nestedElements.length === 0 && !hasDynamicBlocks) {
-      const dependencies = new Set<number>();
       const parts: t.Expression[] = [];
       for (const child of element.children) {
         if (t.isJSXText(child)) {
           const text = cleanJsxText(child.value);
           if (text) parts.push(t.stringLiteral(text));
         } else if (t.isJSXExpressionContainer(child) && !t.isJSXEmptyExpression(child.expression)) {
-          collectStateDependencies(child.expression, statesByValue).forEach((dependency) =>
-            dependencies.add(dependency),
-          );
           parts.push(cloneExpression(child.expression));
         }
       }
-      if (dependencies.size > 0) {
+      if (textDependencies) {
         bindings.push({
           kind: "text",
           path: [...path],
-          dependencies: [...dependencies].sort((left, right) => left - right),
+          dependencies: [...textDependencies].sort((left, right) => left - right),
           value: t.arrayExpression(parts),
         });
       }
     } else {
-      for (const child of expressionChildren) {
-        if (
-          !t.isJSXEmptyExpression(child.expression) &&
-          !conditionalExpressions.has(child.expression) &&
-          !keyedExpressions.has(child.expression) &&
-          collectStateDependencies(child.expression, statesByValue).length > 0
-        ) {
-          return "mixed element and stateful text children are not supported yet";
-        }
+      if (textDependencies) {
+        return "mixed element and stateful text children are not supported yet";
       }
       let elementIndex = 0;
       for (const child of element.children) {
