@@ -7,7 +7,6 @@ export default defineConfig({
   },
   experimental: {
     serverComponents: true,
-    serverActions: true,
   },
   notFound: {
     component: './src/app/not-found.tsx',

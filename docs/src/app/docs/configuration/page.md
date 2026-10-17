@@ -844,6 +844,11 @@ Customize both paths through `server.health`, or set `health: false` when an ada
 
 Server actions are same-origin application RPC endpoints. Farm rejects cross-origin action requests by default and limits the encoded request body to 1 MB.
 
+Server actions run on the React Server Components pipeline from `@farm.js/plugin/rsc` (see the
+[`rsc-demo` example](https://github.com/farming-labs/farm.js/tree/main/examples/rsc-demo)). The
+`experimental` flags below configure that pipeline; on their own they do not make server functions
+callable from the browser, and Farm keeps rejecting client imports of server-function modules.
+
 ```ts
 import { defineConfig } from "@farm.js/core";
 

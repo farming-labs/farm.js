@@ -19,6 +19,5 @@ export default defineConfig({
   }),
   experimental: {
     serverComponents: true,
-    serverActions: true,
   },
 });

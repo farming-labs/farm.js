@@ -34,7 +34,6 @@ This example enables route-level `loading.tsx` and `error.tsx` boundaries with:
 export default defineConfig({
   experimental: {
     serverComponents: true,
-    serverActions: true,
   },
 });
 ```

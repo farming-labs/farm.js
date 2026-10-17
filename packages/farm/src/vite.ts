@@ -105,6 +105,9 @@ import {
   shouldBypassFarmRouterForDottedPath,
 } from "./dev-static";
 import { findClientServerFnViolation, formatServerFnBoundaryError } from "./server-query-boundary";
+
+/** The @farm.js/plugin/rsc transform that turns client imports of server functions into stubs. */
+const SERVER_FN_TRANSFORM_PLUGIN = "@farm.js/plugin/rsc:server-fn-actions";
 import {
   analyzeClientBoundary,
   formatClientBoundaryWarning,
@@ -1059,6 +1062,7 @@ export function farmPlugin(
     publicDir: options.publicDir,
   });
   let farmApp: FarmApp;
+  let serverFnTransformActive = false;
   let server: ViteDevServer;
   let apiRouteManager: APIRouteManager;
   let openAPIManager: OpenAPIManager | null = null;
@@ -1115,6 +1119,16 @@ export function farmPlugin(
     async configResolved(config) {
       if (typeof fontImports.configResolved === "function") {
         await fontImports.configResolved.call(this, config);
+      }
+      serverFnTransformActive = config.plugins.some(
+        (plugin) => plugin.name === SERVER_FN_TRANSFORM_PLUGIN,
+      );
+      if (options.experimental?.serverActions === true && !serverFnTransformActive) {
+        logger.warn(
+          "experimental.serverActions has no effect without @farm.js/plugin/rsc in the Vite " +
+            "plugins. Server functions stay server-only, and importing one from client code " +
+            "is a build error.",
+        );
       }
       // Defer Farm application initialization until Vite server is available.
     },
@@ -3233,12 +3247,13 @@ export const manifest = getManifest();
     async transform(code, id, transformOptions) {
       if (!transformOptions?.ssr) {
         const currentConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
-        if (currentConfig.experimental?.serverActions !== true) {
+        if (currentConfig.experimental?.serverActions !== true || !serverFnTransformActive) {
           // Without the server-function transform there is no client stub for
           // server queries: bundling the defining module into the browser
           // executes the server handler there. Fail with an actionable
           // boundary error instead of Vite's Node-builtin externalization
-          // failure at runtime.
+          // failure at runtime. The flag alone is not enough: only the
+          // @farm.js/plugin/rsc transform makes client imports safe.
           const violation = findClientServerFnViolation(code, id);
           if (violation) {
             this.error(formatServerFnBoundaryError(violation, id));
