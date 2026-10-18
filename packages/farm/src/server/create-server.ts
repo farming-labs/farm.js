@@ -49,18 +49,42 @@ type VitePendingRequest = {
   request: Promise<unknown>;
 };
 
-async function drainVitePendingRequests(server: ViteDevServer): Promise<void> {
+type ViteDepsOptimizerState = {
+  scanProcessing?: Promise<unknown>;
+  metadata?: { discovered?: Record<string, { processing?: Promise<unknown> }> };
+};
+
+/** @internal Exported for tests. */
+export async function drainVitePendingRequests(server: ViteDevServer): Promise<void> {
   // Each Vite environment waits for this registry while it closes its plugin
   // container and dependency optimizer. That order can strand
   // optimized-dependency loads: the optimizer is gone, but the plugin hook
   // still awaits its processing promise. Drain every registry first while the
   // optimizers can finish; a request in one environment can start another.
-  const registries = Object.values(server.environments ?? {}).map(
+  const environments = Object.values(server.environments ?? {});
+  const registries = environments.map(
     (environment) =>
       (environment as { _pendingRequests?: Map<string, VitePendingRequest> })._pendingRequests,
   );
   const pending = () => registries.flatMap((registry) => (registry ? [...registry.values()] : []));
+  // An optimizer run can also be in flight with no request waiting on it.
+  // Vite's close cancels that run and deletes its temporary output directory
+  // while Rolldown may still be writing into it, which surfaces as an
+  // unhandled "Error during dependency optimization". Let it finish first.
+  const optimizerWork = () =>
+    environments.flatMap((environment) => {
+      const optimizer = (environment as { depsOptimizer?: ViteDepsOptimizerState }).depsOptimizer;
+      if (!optimizer) return [];
+      return [
+        optimizer.scanProcessing,
+        ...Object.values(optimizer.metadata?.discovered ?? {}).map((dep) => dep.processing),
+      ].filter((work): work is Promise<unknown> => work !== undefined);
+    });
 
+  for (let requests = pending(); requests.length > 0; requests = pending()) {
+    await Promise.allSettled(requests.map(({ request }) => request));
+  }
+  await Promise.allSettled(optimizerWork());
   for (let requests = pending(); requests.length > 0; requests = pending()) {
     await Promise.allSettled(requests.map(({ request }) => request));
   }
