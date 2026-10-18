@@ -119,6 +119,28 @@ function createBrandingPlugin() {
   };
 }
 
+/**
+ * A Vite restart (an edited .env or config file, the `r` shortcut,
+ * `server.restart()`) rebuilds the server in place. Farm's plugin runtime
+ * restarts with it: close, then setup and start again. Vite calls this hook
+ * after the old server is torn down and before the new one listens. A failure
+ * is reported but must not reject, since Vite would then abandon the restart
+ * with the old server already closed.
+ */
+function createDevRuntimeRestartPlugin(pluginManager: PluginManager) {
+  return {
+    name: "farm:dev-runtime-restart",
+    async closeServer({ reason }: { reason: "close" | "restart" }) {
+      if (reason !== "restart") return;
+      try {
+        await pluginManager.restartRuntime("dev-server-restart");
+      } catch (error) {
+        logger.error(`Plugin runtime restart failed: ${error}`);
+      }
+    },
+  };
+}
+
 function hasProjectPostcssConfig(root: string): boolean {
   const candidates = [
     "postcss.config.js",
@@ -294,6 +316,7 @@ export async function createServer(config: FarmConfig = {}, options: { port?: nu
             farmPlugin(finalConfig, pluginManager),
             farmEnvironmentFunctionsPlugin(),
             createBrandingPlugin(),
+            createDevRuntimeRestartPlugin(pluginManager),
           ],
           server: {
             middlewareMode: false,
@@ -352,7 +375,10 @@ export async function createServer(config: FarmConfig = {}, options: { port?: nu
     (server as any).__farmPluginManager = pluginManager;
     (server as any).__farmResolvedConfig = resolvedConfig;
     (server as any).__farmInstrumentation = instrumentation;
-    const closeViteServer = server.close.bind(server);
+    let closeViteServer: ViteDevServer["close"];
+    let restartViteServer: ViteDevServer["restart"];
+    let watchedHttpServer: ViteDevServer["httpServer"] = null;
+    let restartPromise: Promise<void> | undefined;
 
     /**
      * Tear the whole dev runtime down once, collecting every failure.
@@ -364,6 +390,8 @@ export async function createServer(config: FarmConfig = {}, options: { port?: nu
     let shutdownPromise: Promise<void> | undefined;
     const shutdownFarmDevRuntime = (): Promise<void> => {
       shutdownPromise ??= (async () => {
+        // Close what a restart in flight is about to serve, not what it replaces.
+        await restartPromise?.catch(() => {});
         const closingEnvironments = server.environments;
         const closingHttpServer = server.httpServer;
         const closingWatcher = server.watcher;
@@ -399,9 +427,8 @@ export async function createServer(config: FarmConfig = {}, options: { port?: nu
             const outcome = await Promise.race([
               (async () => {
                 await drainVitePendingWork(server);
-                // A restart closes the old HTTP server and replaces fields on
-                // this same object. Its close event must not close the new
-                // environments after our asynchronous drain finishes.
+                // A restart replaces fields on this same object. Never close
+                // environments that replaced the ones this shutdown drained.
                 if (server.environments === closingEnvironments) await closeViteServer();
                 return "closed" as const;
               })(),
@@ -445,14 +472,55 @@ export async function createServer(config: FarmConfig = {}, options: { port?: nu
       return shutdownPromise;
     };
 
-    server.close = shutdownFarmDevRuntime;
-    // A directly closed HTTP server still has to release the same resources.
-    // close() is memoized, so this cannot double-dispose.
-    server.httpServer?.once("close", () => {
-      shutdownFarmDevRuntime().catch((error) => {
-        logger.warn(`Dev server shutdown failed: ${error}`);
+    /**
+     * Every Vite restart, whether from an edited .env or config file, the `r`
+     * shortcut, or a direct call, goes through `server.restart()`. Vite closes
+     * the old HTTP server and then copies the new server's fields, its own
+     * close() and restart() included, onto this object. Mark the restart so
+     * the old HTTP server's close event is not taken for a shutdown, and put
+     * Farm's methods back once Vite has swapped the server in. The plugin
+     * runtime itself restarts from Vite's closeServer hook.
+     */
+    const restartFarmDevServer = async (forceOptimize?: boolean): Promise<void> => {
+      if (shutdownPromise) return;
+      if (restartPromise) {
+        // Vite folds this into another pass of the restart already running.
+        await Promise.all([restartViteServer(forceOptimize), restartPromise]);
+        return;
+      }
+      restartPromise = (async () => {
+        try {
+          await restartViteServer(forceOptimize);
+        } finally {
+          installFarmServerMethods();
+          restartPromise = undefined;
+        }
+      })();
+      return restartPromise;
+    };
+
+    const installFarmServerMethods = () => {
+      if (server.close !== shutdownFarmDevRuntime) {
+        closeViteServer = server.close.bind(server);
+        server.close = shutdownFarmDevRuntime;
+      }
+      if (server.restart !== restartFarmDevServer) {
+        restartViteServer = server.restart.bind(server);
+        server.restart = restartFarmDevServer;
+      }
+      const httpServer = server.httpServer;
+      if (!httpServer || httpServer === watchedHttpServer) return;
+      watchedHttpServer = httpServer;
+      // A directly closed HTTP server still has to release the same resources.
+      // close() is memoized, so this cannot double-dispose.
+      httpServer.once("close", () => {
+        if (restartPromise) return;
+        shutdownFarmDevRuntime().catch((error) => {
+          logger.warn(`Dev server shutdown failed: ${error}`);
+        });
       });
-    });
+    };
+    installFarmServerMethods();
 
     // Update plugin manager with vite server
     pluginManager.updateContext({ config: finalConfig, viteServer: server });

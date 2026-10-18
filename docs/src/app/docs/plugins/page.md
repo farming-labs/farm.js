@@ -188,15 +188,15 @@ Both hooks receive Farm's plugin context. `setup` additionally receives the reso
 
 ### Runtime hooks
 
-| Hook                | Runs                                                         | May return                                                       |
-| ------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------- |
-| `runtime.start`     | Once when the runtime manager starts.                        | Nothing.                                                         |
-| `runtime.endpoints` | On an exact application-relative path owned by the plugin.   | A Web `Response`.                                                |
-| `runtime.context`   | At the start of every request.                               | A plain object merged into typed request `ctx`.                  |
-| `runtime.before`    | Before Farm invokes the matched handler.                     | A replacement `Request`, a short-circuit `Response`, or nothing. |
-| `runtime.after`     | After a handler or short circuit produces a response.        | A replacement `Response` or nothing.                             |
-| `runtime.error`     | When runtime context, before, handler, or after work throws. | Nothing.                                                         |
-| `runtime.close`     | During graceful shutdown in long-running Node output.        | Nothing.                                                         |
+| Hook                | Runs                                                                                   | May return                                                       |
+| ------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `runtime.start`     | When the runtime manager starts, and again after a dev server restart.                 | Nothing.                                                         |
+| `runtime.endpoints` | On an exact application-relative path owned by the plugin.                             | A Web `Response`.                                                |
+| `runtime.context`   | At the start of every request.                                                         | A plain object merged into typed request `ctx`.                  |
+| `runtime.before`    | Before Farm invokes the matched handler.                                               | A replacement `Request`, a short-circuit `Response`, or nothing. |
+| `runtime.after`     | After a handler or short circuit produces a response.                                  | A replacement `Response` or nothing.                             |
+| `runtime.error`     | When runtime context, before, handler, or after work throws.                           | Nothing.                                                         |
+| `runtime.close`     | During graceful shutdown in long-running Node output, and before a dev server restart. | Nothing.                                                         |
 
 Runtime request hooks apply to page, API, server-action, integration, docs, asset, and general
 requests. Use `runtime.endpoints` when a plugin owns a small exact URL and should not make unrelated

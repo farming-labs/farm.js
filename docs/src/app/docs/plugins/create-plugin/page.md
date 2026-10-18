@@ -567,6 +567,8 @@ export const redisPlugin = definePlugin({
 
 Farm runs registered disposers once, in reverse registration order, after attempting every plugin shutdown hook. One failing hook does not prevent later hooks or resource disposers from running.
 
+In development, stopping `farm dev` closes the runtime with the reason `"dev-server-closed"`. When Vite restarts the development server, after an edited `.env` or config file, the `r` shortcut, or `server.restart()`, Farm closes the runtime with the reason `"dev-server-restart"` and runs the registered disposers. It then runs `setup` and `runtime.start` again before the restarted server accepts requests. Keep both safe to run more than once in the same process, and check `reason` in `runtime.close` when a restart should be handled differently from a final shutdown.
+
 Request-driven serverless and edge hosts may initialize lazily and may not expose a reliable shutdown event. Correctness must not depend solely on cleanup hooks there; use transactions, leases, and idempotent queue handling for externally visible work.
 
 ## Context rules

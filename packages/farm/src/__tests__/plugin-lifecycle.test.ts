@@ -56,6 +56,103 @@ describe("plugin lifecycle hooks", () => {
     expect(calls).toEqual(["shutdown:first", "shutdown:second", "dispose:second", "dispose:first"]);
   });
 
+  it("restarts the runtime with fresh setup state and closes it again later", async () => {
+    const manager = createManager();
+    const calls: string[] = [];
+    let generation = 0;
+
+    manager.addPlugin(
+      definePlugin({
+        name: "pool",
+        setup(context) {
+          const pool = ++generation;
+          calls.push(`setup:${pool}`);
+          context.lifecycle.onShutdown(() => {
+            calls.push(`dispose:${pool}`);
+          });
+          return { pool };
+        },
+        runtime: {
+          start({ state }) {
+            calls.push(`start:${(state as { pool: number }).pool}`);
+          },
+          close({ state, reason }) {
+            calls.push(`close:${(state as { pool: number }).pool}:${reason}`);
+          },
+        },
+      }),
+    );
+
+    await manager.startRuntime();
+    await manager.restartRuntime("dev-server-restart");
+    await manager.closeRuntime("dev-server-closed");
+
+    expect(calls).toEqual([
+      "setup:1",
+      "start:1",
+      "close:1:dev-server-restart",
+      "dispose:1",
+      "setup:2",
+      "start:2",
+      "close:2:dev-server-closed",
+      "dispose:2",
+    ]);
+  });
+
+  it("starts again after a failed restart close and reports the failure", async () => {
+    const manager = createManager();
+    const calls: string[] = [];
+
+    manager.addPlugin(
+      definePlugin({
+        name: "flaky-close",
+        setup() {
+          calls.push("setup");
+        },
+        runtime: {
+          start() {
+            calls.push("start");
+          },
+          close() {
+            calls.push("close");
+            throw new Error("pool drain failed");
+          },
+        },
+      }),
+    );
+
+    await manager.startRuntime();
+    await expect(manager.restartRuntime("dev-server-restart")).rejects.toMatchObject({
+      errors: [expect.objectContaining({ message: "pool drain failed" })],
+    });
+
+    expect(calls).toEqual(["setup", "start", "close", "setup", "start"]);
+  });
+
+  it("does not start a runtime on restart that was never started", async () => {
+    const manager = createManager();
+    const calls: string[] = [];
+
+    manager.addPlugin(
+      definePlugin({
+        name: "setup-only",
+        setup() {
+          calls.push("setup");
+        },
+        runtime: {
+          start() {
+            calls.push("start");
+          },
+        },
+      }),
+    );
+
+    await manager.setupPlugins();
+    await manager.restartRuntime("dev-server-restart");
+
+    expect(calls).toEqual(["setup", "setup"]);
+  });
+
   it("routes direct shutdown hook calls through runtime cleanup", async () => {
     const manager = createManager();
     const calls: string[] = [];

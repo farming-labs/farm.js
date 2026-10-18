@@ -1351,6 +1351,33 @@ export class PluginManager {
     return this.runtimeClosePromise;
   }
 
+  /**
+   * @internal Close the runtime and bring it back with fresh setup state, as a
+   * development server restart does. Setup disposers ran during close, so setup
+   * runs again; startup runs again only when the runtime had been started.
+   */
+  async restartRuntime(reason: string): Promise<void> {
+    const started = this.runtimeReady || this.runtimeStartPromise !== undefined;
+    let closeError: unknown;
+    try {
+      await this.closeRuntime(reason);
+    } catch (error) {
+      closeError = error;
+    }
+
+    this.runtimeClosePromise = undefined;
+    this.runtimeClosed = false;
+    this.runtimeReady = false;
+    this.runtimeStartPromise = undefined;
+    this.setupComplete = false;
+    this.pluginStates.clear();
+
+    // A failed close must not leave the restarted server without a runtime.
+    await this.setupPlugins();
+    if (started) await this.startRuntime();
+    if (closeError !== undefined) throw closeError;
+  }
+
   async beginRuntimeRequest(
     request: Request,
     options: FarmPluginRuntimeRequestOptions = {},
