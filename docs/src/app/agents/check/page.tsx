@@ -89,7 +89,10 @@ export default function AgentCheckPage() {
                   <IndexedLabel index="06.4" icon={ScanSearch} label="Agent-ready check" />
                 </div>
                 <h1 id="agent-check-title">
-                  Is your site ready for <span className="agents-hero-word">agents</span>?
+                  Is your site ready for{" "}
+                  <span className="agents-hero-word">
+                    agents<span className="agents-hero-mark">?</span>
+                  </span>
                   <br />
                   <span className="agents-hero-line">Find out in seconds.</span>
                 </h1>
@@ -103,9 +106,9 @@ export default function AgentCheckPage() {
                 <SelectionWire
                   clear=".agents-intro"
                   fitInk
+                  glitch=".agents-hero-mark"
                   heading="#agent-check-title"
                   over=".agents-hero-line"
-                  padRight={0.14}
                   padX={0.03}
                   pauseWithin=".agent-check-form"
                   route="hug"
