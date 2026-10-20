@@ -1,68 +1,168 @@
-/* Agent-ready check: the /agents page's grid, cards, labels and code chips, plus a score. */
+/* Agent-ready check: the /agents page's grid, labels and code chips, plus a score and its
+   breakdown. Status colors carry state only; everything else stays on the site's neutrals. */
 
 .agent-check-form .agent-waitlist-status[data-tone="error"] {
   color: #ff8f87;
 }
 
-/* 06.4.1 What it checks: two columns of shared-border cells, like 06.1. */
-.agent-check-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.agent-check-list li {
+/* One click per example site, under the address bar. */
+.agent-check-examples {
   display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
-  padding: 32px 48px 36px;
-  color: #bbb;
-}
-.agent-check-list li:nth-child(even) {
-  border-left: 1px solid var(--farm-line);
-}
-.agent-check-list li:nth-child(n + 3) {
-  border-top: 1px solid var(--farm-line);
-}
-.agent-check-list p {
-  max-width: 26rem;
-  color: #929292;
-  font-size: 15px;
-  font-weight: 300;
-  line-height: 1.7;
-}
-.agent-check-list-meta {
-  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-top: auto;
+  gap: 6px;
+  margin-top: 14px;
+  color: #6e6e6e;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
-.agent-check-list-meta code {
-  padding: 6px 10px;
-  border-radius: 2px;
-  background: rgb(255 255 255 / 0.04);
-  color: rgb(255 255 255 / 0.72);
+.agent-check-examples[hidden] {
+  display: none;
+}
+.agent-check-examples span {
+  margin-right: 4px;
+}
+.agent-check-examples button {
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  background: rgb(255 255 255 / 0.02);
+  color: #a1a1a1;
+  font: inherit;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  cursor: pointer;
+  transition:
+    border-color 150ms var(--farm-ease, ease),
+    color 150ms var(--farm-ease, ease);
+}
+.agent-check-examples button:disabled {
+  cursor: progress;
+  opacity: 0.5;
+}
+.agent-check-examples button:focus-visible {
+  outline: 2px solid #ededed;
+  outline-offset: 2px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .agent-check-examples button:hover:not(:disabled) {
+    border-color: rgb(255 255 255 / 0.36);
+    color: #ededed;
+  }
+}
+
+/* Buttons: one solid primary, bordered secondaries, and a quiet text action. */
+.agent-check-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 0;
+  background: rgb(255 255 255 / 0.03);
+  color: #ededed;
   font-family: var(--font-geist-mono), monospace;
   font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--farm-ease, ease),
+    border-color 150ms var(--farm-ease, ease),
+    color 150ms var(--farm-ease, ease),
+    transform 100ms var(--farm-ease, ease);
+}
+.agent-check-button[hidden] {
+  display: none;
+}
+.agent-check-button[data-variant="primary"] {
+  border-color: #ededed;
+  background: #ededed;
+  color: #000;
+}
+.agent-check-button[data-variant="ghost"] {
+  padding: 0 4px;
+  border-color: transparent;
+  background: transparent;
+  color: #a1a1a1;
+}
+.agent-check-button svg {
+  flex: none;
+  transition: transform 150ms var(--farm-ease, ease);
+}
+.agent-check-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.agent-check-button:focus-visible {
+  outline: 2px solid #ededed;
+  outline-offset: 2px;
+}
+.agent-check-button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+@media (hover: hover) and (pointer: fine) {
+  .agent-check-button:hover:not(:disabled) {
+    border-color: rgb(255 255 255 / 0.4);
+    background: rgb(255 255 255 / 0.07);
+  }
+  .agent-check-button[data-variant="primary"]:hover:not(:disabled) {
+    border-color: #fff;
+    background: #fff;
+  }
+  .agent-check-button[data-variant="ghost"]:hover:not(:disabled) {
+    border-color: transparent;
+    background: transparent;
+    color: #fff;
+  }
+  .agent-check-button[data-variant="ghost"]:hover:not(:disabled) svg:last-child {
+    transform: translateX(2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-check-button,
+  .agent-check-button svg {
+    transition: none;
+  }
+}
+
+/* Small mono chips for metadata: points, "Built with Farm.js". */
+.agent-check-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  color: #a1a1a1;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
-.agent-check-list-meta span,
-.agent-check-status,
-.agent-check-rows-heading > span {
+.agent-check-chip[data-tone="pass"] {
+  border-color: rgb(140 224 181 / 0.32);
+  color: #8ce0b5;
+}
+.agent-check-chip[data-tone="muted"] {
+  color: #6e6e6e;
+}
+
+.agent-check-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   color: #6e6e6e;
   font-family: var(--font-geist-mono), monospace;
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   white-space: nowrap;
-}
-.agent-check-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
 }
 .agent-check-status::before {
   content: "";
@@ -81,12 +181,118 @@
   color: #ff8f87;
 }
 
-/* Report hero: the host, a verdict, and the score in the page's pixel face. */
+/* 06.4.1 What it checks: a header per group, then its checks as cards in shared-border cells. */
+.agent-check-list-group-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  padding: 18px 48px;
+  background: rgb(255 255 255 / 0.015);
+  color: #b7b7b7;
+}
+.agent-check-list-group-head h3 {
+  color: #ededed;
+  font-size: 15px;
+  font-weight: 400;
+}
+.agent-check-list-group-head > span {
+  color: #6e6e6e;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.agent-check-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--farm-line);
+  list-style: none;
+}
+.agent-check-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 28px 48px 32px;
+  color: #bbb;
+  transition: background-color 150ms var(--farm-ease, ease);
+}
+.agent-check-list li:nth-child(even) {
+  border-left: 1px solid var(--farm-line);
+}
+.agent-check-list li:nth-child(n + 3) {
+  border-top: 1px solid var(--farm-line);
+}
+.agent-check-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.agent-check-card-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  background: rgb(255 255 255 / 0.03);
+  color: #ededed;
+  transition:
+    background-color 150ms var(--farm-ease, ease),
+    color 150ms var(--farm-ease, ease);
+}
+.agent-check-list h4 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  color: #ededed;
+  font-size: 17px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+.agent-check-list h4 span {
+  color: rgb(255 255 255 / 0.26);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+}
+.agent-check-list p {
+  max-width: 26rem;
+  color: #929292;
+  font-size: 15px;
+  font-weight: 300;
+  line-height: 1.7;
+}
+.agent-check-list code {
+  align-self: flex-start;
+  margin-top: auto;
+  padding: 6px 10px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.04);
+  color: rgb(255 255 255 / 0.72);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+@media (hover: hover) and (pointer: fine) {
+  .agent-check-list li:hover {
+    background: rgb(255 255 255 / 0.015);
+  }
+  .agent-check-list li:hover .agent-check-card-icon {
+    background: #ededed;
+    color: #000;
+  }
+}
+
+/* Report hero: the host, a verdict, the actions, and the score as a ring. */
 .agent-check-hero {
   position: relative;
-  padding: 64px 48px 48px;
+  padding: 56px 48px 48px;
   background-image: radial-gradient(
-    ellipse 60% 70% at 85% 30%,
+    ellipse 50% 80% at 88% 40%,
     rgb(255 255 255 / 0.05),
     transparent 70%
   );
@@ -101,9 +307,12 @@
 .agent-check-hero-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 32px;
-  margin-top: 36px;
+  align-items: center;
+  gap: 48px;
+  margin-top: 32px;
+}
+.agent-check-hero-copy {
+  min-width: 0;
 }
 .agent-check-hero h1 {
   overflow: hidden;
@@ -116,120 +325,294 @@
   white-space: nowrap;
 }
 .agent-check-verdict {
-  margin-top: 16px;
-  color: #aaa;
-  font-size: 17px;
+  margin-top: 14px;
+  color: #b4b4b4;
+  font-size: 18px;
   font-weight: 300;
-  line-height: 1.75;
+  line-height: 1.6;
 }
 .agent-check-meta {
-  margin-top: 6px;
-  overflow: hidden;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  margin-top: 8px;
   color: #6e6e6e;
   font-family: var(--font-geist-mono), monospace;
   font-size: 11px;
+}
+.agent-check-meta span {
+  overflow: hidden;
+  max-width: 100%;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.agent-check-score {
-  color: #ededed;
-  font-size: clamp(72px, 9vw, 120px);
-  line-height: 0.85;
-  white-space: nowrap;
-}
-.agent-check-score span {
-  color: rgb(255 255 255 / 0.36);
-  font-size: 0.3em;
-}
-.agent-check-meter {
-  display: grid;
-  grid-template-columns: repeat(20, minmax(0, 1fr));
-  gap: 3px;
-  margin-top: 36px;
-}
-.agent-check-meter span {
-  height: 10px;
-  background: rgb(255 255 255 / 0.07);
-}
-.agent-check-meter span[data-on] {
-  background: #ededed;
+.agent-check-meta span + span::before {
+  content: "·";
+  margin: 0 8px;
+  color: #3a3a3a;
 }
 .agent-check-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 32px;
-}
-.agent-check-actions :is(a, button) {
-  display: inline-flex;
   align-items: center;
-  min-height: 40px;
-  padding: 0 16px;
-  border: 1px solid rgb(255 255 255 / 0.18);
-  border-radius: 0;
-  background: #000;
-  color: #ededed;
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 10px;
-  text-transform: uppercase;
-  cursor: pointer;
+  gap: 8px;
+  margin-top: 28px;
 }
 .agent-check-action-status {
   align-self: center;
   color: #ff8a8a;
   font-size: 12px;
 }
-.agent-check-actions button:disabled {
-  cursor: progress;
-  opacity: 0.7;
+.agent-check-actions .agent-check-button[data-variant="ghost"] {
+  margin-left: 8px;
 }
-.agent-check-actions button[hidden] {
-  display: none;
+.agent-check-hero-score {
+  display: grid;
+  justify-items: center;
+  gap: 20px;
 }
-@media (hover: hover) and (pointer: fine) {
-  .agent-check-actions :is(a, button):hover {
-    border-color: rgb(255 255 255 / 0.42);
-  }
+.agent-check-ring {
+  position: relative;
+  width: 168px;
+  aspect-ratio: 1;
 }
-
+.agent-check-ring svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.agent-check-ring circle {
+  fill: none;
+  stroke-width: 7;
+}
+.agent-check-ring-track {
+  stroke: rgb(255 255 255 / 0.08);
+}
+.agent-check-ring-value {
+  stroke: #ededed;
+}
+.agent-check-ring p {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  padding-top: 54px;
+  color: #ededed;
+}
+.agent-check-ring p span {
+  font-size: 56px;
+  line-height: 1;
+}
+.agent-check-ring p[data-digits="3"] span {
+  font-size: 44px;
+}
+.agent-check-ring p small {
+  margin-left: 2px;
+  color: rgb(255 255 255 / 0.36);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 12px;
+}
+.agent-check-tally {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 0;
+  margin: 0;
+  border: 1px solid var(--farm-line);
+}
+.agent-check-tally div {
+  display: grid;
+  gap: 2px;
+  padding: 8px 14px;
+  text-align: center;
+}
+.agent-check-tally div + div {
+  border-left: 1px solid var(--farm-line);
+}
+.agent-check-tally dt {
+  color: #6e6e6e;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.agent-check-tally dd {
+  margin: 0;
+  color: #ededed;
+  font-size: 16px;
+}
 /* The check page moves focus to the report's heading when it arrives; that's for screen
    readers, so it draws no ring. */
 #agent-check-host:focus {
   outline: none;
 }
-
 /* The report is long and dense, so its section rules are quieter than the site's. */
 .agent-check-report {
   --farm-rule: rgb(255 255 255 / 0.06);
 }
 
-/* Gaps reuse the 06.1 cards; the summary is the card title. */
-/* The 06.1 grid draws only left and top lines, which leaves a lone last card
-   open when the count is odd. Gaps come in any count, so each card is closed. */
-.agent-check-gaps article:nth-child(even) {
-  border-left: 0;
+/* Where the points come from: one card per group, side by side. */
+.agent-check-groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
-.agent-check-gaps article:nth-child(odd) {
-  border-right: 1px solid var(--farm-line);
+.agent-check-group-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 28px 32px 30px;
 }
-/* A lone last card carries its top rule across the empty cell beside it, so
-   the rule is one line instead of two borders a pixel apart. */
-.agent-check-gaps article:nth-child(n + 3):nth-child(odd):last-child {
-  position: relative;
+.agent-check-group-card + .agent-check-group-card {
+  border-left: 1px solid var(--farm-line);
 }
-.agent-check-gaps article:nth-child(n + 3):nth-child(odd):last-child::after {
-  content: "";
-  position: absolute;
-  top: -1px;
-  /* From this card's right border to the end of the next column. */
-  left: 100%;
-  width: calc(100% + 2px);
-  height: 1px;
-  background: var(--farm-line);
-  pointer-events: none;
+.agent-check-group-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #b7b7b7;
 }
-.agent-check-gaps h3 {
+.agent-check-group-passed {
+  color: #6e6e6e;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.agent-check-group-card h3 {
+  margin-top: 18px;
+  color: #ededed;
+  font-size: 17px;
+  font-weight: 400;
+}
+.agent-check-group-points {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-top: 10px;
+  color: #ededed;
+}
+.agent-check-group-points span {
+  font-size: 40px;
+  line-height: 1;
+}
+.agent-check-group-points small {
+  color: #6e6e6e;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+}
+.agent-check-group-bar {
+  display: flex;
+  gap: 3px;
+  height: 6px;
+  margin-top: 16px;
+}
+.agent-check-group-bar span {
+  flex-basis: 0;
+  background: rgb(255 255 255 / 0.09);
+}
+.agent-check-group-bar span[data-status="pass"] {
+  background: #ededed;
+}
+.agent-check-group-bar span[data-status="warn"] {
+  background: linear-gradient(90deg, #ededed 50%, rgb(255 255 255 / 0.09) 50%);
+}
+.agent-check-group-checks {
+  display: grid;
+  gap: 6px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.agent-check-group-checks li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #a1a1a1;
+}
+.agent-check-group-checks li span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-check-group-checks li span:last-child {
+  flex: none;
+  color: #6e6e6e;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.agent-check-group-checks li[data-status="pass"] span:last-child {
+  color: #8ce0b5;
+}
+.agent-check-group-checks li[data-status="warn"] span:last-child {
+  color: #e9c46a;
+}
+.agent-check-group-checks li[data-status="fail"] span:last-child {
+  color: #ff8f87;
+}
+
+/* Fix these first: one numbered row per gap, with the config that closes it. */
+.agent-check-fixes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agent-check-fixes > li {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  padding: 32px 48px 36px;
+}
+.agent-check-fixes > li + li {
+  border-top: 1px solid var(--farm-line);
+}
+.agent-check-fix-index {
+  color: rgb(255 255 255 / 0.22);
+  font-size: 32px;
+  line-height: 1;
+}
+.agent-check-fix-body {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  max-width: 52rem;
+}
+.agent-check-fix-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+.agent-check-fix-name,
+.agent-check-row-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #b7b7b7;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.agent-check-fix-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.agent-check-fixes h3 {
+  color: #ededed;
   font-size: 22px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
 }
 .agent-check-fix {
   color: #aaa;
@@ -237,10 +620,107 @@
   font-weight: 300;
   line-height: 1.75;
 }
+.agent-check-fix-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px 24px;
+}
+.agent-check-fix-more > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  color: #8f8f8f;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+@media (hover: hover) and (pointer: fine) {
+  .agent-check-fix-more > a:hover {
+    color: #ededed;
+  }
+}
+
+/* A Farm.js snippet: file name, copy, code. */
+.agent-check-snippet {
+  border: 1px solid rgb(255 255 255 / 0.1);
+  background: #050505;
+}
+.agent-check-snippet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  padding: 0 6px 0 14px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.08);
+}
+.agent-check-snippet-head code {
+  overflow: hidden;
+  color: #a1a1a1;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-check-snippet pre {
+  margin: 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  color: #d4d4d4;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.agent-check-copy-code {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #8f8f8f;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.agent-check-copy-code[hidden] {
+  display: none;
+}
+/* Copy, then Copied for two seconds (see AgentCheckClipboard). */
+.agent-check-copy-code [data-label="done"],
+.agent-check-copy-code svg:nth-of-type(2),
+.agent-check-copy-code[data-copied] [data-label="idle"],
+.agent-check-copy-code[data-copied] svg:nth-of-type(1) {
+  display: none;
+}
+.agent-check-copy-code[data-copied] [data-label="done"],
+.agent-check-copy-code[data-copied] svg:nth-of-type(2) {
+  display: inline;
+}
+.agent-check-copy-code[data-copied] {
+  color: #8ce0b5;
+}
+.agent-check-copy-code:focus-visible {
+  outline: 2px solid #ededed;
+  outline-offset: 1px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .agent-check-copy-code:hover {
+    border-color: rgb(255 255 255 / 0.16);
+    color: #ededed;
+  }
+}
+
 .agent-check-evidence {
   display: grid;
   gap: 4px;
-  margin: 0 0 20px;
+  margin: 0;
   padding: 10px 14px;
   border-radius: 2px;
   background: rgb(255 255 255 / 0.04);
@@ -250,6 +730,9 @@
   font-size: 11.5px;
   line-height: 1.7;
   overflow-wrap: anywhere;
+}
+.agent-check-saw {
+  min-width: 0;
 }
 .agent-check-saw summary {
   display: inline-flex;
@@ -272,10 +755,14 @@
   width: 1ch;
   color: #6e6e6e;
 }
+.agent-check-saw[open] {
+  flex-basis: 100%;
+}
 .agent-check-saw[open] summary::before {
   content: "\2212";
 }
-.agent-check-saw .agent-check-evidence {
+.agent-check-saw > .agent-check-evidence,
+.agent-check-saw > .agent-check-snippet {
   margin-top: 8px;
 }
 @media (hover: hover) and (pointer: fine) {
@@ -284,17 +771,29 @@
   }
 }
 
-/* Passing and reported checks: one row each, evidence on demand. */
-.agent-check-rows-heading {
+/* Every check: a header per group, then one row per check with evidence on demand. */
+.agent-check-audit-group + .agent-check-audit-group {
+  border-top: 1px solid var(--farm-line);
+}
+.agent-check-audit-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 24px 48px;
-  color: #b7b7b7;
+  gap: 16px;
+  padding: 16px 48px;
+  background: rgb(255 255 255 / 0.015);
+}
+.agent-check-audit-head > span:last-child {
+  color: #6e6e6e;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .agent-check-rows {
   margin: 0;
   padding: 0;
+  border-top: 1px solid rgb(255 255 255 / 0.06);
   list-style: none;
 }
 .agent-check-rows > li + li {
@@ -310,7 +809,7 @@
   grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr) auto;
   align-items: center;
   gap: 24px;
-  padding: 18px 48px;
+  padding: 16px 48px;
   color: #ededed;
   cursor: pointer;
   list-style: none;
@@ -318,10 +817,21 @@
 .agent-check-rows summary::-webkit-details-marker {
   display: none;
 }
+.agent-check-rows summary:focus-visible {
+  outline: 2px solid #ededed;
+  outline-offset: -2px;
+}
 .agent-check-row-end {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+}
+.agent-check-row-points {
+  min-width: 3.5rem;
+  color: #6e6e6e;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  text-align: right;
 }
 .agent-check-row-chevron {
   color: #6e6e6e;
@@ -342,7 +852,7 @@
   line-height: 1.6;
 }
 .agent-check-rows .agent-check-evidence {
-  margin: 0 48px 20px;
+  margin: 0 48px 18px;
 }
 @media (hover: hover) and (pointer: fine) {
   .agent-check-rows summary:hover {
@@ -350,35 +860,89 @@
   }
 }
 
+@media (max-width: 1000px) {
+  .agent-check-groups {
+    grid-template-columns: 1fr;
+  }
+  .agent-check-group-card + .agent-check-group-card {
+    border-top: 1px solid var(--farm-line);
+    border-left: 0;
+  }
+}
 @media (max-width: 900px) {
   .agent-check-hero {
     padding: 48px 32px 40px;
   }
+  .agent-check-hero-body {
+    gap: 32px;
+  }
+  .agent-check-list-group-head,
+  .agent-check-audit-head {
+    padding: 16px 32px;
+  }
   .agent-check-list li {
+    padding: 24px 32px 28px;
+  }
+  .agent-check-group-card {
+    padding: 24px 32px;
+  }
+  .agent-check-fixes > li {
     padding: 28px 32px 32px;
   }
   .agent-check-rows summary {
     padding: 16px 32px;
   }
-  .agent-check-rows-heading {
-    padding: 20px 32px;
-  }
   .agent-check-rows .agent-check-evidence {
     margin: 0 32px 18px;
   }
 }
-@media (max-width: 600px) {
-  .agent-check-gaps article:nth-child(odd) {
-    border-right: 0;
-  }
-  .agent-check-gaps article:nth-child(n + 3):nth-child(odd):last-child::after {
-    content: none;
-  }
-  .agent-check-hero {
-    padding: 40px 24px 32px;
-  }
+@media (max-width: 720px) {
   .agent-check-hero-body {
     grid-template-columns: 1fr;
+  }
+  .agent-check-hero-score {
+    grid-row: 1;
+    grid-template-columns: auto minmax(0, 1fr);
+    justify-items: start;
+    align-items: center;
+  }
+  .agent-check-ring {
+    width: 120px;
+  }
+  .agent-check-ring p {
+    padding-top: 38px;
+  }
+  .agent-check-ring p span {
+    font-size: 40px;
+  }
+  .agent-check-ring p[data-digits="3"] span {
+    font-size: 32px;
+  }
+}
+@media (max-width: 600px) {
+  .agent-check-hero {
+    padding: 36px 24px 32px;
+  }
+  .agent-check-hero-score {
+    grid-template-columns: 1fr;
+  }
+  .agent-check-tally {
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .agent-check-actions .agent-check-button:not([data-variant="ghost"]) {
+    flex: 1 1 100%;
+  }
+  .agent-check-actions .agent-check-button[data-variant="ghost"] {
+    margin-left: 0;
+  }
+  .agent-check-list-group-head {
+    grid-template-columns: 1fr auto;
+    padding: 16px 24px;
+  }
+  .agent-check-list-group-head h3 {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
   .agent-check-list {
     grid-template-columns: 1fr;
@@ -392,6 +956,19 @@
   .agent-check-list li + li {
     border-top: 1px solid var(--farm-line);
   }
+  .agent-check-group-card {
+    padding: 24px;
+  }
+  .agent-check-fixes > li {
+    grid-template-columns: 1fr;
+    padding: 24px;
+  }
+  .agent-check-fix-index {
+    font-size: 24px;
+  }
+  .agent-check-audit-head {
+    padding: 14px 24px;
+  }
   .agent-check-rows summary {
     grid-template-columns: 1fr auto;
     padding: 16px 24px;
@@ -399,9 +976,6 @@
   .agent-check-row-summary {
     grid-column: 1 / -1;
     grid-row: 2;
-  }
-  .agent-check-rows-heading {
-    padding: 18px 24px;
   }
   .agent-check-rows .agent-check-evidence {
     margin: 0 24px 16px;

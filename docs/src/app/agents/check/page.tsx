@@ -1,6 +1,7 @@
 import type { Metadata } from "@farm.js/core";
 import { ArrowRight, ScanSearch } from "lucide-react";
 import { AgentCheckForm } from "../../../components/agents/check-form";
+import { AGENT_CHECK_GROUPS } from "../../../components/agents/check-groups";
 import { AgentCheckIntro } from "../../../components/agents/check-intro";
 import { AGENT_CHECK_ICONS } from "../../../components/agents/check-icons";
 import { SelectionWire } from "../../../components/home/selection-wire";
@@ -70,6 +71,11 @@ const checks = [
     "modelContext",
   ],
 ] as const;
+
+const checkById = new Map(checks.map((check) => [check[0], check]));
+const checkNumber = new Map(
+  AGENT_CHECK_GROUPS.flatMap((group) => group.checks).map((id, index) => [id, index + 1]),
+);
 
 // Synchronous like /agents, so the hero's grid and selection wire hydrate with the page.
 export default function AgentCheckPage() {
@@ -146,22 +152,54 @@ export default function AgentCheckPage() {
                     100; drafts are reported but not scored.
                   </p>
                 </div>
-                <ol className="agent-check-list farm-full-rule">
-                  {checks.map(([id, title, description, points, probe], index) => (
-                    <li key={id}>
-                      <IndexedLabel
-                        index={String(index + 1).padStart(2, "0")}
-                        icon={AGENT_CHECK_ICONS[id]}
-                        label={title}
-                      />
-                      <p>{description}</p>
-                      <div className="agent-check-list-meta">
-                        <code>{probe}</code>
-                        <span>{points ? `${points} pts` : "Not scored"}</span>
+                {AGENT_CHECK_GROUPS.map((group, groupIndex) => {
+                  const members = group.checks.flatMap((id) => {
+                    const check = checkById.get(id);
+                    return check ? [check] : [];
+                  });
+                  const available = members.reduce((sum, [, , , points]) => sum + points, 0);
+                  return (
+                    <div key={group.id} className="agent-check-list-group farm-full-rule">
+                      <div className="agent-check-list-group-head">
+                        <IndexedLabel
+                          index={String(groupIndex + 1).padStart(2, "0")}
+                          icon={group.icon}
+                          label={group.label}
+                        />
+                        <h3>{group.question}</h3>
+                        <span>{available} pts</span>
                       </div>
-                    </li>
-                  ))}
-                </ol>
+                      <ol className="agent-check-list">
+                        {members.map(([id, title, description, points, probe]) => {
+                          const Icon = AGENT_CHECK_ICONS[id];
+                          return (
+                            <li key={id}>
+                              <div className="agent-check-card-top">
+                                <span className="agent-check-card-icon" aria-hidden>
+                                  {Icon ? <Icon size={16} strokeWidth={1.5} /> : null}
+                                </span>
+                                <span
+                                  className="agent-check-chip"
+                                  data-tone={points ? undefined : "muted"}
+                                >
+                                  {points ? `${points} pts` : "Reported"}
+                                </span>
+                              </div>
+                              <h4>
+                                <span aria-hidden>
+                                  {String(checkNumber.get(id) ?? 0).padStart(2, "0")}
+                                </span>
+                                {title}
+                              </h4>
+                              <p>{description}</p>
+                              <code>{probe}</code>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    </div>
+                  );
+                })}
               </section>
             </AgentCheckIntro>
 

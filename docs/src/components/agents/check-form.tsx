@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "@farm.js/core/navigation";
 import { agentCheckErrorMessage } from "../../lib/agents-check-messages";
 import { runAgentCheck, useAgentCheck } from "./check-store";
@@ -17,6 +17,9 @@ const STEPS = [
   "Scoring",
 ];
 
+// One click each, for someone without a site of their own to hand.
+const EXAMPLES = ["farmjs.dev", "nuxt.com", "vercel.com"];
+
 /**
  * The agent-ready check form, in the waitlist's bar. Once hydrated it runs the check in place:
  * progress here, then the report replaces the page's intro (see AgentCheckIntro). Without
@@ -30,6 +33,10 @@ export function AgentCheckForm() {
   const prefill = (check.url || search.get("url") || "").slice(0, 2048);
   const errorCode = check.runs === 0 ? search.get("error") : null;
   const [step, setStep] = useState(0);
+  const [hydrated, setHydrated] = useState(false);
+  const form = useRef<HTMLFormElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => setHydrated(true), []);
   // Set when the scan started but its report didn't come back, so the saved report opens.
   const [opening, setOpening] = useState(false);
   const busy = check.pending || opening;
@@ -58,6 +65,7 @@ export function AgentCheckForm() {
 
   return (
     <form
+      ref={form}
       className="agent-waitlist agent-check-form"
       action="/api/agents/check"
       method="post"
@@ -77,6 +85,7 @@ export function AgentCheckForm() {
       <label htmlFor="agent-check-url">Website address</label>
       <div className="agent-waitlist-row">
         <input
+          ref={input}
           key={prefill}
           id="agent-check-url"
           name="url"
@@ -122,6 +131,23 @@ export function AgentCheckForm() {
       >
         {status}
       </p>
+      <div className="agent-check-examples" hidden={!hydrated}>
+        <span>Try</span>
+        {EXAMPLES.map((site) => (
+          <button
+            key={site}
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              if (!input.current) return;
+              input.current.value = site;
+              form.current?.requestSubmit();
+            }}
+          >
+            {site}
+          </button>
+        ))}
+      </div>
     </form>
   );
 }
