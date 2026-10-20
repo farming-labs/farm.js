@@ -1,5 +1,4 @@
-import { resolveFarmDevtoolsConfig } from "@farm.js/core";
-import { definePlugin, type FarmPlugin } from "@farm.js/core/plugin";
+import { definePlugin, type FarmPlugin, resolveFarmDevtoolsConfig } from "@farm.js/core/plugin";
 import type { Plugin } from "vite";
 import type { DevtoolsOptions } from "./types.js";
 

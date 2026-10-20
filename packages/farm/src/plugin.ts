@@ -11,6 +11,14 @@ export type {
   RouteMethod,
 } from "./api/route";
 export type { RouteSchema } from "./api/route-schema";
+// Here as well as on the main entry: a plugin that reads Farm's devtools settings must not
+// import the main entry, which loads React and breaks Preact, Solid, Vue, and Svelte apps
+// that don't install it.
+export {
+  resolveFarmDevtoolsConfig,
+  type ResolvedFarmDevtoolsConfig,
+  type FarmDevtoolsUserConfig,
+} from "./devtools-config";
 export type { EndpointMCPMetadata, EndpointMCPOptions } from "./api/endpoint";
 // Reachable from every route a plugin declares (each endpoint carries its
 // OpenAPI metadata), so it must be nameable from this entry the same way
