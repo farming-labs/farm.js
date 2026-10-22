@@ -11,6 +11,10 @@ import {
   FARM_TELEMETRY_TEMPLATES,
 } from "../../../../../../../packages/farm-cli/src/telemetry-contract";
 
+// Only @farm.js/cli and @farm.js/create-app send these events. Publishing the
+// endpoint would only invite events that did not come from them.
+export const openapi = { hidden: true };
+
 const MAX_BODY_BYTES = 8 * 1024;
 const GLOBAL_RATE_LIMIT = 2_000;
 const IDENTITY_RATE_LIMIT = 120;
