@@ -143,6 +143,8 @@ Read `docs/src/app/docs/configuration/page.md` before adding an unfamiliar optio
 - `src/app/users/[id]/page.tsx` maps to `/users/:id`
 - `src/app/docs/[...slug]/page.tsx` maps to catch-all docs paths
 - `[[...slug]]` is optional catch-all; route groups do not appear in URLs
+- A route group's `layout`, `loading`, and `error` files apply only to the pages inside that group,
+  nested inside the parent layouts
 - Named slots and intercepted routes are supported
 - Farm writes typed `Link href` declarations into `src/farm.d.ts`
 - Typed `href` supports query strings and hashes, for example `/users/123?tab=profile`

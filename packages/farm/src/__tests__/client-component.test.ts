@@ -1589,7 +1589,7 @@ export function Chart() {}
     expect(source).toContain(": findLayouts(window.location.pathname);");
     expect(source).toContain("import { isFarmRouteActive } from '@farm.js/core/router'");
     expect(source).toContain(
-      "layout.pattern === '/' || isFarmRouteActive(layout.pattern, pathname, { exact: false })",
+      "if (urlPattern !== '/' && !isFarmRouteActive(urlPattern, pathname, { exact: false })) continue;",
     );
     expect(source).not.toContain("map(decodeRouteSegment).join('/')");
     expect(source).toContain("return urlSegment === routeSegment.segment ? {} : null;");

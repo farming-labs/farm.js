@@ -111,6 +111,7 @@ import * as path from "path";
 import { pathToFileURL } from "node:url";
 import type { FarmUserConfig } from "./config";
 import { getFarmAppDirectories, getFarmLayerAliases, getFarmSourceRoots } from "./layers";
+import { getRouteGroupScope, stripRouteGroups } from "./routing/route-groups";
 import { farmEnvironmentFunctionsPlugin } from "./environment-vite";
 import { FARM_VERSION } from "./version";
 import { createDeferredDataResponse } from "./deferred";
@@ -2726,7 +2727,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
                 // Load route module to get metadata
                 const routeModule = await routeManager.loadRouteModule(route.modulePath);
-                const loadingBoundary = routeManager.getMatchingLoading(targetRequestUrl.pathname);
+                const loadingBoundary = routeManager.getMatchingLoading(
+                  targetRequestUrl.pathname,
+                  route,
+                );
                 const loadingModule = loadingBoundary
                   ? await routeManager.loadRouteModule(loadingBoundary.modulePath)
                   : null;
@@ -2848,6 +2852,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     return {
                       name: slot.name,
                       ownerPattern: slot.ownerPattern,
+                      ...(slot.ownerDirectory ? { ownerDirectory: slot.ownerDirectory } : {}),
                       containerId: slot.containerId,
                       interception: slot.interception,
                       fallback: slot.fallback,
@@ -2906,6 +2911,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                       slots: routeSlots.map((slot) => ({
                         name: slot.name,
                         ownerPattern: slot.ownerPattern,
+                        ownerDirectory: slot.ownerDirectory,
                         containerId: slot.containerId,
                         module: slot.renderModule as any,
                         props: slot.props,
@@ -3353,6 +3359,7 @@ export const getManifest = () => ({
           fullManifest.routes[route.pattern] = {
             modulePath: route.modulePath,
             pattern: route.pattern,
+            ...(route.directory ? { directory: route.directory } : {}),
             segments: route.segments,
             search: route.search,
             isClientComponent: route.isClientComponent,
@@ -3366,9 +3373,11 @@ export const getManifest = () => ({
 
         // Convert layouts array to object keyed by pattern
         for (const layout of manifest.layouts) {
+          const groupScope = getRouteGroupScope(layout.pattern);
           fullManifest.layouts[layout.pattern] = {
             modulePath: layout.modulePath,
             pattern: layout.pattern,
+            ...(groupScope ? { urlPattern: stripRouteGroups(layout.pattern), groupScope } : {}),
             shouldHydrate: layout.shouldHydrate,
             islandStrategy: layout.islandStrategy,
             preloads: [layout.modulePath],
@@ -4557,14 +4566,29 @@ function findLayouts(pathname) {
   const manifest = getManifest();
   const layouts = Object.values(manifest.layouts);
   const matchingLayouts = [];
+  let directory;
   
   for (const layout of layouts) {
-    if (layout.pattern === '/' || isFarmRouteActive(layout.pattern, pathname, { exact: false })) {
-      matchingLayouts.push(layout);
+    // Route groups add no URL segment: match the layout's URL, then keep a
+    // grouped layout to the pages inside its group directory.
+    const urlPattern = layout.urlPattern || layout.pattern;
+    if (urlPattern !== '/' && !isFarmRouteActive(urlPattern, pathname, { exact: false })) continue;
+    if (layout.groupScope) {
+      if (directory === undefined) {
+        const route = findRoute(pathname)?.route;
+        directory = route ? route.directory || route.pattern : null;
+      }
+      if (
+        typeof directory !== 'string' ||
+        (directory !== layout.groupScope && !directory.startsWith(layout.groupScope + '/'))
+      ) continue;
     }
+    matchingLayouts.push(layout);
   }
   
-  return matchingLayouts.sort((a, b) => a.pattern.length - b.pattern.length);
+  return matchingLayouts.sort(
+    (a, b) => a.pattern.split('/').filter(Boolean).length - b.pattern.split('/').filter(Boolean).length,
+  );
 }
 
 // ====== SPA ROUTER ======

@@ -1466,6 +1466,10 @@ src/app/
 
 The group names are organizational. The URLs are still `/`, `/pricing`, and `/dashboard`.
 
+A group can have its own `layout.tsx`, `loading.tsx`, and `error.tsx`. They apply only to the pages
+inside the group, nested inside the parent layouts, so `(marketing)/layout.tsx` wraps `/` and
+`/pricing` but not `/dashboard`. See [route group layouts](/docs/layouts#route-group-layouts).
+
 ## Pending Navigation UI
 
 Use `useNavigation()` for global route-transition UI: top progress bars, disabled navigation buttons, optimistic shells, or app-wide busy indicators. It tracks SPA navigations started by `Link` and `navigateTo`.

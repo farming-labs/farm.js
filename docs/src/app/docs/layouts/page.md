@@ -55,6 +55,34 @@ export default function DashboardLayout({ children }: LayoutProps) {
 }
 ```
 
+## Route group layouts
+
+A [route group](/docs/routing#route-groups) folder such as `(auth)` adds no URL segment, but it can
+have its own `layout.tsx`. That layout wraps only the pages inside the group, nested inside the
+parent layouts. Pages outside the group don't get it.
+
+```txt
+src/app/
+  layout.tsx            # wraps every page
+  (auth)/
+    layout.tsx          # wraps /sign-in and /sign-up only
+    sign-in/page.tsx
+    sign-up/page.tsx
+  dashboard/page.tsx    # root layout only
+```
+
+`/sign-in` renders the root layout, then the `(auth)` layout, then the page. Sibling groups can each
+have their own layout, and a group can have its own `loading.tsx` and `error.tsx`, which take
+precedence over the parent's for the pages in that group.
+
+Client navigation keeps every layout the two pages share. Moving from `/sign-in` to `/sign-up` keeps
+the `(auth)` layout mounted, so state in a `"use client"` group layout survives the navigation.
+Moving from `/sign-in` to a page in another group swaps the group layout and keeps the root layout.
+
+A URL that matches no page belongs to no group, so the not-found page renders with the ungrouped
+layouts only (the root layout, when there is one). An app can skip the top-level `layout.tsx` and
+give each group its own layout instead.
+
 ## Route boundaries
 
 - `loading.*` provides pending UI for a route segment.
