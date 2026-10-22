@@ -5559,6 +5559,20 @@ async function renderPage(pageData) {
     let fragmentHtml = pageData.fragment?.html;
     let layoutPatterns = nextLayoutPatterns;
 
+    // The fragment leaves out the layouts both routes share. When React owns the
+    // current layouts and will not keep rendering them, the swap below replaces the
+    // whole container, so a fragment without its outer layouts would drop them.
+    // Load the complete route for that swap instead.
+    if (
+      typeof fragmentHtml === 'string' &&
+      activeLayoutShouldHydrate &&
+      !(route.layoutShouldHydrate && (appRoot || reactRoot)) &&
+      nextLayoutPatterns.length > 0 &&
+      !findLayoutBoundary(parseNavigationFragment(fragmentHtml), nextLayoutPatterns[0])
+    ) {
+      fragmentHtml = undefined;
+    }
+
     if (typeof fragmentHtml !== 'string') {
       const deploymentId = window.__FARM_DEPLOYMENT_ID__;
       const response = await fetch(path, {
