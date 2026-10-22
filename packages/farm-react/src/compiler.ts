@@ -911,13 +911,12 @@ function containsPotentialKeyedMembershipCall(
   expression: t.Expression,
   reactiveByValue: ReadonlyMap<string, StateBinding>,
 ): boolean {
+  // Presence is syntactic only; keyedMembershipTarget still proves scope and ownership.
   let found = false;
-  traverse(expressionFile(cloneExpression(expression)), {
-    CallExpression(path) {
-      if (!isPotentialKeyedMembershipCall(path.node, reactiveByValue)) return;
-      found = true;
-      path.stop();
-    },
+  t.traverseFast(expression, (node) => {
+    if (!t.isCallExpression(node) || !isPotentialKeyedMembershipCall(node, reactiveByValue)) return;
+    found = true;
+    return t.traverseFast.stop;
   });
   return found;
 }
@@ -944,13 +943,12 @@ function containsPotentialKeyedMapLookupCall(
   expression: t.Expression,
   reactiveByValue: ReadonlyMap<string, StateBinding>,
 ): boolean {
+  // Presence is syntactic only; keyedMapLookupTarget still proves scope and ownership.
   let found = false;
-  traverse(expressionFile(cloneExpression(expression)), {
-    CallExpression(path) {
-      if (!isPotentialKeyedMapLookupCall(path.node, reactiveByValue)) return;
-      found = true;
-      path.stop();
-    },
+  t.traverseFast(expression, (node) => {
+    if (!t.isCallExpression(node) || !isPotentialKeyedMapLookupCall(node, reactiveByValue)) return;
+    found = true;
+    return t.traverseFast.stop;
   });
   return found;
 }
