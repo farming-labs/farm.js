@@ -1206,6 +1206,83 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(html).toContain("Settings fragment");
   });
 
+  it("keeps a large route inline instead of behind its loading.tsx fallback", async () => {
+    // React outlines a completed boundary bigger than its 12.8 KB progressive chunk
+    // size: the fallback, then the content in a hidden segment revealed by $RC.
+    const rows = Array.from({ length: 400 }, (_, index) => index);
+    const renderer = createRenderer({});
+    const html = await renderer.renderNavigationFragment({
+      PageComponent: function LargePage() {
+        return React.createElement(
+          "ul",
+          null,
+          rows.map((row) =>
+            React.createElement("li", { key: row }, `Large navigation row ${row} with padding`),
+          ),
+        );
+      },
+      LoadingComponent: function RouteLoading() {
+        return React.createElement("p", null, "Route loading fallback");
+      },
+      pageProps: {},
+      params: {},
+      layouts: [],
+      pageShouldHydrate: true,
+      layoutShouldHydrate: false,
+      islandStrategy: null,
+    });
+
+    expect(html.length).toBeGreaterThan(12_800);
+    expectInlineNavigationFragment(html, "Large navigation row 399 with padding");
+  });
+
+  it("waits for a route that suspends briefly instead of serializing its fallback", async () => {
+    const renderer = createRenderer({});
+    const html = await renderer.renderNavigationFragment({
+      PageComponent: async function BrieflyAsyncPage() {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return React.createElement("main", null, "Briefly async page ready");
+      },
+      LoadingComponent: function RouteLoading() {
+        return React.createElement("p", null, "Route loading fallback");
+      },
+      pageProps: {},
+      params: {},
+      layouts: [],
+      pageShouldHydrate: false,
+      layoutShouldHydrate: false,
+      islandStrategy: null,
+    });
+
+    expectInlineNavigationFragment(html, "Briefly async page ready");
+  });
+
+  it("still returns a fragment when content under loading.tsx fails after the shell", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const renderer = createRenderer({});
+    const html = await renderer.renderNavigationFragment({
+      PageComponent: async function FailingPage() {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        throw new Error("late route failure");
+      },
+      LoadingComponent: function RouteLoading() {
+        return React.createElement("p", null, "Route loading fallback");
+      },
+      pageProps: {},
+      params: {},
+      layouts: [],
+      pageShouldHydrate: true,
+      layoutShouldHydrate: false,
+      islandStrategy: null,
+    });
+
+    // A late failure does not reject the fragment: React marks the boundary for
+    // client rendering inline rather than through a deferred $RX script.
+    expect(html).toContain("<!--$!-->");
+    expect(html).not.toContain("$RX(");
+    expect(html).toContain("Route loading fallback");
+  });
+
   it("applies the app base path while rendering navigation fragments", async () => {
     const renderer = createRenderer({}, { basePath: "/console" });
     const html = await renderer.renderNavigationFragment({
@@ -1778,6 +1855,18 @@ function createBinaryResponse(): BinaryMockResponse {
   };
 
   return response as unknown as BinaryMockResponse;
+}
+
+function expectInlineNavigationFragment(html: string, content: string) {
+  // A fragment is inserted into a page already on screen, so React's streamed
+  // fallback and its deferred reveal script would both reach the screen.
+  expect(html).not.toContain("<!--$?-->");
+  expect(html).not.toContain("$RC(");
+  expect(html).not.toContain("Route loading fallback");
+  const page = new JSDOM(`<div id="root">${html}</div>`).window.document.getElementById(
+    "__farm_page__",
+  );
+  expect(page?.textContent).toContain(content);
 }
 
 function createDeferred<T>() {

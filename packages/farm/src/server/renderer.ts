@@ -735,9 +735,17 @@ export class ServerRenderer {
       : undefined;
 
     if (renderToPipeableStream) {
+      // React streams a Suspense boundary as its fallback plus a script that reveals
+      // the content later whenever the boundary is pending when output starts or is
+      // bigger than the progressive chunk size (12.8 KB). Since React 19.2 that
+      // reveal waits for a later frame. This HTML is buffered and then inserted into
+      // a page already on screen (a navigation fragment), so the fallback would
+      // paint. Start output once every boundary is done and keep them all inline:
+      // the buffer resolves no later than it did when piping at shell ready.
+      const inlineBoundaries = isReactRenderer(this.config.renderer);
       return await new Promise<string>((resolve, reject) => {
         const chunks: Buffer[] = [];
-        let started = false;
+        let shellReady = false;
         const writable = new Writable({
           write(chunk, _encoding, callback) {
             chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -748,15 +756,24 @@ export class ServerRenderer {
         writable.once("error", reject);
 
         const stream = renderToPipeableStream(element, {
+          ...(inlineBoundaries
+            ? {
+                progressiveChunkSize: Number.MAX_SAFE_INTEGER,
+                onAllReady() {
+                  stream.pipe(writable);
+                },
+              }
+            : {}),
           onShellReady() {
-            started = true;
-            stream.pipe(writable);
+            shellReady = true;
+            if (!inlineBoundaries) stream.pipe(writable);
           },
           onShellError(error) {
             reject(error);
           },
           onError(error) {
-            if (!started) reject(error);
+            // After the shell, a failed boundary is rendered by the client instead.
+            if (!shellReady) reject(error);
           },
         });
       });
