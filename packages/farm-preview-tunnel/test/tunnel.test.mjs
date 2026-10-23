@@ -218,7 +218,7 @@ test("removes headers nominated by Connection in both proxy directions", async (
   }
 });
 
-test("preserves repeated cookies and removes encoding after decoding a response", async () => {
+test("preserves repeated cookies host-only and removes encoding after decoding a response", async () => {
   const target = createServer((_request, response) => {
     response.statusCode = 200;
     response.setHeader("content-encoding", "gzip");
@@ -226,6 +226,8 @@ test("preserves repeated cookies and removes encoding after decoding a response"
     response.setHeader("set-cookie", [
       "access=one; Path=/; HttpOnly",
       "refresh=two; Path=/; HttpOnly",
+      // Would reach every other preview under the relay's domain.
+      "theme=dark; Domain=.example.test; Path=/",
     ]);
     response.end(gzipSync(Buffer.from("decoded preview response")));
   });
@@ -248,6 +250,7 @@ test("preserves repeated cookies and removes encoding after decoding a response"
     assert.deepEqual(getSetCookies(response.headers), [
       "access=one; Path=/; HttpOnly",
       "refresh=two; Path=/; HttpOnly",
+      "theme=dark; Path=/",
     ]);
   } finally {
     await agent.close();

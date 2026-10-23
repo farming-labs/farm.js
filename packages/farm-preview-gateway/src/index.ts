@@ -1,4 +1,5 @@
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   authorizePreviewAccount,
@@ -1150,7 +1151,7 @@ async function proxyPublicRequest(
       // Append multi-valued headers (Set-Cookie) so every value reaches the
       // visitor; Headers.set would keep only the last.
       for (const single of Array.isArray(value) ? value : [value]) {
-        headers.append(key, single);
+        headers.append(key, normalized === "set-cookie" ? withoutCookieDomain(single) : single);
       }
     }
     headers.set("cache-control", "no-store");
@@ -1349,10 +1350,27 @@ async function readBodyWithLimit(request: Request, maxBytes: number, message: st
 
 async function requireSession(store: PreviewGatewayStore, sessionId: string, token: string | null) {
   const session = await store.getSessionById(sessionId);
-  if (!session || !token || token !== session.token) {
+  if (!session || !token || !tokensMatch(token, session.token)) {
     throw new GatewayHttpError(401, "Invalid preview gateway session.");
   }
   return session;
+}
+
+function tokensMatch(presented: string, expected: string): boolean {
+  const a = createHash("sha256").update(presented).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
+}
+
+/**
+ * Every preview is a sibling host under the gateway's domain. A tenant cookie
+ * with `Domain=<domain>` would be sent to every other preview, letting one
+ * preview set or shadow cookies for another, so a proxied cookie stays
+ * host-only.
+ */
+function withoutCookieDomain(setCookie: string): string {
+  const [pair, ...attributes] = setCookie.split(";");
+  return [pair, ...attributes.filter((part) => !/^\s*domain\s*(=|$)/i.test(part))].join(";");
 }
 
 function resolvePublicPreviewRoute(request: Request, url: URL, domain: string) {
