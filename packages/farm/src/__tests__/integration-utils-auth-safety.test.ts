@@ -135,13 +135,33 @@ describe("integration request-cookie duplicate handling", () => {
   });
 });
 
+describe("integration request-cookie serialization", () => {
+  const httpRequest = new Request("http://localhost:3000/auth/callback");
+
+  it("forces Secure for SameSite=None on an http request", () => {
+    // A browser rejects SameSite=None without Secure, so the cookie would
+    // never be stored in local development.
+    const header = createRequestCookie("state", "value", httpRequest, { sameSite: "None" });
+
+    expect(header).toContain("SameSite=None");
+    expect(header).toContain("Secure");
+    expect(
+      createRequestCookie("state", "value", httpRequest, { sameSite: "None", secure: false }),
+    ).toContain("Secure");
+    expect(clearRequestCookie("state", httpRequest, { sameSite: "None" })).toContain("Secure");
+  });
+
+  it("keeps Lax cookies on http requests without Secure", () => {
+    const header = createRequestCookie("state", "value", httpRequest);
+
+    expect(header).toContain("SameSite=Lax");
+    expect(header).not.toContain("Secure");
+  });
+});
+
 describe("integration Set-Cookie attributes browsers require", () => {
   const http = new Request("http://app.example.com/auth/callback");
   const https = new Request("https://app.example.com/auth/callback");
-
-  it("marks a SameSite=None cookie Secure even on http", () => {
-    expect(createRequestCookie("sid", "v", http, { sameSite: "None" })).toContain("; Secure");
-  });
 
   it("applies the __Host- and __Secure- prefix rules", () => {
     const host = createRequestCookie("__Host-sid", "v", http, {

@@ -45,6 +45,7 @@ export function createRequestCookie(
   request: Request,
   options: RequestCookieOptions = {},
 ): string {
+  const sameSite = options.sameSite || "Lax";
   // Browsers silently discard a `__Host-` or `__Secure-` cookie without the
   // attributes its name requires, and a SameSite=None cookie without Secure.
   // Both a set and its deletion would then do nothing, so these come from the
@@ -53,7 +54,7 @@ export function createRequestCookie(
   const secure =
     hostPrefixed ||
     name.startsWith("__Secure-") ||
-    options.sameSite === "None" ||
+    sameSite === "None" ||
     (options.secure ?? isHttpsRequest(request));
   const path = hostPrefixed ? "/" : options.path || "/";
   const domain = hostPrefixed ? undefined : options.domain;
@@ -82,7 +83,7 @@ export function createRequestCookie(
     parts.push("Secure");
   }
 
-  parts.push(`SameSite=${options.sameSite || "Lax"}`);
+  parts.push(`SameSite=${sameSite}`);
 
   return parts.join("; ");
 }
