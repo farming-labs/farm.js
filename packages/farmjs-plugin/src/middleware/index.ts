@@ -21,7 +21,10 @@ import { createRequire } from "node:module";
 import { _withAfterNodeMiddleware } from "@farm.js/core/after";
 import { devServableFileExists } from "../dev-static.js";
 import { resolveDevRequestURL, resolveViteHtmlFallbackUrl } from "../dev-request.js";
-import { matchesMiddlewareConfig, serializeMiddlewareCookieDeletion } from "@farm.js/core/middleware";
+import {
+  matchesMiddlewareConfig,
+  serializeMiddlewareCookieDeletion,
+} from "@farm.js/core/middleware";
 import type { MiddlewareConfig } from "@farm.js/core/middleware";
 import { middlewareMatchesPath, parseCookies, serializeCookie } from "./matching.js";
 

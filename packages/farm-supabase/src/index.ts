@@ -784,7 +784,9 @@ function createSupabaseHandler(
       },
       setAll(cookiesToSet) {
         for (const cookie of cookiesToSet) {
-          setCookies.push(serializeCookie(cookie.name, cookie.value, context.request, cookie.options));
+          setCookies.push(
+            serializeCookie(cookie.name, cookie.value, context.request, cookie.options),
+          );
         }
       },
     },
