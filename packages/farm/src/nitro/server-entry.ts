@@ -25,6 +25,10 @@ import {
   parseFarmLayoutChainHeader,
 } from "../navigation/render-plan";
 import { resolveFarmPageDataFailure } from "../navigation/page-data-error";
+import {
+  createFarmPageDataRedirectResponse,
+  getFarmPageDataRedirect,
+} from "../navigation/page-data-redirect";
 import { mergeMetadata } from "../metadata";
 
 // Managers will be available via globalThis.__FARM_REGISTRY__
@@ -347,6 +351,14 @@ async function defaultHandler({
         activeDeploymentId,
       );
     } catch (error) {
+      // redirect() is control flow: the navigation continues at its target.
+      const redirect = getFarmPageDataRedirect(error);
+      if (redirect) {
+        return withFarmDeploymentResponse(
+          createFarmPageDataRedirectResponse(redirect),
+          activeDeploymentId,
+        );
+      }
       const failure = resolveFarmPageDataFailure(error);
       if (failure.status >= 500) {
         console.error("[Farm.js] Page data error:", error);

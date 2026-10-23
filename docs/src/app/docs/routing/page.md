@@ -193,6 +193,12 @@ repopulating it. Cancelling navigation does not abort a shared background prefet
 When a production HTML request redirects, Farm hands the original URL to a full document
 navigation so the browser preserves the redirect destination, fragments, and push/replace history.
 Prefetching a redirect never navigates the page or caches destination HTML under the original URL.
+When development page data redirects (a `redirect()` or thrown 3xx `Response` from the page, its
+layouts, metadata, or route data, or route middleware that redirects), the router continues the
+navigation at the target instead of reloading the document. The target takes the history entry
+the redirecting URL would have had and inherits its fragment unless the target has its own; a
+cross-origin target, or a chain of more than 20 redirects, becomes a document navigation.
+Prefetching such a link neither caches nor reports the redirect.
 A same-origin link whose response is not HTML, such as an RSS feed, JSON, or a file served by an API
 route, is handed to the browser the same way, so it opens as its own document. Prefetching such a
 link never caches it as page HTML.

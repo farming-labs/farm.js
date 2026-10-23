@@ -16,6 +16,10 @@ import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-state";
 import type { FarmI18nClientSnapshot } from "../i18n/types";
 import type { FarmIslandStrategy } from "../island";
 import type { FarmRouteRenderPlan } from "../navigation/render-plan";
+import {
+  readFarmPageDataRedirect,
+  type FarmPageDataRedirect,
+} from "../navigation/page-data-redirect";
 
 export { getHashTargetElement } from "./hash-target";
 export { isFarmExternalNavigationURL } from "./navigation-url";
@@ -94,6 +98,16 @@ interface ViewportPrefetchTask {
 }
 
 const MAX_CONCURRENT_VIEWPORT_PREFETCHES = 4;
+// The browser's own limit for a redirect chain.
+const MAX_PAGE_DATA_REDIRECTS = 20;
+
+/** Page data answered with a redirect: the navigation continues at its target. */
+class FarmPageDataRedirectSignal extends Error {
+  constructor(readonly redirect: FarmPageDataRedirect) {
+    super(`Page data redirected to ${redirect.location}`);
+    this.name = "FarmPageDataRedirect";
+  }
+}
 
 export interface FarmNavigationBlockerContext {
   from: string;
@@ -203,6 +217,7 @@ export class SPARouter {
     | "resolveNavigation"
     | "scheduleNavigationRendered"
     | "failNavigation"
+    | "cancelNavigation"
   >;
 
   private readonly onPopState = (event: PopStateEvent) => {
@@ -295,7 +310,15 @@ export class SPARouter {
   /**
    * Navigate to a new URL
    */
-  async navigate(href: string, options: FarmNavigateOptions = {}): Promise<void> {
+  navigate(href: string, options: FarmNavigateOptions = {}): Promise<void> {
+    return this.runNavigation(href, options, 0);
+  }
+
+  private async runNavigation(
+    href: string,
+    options: FarmNavigateOptions,
+    redirectCount: number,
+  ): Promise<void> {
     const {
       replace = false,
       scroll = true,
@@ -342,19 +365,23 @@ export class SPARouter {
     }
 
     const from = window.location.pathname + window.location.search;
-    if (
-      await this.shouldBlockNavigation({
-        from,
-        to: fullPath,
-        action: replace ? "replace" : "push",
-      })
-    ) {
-      return;
-    }
+    // A redirect continues a navigation that already passed blockers and
+    // saved the scroll position of the page it leaves.
+    if (redirectCount === 0) {
+      if (
+        await this.shouldBlockNavigation({
+          from,
+          to: fullPath,
+          action: replace ? "replace" : "push",
+        })
+      ) {
+        return;
+      }
 
-    // Save current scroll position
-    if (this.options.scrollRestoration) {
-      this.saveScrollPosition(window.location.pathname + window.location.search);
+      // Save current scroll position
+      if (this.options.scrollRestoration) {
+        this.saveScrollPosition(window.location.pathname + window.location.search);
+      }
     }
 
     const navigation = this.startNavigation({
@@ -408,6 +435,16 @@ export class SPARouter {
       this.finishNavigation(navigation);
     } catch (error) {
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+      if (error instanceof FarmPageDataRedirectSignal) {
+        await this.followPageDataRedirect(
+          error.redirect,
+          url,
+          options,
+          redirectCount,
+          clientNavigation,
+        );
+        return;
+      }
       if (clientNavigation) {
         await this.clientPlugins?.failNavigation(clientNavigation, error);
       }
@@ -416,6 +453,42 @@ export class SPARouter {
       // Fall back to full page navigation
       window.location.href = href;
     }
+  }
+
+  /**
+   * Continue a navigation whose page data redirected, as a document load
+   * follows a server redirect: the target takes the history entry the
+   * redirecting URL would have had, inherits its fragment when the target has
+   * none, and leaves the app when it is cross-origin.
+   */
+  private followPageDataRedirect(
+    redirect: FarmPageDataRedirect,
+    from: URL,
+    options: FarmNavigateOptions,
+    redirectCount: number,
+    clientNavigation: FarmClientNavigationSession | undefined,
+  ): Promise<void> {
+    if (clientNavigation) this.clientPlugins?.cancelNavigation?.(clientNavigation, "superseded");
+    const target = resolvePageDataRedirectTarget(redirect.location, from);
+    // Landing on the current URL replaces its entry, as the browser does.
+    const replace =
+      options.replace === true ||
+      (target !== null &&
+        target.pathname + target.search === window.location.pathname + window.location.search);
+    if (!target || redirectCount >= MAX_PAGE_DATA_REDIRECTS) {
+      // A redirect loop or an unusable Location: let the browser follow, and
+      // report, the redirect as a document load.
+      this.cancelActiveNavigation();
+      const documentURL = (target ?? from).href;
+      if (replace) window.location.replace(documentURL);
+      else window.location.assign(documentURL);
+      return Promise.resolve();
+    }
+    return this.runNavigation(
+      target.href,
+      { ...options, replace, refresh: true },
+      redirectCount + 1,
+    );
   }
 
   /**
@@ -452,7 +525,10 @@ export class SPARouter {
     try {
       await this.fetchPageData(fullPath, false, interceptFrom);
     } catch (error) {
-      console.warn("[Farm.js] Prefetch failed:", href, error);
+      // A redirect is not page data: the navigation that follows it fetches the target.
+      if (!(error instanceof FarmPageDataRedirectSignal)) {
+        console.warn("[Farm.js] Prefetch failed:", href, error);
+      }
     } finally {
       this.prefetchingUrls.delete(fullPath);
     }
@@ -822,6 +898,9 @@ export class SPARouter {
       throw error;
     }
 
+    const redirect = await readFarmPageDataRedirect(response);
+    if (redirect) throw new FarmPageDataRedirectSignal(redirect);
+
     if (!response.ok) {
       throw new Error(`Failed to fetch page data: ${response.status}`);
     }
@@ -1020,6 +1099,17 @@ export class SPARouter {
       this.finishNavigation(navigation);
     } catch (error) {
       if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+      if (error instanceof FarmPageDataRedirectSignal) {
+        // The browser already moved to this entry: the target replaces it.
+        await this.followPageDataRedirect(
+          error.redirect,
+          new URL(window.location.href),
+          { replace: true },
+          0,
+          clientNavigation,
+        );
+        return;
+      }
       if (clientNavigation) {
         await this.clientPlugins?.failNavigation(clientNavigation, error);
       }
@@ -1338,6 +1428,18 @@ function createHistoryState(
     nextState[FARM_INTERCEPT_FROM_KEY] = interceptFrom;
   }
   return nextState;
+}
+
+/** A redirect Location resolved against the URL it redirects, inheriting its fragment. */
+function resolvePageDataRedirectTarget(location: string, from: URL): URL | null {
+  let target: URL;
+  try {
+    target = new URL(location, from);
+  } catch {
+    return null;
+  }
+  if (!target.hash && from.hash) target.hash = from.hash;
+  return target;
 }
 
 function getPageDataCacheKey(path: string, interceptFrom?: string): string {

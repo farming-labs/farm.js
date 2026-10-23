@@ -60,6 +60,10 @@ import {
   isFarmRedirectError,
 } from "../navigation-errors";
 import {
+  getFarmPageDataRedirect,
+  type FarmPageDataRedirect,
+} from "../navigation/page-data-redirect";
+import {
   addMetadataImageReference,
   addMetadataMarkdownAlternate,
   mergeMetadata,
@@ -728,7 +732,10 @@ export class ServerRenderer {
     return this.rendererRuntime.wrapClientGraph(element);
   }
 
-  private async renderElementToCompleteHTML(element: unknown): Promise<string> {
+  private async renderElementToCompleteHTML(
+    element: unknown,
+    { rejectLateRedirects = false }: { rejectLateRedirects?: boolean } = {},
+  ): Promise<string> {
     const streaming = getFarmRendererStreamingCapabilitiesForRuntime(this.config.renderer, "node");
     const renderToPipeableStream = streaming.node
       ? this.rendererRuntime.renderToPipeableStream
@@ -738,6 +745,7 @@ export class ServerRenderer {
       return await new Promise<string>((resolve, reject) => {
         const chunks: Buffer[] = [];
         let started = false;
+        let redirected = false;
         const writable = new Writable({
           write(chunk, _encoding, callback) {
             chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -756,7 +764,15 @@ export class ServerRenderer {
             reject(error);
           },
           onError(error) {
-            if (!started) reject(error);
+            if (!started) {
+              reject(error);
+            } else if (rejectLateRedirects && !redirected && isFarmRedirectError(error)) {
+              // Nothing has been sent yet, so a redirect() behind a boundary
+              // that settles after the shell still answers the whole render.
+              redirected = true;
+              reject(error);
+              stream.abort?.(error);
+            }
           },
         });
       });
@@ -861,7 +877,9 @@ export class ServerRenderer {
       element = this.wrapClientGraph(element);
     }
 
-    return this.renderElementToCompleteHTML(await this.wrapWithIntegrationProviders(element));
+    return this.renderElementToCompleteHTML(await this.wrapWithIntegrationProviders(element), {
+      rejectLateRedirects: true,
+    });
   }
 
   async runWithRequestContext<T>(request: Request, fn: () => T | Promise<T>): Promise<T> {
@@ -3336,6 +3354,25 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       return true;
     }
     return false;
+  }
+
+  /**
+   * The redirect a page-data request for `request` ended with. A `redirect()`
+   * target is localized as a document render localizes it; a thrown 3xx
+   * Response keeps its Location as written, as a document render sends it.
+   */
+  async resolvePageDataRedirect(
+    request: Request,
+    error: unknown,
+  ): Promise<FarmPageDataRedirect | null> {
+    const redirect = getFarmPageDataRedirect(error);
+    if (!redirect || !isFarmRedirectError(error)) return redirect;
+    return {
+      status: redirect.status,
+      location: await this.runWithRequestContext(request, () =>
+        this.localizeRedirectUrl(redirect.location),
+      ),
+    };
   }
 
   private localizeRedirectUrl(url: string): string {

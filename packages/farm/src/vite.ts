@@ -125,6 +125,7 @@ import {
   createFarmDeploymentMismatchResponse,
   FARM_DEPLOYMENT_ID_HEADER,
   getFarmDeploymentMismatch,
+  withFarmDeploymentResponse,
 } from "./deployment";
 import { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config";
 import { farmImageImportsPlugin } from "./image-vite";
@@ -175,6 +176,11 @@ import {
   parseFarmLayoutChainHeader,
 } from "./navigation/render-plan";
 import { resolveFarmPageDataFailure } from "./navigation/page-data-error";
+import {
+  createFarmPageDataRedirectResponse,
+  getFarmPageDataRedirectFromResponse,
+  type FarmPageDataRedirect,
+} from "./navigation/page-data-redirect";
 import { addMetadataMarkdownAlternate, mergeMetadata } from "./metadata";
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
 import { isFarmPreviewDeploymentEnvironment } from "./deployment-environment";
@@ -2549,6 +2555,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           if (req.url?.startsWith("/__farm/page-data")) {
             const urlObj = parsedRequestUrl;
             const targetPath = urlObj.searchParams.get("path") || "/";
+            let renderedRequest: Request | undefined;
 
             try {
               const request = createRequestFromNodeRequest(
@@ -2574,6 +2581,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 headers: request.headers,
                 signal: request.signal,
               });
+              renderedRequest = targetRequest;
               // Client navigation must pass the same middleware a document
               // request for the target does: production navigates by fetching
               // the target document, which runs its middleware first.
@@ -2581,13 +2589,19 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               let middlewareContext = new Map<string, unknown>();
               if (middlewareManager?.hasMiddleware()) {
                 const targetNodeRequest = createPageDataMiddlewareRequest(req, targetRequestUrl);
+                const targetNodeResponse = createPageDataMiddlewareResponse(res);
                 const handled = await runFarmMiddlewareWithNavigation(
                   farmApp.getServerRenderer(),
                   targetRequest,
                   targetNodeRequest,
-                  res,
-                  () => middlewareManager!.execute(targetNodeRequest, res),
+                  targetNodeResponse.response,
+                  () => middlewareManager!.execute(targetNodeRequest, targetNodeResponse.response),
                 );
+                const middlewareRedirect = targetNodeResponse.redirect();
+                if (middlewareRedirect) {
+                  await sendFarmPageDataRedirect(res, middlewareRedirect, farmConfig.deploymentId);
+                  return;
+                }
                 if (handled) return;
                 middlewareMap = targetNodeRequest.__FARM_MIDDLEWARE_DATA__ ?? middlewareMap;
                 middlewareContext =
@@ -2906,6 +2920,14 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               });
               return;
             } catch (error) {
+              // redirect() is control flow: the navigation continues at its target.
+              const redirect = renderedRequest
+                ? await farmApp.getServerRenderer().resolvePageDataRedirect(renderedRequest, error)
+                : null;
+              if (redirect && !res.headersSent) {
+                await sendFarmPageDataRedirect(res, redirect, farmConfig.deploymentId);
+                return;
+              }
               const failure = resolveFarmPageDataFailure(error);
               if (failure.status >= 500) {
                 await emitPluginError("page-data", error, {
@@ -3851,6 +3873,106 @@ function createPageDataMiddlewareRequest(
   targetNodeRequest.originalUrl = targetNodeRequest.url;
   targetNodeRequest.method = "GET";
   return targetNodeRequest;
+}
+
+/**
+ * The navigating client's response as page-data middleware sees it. A
+ * redirect the middleware answers with (a returned 3xx Response,
+ * `ctx.redirect()`, or a thrown `redirect()`) is held back rather than sent:
+ * `fetch` would follow it to the target's HTML, so the page-data handler
+ * answers with a redirect instruction instead. Any other response goes out
+ * unchanged.
+ */
+function createPageDataMiddlewareResponse(res: ServerResponse): {
+  response: ServerResponse;
+  redirect(): FarmPageDataRedirect | null;
+} {
+  let redirect: FarmPageDataRedirect | null = null;
+  let passthrough = false;
+  // Decided when the response would first go out: its status and Location
+  // are final by then.
+  const captures = (status: number, location: unknown): boolean => {
+    if (redirect) return true;
+    if (passthrough) return false;
+    redirect = getFarmPageDataRedirectFromResponse(
+      status,
+      Array.isArray(location) ? location[0] : typeof location === "string" ? location : null,
+    );
+    passthrough = !redirect;
+    return !passthrough;
+  };
+  const response: ServerResponse = new Proxy(res, {
+    get(target, property) {
+      if (property === "writeHead") {
+        return (status: number, ...args: unknown[]) => {
+          const headers = args.find((arg) => arg && typeof arg === "object");
+          if (captures(status, readWriteHeadLocation(headers) ?? target.getHeader("location"))) {
+            return response;
+          }
+          return (target.writeHead as (...writeHeadArgs: unknown[]) => ServerResponse)(
+            status,
+            ...args,
+          );
+        };
+      }
+      if (property === "write" || property === "end") {
+        return (...args: unknown[]) => {
+          if (captures(target.statusCode, target.getHeader("location"))) {
+            const callback = args.find((arg) => typeof arg === "function") as
+              | (() => void)
+              | undefined;
+            callback?.();
+            return property === "write" ? true : response;
+          }
+          return (target[property] as (...writeArgs: unknown[]) => unknown)(...args);
+        };
+      }
+      // Middleware stops its chain once the response looks sent.
+      if (
+        redirect &&
+        (property === "headersSent" || property === "writableEnded" || property === "finished")
+      ) {
+        return true;
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+    set(target, property, value) {
+      return Reflect.set(target, property, value, target);
+    },
+  });
+  return { response, redirect: () => redirect };
+}
+
+function readWriteHeadLocation(headers: unknown): unknown {
+  if (Array.isArray(headers)) {
+    for (let index = 0; index + 1 < headers.length; index += 2) {
+      if (String(headers[index]).toLowerCase() === "location") return headers[index + 1];
+    }
+    return undefined;
+  }
+  if (!headers || typeof headers !== "object") return undefined;
+  for (const [name, value] of Object.entries(headers)) {
+    if (name.toLowerCase() === "location") return value;
+  }
+  return undefined;
+}
+
+/**
+ * Answer page data with a redirect instruction. Headers middleware set on the
+ * response (cookies, security headers) are kept; the held-back redirect's own
+ * Location and body headers are not.
+ */
+async function sendFarmPageDataRedirect(
+  res: ServerResponse,
+  redirect: FarmPageDataRedirect,
+  deploymentId: string | undefined,
+): Promise<void> {
+  for (const name of ["location", "content-length", "content-type"]) res.removeHeader(name);
+  await sendWebResponse(
+    res,
+    withFarmDeploymentResponse(createFarmPageDataRedirectResponse(redirect), deploymentId),
+  );
 }
 
 /**
