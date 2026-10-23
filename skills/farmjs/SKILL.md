@@ -460,7 +460,9 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
 - Use `agent.crawlers: { search, training }` (`"allow"` or `"block"`, plus `rules` and `sitemap`)
   for a generated `/robots.txt` naming AI search and training crawlers. `public/robots.txt`, then
   `src/app/robots.ts`, win over it; it wins over the docs engine's robots.txt.
-- Use `md`/`mdx` for page mirrors and content routes; use `openapi` for API references.
+- Use `md`/`mdx` for page mirrors and content routes; use `openapi` for API references. It
+  documents every mounted API route, plugin routes included; keep internal routes out with
+  `openapi: { hidden: true }` (endpoint option or route-file export).
 - Use `agent.noindexPreviews: true` to send `X-Robots-Tag: noindex, nofollow` on preview
   deployments (`FARM_PREVIEW=1`, `VERCEL_ENV=preview`, Netlify deploy-preview/branch-deploy at
   build time, Render PR previews). Test locally with `FARM_PREVIEW=1 farm dev`.

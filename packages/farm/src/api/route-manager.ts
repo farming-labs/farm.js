@@ -28,6 +28,8 @@ import {
   type APIRouteMatch,
 } from "./runtime";
 import { isFarmAPIRouteFileName } from "./route-files";
+import { resolveRouteOpenAPIConfig } from "../openapi/route-config";
+import type { RouteOpenAPIConfig } from "../openapi/types";
 import { AmbiguousRouteError, NonTerminalCatchAllRouteError } from "../routing/specificity";
 
 export interface APIRoute extends FarmRouteRuntimeConfig {
@@ -36,6 +38,8 @@ export interface APIRoute extends FarmRouteRuntimeConfig {
   filePath: string;
   methods: string[];
   endpoints: Record<string, any>;
+  /** A route file's `openapi` export, under each method that file defines. */
+  openapi?: Record<string, RouteOpenAPIConfig>;
 }
 
 export interface APIRouteManagerOptions {
@@ -199,11 +203,19 @@ export class APIRouteManager {
           getFarmRouteRuntimeConfig(routeModule),
           `API route "${routePath}"`,
         );
+        const routeOpenAPI = resolveRouteOpenAPIConfig(
+          routeModule.openapi,
+          `API route "${routePath}"`,
+        );
         this.registerRouteShape(routePath, filePath, appDir);
         const existingRoute = this.routes.get(routePath);
         const mergedMethods = existingRoute ? [...existingRoute.methods] : [];
+        // A project file that overrides a layer's method also replaces its OpenAPI options.
+        const openapi = { ...existingRoute?.openapi };
         for (const method of availableMethods) {
           if (!mergedMethods.includes(method)) mergedMethods.push(method);
+          if (routeOpenAPI) openapi[method] = routeOpenAPI;
+          else delete openapi[method];
         }
         this.routes.set(routePath, {
           ...existingRoute,
@@ -211,6 +223,7 @@ export class APIRouteManager {
           filePath,
           methods: mergedMethods,
           endpoints: { ...existingRoute?.endpoints, ...endpoints },
+          openapi: Object.keys(openapi).length > 0 ? openapi : undefined,
           ...runtimeConfig,
         });
         const nextSources = new Map(existingSources);
@@ -346,6 +359,7 @@ export class APIRouteManager {
         existingRoute.methods.push(normalizedMethod);
       }
       existingRoute.endpoints[normalizedMethod] = endpoint;
+      delete existingRoute.openapi?.[normalizedMethod];
       Object.assign(existingRoute, runtimeConfig);
       const sources = this.endpointSources.get(routePath) ?? new Map();
       sources.set(normalizedMethod, { appDir, filePath });

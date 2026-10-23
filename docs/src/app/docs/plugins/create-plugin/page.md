@@ -135,6 +135,10 @@ duplicate methods and equivalent dynamic shapes fail registration.
 Plugin routes require the default universal production build; the legacy `universal: false`
 build fails with an actionable error instead of silently omitting these handlers.
 
+When [`openapi`](/docs/openapi) is enabled, plugin routes appear in the generated document with
+their input schemas. A route definition accepts the same `openapi` metadata as `createEndpoint`,
+for example `openapi: { hidden: true }` for a route that should stay out of it.
+
 Route factories run synchronously during discovery/build and again at production startup.
 Keep paths and methods stable across environments; put per-request decisions in handlers or
 middleware. Production checks the runtime table against the build manifest. Restart the dev

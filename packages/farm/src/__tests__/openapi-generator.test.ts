@@ -1,10 +1,14 @@
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as z from "zod";
 import * as z3 from "zod/v3";
+import { createEndpoint } from "../api/endpoint";
+import { APIRouteManager } from "../api/route-manager";
 import { OpenAPIGenerator } from "../openapi/generator";
+import { OpenAPIManager } from "../openapi/manager";
+import { definePlugin } from "../plugin";
 
 function toSchema(schema: unknown): any {
   const generator = new OpenAPIGenerator(os.tmpdir(), { title: "Test API" });
@@ -278,6 +282,170 @@ describe("OpenAPIGenerator", () => {
     expect(spec.paths["/unknown"].get.responses).toEqual({
       default: { description: "Response metadata is unavailable." },
     });
+  });
+});
+
+describe("OpenAPI route visibility", () => {
+  it("leaves hidden operations out without leaving an empty path", async () => {
+    const generator = new OpenAPIGenerator(os.tmpdir(), { title: "Visibility API" });
+    const spec = await generator.generateSpec([
+      {
+        path: "/api/projects",
+        methods: ["GET", "POST"],
+        endpoints: {
+          GET: createEndpoint({ method: "GET" }, async () => ({ projects: [] })),
+          POST: createEndpoint({ method: "POST", openapi: { hidden: true } }, async () => ({})),
+        },
+      },
+      {
+        path: "/api/admin/session",
+        methods: ["POST"],
+        endpoints: { POST: async () => new Response(null, { status: 303 }) },
+        openapi: { POST: { hidden: true } },
+      },
+    ]);
+
+    expect(Object.keys(spec.paths)).toEqual(["/projects"]);
+    expect(Object.keys(spec.paths["/projects"])).toEqual(["get"]);
+  });
+
+  it("leaves out routes that are not served beneath the API server", async () => {
+    const generator = new OpenAPIGenerator(os.tmpdir(), { title: "Programmatic API" });
+    const spec = await generator.generateSpec([
+      { path: "/api", methods: ["GET"], endpoints: { GET: async () => new Response() } },
+      {
+        path: "/sitemap-site.xml",
+        methods: ["GET"],
+        endpoints: { GET: async () => new Response() },
+      },
+    ]);
+
+    expect(Object.keys(spec.paths)).toEqual(["/"]);
+  });
+
+  it("documents the mounted route table, plugin routes included", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-openapi-mounted-"));
+    tempDirs.push(root);
+    const modules: Record<string, Record<string, unknown>> = {
+      "items/route.ts": {
+        POST: createEndpoint(
+          { method: "POST", body: z.object({ name: z.string() }) },
+          async () => ({ ok: true }),
+        ),
+      },
+      "admin/session/route.ts": {
+        POST: async () => new Response(null, { status: 303 }),
+        openapi: { hidden: true },
+      },
+    };
+    for (const file of Object.keys(modules)) {
+      const filePath = path.join(root, "api", file);
+      mkdirSync(path.dirname(filePath), { recursive: true });
+      writeFileSync(filePath, "export {};\n");
+    }
+    const projectRoutes = definePlugin({
+      name: "test:project-routes",
+      routes: ({ route }) => [
+        route.get("/api/projects/[projectId]", {
+          input: { query: z.object({ view: z.enum(["summary", "full"]) }) },
+          handler: () => ({ ok: true }),
+        }),
+        route.post("/api/projects/internal", {
+          openapi: { hidden: true },
+          handler: () => ({ ok: true }),
+        }),
+      ],
+    });
+    const routeManager = new APIRouteManager(
+      root,
+      {
+        environments: {
+          ssr: {
+            runner: {
+              import: async (filePath: string) =>
+                modules[path.relative(path.join(root, "api"), filePath).replace(/\\/g, "/")],
+            },
+          },
+        },
+      } as any,
+      { plugins: [projectRoutes] },
+    );
+    await routeManager.discoverRoutes();
+
+    const manager = new OpenAPIManager(
+      root,
+      { title: "Mounted API" },
+      { routes: () => routeManager.getRoutes().values() },
+    );
+    const spec = await manager.generateSpec();
+
+    expect(Object.keys(spec.paths).sort()).toEqual(["/items", "/projects/{projectId}"]);
+    expect(spec.paths["/items"].post.requestBody).toMatchObject({
+      required: true,
+      content: {
+        "application/json": {
+          schema: { type: "object", properties: { name: { type: "string" } } },
+        },
+      },
+    });
+    expect(spec.paths["/projects/{projectId}"].get.parameters).toEqual([
+      { name: "projectId", in: "path", required: true, schema: { type: "string" } },
+      expect.objectContaining({ name: "view", in: "query", required: true }),
+    ]);
+  });
+
+  it("reads the openapi export of a scanned route file", async () => {
+    const fixture = (name: string) => realpathSync(path.resolve(`src/__tests__/fixtures/${name}`));
+    const generator = new OpenAPIGenerator(path.resolve("src/__tests__/fixtures"), {
+      title: "Scanned API",
+    });
+
+    const spec = await generator.generateSpec([
+      { path: "/api/hidden", methods: ["GET"], filePath: fixture("openapi-hidden-route.mjs") },
+    ]);
+    expect(spec.paths).toEqual({});
+    await expect(
+      generator.generateSpec([
+        {
+          path: "/api/misspelled",
+          methods: ["GET"],
+          filePath: fixture("openapi-misspelled-route.mjs"),
+        },
+      ]),
+    ).rejects.toThrow(
+      'API route "/api/misspelled" exports "openapi" with an unknown option "hide"',
+    );
+  });
+
+  it("adds configured paths for routes served without a route file", async () => {
+    const docsSearch = {
+      summary: "Search the docs",
+      parameters: [{ name: "query", in: "query", schema: { type: "string" } }],
+      responses: { 200: { description: "Matching sections" } },
+    };
+    const generator = new OpenAPIGenerator(os.tmpdir(), {
+      title: "Configured API",
+      paths: { "/docs": { get: docsSearch } },
+    });
+    const routes = [
+      {
+        path: "/api/docs",
+        methods: ["POST"],
+        endpoints: { POST: createEndpoint({ method: "POST" }, async () => ({})) },
+      },
+    ];
+
+    const spec = await generator.generateSpec(routes);
+    expect(spec.paths["/docs"].get).toEqual(docsSearch);
+    expect(spec.paths["/docs"].post.operationId).toBe("post_docs");
+
+    const conflicting = new OpenAPIGenerator(os.tmpdir(), {
+      title: "Conflicting API",
+      paths: { "/docs": { post: docsSearch } },
+    });
+    await expect(conflicting.generateSpec(routes)).rejects.toThrow(
+      'openapi.paths["/docs"].post describes an operation Farm already generates',
+    );
   });
 });
 

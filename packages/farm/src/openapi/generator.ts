@@ -1,10 +1,25 @@
 import type { OpenAPIConfig } from "../config";
-import type { APIRouteInfo } from "../type-generator";
+import { resolveRouteOpenAPIConfig } from "./route-config";
 import type {
   EndpointOpenAPIMetadata,
   EndpointOpenAPIResponseMetadata,
   OpenAPISecurityMode,
+  RouteOpenAPIConfig,
 } from "./types";
+
+/**
+ * A route to document. Mounted routes carry their loaded `endpoints`, which
+ * include plugin routes and need no import. A scanned route only has a file,
+ * which is imported to read its metadata.
+ */
+export interface OpenAPIRouteInput {
+  path: string;
+  methods: readonly string[];
+  filePath?: string;
+  endpoints?: Record<string, unknown>;
+  /** The route file's `openapi` export, under each method that file defines. */
+  openapi?: Record<string, RouteOpenAPIConfig | undefined>;
+}
 
 export interface OpenAPISpec {
   openapi: string;
@@ -353,7 +368,10 @@ export class OpenAPIGenerator {
   /**
    * Generate OpenAPI spec from API routes
    */
-  async generateSpec(routes: APIRouteInfo[], requestOrigin?: string): Promise<OpenAPISpec> {
+  async generateSpec(
+    routes: readonly OpenAPIRouteInput[],
+    requestOrigin?: string,
+  ): Promise<OpenAPISpec> {
     const spec: OpenAPISpec = {
       openapi: "3.0.3",
       info: {
@@ -384,8 +402,11 @@ export class OpenAPIGenerator {
     };
 
     // Group routes by path
-    const routeGroups = new Map<string, APIRouteInfo[]>();
+    const routeGroups = new Map<string, OpenAPIRouteInput[]>();
     for (const route of routes) {
+      // Paths are relative to the API server. A programmatic route outside /api,
+      // such as /sitemap-site.xml, is not served beneath it.
+      if (route.path !== "/api" && !route.path.startsWith("/api/")) continue;
       const key = route.path;
       if (!routeGroups.has(key)) {
         routeGroups.set(key, []);
@@ -396,15 +417,14 @@ export class OpenAPIGenerator {
     // Generate paths
     for (const [path, routeList] of routeGroups) {
       for (const variant of this.getOpenAPIPathVariants(path)) {
-        spec.paths[variant.path] ??= {};
-
         for (const route of routeList) {
           for (const method of route.methods) {
+            if (await this.isHidden(route, method)) continue;
             if (variant.operationIdSuffix === "base") {
               const existingOperation =
                 method === "QUERY"
-                  ? spec.paths[variant.path]["x-oai-additionalOperations"]?.QUERY
-                  : spec.paths[variant.path][method.toLowerCase()];
+                  ? spec.paths[variant.path]?.["x-oai-additionalOperations"]?.QUERY
+                  : spec.paths[variant.path]?.[method.toLowerCase()];
               if (existingOperation) continue;
             }
 
@@ -414,20 +434,80 @@ export class OpenAPIGenerator {
               variant.path,
               variant.operationIdSuffix,
             );
+            // Created with its first operation, so a path whose operations are all
+            // hidden leaves no empty entry behind.
+            const pathItem = (spec.paths[variant.path] ??= {});
             if (method === "QUERY") {
-              const additionalOperations =
-                spec.paths[variant.path]["x-oai-additionalOperations"] ?? {};
+              const additionalOperations = pathItem["x-oai-additionalOperations"] ?? {};
               additionalOperations.QUERY = operation;
-              spec.paths[variant.path]["x-oai-additionalOperations"] = additionalOperations;
+              pathItem["x-oai-additionalOperations"] = additionalOperations;
             } else {
-              spec.paths[variant.path][method.toLowerCase()] = operation;
+              pathItem[method.toLowerCase()] = operation;
             }
           }
         }
       }
     }
 
+    this.addConfiguredPaths(spec);
+
     return spec;
+  }
+
+  /**
+   * Adds `openapi.paths`, which describe routes Farm serves without a route file.
+   * Neither side silently replaces the other: an operation both describe is an error.
+   */
+  private addConfiguredPaths(spec: OpenAPISpec): void {
+    for (const [path, pathItem] of Object.entries(this.config.paths ?? {})) {
+      if (!path.startsWith("/")) {
+        throw new Error(`openapi.paths keys must start with "/": received "${path}".`);
+      }
+      if (!pathItem || typeof pathItem !== "object" || Array.isArray(pathItem)) {
+        throw new Error(`openapi.paths["${path}"] must be an OpenAPI Path Item Object.`);
+      }
+      const generated = spec.paths[path];
+      if (generated) {
+        for (const key of Object.keys(pathItem)) {
+          if (key in generated) {
+            throw new Error(
+              `openapi.paths["${path}"].${key} describes an operation Farm already generates from an API route. Remove it, or hide the route with openapi: { hidden: true }.`,
+            );
+          }
+        }
+      }
+      spec.paths[path] = { ...generated, ...pathItem };
+    }
+  }
+
+  /** Endpoint metadata wins over the route file's `openapi` export. */
+  private async isHidden(route: OpenAPIRouteInput, method: string): Promise<boolean> {
+    let hidden: boolean | undefined;
+    try {
+      hidden = (await this.loadEndpoint(route, method))?.__openapi?.hidden;
+    } catch {
+      // A scanned route that cannot be imported keeps its existing fallback document.
+    }
+    if (hidden !== undefined) return hidden;
+    if (route.endpoints) return route.openapi?.[method]?.hidden === true;
+    let routeModule: Record<string, unknown>;
+    try {
+      routeModule = await import(/* @vite-ignore */ route.filePath!);
+    } catch {
+      return false;
+    }
+    const routeOpenAPI = resolveRouteOpenAPIConfig(
+      routeModule.openapi,
+      `API route "${route.path}"`,
+    );
+    return routeOpenAPI?.hidden === true;
+  }
+
+  /** A mounted route's endpoint, or the export of a scanned route's file. */
+  private async loadEndpoint(route: OpenAPIRouteInput, method: string): Promise<any> {
+    if (route.endpoints) return route.endpoints[method];
+    const routeModule = await import(/* @vite-ignore */ route.filePath!);
+    return routeModule[method];
   }
 
   /**
@@ -518,18 +598,13 @@ export class OpenAPIGenerator {
   /**
    * Extract request body schema from endpoint
    */
-  private async getRequestBody(route: APIRouteInfo, method: string): Promise<any> {
+  private async getRequestBody(route: OpenAPIRouteInput, method: string): Promise<any> {
     if (!["QUERY", "POST", "PUT", "PATCH", "DELETE"].includes(method)) {
       return undefined;
     }
 
     try {
-      // Try to dynamically load the route module
-      const modulePath = route.filePath;
-      const routeModule = await import(/* @vite-ignore */ modulePath);
-
-      // Get the method handler (GET, POST, etc.)
-      const handler = routeModule[method];
+      const handler = await this.loadEndpoint(route, method);
 
       const bodySchema = handler?.__types?.body ?? handler?._type?.body;
       if (bodySchema) {
@@ -564,16 +639,11 @@ export class OpenAPIGenerator {
   /**
    * Extract query parameters from endpoint
    */
-  private async getParameters(route: APIRouteInfo, method: string): Promise<any[]> {
+  private async getParameters(route: OpenAPIRouteInput, method: string): Promise<any[]> {
     const parameters: any[] = [];
 
     try {
-      // Try to dynamically load the route module
-      const modulePath = route.filePath;
-      const routeModule = await import(/* @vite-ignore */ modulePath);
-
-      // Get the method handler
-      const handler = routeModule[method];
+      const handler = await this.loadEndpoint(route, method);
 
       const querySchema = handler?.__types?.query ?? handler?._type?.query;
       const shape = getZodObjectShape(querySchema);
@@ -600,7 +670,7 @@ export class OpenAPIGenerator {
    * Generate OpenAPI operation from route info
    */
   private async generateOperation(
-    route: APIRouteInfo,
+    route: OpenAPIRouteInput,
     method: string,
     openAPIPath = this.convertToOpenAPIPath(route.path),
     operationIdSuffix?: string,
@@ -639,12 +709,11 @@ export class OpenAPIGenerator {
   }
 
   private async getEndpointOpenAPIMetadata(
-    route: APIRouteInfo,
+    route: OpenAPIRouteInput,
     method: string,
   ): Promise<EndpointOpenAPIMetadata> {
     try {
-      const routeModule = await import(/* @vite-ignore */ route.filePath);
-      return routeModule[method]?.__openapi ?? {};
+      return (await this.loadEndpoint(route, method))?.__openapi ?? {};
     } catch {
       return {};
     }
@@ -716,7 +785,7 @@ export class OpenAPIGenerator {
   /**
    * Generate OpenAPI spec file
    */
-  async generateSpecFile(routes: APIRouteInfo[], outputPath: string): Promise<void> {
+  async generateSpecFile(routes: readonly OpenAPIRouteInput[], outputPath: string): Promise<void> {
     const spec = await this.generateSpec(routes);
     const fs = require("fs");
     const path = require("path");
