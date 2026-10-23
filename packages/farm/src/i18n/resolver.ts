@@ -1,3 +1,4 @@
+import { decodeCookieName } from "../request-cookies";
 import { localizeFarmPathname, resolveFarmLocalePath } from "./routing";
 import { stripFarmBasePath } from "../base-path";
 import type { FarmI18nLocaleSource, ResolvedFarmI18nConfig } from "./types";
@@ -192,13 +193,7 @@ function readCookie(header: string | null, name: string): string | undefined {
   for (const part of header.split(";")) {
     const separator = part.indexOf("=");
     if (separator < 0) continue;
-    let key: string;
-    try {
-      key = decodeURIComponent(part.slice(0, separator).trim());
-    } catch {
-      continue;
-    }
-    if (key !== name) continue;
+    if (decodeCookieName(part.slice(0, separator).trim()) !== name) continue;
     try {
       return decodeURIComponent(part.slice(separator + 1).trim());
     } catch {

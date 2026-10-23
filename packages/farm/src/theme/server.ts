@@ -1,3 +1,4 @@
+import { decodeCookieName } from "../request-cookies";
 import { getCurrentRequestOrNull } from "../server/request";
 import { _setFarmThemeServerSnapshotResolver } from "./bridge";
 import { resolveFarmThemeConfig } from "./config";
@@ -54,7 +55,7 @@ function readCookie(cookieHeader: string | null, name: string): string | undefin
   for (const entry of cookieHeader.split(";")) {
     const separator = entry.indexOf("=");
     if (separator < 0) continue;
-    const key = decodeCookieValue(entry.slice(0, separator).trim());
+    const key = decodeCookieName(entry.slice(0, separator).trim());
     if (key !== name) continue;
     return decodeCookieValue(entry.slice(separator + 1).trim());
   }
