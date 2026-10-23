@@ -100,7 +100,7 @@ describe("Farm docs runtime adapters", () => {
     const options = call.slice(call.indexOf("}, {"), call.indexOf("})"));
     expect(options).toContain("rootDir: farmDocsRuntimeRoot,");
     expect(options).toContain("immutableContent: true,");
-    expect(options).toContain("resolveModulePreloads: farmDocsModulePreloadsFor,");
+    expect(options).toContain("modulePreloads: farmDocsModulePreloadPaths,");
     // The page list is filled in after the client build; an unfilled one parses to nothing.
     expect(source).toContain('JSON.parse("${FARM_DOCS_MODULE_PRELOADS_PLACEHOLDER}")');
   });

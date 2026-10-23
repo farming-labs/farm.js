@@ -6214,15 +6214,17 @@ const farmDocsModulePreloads = (() => {
     return null;
   }
 })();
-const farmDocsModulePreloadsFor = farmDocsModulePreloads
-  ? (page) => {
-      const own =
-        page && Object.prototype.hasOwnProperty.call(farmDocsModulePreloads.pages, page.sourcePath)
-          ? farmDocsModulePreloads.pages[page.sourcePath]
-          : [];
-      return [...farmDocsModulePreloads.runtime, ...own].map(
-        (index) => "/" + farmDocsModulePreloads.files[index],
-      );
+// Paths the adapter matches against a page's source path the way the browser
+// finds the page's module.
+const farmDocsModulePreloadPaths = farmDocsModulePreloads
+  ? {
+      runtime: farmDocsModulePreloads.runtime.map((index) => "/" + farmDocsModulePreloads.files[index]),
+      pages: Object.fromEntries(
+        Object.entries(farmDocsModulePreloads.pages).map(([sourcePath, indexes]) => [
+          sourcePath,
+          indexes.map((index) => "/" + farmDocsModulePreloads.files[index]),
+        ]),
+      ),
     }
   : undefined;
 const farmDocsHandler = ${
@@ -6246,7 +6248,7 @@ const farmDocsHandler = ${
   immutableContent: true,
   // List the chunks a page needs, so the browser fetches them alongside the
   // client entry instead of discovering them one import at a time.
-  resolveModulePreloads: farmDocsModulePreloadsFor,
+  modulePreloads: farmDocsModulePreloadPaths,
   clientEntry: "/__farm_client_js_src__",
   // Font CSS is merged into the client stylesheet; farm-fonts.css only exists when the
   // app has fonts, so linking it separately 404'd for apps without them.
