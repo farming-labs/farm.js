@@ -1,4 +1,5 @@
 export { _runWithAfterRequest } from "../after";
+export { createFarmAppManifestResponse } from "../app-manifest";
 export { farmSecretsMatch } from "../secret-compare";
 export { createFarmLayoutSelector } from "../routing/layout-selector";
 export { mergeRouteRenderingDirectiveConfig } from "../route-rendering";

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { createEndpoint, createRouteFactory } from "@farm.js/core/api";
 import type { FarmMCPConfig } from "@farm.js/core";
 import { invokeAPIRouteEndpoint, mergePluginAPIRoutes } from "@farm.js/core/api/runtime";
-import { apiMcp } from "./index.js";
+import { apiMcp, definePrompt, defineResource, defineTool } from "./index.js";
 
 const route = createRouteFactory();
 
@@ -249,8 +249,72 @@ describe("apiMcp", () => {
       name: "create_note",
       endpoint: "/api/mcp",
     });
+    // An endpoint tool's schema comes from its route input, for the app manifest.
+    const catalogs = (globalThis as Record<symbol, Map<string, any>>)[
+      Symbol.for("farm.mcp.catalogs")
+    ];
+    expect(catalogs.get("/api/mcp").details.schemas.create_note.input).toMatchObject({
+      type: "object",
+      properties: { body: { type: "object", properties: { text: { type: "string" } } } },
+    });
     // Publishing adds no runtime hook, which would bundle the plugin runtime into servers.
     expect(plugin.runtime).toBeUndefined();
+  });
+
+  it("publishes each tool's schemas, its resources and its prompts for the app manifest", () => {
+    const plugin = apiMcp({
+      path: "/api/manifest-mcp",
+      authorize: () => ({ subject: "x" }),
+      tools: [
+        defineTool({
+          name: "search_notes",
+          inputSchema: z.object({ query: z.string() }),
+          outputSchema: z.object({ notes: z.array(z.string()) }),
+          readOnlyHint: true,
+          execute: () => ({ notes: [] }),
+        }),
+      ],
+      resources: [
+        defineResource({
+          name: "handbook",
+          uri: "docs://handbook",
+          mimeType: "text/markdown",
+          read: () => "# Handbook",
+        }),
+      ],
+      prompts: [
+        definePrompt({
+          name: "summarize",
+          description: "Summarize a note.",
+          arguments: z.object({ id: z.string() }),
+          render: ({ id }) => `Summarize ${id}`,
+        }),
+      ],
+    });
+    mergePluginAPIRoutes([], [plugin]);
+    const catalogs = (globalThis as Record<symbol, Map<string, any>>)[
+      Symbol.for("farm.mcp.catalogs")
+    ];
+    const { details } = catalogs.get("/api/manifest-mcp");
+    expect(Object.keys(details.schemas)).toEqual(["search_notes"]);
+    expect(details.schemas.search_notes.input).toMatchObject({
+      type: "object",
+      properties: { query: { type: "string" } },
+    });
+    // The output schema agents see: the result inside MCP's structured content.
+    expect(details.schemas.search_notes.output).toMatchObject({
+      properties: { result: { properties: { notes: { type: "array" } } } },
+    });
+    expect(details.resources).toEqual([
+      { name: "handbook", mimeType: "text/markdown", uri: "docs://handbook" },
+    ]);
+    expect(details.prompts).toEqual([
+      {
+        name: "summarize",
+        description: "Summarize a note.",
+        arguments: expect.objectContaining({ properties: { id: { type: "string" } } }),
+      },
+    ]);
   });
 
   it("adds no request hook without oauth", () => {

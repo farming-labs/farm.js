@@ -76,6 +76,37 @@ Farm never sends URLs, query strings, route parameters, headers, cookies, IP add
 user-agents, request or response bodies, tool arguments or results, or error messages. Requests that
 match no route are reported as `/[unmatched]`.
 
+## Tool discovery: `/.well-known/farmjs`
+
+Every Farm app serves a manifest at `/.well-known/farmjs` (under its `basePath`), so Farm Infra
+can list all of its MCP tools, including the ones nothing has called yet, without the app sending
+anything. It describes:
+
+- `app`: Farm's version, the renderer, the base path and the build (the deployment ID, or
+  `development`).
+- `packages`: the installed versions of the app's `@farm.js/*` and `@farming-labs/*` packages.
+- `mcp.servers`: each MCP server's name, version and path, its tools (name, title, description,
+  whether it's an API endpoint, `defineTool` or a server function, the endpoint's method and route,
+  the read-only, destructive, idempotent and open-world hints, and the input and output JSON
+  Schemas), its resources (name, URI or template, MIME type) and its prompts (name, description,
+  argument schema).
+- `webmcp`: whether `@farm.js/webmcp` is on, and the browser tools the app's source defines with
+  `defineWebMCPTool` or `registerWebMCPTool`: name, title, description, hints, and the input schema
+  when it's written out (`inputSchemaSource: "literal"`). A schema built at runtime, such as
+  `z.toJSONSchema(...)`, is listed as `"computed"`. Farm reads them from your source files, at build
+  time in production and on each request in `farm dev`.
+- `integrations`: each integration's key, category (`auth`, `payment`, `monitoring`…) and type, such
+  as `stripe`. Never its configuration.
+- `agent`: the API catalog, `llms.txt` and OpenAPI spec, when they're on.
+- `plugins`: the names of the app's plugins.
+
+It never includes environment values, keys, file paths or anything a request carries.
+
+On `farm dev` it's open, so devtools and coding agents can read it. In production it answers only
+requests Farm Infra signed for this app's `FARMJS_API_KEY`; anything else gets a plain `404`. Farm
+Infra reads it from the **Site URL** you set on the project's Settings. Without
+`FARMJS_API_KEY`, or with `analytics: false`, production serves nothing there.
+
 ## Delivery
 
 Analytics never delays or changes a response. Events are queued in memory and sent in the

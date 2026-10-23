@@ -71,6 +71,13 @@ import {
   FARM_API_CATALOG_PATH,
   resolveFarmApiCatalogInput,
 } from "./api-catalog";
+import {
+  createFarmAppManifestResponse,
+  FARM_APP_MANIFEST_PATH,
+  resolveFarmAppManifestInput,
+} from "./app-manifest";
+import { resolveFarmAppPackages } from "./app-manifest-packages";
+import { collectFarmWebMCPTools } from "./app-manifest-webmcp";
 import { resolveDevGlobalStylesheetHref } from "./server/dev-styles";
 import { FARM_LAYOUT_ELEMENT_CLIENT_SOURCE } from "./document-layout-client";
 import {
@@ -1188,6 +1195,7 @@ export function farmPlugin(
       await farmApp.initialize();
 
       const farmConfig = farmApp.getConfig();
+      let farmAppPackages: Record<string, string> | undefined;
       // agent.noindexPreviews marks every dev response, Vite's own included, when
       // the environment says this is a preview (`FARM_PREVIEW=1 farm dev`).
       if (farmConfig.agent?.noindexPreviews) {
@@ -1960,6 +1968,27 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             if (await runAppMiddlewareForContentRoute()) return;
             const docsHandler = openAPIManager.getDocsRouteHandler(parsedRequestUrl.origin);
             return docsHandler(req, res);
+          }
+
+          // /.well-known/farmjs: the app's manifest, open on the dev server.
+          if (stripFarmBasePath(requestPathname, farmConfig.basePath) === FARM_APP_MANIFEST_PATH) {
+            farmAppPackages ??= resolveFarmAppPackages(farmConfig.root ?? process.cwd());
+            const manifest = await createFarmAppManifestResponse(
+              new Request(parsedRequestUrl, { method: requestMethod }),
+              resolveFarmAppManifestInput(farmConfig, {
+                build: "development",
+                packages: farmAppPackages,
+                // Read again on each request; unchanged files come from a cache.
+                webmcpTools: farmConfig.plugins?.some(({ name }) => name === "farm:webmcp")
+                  ? collectFarmWebMCPTools(farmConfig.root ?? process.cwd(), farmConfig.srcDir)
+                  : [],
+              }),
+              { development: true },
+            );
+            if (manifest) {
+              await sendWebResponse(res, manifest);
+              return;
+            }
           }
 
           // agent.apiCatalog: list the OpenAPI and MCP surfaces at the RFC 9727 path.

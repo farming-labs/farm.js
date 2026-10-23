@@ -11,14 +11,43 @@ import type { FarmMCPServer, FarmMCPTool } from "./mcp-config";
 
 const CATALOGS = Symbol.for("farm.mcp.catalogs");
 
+type JSONSchema = Readonly<Record<string, unknown>>;
+
+/** What a server can say beyond its tool list, for the app manifest. All optional. */
+export interface FarmMCPCatalogDetails {
+  /** Each tool's input and output JSON Schemas, by tool name. */
+  schemas?: Readonly<Record<string, { input: JSONSchema; output?: JSONSchema }>>;
+  resources?: readonly {
+    name: string;
+    title?: string;
+    description?: string;
+    mimeType?: string;
+    uri?: string;
+    uriTemplate?: string;
+  }[];
+  prompts?: readonly {
+    name: string;
+    title?: string;
+    description?: string;
+    /** The arguments' JSON Schema. */
+    arguments?: JSONSchema;
+  }[];
+}
+
 interface PublishedCatalog {
   server: FarmMCPServer;
   tools: readonly FarmMCPTool[];
+  details?: FarmMCPCatalogDetails;
 }
 
 function catalogs(): Map<string, PublishedCatalog> {
   const state = globalThis as unknown as Record<PropertyKey, Map<string, PublishedCatalog>>;
   return (state[CATALOGS] ??= new Map());
+}
+
+/** @internal Every published MCP server and its tools, in publication order. */
+export function _listFarmMCPCatalogs(): readonly PublishedCatalog[] {
+  return [...catalogs().values()];
 }
 
 /**
@@ -28,8 +57,9 @@ function catalogs(): Map<string, PublishedCatalog> {
 export function _publishFarmMCPCatalog(
   server: FarmMCPServer,
   tools: readonly FarmMCPTool[],
+  details?: FarmMCPCatalogDetails,
 ): () => void {
-  const entry = { server, tools };
+  const entry = { server, tools, ...(details ? { details } : {}) };
   catalogs().set(server.path, entry);
   return () => {
     if (catalogs().get(server.path) === entry) catalogs().delete(server.path);

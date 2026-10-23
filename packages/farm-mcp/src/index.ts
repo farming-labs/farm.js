@@ -30,6 +30,7 @@ import {
   _publishFarmMCPCatalog,
   isEndpointFailure,
   parseRouteSchema,
+  type FarmMCPCatalogDetails,
 } from "@farm.js/core/api/runtime";
 import {
   _describeServerFunction,
@@ -135,10 +136,16 @@ export function apiMcp(options: APIMCPOptions): FarmPlugin {
       const tools = api.available ? bindTools(api, normalized) : [];
       // Lets core name the tool behind an endpoint, such as a form in the Markdown mirror.
       // Rebuilding the routes (a dev restart) replaces this endpoint's catalog.
-      const handler = createHandler(normalized, tools, resources, prompts, (server, catalog) => {
-        unpublishCatalog?.();
-        unpublishCatalog = _publishFarmMCPCatalog(server, catalog);
-      });
+      const handler = createHandler(
+        normalized,
+        tools,
+        resources,
+        prompts,
+        (server, catalog, details) => {
+          unpublishCatalog?.();
+          unpublishCatalog = _publishFarmMCPCatalog(server, catalog, details);
+        },
+      );
       const serve = (request: Request, body: unknown) => handler(request, body);
 
       return [
@@ -166,7 +173,11 @@ function createHandler(
   tools: readonly BoundTool[],
   resources: readonly FarmMCPResource[],
   prompts: readonly BoundPrompt[],
-  publish: (server: FarmMCPServer, catalog: readonly FarmMCPTool[]) => void,
+  publish: (
+    server: FarmMCPServer,
+    catalog: readonly FarmMCPTool[],
+    details: FarmMCPCatalogDetails,
+  ) => void,
 ) {
   const catalog: readonly FarmMCPTool[] = Object.freeze(
     tools.map((tool) =>
@@ -186,7 +197,37 @@ function createHandler(
     version: options.version,
     path: options.path,
   });
-  publish(serverIdentity, catalog);
+  // The app manifest (/.well-known/farmjs) lists schemas, resources and prompts too.
+  publish(serverIdentity, catalog, {
+    schemas: Object.fromEntries(
+      tools.map((tool) => [
+        tool.config.name,
+        {
+          input: tool.inputSchema,
+          ...(tool.outputSchema === undefined ? {} : { output: tool.outputSchema }),
+        },
+      ]),
+    ),
+    resources: resources.map(
+      ({ name, title, description, mimeType, uri, uriTemplate }) =>
+        Object.fromEntries(
+          Object.entries({ name, title, description, mimeType, uri, uriTemplate }).filter(
+            ([, value]) => value !== undefined,
+          ),
+        ) as { name: string },
+    ),
+    prompts: prompts.map(
+      ({ definition, argsJSONSchema }) =>
+        Object.fromEntries(
+          Object.entries({
+            name: definition.name,
+            title: definition.title,
+            description: definition.description,
+            arguments: argsJSONSchema,
+          }).filter(([, value]) => value !== undefined),
+        ) as { name: string },
+    ),
+  });
   const toolNames = new Set(catalog.map(({ name }) => name));
   const resourceNames = new Set(resources.map(({ name }) => name));
   const promptNames = new Set(prompts.map(({ definition }) => definition.name));

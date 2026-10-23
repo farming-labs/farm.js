@@ -2,6 +2,9 @@ import { createBundledEnv } from "../env";
 import { generateNativeMCPPluginSource } from "./native-mcp-source";
 import { getFarmMarkdownAlternatePath } from "../markdown";
 import { FARM_API_CATALOG_PATH, resolveFarmApiCatalogInput } from "../api-catalog";
+import { FARM_APP_MANIFEST_PATH, resolveFarmAppManifestInput } from "../app-manifest";
+import { resolveFarmAppPackages } from "../app-manifest-packages";
+import { collectFarmWebMCPTools } from "../app-manifest-webmcp";
 import type { RedirectConfig, ResolvedFarmConfig, RewriteConfig } from "../config";
 import { hasCustomFarmRouteContext, resolveDeployOutputPath } from "../config";
 import {
@@ -5585,6 +5588,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   createFarmMetadataRouteResponse,
   createFarmAgentRobots,
   createFarmApiCatalogResponse,
+  createFarmAppManifestResponse,
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsMarkdownReader,
@@ -6252,7 +6256,19 @@ ${
   config.agent?.apiCatalog
     ? `const farmApiCatalogInput = ${JSON.stringify(resolveFarmApiCatalogInput(config))};\n`
     : ""
-}
+}${
+    config.analytics !== false
+      ? `const farmAppManifestInput = ${JSON.stringify(
+          resolveFarmAppManifestInput(config, {
+            build: config.deploymentId,
+            packages: resolveFarmAppPackages(config.root),
+            webmcpTools: config.plugins.some(({ name }) => name === "farm:webmcp")
+              ? collectFarmWebMCPTools(config.root, config.srcDir)
+              : [],
+          }),
+        )};\n`
+      : ""
+  }
 function isFarmLocalAPIPathname(pathname) {
   return farmLocalAPIBasePath !== "/" &&
     (pathname === farmLocalAPIBasePath ||
@@ -8089,6 +8105,21 @@ async function handleFarmRequestInContext(
   );
   if (applicationMetadataResponse) {
     return applyProductionMiddlewareHeaders(applicationMetadataResponse, middlewareHeaders);
+  }
+  `
+      : ""
+  }
+  ${
+    config.analytics !== false
+      ? `
+  // /.well-known/farmjs: the app's manifest, only for a request Farm Infra signed.
+  if (normalizeRuntimePath(routePathname) === ${JSON.stringify(FARM_APP_MANIFEST_PATH)}) {
+    const farmAppManifest = await createFarmAppManifestResponse(request, farmAppManifestInput, {
+      development: false,
+    });
+    if (farmAppManifest) {
+      return applyProductionMiddlewareHeaders(farmAppManifest, middlewareHeaders);
+    }
   }
   `
       : ""
