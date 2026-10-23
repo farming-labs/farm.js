@@ -1077,6 +1077,17 @@ function keyedMapLookupTarget(
 
 function collectReferencedLocals(expression: t.Expression, names: ReadonlySet<string>): string[] {
   if (names.size === 0) return [];
+  // Only proven misses bypass cloning and scope construction. Matching binding,
+  // property, and JSX names still require the full reference analysis below.
+  let possible = false;
+  t.traverseFast(expression, (node) => {
+    if ((t.isIdentifier(node) || t.isJSXIdentifier(node)) && names.has(node.name)) {
+      possible = true;
+      return t.traverseFast.stop;
+    }
+  });
+  if (!possible) return [];
+
   const references = new Set<string>();
   traverse(expressionFile(cloneExpression(expression)), {
     ReferencedIdentifier(path) {
