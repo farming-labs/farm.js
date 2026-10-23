@@ -9,6 +9,8 @@ export interface FarmDocsCompiledResponse {
   statusText: string;
   headers: Array<[string, string]>;
   body: string;
+  /** Binary bodies (raster social images) are stored as base64. */
+  bodyEncoding?: "base64";
 }
 
 export interface FarmDocsCompiledSearch {
@@ -67,7 +69,11 @@ function createResponse(
     ]),
   );
   return new Response(
-    request.method === "HEAD" ? null : replaceOrigin(compiled.body, manifest, request),
+    request.method === "HEAD"
+      ? null
+      : compiled.bodyEncoding === "base64"
+        ? Uint8Array.from(atob(compiled.body), (character) => character.charCodeAt(0))
+        : replaceOrigin(compiled.body, manifest, request),
     {
       status: compiled.status,
       statusText: compiled.statusText,

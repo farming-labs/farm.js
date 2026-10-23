@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isMissingPackageError } from "../optional-peer";
 import type { LoadedFarmDocsPage } from "./handler";
 import type {
   FarmDocsResolvedConfig,
@@ -8,6 +9,13 @@ import type {
 
 export const FARM_DOCS_SOCIAL_IMAGE_WIDTH = 1200;
 export const FARM_DOCS_SOCIAL_IMAGE_HEIGHT = 630;
+
+/**
+ * X, LinkedIn, Facebook and Slack ignore an SVG `og:image`, so the generated
+ * image is served as a PNG whenever the optional `sharp` peer can rasterize it.
+ * Without sharp the SVG stays the shared image.
+ */
+export type FarmDocsSocialImageFormat = "png" | "svg";
 
 export interface FarmDocsSocialImageDescriptor {
   title: string;
@@ -22,6 +30,7 @@ export interface FarmDocsSocialImageDescriptor {
   imageAlt: string;
   illustration: FarmDocsSocialImageIllustration;
   fonts?: FarmDocsSocialImageFonts;
+  format: FarmDocsSocialImageFormat;
   hash: string;
 }
 
@@ -128,6 +137,7 @@ export function createFarmDocsSocialImageDescriptor(
   page: LoadedFarmDocsPage,
   docs: FarmDocsResolvedConfig,
   requestUrl: URL,
+  format: FarmDocsSocialImageFormat = "svg",
 ): FarmDocsSocialImageDescriptor {
   const config = getSocialImageConfig(docs);
   const siteName = config?.siteName || getNavTitle(docs);
@@ -142,7 +152,7 @@ export function createFarmDocsSocialImageDescriptor(
   const illustration = resolveIllustration(page);
   const entry = normalizeEntry(docs.entry);
   const slugPath = encodeSlugPath(page.slug) || "index";
-  const imagePath = `${entry}/_social/${slugPath}/opengraph-image.svg`;
+  const imagePath = `${entry}/_social/${slugPath}/opengraph-image.${format}`;
   const baseUrl = resolveBaseUrl(requestUrl, config);
   const pageUrl = new URL(page.href, baseUrl).href;
   const imageAlt = `${title} — ${siteName} documentation`;
@@ -171,6 +181,7 @@ export function createFarmDocsSocialImageDescriptor(
     imageAlt,
     illustration,
     fonts: config?.fonts,
+    format,
     hash,
   };
 }
@@ -178,15 +189,17 @@ export function createFarmDocsSocialImageDescriptor(
 export function getFarmDocsSocialImageSlug(
   docs: FarmDocsResolvedConfig,
   requestUrl: URL,
-): string | null {
+): { slug: string; format: FarmDocsSocialImageFormat } | null {
   const entry = normalizeEntry(docs.entry);
   const prefix = `${entry}/_social/`;
-  const suffix = "/opengraph-image.svg";
-  if (!requestUrl.pathname.startsWith(prefix) || !requestUrl.pathname.endsWith(suffix)) {
-    return null;
-  }
+  const format = requestUrl.pathname.endsWith("/opengraph-image.png")
+    ? "png"
+    : requestUrl.pathname.endsWith("/opengraph-image.svg")
+      ? "svg"
+      : null;
+  if (!format || !requestUrl.pathname.startsWith(prefix)) return null;
 
-  const rawSlug = requestUrl.pathname.slice(prefix.length, -suffix.length);
+  const rawSlug = requestUrl.pathname.slice(prefix.length, -"/opengraph-image.svg".length);
   if (!rawSlug) return null;
   try {
     const slug = rawSlug
@@ -196,10 +209,48 @@ export function getFarmDocsSocialImageSlug(
     if (slug.split("/").some((segment) => !segment || segment === ".." || segment === ".")) {
       return null;
     }
-    return slug === "index" ? "" : slug;
+    return { slug: slug === "index" ? "" : slug, format };
   } catch {
     return null;
   }
+}
+
+type Sharp = typeof import("sharp").default;
+let sharpLoad: Promise<Sharp | null> | undefined;
+
+function loadSharp(): Promise<Sharp | null> {
+  // Load once per process so page metadata and the image route agree on the
+  // format. A missing or broken optional peer falls back to the SVG image.
+  sharpLoad ??= import("sharp").then(
+    (module) => module.default,
+    (error) => {
+      if (!isMissingPackageError(error, "sharp")) {
+        console.warn(
+          `[farm] Docs social images fall back to SVG because sharp failed to load: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      return null;
+    },
+  );
+  return sharpLoad;
+}
+
+export async function resolveFarmDocsSocialImageFormat(): Promise<FarmDocsSocialImageFormat> {
+  return (await loadSharp()) ? "png" : "svg";
+}
+
+/** Rasterize the generated SVG into a 1200×630 PNG, or null when sharp is unavailable. */
+export async function renderFarmDocsSocialImagePng(
+  descriptor: FarmDocsSocialImageDescriptor,
+): Promise<Uint8Array<ArrayBuffer> | null> {
+  const sharp = await loadSharp();
+  if (!sharp) return null;
+  const png = await sharp(Buffer.from(renderFarmDocsSocialImageSvg(descriptor)))
+    .png({ compressionLevel: 9, palette: true })
+    .toBuffer();
+  return new Uint8Array(png);
 }
 
 function escapeXml(value: string): string {
@@ -402,7 +453,15 @@ export function renderFarmDocsSocialImageSvg(descriptor: FarmDocsSocialImageDesc
   const routeY = Math.max(418, descriptionY + descriptionLines.length * 29 + 24);
   const section = truncate(descriptor.section.toUpperCase(), 27);
   const route = truncate(descriptor.pageHref, 42);
-  const footerUrl = truncate(descriptor.pageUrl.replace(/^https?:\/\//, ""), 70);
+  // Build-time renders (edge docs manifests) use a reserved `.invalid` origin
+  // that is swapped at request time in text, but not in raster pixels.
+  const pageUrl = new URL(descriptor.pageUrl);
+  const footerUrl = truncate(
+    pageUrl.hostname.endsWith(".invalid")
+      ? pageUrl.pathname
+      : descriptor.pageUrl.replace(/^https?:\/\//, ""),
+    70,
+  );
   const brand = truncate(descriptor.brand.toUpperCase(), 25);
   const titleId = `farm-docs-og-${descriptor.hash}`;
 
@@ -465,13 +524,17 @@ export function renderFarmDocsSocialMetadata(
     ? new URL(customImage, descriptor.pageUrl).href
     : descriptor.imageUrl;
   const customExtension = customImage?.toLowerCase().split(/[?#]/, 1)[0];
-  const imageType = customExtension?.endsWith(".webp")
-    ? "image/webp"
-    : customExtension?.endsWith(".png")
+  const imageType = !customExtension
+    ? descriptor.format === "png"
       ? "image/png"
-      : customExtension?.match(/\.jpe?g$/)
-        ? "image/jpeg"
-        : "image/svg+xml";
+      : "image/svg+xml"
+    : customExtension.endsWith(".webp")
+      ? "image/webp"
+      : customExtension.endsWith(".png")
+        ? "image/png"
+        : customExtension.match(/\.jpe?g$/)
+          ? "image/jpeg"
+          : "image/svg+xml";
   const tag = (property: string, content: string, name = false) =>
     `<meta ${name ? "name" : "property"}="${property}" content="${escapeXml(content)}">`;
 

@@ -36,7 +36,10 @@ export interface FarmDocsSocialImageConfig {
   siteName?: string;
   /** Short brand label drawn in the image header. Defaults to siteName. */
   brand?: string;
-  /** Optional WOFF2 URLs or data URLs embedded into the generated SVG. */
+  /**
+   * Optional WOFF2 URLs or data URLs embedded into the generated SVG. The PNG
+   * that social networks receive (rendered with `sharp`) uses system fonts.
+   */
   fonts?: FarmDocsSocialImageFonts;
 }
 

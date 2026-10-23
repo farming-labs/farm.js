@@ -43,13 +43,24 @@ async function compileResponse(
   response: Response,
   absolutePaths: readonly string[],
 ): Promise<FarmDocsCompiledResponse> {
+  const headers = Array.from(response.headers.entries()).map(([key, value]): [string, string] => [
+    key,
+    sanitizeCompiledValue(value, absolutePaths),
+  ]);
+  // Raster images (the PNG docs social image) are binary; keep their bytes intact.
+  if (/^image\/(?!svg)/i.test(response.headers.get("content-type") || "")) {
+    return {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+      body: Buffer.from(await response.arrayBuffer()).toString("base64"),
+      bodyEncoding: "base64",
+    };
+  }
   return {
     status: response.status,
     statusText: response.statusText,
-    headers: Array.from(response.headers.entries()).map(([key, value]) => [
-      key,
-      sanitizeCompiledValue(value, absolutePaths),
-    ]),
+    headers,
     body: sanitizeCompiledValue(await response.text(), absolutePaths),
   };
 }
