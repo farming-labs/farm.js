@@ -10180,10 +10180,14 @@ function createKeyedRowsBlockComponentCore(
         let oldIndex = 0;
         for (const key of this.instances.keys()) oldIndices.set(key, oldIndex++);
       }
-      for (const [key, instance] of this.instances) {
-        if (!nextKeys.has(key)) {
-          instance.scope?.cleanup();
-          if (hasSurvivingRows) instance.element.remove();
+      // A complete replacement removes scope-free rows in bulk below. Retain
+      // cleanup for host-capable runtimes even if the current props changed.
+      if (hasSurvivingRows || options.hostBlocks) {
+        for (const [key, instance] of this.instances) {
+          if (!nextKeys.has(key)) {
+            instance.scope?.cleanup();
+            if (hasSurvivingRows) instance.element.remove();
+          }
         }
       }
 

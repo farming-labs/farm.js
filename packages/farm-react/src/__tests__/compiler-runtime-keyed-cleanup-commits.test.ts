@@ -7,7 +7,9 @@ import {
   createCompilerKeyedArraySlice,
   createCompilerKeyedArrayStructuralReorder,
   keyedRowsEveryHintedRuntimeFeature,
+  keyedRowsHostRuntimeFeature,
   type CompilerKeyedRowsBlockProps,
+  type CompilerRuntimeFeature,
 } from "../compiler-runtime";
 
 interface Item {
@@ -18,7 +20,11 @@ interface Item {
 interface Block {
   root: Element;
   mounted: boolean;
-  instances: Map<string, { element: Element; item: Item; index: number }>;
+  instances: Map<
+    string,
+    { element: Element; item: Item; index: number; scope?: { cleanup(): void } }
+  >;
+  currentProps: CompilerKeyedRowsBlockProps;
   eventHandlers: Map<string, Map<number, () => void>>;
   conditionalListeners: Map<string, Map<number, () => void>>;
   adopt(): boolean;
@@ -27,14 +33,19 @@ interface Block {
   refresh(afterCommit?: () => void, dirtyState?: ReadonlySet<number>): void;
 }
 
-function harness(size: number) {
+function harness(
+  size: number,
+  feature: CompilerRuntimeFeature = keyedRowsEveryHintedRuntimeFeature,
+  hostBlocks = false,
+) {
   let items: Item[] = Array.from({ length: size }, (_, index) => ({ id: `row-${index}` }));
-  const Component = keyedRowsEveryHintedRuntimeFeature.create({
+  const Component = feature.create({
     setRoot() {},
     subscribe: () => () => {},
   }).KeyedRows as React.ComponentClass<CompilerKeyedRowsBlockProps>;
   const block = new Component({
     id: 0,
+    hostBlocks,
     items: () => items,
     collectionDependency: 0,
     dependencies: [0],
@@ -152,6 +163,83 @@ describe.each(Object.entries(updates))("cleanup after %s", (name, update) => {
         expect([...registry]).toEqual(populated ? [["row-1", callback]] : []);
       }
       expect(callback.get(0)).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("full replacement cleanup", () => {
+  it.each([1, 1_000])("does not iterate %i scope-free old rows just to discard them", (size) => {
+    const { block, setItems } = harness(size);
+    const before = block.instances;
+    const oldElements = [...block.root.children];
+    const iterate = vi.spyOn(before, Symbol.iterator);
+    const next = Array.from({ length: size }, (_, index) => ({ id: `next-${index}` }));
+    const committed = vi.fn();
+    block.eventHandlers.set("row-0", new Map([[0, vi.fn()]]));
+    block.conditionalListeners.set("row-0", new Map([[0, vi.fn()]]));
+
+    setItems(next);
+    block.refresh(committed);
+
+    expect(iterate).not.toHaveBeenCalled();
+    expect(committed).toHaveBeenCalledTimes(1);
+    expect(block.instances).not.toBe(before);
+    expect([...block.instances.keys()]).toEqual(next.map((item) => item.id));
+    expect([...block.root.children].map((row) => row.textContent)).toEqual(
+      next.map((item) => item.id),
+    );
+    expect(oldElements.every((element) => element.parentNode === null)).toBe(true);
+    expect(block.eventHandlers.size).toBe(0);
+    expect(block.conditionalListeners.size).toBe(0);
+  });
+
+  it.each([false, true])("cleans old host scopes with current hostBlocks=%s", (hostBlocks) => {
+    const { block, setItems } = harness(3, keyedRowsHostRuntimeFeature, true);
+    const cleanups = [...block.instances.values()].map((instance) =>
+      vi.spyOn(instance.scope!, "cleanup"),
+    );
+    // Definitions/props can change before scopes mounted by the previous one are disposed.
+    block.currentProps = { ...block.currentProps, hostBlocks };
+    setItems([{ id: "new-a" }, { id: "new-b" }, { id: "new-c" }]);
+
+    block.refresh();
+
+    for (const cleanup of cleanups) expect(cleanup).toHaveBeenCalledTimes(1);
+    expect([...block.root.children].map((row) => row.textContent)).toEqual([
+      "new-a",
+      "new-b",
+      "new-c",
+    ]);
+  });
+
+  it.each([false, true])(
+    "still removes old rows when some survive (host scopes: %s)",
+    (hostBlocks) => {
+      const { block, items, setItems } = harness(
+        3,
+        hostBlocks ? keyedRowsHostRuntimeFeature : keyedRowsEveryHintedRuntimeFeature,
+        hostBlocks,
+      );
+      const survivor = block.instances.get("row-1")!;
+      const removed = [block.instances.get("row-0")!, block.instances.get("row-2")!];
+      const cleanups = hostBlocks
+        ? removed.map((instance) => vi.spyOn(instance.scope!, "cleanup"))
+        : [];
+      const survivorCleanup = hostBlocks ? vi.spyOn(survivor.scope!, "cleanup") : undefined;
+      setItems([{ id: "new-a" }, items[1], { id: "new-b" }]);
+
+      block.refresh();
+
+      expect(block.instances.get("row-1")).toBe(survivor);
+      expect(block.root.children[1]).toBe(survivor.element);
+      expect(removed.every((instance) => instance.element.parentNode === null)).toBe(true);
+      for (const cleanup of cleanups) expect(cleanup).toHaveBeenCalledTimes(1);
+      if (survivorCleanup) expect(survivorCleanup).not.toHaveBeenCalled();
+      expect([...block.root.children].map((row) => row.textContent)).toEqual([
+        "new-a",
+        "row-1",
+        "new-b",
+      ]);
     },
   );
 });
