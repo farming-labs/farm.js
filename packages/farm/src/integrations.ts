@@ -52,6 +52,14 @@ import type {
 import type { InferFarmIntegrationOrmClient } from "./integration-orm";
 import { setFarmPluginIntegrationContext } from "./plugin-integration-context";
 import { canonicalizeRequestPathname, canonicalizeRequestPathSegments } from "./utils/decode";
+import { stripFarmBasePath } from "./base-path";
+import { resolveFarmLocalePath } from "./i18n/routing";
+import {
+  compileMiddlewareConfig,
+  matchesCompiledMiddlewareConfig,
+  type CompiledMiddlewareConfig,
+} from "./middleware/matcher";
+import type { MiddlewareContext } from "./middleware/types";
 import {
   assertTerminalCatchAll,
   assertUniqueRouteParameters,
@@ -1982,7 +1990,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
       };
 
       for (const entry of middleware) {
-        const params = resolveMatcherParams(entry.matcher, pathname);
+        const params = resolveIntegrationMiddlewareParams(entry, pathname, context.config);
         if (!params) {
           continue;
         }
@@ -2895,7 +2903,7 @@ export async function dispatchIntegrationRequest(
   const forwardedSetCookies: string[] = [];
 
   for (const entry of middleware) {
-    const params = resolveMatcherParams(entry.matcher, pathname);
+    const params = resolveIntegrationMiddlewareParams(entry, pathname, runtime.config);
     if (!params) {
       continue;
     }
@@ -3405,6 +3413,65 @@ function matchesMatcher(
   pathname: string,
 ): boolean {
   return resolveMatcherParams(matcher, pathname) !== null;
+}
+
+const compiledIntegrationGuards = new WeakMap<object, CompiledMiddlewareConfig>();
+const noMiddlewareContext = {} as MiddlewareContext;
+
+/**
+ * Integration middleware is a guard (`protectedRoutes` compiles straight into
+ * one), documented to take the same matcher syntax as Farm middleware and to
+ * see the router's pathname. The integration pattern language alone knows only
+ * `(.*)` and `[param]`, so `/dashboard/:path*` or `/api/**` compared as literal
+ * text and protected nothing, and `/fr/dashboard` or `/console/dashboard`
+ * (basePath) walked past `/dashboard(.*)` while the router served the page.
+ * Every step here can only add a match, never remove one.
+ */
+function resolveIntegrationMiddlewareParams(
+  entry: { matcher?: string | readonly string[] },
+  pathname: string,
+  config: FarmPluginContext["config"] | undefined,
+): FarmIntegrationRouteParams | null {
+  const params = resolveMatcherParams(entry.matcher, pathname);
+  // A missing matcher already matched everything above.
+  if (params || !entry.matcher) return params;
+
+  const routePathname = resolveIntegrationRoutePathname(pathname, config);
+  if (routePathname !== pathname) {
+    const routeParams = resolveMatcherParams(entry.matcher, routePathname);
+    if (routeParams) return routeParams;
+  }
+
+  let compiled = compiledIntegrationGuards.get(entry);
+  if (!compiled) {
+    compiled = compileMiddlewareConfig({
+      matcher: typeof entry.matcher === "string" ? entry.matcher : [...entry.matcher],
+    });
+    compiledIntegrationGuards.set(entry, compiled);
+  }
+  for (const candidate of routePathname === pathname ? [pathname] : [pathname, routePathname]) {
+    const result = matchesCompiledMiddlewareConfig(candidate, compiled, noMiddlewareContext);
+    if (result.matched) return result.params ?? {};
+  }
+  return null;
+}
+
+/** The pathname the page router matches: basePath and locale prefix removed. */
+function resolveIntegrationRoutePathname(
+  pathname: string,
+  config: FarmPluginContext["config"] | undefined,
+): string {
+  const basePath = typeof config?.basePath === "string" ? config.basePath : undefined;
+  let routePathname = basePath ? stripFarmBasePath(pathname, basePath) : pathname;
+  const i18n = config?.i18n;
+  if (i18n && Array.isArray(i18n.locales) && i18n.locales.length > 0) {
+    routePathname = resolveFarmLocalePath(routePathname, {
+      locales: i18n.locales,
+      defaultLocale: i18n.defaultLocale,
+      routing: i18n.routing || "prefix-except-default",
+    }).pathname;
+  }
+  return routePathname;
 }
 
 function resolveMatcherParams(

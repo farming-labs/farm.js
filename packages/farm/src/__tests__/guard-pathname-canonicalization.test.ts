@@ -100,7 +100,11 @@ async function runProductionGuard(matcher: MiddlewareMatcher, pathname: string):
 }
 
 /** An integration `protectedRoutes` entry, which becomes `middleware[].matcher`. */
-async function runIntegrationGuard(matcher: string, pathname: string): Promise<GuardRun> {
+async function runIntegrationGuard(
+  matcher: string,
+  pathname: string,
+  config: Record<string, unknown> = {},
+): Promise<GuardRun> {
   const result: GuardRun = { ran: false, params: {} };
   const integration = defineIntegration({
     category: "custom",
@@ -117,7 +121,7 @@ async function runIntegrationGuard(matcher: string, pathname: string): Promise<G
     ],
   });
   await dispatchIntegrationRequest(
-    { integration, config: {}, isDev: false, isProd: true },
+    { integration, config: config as never, isDev: false, isProd: true },
     new Request(`https://farm.test${pathname}`),
   );
   return result;
@@ -358,5 +362,81 @@ describe("route guards match the canonical request pathname", () => {
     });
     await runner(new Request("https://farm.test/api/health/"));
     expect(result.ran).toBe(true);
+  });
+});
+
+describe("integration guards take the middleware matcher syntax", () => {
+  // `protectedRoutes` is documented to use the same matcher syntax as Farm
+  // middleware. The integration pattern language only knew `(.*)` and
+  // `[param]`, so these compared as literal text and guarded nothing.
+  it.each([
+    ["/dashboard/:path*", "/dashboard"],
+    ["/dashboard/:path*", "/dashboard/settings"],
+    ["/dashboard/:path+", "/dashboard/settings/billing"],
+    ["/api/**", "/api/admin"],
+    ["/api/**", "/api/admin/users"],
+    ["/api/*", "/api/admin"],
+    ["/team/:id", "/team/42"],
+  ])("%s guards %s like middleware does", async (matcher, pathname) => {
+    expect(await collectGuards(matcher, pathname)).toEqual({
+      devMiddleware: true,
+      productionMiddleware: true,
+      integration: true,
+    });
+  });
+
+  it.each([
+    ["/dashboard/:path*", "/dashboards"],
+    ["/api/*", "/api/admin/users"],
+    ["/team/:id", "/team"],
+  ])("%s still does not guard %s", async (matcher, pathname) => {
+    expect(await collectGuards(matcher, pathname)).toEqual({
+      devMiddleware: false,
+      productionMiddleware: false,
+      integration: false,
+    });
+  });
+
+  it("keeps catch-all params as arrays for integration patterns", async () => {
+    const run = await runIntegrationGuard("/docs/[...slug]", "/docs/a/b");
+    expect(run).toEqual({ ran: true, params: { slug: ["a", "b"] } });
+  });
+
+  // The page router strips the basePath and the locale prefix before it
+  // matches, so a guard written for the page path has to see that path too.
+  it("guards a localized page path", async () => {
+    const i18n = { locales: ["en", "fr"], defaultLocale: "en" };
+    for (const pathname of [
+      "/dashboard",
+      "/fr/dashboard",
+      "/fr/dashboard/settings",
+      "/en/dashboard",
+    ]) {
+      expect({
+        pathname,
+        ...(await runIntegrationGuard("/dashboard(.*)", pathname, { i18n })),
+      }).toMatchObject({ pathname, ran: true });
+    }
+    expect((await runIntegrationGuard("/dashboard(.*)", "/fr/other", { i18n })).ran).toBe(false);
+    expect((await runIntegrationGuard("/dashboard/:path*", "/fr/dashboard/x", { i18n })).ran).toBe(
+      true,
+    );
+    // Without i18n a first segment is not a locale.
+    expect((await runIntegrationGuard("/dashboard(.*)", "/fr/dashboard")).ran).toBe(false);
+  });
+
+  it("guards a page path under basePath", async () => {
+    const config = { basePath: "/console" };
+    expect((await runIntegrationGuard("/dashboard(.*)", "/console/dashboard", config)).ran).toBe(
+      true,
+    );
+    expect(
+      (await runIntegrationGuard("/dashboard/:path*", "/console/dashboard/a", config)).ran,
+    ).toBe(true);
+    expect((await runIntegrationGuard("/dashboard(.*)", "/console/other", config)).ran).toBe(false);
+    const both = { basePath: "/console", i18n: { locales: ["en", "fr"], defaultLocale: "en" } };
+    expect((await runIntegrationGuard("/dashboard(.*)", "/console/fr/dashboard", both)).ran).toBe(
+      true,
+    );
   });
 });
