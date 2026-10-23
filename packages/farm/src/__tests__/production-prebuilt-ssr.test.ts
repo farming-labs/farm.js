@@ -15,7 +15,7 @@ import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
 import { signFarmInfraManifestRequest } from "../app-manifest";
-import { resolveConfig } from "../config";
+import { loadConfig, resolveConfig } from "../config";
 import { defineIntegration } from "../integrations";
 import { definePlugin } from "../plugin";
 import { logger } from "../utils";
@@ -2066,6 +2066,107 @@ export function CopyButton({ text }) {
     },
     120_000,
   );
+
+  it("records MCP tool calls in an app whose plugins only add routes", async () => {
+    const root = await createProductionFixture();
+    const received: string[] = [];
+    const receiver = createHttpServer((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => (body += chunk));
+      request.on("end", () => {
+        received.push(body);
+        response.writeHead(202).end();
+      });
+    });
+    await new Promise<void>((resolve) => receiver.listen(0, "127.0.0.1", resolve));
+    const receiverPort = (receiver.address() as { port: number }).port;
+    const events = () => received.flatMap((body) => JSON.parse(body).events);
+
+    try {
+      // Like @farm.js/mcp without OAuth: a route and no runtime hooks, so the server has no
+      // plugin runtime. The route reports its tool calls the way @farm.js/mcp does, after an
+      // await, as a tool callback would.
+      await fs.writeFile(
+        path.join(root, "farm.config.ts"),
+        `import { definePlugin } from "@farm.js/core";
+import { emitFarmEvent } from "@farm.js/core/observability";
+const call = (tool, outcome) =>
+  emitFarmEvent({ type: "mcp.tool.complete", route: "/api/mcp", server: "fixture", tool, outcome, durationMs: 3 });
+export default {
+  plugins: [definePlugin({
+    name: "fixture-mcp",
+    routes: ({ route }) => [
+      route.post("/api/mcp", {
+        handler: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          call("list_users", "success");
+          call("remove_user", "error");
+          return { ok: true };
+        },
+      }),
+    ],
+  })],
+};
+`,
+      );
+      const userConfig = await loadConfig(root, undefined, "production");
+      const config = await resolveConfig(
+        {
+          ...userConfig,
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "infra-tool-calls-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          await vi.waitFor(() => expect(events()).toHaveLength(3), { timeout: 5_000 });
+        },
+        "/api/mcp",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "user-agent": "Claude-User/1.0" },
+          body: "{}",
+        },
+        {
+          FARMJS_API_KEY: `fti_${"r".repeat(43)}`,
+          FARMJS_API_URL: `http://127.0.0.1:${receiverPort}`,
+        },
+      );
+      const request = events().find(({ kind }) => kind === "request");
+      expect(request).toMatchObject({ method: "POST", status: 200 });
+      // Each call is tied to the request that carried it.
+      expect(
+        events()
+          .filter(({ kind }) => kind === "mcp.tool")
+          .map(({ tool, outcome, requestId, route, agent }) => ({
+            tool,
+            outcome,
+            requestId,
+            route,
+            agent,
+          })),
+      ).toEqual(
+        ["list_users:success", "remove_user:error"].map((call) => ({
+          tool: call.split(":")[0],
+          outcome: call.split(":")[1],
+          requestId: request.requestId,
+          route: request.route,
+          agent: request.agent,
+        })),
+      );
+    } finally {
+      await new Promise((resolve) => receiver.close(resolve));
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
 
   it("serves /.well-known/farmjs only to a request Farm Infra signed for the app's key", async () => {
     const root = await createProductionFixture();
