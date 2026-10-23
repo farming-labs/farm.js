@@ -160,5 +160,10 @@ autumn({
 - Set `AUTUMN_SECRET_KEY`, `AUTUMN_WEBHOOK_SECRET`, and `APP_BASE_URL`.
 - Keep Farm product IDs separate from provider IDs when you want a stable app contract.
 - Use `check` before expensive operations and `reportUsage` after successful work.
+- The billing POST routes act for the signed-in caller from its session cookie, so a request a
+  browser sends from another origin is refused with `403`: a page on another site cannot report
+  usage, start a checkout or open the portal for your visitor. Calls with no `Origin` (your own
+  server, a script) are unaffected. If your frontend runs on another origin, list it in
+  `allowedOrigins`, using the same syntax as `serverActions.allowedOrigins`.
 - Treat webhooks as the source of truth for subscription state.
 - Test free-plan reads, checkout redirects, portal redirects, usage limits, and webhook sync.

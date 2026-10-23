@@ -77,6 +77,7 @@ async function callRoute(
   integration: ReturnType<typeof polar>,
   path: string,
   body: Record<string, unknown>,
+  headers: Record<string, string> = { "content-type": "application/json" },
 ): Promise<Response> {
   const route = integration.routes.find(
     (candidate) => candidate.path === path && candidate.method === "POST",
@@ -85,13 +86,42 @@ async function callRoute(
 
   const request = new Request(`http://example.com${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
   return route!.handler(request, createContext(request, "POST", path, integration.instance));
 }
 
 describe("polar billing usage", () => {
+  it("refuses a cross-site POST before reporting usage for the signed-in caller", async () => {
+    const sdk = createFakeSdk({
+      id: "cus_csrf",
+      activeSubscriptions: [],
+      activeMeters: [{ meterId: "mtr_api", consumedUnits: 0, creditedUnits: 0, balance: 0 }],
+    });
+    const integration = polar({
+      instance: sdk as unknown as PolarIntegrationInstance,
+      billing: {
+        resolveOwner: () => ({ kind: "user", id: "csrf-user" }),
+        meters: { api: { aggregation: "sum", eventName: "api.called", meterId: "mtr_api" } },
+      },
+    });
+
+    // A text/plain form on another site, sent with the visitor's session cookie.
+    const response = await callRoute(
+      integration,
+      "/billing/report-usage",
+      { key: "api", quantity: 100000, idempotencyKey: "csrf-1" },
+      {
+        origin: "https://evil.example",
+        "content-type": "text/plain",
+        "sec-fetch-site": "cross-site",
+      },
+    );
+    expect(response.status).toBe(403);
+    expect(sdk.events.ingest).not.toHaveBeenCalled();
+  });
+
   it("lets a gauge (last) meter report a decrease without tripping the hard cap", async () => {
     const sdk = createFakeSdk({
       id: "cus_gauge",

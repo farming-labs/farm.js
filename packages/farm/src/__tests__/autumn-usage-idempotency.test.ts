@@ -80,9 +80,14 @@ function createFakeSdk(customer: Record<string, unknown>) {
   };
 }
 
-function createIntegration(sdk: ReturnType<typeof createFakeSdk>, ownerId: string) {
+function createIntegration(
+  sdk: ReturnType<typeof createFakeSdk>,
+  ownerId: string,
+  allowedOrigins?: readonly string[],
+) {
   return autumn({
     instance: sdk as unknown as AutumnIntegrationInstance,
+    allowedOrigins,
     billing: {
       resolveOwner: () => ({ kind: "user" as const, id: ownerId }),
       meters: {
@@ -95,6 +100,7 @@ function createIntegration(sdk: ReturnType<typeof createFakeSdk>, ownerId: strin
 async function report(
   integration: ReturnType<typeof autumn>,
   body: Record<string, unknown>,
+  headers: Record<string, string> = { "content-type": "application/json" },
 ): Promise<Response> {
   const path = "/billing/report-usage";
   const route = integration.routes.find(
@@ -104,11 +110,67 @@ async function report(
 
   const request = new Request(`http://example.com${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
   return route!.handler(request, createContext(request, "POST", path, integration.instance));
 }
+
+// A text/plain form on another site: the browser adds its page's Origin, and the body still parses
+// as JSON. The route acts for whoever the visitor's session cookie names.
+const crossSiteForm = {
+  origin: "https://evil.example",
+  "content-type": "text/plain",
+  "sec-fetch-site": "cross-site",
+};
+
+describe("autumn billing routes and other sites", () => {
+  it("refuses a cross-site POST before reporting usage for the signed-in caller", async () => {
+    const sdk = createFakeSdk({
+      id: "cus_1",
+      balances: { credits: { usage: 0, granted: 100 } },
+      subscriptions: [],
+    });
+    const integration = createIntegration(sdk, "csrf-user");
+
+    const crossSite = await report(
+      integration,
+      { key: "credits", quantity: 50, idempotencyKey: "csrf-1" },
+      crossSiteForm,
+    );
+    expect(crossSite.status).toBe(403);
+    expect(sdk.balances.update).not.toHaveBeenCalled();
+
+    // The app's own page, and a caller with no Origin at all (a server), still report.
+    const own = await report(
+      integration,
+      { key: "credits", quantity: 1, idempotencyKey: "own-1" },
+      { "content-type": "application/json", origin: "http://example.com" },
+    );
+    expect(own.status).toBe(200);
+    const server = await report(integration, {
+      key: "credits",
+      quantity: 1,
+      idempotencyKey: "server-1",
+    });
+    expect(server.status).toBe(200);
+  });
+
+  it("takes requests from an origin listed in allowedOrigins", async () => {
+    const sdk = createFakeSdk({
+      id: "cus_1",
+      balances: { credits: { usage: 0, granted: 100 } },
+      subscriptions: [],
+    });
+    const integration = createIntegration(sdk, "app-user", ["https://app.example"]);
+    const allowed = await report(
+      integration,
+      { key: "credits", quantity: 1, idempotencyKey: "app-1" },
+      { "content-type": "application/json", origin: "https://app.example" },
+    );
+    expect(allowed.status).toBe(200);
+  });
+});
 
 describe("autumn usage-report idempotency", () => {
   it("applies a report once and replays retries with the same key", async () => {

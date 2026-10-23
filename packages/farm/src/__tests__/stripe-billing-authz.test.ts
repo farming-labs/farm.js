@@ -170,7 +170,12 @@ function createIntegration(options: {
     },
   });
 
-  async function call(pathWithQuery: string, method: string, body?: unknown) {
+  async function call(
+    pathWithQuery: string,
+    method: string,
+    body?: unknown,
+    extraHeaders: Record<string, string> = {},
+  ) {
     const path = pathWithQuery.split("?")[0]!;
     const route = integration.routes.find(
       (entry: { path: string; method: unknown }) =>
@@ -180,7 +185,11 @@ function createIntegration(options: {
 
     const request = new Request(`http://example.com${pathWithQuery}`, {
       method,
-      headers: { "content-type": "application/json", "x-farm-integration-client": "1" },
+      headers: {
+        "content-type": "application/json",
+        "x-farm-integration-client": "1",
+        ...extraHeaders,
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const response = await route.handler(
@@ -195,6 +204,33 @@ function createIntegration(options: {
 
   return { call, saved, checkoutCompleted };
 }
+
+describe("stripe billing routes and other sites", () => {
+  it("refuses a cross-site POST before acting for the signed-in owner", async () => {
+    const { call } = createIntegration({
+      signedInOwner: ownerA,
+      seeded: [{ owner: ownerA, customerId: "cus_a" }],
+    });
+    // A text/plain form on another site, sent with the visitor's session cookie.
+    const crossSite = {
+      origin: "https://evil.example",
+      "content-type": "text/plain",
+      "sec-fetch-site": "cross-site",
+    };
+    for (const path of [
+      "/billing/portal",
+      "/billing/checkout",
+      "/billing/report-usage",
+      "/billing/usage",
+    ]) {
+      expect((await call(path, "POST", { customerId: "cus_a" }, crossSite)).status, path).toBe(403);
+    }
+    // The app's own page still opens the portal.
+    expect(
+      (await call("/billing/portal", "POST", {}, { origin: "http://example.com" })).status,
+    ).toBe(200);
+  });
+});
 
 describe("stripe billing portal authorization", () => {
   it("refuses an unauthenticated caller that supplies a customerId", async () => {

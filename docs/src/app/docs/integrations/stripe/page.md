@@ -187,4 +187,9 @@ The same `ctx` includes `ctx.args.db`, `ctx.data`, request params, the raw reque
   or a checkout hook fails, Farm releases the claim so Stripe's retry can finish the checkout. The
   built-in storage adapters do this already.
 - Use server callers for admin-only operations and browser callers for checkout/portal redirects.
+- The billing POST routes act for the signed-in caller from its session cookie, so a request a
+  browser sends from another origin is refused with `403`: a page on another site cannot report
+  usage, start a checkout or open the portal for your visitor. Calls with no `Origin` (your own
+  server, a script) are unaffected. If your frontend runs on another origin, list it in
+  `allowedOrigins`, using the same syntax as `serverActions.allowedOrigins`.
 - Test checkout success, cancel, webhook replay, portal return, subscription update, and trial edge cases.

@@ -13,6 +13,9 @@ import {
   WebhookVerificationError as StandardWebhookVerificationError,
 } from "standardwebhooks";
 import {
+  describeIntegrationOriginRejection,
+  resolveIntegrationAllowedOrigins,
+  validateIntegrationRequestOrigin,
   defineIntegration,
   integrationRoute,
   type FarmIntegration,
@@ -265,6 +268,12 @@ export interface AutumnIntegrationInput extends AutumnClientPathOptions {
   secretKey?: string;
   serverURL?: string;
   appBaseUrl?: string;
+  /**
+   * Origins besides the app's own that may call the billing routes, in
+   * `serverActions.allowedOrigins` pattern syntax. The routes act for the signed-in caller from its
+   * cookies, so a request from any other origin is refused.
+   */
+  allowedOrigins?: readonly string[];
   webhooks?: AutumnWebhookConfig;
   billing: AutumnBillingOptions;
   log?: FarmIntegrationLogger;
@@ -1240,6 +1249,10 @@ export function autumn<const TInput extends AutumnIntegrationInput>(
 export function autumn<TInput extends AutumnIntegrationInput>(
   input: TInput,
 ): AutumnIntegrationResult<FarmIntegrationAPI> {
+  const allowedOrigins = resolveIntegrationAllowedOrigins(
+    input.allowedOrigins,
+    "autumn().allowedOrigins",
+  );
   const secretKey = input.secretKey ?? process.env.AUTUMN_SECRET_KEY ?? "";
   const appBaseUrl = input.appBaseUrl ?? process.env.APP_BASE_URL ?? undefined;
   const webhookSecret = process.env.AUTUMN_WEBHOOK_SECRET ?? undefined;
@@ -1714,6 +1727,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(usagePath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnBillingUsageInput;
           if (!body.key) {
             return new Response("A billing usage key is required.", { status: 400 });
@@ -1753,6 +1768,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(meterUsagePath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnBillingMeterUsageInput;
           if (!body.key) {
             return new Response("An Autumn meter key is required.", { status: 400 });
@@ -1853,6 +1870,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(reportUsagePath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnBillingReportUsageInput;
           if (!body.key) {
             return new Response("An Autumn meter key is required.", { status: 400 });
@@ -2046,6 +2065,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(checkPath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnBillingCheckInput;
           if (!body.key) {
             return new Response("An Autumn meter key is required.", { status: 400 });
@@ -2096,6 +2117,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(checkoutPath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnCheckoutInput;
           if (!body.productId) {
             return new Response("A billing productId is required.", { status: 400 });
@@ -2147,6 +2170,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(portalPath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnPortalInput;
           const resolved = await requireOwner(ctx, billing, sdk);
           const returnPath = resolveAppPath(body.returnTo, "Autumn portal returnTo");
@@ -2167,4 +2192,21 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       ...webhookRoutes,
     ],
   });
+}
+
+/**
+ * The billing routes act for the signed-in caller from its session cookie, and a page on another
+ * site can send them a simple POST (a text/plain form, a no-cors fetch) with no preflight. A browser
+ * sends such a POST with its page's Origin, so a foreign origin, or one the browser marks
+ * cross-site, is refused before the body is read. A caller with no Origin at all (a server, a
+ * script) is not a browser on another site and keeps working, as with the email routes.
+ */
+function rejectForeignOrigin(request: Request, allowedOrigins: readonly string[]): Response | null {
+  const origin = validateIntegrationRequestOrigin(request, {
+    allowedOrigins,
+    requireOriginMetadata: false,
+  });
+  return origin.ok
+    ? null
+    : Response.json({ error: describeIntegrationOriginRejection(origin.reason) }, { status: 403 });
 }

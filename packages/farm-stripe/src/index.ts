@@ -1,5 +1,8 @@
 import Stripe from "stripe";
 import {
+  describeIntegrationOriginRejection,
+  resolveIntegrationAllowedOrigins,
+  validateIntegrationRequestOrigin,
   createIntegrationOrm,
   declareSchemaTables,
   defineIntegration,
@@ -293,6 +296,12 @@ export interface StripeIntegrationInput {
   webhooks?: StripeWebhookConfig;
   webhookSecret?: string;
   appBaseUrl?: string;
+  /**
+   * Origins besides the app's own that may call the billing routes, in
+   * `serverActions.allowedOrigins` pattern syntax. The routes act for the signed-in caller from its
+   * cookies, so a request from any other origin is refused.
+   */
+  allowedOrigins?: readonly string[];
   productsPath?: string;
   statusPath?: string;
   currentChargesPath?: string;
@@ -3575,6 +3584,10 @@ export function stripe<const TInput extends StripeIntegrationInput = {}>(
 export function stripe<TInput extends StripeIntegrationInput = {}>(
   input: TInput = {} as TInput,
 ): StripeIntegrationResult<FarmIntegrationAPI> {
+  const allowedOrigins = resolveIntegrationAllowedOrigins(
+    input.allowedOrigins,
+    "stripe().allowedOrigins",
+  );
   const env = resolveEnv(input);
   const rawInstance = input.instance || (env.secretKey ? new Stripe(env.secretKey) : undefined);
   const instance = resolveStripeInstance(input, env);
@@ -4061,6 +4074,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
         {
           responseFormat: "json",
           async handler(request, context) {
+            const rejected = rejectForeignOrigin(request, allowedOrigins);
+            if (rejected) return rejected;
             if (!input.billing) {
               return Response.json(
                 {
@@ -4143,6 +4158,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
       >(meterUsagePath, {
         responseFormat: "json",
         async handler(request, context) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           if (!input.billing) {
             return Response.json(
               {
@@ -4563,6 +4580,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
       >(reportUsagePath, {
         responseFormat: "json",
         async handler(request, context) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           if (!input.billing) {
             return Response.json(
               {
@@ -4954,6 +4973,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
         {
           responseFormat: "json",
           async handler(request, context) {
+            const rejected = rejectForeignOrigin(request, allowedOrigins);
+            if (rejected) return rejected;
             if (!input.billing) {
               return Response.json(
                 {
@@ -5072,6 +5093,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
         {
           responseFormat: "json",
           async handler(request, context) {
+            const rejected = rejectForeignOrigin(request, allowedOrigins);
+            if (rejected) return rejected;
             const body = await readJsonObject(request);
             const productId = typeof body.productId === "string" ? body.productId : "";
             if (!productId) {
@@ -5260,6 +5283,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
       >(upgradePath, {
         responseFormat: "json",
         async handler(request, context) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           if (!input.billing) {
             return Response.json(
               {
@@ -5443,6 +5468,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
       integrationRoute.post<typeof portalPath, StripePortalInput, StripePortalResult>(portalPath, {
         responseFormat: "json",
         async handler(request, context) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = await readJsonObject(request);
           try {
             const requestedCustomerId =
@@ -5628,4 +5655,21 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
     schema: integrationSchema,
     resolveClient: (config) => resolveConfiguredStorageRuntimeClient(config),
   });
+}
+
+/**
+ * The billing routes act for the signed-in caller from its session cookie, and a page on another
+ * site can send them a simple POST (a text/plain form, a no-cors fetch) with no preflight. A browser
+ * sends such a POST with its page's Origin, so a foreign origin, or one the browser marks
+ * cross-site, is refused before the body is read. A caller with no Origin at all (a server, a
+ * script) is not a browser on another site and keeps working, as with the email routes.
+ */
+function rejectForeignOrigin(request: Request, allowedOrigins: readonly string[]): Response | null {
+  const origin = validateIntegrationRequestOrigin(request, {
+    allowedOrigins,
+    requireOriginMetadata: false,
+  });
+  return origin.ok
+    ? null
+    : Response.json({ error: describeIntegrationOriginRejection(origin.reason) }, { status: 403 });
 }
