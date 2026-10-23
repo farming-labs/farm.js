@@ -2036,6 +2036,15 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     filePath: sourcePath,
                   };
                 },
+                // The anonymous check goes through this server, so its guards and
+                // middleware see the page's own path, as in production.
+                renderPage: async (request) =>
+                  fetch(request, {
+                    redirect: "manual",
+                    signal: res.destroyed
+                      ? AbortSignal.abort()
+                      : createFarmNodeRequestAbortSignal(req, res),
+                  }),
               });
           if (markdownSourceResponse) {
             if (await runAppMiddlewareForContentRoute()) return;

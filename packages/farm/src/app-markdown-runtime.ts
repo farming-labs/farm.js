@@ -149,12 +149,28 @@ export function createFarmMarkdownRouteModule(
   };
 }
 
+const publicSourceResponses = new WeakSet<Response>();
+
+/**
+ * Whether a source response is the one the app served to an anonymous visitor,
+ * so the caller's own middleware headers (a refreshed session cookie, say) must
+ * not be added to it.
+ */
+export function isFarmMarkdownPublicSourceResponse(response: Response): boolean {
+  return publicSourceResponses.has(response);
+}
+
 export async function createFarmMarkdownSourceResponse(options: {
   request: Request;
   config?: FarmMdxResolvedConfig;
   resolveSource: (
     pathname: string,
   ) => Promise<FarmMarkdownPageSource | null> | FarmMarkdownPageSource | null;
+  /**
+   * Runs a request through the app's full pipeline, guards included. With it, a
+   * page's source is only served when an anonymous visitor may open the page.
+   */
+  renderPage?: (request: Request) => Response | Promise<Response>;
 }): Promise<Response | null> {
   if (options.request.method !== "GET" && options.request.method !== "HEAD") {
     return null;
@@ -173,6 +189,44 @@ export async function createFarmMarkdownSourceResponse(options: {
   const source = await options.resolveSource(targetPathname);
   if (!source) {
     return null;
+  }
+
+  // `/page.md` is matched by guards as `/page.md`, not `/page`, and a signed-in
+  // caller passes them. Either way the source would be served without the
+  // page's protection, under a public cache. A page has a Markdown source only
+  // when an anonymous visitor may open it, so ask the app as one: its
+  // middleware, integration guards and route rules see the page's own path.
+  const anonymous =
+    !options.request.headers.has("cookie") && !options.request.headers.has("authorization");
+  if (options.renderPage && (hasMarkdownExtension || !anonymous)) {
+    const publicUrl = new URL(url);
+    publicUrl.pathname = targetPathname;
+    const publicHeaders = new Headers(options.request.headers);
+    publicHeaders.delete("cookie");
+    publicHeaders.delete("authorization");
+    publicHeaders.set("accept", "text/markdown");
+    const publicResponse = await options.renderPage(
+      new Request(publicUrl, {
+        method: options.request.method,
+        headers: publicHeaders,
+        signal: options.request.signal,
+      }),
+    );
+    if (publicResponse.headers.get("X-Farm-Markdown-Route") === targetPathname) {
+      publicSourceResponses.add(publicResponse);
+      return publicResponse;
+    }
+    await publicResponse.body?.cancel();
+    // The page is behind a guard. A credentialed caller asking for the page
+    // itself still gets its HTML; `/page.md` has nothing to serve.
+    if (!hasMarkdownExtension) return null;
+    return new Response(`No public Markdown version of ${targetPathname}.\n`, {
+      status: 404,
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "private, no-store",
+      },
+    });
   }
 
   const headers = new Headers({

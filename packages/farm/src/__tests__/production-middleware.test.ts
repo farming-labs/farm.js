@@ -381,6 +381,7 @@ describe("production middleware runtime", () => {
         "## Private notes\n\nURL: https://example.test/dashboard/private-notes.md\n\n---",
       );
       expect(llmsFull).not.toContain("dashboard-private-notes-source");
+      expect(llmsFull).not.toContain("members-only-source");
       expect(llmsFull).not.toContain("rewrite-target");
 
       // A nested llms-full.ts that returns a string is served exactly as written.
@@ -641,12 +642,41 @@ describe("production middleware runtime", () => {
       expect(allowedMarkdownResponse.headers.get("x-farm-middleware")).toBe("yes");
       await expect(allowedMarkdownResponse.text()).resolves.toContain("dashboard-notes-source");
 
+      // A guard matching /members does not match /members.md. The source is
+      // only served when an anonymous visitor may open the page, so a guarded
+      // page has no .md version, with or without a session.
+      for (const headers of [{}, { cookie: "member=1" }] as Record<string, string>[]) {
+        const membersMarkdown = await serverModule.default.fetch(
+          new Request("https://example.test/members.md", { headers }),
+        );
+        expect(membersMarkdown.status).toBe(404);
+        expect(membersMarkdown.headers.get("cache-control")).toBe("private, no-store");
+        expect(await membersMarkdown.text()).not.toContain("members-only-source");
+      }
+      const membersNegotiated = await serverModule.default.fetch(
+        new Request("https://example.test/members", { headers: { accept: "text/markdown" } }),
+      );
+      expect(membersNegotiated.status).toBe(401);
+      expect(await membersNegotiated.text()).not.toContain("members-only-source");
+      // The page itself still renders for a member.
+      const membersPage = await serverModule.default.fetch(
+        new Request("https://example.test/members", { headers: { cookie: "member=1" } }),
+      );
+      expect(membersPage.status).toBe(200);
+      await expect(membersPage.text()).resolves.toContain("members-only-source");
+
       // Routes outside every matcher keep serving their markdown source.
       const publicMarkdownResponse = await serverModule.default.fetch(
         new Request("https://example.test/public-notes.md"),
       );
       expect(publicMarkdownResponse.status).toBe(200);
       await expect(publicMarkdownResponse.text()).resolves.toContain("public-notes-source");
+      // A public page's source is the same for a signed-in caller.
+      const signedInPublicMarkdown = await serverModule.default.fetch(
+        new Request("https://example.test/public-notes.md", { headers: { cookie: "member=1" } }),
+      );
+      expect(signedInPublicMarkdown.status).toBe(200);
+      await expect(signedInPublicMarkdown.text()).resolves.toContain("public-notes-source");
 
       const generatedMetadataResponse = await serverModule.default.fetch(
         new Request("https://example.test/metadata/42?variant=featured"),

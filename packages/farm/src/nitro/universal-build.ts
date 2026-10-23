@@ -5685,8 +5685,8 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
     ? `import { applyMarkdownNegotiationHeaders, createMarkdownMirrorResponse, getFarmMarkdownAlternatePath } from "@farm.js/core/markdown";`
     : "";
   const appMarkdownImport = hasMarkdownPages
-    ? `import { createFarmMarkdownRouteModule, createFarmMarkdownSourceResponse } from "@farm.js/core/internal/app-markdown-runtime";`
-    : "const createFarmMarkdownSourceResponse = null;";
+    ? `import { createFarmMarkdownRouteModule, createFarmMarkdownSourceResponse, isFarmMarkdownPublicSourceResponse } from "@farm.js/core/internal/app-markdown-runtime";`
+    : "const createFarmMarkdownSourceResponse = null;\nconst isFarmMarkdownPublicSourceResponse = null;";
   // Always available: agents can request Markdown on any route, so the
   // Markdown error body is not gated on the app having Markdown page files.
   // Use the response-only module so TSX apps do not bundle the MDX compiler.
@@ -7962,7 +7962,8 @@ async function handleFarmRequestInContext(
     hasMarkdownPages
       ? `
   // The raw markdown source of a page route is the page's content in another
-  // representation; middleware guarding the route must run before serving it.
+  // representation; it is only served for a page an anonymous visitor may open,
+  // which renderPage asks the app with the page's own path.
   const markdownSourceResponse = await createFarmMarkdownSourceResponse?.({
     request: cloneFarmRequestWithContext(request),
     config: farmMdxConfig,
@@ -7970,9 +7971,12 @@ async function handleFarmRequestInContext(
       const match = matchPageRoute(getFarmRoutePathname(targetPathname));
       return match?.route?.markdownSource || null;
     },
+    renderPage: (targetRequest) => handleFarmRequest(targetRequest, adapterContext),
   });
   if (markdownSourceResponse) {
-    return applyProductionMiddlewareHeaders(markdownSourceResponse, middlewareHeaders);
+    return isFarmMarkdownPublicSourceResponse(markdownSourceResponse)
+      ? markdownSourceResponse
+      : applyProductionMiddlewareHeaders(markdownSourceResponse, middlewareHeaders);
   }
   `
       : ""

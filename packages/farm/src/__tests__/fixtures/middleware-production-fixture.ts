@@ -483,6 +483,23 @@ export async function middleware(
     path.join(root, "src", "app", "dashboard", "private-notes", "page.md"),
     `# Private notes\n\ndashboard-private-notes-source\n`,
   );
+  // A top-level page guarded by its own middleware: the matcher covers
+  // /members, which a request for /members.md does not spell.
+  await fs.mkdir(path.join(root, "src", "app", "members"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "src", "app", "members", "middleware.ts"),
+    `
+export async function middleware(request: Request) {
+  if (!request.headers.get("cookie")?.includes("member=1")) {
+    return new Response("members require sign-in", { status: 401 });
+  }
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "members", "page.md"),
+    `# Members\n\nmembers-only-source\n`,
+  );
   await fs.mkdir(path.join(root, "src", "app", "public-notes"), { recursive: true });
   await fs.writeFile(
     path.join(root, "src", "app", "public-notes", "page.md"),

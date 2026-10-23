@@ -574,6 +574,13 @@ export default function Page() { return <main>must not render</main>; }`,
         });
       },
     },
+    {
+      matcher: "/members",
+      handler(ctx, next) {
+        if (ctx.cookies.get("member")) return next();
+        return new Response("members require sign-in", { status: 401 });
+      },
+    },
   ],
 };`,
     );
@@ -591,6 +598,7 @@ export default function Layout({ children }) {
       `# Private notes\n\nprivate-notes-source\n`,
     );
     await writeModule(root, "src/app/open/page.md", `# Open notes\n\nopen-notes-source\n`);
+    await writeModule(root, "src/app/members/page.md", `# Members\n\nmembers-only-source\n`);
 
     const server = await createServer({ root, images: { provider: "none" } });
     servers.add(server);
@@ -604,6 +612,17 @@ export default function Layout({ children }) {
     expect(guardedResponse.status).toBe(401);
     expect(guardedResponse.headers.get("x-markdown-guard")).toBe("yes");
     await expect(guardedResponse.text()).resolves.not.toContain("private-notes-source");
+
+    // The /members matcher does not match /members.md. A guarded page has no
+    // .md version, with or without a session, while the page still renders.
+    for (const headers of [{}, { cookie: "member=1" }] as Record<string, string>[]) {
+      const membersMarkdown = await fetch(`${origin}/members.md`, { headers });
+      expect(membersMarkdown.status).toBe(404);
+      await expect(membersMarkdown.text()).resolves.not.toContain("members-only-source");
+    }
+    const membersPage = await fetch(`${origin}/members`, { headers: { cookie: "member=1" } });
+    expect(membersPage.status).toBe(200);
+    await expect(membersPage.text()).resolves.toContain("members-only-source");
 
     // Routes outside every matcher keep serving their markdown source.
     const openResponse = await fetch(`${origin}/open.md`);
