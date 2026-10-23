@@ -167,7 +167,7 @@ async function defaultHandler({
 
       // Load route module to get metadata
       const routeModule = await rm.loadRouteModule(route.modulePath);
-      const loadingBoundary = rm.getMatchingLoading(targetPathname);
+      const loadingBoundary = rm.getMatchingLoading(targetPathname, route);
       const loadingModule = loadingBoundary
         ? await rm.loadRouteModule(loadingBoundary.modulePath)
         : null;

@@ -13,6 +13,12 @@ import {
 } from "./client-css-href";
 import type { RouteManager, ApplicationMetadataRouteEntry } from "../routing/route-manager";
 import { compareRoutePatternSpecificity } from "../routing/specificity";
+import {
+  getRouteDirectoryDepth,
+  getRouteGroupScope,
+  routeBoundaryCoversDirectory,
+  stripRouteGroups,
+} from "../routing/route-groups";
 import type { APIRouteManager } from "../api/route-manager";
 import { resolveFarmAPIServerBasePath } from "../api/server-path";
 import type { ServerRenderer } from "../server/renderer";
@@ -144,6 +150,8 @@ type NitroOutputPackage = {
 type FarmNitroBuilder = typeof import("nitro/builder");
 type UniversalPageRoute = {
   pattern: string;
+  /** Directory pattern when route groups make it differ from `pattern`. */
+  directory?: string;
   modulePath: string;
   source?: string;
   markdownSourcePath?: string;
@@ -155,6 +163,8 @@ type UniversalBoundaryRoute = {
 type UniversalRouteSlot = {
   name: string;
   ownerPattern: string;
+  /** The owning layout's pattern when route groups make it differ from `ownerPattern`. */
+  ownerDirectory?: string;
   pattern: string;
   modulePath: string;
   containerId: string;
@@ -1099,6 +1109,7 @@ export async function buildUniversal(
         (isFarmMarkdownPageFile(entry.modulePath) ? entry.modulePath : undefined);
       pageRoutes.push({
         pattern,
+        ...(entry.directory ? { directory: entry.directory } : {}),
         modulePath: entry.modulePath,
         ...(markdownSourcePath
           ? {
@@ -1113,6 +1124,7 @@ export async function buildUniversal(
       (entry) => ({
         name: entry.name,
         ownerPattern: entry.ownerPattern,
+        ...(entry.ownerDirectory ? { ownerDirectory: entry.ownerDirectory } : {}),
         pattern: entry.pattern,
         modulePath: entry.modulePath,
         containerId: entry.containerId,
@@ -1477,6 +1489,7 @@ async function buildClient(
   // Detect which pages should hydrate on the client.
   const clientPages: Array<{
     pattern: string;
+    directory?: string;
     modulePath: string;
     relativePath: string;
     pageShouldHydrate: boolean;
@@ -1556,10 +1569,11 @@ async function buildClient(
     }
   });
 
-  const layoutAppliesToRoute = (layoutPattern: string, routePattern: string) =>
-    layoutPattern === "/" ||
-    routePattern === layoutPattern ||
-    routePattern.startsWith(`${layoutPattern}/`);
+  // Pages are compared by directory so a layout inside a route group applies only
+  // to the pages in that group. Docs pages sit in no group.
+  const layoutAppliesToRoute = routeBoundaryCoversDirectory;
+  const routeDirectory = (route: { pattern: string; directory?: string }) =>
+    route.directory ?? route.pattern;
 
   const adapterOwnsDocsRuntime = Boolean(
     isReactRenderer(config.renderer) &&
@@ -1613,8 +1627,8 @@ async function buildClient(
     })),
     [
       ...routePlans.map(({ route, metadata }) => ({
-        pattern: route.pattern,
-        depth: route.pattern.split("/").filter(Boolean).length,
+        pattern: routeDirectory(route),
+        depth: getRouteDirectoryDepth(routeDirectory(route)),
         metadata,
       })),
       ...syntheticDocsPatterns.map((pattern) => ({
@@ -1637,7 +1651,7 @@ async function buildClient(
 
   for (const layout of clientLayouts) {
     const matchesBuiltRoute =
-      pageRoutes.some((route) => layoutAppliesToRoute(layout.pattern, route.pattern)) ||
+      pageRoutes.some((route) => layoutAppliesToRoute(layout.pattern, routeDirectory(route))) ||
       Boolean(adapterDocsEntry && layoutAppliesToRoute(layout.pattern, adapterDocsEntry));
     if (matchesBuiltRoute && layout.suppressedAsyncHydration) {
       logger.warn(`⚠️  ${describeSuppressedAsyncHydration(layout.pattern, layout.fallbackReason)}`);
@@ -1668,7 +1682,7 @@ async function buildClient(
       const applicableClientLayouts = clientLayouts.filter(
         (layout) =>
           (layout.shouldHydrate || layout.hasIsolatedClientBoundaries) &&
-          layoutAppliesToRoute(layout.pattern, route.pattern),
+          layoutAppliesToRoute(layout.pattern, routeDirectory(route)),
       );
       if (metadata.suppressedAsyncHydration) {
         logger.warn(
@@ -2755,6 +2769,7 @@ export function generateUniversalRouterStateProperties(): string {
 function generateClientHydrationEntry(
   clientPages: Array<{
     pattern: string;
+    directory?: string;
     modulePath: string;
     relativePath: string;
     pageShouldHydrate: boolean;
@@ -2842,8 +2857,12 @@ function generateClientHydrationEntry(
     if (!layout.hasIsolatedClientBoundaries) {
       layoutImportStatements.push(`import Layout${index} from "${relativePath}";`);
     }
+    const groupScope = getRouteGroupScope(layout.pattern);
+    const groupFields = groupScope
+      ? `, urlPattern: ${JSON.stringify(stripRouteGroups(layout.pattern))}, groupScope: ${JSON.stringify(groupScope)}`
+      : "";
     layoutRegistrations.push(
-      `  { pattern: ${JSON.stringify(layout.pattern)}, Component: ${layout.hasIsolatedClientBoundaries ? "null" : `Layout${index}`}, shouldHydrate: ${JSON.stringify(layout.shouldHydrate)}, islandStrategy: ${JSON.stringify(layout.islandStrategy)} }`,
+      `  { pattern: ${JSON.stringify(layout.pattern)}${groupFields}, Component: ${layout.hasIsolatedClientBoundaries ? "null" : `Layout${index}`}, shouldHydrate: ${JSON.stringify(layout.shouldHydrate)}, islandStrategy: ${JSON.stringify(layout.islandStrategy)} }`,
     );
   });
 
@@ -3203,7 +3222,9 @@ document.addEventListener("click", function(e) {
       ? `() => import(${JSON.stringify(toImportPath(page.modulePath))}).then((module) => module.default)`
       : "null";
     routeEntries.push(`  {
-    pattern: ${JSON.stringify(page.pattern)},
+    pattern: ${JSON.stringify(page.pattern)},${
+      page.directory ? `\n    directory: ${JSON.stringify(page.directory)},` : ""
+    }
     pageShouldHydrate: ${JSON.stringify(page.pageShouldHydrate)},
     ${page.hasIsolatedClientBoundaries ? "hasIsolatedClientBoundaries: true," : ""}
     islandStrategy: ${JSON.stringify(page.islandStrategy)},
@@ -3317,11 +3338,24 @@ ${layoutRegistrations.join(",\n")}
 function getApplicableLayouts(pathname) {
   const applicable = [];
   const normalizedPath = getFarmRoutePathname(pathname).replace(/\\/$/, '') || '/';
+  let directory;
   
   for (const layout of layoutRoutes) {
-    if (layout.pattern === '/' || isFarmRouteActive(layout.pattern, normalizedPath, { exact: false })) {
-      applicable.push(layout);
+    // Route groups add no URL segment: match the layout's URL, then keep a
+    // grouped layout to the pages inside its group directory.
+    const urlPattern = layout.urlPattern || layout.pattern;
+    if (urlPattern !== '/' && !isFarmRouteActive(urlPattern, normalizedPath, { exact: false })) continue;
+    if (layout.groupScope) {
+      if (directory === undefined) {
+        const matched = matchRoute(pathname);
+        directory = matched ? matched.route.directory || matched.route.pattern : null;
+      }
+      if (
+        typeof directory !== 'string' ||
+        (directory !== layout.groupScope && !directory.startsWith(layout.groupScope + '/'))
+      ) continue;
     }
+    applicable.push(layout);
   }
   
   // Sort by depth (root first)
@@ -5288,10 +5322,6 @@ function isolateFarmRouteServerPage(element) { return element; }`;
     config.renderer,
     Boolean(unsupportedIntegrationProvider),
   );
-  const layoutAppliesToRoute = (layoutPattern: string, routePattern: string) =>
-    layoutPattern === "/" ||
-    routePattern === layoutPattern ||
-    routePattern.startsWith(`${layoutPattern}/`);
   const layoutHydrationPlans = layoutRoutes.map((layout) => ({
     ...layout,
     hydration: getCachedClientModuleHydrationPlan(
@@ -5330,11 +5360,12 @@ function isolateFarmRouteServerPage(element) { return element; }`;
       metadata: layout.hydration,
     })),
     pageRoutes.map((route) => ({
-      pattern: route.pattern,
-      depth: route.pattern.split("/").filter(Boolean).length,
+      // Compared by directory so a grouped layout applies only inside its group.
+      pattern: route.directory ?? route.pattern,
+      depth: getRouteDirectoryDepth(route.directory ?? route.pattern),
       metadata: pageHydrationPlans.get(route.modulePath)!,
     })),
-    layoutAppliesToRoute,
+    routeBoundaryCoversDirectory,
   );
   const providerServerImports = [
     providerServerModules.hasClerkProvider
@@ -5385,7 +5416,9 @@ function isolateFarmRouteServerPage(element) { return element; }`;
     if (isFarmMarkdownPageFile(route.modulePath)) {
       pageRegistrations.push(`
   {
-    pattern: ${JSON.stringify(route.pattern)},
+    pattern: ${JSON.stringify(route.pattern)},${
+      route.directory ? `\n    directory: ${JSON.stringify(route.directory)},` : ""
+    }
     module: createFarmMarkdownRouteModule({
       source: ${JSON.stringify(route.source ?? "")},
       filePath: ${JSON.stringify(toBakedMarkdownSourcePath(config.root, route.modulePath))},
@@ -5412,7 +5445,9 @@ function isolateFarmRouteServerPage(element) { return element; }`;
     const renderingDirective = parseRouteRenderingDirectiveFromDisk(route.modulePath);
     pageRegistrations.push(`
   {
-    pattern: ${JSON.stringify(route.pattern)},
+    pattern: ${JSON.stringify(route.pattern)},${
+      route.directory ? `\n    directory: ${JSON.stringify(route.directory)},` : ""
+    }
     module: ${varName},
     shouldHydrate: ${JSON.stringify(clientMetadata.shouldHydrate)},
     islandStrategy: ${JSON.stringify(clientMetadata.islandStrategy)},${
@@ -5470,7 +5505,9 @@ function isolateFarmRouteServerPage(element) { return element; }`;
     routeSlotRegistrations.push(`
   {
     name: ${JSON.stringify(slot.name)},
-    ownerPattern: ${JSON.stringify(slot.ownerPattern)},
+    ownerPattern: ${JSON.stringify(slot.ownerPattern)},${
+      slot.ownerDirectory ? `\n    ownerDirectory: ${JSON.stringify(slot.ownerDirectory)},` : ""
+    }
     pattern: ${JSON.stringify(slot.pattern)},
     containerId: ${JSON.stringify(slot.containerId)},
     interception: ${JSON.stringify(slot.interception)},
@@ -5488,9 +5525,16 @@ function isolateFarmRouteServerPage(element) { return element; }`;
     errorImports.push(
       `import * as ${varName} from ${toVirtualEntryImportSpecifier(errorRoute.modulePath)};`,
     );
+    // The runtime matches the URL; a boundary inside a route group also needs the
+    // page to sit in that group, and beats its parent at the same URL.
+    const groupScope = getRouteGroupScope(errorRoute.pattern);
     errorRegistrations.push(`
   {
-    pattern: ${JSON.stringify(errorRoute.pattern)},
+    pattern: ${JSON.stringify(stripRouteGroups(errorRoute.pattern))},${
+      groupScope
+        ? `\n    groupScope: ${JSON.stringify(groupScope)},\n    directoryDepth: ${getRouteDirectoryDepth(errorRoute.pattern)},`
+        : ""
+    }
     module: ${varName},
   }`);
   });
@@ -5581,6 +5625,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   createDefaultErrorMarkup,
   createFarmInstrumentationLifecycle,
   createFarmLayoutSelector,
+  isInFarmRouteGroupScope,
   createFarmCacheKey,
   createFarmMetadataRouteResponse,
   createFarmAgentRobots,
@@ -6277,7 +6322,7 @@ for (const route of pageRoutes) {
 // Layout routes bundled at build time (sorted by depth, root first)
 const layoutRoutes = [${layoutRegistrations.join(",")}
 ];
-const selectApplicableLayouts = createFarmLayoutSelector(layoutRoutes);
+const selectApplicableLayouts = createFarmLayoutSelector(layoutRoutes, getMatchedPageDirectory);
 
 const routeSlots = [${routeSlotRegistrations.join(",")}
 ];
@@ -6925,6 +6970,7 @@ ${generateRuntimePathMatcherSource()}
 function getMatchingErrorBoundary(pathname) {
   const pathSegments = splitRuntimePath(pathname);
   let bestMatch = null;
+  let directory;
 
   for (const errorRoute of errorRoutes) {
     const patternDepth = splitRuntimePath(errorRoute.pattern).length;
@@ -6934,9 +6980,18 @@ function getMatchingErrorBoundary(pathname) {
       : "/" + pathSegments.slice(0, patternDepth).join("/");
     const params = matchRuntimePathPattern(errorRoute.pattern, candidatePath);
     if (params === null) continue;
+    if (errorRoute.groupScope) {
+      if (directory === undefined) directory = getMatchedPageDirectory(pathname);
+      if (!isInFarmRouteGroupScope(directory, errorRoute.groupScope)) continue;
+    }
 
-    if (!bestMatch || patternDepth > bestMatch.depth) {
-      bestMatch = { route: errorRoute, params, depth: patternDepth };
+    const directoryDepth = errorRoute.directoryDepth ?? patternDepth;
+    if (
+      !bestMatch ||
+      patternDepth > bestMatch.depth ||
+      (patternDepth === bestMatch.depth && directoryDepth > bestMatch.directoryDepth)
+    ) {
+      bestMatch = { route: errorRoute, params, depth: patternDepth, directoryDepth };
     }
   }
 
@@ -7536,11 +7591,18 @@ function getFarmPluginRequestOptions(request) {
   return { kind: "request", route };
 }
 
+/** The directory of the page a pathname selects, or null; route groups confine layouts to it. */
+function getMatchedPageDirectory(pathname) {
+  const match = matchPageRoute(pathname);
+  return match ? match.route.directory || match.route.pattern : null;
+}
+
 /**
- * Get applicable layouts for a page path (from root to most specific)
+ * Get applicable layouts for a page path (from root to most specific). Pass the
+ * selected page's directory when it is known, or null when no page applies.
  */
-function getApplicableLayouts(pathname) {
-  const applicable = selectApplicableLayouts(pathname);
+function getApplicableLayouts(pathname, directory) {
+  const applicable = selectApplicableLayouts(pathname, directory);
   // buildSSRInMemory already emits these immutable descriptors in stable depth
   // order. Filtering preserves that order, including equal-depth ties.
   return applicable;
@@ -8253,7 +8315,10 @@ async function handleFarmRequestInContext(
       const pageMetadata = route.module.metadata || {};
       
       // Get applicable layouts for this page
-      const applicableLayouts = getApplicableLayouts(routePathname);
+      const applicableLayouts = getApplicableLayouts(
+        routePathname,
+        route.directory || route.pattern,
+      );
       const shouldHydrateLayout = applicableLayouts.some(
         (layout) => layout.shouldHydrate === true,
       );
@@ -8506,7 +8571,7 @@ async function handleFarmRequestInContext(
               if (LayoutComponent) {
                 const slotProps = {};
                 for (const slot of renderedRouteSlots) {
-                  if (slot.ownerPattern !== layout.pattern) continue;
+                  if ((slot.ownerDirectory || slot.ownerPattern) !== layout.pattern) continue;
                   slotProps[slot.name] = React.createElement(
                     "div",
                     {
@@ -9066,7 +9131,8 @@ async function handleFarmRequestInContext(
   try {
     // Wrap 404 page with root layout if available
     let notFoundElement = createFarmNotFoundElement(pathname);
-    const applicableLayouts = getApplicableLayouts("/");
+    // No page matched, so a layout inside a route group cannot apply.
+    const applicableLayouts = getApplicableLayouts("/", null);
     
     // Wrap with layouts (from innermost to outermost)
     for (let i = applicableLayouts.length - 1; i >= 0; i--) {

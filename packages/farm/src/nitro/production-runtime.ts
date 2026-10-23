@@ -1,6 +1,7 @@
 export { _runWithAfterRequest } from "../after";
 export { farmSecretsMatch } from "../secret-compare";
 export { createFarmLayoutSelector } from "../routing/layout-selector";
+export { isInRouteGroupScope as isInFarmRouteGroupScope } from "../routing/route-groups";
 export { mergeRouteRenderingDirectiveConfig } from "../route-rendering";
 export type { FarmServerConfig } from "../server-http";
 export {

@@ -251,6 +251,8 @@ export interface FarmNavigationFragmentLayout {
 export interface FarmNavigationFragmentSlot {
   name: string;
   ownerPattern: string;
+  /** The owning layout's pattern when route groups make it differ from `ownerPattern`. */
+  ownerDirectory?: string;
   containerId: string;
   module: { default?: any };
   props: Record<string, unknown>;
@@ -836,7 +838,9 @@ export class ServerRenderer {
       if (!LayoutComponent) continue;
       const slotProps: Record<string, unknown> = {};
       for (const slot of input.slots || []) {
-        if (slot.ownerPattern !== layout.pattern || !slot.module.default) continue;
+        if ((slot.ownerDirectory ?? slot.ownerPattern) !== layout.pattern || !slot.module.default) {
+          continue;
+        }
         let slotElement = this.rendererRuntime.createElement(slot.module.default, slot.props);
         slotElement = this.wrapClientGraph(slotElement);
         slotProps[slot.name] = this.rendererRuntime.createElement(
@@ -1353,8 +1357,8 @@ export class ServerRenderer {
         params,
       });
 
-      const loadingBoundaryEntry = this.routeManager.getMatchingLoading(pathname);
-      errorBoundaryEntry = this.routeManager.getMatchingError(pathname);
+      const loadingBoundaryEntry = this.routeManager.getMatchingLoading(pathname, route);
+      errorBoundaryEntry = this.routeManager.getMatchingError(pathname, route);
 
       middlewareMap = toMiddlewareMap((req as any).__FARM_MIDDLEWARE_DATA__);
       middlewareContext = toMiddlewareMap((req as any).__FARM_MIDDLEWARE_CONTEXT__);
@@ -1788,7 +1792,7 @@ export class ServerRenderer {
               const LayoutComponent = layoutModule.default;
               const slotProps: Record<string, any> = {};
               for (const slot of renderedRouteSlots) {
-                if (slot.ownerPattern !== layoutEntry.pattern) continue;
+                if ((slot.ownerDirectory ?? slot.ownerPattern) !== layoutEntry.pattern) continue;
 
                 let slotElement = this.rendererRuntime.createElement(
                   slot.module.default,

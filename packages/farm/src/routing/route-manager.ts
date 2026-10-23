@@ -80,6 +80,14 @@ import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { stripFarmBasePath } from "../base-path";
 import { appendFarmRedirectQuery } from "../redirect-query";
 import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
+import {
+  createRouteDirectoryPattern,
+  formatRouteSegment,
+  getRouteDirectoryDepth,
+  getRouteGroupScope,
+  isInRouteGroupScope,
+  routeBoundaryCoversDirectory,
+} from "./route-groups";
 import { getFarmRendererComponentExtensions } from "../renderer";
 import type { ApplicationMetadataRouteKind } from "../metadata-route";
 import {
@@ -94,14 +102,36 @@ interface RouteEntry {
   route: ParsedRoute;
   modulePath: string;
   markdownSourcePath?: string;
+  /**
+   * A page's URL pattern. Layouts, loading and error boundaries use their app
+   * directory instead, route groups included (`/(auth)`), because a group adds
+   * no URL segment and two of them can share one URL.
+   */
   pattern: string;
+  /** A page's directory pattern, set only when it differs from `pattern` (route groups). */
+  directory?: string;
   source?: "file" | "programmatic";
   sourceRoot: string;
+}
+
+/** A layout in nesting order, with the group directory that confines it, if any. */
+interface OrderedLayoutEntry {
+  entry: RouteEntry;
+  groupScope: string | null;
+}
+
+function getRouteEntryDirectory(entry: RouteEntry): string {
+  return entry.directory ?? entry.pattern;
 }
 
 export interface RouteSlotEntry extends RouteEntry {
   name: string;
   ownerPattern: string;
+  /**
+   * The owning layout's pattern when route groups make it differ from
+   * `ownerPattern` (a URL pattern); slots render into the layout with this pattern.
+   */
+  ownerDirectory?: string;
   interception: boolean;
   fallback: boolean;
   containerId: string;
@@ -110,6 +140,8 @@ export interface RouteSlotEntry extends RouteEntry {
 export interface MatchedRouteSlot {
   name: string;
   ownerPattern: string;
+  /** See `RouteSlotEntry.ownerDirectory`. */
+  ownerDirectory?: string;
   containerId: string;
   interception: boolean;
   fallback: boolean;
@@ -120,6 +152,8 @@ export interface MatchedRouteSlot {
 export interface FarmClientRouteManifest {
   routes: Array<{
     pattern: string;
+    /** The page's directory pattern when route groups make it differ from `pattern`. */
+    directory?: string;
     modulePath: string;
     shouldHydrate: boolean;
     isClientComponent: boolean;
@@ -213,7 +247,7 @@ export class RouteManager {
   private routes: Map<string, RouteEntry> = new Map();
   private pageRouteShapes: Map<string, RouteEntry> = new Map();
   private layouts: Map<string, RouteEntry> = new Map();
-  private orderedLayouts: RouteEntry[] = [];
+  private orderedLayouts: OrderedLayoutEntry[] = [];
   private routeSlots: Map<string, RouteSlotEntry> = new Map();
   private routeSlotOwnerSegments: Map<string, ParsedRoute["segments"]> = new Map();
   private loadings: Map<string, RouteEntry> = new Map();
@@ -282,9 +316,14 @@ export class RouteManager {
         compareRouteEntries(left, right),
       ),
     );
-    this.orderedLayouts = Array.from(this.layouts.values()).sort(
-      (left, right) => left.route.segments.length - right.route.segments.length,
-    );
+    // Directory depth, groups included, so `(auth)/layout` nests inside the root
+    // layout it shares a URL with. Without groups this is the URL depth.
+    this.orderedLayouts = Array.from(this.layouts.values())
+      .sort(
+        (left, right) =>
+          getRouteDirectoryDepth(left.pattern) - getRouteDirectoryDepth(right.pattern),
+      )
+      .map((entry) => ({ entry, groupScope: getRouteGroupScope(entry.pattern) }));
     for (const slot of this.routeSlots.values()) {
       if (!this.routeSlotOwnerSegments.has(slot.ownerPattern)) {
         this.routeSlotOwnerSegments.set(
@@ -338,7 +377,7 @@ export class RouteManager {
     }
 
     // Find all matching layouts (from root to specific)
-    const layouts = this.findMatchingLayouts(normalizedPath, pathParts);
+    const layouts = this.findMatchingLayouts(pathParts, matchedRoute);
     const slots = this.findMatchingRouteSlots(normalizedPath, pathParts, options.interceptFrom);
 
     return {
@@ -375,7 +414,7 @@ export class RouteManager {
     }
 
     const inherited = resolveFarmRouteRuleRuntimeConfig(pattern, this.config.routeRules);
-    const layouts = this.findMatchingLayouts(pattern);
+    const layouts = this.findMatchingLayouts(splitRoutePath(pattern), routeEntry);
     const layoutConfigs = [];
 
     for (const layout of layouts) {
@@ -465,17 +504,20 @@ export class RouteManager {
   }
 
   /**
-   * Return the nearest matching loading boundary for a pathname.
+   * Return the nearest matching loading boundary for a pathname. Pass the page
+   * `matchRoute` selected when it is known (`null` for none); otherwise the page is
+   * matched only if a boundary inside a route group needs it.
    */
-  getMatchingLoading(pathname: string): RouteEntry | null {
-    return this.findNearestBoundary(this.toRoutePathname(pathname), this.loadings);
+  getMatchingLoading(pathname: string, route?: RouteEntry | null): RouteEntry | null {
+    return this.findNearestBoundary(this.toRoutePathname(pathname), this.loadings, route);
   }
 
   /**
-   * Return the nearest matching error boundary for a pathname.
+   * Return the nearest matching error boundary for a pathname. `route` works as it
+   * does for `getMatchingLoading`.
    */
-  getMatchingError(pathname: string): RouteEntry | null {
-    return this.findNearestBoundary(this.toRoutePathname(pathname), this.errors);
+  getMatchingError(pathname: string, route?: RouteEntry | null): RouteEntry | null {
+    return this.findNearestBoundary(this.toRoutePathname(pathname), this.errors, route);
   }
 
   matchMetadataImage(pathname: string): {
@@ -710,21 +752,20 @@ export class RouteManager {
       );
     }
 
+    // Pages are compared by directory so a layout inside a route group applies
+    // only to the pages in that group.
     enforceFarmIsolatedHydrationRouteBudget(
       layoutEntries.map(({ entry, metadata }) => ({
         pattern: entry.pattern,
-        depth: entry.route.segments.length,
+        depth: getRouteDirectoryDepth(entry.pattern),
         metadata,
       })),
       routeEntries.map(({ entry, metadata }) => ({
-        pattern: entry.pattern,
-        depth: entry.route.segments.length,
+        pattern: getRouteEntryDirectory(entry),
+        depth: getRouteDirectoryDepth(getRouteEntryDirectory(entry)),
         metadata,
       })),
-      (layoutPattern, routePattern) =>
-        layoutPattern === "/" ||
-        routePattern === layoutPattern ||
-        routePattern.startsWith(`${layoutPattern.replace(/\/$/, "")}/`),
+      routeBoundaryCoversDirectory,
     );
 
     for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
@@ -747,12 +788,11 @@ export class RouteManager {
       const layoutShouldHydrate = layoutEntries.some(
         ({ entry: layout, metadata: layoutMetadata }) =>
           layoutMetadata.shouldHydrate &&
-          (layout.pattern === "/" ||
-            entry.pattern === layout.pattern ||
-            entry.pattern.startsWith(`${layout.pattern.replace(/\/$/, "")}/`)),
+          routeBoundaryCoversDirectory(layout.pattern, getRouteEntryDirectory(entry)),
       );
       return {
         pattern: entry.pattern,
+        ...(entry.directory ? { directory: entry.directory } : {}),
         modulePath: toUrlPath(entry.modulePath),
         shouldHydrate: metadata.shouldHydrate,
         isClientComponent: metadata.isClientComponent,
@@ -940,20 +980,7 @@ export class RouteManager {
   private createRoutePattern(route: ParsedRoute): string {
     if (route.segments.length === 0) return "/";
 
-    return (
-      "/" +
-      route.segments
-        .map((segment) => {
-          if (!segment.isDynamic) return segment.segment;
-
-          if (segment.isCatchAll) {
-            return segment.isOptional ? `[[...${segment.segment}]]` : `[...${segment.segment}]`;
-          }
-
-          return `[${segment.segment}]`;
-        })
-        .join("/")
-    );
+    return "/" + route.segments.map(formatRouteSegment).join("/");
   }
 
   private registerPageRoute(entry: RouteEntry): void {
@@ -1054,6 +1081,7 @@ export class RouteManager {
             }
           : {}),
         pattern,
+        ...getPageDirectoryField(group.route, pattern),
         source: "file",
         sourceRoot: source.root,
       });
@@ -1067,7 +1095,8 @@ export class RouteManager {
       for (const file of files) {
         const route = parseRoutePath(file);
         const modulePath = path.join(appDir, file);
-        const pattern = this.createRoutePattern(route);
+        // Keyed by directory: `(auth)/layout.tsx` and `layout.tsx` share the URL "/".
+        const pattern = createRouteDirectoryPattern(route);
         const existing = target.get(pattern);
         if (existing?.sourceRoot === source.root) {
           throw new Error(
@@ -1091,6 +1120,7 @@ export class RouteManager {
       const modulePath = path.join(appDir, file);
       const pattern = this.createRoutePattern(slot.route);
       const ownerPattern = this.createRoutePattern(slot.ownerRoute);
+      const ownerDirectory = createRouteDirectoryPattern(slot.ownerRoute);
       const key = `${ownerPattern}:${slot.name}:${slot.interception ? "intercept" : "slot"}:${
         slot.fallback ? "default" : pattern
       }`;
@@ -1109,6 +1139,7 @@ export class RouteManager {
         sourceRoot: source.root,
         name: slot.name,
         ownerPattern,
+        ...(ownerDirectory === ownerPattern ? {} : { ownerDirectory }),
         interception: slot.interception,
         fallback: slot.fallback,
         containerId: createRouteSlotContainerId(slot.name, ownerPattern),
@@ -1202,6 +1233,7 @@ export class RouteManager {
             route,
             modulePath,
             pattern,
+            ...getPageDirectoryField(route, pattern),
             source: "programmatic",
             sourceRoot: source.root,
           });
@@ -1209,7 +1241,7 @@ export class RouteManager {
 
         if (definition.kind === "layout") {
           const route = parseProgrammaticRoutePath(definition.path, "layout");
-          const pattern = this.createRoutePattern(route);
+          const pattern = createRouteDirectoryPattern(route);
           const existing = this.layouts.get(pattern);
           if (existing?.sourceRoot === source.root) {
             throw new Error(
@@ -1250,21 +1282,34 @@ export class RouteManager {
   }
 
   /**
-   * Find all layouts that should wrap a given path
+   * Find all layouts that should wrap a given path. A layout inside a route group
+   * wraps only the pages in that group, so it needs the selected page.
    */
   private findMatchingLayouts(
-    pathname: string,
-    pathnameParts = splitRoutePath(pathname),
+    pathnameParts: readonly string[],
+    route: RouteEntry | null,
   ): RouteEntry[] {
     const matchingLayouts: RouteEntry[] = [];
 
-    for (const layoutEntry of this.orderedLayouts) {
-      if (matchRoutePrefixParts(pathnameParts, layoutEntry.route.segments)) {
-        matchingLayouts.push(layoutEntry);
+    for (const { entry, groupScope } of this.orderedLayouts) {
+      if (!matchRoutePrefixParts(pathnameParts, entry.route.segments)) continue;
+      if (
+        groupScope !== null &&
+        !isInRouteGroupScope(route && getRouteEntryDirectory(route), groupScope)
+      ) {
+        continue;
       }
+      matchingLayouts.push(entry);
     }
 
     return matchingLayouts;
+  }
+
+  private matchPageRoute(pathnameParts: readonly string[]): RouteEntry | null {
+    for (const routeEntry of this.routes.values()) {
+      if (matchRouteParts(pathnameParts, routeEntry.route.segments).matches) return routeEntry;
+    }
+    return null;
   }
 
   private findMatchingRouteSlots(
@@ -1313,6 +1358,9 @@ export class RouteManager {
         matches.push({
           name: selected.entry.name,
           ownerPattern: selected.entry.ownerPattern,
+          ...(selected.entry.ownerDirectory
+            ? { ownerDirectory: selected.entry.ownerDirectory }
+            : {}),
           containerId: selected.entry.containerId,
           interception: selected.entry.interception,
           fallback: false,
@@ -1327,6 +1375,7 @@ export class RouteManager {
         matches.push({
           name: fallback.name,
           ownerPattern: fallback.ownerPattern,
+          ...(fallback.ownerDirectory ? { ownerDirectory: fallback.ownerDirectory } : {}),
           containerId: fallback.containerId,
           interception: false,
           fallback: true,
@@ -1356,14 +1405,29 @@ export class RouteManager {
   private findNearestBoundary(
     pathname: string,
     boundaries: Map<string, RouteEntry>,
+    route?: RouteEntry | null,
   ): RouteEntry | null {
     const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/$/, "");
     let bestMatch: RouteEntry | null = null;
+    let page = route;
 
     for (const boundaryEntry of boundaries.values()) {
       if (!matchRoutePrefix(normalizedPath, boundaryEntry.route.segments)) continue;
+      const groupScope = getRouteGroupScope(boundaryEntry.pattern);
+      if (groupScope !== null) {
+        if (page === undefined) page = this.matchPageRoute(splitRoutePath(normalizedPath));
+        if (!isInRouteGroupScope(page && getRouteEntryDirectory(page), groupScope)) continue;
+      }
 
-      if (!bestMatch || boundaryEntry.route.segments.length > bestMatch.route.segments.length) {
+      // The deepest URL wins; a group boundary beats its parent at the same URL.
+      const depth = boundaryEntry.route.segments.length;
+      const bestDepth = bestMatch?.route.segments.length ?? -1;
+      if (
+        !bestMatch ||
+        depth > bestDepth ||
+        (depth === bestDepth &&
+          getRouteDirectoryDepth(boundaryEntry.pattern) > getRouteDirectoryDepth(bestMatch.pattern))
+      ) {
         bestMatch = boundaryEntry;
       }
     }
@@ -1493,6 +1557,12 @@ export class RouteManager {
       return undefined;
     }
   }
+}
+
+/** A page's directory pattern when route groups make it differ from its URL pattern. */
+function getPageDirectoryField(route: ParsedRoute, pattern: string): { directory?: string } {
+  const directory = createRouteDirectoryPattern(route);
+  return directory === pattern ? {} : { directory };
 }
 
 export function interpolateRedirectDestination(
