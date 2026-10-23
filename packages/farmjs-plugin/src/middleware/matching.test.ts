@@ -122,3 +122,19 @@ describe("serializeCookie", () => {
     expect(serializeCookie("a", "b")).toContain("Path=/");
   });
 });
+
+describe("cookie rules shared with core", () => {
+  it("keeps the first duplicate and ignores prototype names", () => {
+    const cookies = parseCookies("session=first; session=second; __proto__=x");
+    expect(cookies.session).toBe("first");
+    expect(Object.getPrototypeOf(cookies)).toBeNull();
+  });
+
+  it("adds the attributes browsers require for SameSite=None and name prefixes", () => {
+    expect(serializeCookie("sid", "v", { sameSite: "none" })).toContain("; Secure");
+    const host = serializeCookie("__Host-sid", "v", { path: "/admin", domain: "example.com" });
+    expect(host).toContain("Path=/;");
+    expect(host).not.toContain("Domain=");
+    expect(host).toContain("; Secure");
+  });
+});

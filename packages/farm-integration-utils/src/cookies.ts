@@ -45,16 +45,29 @@ export function createRequestCookie(
   request: Request,
   options: RequestCookieOptions = {},
 ): string {
-  const requestUrl = new URL(request.url);
-  const secure = options.secure ?? requestUrl.protocol === "https:";
-  const parts = [`${name}=${encodeURIComponent(value)}`, `Path=${options.path || "/"}`];
+  // Browsers silently discard a `__Host-` or `__Secure-` cookie without the
+  // attributes its name requires, and a SameSite=None cookie without Secure.
+  // Both a set and its deletion would then do nothing, so these come from the
+  // name and SameSite rather than from the caller.
+  const hostPrefixed = name.startsWith("__Host-");
+  const secure =
+    hostPrefixed ||
+    name.startsWith("__Secure-") ||
+    options.sameSite === "None" ||
+    (options.secure ?? isHttpsRequest(request));
+  const path = hostPrefixed ? "/" : options.path || "/";
+  const domain = hostPrefixed ? undefined : options.domain;
+  const parts = [`${encodeURIComponent(name)}=${encodeURIComponent(value)}`, `Path=${path}`];
 
   if (options.maxAge != null) {
+    if (!Number.isFinite(options.maxAge)) {
+      throw new TypeError(`Cookie "${name}" maxAge must be a finite number of seconds.`);
+    }
     parts.push(`Max-Age=${Math.max(0, Math.floor(options.maxAge))}`);
   }
 
-  if (options.domain) {
-    parts.push(`Domain=${options.domain}`);
+  if (domain) {
+    parts.push(`Domain=${domain}`);
   }
 
   if (options.expires) {
@@ -83,4 +96,15 @@ export function clearRequestCookie(
     ...options,
     maxAge: 0,
   });
+}
+
+/**
+ * Behind a TLS-terminating proxy the request URL is `http:`. Trusting
+ * `X-Forwarded-Proto: https` here only ever adds `Secure`, and only for the
+ * client that sent it, so it is safe without `trustProxy`.
+ */
+function isHttpsRequest(request: Request): boolean {
+  if (new URL(request.url).protocol === "https:") return true;
+  const forwarded = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  return forwarded?.toLowerCase() === "https";
 }

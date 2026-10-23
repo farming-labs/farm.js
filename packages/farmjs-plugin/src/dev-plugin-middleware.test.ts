@@ -79,7 +79,7 @@ async function setup(order: "middleware-first" | "api-first", handler: Middlewar
 
   async function request(
     url: string,
-    init: { originalUrl?: string; headers?: Record<string, string> } = {},
+    init: { originalUrl?: string; headers?: Record<string, string>; setCookie?: string[] } = {},
   ) {
     const req = Object.assign(Readable.from([Buffer.alloc(0)]), {
       method: "GET",
@@ -93,7 +93,9 @@ async function setup(order: "middleware-first" | "api-first", handler: Middlewar
       destroyed: false,
       headersSent: false,
       setHeader: vi.fn(),
-      getHeader: vi.fn(),
+      getHeader: vi.fn((name: string) =>
+        name.toLowerCase() === "set-cookie" ? init.setCookie : undefined,
+      ),
       removeHeader: vi.fn(),
       writeHead: vi.fn(),
       write: vi.fn(() => true),
@@ -256,4 +258,21 @@ describe("farmMiddleware() with farmApi() on one dev server", () => {
       expect(new URL(dispatched.url).pathname).toBe("/api/users/1");
     });
   }
+});
+
+describe("farmMiddleware() cookie jar", () => {
+  it("deletes with the cookie's path and keeps Set-Cookie written earlier", async () => {
+    const { request } = await setup("middleware-first", async (ctx, next) => {
+      ctx.cookies.delete("sid", { path: "/admin" });
+      await next();
+    });
+
+    const { res } = await request("/api/users/1", { setCookie: ["prior=1; Path=/"] });
+
+    const setCookie = res.setHeader.mock.calls.findLast(
+      ([name]) => String(name).toLowerCase() === "set-cookie",
+    )?.[1] as string[];
+    expect(setCookie[0]).toBe("prior=1; Path=/");
+    expect(setCookie[1]).toMatch(/^sid=; Max-Age=0; .*Path=\/admin/);
+  });
 });
