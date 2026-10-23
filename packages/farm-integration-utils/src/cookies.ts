@@ -46,7 +46,10 @@ export function createRequestCookie(
   options: RequestCookieOptions = {},
 ): string {
   const requestUrl = new URL(request.url);
-  const secure = options.secure ?? requestUrl.protocol === "https:";
+  const sameSite = options.sameSite || "Lax";
+  // Browsers discard a SameSite=None cookie without Secure, so a set and its
+  // deletion would silently do nothing on an http:// request.
+  const secure = sameSite === "None" || (options.secure ?? requestUrl.protocol === "https:");
   const parts = [`${name}=${encodeURIComponent(value)}`, `Path=${options.path || "/"}`];
 
   if (options.maxAge != null) {
@@ -69,7 +72,7 @@ export function createRequestCookie(
     parts.push("Secure");
   }
 
-  parts.push(`SameSite=${options.sameSite || "Lax"}`);
+  parts.push(`SameSite=${sameSite}`);
 
   return parts.join("; ");
 }

@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
+  clearRequestCookie,
+  createRequestCookie,
   getCookieValue,
   parseCookieHeaderList,
   parseCookieHeaderMap,
@@ -130,5 +132,29 @@ describe("integration request-cookie duplicate handling", () => {
 
   it("uses the first value for WorkOS single-cookie lookup", () => {
     expect(getCookieValue(new Headers({ cookie: header }), "sid")).toBe("path-specific");
+  });
+});
+
+describe("integration request-cookie serialization", () => {
+  const httpRequest = new Request("http://localhost:3000/auth/callback");
+
+  it("forces Secure for SameSite=None on an http request", () => {
+    // A browser rejects SameSite=None without Secure, so the cookie would
+    // never be stored in local development.
+    const header = createRequestCookie("state", "value", httpRequest, { sameSite: "None" });
+
+    expect(header).toContain("SameSite=None");
+    expect(header).toContain("Secure");
+    expect(
+      createRequestCookie("state", "value", httpRequest, { sameSite: "None", secure: false }),
+    ).toContain("Secure");
+    expect(clearRequestCookie("state", httpRequest, { sameSite: "None" })).toContain("Secure");
+  });
+
+  it("keeps Lax cookies on http requests without Secure", () => {
+    const header = createRequestCookie("state", "value", httpRequest);
+
+    expect(header).toContain("SameSite=Lax");
+    expect(header).not.toContain("Secure");
   });
 });
