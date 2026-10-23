@@ -85,6 +85,12 @@ import {
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "../docs/fonts";
 import { compileFarmDocsManifest } from "../docs/compiler";
 import { compileFarmDocsAdapterEdgeManifest } from "../docs/adapter";
+import {
+  createFarmDocsModulePreloadPlugin,
+  encodeFarmDocsModulePreloads,
+  FARM_DOCS_MODULE_PRELOADS_PLACEHOLDER,
+  readFarmDocsModulePreloads,
+} from "../docs/module-preloads";
 import type { FarmDocsCompiledManifest } from "../docs/precompiled-runtime";
 import {
   createFarmRouteRuntimeManifest,
@@ -1886,6 +1892,20 @@ async function buildClient(
       },
       plugins: [
         createFarmThemeCssPlugin(config.theme, config.basePath),
+        ...(adapterOwnsDocsRuntime
+          ? [
+              createFarmDocsModulePreloadPlugin({
+                root,
+                buildDir: path.dirname(outputDir),
+                importer: clientEntryPath,
+                entryName: "farm-client",
+                modules: [
+                  config.docs.adapter!.react!,
+                  getFarmDocsAdapterConfigModule(config.docs),
+                ].filter((specifier): specifier is string => Boolean(specifier)),
+              }),
+            ]
+          : []),
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
         ...(rendererVitePlugins as any[]),
         ...(config.vite.plugins || []),
@@ -6186,6 +6206,25 @@ const farmDocsPrecompiledRuntime = ${
       ? `createFarmDocsPrecompiledRuntime(${JSON.stringify(farmDocsPrecompiledManifest)})`
       : "null"
   };
+// Filled in from the client build once it has finished (see buildNitroUniversal).
+const farmDocsModulePreloads = (() => {
+  try {
+    return JSON.parse("${FARM_DOCS_MODULE_PRELOADS_PLACEHOLDER}");
+  } catch {
+    return null;
+  }
+})();
+const farmDocsModulePreloadsFor = farmDocsModulePreloads
+  ? (page) => {
+      const own =
+        page && Object.prototype.hasOwnProperty.call(farmDocsModulePreloads.pages, page.sourcePath)
+          ? farmDocsModulePreloads.pages[page.sourcePath]
+          : [];
+      return [...farmDocsModulePreloads.runtime, ...own].map(
+        (index) => "/" + farmDocsModulePreloads.files[index],
+      );
+    }
+  : undefined;
 const farmDocsHandler = ${
     config.docs?.enabled
       ? hasPrecompiledDocs
@@ -6205,6 +6244,9 @@ const farmDocsHandler = ${
   // A production build's content cannot change, so the adapter reads its
   // navigation once instead of scanning the content directory per request.
   immutableContent: true,
+  // List the chunks a page needs, so the browser fetches them alongside the
+  // client entry instead of discovering them one import at a time.
+  resolveModulePreloads: farmDocsModulePreloadsFor,
   clientEntry: "/__farm_client_js_src__",
   // Font CSS is merged into the client stylesheet; farm-fonts.css only exists when the
   // app has fonts, so linking it separately 404'd for apps without them.
@@ -9665,12 +9707,19 @@ async function buildNitroUniversal(
   // content hash of the bytes browsers will actually receive. Substituting in
   // memory, before any consumer, covers the disk write below as well as the
   // prebuilt-SSR copies and prerendering that reuse this bundle directly.
-  const [clientCssHref, clientJsSrc] = await Promise.all([
+  const [clientCssHref, clientJsSrc, docsModulePreloads] = await Promise.all([
     resolveHashedClientCssHref(clientOutputDir),
     resolveHashedClientJsSrc(clientOutputDir),
+    readFarmDocsModulePreloads(path.join(root, distDir)),
   ]);
+  const encodedDocsModulePreloads = encodeFarmDocsModulePreloads(docsModulePreloads);
   for (const output of Object.values(ssrBundle)) {
     if (output.type !== "chunk") continue;
+    if (output.code.includes(FARM_DOCS_MODULE_PRELOADS_PLACEHOLDER)) {
+      output.code = output.code
+        .split(FARM_DOCS_MODULE_PRELOADS_PLACEHOLDER)
+        .join(encodedDocsModulePreloads);
+    }
     // split/join rather than replaceAll: the package's lib target predates
     // ES2021, and a fixed token needs no regex escaping either way.
     if (output.code.includes(FARM_CLIENT_CSS_HREF_PLACEHOLDER)) {
