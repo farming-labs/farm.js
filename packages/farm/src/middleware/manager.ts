@@ -41,10 +41,11 @@ import type { FarmServerConfig, ResolvedFarmServerConfig } from "../server-http"
 import { resolveFarmRequestURL } from "../server/request";
 import {
   compileMiddlewareConfig,
-  matchesMiddlewareConfig,
   compileMiddlewareRoute,
-  matchesMiddlewareRoute,
+  matchesMiddlewareConfigAt,
+  matchesMiddlewareRouteAt,
 } from "./matcher";
+import { createFarmAPIMiddlewarePathnames } from "../api/server-path";
 
 export interface DiscoveredMiddleware {
   path: string;
@@ -69,6 +70,7 @@ export class MiddlewareManager {
   private appDirs: string[];
   private i18n?: ResolvedFarmI18nConfig;
   private server?: FarmServerConfig | ResolvedFarmServerConfig;
+  private toMiddlewarePathnames: (pathname: string) => readonly string[];
 
   constructor(
     appDir: string | readonly string[],
@@ -76,11 +78,14 @@ export class MiddlewareManager {
     config?: FarmMiddlewareConfig,
     i18n?: ResolvedFarmI18nConfig,
     server?: FarmServerConfig | ResolvedFarmServerConfig,
+    /** The app's public API path (`api.basePath`); `/api` middleware guards it too. */
+    apiBasePath?: string,
   ) {
     this.appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
     this.viteServer = viteServer;
     this.i18n = i18n;
     this.server = server;
+    this.toMiddlewarePathnames = createFarmAPIMiddlewarePathnames(apiBasePath);
     this.configure(config);
   }
 
@@ -171,7 +176,8 @@ export class MiddlewareManager {
     // Recursively check subdirectories
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
-      if (entry.isDirectory() && !entry.name.startsWith(".") && !entry.name.startsWith("_")) {
+      // `_private` folders still route their pages, so their middleware has to guard them.
+      if (entry.isDirectory() && !entry.name.startsWith(".")) {
         await this.discoverInDirectory(
           path.join(dir, entry.name),
           appendMiddlewareRoutePath(routePath, entry.name),
@@ -242,6 +248,7 @@ export class MiddlewareManager {
         ? stripFarmLocaleFromPathname(value, this.i18n)
         : stripFarmBasePath(value, this.i18n?.basePath ?? "/");
     const routePathname = toRoutePathname(pathname);
+    const toMiddlewarePathnames = this.toMiddlewarePathnames;
     const method = req.method || "GET";
     const startTime = Date.now();
 
@@ -265,7 +272,10 @@ export class MiddlewareManager {
     }> = [
       ...this.configMiddleware.map((mw) => ({ mw, routeMatch: { matched: true } })),
       ...this.middleware
-        .map((mw) => ({ mw, routeMatch: matchesMiddlewareRoute(routePathname, mw) }))
+        .map((mw) => ({
+          mw,
+          routeMatch: matchesMiddlewareRouteAt(toMiddlewarePathnames(routePathname), mw),
+        }))
         .filter((entry) => entry.routeMatch.matched),
     ];
 
@@ -301,7 +311,8 @@ export class MiddlewareManager {
         );
         if (rewrittenPathname === passPathname) return;
         passPathname = rewrittenPathname;
-        if (globalConfig && !matchesMiddlewareConfig(passPathname, globalConfig, ctx).matched) {
+        const passPathnames = toMiddlewarePathnames(passPathname);
+        if (globalConfig && !matchesMiddlewareConfigAt(passPathnames, globalConfig, ctx).matched) {
           return;
         }
         pass = allMiddleware
@@ -309,7 +320,9 @@ export class MiddlewareManager {
           .map((mw) => ({
             mw,
             routeMatch:
-              mw.source === "config" ? { matched: true } : matchesMiddlewareRoute(passPathname, mw),
+              mw.source === "config"
+                ? { matched: true }
+                : matchesMiddlewareRouteAt(passPathnames, mw),
           }))
           .filter((entry) => entry.routeMatch.matched);
       }
@@ -444,7 +457,7 @@ export class MiddlewareManager {
     config: MiddlewareConfig,
     ctx: MiddlewareContext,
   ): { matched: boolean; params?: Record<string, string> } {
-    return matchesMiddlewareConfig(pathname, config, ctx);
+    return matchesMiddlewareConfigAt(this.toMiddlewarePathnames(pathname), config, ctx);
   }
 
   /**

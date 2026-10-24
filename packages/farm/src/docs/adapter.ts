@@ -3,6 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { DocsConfig } from "@farming-labs/docs";
 import type { FarmLayoutFonts } from "../font";
+import type { FarmMCPServerRegistration } from "../mcp-catalog";
 import { getFarmDocsAdapterConfigModule } from "./adapter-client";
 import { resolveFarmDocsContentDir } from "./handler";
 import type { FarmDocsCompiledManifest } from "./precompiled-runtime";
@@ -19,6 +20,7 @@ interface FarmDocsAdapterServerModule {
         pathname: string,
       ) => FarmLayoutFonts | undefined | Promise<FarmLayoutFonts | undefined>;
       loadReactModule?: () => Promise<any>;
+      registerMCPServer?: (server: FarmMCPServerRegistration) => () => void;
     },
   ) => (request: Request) => Promise<Response | null>;
 }
@@ -44,6 +46,11 @@ export interface FarmDocsAdapterHandlerOptions {
     pathname: string,
   ) => FarmLayoutFonts | undefined | Promise<FarmLayoutFonts | undefined>;
   loadModule: (specifier: string) => Promise<any>;
+  /**
+   * Lists the adapter's MCP endpoint in the app's AI catalog. The adapter knows its
+   * route, name, and version; older adapters ignore it and older hosts do not pass it.
+   */
+  registerMCPServer?: (server: FarmMCPServerRegistration) => () => void;
 }
 
 export interface FarmDocsAdapterEdgeCompileOptions {
@@ -161,8 +168,8 @@ export async function compileFarmDocsAdapterEdgeManifest(
  * Load a documentation runtime through the versioned adapter descriptor.
  *
  * Core deliberately knows nothing about the adapter's DOM or theme. It only
- * supplies host assets and Vite's module loader; the adapter returns the final
- * Web Request handler.
+ * supplies host assets, Vite's module loader, and a way to list the adapter's MCP
+ * endpoint in the AI catalog; the adapter returns the final Web Request handler.
  */
 export async function createFarmDocsAdapterHandler(
   docs: FarmDocsResolvedConfig,
@@ -196,5 +203,6 @@ export async function createFarmDocsAdapterHandler(
     stylesheets: getFarmDocsAdapterStylesheets(options),
     resolveLayoutFonts: options.resolveLayoutFonts,
     loadReactModule: () => options.loadModule(docs.adapter.react!),
+    ...(options.registerMCPServer ? { registerMCPServer: options.registerMCPServer } : {}),
   });
 }

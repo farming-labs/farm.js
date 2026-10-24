@@ -59,7 +59,44 @@ export interface Auth0IntegrationInput {
   audience?: string;
   scopes?: string[];
   tokenEndpointAuthMethod?: "auto" | "client_secret_basic" | "client_secret_post" | "none";
+  /**
+   * Session cookie name. A `__Host-` name (`__Host-farm_auth0_session`) cannot be set or
+   * shadowed by a sibling subdomain; Farm adds the `Secure` and `Path=/` it requires.
+   * @default "farm_auth0_session"
+   */
+  cookieName?: string;
+  /**
+   * Login state cookie name, held between the redirect to Auth0 and the callback.
+   * @default "farm_auth0_state"
+   */
+  stateCookieName?: string;
+  /**
+   * Longest a sign-in lasts, in seconds, when shorter than the Auth0 token lifetime. The session
+   * is a signed cookie, not a server record, so sign-out cannot invalidate a copy of it: a short
+   * max age bounds how long a copied cookie stays usable.
+   * @default the token's `expires_in`
+   */
+  sessionMaxAge?: number;
+  /**
+   * Called for every session Farm reads (profile route, protected routes). Return `true` to treat
+   * it as signed out, for example after `onSignOut` recorded its `sessionId` in your store.
+   * Sessions issued before this option existed have no `sessionId`.
+   */
+  isSessionRevoked?(session: Auth0Session, request: Request): boolean | Promise<boolean>;
+  /** Called on sign-out with the session being ended, so the app can revoke its `sessionId`. */
+  onSignOut?(session: Auth0Session, request: Request): void | Promise<void>;
   log?: FarmIntegrationLogger;
+}
+
+/** A signed-in Auth0 session as Farm stores it in the session cookie. */
+export interface Auth0Session {
+  user: Record<string, unknown>;
+  /** Epoch milliseconds after which the session is no longer accepted. */
+  expiresAt: number;
+  /** Random id of this sign-in; absent on sessions issued by older Farm releases. */
+  sessionId?: string;
+  /** Epoch milliseconds the session was issued; absent on older sessions. */
+  issuedAt?: number;
 }
 
 interface ResolvedAuth0Env {
@@ -76,10 +113,7 @@ interface Auth0StatePayload {
   codeVerifier: string;
 }
 
-interface Auth0SessionPayload {
-  user: Record<string, unknown>;
-  expiresAt: number;
-}
+type Auth0SessionPayload = Auth0Session;
 
 interface Auth0RedirectResponse extends Auth0RedirectResult {
   headers: Headers;
@@ -343,6 +377,17 @@ async function exchangeCode(
   throw new Error(lastFailure);
 }
 
+function resolveCookieName(value: string | undefined, fallback: string, option: string): string {
+  if (value === undefined) return fallback;
+  // RFC 6265 token: no separators, whitespace, or control characters.
+  if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(value)) {
+    throw new Error(
+      `Auth0 integration ${option} must be a valid cookie name, got ${JSON.stringify(value)}.`,
+    );
+  }
+  return value;
+}
+
 export function auth0(input: Auth0IntegrationInput = {}) {
   if (input.instance) {
     return defineIntegration({
@@ -372,8 +417,37 @@ export function auth0(input: Auth0IntegrationInput = {}) {
     input.allowedOrigins,
     "auth0.allowedOrigins",
   );
-  const stateCookieName = "farm_auth0_state";
-  const sessionCookieName = "farm_auth0_session";
+  const stateCookieName = resolveCookieName(
+    input.stateCookieName,
+    "farm_auth0_state",
+    "stateCookieName",
+  );
+  const sessionCookieName = resolveCookieName(input.cookieName, "farm_auth0_session", "cookieName");
+  if (stateCookieName === sessionCookieName) {
+    throw new Error("Auth0 integration cookieName and stateCookieName must differ.");
+  }
+  const sessionMaxAge = input.sessionMaxAge;
+  if (
+    sessionMaxAge !== undefined &&
+    (typeof sessionMaxAge !== "number" || !Number.isFinite(sessionMaxAge) || sessionMaxAge < 60)
+  ) {
+    throw new Error("Auth0 integration sessionMaxAge must be a number of seconds, at least 60.");
+  }
+
+  /** The session cookie, unless it expired, outlived `sessionMaxAge`, or the app revoked it. */
+  async function readSession(request: Request): Promise<Auth0SessionPayload | null> {
+    const session = getSession(request, sessionCookieName, secret);
+    if (!session) return null;
+    if (
+      sessionMaxAge !== undefined &&
+      typeof session.issuedAt === "number" &&
+      session.issuedAt + sessionMaxAge * 1000 <= Date.now()
+    ) {
+      return null;
+    }
+    if (input.isSessionRevoked && (await input.isSessionRevoked(session, request))) return null;
+    return session;
+  }
   const callbackSettings = resolveCallbackSettings(
     {
       callbackUrl: input.callbackUrl,
@@ -547,14 +621,22 @@ export function auth0(input: Auth0IntegrationInput = {}) {
               tokenResponse.access_token,
               tokenResponse.id_token,
             );
-            const expiresAt = Date.now() + Math.max(tokenResponse.expires_in || 3600, 60) * 1000;
+            const issuedAt = Date.now();
+            const tokenLifetime = Math.max(tokenResponse.expires_in || 3600, 60);
+            const expiresAt =
+              issuedAt + Math.min(tokenLifetime, sessionMaxAge ?? tokenLifetime) * 1000;
+            const sessionId = randomBytes(16).toString("hex");
 
             const headers = new Headers();
             headers.append(
               "set-cookie",
               createRequestCookie(
                 sessionCookieName,
-                signValue({ user, expiresAt } satisfies Auth0SessionPayload, secret, "session"),
+                signValue(
+                  { user, expiresAt, sessionId, issuedAt } satisfies Auth0SessionPayload,
+                  secret,
+                  "session",
+                ),
                 request,
                 {
                   maxAge: Math.max((expiresAt - Date.now()) / 1000, 60),
@@ -576,7 +658,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
       }),
       integrationRoute.get<typeof logoutPath, Auth0RedirectResult>(logoutPath, {
         responseFormat: "json",
-        handler(request: Request) {
+        async handler(request: Request) {
           // Sign-out is a GET, so it is also reachable as a plain link or a
           // bookmark with no origin metadata at all. Only a request the browser
           // labelled cross-site is refused.
@@ -603,6 +685,9 @@ export function auth0(input: Auth0IntegrationInput = {}) {
           redirectTo.searchParams.set("client_id", clientId);
           redirectTo.searchParams.set("returnTo", origin);
 
+          const endedSession = getSession(request, sessionCookieName, secret);
+          if (endedSession) await input.onSignOut?.(endedSession, request);
+
           const headers = new Headers();
           headers.append("set-cookie", clearRequestCookie(sessionCookieName, request));
 
@@ -627,8 +712,8 @@ export function auth0(input: Auth0IntegrationInput = {}) {
       }),
       integrationRoute.get<typeof profilePath, Auth0ProfileResult>(profilePath, {
         responseFormat: "json",
-        handler(request: Request) {
-          const session = getSession(request, sessionCookieName, secret);
+        async handler(request: Request) {
+          const session = await readSession(request);
 
           if (!session) {
             return Response.json(
@@ -651,8 +736,8 @@ export function auth0(input: Auth0IntegrationInput = {}) {
         ? [
             {
               matcher: protectedMatchers,
-              handler(request: Request) {
-                const session = getSession(request, sessionCookieName, secret);
+              async handler(request: Request) {
+                const session = await readSession(request);
                 if (session) {
                   return;
                 }

@@ -137,6 +137,31 @@ const user = result.data?.user;
 
 The session cookie contains the fetched Auth0 profile and an expiry derived from the token response. The integration does not persist refresh tokens, so an expired local session requires a new login.
 
+## Session lifetime and sign-out
+
+The session is a signed cookie, not a server-side record. Sign-out clears the cookie in that
+browser, but a copy of it (from another device, a log, or malware) keeps working until it expires,
+which by default is the token lifetime Auth0 returns (often 24 hours). Two options narrow that:
+
+```ts
+const revoked = new Set<string>(); // use a shared store (Redis, your database) in production
+
+auth0({
+  // Sign-ins last at most an hour, whatever the token lifetime.
+  sessionMaxAge: 60 * 60,
+  // Record the ending session on sign-out, and reject it on every later read.
+  onSignOut(session) {
+    if (session.sessionId) revoked.add(session.sessionId);
+  },
+  isSessionRevoked(session) {
+    return session.sessionId !== undefined && revoked.has(session.sessionId);
+  },
+});
+```
+
+`isSessionRevoked` runs for the profile route and protected routes. Sessions issued before these
+options existed carry no `sessionId` or issue time; they end at their original expiry.
+
 ## Protect app routes
 
 ```ts
@@ -170,6 +195,29 @@ Only root-relative `returnTo` values are accepted. Invalid or external values fa
 | `tokenEndpointAuthMethod` | `auto`                 | `client_secret_basic`, `client_secret_post`, `none`, or automatic selection. |
 | `protectedRoutes`         | None                   | One matcher or a list of matchers.                                           |
 | `allowedOrigins`          | App origin only        | Extra origins allowed to drive sign-out.                                     |
+| `cookieName`              | `farm_auth0_session`   | Session cookie name.                                                         |
+| `stateCookieName`         | `farm_auth0_state`     | Login state cookie name.                                                     |
+| `sessionMaxAge`           | Token lifetime         | Longest a sign-in lasts, in seconds.                                         |
+| `isSessionRevoked`        | None                   | Reject a session the app revoked.                                            |
+| `onSignOut`               | None                   | Called with the session being ended on sign-out.                             |
+
+## Cookie names
+
+A sibling subdomain (`evil.example.com` next to `app.example.com`) can set a cookie for
+`.example.com` with a longer `Path`. Browsers send that cookie first, so it would pick which session
+or login state the app reads. A `__Host-` name cannot be set from another host, so use one in
+production:
+
+```ts
+auth0({
+  cookieName: "__Host-farm_auth0_session",
+  stateCookieName: "__Host-farm_auth0_state",
+});
+```
+
+Farm adds the `Secure`, `Path=/`, and no-`Domain` attributes the prefix requires. Browsers accept
+such cookies over https and from `http://localhost`; on another plain-http dev host keep the
+defaults. Renaming the session cookie signs existing users out once.
 
 ## Cross-site request protection
 

@@ -57,7 +57,7 @@ export const FARM_INTERNAL_READ_HEADER = "x-farm-internal-read";
  */
 export function emitFarmAgentRead(
   request: Request,
-  surface: "markdown" | "llms" | "llms-full" | "api-catalog",
+  surface: "markdown" | "llms" | "llms-full" | "api-catalog" | "ai-catalog" | "mcp-server-card",
   status: number,
   view?: "outline" | "section" | "parts" | "actions",
 ): void {

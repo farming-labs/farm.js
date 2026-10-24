@@ -219,11 +219,39 @@
 .agent-check-meter span[data-on] {
   background: #ededed;
 }
+/* Two groups: what to do next (bordered buttons), then quiet report utilities. */
 .agent-check-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px 32px;
   margin-top: 32px;
+}
+.agent-check-action-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.agent-check-actions .agent-check-action-group[data-quiet] {
+  gap: 4px 20px;
+}
+.agent-check-actions [data-quiet] :is(a, button) {
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgb(255 255 255 / 0.56);
+}
+@media (max-width: 639px) {
+  .agent-check-action-group:not([data-quiet]) {
+    display: grid;
+    width: 100%;
+  }
+  .agent-check-action-group:not([data-quiet]) :is(a, button) {
+    justify-content: center;
+  }
 }
 .agent-check-actions :is(a, button) {
   display: inline-flex;
@@ -238,6 +266,18 @@
   font-size: 10px;
   text-transform: uppercase;
   cursor: pointer;
+}
+/* The next step comes first and reads like the site's primary button. */
+.agent-check-actions .agent-check-primary {
+  gap: 10px;
+  border-color: #fff;
+  background: #fff;
+  color: #000;
+}
+.agent-check-primary code {
+  font-family: inherit;
+  text-transform: none;
+  opacity: 0.6;
 }
 .agent-check-action-status {
   align-self: center;
@@ -254,6 +294,13 @@
 @media (hover: hover) and (pointer: fine) {
   .agent-check-actions :is(a, button):hover {
     border-color: rgb(255 255 255 / 0.42);
+  }
+  .agent-check-actions [data-quiet] :is(a, button):hover {
+    color: #ededed;
+  }
+  .agent-check-actions .agent-check-primary:hover {
+    border-color: #fff;
+    background: rgb(255 255 255 / 0.88);
   }
 }
 

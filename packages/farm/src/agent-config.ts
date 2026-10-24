@@ -1,8 +1,9 @@
 /**
  * Agent-readiness configuration: primitives that make a Farm site easier for AI agents and
  * crawlers to discover, resolve, and use. The ones that only describe the site agents can
- * already read (JSON-LD, llms.txt) are on by default; the ones that expose more
- * (crawler rules, an API catalog) are opt-in. Each one turns off with `false`.
+ * already read (JSON-LD, llms.txt, and the AI catalog of MCP servers the app already
+ * serves) are on by default; the ones that expose more (crawler rules, an API catalog)
+ * are opt-in. Each one turns off with `false`.
  */
 import {
   resolveFarmAgentCrawlers,
@@ -87,6 +88,17 @@ export interface FarmAgentUserConfig {
    * @default false
    */
   apiCatalog?: boolean;
+  /**
+   * Advertise the app's MCP servers (the top-level `mcp` config, `apiMcp()`, and
+   * endpoints listed with `registerFarmMCPServer`, such as the docs engine's):
+   * `/.well-known/ai-catalog.json` (and `/.well-known/ard.json`) lists a server
+   * card for each, served at `<endpoint>/server-card`, and the generated
+   * `/llms.txt` names each endpoint. Nothing is served when the app has no MCP
+   * server. `false` turns all of it off.
+   *
+   * @default true
+   */
+  aiCatalog?: boolean;
 }
 
 export interface ResolvedFarmAgentConfig {
@@ -95,6 +107,7 @@ export interface ResolvedFarmAgentConfig {
   llmsTxt: ResolvedFarmLlmsTxtConfig;
   crawlers: ResolvedFarmAgentCrawlers;
   apiCatalog: boolean;
+  aiCatalog: boolean;
 }
 
 /** What an app gets without an `agent` block: the site described, nothing more exposed. */
@@ -119,13 +132,14 @@ export function resolveFarmAgentConfig(
     // llms-full.txt renders every listed page, so it stays opt-in.
     llmsTxt: resolveFarmLlmsTxtConfig(input?.llmsTxt ?? (context.docs ? false : { full: false })),
     crawlers: resolveFarmAgentCrawlers(input?.crawlers),
-    apiCatalog: resolveFarmApiCatalogEnabled(input?.apiCatalog),
+    apiCatalog: resolveFarmAgentBoolean(input?.apiCatalog, "apiCatalog", false),
+    aiCatalog: resolveFarmAgentBoolean(input?.aiCatalog, "aiCatalog", true),
   };
 }
 
-function resolveFarmApiCatalogEnabled(input: unknown): boolean {
-  if (input === undefined) return false;
-  if (typeof input !== "boolean") throw new TypeError("agent.apiCatalog must be a boolean.");
+function resolveFarmAgentBoolean(input: unknown, key: string, fallback: boolean): boolean {
+  if (input === undefined) return fallback;
+  if (typeof input !== "boolean") throw new TypeError(`agent.${key} must be a boolean.`);
   return input;
 }
 

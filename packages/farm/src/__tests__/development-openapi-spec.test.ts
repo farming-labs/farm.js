@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ViteDevServer } from "vite";
+import { _publishFarmMCPCatalog } from "../mcp-catalog";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
 
@@ -123,4 +124,48 @@ describe("development OpenAPI spec route", () => {
     const origin = await startApp();
     expect((await fetch(`${origin}/.well-known/api-catalog`)).status).toBe(404);
   }, 30_000);
+
+  it("lists the app's MCP servers at /.well-known/ai-catalog.json and in llms.txt", async () => {
+    // What @farm.js/mcp does when it mounts its endpoint; the dev server runs in this process.
+    const unpublish = _publishFarmMCPCatalog(
+      { name: "projects", version: "1.2.0", path: "/api/mcp", title: "Projects" },
+      [],
+    );
+    try {
+      const origin = await startApp(`basePath: "/app",`);
+
+      const catalog = await fetch(`${origin}/app/.well-known/ai-catalog.json`);
+      expect(catalog.status).toBe(200);
+      expect(catalog.headers.get("content-type")).toBe(
+        "application/ai-catalog+json; charset=utf-8",
+      );
+      const { entries } = await catalog.json();
+      expect(entries).toEqual([
+        expect.objectContaining({
+          identifier: "urn:air:localhost:mcp:projects",
+          url: `${origin}/api/mcp/server-card`,
+        }),
+      ]);
+
+      const card = await fetch(entries[0].url);
+      expect(card.status).toBe(200);
+      expect(await card.json()).toMatchObject({
+        name: "localhost/projects",
+        version: "1.2.0",
+        remotes: [{ type: "streamable-http", url: `${origin}/api/mcp` }],
+      });
+
+      const plain = await startApp();
+      const llms = await (await fetch(`${plain}/llms.txt`)).text();
+      expect(llms).toContain("## MCP");
+      expect(llms).toContain(`- [Projects](${plain}/api/mcp)`);
+
+      const optedOut = await startApp(`agent: { aiCatalog: false },`);
+      expect((await fetch(`${optedOut}/.well-known/ai-catalog.json`)).status).toBe(404);
+      expect((await fetch(`${optedOut}/api/mcp/server-card`)).status).toBe(404);
+      expect(await (await fetch(`${optedOut}/llms.txt`)).text()).not.toContain("## MCP");
+    } finally {
+      unpublish();
+    }
+  }, 60_000);
 });

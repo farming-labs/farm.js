@@ -36,6 +36,7 @@
   },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "build:runtime": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc --noCheck",
     "dev": "tsc --watch",
     "type-check": "tsc --noEmit",
     "test": "vitest run"

@@ -247,8 +247,9 @@ See [MCP tool observability](/docs/plugins/mcp#observe-tool-executions) for payl
 ## Agent reads
 
 `agent.read` fires each time an agent surface answers: a Markdown mirror or `page.md` (including
-`?outline`, `?section`, `?max_tokens` parts, and `?actions`), `/llms.txt` or `/llms-full.txt`, and
-`/.well-known/api-catalog`. It carries the path served, never the query string, the status, and the
+`?outline`, `?section`, `?max_tokens` parts, and `?actions`), `/llms.txt` or `/llms-full.txt`,
+`/.well-known/api-catalog`, `/.well-known/ai-catalog.json` or `/.well-known/ard.json`
+(`ai-catalog`), and an MCP server card (`mcp-server-card`). It carries the path served, never the query string, the status, and the
 agent the request's User-Agent declares:
 
 ```ts
