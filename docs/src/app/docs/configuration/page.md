@@ -1033,6 +1033,11 @@ export default defineConfig({
 
 `render: "static"` maps to prerendering. `render: "dynamic"` forces a dynamic response. `swr` and `isr` accept `true` or a TTL in seconds. `cors: true` applies permissive API CORS headers; pass an object when you need a specific origin, methods, or headers.
 
+On Netlify, an `isr` rule caches a response on Netlify's CDN only when Farm sends it with a shared
+`Cache-Control`. A response Farm marks `private` or `no-store` (a request with cookies or an
+`Authorization` header, middleware data, a render that read the request, an error, or a dynamic
+render with no cache policy such as `revalidate`) is never stored for other visitors.
+
 API routes remain same-origin by default in development and production. Add `cors` only to route patterns that intentionally form a cross-origin browser API.
 
 Rules can also provide `runtime`, `regions`, and `maxDuration` defaults. File pages, API routes, and layouts can override them with named exports. See [Route Runtime](/docs/route-runtime) for inheritance and deployment behavior.
