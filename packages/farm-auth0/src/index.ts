@@ -152,13 +152,24 @@ function createCodeChallenge(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
 }
 
-function signValue(value: unknown, secret: string): string {
-  const payload = Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
-  const signature = createHmac("sha256", secret).update(payload).digest("hex");
-  return `${payload}.${signature}`;
+// The state and session cookies share one secret, so every signature is bound
+// to its purpose: a login state value must never verify as a session.
+type SignedCookiePurpose = "state" | "session";
+
+function signPayload(payload: string, secret: string, purpose: SignedCookiePurpose): string {
+  return createHmac("sha256", secret).update(`farm-auth0:${purpose}.${payload}`).digest("hex");
 }
 
-function unsignValue<T>(signed: string | undefined, secret: string): T | null {
+function signValue(value: unknown, secret: string, purpose: SignedCookiePurpose): string {
+  const payload = Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+  return `${payload}.${signPayload(payload, secret, purpose)}`;
+}
+
+function unsignValue<T>(
+  signed: string | undefined,
+  secret: string,
+  purpose: SignedCookiePurpose,
+): T | null {
   if (!signed) {
     return null;
   }
@@ -170,7 +181,7 @@ function unsignValue<T>(signed: string | undefined, secret: string): T | null {
 
   const payload = signed.slice(0, separator);
   const signature = signed.slice(separator + 1);
-  const expected = createHmac("sha256", secret).update(payload).digest("hex");
+  const expected = signPayload(payload, secret, purpose);
 
   if (signature.length !== expected.length) {
     return null;
@@ -213,9 +224,17 @@ function getSession(
   secret: string,
 ): Auth0SessionPayload | null {
   const cookies = parseCookieHeaderMap(request.headers.get("cookie"));
-  const session = unsignValue<Auth0SessionPayload>(cookies[cookieName], secret);
+  const session = unsignValue<Auth0SessionPayload>(cookies[cookieName], secret, "session");
 
-  if (!session) {
+  if (
+    !session ||
+    typeof session !== "object" ||
+    typeof session.expiresAt !== "number" ||
+    !Number.isFinite(session.expiresAt) ||
+    !session.user ||
+    typeof session.user !== "object" ||
+    Array.isArray(session.user)
+  ) {
     return null;
   }
 
@@ -396,7 +415,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
       "set-cookie",
       createRequestCookie(
         stateCookieName,
-        signValue({ state, returnTo, codeVerifier } satisfies Auth0StatePayload, secret),
+        signValue({ state, returnTo, codeVerifier } satisfies Auth0StatePayload, secret, "state"),
         request,
         { maxAge: 600 },
       ),
@@ -500,7 +519,11 @@ export function auth0(input: Auth0IntegrationInput = {}) {
             }
 
             const cookies = parseCookieHeaderMap(request.headers.get("cookie"));
-            const statePayload = unsignValue<Auth0StatePayload>(cookies[stateCookieName], secret);
+            const statePayload = unsignValue<Auth0StatePayload>(
+              cookies[stateCookieName],
+              secret,
+              "state",
+            );
             if (!statePayload || statePayload.state !== state) {
               return new Response("Invalid Auth0 state.", { status: 400 });
             }
@@ -528,7 +551,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
               "set-cookie",
               createRequestCookie(
                 sessionCookieName,
-                signValue({ user, expiresAt } satisfies Auth0SessionPayload, secret),
+                signValue({ user, expiresAt } satisfies Auth0SessionPayload, secret, "session"),
                 request,
                 {
                   maxAge: Math.max((expiresAt - Date.now()) / 1000, 60),
