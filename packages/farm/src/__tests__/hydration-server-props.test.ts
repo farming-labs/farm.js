@@ -92,6 +92,22 @@ return pageProps;`,
       path: "/check",
     });
   });
+
+  it("hydrates a client navigation with middleware data as a Map", () => {
+    const renderPage = extractBlock(source, "async function renderPage(pageData) {");
+    const revive = renderPage.match(
+      /const (\w+) = pageData\.props \? normalizeServerProps\(pageData\.props\)/,
+    );
+    // The props argument of each tryHydrateImportedPage(container, route, params, layouts, mode, props, ...).
+    const propsArguments = renderPage
+      .split("tryHydrateImportedPage(")
+      .slice(1)
+      .map((call) => call.split(",")[5]?.trim());
+
+    expect(revive).not.toBeNull();
+    expect(propsArguments).toHaveLength(2);
+    expect(propsArguments).toEqual([revive![1], revive![1]]);
+  });
 });
 
 describe("production client page props", () => {

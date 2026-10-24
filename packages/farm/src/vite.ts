@@ -5543,6 +5543,8 @@ async function renderPage(pageData) {
     loadingModulePath: pageData.loadingModulePath,
   };
   const params = pageData.props?.params || {};
+  // Page data carries middleware data as JSON, the way a full load embeds it.
+  const pageProps = pageData.props ? normalizeServerProps(pageData.props) : pageData.props;
   const nextLayoutPatterns = Array.isArray(pageData.fragment?.layoutPatterns)
     ? pageData.fragment.layoutPatterns
     : [];
@@ -5603,7 +5605,7 @@ async function renderPage(pageData) {
         params,
         layouts,
         false,
-        pageData.props,
+        pageProps,
         null,
         {
           pageShouldHydrate,
@@ -5657,7 +5659,7 @@ async function renderPage(pageData) {
               params,
               layouts,
               true,
-              pageData.props,
+              pageProps,
               hydrationController.signal,
               {
                 pageShouldHydrate,
