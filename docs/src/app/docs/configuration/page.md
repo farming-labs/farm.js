@@ -394,9 +394,11 @@ public URL in the browser bundle.
 
 A root-relative API root is also mounted by Farm in development and production. For example,
 `api: { basePath: "/v2/api" }` makes a route declared at `app/api/users/route.ts` available at
-`/v2/api/users`. Farm treats an absolute `baseURL` as external and does not remount the current
-application's API routes for it. `basePath` rejects backslashes, control characters, and `.` or
-`..` segments, including encoded path separators. Root-relative `baseURL` and `basePath` values
+`/v2/api/users`. The route still answers at `/api/users` too, and middleware guards both paths:
+`src/app/api/**/middleware.ts` files run for either prefix, and a middleware `matcher` written for
+`/api/...` or `/v2/api/...` matches the request at both. Farm treats an absolute `baseURL` as
+external and does not remount the current application's API routes for it. `basePath` rejects
+backslashes, control characters, and `.` or `..` segments, including encoded path separators. Root-relative `baseURL` and `basePath` values
 must begin with one slash; network-path references such as `//api.example.com` are rejected so the
 server mount and browser URL cannot resolve to different origins or paths.
 
@@ -441,14 +443,16 @@ mixed declarations, the resolved catalog, and permission checks.
 ## Agent readiness
 
 `agent` holds features that help AI agents and crawlers understand a public site, and decide which
-of them may use it. The two that only describe what agents can already read are on by default:
-`jsonLd` (a schema.org `WebSite` built from your metadata) and `llmsTxt` (an index of your static
-pages, when the [docs engine](/docs/docs-engine) isn't serving its own). The rest, which expose more
-or change who may crawl, are opt-in. Turn a default off with `false`, for example on an internal tool:
+of them may use it. The ones that only describe what agents can already read are on by default:
+`jsonLd` (a schema.org `WebSite` built from your metadata), `llmsTxt` (an index of your static
+pages, when the [docs engine](/docs/docs-engine) isn't serving its own), and `aiCatalog` (discovery
+for the [MCP server](/docs/plugins/mcp#discovery) you already serve, when you serve one). The rest,
+which expose more or change who may crawl, are opt-in. Turn a default off with `false`, for example
+on an internal tool:
 
 ```ts title="farm.config.ts"
 export default defineConfig({
-  agent: { jsonLd: false, llmsTxt: false },
+  agent: { jsonLd: false, llmsTxt: false, aiCatalog: false },
 });
 ```
 
@@ -604,6 +608,18 @@ The app's own file wins. Farm serves `/robots.txt` from, in order:
 2. A root [`robots.ts` metadata route](/docs/routing#application-metadata-routes) in `src/app`.
 3. The generated file from `agent.crawlers`.
 4. The [docs engine](/docs/docs-engine)'s robots.txt, when the docs engine is enabled.
+
+### AI catalog
+
+When the app mounts an MCP server, through the top-level [`mcp`](/docs/plugins/mcp) config or
+`apiMcp()`, Farm serves `/.well-known/ai-catalog.json` (and the same entries at
+`/.well-known/ard.json`) listing a server card for it, serves the card at `<endpoint>/server-card`,
+and adds an `MCP` section to the generated `llms.txt` that names the endpoint. The card carries only
+the server's identity and URL, never its tools, and listing it does not skip `authorize`.
+[MCP discovery](/docs/plugins/mcp#discovery) shows both documents. MCP servers Farm does not serve,
+such as the [docs engine](/docs/docs-engine)'s endpoint, join the catalog through
+[`registerFarmMCPServer`](/docs/plugins/mcp#list-an-mcp-server-farm-does-not-serve).
+`aiCatalog: false` turns all three off; an app without an MCP server serves none of them.
 
 ### API catalog
 
@@ -963,6 +979,33 @@ When streamed action input exceeds the limit, Farm cancels it without awaiting p
 
 Rejected requests use generic, non-cacheable responses: `403` for origin failures, `413` for oversized bodies, and `415` for unsupported content types. Detailed parsing or execution errors stay in server logs.
 
+### Middleware does not protect actions
+
+An action is addressed by its id, not by the route that renders it. The browser POSTs it to the
+current page's URL, and any page URL works, so the action runs under the middleware of whatever URL
+the request names. A guard in `src/app/admin/middleware.ts` does not stop a POST to `/` that invokes
+an action defined for the admin page. Next.js behaves the same way.
+
+Authorize inside every action that reads or changes protected data:
+
+```ts
+"use server";
+
+import { auth } from "@farm.js/auth/server";
+import { db } from "@/db";
+
+export async function deleteProject(projectId: string) {
+  const user = await auth.user({ required: true });
+  const project = await db.project.findUnique({ where: { id: projectId } });
+  if (project?.ownerId !== user.id) throw new Error("Forbidden");
+  await db.project.delete({ where: { id: projectId } });
+}
+```
+
+For checks that many actions share, define them as `createServerFn` functions with
+`createServerMiddleware` (see [Composable middleware](/docs/api-client#composable-middleware)): that
+middleware runs for every call of the function, whichever URL carried it.
+
 ## Next-style route exports
 
 Farm route modules can expose compact rendering options directly on the page when the behavior belongs to that route.
@@ -1032,6 +1075,11 @@ export default defineConfig({
 ```
 
 `render: "static"` maps to prerendering. `render: "dynamic"` forces a dynamic response. `swr` and `isr` accept `true` or a TTL in seconds. `cors: true` applies permissive API CORS headers; pass an object when you need a specific origin, methods, or headers.
+
+On Netlify, an `isr` rule caches a response on Netlify's CDN only when Farm sends it with a shared
+`Cache-Control`. A response Farm marks `private` or `no-store` (a request with cookies or an
+`Authorization` header, middleware data, a render that read the request, an error, or a dynamic
+render with no cache policy such as `revalidate`) is never stored for other visitors.
 
 API routes remain same-origin by default in development and production. Add `cors` only to route patterns that intentionally form a cross-origin browser API.
 
@@ -1201,5 +1249,5 @@ Prefer a CI release or commit identifier when a deployment runs on multiple serv
 - Prefer `routeRules` for broad URL patterns and platform-level cache/header behavior.
 - Keep `serverActions.allowedOrigins` empty unless the deployment has a known proxy-origin mismatch.
 - Give every rolling release one stable `deploymentId`; do not generate a different value per server instance.
-- Treat every server action as a public endpoint and authorize the current user inside the action or middleware.
+- Treat every server action as a public endpoint and authorize the current user inside the action or its `createServerMiddleware`; route middleware does not run for the action's own route.
 - Keep `farm.config.ts` as the single control plane instead of spreading framework behavior across many root files.

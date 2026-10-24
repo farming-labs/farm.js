@@ -65,4 +65,15 @@ export async function fetchAgentCheck(id: string): Promise<StoredAgentCheck | nu
   return (await response.json()) as StoredAgentCheck;
 }
 
-export { AGENT_CHECK_ERRORS, agentCheckErrorMessage } from "./agents-check-messages";
+/**
+ * A form post without JavaScript lands on /agents/check?url=<site>; this short-lived cookie
+ * carries the new report's id there, so the page can show it with no id in the address.
+ */
+export const AGENT_CHECK_REPORT_COOKIE = "agent_check_report";
+export const AGENT_CHECK_REPORT_COOKIE_MAX_AGE = 600;
+
+export {
+  AGENT_CHECK_ERRORS,
+  agentCheckErrorMessage,
+  agentCheckPath,
+} from "./agents-check-messages";

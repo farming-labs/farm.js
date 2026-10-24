@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Code2, Copy, RefreshCw } from "lucide-react";
+import { Check, Code2, Copy, RefreshCw } from "../icons";
 import type { KeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { highlight } from "sugar-high";
@@ -146,7 +146,11 @@ function CopyCodeButton({ code, label }: { code: string; label: string }) {
 function renderHighlightedCode(code: string, highlightLines: readonly number[] = []) {
   const highlightedLineNumbers = new Set(highlightLines);
 
+  // sugar-high repeats each token's color as an inline style. The token classes carry it in
+  // globals.css instead, and whitespace needs no span, which keeps the homepage HTML light.
   return highlight(code)
+    .replace(/<span class="sh__token--space"[^>]*>([^<]*)<\/span>/g, "$1")
+    .replace(/ style="color:var\(--sh-[a-z]+\)"/g, "")
     .split("\n")
     .map((line, index) =>
       highlightedLineNumbers.has(index + 1)

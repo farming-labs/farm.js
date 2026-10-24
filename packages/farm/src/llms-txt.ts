@@ -211,8 +211,11 @@ export function createFarmDefaultLlmsTxt(options: {
   pages: FarmLlmsTxtPage[];
   config: ResolvedFarmLlmsTxtConfig;
   rootMetadata?: unknown;
+  /** The app's MCP endpoints and AI catalog, listed in an "MCP" section. */
+  mcp?: FarmLlmsTxtLink[];
 }): FarmLlmsTxt {
   const { config, pages } = options;
+  const mcp = options.mcp ?? [];
   const summary = config.summary ?? readMetadataString(options.rootMetadata, "description");
 
   return {
@@ -223,18 +226,21 @@ export function createFarmDefaultLlmsTxt(options: {
       new URL(options.origin).host,
     ...(summary ? { summary } : {}),
     ...(config.details ? { details: config.details } : {}),
-    sections: pages.length
-      ? [
-          {
-            title: "Pages",
-            links: pages.map(({ title, url, description }) => ({
-              title,
-              url,
-              ...(description ? { description } : {}),
-            })),
-          },
-        ]
-      : [],
+    sections: [
+      ...(pages.length
+        ? [
+            {
+              title: "Pages",
+              links: pages.map(({ title, url, description }) => ({
+                title,
+                url,
+                ...(description ? { description } : {}),
+              })),
+            },
+          ]
+        : []),
+      ...(mcp.length ? [{ title: "MCP", links: mcp }] : []),
+    ],
   };
 }
 

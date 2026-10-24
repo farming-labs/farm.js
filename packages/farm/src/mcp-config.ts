@@ -144,6 +144,8 @@ export interface FarmMCPServer {
   readonly name: string;
   readonly version: string;
   readonly path: `/api/${string}`;
+  readonly title?: string;
+  readonly description?: string;
 }
 
 export interface FarmMCPAuthorization extends Record<string, unknown> {
@@ -181,6 +183,13 @@ export interface FarmMCPConfig {
   name?: string;
   /** MCP server version. @default "1.0.0" */
   version?: string;
+  /** Display name, sent in `serverInfo` and the server card. */
+  title?: string;
+  /**
+   * What the server does, sent in `serverInfo` and the server card that
+   * `/.well-known/ai-catalog.json` lists. The card keeps the first 100 characters.
+   */
+  description?: string;
   /** Explicit endpoint/standalone tool allowlist. Omit to discover route-owned MCP metadata. */
   tools?: readonly FarmMCPToolDefinition[];
   /** Read-only context for agents, from `defineResource()`. */

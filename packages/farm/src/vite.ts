@@ -66,6 +66,8 @@ import {
   normalizeFarmMarkdownRoutePath,
 } from "./app-markdown";
 import { applyWebResponseHeaders, sendWebResponse } from "./server/response";
+import { createFarmAiCatalogResponse } from "./ai-catalog";
+import { registerFarmMCPServer } from "./mcp-catalog";
 import {
   createFarmApiCatalogResponse,
   FARM_API_CATALOG_PATH,
@@ -152,9 +154,11 @@ import {
   generateFarmDocsAdapterClientRuntime,
   getFarmDocsAdapterConfigModule,
 } from "./docs/adapter-client";
+import { isFarmDocsClientConfigModule, redactFarmDocsClientConfig } from "./docs/client-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "./docs/fonts";
 import {
   createFarmNodeRequestAbortSignal,
+  createFarmNodeRequestBodyStream,
   createFarmRequestBodyErrorResponse,
   readNodeRequestBody,
   resolveFarmServerConfig,
@@ -1101,6 +1105,12 @@ export function farmPlugin(
   let refreshRouteDiscovery: ((reason: string) => Promise<void>) | null = null;
   let workflowHandler: ((request: Request) => Promise<Response | null>) | null = null;
   let isBuild = false;
+  // MCP servers the docs runtime lists in the AI catalog, removed when the dev server closes.
+  const docsMCPServerDisposers = new Set<() => void>();
+  const releaseDocsMCPServers = () => {
+    for (const dispose of docsMCPServerDisposers) dispose();
+    docsMCPServerDisposers.clear();
+  };
   const logUpdate = (tag: "PAGE" | "API" | "MIDDLEWARE" | "TYPE", message: string) => {
     const pc = createCliColors();
     const log = [
@@ -1527,6 +1537,7 @@ export function farmPlugin(
         farmConfig.middleware,
         farmConfig.i18n,
         farmConfig.server,
+        apiServerBasePath,
       );
       await middlewareManager.discover();
       if (pm) {
@@ -1575,6 +1586,8 @@ export function farmPlugin(
         );
         return resolveFarmLayoutFonts(layoutModules);
       };
+      // A restarted server's docs runtime registers its MCP endpoint again.
+      releaseDocsMCPServers();
       const farmDocsHandler = farmDocsDevRuntime
         ? farmDocsDevRuntime.hasFarmDocsRuntimeAdapter(farmConfig.docs)
           ? await farmDocsDevRuntime.createFarmDocsAdapterHandler(farmConfig.docs, {
@@ -1593,6 +1606,14 @@ export function farmPlugin(
                   return import(/* @vite-ignore */ pathToFileURL(resolved.id).href);
                 }
                 return loadFarmDevModule(server, resolved?.id ?? specifier);
+              },
+              registerMCPServer: (mcpServer) => {
+                const dispose = registerFarmMCPServer(mcpServer);
+                docsMCPServerDisposers.add(dispose);
+                return () => {
+                  docsMCPServerDisposers.delete(dispose);
+                  dispose();
+                };
               },
             })
           : farmDocsDevRuntime.createFarmDocsHandler(farmConfig.docs, {
@@ -1743,6 +1764,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               rootDir: farmConfig.root,
               srcDir: farmConfig.srcDir,
               docs: farmConfig.docs,
+              diagnostics: true,
             })
           : null;
       const farmDocsFontAssets = new Map(
@@ -2016,6 +2038,25 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             return;
           }
 
+          // agent.aiCatalog: the AI catalog of MCP servers and each server's card.
+          if (options.agent?.aiCatalog !== false) {
+            const aiCatalog = createFarmAiCatalogResponse(
+              new Request(parsedRequestUrl, {
+                method: requestMethod,
+                headers: {
+                  "user-agent": String(req.headers["user-agent"] ?? ""),
+                  "if-none-match": String(req.headers["if-none-match"] ?? ""),
+                },
+              }),
+              { basePath: farmConfig.basePath, apiServerBasePath },
+            );
+            if (aiCatalog) {
+              if (await runAppMiddlewareForContentRoute()) return;
+              await sendWebResponse(res, aiCatalog);
+              return;
+            }
+          }
+
           const docsHeaders = new Headers();
           for (const [key, value] of Object.entries(req.headers)) {
             if (value) {
@@ -2037,7 +2078,13 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               method: requestMethod,
               headers: docsHeaders,
             });
-            const docsResponse = await farmDocsHandler(docsRequest.clone());
+            // The docs handler gets the body (MCP, feedback, AI) as in production. It is read
+            // lazily, so a path the docs runtime declines keeps its body for the app's routes.
+            const docsBodyInit: RequestInit & { duplex?: "half" } =
+              requestMethod === "GET" || requestMethod === "HEAD"
+                ? {}
+                : { body: createFarmNodeRequestBodyStream(req), duplex: "half" };
+            const docsResponse = await farmDocsHandler(new Request(docsRequest, docsBodyInit));
             if (docsResponse) {
               if (await runAppMiddlewareForContentRoute()) return;
               await sendWebResponse(
@@ -3349,6 +3396,14 @@ export const manifest = getManifest();
 
     async transform(code, id, transformOptions) {
       if (!transformOptions?.ssr) {
+        // The docs config module reaches the browser for adapter hydration: without credentials.
+        const docsConfigModule = getFarmDocsAdapterConfigModule(farmApp?.getConfig()?.docs);
+        if (isFarmDocsClientConfigModule(id, docsConfigModule)) {
+          const redacted = redactFarmDocsClientConfig(code, id.split("?")[0]);
+          if (redacted !== null) return { code: redacted, map: null };
+        }
+      }
+      if (!transformOptions?.ssr) {
         const currentConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
         if (currentConfig.experimental?.serverActions !== true || !serverFnTransformActive) {
           // Without the server-function transform there is no client stub for
@@ -3534,6 +3589,7 @@ if (import.meta.hot) {
     async closeBundle() {
       // SSG: Pre-render static pages at build time. Vite also runs this hook
       // when a dev server closes, after its SSR module runner has stopped.
+      if (!isBuild) releaseDocsMCPServers();
       if (!farmApp || !isBuild) return;
 
       try {

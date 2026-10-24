@@ -2,6 +2,7 @@ import {
   createMcpHandler,
   fromJsonSchema,
   McpServer,
+  SUPPORTED_PROTOCOL_VERSIONS,
   type AuthInfo,
   type ToolAnnotations,
 } from "@modelcontextprotocol/server";
@@ -192,13 +193,17 @@ function createHandler(
       }),
     ),
   );
-  const serverIdentity = Object.freeze({
+  const serverInfo = {
     name: options.name,
     version: options.version,
-    path: options.path,
-  });
-  // The app manifest (/.well-known/farmjs) lists schemas, resources and prompts too.
+    ...(options.title ? { title: options.title } : {}),
+    ...(options.description ? { description: options.description } : {}),
+  };
+  const serverIdentity = Object.freeze({ ...serverInfo, path: options.path });
+  // The app manifest (/.well-known/farmjs) lists schemas, resources and prompts too,
+  // and the server card core serves for /.well-known/ai-catalog.json uses the versions.
   publish(serverIdentity, catalog, {
+    protocolVersions: [...SUPPORTED_PROTOCOL_VERSIONS],
     schemas: Object.fromEntries(
       tools.map((tool) => [
         tool.config.name,
@@ -232,10 +237,7 @@ function createHandler(
   const resourceNames = new Set(resources.map(({ name }) => name));
   const promptNames = new Set(prompts.map(({ definition }) => definition.name));
   const mcp = createMcpHandler(({ requestInfo, authInfo }) => {
-    const server = new McpServer(
-      { name: options.name, version: options.version },
-      { capabilities: { tools: {} } },
-    );
+    const server = new McpServer(serverInfo, { capabilities: { tools: {} } });
     const allowed = authInfo?.extra?.farmAllowedTools as readonly string[] | undefined;
     const allowedNames = allowed === undefined ? undefined : new Set(allowed);
     // A fresh server is created per HTTP request. Unregistered tools are neither
@@ -1142,6 +1144,12 @@ function validateOptions(options: APIMCPOptions): NormalizedOptions {
     );
   }
   if (options.oauth !== undefined) validateOAuth(options.oauth);
+  for (const key of ["title", "description"] as const) {
+    const value = options[key];
+    if (value !== undefined && (typeof value !== "string" || !value.trim())) {
+      throw new TypeError(`apiMcp ${key} must be a non-empty string.`);
+    }
+  }
   const path = options.path ?? "/api/mcp";
   if (!/^\/api\/[^/?#]+(?:\/[^/?#]+)*$/.test(path)) {
     throw new TypeError("apiMcp path must be a canonical /api path.");

@@ -67,6 +67,8 @@ function createFakeSdk(customer: Record<string, unknown>) {
     customers: {
       getOrCreate: vi.fn(async () => customer),
     },
+    // Autumn's track adds `value` to the stored usage and answers with the new balance.
+    track: vi.fn(async (input: { value: number }) => ({ value: input.value, balance: null })),
     plans: {
       get: vi.fn(async () => ({ id: "plan", items: [] })),
       list: vi.fn(async () => ({ list: [] })),
@@ -139,7 +141,7 @@ describe("autumn billing routes and other sites", () => {
       crossSiteForm,
     );
     expect(crossSite.status).toBe(403);
-    expect(sdk.balances.update).not.toHaveBeenCalled();
+    expect(sdk.track).not.toHaveBeenCalled();
 
     // The app's own page, and a caller with no Origin at all (a server), still report.
     const own = await report(
@@ -192,9 +194,13 @@ describe("autumn usage-report idempotency", () => {
       eventIdentifier: "evt-1",
       projectedCurrentPeriodUsed: 10,
     });
-    expect(sdk.balances.update).toHaveBeenCalledTimes(1);
-    expect(sdk.balances.update).toHaveBeenCalledWith(
-      expect.objectContaining({ featureId: "credits", usage: 10 }),
+    expect(sdk.track).toHaveBeenCalledTimes(1);
+    expect(sdk.track).toHaveBeenCalledWith(
+      expect.objectContaining({
+        featureId: "credits",
+        value: 10,
+        properties: { idempotencyKey: "evt-1" },
+      }),
     );
 
     // The lost-response retry: same key, same payload.
@@ -206,7 +212,7 @@ describe("autumn usage-report idempotency", () => {
     expect(retry.status).toBe(200);
     expect(await retry.json()).toEqual(firstBody);
     // No second write: the customer is not billed twice for one event.
-    expect(sdk.balances.update).toHaveBeenCalledTimes(1);
+    expect(sdk.track).toHaveBeenCalledTimes(1);
 
     // A genuinely new event still applies.
     const second = await report(integration, {
@@ -216,9 +222,9 @@ describe("autumn usage-report idempotency", () => {
     });
     expect(second.status).toBe(200);
     expect(await second.json()).toMatchObject({ projectedCurrentPeriodUsed: 15 });
-    expect(sdk.balances.update).toHaveBeenCalledTimes(2);
-    expect(sdk.balances.update).toHaveBeenLastCalledWith(
-      expect.objectContaining({ featureId: "credits", usage: 15 }),
+    expect(sdk.track).toHaveBeenCalledTimes(2);
+    expect(sdk.track).toHaveBeenLastCalledWith(
+      expect.objectContaining({ featureId: "credits", value: 5 }),
     );
   });
 
@@ -232,7 +238,7 @@ describe("autumn usage-report idempotency", () => {
 
     const response = await report(integration, { key: "credits", quantity: 10 });
     expect(response.status).toBe(400);
-    expect(sdk.balances.update).not.toHaveBeenCalled();
+    expect(sdk.track).not.toHaveBeenCalled();
   });
   it.each([
     ["a negative quantity", -1_000_000],
@@ -257,7 +263,7 @@ describe("autumn usage-report idempotency", () => {
     });
 
     expect(response.status).toBe(400);
-    expect(sdk.balances.update).not.toHaveBeenCalled();
+    expect(sdk.track).not.toHaveBeenCalled();
   });
 
   it("still accepts an ordinary positive report", async () => {
@@ -275,7 +281,7 @@ describe("autumn usage-report idempotency", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(sdk.balances.update).toHaveBeenCalled();
+    expect(sdk.track).toHaveBeenCalled();
   });
 });
 
@@ -297,16 +303,16 @@ describe("autumn usage-report idempotency under concurrent retries", () => {
       subscriptions: [],
     });
     const write = deferred();
-    sdk.balances.update.mockImplementation(async () => {
+    sdk.track.mockImplementation(async () => {
       await write.promise;
-      return {};
+      return { value: 10, balance: null };
     });
     const integration = createIntegration(sdk, "concurrent-user");
     const body = { key: "credits", quantity: 10, idempotencyKey: "evt-concurrent" };
 
     const first = report(integration, body);
     const retry = report(integration, body);
-    await vi.waitFor(() => expect(sdk.balances.update).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(sdk.track).toHaveBeenCalledTimes(1));
     write.resolve();
 
     const [firstResponse, retryResponse] = await Promise.all([first, retry]);
@@ -315,7 +321,7 @@ describe("autumn usage-report idempotency under concurrent retries", () => {
     const firstBody = await firstResponse.json();
     expect(await retryResponse.json()).toEqual(firstBody);
     expect(firstBody).toMatchObject({ projectedCurrentPeriodUsed: 10 });
-    expect(sdk.balances.update).toHaveBeenCalledTimes(1);
+    expect(sdk.track).toHaveBeenCalledTimes(1);
   });
 
   it("lets a later retry apply a report whose in-flight attempt failed", async () => {
@@ -325,22 +331,94 @@ describe("autumn usage-report idempotency under concurrent retries", () => {
       subscriptions: [],
     });
     const write = deferred();
-    sdk.balances.update.mockImplementationOnce(async () => {
+    sdk.track.mockImplementationOnce(async () => {
       await write.promise;
-      return {};
+      return { value: 10, balance: null };
     });
     const integration = createIntegration(sdk, "failed-user");
     const body = { key: "credits", quantity: 10, idempotencyKey: "evt-failed" };
 
     const first = report(integration, body);
     const concurrent = report(integration, body);
-    await vi.waitFor(() => expect(sdk.balances.update).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(sdk.track).toHaveBeenCalledTimes(1));
     write.reject(new Error("provider unavailable"));
     await expect(first).rejects.toThrow("provider unavailable");
     await expect(concurrent).rejects.toThrow("provider unavailable");
 
     const later = await report(integration, body);
     expect(later.status).toBe(200);
-    expect(sdk.balances.update).toHaveBeenCalledTimes(2);
+    expect(sdk.track).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("autumn usage reports under concurrency", () => {
+  // Autumn's model: `balances.update({ usage })` sets the stored usage, `track({ value })` adds to
+  // it, and `customers.getOrCreate` reads whatever is stored when it runs.
+  function createAutumnModel(granted: number) {
+    let usage = 0;
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 1));
+    const sdk = createFakeSdk({});
+    sdk.customers.getOrCreate.mockImplementation(async () => {
+      const read = { id: "cus_race", balances: { credits: { usage, granted } }, subscriptions: [] };
+      await tick();
+      return read;
+    });
+    sdk.balances.update.mockImplementation(async (input?: { usage?: number }) => {
+      await tick();
+      usage = input?.usage ?? usage;
+      return {};
+    });
+    sdk.track.mockImplementation(async (input: { value: number }) => {
+      await tick();
+      usage += input.value;
+      return { value: input.value, balance: { usage, granted } as never };
+    });
+    return { sdk, usage: () => usage };
+  }
+
+  function reportAll(integration: ReturnType<typeof autumn>, count: number, quantity: number) {
+    return Promise.all(
+      Array.from({ length: count }, async (_, index) => {
+        const response = await report(integration, {
+          key: "credits",
+          quantity,
+          idempotencyKey: `race-${index}`,
+        });
+        expect(response.status).toBe(200);
+        return ((await response.json()) as { state: string }).state;
+      }),
+    );
+  }
+
+  it("counts every parallel report instead of the last total written", async () => {
+    const model = createAutumnModel(1_000_000);
+    const integration = createIntegration(model.sdk as never, "race-user");
+
+    await reportAll(integration, 20, 1000);
+
+    expect(model.usage()).toBe(20_000);
+    expect(model.sdk.balances.update).not.toHaveBeenCalled();
+  });
+
+  it("holds the hard cap when parallel reports race past it", async () => {
+    const model = createAutumnModel(1_000_000);
+    const integration = autumn({
+      instance: model.sdk as unknown as AutumnIntegrationInstance,
+      billing: {
+        resolveOwner: () => ({ kind: "user" as const, id: "cap-user" }),
+        meters: {
+          credits: {
+            aggregation: "sum" as const,
+            featureId: "credits",
+            guard: { hardLimit: 5000 },
+          },
+        },
+      },
+    });
+
+    const states = await reportAll(integration, 20, 1000);
+
+    expect(model.usage()).toBe(5000);
+    expect(states.filter((state) => state === "hard_limit_reached")).toHaveLength(16);
   });
 });

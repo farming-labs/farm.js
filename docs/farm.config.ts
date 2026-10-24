@@ -49,10 +49,23 @@ export default defineConfig({
         operatingSystem: "Linux, macOS, Windows",
         license: "https://github.com/farming-labs/farm.js/blob/main/LICENSE",
         offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+        // Farming Labs publishes no postal address, so the organization carries no `address`.
         author: {
           "@type": "Organization",
           name: "Farming Labs",
-          url: "https://github.com/farming-labs",
+          url: "https://farming-labs.dev",
+          email: "contact@farming-labs.dev",
+          contactPoint: {
+            "@type": "ContactPoint",
+            contactType: "technical support",
+            email: "contact@farming-labs.dev",
+            url: "https://github.com/farming-labs/farm.js/issues",
+          },
+          sameAs: [
+            "https://github.com/farming-labs",
+            "https://www.npmjs.com/org/farm.js",
+            "https://x.com/KinfishT",
+          ],
         },
       },
     },

@@ -85,6 +85,7 @@ import {
   generateFarmDocsAdapterClientRuntime,
   getFarmDocsAdapterConfigModule,
 } from "../docs/adapter-client";
+import { farmDocsClientConfigPlugin } from "../docs/client-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "../docs/fonts";
 import { compileFarmDocsManifest } from "../docs/compiler";
 import { compileFarmDocsAdapterEdgeManifest } from "../docs/adapter";
@@ -97,6 +98,7 @@ import {
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { buildFarmVercelRoutes } from "./vercel-assets";
+import { createFarmNetlifyEntry, resolveNitroNetlifyEntry } from "./netlify-entry";
 import { createFarmNodeServerEntry } from "./node-server-entry";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
@@ -1023,7 +1025,8 @@ export async function discoverMiddlewareRoutes(
     }
 
     for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name.startsWith("_")) {
+      // `_private` folders still route their pages, so their middleware has to guard them.
+      if (!entry.isDirectory() || entry.name.startsWith(".")) {
         continue;
       }
 
@@ -1926,6 +1929,9 @@ async function buildClient(
         ...(rendererVitePlugins as any[]),
         ...(config.vite.plugins || []),
         farmServerOnlyEntriesPlugin(),
+        farmDocsClientConfigPlugin(
+          adapterOwnsDocsRuntime ? getFarmDocsAdapterConfigModule(config.docs) : undefined,
+        ),
         // Plugin to redirect @farm.js/core imports to client-only exports
         {
           name: "farm-client-only-imports",
@@ -5275,6 +5281,10 @@ function generateVirtualEntryCode(
     !applicationMetadataRoutes.some(
       (metadata) => metadata.kind === "robots" && metadata.pattern === "/",
     );
+  // agent.aiCatalog lists the MCP servers @farm.js/mcp mounts and those registered with
+  // registerFarmMCPServer, which a docs runtime or app code does when the server starts,
+  // so the build cannot tell whether any will be. With none, it answers nothing.
+  const servesAiCatalog = config.agent?.aiCatalog !== false;
   const hasPluginRuntime = hasRuntimeIntegrationConfig || hasServerRuntimePlugins;
   // Decided when the server starts, from its environment; see createFarmInfraAnalyticsPlugin.
   const hasInfraAnalyticsRuntime =
@@ -5672,11 +5682,14 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   createFarmCacheKey,
   createFarmMetadataRouteResponse,
   createFarmAgentRobots,
+  createFarmAiCatalogResponse,
   createFarmApiCatalogResponse,
   createFarmAppManifestResponse,
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsMarkdownReader,
+  listFarmMCPLlmsTxtLinks,
+  registerFarmMCPServer,
   renderFarmLlmsFullTxt,
   createFarmLlmsFullRenderer,
   createFarmThemeDocumentParts,
@@ -6303,6 +6316,8 @@ const farmDocsHandler = ${
       getApplicableLayouts(getFarmRoutePathname(pathname)).map((layout) => layout.module),
     ),
   loadReactModule: async () => FarmDocsAdapterReact,
+  // Lists the docs MCP endpoint in /.well-known/ai-catalog.json for the server's lifetime.
+  registerMCPServer: registerFarmMCPServer,
 })`
           : `createFarmDocsHandler(farmDocsResolvedConfig, {
   root: farmDocsRuntimeRoot,
@@ -7276,6 +7291,14 @@ function createFarmLlmsTxtContext(request, full) {
       pages,
       config: farmLlmsTxtConfig,
       rootMetadata: rootLayout && rootLayout.module && rootLayout.module.metadata,
+      ${
+        servesAiCatalog
+          ? `mcp: listFarmMCPLlmsTxtLinks(origin, {
+        basePath: ${JSON.stringify(config.basePath)},
+        apiServerBasePath: farmLocalAPIBasePath,
+      }),`
+          : ""
+      }
     }),
     // llms-full.txt reads each page's .md mirror through this same handler,
     // with a fresh request so the caller's cookies never shape its content.
@@ -7384,6 +7407,7 @@ const farmMiddlewareRunner = ${
   modules: fileMiddlewareModules,
   i18n: farmI18nConfig,
   server: farmServerConfig,
+  apiBasePath: farmLocalAPIBasePath,
 })`
       : "null"
   };
@@ -8031,6 +8055,24 @@ async function handleFarmRequestInContext(
       : "undefined"
   };
   `
+  }
+
+  ${
+    servesAiCatalog
+      ? `
+  // agent.aiCatalog: the AI catalog of MCP servers and each server's card. Cards
+  // live below the MCP endpoint, so this answers before the docs runtime and the
+  // API routes, as in dev.
+  const farmAiCatalogResponse = createFarmAiCatalogResponse(
+    request,
+    { basePath: ${JSON.stringify(config.basePath)}, apiServerBasePath: farmLocalAPIBasePath },
+    url,
+  );
+  if (farmAiCatalogResponse) {
+    return applyProductionMiddlewareHeaders(farmAiCatalogResponse, middlewareHeaders);
+  }
+  `
+      : ""
   }
 
   ${
@@ -10022,6 +10064,16 @@ function toFarmNodeResponse(request, response) {
       }),
     );
   }
+  const farmNetlifyEntryPath =
+    preset === "netlify" ? path.join(ssrOutputDir, "farm-netlify-entry.mjs") : null;
+  if (farmNetlifyEntryPath) {
+    await fs.writeFile(
+      farmNetlifyEntryPath,
+      createFarmNetlifyEntry({
+        nitroNetlifyEntry: resolveNitroNetlifyEntry(resolveNitroPackageEntry(root)),
+      }),
+    );
+  }
   const prebuiltSSRPlugin = createExternalSSRBundlePlugin(
     nitroEntryPath,
     ssrOutputDir,
@@ -10048,6 +10100,7 @@ function toFarmNodeResponse(request, response) {
   let nitroConfig: NitroConfig = {
     preset,
     ...(farmNodeServerEntryPath ? { entry: farmNodeServerEntryPath } : {}),
+    ...(farmNetlifyEntryPath ? { entry: farmNetlifyEntryPath } : {}),
     rootDir: root,
     // Farm registers every handler, task, and plugin explicitly. Scanning the
     // project root would bundle an app's own `middleware/`, `api/`, `routes/`,
@@ -10257,10 +10310,10 @@ function toFarmNodeResponse(request, response) {
       nitroInstance.routing.sync();
     });
   }
-  if (farmNodeServerEntryPath) {
-    // The custom entry is only for the final long-running Node server. Nitro
-    // derives its prerenderer config from this config, so remove the override
-    // and let the nitro-prerender preset provide appFetch/closePrerenderer.
+  if (farmNodeServerEntryPath || farmNetlifyEntryPath) {
+    // The custom entry is only for the final Node server or Netlify function.
+    // Nitro derives its prerenderer config from this config, so remove the
+    // override and let the nitro-prerender preset provide appFetch/closePrerenderer.
     nitroInstance.hooks.hook("prerender:config", (prerendererConfig) => {
       delete prerendererConfig.entry;
     });
