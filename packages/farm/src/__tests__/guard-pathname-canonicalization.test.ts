@@ -457,6 +457,8 @@ describe("optional catch-all and wildcard matchers", () => {
     ["/admin*", "/admin"],
     ["/admin*", "/admin-panel"],
     ["/files/*.pdf", "/files/report.pdf"],
+    ["/team/:id?", "/team"],
+    ["/team/:id?", "/team/42"],
   ])("%s guards %s", async (matcher, pathname) => {
     expect(await collectGuards(matcher, pathname)).toEqual({
       devMiddleware: true,
@@ -470,6 +472,7 @@ describe("optional catch-all and wildcard matchers", () => {
     ["/admin*", "/admin/users"],
     ["/admin*", "/xadmin"],
     ["/files/*.pdf", "/files/report.txt"],
+    ["/team/:id?", "/team/42/edit"],
   ])("%s still does not guard %s", async (matcher, pathname) => {
     expect(await collectGuards(matcher, pathname)).toEqual({
       devMiddleware: false,

@@ -145,6 +145,9 @@ function compilePathPattern(pattern: string, trailingSlash = false): CompiledPat
       if (modifier === "+") {
         return "/(.+)";
       }
+      if (modifier === "?") {
+        return "(?:/([^/]+))?";
+      }
       return "/([^/]+)";
     }
 
