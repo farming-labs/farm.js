@@ -10270,10 +10270,10 @@ function toFarmNodeResponse(request, response) {
       nitroInstance.routing.sync();
     });
   }
-  if (farmNodeServerEntryPath) {
-    // The custom entry is only for the final long-running Node server. Nitro
-    // derives its prerenderer config from this config, so remove the override
-    // and let the nitro-prerender preset provide appFetch/closePrerenderer.
+  if (farmNodeServerEntryPath || farmNetlifyEntryPath) {
+    // The custom entry is only for the final Node server or Netlify function.
+    // Nitro derives its prerenderer config from this config, so remove the
+    // override and let the nitro-prerender preset provide appFetch/closePrerenderer.
     nitroInstance.hooks.hook("prerender:config", (prerendererConfig) => {
       delete prerendererConfig.entry;
     });
