@@ -12,7 +12,7 @@ import {
   Newspaper,
   Network,
   X,
-} from "lucide-react";
+} from "./icons";
 import type { LucideIcon } from "lucide-react";
 import githubIconUrl from "simple-icons/icons/github.svg?url";
 import farmingLabsLogoUrl from "../assets/farming-labs-logo-dark.svg?url";
@@ -106,7 +106,7 @@ export function IndexedLabel({
   label: string;
 }) {
   return (
-    <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] font-normal uppercase tracking-normal text-current">
+    <span className="farm-indexed-label font-mono">
       <span aria-hidden className="text-white/26">
         {index}
       </span>
