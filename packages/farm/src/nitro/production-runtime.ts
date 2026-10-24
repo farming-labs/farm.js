@@ -59,6 +59,7 @@ export {
   _withFarmResponseHeaders,
 } from "../owned-response";
 export { createFarmAgentRobots } from "../agent-crawlers";
+export { createFarmAiCatalogResponse, listFarmMCPLlmsTxtLinks } from "../ai-catalog";
 export { createFarmApiCatalogResponse } from "../api-catalog";
 export {
   collectFarmLlmsTxtPages,

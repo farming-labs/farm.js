@@ -552,6 +552,62 @@ curl http://localhost:3000/api/mcp \
 Do not put production tokens in source, browser code, an MCP tool description, or a checked-in
 client configuration.
 
+## Discovery
+
+Clients find the server from your origin alone. Farm serves an
+[AI Catalog](https://github.com/Agent-Card/ai-catalog) at `/.well-known/ai-catalog.json` that lists
+an [MCP server card](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/seps/2127-mcp-server-cards.md)
+for each mounted MCP server, and serves each card at `<endpoint>/server-card`, the location the
+server card extension reserves:
+
+```json title="/.well-known/ai-catalog.json"
+{
+  "specVersion": "1.0",
+  "entries": [
+    {
+      "identifier": "urn:air:app.example.com:mcp:project-tools",
+      "type": "application/mcp-server-card+json",
+      "url": "https://app.example.com/api/mcp/server-card",
+      "displayName": "Project tools",
+      "description": "Create and search projects.",
+      "version": "1.0.0"
+    }
+  ]
+}
+```
+
+```json title="/api/mcp/server-card"
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
+  "name": "com.example.app/project-tools",
+  "version": "1.0.0",
+  "title": "Project tools",
+  "description": "Create and search projects.",
+  "websiteUrl": "https://app.example.com",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://app.example.com/api/mcp",
+      "supportedProtocolVersions": ["2026-07-28", "2025-11-25", "2025-06-18"]
+    }
+  ]
+}
+```
+
+The same entries answer at `/.well-known/ard.json` for
+[Agentic Resource Discovery](https://agenticresourcediscovery.org/spec/) crawlers, and the generated
+[`llms.txt`](/docs/configuration#agent-readiness) gets an `MCP` section naming each endpoint and the
+catalog. The card carries the `name`, `version`, `title`, and `description` the server reports during
+initialization, so the two agree. A `name` without a slash is namespaced by the request host in the
+card (`project-tools` on `app.example.com` becomes `com.example.app/project-tools`), and a missing
+`description` reads `MCP server for <host>`.
+
+Cards hold identity and the endpoint only, never tools, resources, or credentials, so listing a
+server does not open it: `authorize` still runs on every request. Both documents are public,
+send `Access-Control-Allow-Origin: *` and an `ETag`, and answer `If-None-Match` with `304`.
+The catalog follows the app `basePath`; cards live below the endpoint, which follows `api.basePath`.
+Turn discovery off with `agent: { aiCatalog: false }`. An app without an MCP server serves none of it.
+
 ## Observe tool executions
 
 Subscribe through the existing [observability API](/docs/observability), not by inspecting MCP
@@ -601,6 +657,8 @@ bounded post-response work where the host requires it.
 | `path`                 | `/api/mcp`    | Canonical Farm API path for the Streamable HTTP endpoint.                                       |
 | `name`                 | `farm-api`    | MCP server name returned during initialization.                                                 |
 | `version`              | `1.0.0`       | Application server version returned during initialization.                                      |
+| `title`                | none          | Display name returned during initialization and in the server card.                             |
+| `description`          | none          | What the server does, returned during initialization and in the server card (100 characters).   |
 
 Tool metadata supports `name`, `title`, `description`, `readOnlyHint`, `destructiveHint`,
 `idempotentHint`, and `openWorldHint`. Annotations describe intent to the client; they do not enforce

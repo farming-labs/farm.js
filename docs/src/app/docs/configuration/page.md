@@ -443,14 +443,16 @@ mixed declarations, the resolved catalog, and permission checks.
 ## Agent readiness
 
 `agent` holds features that help AI agents and crawlers understand a public site, and decide which
-of them may use it. The two that only describe what agents can already read are on by default:
-`jsonLd` (a schema.org `WebSite` built from your metadata) and `llmsTxt` (an index of your static
-pages, when the [docs engine](/docs/docs-engine) isn't serving its own). The rest, which expose more
-or change who may crawl, are opt-in. Turn a default off with `false`, for example on an internal tool:
+of them may use it. The ones that only describe what agents can already read are on by default:
+`jsonLd` (a schema.org `WebSite` built from your metadata), `llmsTxt` (an index of your static
+pages, when the [docs engine](/docs/docs-engine) isn't serving its own), and `aiCatalog` (discovery
+for the [MCP server](/docs/plugins/mcp#discovery) you already serve, when you serve one). The rest,
+which expose more or change who may crawl, are opt-in. Turn a default off with `false`, for example
+on an internal tool:
 
 ```ts title="farm.config.ts"
 export default defineConfig({
-  agent: { jsonLd: false, llmsTxt: false },
+  agent: { jsonLd: false, llmsTxt: false, aiCatalog: false },
 });
 ```
 
@@ -606,6 +608,16 @@ The app's own file wins. Farm serves `/robots.txt` from, in order:
 2. A root [`robots.ts` metadata route](/docs/routing#application-metadata-routes) in `src/app`.
 3. The generated file from `agent.crawlers`.
 4. The [docs engine](/docs/docs-engine)'s robots.txt, when the docs engine is enabled.
+
+### AI catalog
+
+When the app mounts an MCP server, through the top-level [`mcp`](/docs/plugins/mcp) config or
+`apiMcp()`, Farm serves `/.well-known/ai-catalog.json` (and the same entries at
+`/.well-known/ard.json`) listing a server card for it, serves the card at `<endpoint>/server-card`,
+and adds an `MCP` section to the generated `llms.txt` that names the endpoint. The card carries only
+the server's identity and URL, never its tools, and listing it does not skip `authorize`.
+[MCP discovery](/docs/plugins/mcp#discovery) shows both documents. `aiCatalog: false` turns all
+three off; an app without an MCP server serves none of them.
 
 ### API catalog
 

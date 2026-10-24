@@ -15,6 +15,8 @@ type JSONSchema = Readonly<Record<string, unknown>>;
 
 /** What a server can say beyond its tool list, for the app manifest. All optional. */
 export interface FarmMCPCatalogDetails {
+  /** MCP protocol versions the endpoint accepts, for its server card. */
+  protocolVersions?: readonly string[];
   /** Each tool's input and output JSON Schemas, by tool name. */
   schemas?: Readonly<Record<string, { input: JSONSchema; output?: JSONSchema }>>;
   resources?: readonly {

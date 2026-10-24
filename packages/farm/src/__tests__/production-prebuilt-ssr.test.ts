@@ -1178,6 +1178,103 @@ export default function Page() {
     }
   }, 120_000);
 
+  it("lists the MCP server in /.well-known/ai-catalog.json, its card, and llms.txt", async () => {
+    const root = await createProductionFixture();
+    // What @farm.js/mcp does when it mounts its endpoint.
+    const plugin = `{
+    name: "farm:api-mcp",
+    routes: ({ route }) => {
+      _publishFarmMCPCatalog(
+        { name: "fixture", version: "2.0.0", path: "/api/mcp", title: "Fixture" },
+        [],
+        { protocolVersions: ["2025-11-25"] },
+      );
+      return [route.post("/api/mcp", { handler: () => Response.json({ ok: true }) })];
+    },
+  }`;
+
+    try {
+      await fs.writeFile(
+        path.join(root, "farm.config.ts"),
+        `import { _publishFarmMCPCatalog } from "@farm.js/core/api/runtime";
+export default { basePath: "/workspace", plugins: [${plugin}] };`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          basePath: "/workspace",
+          images: { provider: "none" },
+          telemetry: false,
+          plugins: [
+            definePlugin({
+              name: "farm:api-mcp",
+              routes: ({ route }) => [
+                route.post("/api/mcp", { handler: () => Response.json({ ok: true }) }),
+              ],
+            }),
+          ],
+          generateBuildId: () => "production-ai-catalog-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(response.headers.get("content-type")).toBe(
+            "application/ai-catalog+json; charset=utf-8",
+          );
+          const origin = new URL(response.url).origin;
+          const { entries } = await response.json();
+          expect(entries).toEqual([
+            expect.objectContaining({
+              identifier: "urn:air:127.0.0.1:mcp:fixture",
+              type: "application/mcp-server-card+json",
+              url: `${origin}/api/mcp/server-card`,
+              displayName: "Fixture",
+            }),
+          ]);
+
+          const ard = await fetch(`${origin}/workspace/.well-known/ard.json`);
+          expect((await ard.json()).entries).toEqual(entries);
+
+          // The card is served below the endpoint, before the API routes answer.
+          const card = await fetch(entries[0].url);
+          expect(card.status).toBe(200);
+          expect(card.headers.get("access-control-allow-origin")).toBe("*");
+          expect(await card.json()).toMatchObject({
+            version: "2.0.0",
+            title: "Fixture",
+            remotes: [
+              {
+                type: "streamable-http",
+                url: `${origin}/api/mcp`,
+                supportedProtocolVersions: ["2025-11-25"],
+              },
+            ],
+          });
+          const etag = card.headers.get("etag")!;
+          expect((await fetch(entries[0].url, { headers: { "if-none-match": etag } })).status).toBe(
+            304,
+          );
+          expect((await fetch(`${origin}/api/mcp`, { method: "POST" })).status).toBe(200);
+
+          const llms = await (await fetch(`${origin}/workspace/llms.txt`)).text();
+          expect(llms).toContain("## MCP");
+          expect(llms).toContain(`- [Fixture](${origin}/api/mcp)`);
+          expect(llms).toContain(`(${origin}/workspace/.well-known/ai-catalog.json)`);
+        },
+        "/workspace/.well-known/ai-catalog.json",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("reads server env where the server runs instead of storing it in the build output", async () => {
     const root = await createProductionFixture();
     const previous = process.env.FARM_TEST_DATABASE_URL;

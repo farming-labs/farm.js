@@ -66,6 +66,7 @@ import {
   normalizeFarmMarkdownRoutePath,
 } from "./app-markdown";
 import { applyWebResponseHeaders, sendWebResponse } from "./server/response";
+import { createFarmAiCatalogResponse } from "./ai-catalog";
 import {
   createFarmApiCatalogResponse,
   FARM_API_CATALOG_PATH,
@@ -2016,6 +2017,25 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               ),
             );
             return;
+          }
+
+          // agent.aiCatalog: the AI catalog of MCP servers and each server's card.
+          if (options.agent?.aiCatalog !== false) {
+            const aiCatalog = createFarmAiCatalogResponse(
+              new Request(parsedRequestUrl, {
+                method: requestMethod,
+                headers: {
+                  "user-agent": String(req.headers["user-agent"] ?? ""),
+                  "if-none-match": String(req.headers["if-none-match"] ?? ""),
+                },
+              }),
+              { basePath: farmConfig.basePath, apiServerBasePath },
+            );
+            if (aiCatalog) {
+              if (await runAppMiddlewareForContentRoute()) return;
+              await sendWebResponse(res, aiCatalog);
+              return;
+            }
           }
 
           const docsHeaders = new Headers();

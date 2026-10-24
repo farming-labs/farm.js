@@ -5276,6 +5276,10 @@ function generateVirtualEntryCode(
     !applicationMetadataRoutes.some(
       (metadata) => metadata.kind === "robots" && metadata.pattern === "/",
     );
+  // agent.aiCatalog lists MCP servers, which only @farm.js/mcp mounts.
+  const servesAiCatalog =
+    config.agent?.aiCatalog !== false &&
+    (config.plugins || []).some((plugin) => plugin.name === "farm:api-mcp");
   const hasPluginRuntime = hasRuntimeIntegrationConfig || hasServerRuntimePlugins;
   // Decided when the server starts, from its environment; see createFarmInfraAnalyticsPlugin.
   const hasInfraAnalyticsRuntime =
@@ -5673,11 +5677,13 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   createFarmCacheKey,
   createFarmMetadataRouteResponse,
   createFarmAgentRobots,
+  createFarmAiCatalogResponse,
   createFarmApiCatalogResponse,
   createFarmAppManifestResponse,
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsMarkdownReader,
+  listFarmMCPLlmsTxtLinks,
   renderFarmLlmsFullTxt,
   createFarmLlmsFullRenderer,
   createFarmThemeDocumentParts,
@@ -7277,6 +7283,14 @@ function createFarmLlmsTxtContext(request, full) {
       pages,
       config: farmLlmsTxtConfig,
       rootMetadata: rootLayout && rootLayout.module && rootLayout.module.metadata,
+      ${
+        servesAiCatalog
+          ? `mcp: listFarmMCPLlmsTxtLinks(origin, {
+        basePath: ${JSON.stringify(config.basePath)},
+        apiServerBasePath: farmLocalAPIBasePath,
+      }),`
+          : ""
+      }
     }),
     // llms-full.txt reads each page's .md mirror through this same handler,
     // with a fresh request so the caller's cookies never shape its content.
@@ -8113,6 +8127,22 @@ async function handleFarmRequestInContext(
     if (markdownResponse) {
       return applyProductionMiddlewareHeaders(markdownResponse, middlewareHeaders);
     }
+  }
+  `
+      : ""
+  }
+
+  ${
+    servesAiCatalog
+      ? `
+  // agent.aiCatalog: the AI catalog of MCP servers and each server's card. Cards
+  // live below the MCP endpoint, so this answers before the API routes, as in dev.
+  const farmAiCatalogResponse = createFarmAiCatalogResponse(request, {
+    basePath: ${JSON.stringify(config.basePath)},
+    apiServerBasePath: farmLocalAPIBasePath,
+  });
+  if (farmAiCatalogResponse) {
+    return applyProductionMiddlewareHeaders(farmAiCatalogResponse, middlewareHeaders);
   }
   `
       : ""
