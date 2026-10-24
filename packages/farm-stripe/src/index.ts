@@ -3475,6 +3475,7 @@ async function resolveBillingSnapshotForSession(
 ): Promise<{
   snapshot: StripeBillingSnapshot;
   previousSnapshot: StripeBillingSnapshot | null;
+  purchaseOnly: boolean;
 } | null> {
   if (!billing) {
     return null;
@@ -3523,6 +3524,33 @@ async function resolveBillingSnapshotForSession(
     return null;
   }
 
+  // A one-time product without a plan (credits, add-ons) sells no access: the purchase reaches
+  // the app through onCheckoutCompleted, and the plan, status and subscription stay as they were.
+  // Writing the session over them let a past_due owner buy anything to become active again.
+  const purchased = findConfiguredProduct(products, resolveProductIdFromSession(session));
+  if (session.mode === "payment" && purchased && !purchased.planId) {
+    const base: StripeBillingSnapshot = existingSnapshot ?? {
+      owner,
+      planId: "free",
+      productId: null,
+      status: "free",
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      trialEndsAt: null,
+      trialUsedAt: null,
+      seatQuantity: null,
+      seatAllowanceOverride: null,
+      metadata: {},
+    };
+    return {
+      snapshot: { ...base, stripeCustomerId: base.stripeCustomerId ?? session.customerId ?? null },
+      previousSnapshot: existingSnapshot,
+      purchaseOnly: true,
+    };
+  }
+
   return {
     snapshot: createBillingSnapshot(
       owner,
@@ -3533,6 +3561,7 @@ async function resolveBillingSnapshotForSession(
       existingSnapshot,
     ),
     previousSnapshot: existingSnapshot,
+    purchaseOnly: false,
   };
 }
 
@@ -3620,16 +3649,24 @@ async function syncBillingCheckoutSession(
   }
 
   try {
-    await persistBillingSnapshot(
-      resolved.snapshot,
-      billing,
-      persistence,
-      resolved.previousSnapshot,
-    );
+    // A purchase that changed nothing does not replay the status hooks (onPaymentFailed for a
+    // past_due owner buying credits).
+    if (
+      !resolved.purchaseOnly ||
+      !billingSnapshotStateEquals(resolved.snapshot, resolved.previousSnapshot)
+    ) {
+      await persistBillingSnapshot(
+        resolved.snapshot,
+        billing,
+        persistence,
+        resolved.previousSnapshot,
+      );
+    }
     await billing.hooks?.onCheckoutCompleted?.(
       {
         ...resolved.snapshot,
         sessionId: session.id,
+        purchasedProductId: resolveProductIdFromSession(session),
       },
       persistence.tools,
     );

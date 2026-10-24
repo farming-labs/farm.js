@@ -215,6 +215,9 @@ The same `ctx` includes `ctx.args.db`, `ctx.data`, request params, the raw reque
 - Store billing snapshots through the integration schema when the app needs fast entitlement reads.
 - Run `farm stripe migrate --apply` after upgrading so the additive
   `billing_checkout_session` table can persistently deduplicate success-page and webhook delivery.
+- A `one_time` product without a `planId` (credits, add-ons) sells no access: its checkout leaves
+  the owner's plan, status, and subscription as they were. Record the purchase in
+  `hooks.onCheckoutCompleted`, which receives the sold product as `purchasedProductId`.
 - Checkout completion, billing sync, and payment hooks are claimed by Stripe session ID before they
   run. Custom persistence should implement `claimCheckoutSession`; without it, Farm falls back to
   comparing the stored billing snapshot, so its billing-account reader must accompany

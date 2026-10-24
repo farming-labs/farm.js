@@ -235,6 +235,8 @@ export interface StripeBillingHooks {
   onCheckoutCompleted?(
     snapshot: StripeBillingSnapshot & {
       sessionId: string;
+      /** The product this checkout sold. For a one-time product without a plan the snapshot keeps the owner's plan product. */
+      purchasedProductId: string | null;
     },
     args: StripeBillingArgs,
   ): Promise<void> | void;
