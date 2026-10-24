@@ -11,6 +11,11 @@ export type RouteSlotConvention = {
 
 const SLOT_SEGMENT = /^@([A-Za-z][A-Za-z0-9_-]*)$/;
 
+/** Whether a folder name is a parallel route slot such as `@team`, which adds no URL segment. */
+export function isRouteSlotSegment(segment: string): boolean {
+  return SLOT_SEGMENT.test(segment);
+}
+
 /**
  * Parse a page nested below an `@slot` directory without adding the slot name
  * or interception marker to its public URL.

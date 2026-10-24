@@ -1,5 +1,15 @@
+import { isRouteSlotSegment } from "../routing/route-slots";
+
+/**
+ * URL path a middleware file in `directoryName` guards. Route groups and
+ * parallel route slots add no URL segment: `dashboard/@team/middleware.ts`
+ * guards `/dashboard`, the URL the slot renders under.
+ */
 export function appendMiddlewareRoutePath(routePath: string, directoryName: string): string {
-  if (directoryName.startsWith("(") && directoryName.endsWith(")")) {
+  if (
+    (directoryName.startsWith("(") && directoryName.endsWith(")")) ||
+    isRouteSlotSegment(directoryName)
+  ) {
     return routePath;
   }
 

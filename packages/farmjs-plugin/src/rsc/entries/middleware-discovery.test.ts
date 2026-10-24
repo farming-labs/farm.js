@@ -73,6 +73,14 @@ describe("RSC file middleware discovery", () => {
     expect(modules.map((entry) => entry.path)).toEqual(["/cart"]);
   });
 
+  it("drops parallel route slot folders, like core", () => {
+    const modules = buildMiddlewareModules({
+      "/dashboard/@team/middleware.ts": { default: () => {} },
+      "/dashboard/@team/settings/middleware.ts": { default: () => {} },
+    });
+    expect(modules.map((entry) => entry.path)).toEqual(["/dashboard", "/dashboard/settings"]);
+  });
+
   it("ignores middleware in private and dot folders, like core", () => {
     const modules = buildMiddlewareModules({
       "/_components/middleware.ts": { default: () => {} },

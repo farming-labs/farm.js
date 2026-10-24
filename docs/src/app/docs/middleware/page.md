@@ -47,6 +47,9 @@ Middleware can live near the routes it protects. Use it for auth, request metada
 Route-group directories such as `(marketing)` organize middleware without adding a URL segment.
 Middleware in sibling groups and in the folder above them all run, the shallower folder first:
 `src/app/middleware.ts`, then `src/app/(app)/middleware.ts`, then `src/app/(site)/middleware.ts`.
+Parallel route slots work the same way: `src/app/dashboard/@team/middleware.ts` runs for
+`/dashboard` and the URLs below it, because that is where the slot renders. It guards the whole
+request, not only the slot.
 
 **src/app/dashboard/middleware.ts**
 

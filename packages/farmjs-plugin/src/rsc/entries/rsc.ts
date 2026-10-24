@@ -509,10 +509,12 @@ debug('Discovered API routes:', Array.from(apiRouteMap.keys()));
 /**
  * Convert an app-relative middleware file path to the route it guards, with the
  * same rules as core's middleware discovery: a route group such as
- * '(protected)' adds no URL segment, and a '_private' or dot-prefixed folder
- * holds no routes, so its middleware never runs (null).
+ * '(protected)' or a parallel route slot such as '@team' adds no URL segment,
+ * and a '_private' or dot-prefixed folder holds no routes, so its middleware
+ * never runs (null).
  * e.g., '/middleware.ts' -> '/'
  * e.g., '/(protected)/dashboard/middleware.ts' -> '/dashboard'
+ * e.g., '/dashboard/@team/middleware.ts' -> '/dashboard'
  */
 function middlewarePathToRoute(filePath) {
   const segments = filePath
@@ -523,7 +525,9 @@ function middlewarePathToRoute(filePath) {
     return null;
   }
   const routeSegments = segments.filter(
-    (segment) => !(segment.startsWith('(') && segment.endsWith(')')),
+    (segment) =>
+      !(segment.startsWith('(') && segment.endsWith(')')) &&
+      !/^@[A-Za-z][A-Za-z0-9_-]*$/.test(segment),
   );
   return routeSegments.length === 0 ? '/' : '/' + routeSegments.join('/');
 }
