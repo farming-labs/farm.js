@@ -97,6 +97,7 @@ import {
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { buildFarmVercelRoutes } from "./vercel-assets";
+import { createFarmNetlifyEntry, resolveNitroNetlifyEntry } from "./netlify-entry";
 import { createFarmNodeServerEntry } from "./node-server-entry";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
@@ -9958,6 +9959,16 @@ function toFarmNodeResponse(request, response) {
       }),
     );
   }
+  const farmNetlifyEntryPath =
+    preset === "netlify" ? path.join(ssrOutputDir, "farm-netlify-entry.mjs") : null;
+  if (farmNetlifyEntryPath) {
+    await fs.writeFile(
+      farmNetlifyEntryPath,
+      createFarmNetlifyEntry({
+        nitroNetlifyEntry: resolveNitroNetlifyEntry(resolveNitroPackageEntry(root)),
+      }),
+    );
+  }
   const prebuiltSSRPlugin = createExternalSSRBundlePlugin(
     nitroEntryPath,
     ssrOutputDir,
@@ -9984,6 +9995,7 @@ function toFarmNodeResponse(request, response) {
   let nitroConfig: NitroConfig = {
     preset,
     ...(farmNodeServerEntryPath ? { entry: farmNodeServerEntryPath } : {}),
+    ...(farmNetlifyEntryPath ? { entry: farmNetlifyEntryPath } : {}),
     rootDir: root,
     // Farm registers every handler, task, and plugin explicitly. Scanning the
     // project root would bundle an app's own `middleware/`, `api/`, `routes/`,
