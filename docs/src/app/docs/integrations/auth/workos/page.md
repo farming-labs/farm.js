@@ -175,20 +175,21 @@ Signed-out requests receive a `307` redirect to `/login` with the original root-
 
 ## Options
 
-| Option            | Default            | Use                                          |
-| ----------------- | ------------------ | -------------------------------------------- |
-| `instance`        | None               | Existing WorkOS SDK instance.                |
-| `clientId`        | `WORKOS_CLIENT_ID` | AuthKit client ID.                           |
-| `apiKey`          | `WORKOS_API_KEY`   | Server API key when no instance is supplied. |
-| `cookiePassword`  | WorkOS cookie env  | Sealed-session password.                     |
-| `cookieName`      | `wos-session`      | Session cookie name.                         |
-| `loginPath`       | `/login`           | Sign-in route.                               |
-| `signUpPath`      | `/signup`          | Sign-up route.                               |
-| `callbackPath`    | `/callback`        | AuthKit callback route.                      |
-| `logoutPath`      | `/logout`          | Logout route.                                |
-| `sessionPath`     | `/auth/session`    | Session JSON route.                          |
-| `protectedRoutes` | None               | One matcher or a list of matchers.           |
-| `allowedOrigins`  | App origin only    | Extra origins allowed to post sign-out.      |
+| Option            | Default             | Use                                          |
+| ----------------- | ------------------- | -------------------------------------------- |
+| `instance`        | None                | Existing WorkOS SDK instance.                |
+| `clientId`        | `WORKOS_CLIENT_ID`  | AuthKit client ID.                           |
+| `apiKey`          | `WORKOS_API_KEY`    | Server API key when no instance is supplied. |
+| `cookiePassword`  | WorkOS cookie env   | Sealed-session password.                     |
+| `cookieName`      | `wos-session`       | Session cookie name.                         |
+| `stateCookieName` | `farm_workos_state` | Login state cookie name.                     |
+| `loginPath`       | `/login`            | Sign-in route.                               |
+| `signUpPath`      | `/signup`           | Sign-up route.                               |
+| `callbackPath`    | `/callback`         | AuthKit callback route.                      |
+| `logoutPath`      | `/logout`           | Logout route.                                |
+| `sessionPath`     | `/auth/session`     | Session JSON route.                          |
+| `protectedRoutes` | None                | One matcher or a list of matchers.           |
+| `allowedOrigins`  | App origin only     | Extra origins allowed to post sign-out.      |
 
 ## Cross-site request protection
 
