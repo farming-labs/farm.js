@@ -9552,22 +9552,24 @@ function createKeyedRowsBlockComponentCore(
       const eventTarget = event.target as Node | null;
       if (!instance || !eventTarget) return;
       const capture = name.endsWith("Capture");
-      const matches = (this.currentProps.events || [])
-        .filter((descriptor) => descriptor.name === name && descriptor.path !== undefined)
-        .map((descriptor) => ({
-          descriptor,
-          target: findCompilerHostTarget(instance.element, descriptor.path || []),
-        }))
-        .filter((match): match is { descriptor: CompilerKeyedRowEvent; target: Element } =>
-          Boolean(
-            match.target && (match.target === eventTarget || match.target.contains(eventTarget)),
-          ),
-        )
-        .sort((left, right) =>
-          capture
-            ? (left.descriptor.path?.length || 0) - (right.descriptor.path?.length || 0)
-            : (right.descriptor.path?.length || 0) - (left.descriptor.path?.length || 0),
-        );
+      const descriptors = this.currentProps.events || [];
+      const matches: { descriptor: CompilerKeyedRowEvent; target: Element }[] = [];
+      // Snapshot all matching targets before invoking a handler: a handler can
+      // replace the DOM or update the descriptors for the next event.
+      for (let index = 0, length = descriptors.length; index < length; index += 1) {
+        if (!(index in descriptors)) continue;
+        const descriptor = descriptors[index];
+        if (descriptor.name !== name || descriptor.path === undefined) continue;
+        const target = findCompilerHostTarget(instance.element, descriptor.path || []);
+        if (target && (target === eventTarget || target.contains(eventTarget))) {
+          matches.push({ descriptor, target });
+        }
+      }
+      matches.sort((left, right) =>
+        capture
+          ? (left.descriptor.path?.length || 0) - (right.descriptor.path?.length || 0)
+          : (right.descriptor.path?.length || 0) - (left.descriptor.path?.length || 0),
+      );
 
       for (const match of matches) {
         this.invokeDelegatedEvent(match.descriptor, instance, event, match.target);
