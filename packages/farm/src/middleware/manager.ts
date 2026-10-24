@@ -31,7 +31,12 @@ import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import { stripFarmBasePath } from "../base-path";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { createCliColors } from "../cli-colors";
-import { appendMiddlewareRoutePath } from "./path";
+import {
+  appendMiddlewareDirectory,
+  appendMiddlewareRoutePath,
+  compareMiddlewareRouteLocations,
+  type MiddlewareRouteLocation,
+} from "./path";
 import type { FarmServerConfig, ResolvedFarmServerConfig } from "../server-http";
 import { resolveFarmRequestURL } from "../server/request";
 import {
@@ -111,23 +116,27 @@ export class MiddlewareManager {
    * Discover all middleware.ts files
    */
   async discover(): Promise<void> {
-    const middlewareByPath = new Map<string, DiscoveredMiddleware>();
+    // Keyed by folder, not URL path: route groups share a URL path, and every
+    // group's middleware has to run. A later layer still overrides the same folder.
+    const middlewareByDirectory = new Map<
+      string,
+      { location: MiddlewareRouteLocation; middleware: DiscoveredMiddleware }
+    >();
     for (const appDir of this.appDirs) {
-      const discovered: DiscoveredMiddleware[] = [];
-      await this.discoverInDirectory(appDir, "/", discovered);
-      for (const middleware of discovered) {
-        compileMiddlewareRoute(middleware);
-        middlewareByPath.set(middleware.path, middleware);
+      const discovered: Array<{
+        location: MiddlewareRouteLocation;
+        middleware: DiscoveredMiddleware;
+      }> = [];
+      await this.discoverInDirectory(appDir, "/", "", discovered);
+      for (const entry of discovered) {
+        compileMiddlewareRoute(entry.middleware);
+        middlewareByDirectory.set(entry.location.directory, entry);
       }
     }
-    this.middleware = Array.from(middlewareByPath.values());
-
-    // Sort by path depth (root first, then nested)
-    this.middleware.sort((a, b) => {
-      const depthA = a.path.split("/").filter(Boolean).length;
-      const depthB = b.path.split("/").filter(Boolean).length;
-      return depthA - depthB;
-    });
+    // Root first, then nested; the same order production discovery emits.
+    this.middleware = Array.from(middlewareByDirectory.values())
+      .sort((left, right) => compareMiddlewareRouteLocations(left.location, right.location))
+      .map((entry) => entry.middleware);
 
     if (process.env.FARM_VERBOSE && this.middleware.length > 0) {
       logger.success(`Discovered ${this.middleware.length} middleware files`);
@@ -143,7 +152,8 @@ export class MiddlewareManager {
   private async discoverInDirectory(
     dir: string,
     routePath: string,
-    discovered: DiscoveredMiddleware[],
+    directory: string,
+    discovered: Array<{ location: MiddlewareRouteLocation; middleware: DiscoveredMiddleware }>,
   ): Promise<void> {
     if (!fs.existsSync(dir)) {
       return;
@@ -154,7 +164,7 @@ export class MiddlewareManager {
     if (middlewareFile) {
       const middleware = await this.loadMiddleware(middlewareFile, routePath);
       if (middleware) {
-        discovered.push(middleware);
+        discovered.push({ location: { path: routePath, directory }, middleware });
       }
     }
 
@@ -162,9 +172,12 @@ export class MiddlewareManager {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory() && !entry.name.startsWith(".") && !entry.name.startsWith("_")) {
-        const subPath = path.join(dir, entry.name);
-        const subRoutePath = appendMiddlewareRoutePath(routePath, entry.name);
-        await this.discoverInDirectory(subPath, subRoutePath, discovered);
+        await this.discoverInDirectory(
+          path.join(dir, entry.name),
+          appendMiddlewareRoutePath(routePath, entry.name),
+          appendMiddlewareDirectory(directory, entry.name),
+          discovered,
+        );
       }
     }
   }

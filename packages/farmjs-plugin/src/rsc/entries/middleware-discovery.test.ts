@@ -96,4 +96,23 @@ describe("RSC file middleware discovery", () => {
     await runner(new Request("https://example.test/admin/users/7"));
     expect(calls).toEqual(["root", "admin", "users"]);
   });
+
+  it("runs root middleware before route-group middleware at the same URL path", async () => {
+    const calls: string[] = [];
+    // Glob order puts '/(app)/' and '/(site)/' ahead of '/middleware.ts'.
+    const modules = buildMiddlewareModules({
+      "/(app)/middleware.ts": recordingMiddleware("app", calls),
+      "/(site)/middleware.ts": recordingMiddleware("site", calls),
+      "/middleware.ts": recordingMiddleware("root", calls),
+    });
+    expect(modules.map((entry) => entry.filePath)).toEqual([
+      "/middleware.ts",
+      "/(app)/middleware.ts",
+      "/(site)/middleware.ts",
+    ]);
+
+    const runner = createProductionMiddlewareRunner({ modules });
+    await runner(new Request("https://example.test/admin"));
+    expect(calls).toEqual(["root", "app", "site"]);
+  });
 });

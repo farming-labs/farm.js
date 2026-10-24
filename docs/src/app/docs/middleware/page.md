@@ -45,6 +45,8 @@ a returned response does not replace cookies already written through `ctx.cookie
 
 Middleware can live near the routes it protects. Use it for auth, request metadata, A/B flags, rate limit checks, or headers that belong to an area of the app.
 Route-group directories such as `(marketing)` organize middleware without adding a URL segment.
+Middleware in sibling groups and in the folder above them all run, the shallower folder first:
+`src/app/middleware.ts`, then `src/app/(app)/middleware.ts`, then `src/app/(site)/middleware.ts`.
 
 **src/app/dashboard/middleware.ts**
 

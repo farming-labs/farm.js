@@ -486,7 +486,15 @@ const farmMiddlewareRunner = createProductionMiddlewareRunner({
     .filter((entry) => entry.path !== null)
     // Root first, as core runs them: a nested guard can rely on what its
     // parent middleware set, and glob order is alphabetical, not by depth.
-    .sort((left, right) => middlewareRouteDepth(left.path) - middlewareRouteDepth(right.path)),
+    // Route groups share a URL path; the shallower file runs first, so
+    // '/middleware.ts' precedes '/(app)/middleware.ts'.
+    .sort(
+      (left, right) =>
+        middlewareRouteDepth(left.path) - middlewareRouteDepth(right.path) ||
+        left.path.localeCompare(right.path) ||
+        middlewareRouteDepth(left.filePath) - middlewareRouteDepth(right.filePath) ||
+        left.filePath.localeCompare(right.filePath),
+    ),
   i18n: ${JSON.stringify(ctx.i18n) ?? "undefined"},
   server: ${JSON.stringify(ctx.server) ?? "undefined"},
 });

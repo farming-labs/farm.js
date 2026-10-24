@@ -128,7 +128,12 @@ import {
   REACT_RENDERER,
   resolveFarmRendererAppSetup,
 } from "../renderer";
-import { appendMiddlewareRoutePath } from "../middleware/path";
+import {
+  appendMiddlewareDirectory,
+  appendMiddlewareRoutePath,
+  compareMiddlewareRouteLocations,
+  type MiddlewareRouteLocation,
+} from "../middleware/path";
 import type { FarmRenderer } from "../renderer";
 import { farmPluginMayAffectRuntimePath } from "../plugin-runtime-endpoint";
 
@@ -982,12 +987,15 @@ export async function discoverMiddlewareRoutes(
 ): Promise<UniversalMiddlewareRoute[]> {
   const fs = await import("fs/promises");
   const appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
-  const routes = new Map<string, UniversalMiddlewareRoute>();
+  // Keyed by folder, not URL path: route groups share a URL path, and every
+  // group's middleware has to run. A later layer still overrides the same folder.
+  const routes = new Map<string, MiddlewareRouteLocation & UniversalMiddlewareRoute>();
 
   async function walk(
     dir: string,
     routePath: string,
-    discovered: UniversalMiddlewareRoute[],
+    directory: string,
+    discovered: Array<MiddlewareRouteLocation & UniversalMiddlewareRoute>,
   ): Promise<void> {
     let entries: import("fs").Dirent[];
     try {
@@ -1003,6 +1011,7 @@ export async function discoverMiddlewareRoutes(
     if (middlewareFile) {
       discovered.push({
         path: routePath,
+        directory,
         filePath: path.join(dir, middlewareFile.name),
       });
     }
@@ -1012,24 +1021,26 @@ export async function discoverMiddlewareRoutes(
         continue;
       }
 
-      const childRoutePath = appendMiddlewareRoutePath(routePath, entry.name);
-      await walk(path.join(dir, entry.name), childRoutePath, discovered);
+      await walk(
+        path.join(dir, entry.name),
+        appendMiddlewareRoutePath(routePath, entry.name),
+        appendMiddlewareDirectory(directory, entry.name),
+        discovered,
+      );
     }
   }
 
   for (const sourceAppDir of appDirs) {
-    const discovered: UniversalMiddlewareRoute[] = [];
-    await walk(sourceAppDir, "/", discovered);
+    const discovered: Array<MiddlewareRouteLocation & UniversalMiddlewareRoute> = [];
+    await walk(sourceAppDir, "/", "", discovered);
     for (const route of discovered) {
-      routes.set(route.path, route);
+      routes.set(route.directory, route);
     }
   }
 
-  return Array.from(routes.values()).sort((a, b) => {
-    const depthA = a.path.split("/").filter(Boolean).length;
-    const depthB = b.path.split("/").filter(Boolean).length;
-    return depthA - depthB || a.path.localeCompare(b.path);
-  });
+  return Array.from(routes.values())
+    .sort(compareMiddlewareRouteLocations)
+    .map(({ path: routePath, filePath }) => ({ path: routePath, filePath }));
 }
 
 /**
