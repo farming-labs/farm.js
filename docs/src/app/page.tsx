@@ -20,7 +20,7 @@ import {
   Rocket,
   Route,
   Terminal,
-} from "lucide-react";
+} from "../components/icons";
 import type { LucideIcon } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import auth0IconUrl from "simple-icons/icons/auth0.svg?url";
@@ -741,7 +741,7 @@ function ProductStackTile({
 }) {
   const Icon = item.icon;
   const className = cx(
-    "flex h-16 w-40 shrink-0 items-center justify-center gap-3 border-r border-white/12 bg-black px-4 font-mono text-[10px] font-normal uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.07] hover:text-white/82 focus-visible:z-10 focus-visible:bg-white/[0.07] focus-visible:text-white focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-white/36 sm:w-44 sm:text-[11px]",
+    "farm-stack-tile bg-black font-mono hover:bg-white/[0.07] focus-visible:bg-white/[0.07]",
     itemIndex % 2 === 0 && "bg-white/[0.045]",
   );
 
@@ -1135,7 +1135,15 @@ function FeatureCell({
 
 function DeveloperExperienceGrid() {
   return (
-    <section className="farm-full-rule grid w-full lg:grid-cols-2">
+    <section
+      aria-labelledby="developer-experience-title"
+      className="farm-full-rule grid w-full lg:grid-cols-2"
+    >
+      {/* The hero's H1 is the only visible heading above these cards; this keeps the outline
+          from skipping a level, as the benchmark section's heading does. */}
+      <h2 className="sr-only" id="developer-experience-title">
+        Developer experience
+      </h2>
       <FeatureCell
         body="Start the whole app once, then see every page request and response time as you work."
         icon={Terminal}
@@ -1356,7 +1364,7 @@ function DeploymentVisual() {
             <div
               key={`${tile.row}_${tile.col}`}
               className={cx(
-                "group/tile absolute flex size-[20%] items-center justify-center overflow-hidden rounded-none border border-white/[0.08] transition-[background-color,border-color] duration-150",
+                "farm-deploy-tile group/tile",
                 tile.brand
                   ? "bg-white/[0.055] group-hover/deployment:border-white/[0.14] group-hover/deployment:bg-white/[0.075]"
                   : "bg-white/[0.012]",
@@ -1369,13 +1377,8 @@ function DeploymentVisual() {
             >
               {tile.brand ? (
                 <>
-                  <BrandIcon
-                    className="size-7 opacity-72 transition-[opacity,transform] duration-150 group-hover/tile:-translate-y-1 group-hover/tile:opacity-90"
-                    src={tile.brand}
-                  />
-                  <span className="pointer-events-none absolute inset-x-1 bottom-1 translate-y-1 truncate text-center font-mono text-[7px] font-normal uppercase tracking-normal text-white/68 opacity-0 transition-[opacity,transform] duration-150 group-hover/tile:translate-y-0 group-hover/tile:opacity-100">
-                    {tile.label}
-                  </span>
+                  <BrandIcon className="farm-deploy-tile-icon" src={tile.brand} />
+                  <span className="farm-deploy-tile-label font-mono">{tile.label}</span>
                 </>
               ) : (
                 <span className="size-px bg-white/12" />
@@ -1757,7 +1760,7 @@ function IntegrationsSection() {
                 <a
                   key={item.label}
                   aria-label={`${item.label} integration documentation`}
-                  className="group absolute grid place-items-center bg-white/[0.055] transition-[background-color,color] duration-150 hover:z-10 hover:bg-white focus-visible:z-10 focus-visible:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
+                  className="farm-integration-tile group"
                   href={item.href}
                   style={{
                     height: "16.6666667%",
@@ -1768,20 +1771,11 @@ function IntegrationsSection() {
                   title={`${item.label} integration`}
                 >
                   {"brand" in item ? (
-                    <BrandIcon
-                      className="size-7 opacity-60 transition-[filter,opacity,transform] duration-150 group-hover:-translate-y-1 group-hover:invert-0 group-hover:opacity-100 group-focus-visible:-translate-y-1 group-focus-visible:invert-0 group-focus-visible:opacity-100"
-                      src={item.brand}
-                    />
+                    <BrandIcon className="farm-integration-tile-icon" src={item.brand} />
                   ) : Icon ? (
-                    <Icon
-                      aria-hidden
-                      className="size-7 text-white/60 transition-[color,transform] duration-150 group-hover:-translate-y-1 group-hover:text-black group-focus-visible:-translate-y-1 group-focus-visible:text-black"
-                      strokeWidth={1.35}
-                    />
+                    <Icon aria-hidden className="farm-integration-tile-glyph" strokeWidth={1.35} />
                   ) : null}
-                  <span className="pointer-events-none absolute inset-x-1 bottom-1 translate-y-1 truncate text-center font-mono text-[7px] font-normal uppercase tracking-normal text-black/55 opacity-0 transition-[opacity,transform] duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
-                    {item.label}
-                  </span>
+                  <span className="farm-integration-tile-label font-mono">{item.label}</span>
                 </a>
               );
             })}

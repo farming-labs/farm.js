@@ -1,4 +1,4 @@
-import { Activity, Rocket, Server, TimerReset, Weight } from "lucide-react";
+import { Activity, Rocket, Server, TimerReset, Weight } from "../icons";
 import type { ComponentType, ReactNode } from "react";
 import nextIconUrl from "simple-icons/icons/nextdotjs.svg?url";
 import nuxtIconUrl from "simple-icons/icons/nuxt.svg?url";
@@ -39,6 +39,8 @@ const chartMetrics = [
 ] as const satisfies readonly (readonly [MetricKey, string])[];
 
 const chartInsetX = 42;
+/** Two decimals is far below a pixel and keeps every coordinate in the HTML short. */
+const round2 = (value: number) => Math.round(value * 100) / 100;
 const chartTopY = 250;
 
 function formatByteCount(bytes: number) {
@@ -100,7 +102,7 @@ function getChartPoints(framework: FrameworkResult, width: number, height: numbe
     const rank = maximum === minimum ? 0 : (rawValue - minimum) / (maximum - minimum);
     const x = insetX + index * step;
     const clamped = Math.max(0, Math.min(1, rank));
-    const y = insetTop + (1 - clamped) * (height - insetTop - insetBottom);
+    const y = round2(insetTop + (1 - clamped) * (height - insetTop - insetBottom));
 
     return { label, metric, rawValue, x, y };
   });
@@ -142,11 +144,11 @@ function closeCeilingPath(path: string, points: readonly ChartPoint[], ceilingY:
 }
 
 function getTooltipX(x: number, width: number) {
-  return Math.max(52, Math.min(width - 238, x - 76));
+  return round2(Math.max(52, Math.min(width - 238, x - 76)));
 }
 
 function getTooltipY(y: number) {
-  return Math.max(252, y - 68);
+  return round2(Math.max(252, y - 68));
 }
 
 function getColumnRangeLabel(key: MetricKey) {
@@ -323,13 +325,34 @@ function BenchmarkAreaChart() {
       <div className="relative h-[40rem]">
         <svg
           aria-label="Farm.js benchmark comparison area chart"
-          className="absolute inset-x-0 bottom-0 h-full w-full text-white"
+          className="benchmark-chart absolute inset-x-0 bottom-0 h-full w-full text-white"
           preserveAspectRatio="none"
           role="img"
           viewBox={`0 0 ${width} ${height}`}
         >
           <style>
             {`
+              .benchmark-chart text {
+                fill: currentColor;
+                font-family: var(--font-geist-mono, monospace);
+              }
+
+              .benchmark-point-ring {
+                fill: black;
+                stroke: white;
+              }
+
+              .benchmark-point-hit {
+                fill: white;
+                fill-opacity: 0.001;
+                pointer-events: all;
+              }
+
+              .benchmark-point-tooltip rect {
+                fill: black;
+                stroke: white;
+              }
+
               .benchmark-series-line,
               .benchmark-point-ring,
               .benchmark-point-tooltip {
@@ -440,9 +463,7 @@ function BenchmarkAreaChart() {
             return (
               <g key={label}>
                 <text
-                  fill="currentColor"
                   fillOpacity="0.34"
-                  fontFamily="var(--font-geist-mono, monospace)"
                   fontSize="8"
                   textAnchor={textAnchor}
                   x={x}
@@ -451,9 +472,7 @@ function BenchmarkAreaChart() {
                   {formatMetricValue(metric, maximum)}
                 </text>
                 <text
-                  fill="currentColor"
                   fillOpacity="0.42"
-                  fontFamily="var(--font-geist-mono, monospace)"
                   fontSize="8"
                   textAnchor={textAnchor}
                   x={x}
@@ -462,9 +481,7 @@ function BenchmarkAreaChart() {
                   {formatMetricValue(metric, minimum)}
                 </text>
                 <text
-                  fill="currentColor"
                   fillOpacity="0.48"
-                  fontFamily="var(--font-geist-mono, monospace)"
                   fontSize="10"
                   textAnchor={textAnchor}
                   x={x}
@@ -548,27 +565,21 @@ function BenchmarkAreaChart() {
                       className="benchmark-point-ring"
                       cx={point.x}
                       cy={point.y}
-                      fill="black"
                       fillOpacity={isFarm ? "0.82" : "0.74"}
                       r={isFarm ? "3.3" : framework.id === "tanstack" ? "2.6" : "2.1"}
-                      stroke="white"
                       strokeOpacity={isFarm ? "0.88" : seriesOpacity[framework.id]}
                       strokeWidth={isFarm ? "1.2" : "1"}
                     />
                     <circle
+                      className="benchmark-point-hit"
                       cx={point.x}
                       cy={point.y}
-                      fill="white"
-                      fillOpacity="0.001"
-                      pointerEvents="all"
                       r={isFarm ? "14" : "13"}
                     />
                     <g className="benchmark-point-tooltip">
                       <rect
-                        fill="black"
                         fillOpacity={isFarm ? "0.96" : "0.94"}
                         height="62"
-                        stroke="white"
                         strokeOpacity={isFarm ? "0.16" : "0.12"}
                         width="226"
                         x={tooltipX}
@@ -580,37 +591,31 @@ function BenchmarkAreaChart() {
                         href={iconUrl}
                         opacity={isFarm ? "0.9" : "0.82"}
                         width="12"
-                        x={tooltipX + 10}
-                        y={tooltipY + 10.5}
+                        x={round2(tooltipX + 10)}
+                        y={round2(tooltipY + 10.5)}
                       />
                       <text
                         dominantBaseline="middle"
-                        fill="currentColor"
-                        fontFamily="var(--font-geist-mono, monospace)"
                         fontSize="8.5"
-                        x={tooltipX + 29}
-                        y={tooltipY + 17}
+                        x={round2(tooltipX + 29)}
+                        y={round2(tooltipY + 17)}
                       >
                         {framework.label.toUpperCase()}
                       </text>
                       <text
-                        fill="currentColor"
                         fillOpacity={isFarm ? "0.68" : "0.62"}
-                        fontFamily="var(--font-geist-mono, monospace)"
                         fontSize="9"
-                        x={tooltipX + 10}
-                        y={tooltipY + 39}
+                        x={round2(tooltipX + 10)}
+                        y={round2(tooltipY + 39)}
                       >
                         {point.label.toUpperCase()} MEDIAN ·{" "}
                         {formatMetricValue(point.metric, point.rawValue)}
                       </text>
                       <text
-                        fill="currentColor"
                         fillOpacity={isFarm ? "0.52" : "0.48"}
-                        fontFamily="var(--font-geist-mono, monospace)"
                         fontSize="8"
-                        x={tooltipX + 10}
-                        y={tooltipY + 53}
+                        x={round2(tooltipX + 10)}
+                        y={round2(tooltipY + 53)}
                       >
                         RANGE {getColumnRangeLabel(point.metric)}
                       </text>

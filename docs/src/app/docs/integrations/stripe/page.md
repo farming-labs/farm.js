@@ -162,6 +162,11 @@ Checkout session ids appear in success URLs and browser history, so the session 
 customer, email, metadata, subscription, and line items only to the session's owner. Anyone else
 gets the `id`, `status`, `paymentStatus`, and `mode` with the identifying fields empty.
 
+A session Farm's checkout route created carries its owner in the metadata. A session created
+elsewhere (a Payment Link, the Dashboard) carries none, so Farm applies it only to the owner whose
+stored billing account already has that session's Stripe customer; it never links a new customer to
+whoever presents the session id.
+
 ## Billing owner
 
 Production billing usually needs an owner resolver. That resolver decides whether the billing account belongs to a user, organization, workspace, or team.
@@ -199,9 +204,25 @@ The same `ctx` includes `ctx.args.db`, `ctx.data`, request params, the raw reque
   needed none). Subscribe the webhook endpoint to `checkout.session.completed` and
   `checkout.session.async_payment_succeeded` so delayed payment methods are fulfilled when the
   money arrives.
+- The upgrade route changes seat quantity with the proration set in `billing.seats.prorationBehavior`
+  (`"create_prorations"` by default, or `"always_invoice"` / `"none"`). A `prorationBehavior` in
+  the request body is ignored, so a caller cannot add seats without being charged for them.
+- Subscribe the webhook endpoint to `customer.subscription.updated`: a plan switch made in Stripe
+  (customer portal, Dashboard, or API) moves `planId` and `productId` to the configured product
+  whose `priceId` or `lookupKey` the subscription now bills. Seat add-on and meter prices never
+  count as the plan. A subscription that bills no configured product drops to the `free` plan with
+  a warning, so give every subscription product a `priceId` or `lookupKey`.
+- Subscribe it to `customer.subscription.deleted`, `invoice.paid`, and `invoice.payment_failed` as
+  well. When the subscription ends, the owner moves to the `free` plan with status `canceled`.
+  Invoice events change the status only for the owner's current subscription, so a one-off invoice
+  never reactivates a canceled one. Features and limits come from the plan only while the status is
+  `active`, `trialing`, or `past_due`; `canceled`, `unpaid`, and `incomplete` get the `free` plan's.
 - Store billing snapshots through the integration schema when the app needs fast entitlement reads.
 - Run `farm stripe migrate --apply` after upgrading so the additive
   `billing_checkout_session` table can persistently deduplicate success-page and webhook delivery.
+- A `one_time` product without a `planId` (credits, add-ons) sells no access: its checkout leaves
+  the owner's plan, status, and subscription as they were. Record the purchase in
+  `hooks.onCheckoutCompleted`, which receives the sold product as `purchasedProductId`.
 - Checkout completion, billing sync, and payment hooks are claimed by Stripe session ID before they
   run. Custom persistence should implement `claimCheckoutSession`; without it, Farm falls back to
   comparing the stored billing snapshot, so its billing-account reader must accompany

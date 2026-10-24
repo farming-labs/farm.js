@@ -71,6 +71,9 @@ importers:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../packages/farm
+      '@farm.js/webmcp':
+        specifier: workspace:*
+        version: link:../packages/farm-webmcp
       '@farming-labs/docs':
         specifier: 0.2.121
         version: 0.2.121(react@19.2.8)(supports-color@10.2.2)

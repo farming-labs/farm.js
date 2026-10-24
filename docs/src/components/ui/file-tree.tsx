@@ -13,7 +13,7 @@ import {
   FolderOpen,
   FolderTree,
   Route,
-} from "lucide-react";
+} from "../icons";
 import type { LucideIcon } from "lucide-react";
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 

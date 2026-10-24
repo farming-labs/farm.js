@@ -454,6 +454,36 @@ export async function readNodeRequestBody(
   });
 }
 
+/**
+ * A Web body over a Node request that reads nothing until it is pulled, so a handler that
+ * declines the request without reading its body leaves the stream to the next handler.
+ */
+export function createFarmNodeRequestBodyStream(
+  request: AsyncIterable<unknown>,
+): ReadableStream<Uint8Array> {
+  let iterator: AsyncIterator<unknown> | undefined;
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        iterator ??= request[Symbol.asyncIterator]();
+        const { value, done } = await iterator.next();
+        if (done) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(
+          value instanceof Uint8Array ? value : new TextEncoder().encode(String(value)),
+        );
+      },
+      async cancel(reason) {
+        await iterator?.return?.(reason);
+      },
+    },
+    // No eager pull: the request stays untouched until the handler reads it.
+    { highWaterMark: 0 },
+  );
+}
+
 export function createFarmRequestBodyErrorResponse(error: unknown): Response | null {
   if (!(error instanceof FarmRequestBodyError)) return null;
 

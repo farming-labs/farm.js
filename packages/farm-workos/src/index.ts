@@ -30,7 +30,17 @@ export interface WorkOSIntegrationInput {
   clientId?: string;
   apiKey?: string;
   cookiePassword?: string;
+  /**
+   * Session cookie name. A `__Host-` name (`__Host-wos-session`) cannot be set or shadowed by a
+   * sibling subdomain; Farm adds the `Secure` and `Path=/` it requires.
+   * @default "wos-session"
+   */
   cookieName?: string;
+  /**
+   * Login state cookie name, held between the redirect to AuthKit and the callback.
+   * @default "farm_workos_state"
+   */
+  stateCookieName?: string;
   loginPath?: string;
   signUpPath?: string;
   callbackPath?: string;
@@ -149,10 +159,33 @@ async function getSession(
   };
 }
 
+function resolveCookieName(value: string | undefined, fallback: string, option: string): string {
+  if (value === undefined) return fallback;
+  // RFC 6265 token: no separators, whitespace, or control characters.
+  if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(value)) {
+    throw new Error(
+      `WorkOS integration ${option} must be a valid cookie name, got ${JSON.stringify(value)}.`,
+    );
+  }
+  return value;
+}
+
 export function workos(input: WorkOSIntegrationInput = {}) {
   const { clientId, apiKey, cookiePassword } = resolveEnv(input);
   const protectedMatchers = normalizeMatchers(input.protectedRoutes);
-  const cookieName = input.cookieName ?? "wos-session";
+  const cookieName = resolveCookieName(input.cookieName, "wos-session", "cookieName");
+  // The OAuth `state` must be unguessable and bound to the browser that started
+  // the flow. We keep a random nonce in an HMAC-signed, http-only cookie and
+  // require the callback's state to match it, so an attacker cannot feed a
+  // victim a code/state pair from their own login (login CSRF / code injection).
+  const stateCookieName = resolveCookieName(
+    input.stateCookieName,
+    "farm_workos_state",
+    "stateCookieName",
+  );
+  if (stateCookieName === cookieName) {
+    throw new Error("WorkOS integration cookieName and stateCookieName must differ.");
+  }
   const loginPath = input.loginPath ?? "/login";
   const signUpPath = input.signUpPath ?? "/signup";
   const callbackPath = input.callbackPath ?? "/callback";
@@ -170,12 +203,6 @@ export function workos(input: WorkOSIntegrationInput = {}) {
       apiKey,
       clientId,
     });
-
-  // The OAuth `state` must be unguessable and bound to the browser that started
-  // the flow. We keep a random nonce in an HMAC-signed, http-only cookie and
-  // require the callback's state to match it, so an attacker cannot feed a
-  // victim a code/state pair from their own login (login CSRF / code injection).
-  const stateCookieName = "farm_workos_state";
 
   function signState(payload: WorkOSStatePayload): string {
     const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");

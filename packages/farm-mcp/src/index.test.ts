@@ -261,6 +261,58 @@ describe("apiMcp", () => {
     expect(plugin.runtime).toBeUndefined();
   });
 
+  it("reports its title and description, and publishes them for the server card", async () => {
+    const health = route.get("/api/health", { mcp: true, handler: () => ({ ok: true }) });
+    const plugin = apiMcp({
+      allowUnauthenticated: true,
+      path: "/api/card-mcp",
+      name: "projects",
+      version: "3.1.0",
+      title: "Projects",
+      description: "Create and search projects.",
+    });
+    const routes = mergePluginAPIRoutes(
+      [{ path: health.path, methods: [health.method], endpoints: { GET: health.endpoint } }],
+      [plugin],
+    );
+    const endpoint = routes.find((entry) => entry.path === "/api/card-mcp")!.endpoints.POST;
+    const payload = await readMCP(
+      await sendMCP(endpoint, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-11-25",
+          capabilities: {},
+          clientInfo: { name: "test", version: "1" },
+        },
+      }),
+    );
+    expect(payload.result.serverInfo).toEqual({
+      name: "projects",
+      version: "3.1.0",
+      title: "Projects",
+      description: "Create and search projects.",
+    });
+
+    const catalogs = (globalThis as Record<symbol, Map<string, any>>)[
+      Symbol.for("farm.mcp.catalogs")
+    ];
+    const published = catalogs.get("/api/card-mcp");
+    expect(published.server).toEqual({
+      name: "projects",
+      version: "3.1.0",
+      title: "Projects",
+      description: "Create and search projects.",
+      path: "/api/card-mcp",
+    });
+    expect(published.details.protocolVersions).toContain("2025-11-25");
+
+    expect(() => apiMcp({ allowUnauthenticated: true, description: " " })).toThrow(
+      "apiMcp description must be a non-empty string.",
+    );
+  });
+
   it("publishes each tool's schemas, its resources and its prompts for the app manifest", () => {
     const plugin = apiMcp({
       path: "/api/manifest-mcp",

@@ -1,11 +1,23 @@
-import { isRouteSlotSegment } from "../routing/route-slots";
+import { isRouteSlotSegment, parseInterceptionMarker } from "../routing/route-slots";
 
 /**
  * URL path a middleware file in `directoryName` guards. Route groups and
  * parallel route slots add no URL segment: `dashboard/@team/middleware.ts`
- * guards `/dashboard`, the URL the slot renders under.
+ * guards `/dashboard`, the URL the slot renders under. An intercepting folder
+ * guards the URL it intercepts: `feed/@modal/(.)photo/middleware.ts` guards
+ * `/feed/photo`, `(..)photo` one level above the slot's owner, `(...)photo` `/photo`.
  */
 export function appendMiddlewareRoutePath(routePath: string, directoryName: string): string {
+  const marker = parseInterceptionMarker(directoryName);
+  if (marker) {
+    const owner = routePath.split("/").filter(Boolean);
+    const parts = [
+      ...(marker.root ? [] : owner.slice(0, Math.max(0, owner.length - marker.up))),
+      ...(marker.remainder ? [marker.remainder] : []),
+    ];
+    return `/${parts.join("/")}`;
+  }
+
   if (
     (directoryName.startsWith("(") && directoryName.endsWith(")")) ||
     isRouteSlotSegment(directoryName)

@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Check, Copy, LoaderCircle, RefreshCw, Terminal } from "lucide-react";
+import { Bot, Check, Copy, LoaderCircle, RefreshCw, Terminal } from "../icons";
 import type { LucideIcon } from "lucide-react";
 import type { KeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";

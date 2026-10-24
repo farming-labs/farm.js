@@ -104,6 +104,9 @@ import {
   resolveFarmLlmsTxtConfig,
 } from "../llms-txt";
 import { getFarmMarkdownAlternatePath, resolveMarkdownConfig } from "../markdown";
+import { listFarmMCPLlmsTxtLinks } from "../ai-catalog";
+import { normalizeFarmAPIConfig } from "../api/config";
+import { resolveFarmAPIServerBasePath } from "../api/server-path";
 import { createFarmAgentRobots, resolveFarmAgentCrawlers } from "../agent-crawlers";
 import {
   resolveFarmTrailingSlashRedirect,
@@ -2406,7 +2409,23 @@ export class ServerRenderer {
     });
     return {
       pages,
-      defaults: createFarmDefaultLlmsTxt({ origin, pages, config, rootMetadata }),
+      defaults: createFarmDefaultLlmsTxt({
+        origin,
+        pages,
+        config,
+        rootMetadata,
+        mcp:
+          this.config.agent?.aiCatalog === false
+            ? []
+            : listFarmMCPLlmsTxtLinks(origin, {
+                basePath: this.config.basePath,
+                apiServerBasePath: resolveFarmAPIServerBasePath(
+                  normalizeFarmAPIConfig(
+                    this.config.api as { baseURL?: string; basePath?: string },
+                  ),
+                ),
+              }),
+      }),
       ...(options.full ? { markdown: this.createDevMarkdownReader(options.req) } : {}),
     };
   }
