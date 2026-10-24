@@ -42,17 +42,52 @@ describe("chunk error recovery", () => {
 
   it("detects script and css resource load failures", () => {
     const script = document.createElement("script");
+    script.type = "module";
     script.src = "/assets/app.abc123.js";
     const scriptEvent = new Event("error");
     Object.defineProperty(scriptEvent, "target", { value: script });
 
     const link = document.createElement("link");
+    link.rel = "stylesheet";
     link.href = "/assets/app.abc123.css";
     const linkEvent = new Event("error");
     Object.defineProperty(linkEvent, "target", { value: link });
 
+    const preload = document.createElement("link");
+    preload.rel = "modulepreload";
+    preload.href = "/chunks/page.abc123.js";
+    const preloadEvent = new Event("error");
+    Object.defineProperty(preloadEvent, "target", { value: preload });
+
     expect(isChunkLoadError(scriptEvent)).toBe(true);
     expect(isChunkLoadError(linkEvent)).toBe(true);
+    expect(isChunkLoadError(preloadEvent)).toBe(true);
+  });
+
+  it("ignores a same-origin classic script that is not a Farm chunk", () => {
+    const storage = new MemoryStorage();
+    const reload = vi.fn();
+    const cleanup = installChunkErrorRecovery({ storage, reload, now: () => 1000 });
+
+    // Vercel Analytics injects this script; it 404s on any host but Vercel.
+    const script = document.createElement("script");
+    script.defer = true;
+    script.src = "/_vercel/insights/script.js";
+    const event = new Event("error");
+    Object.defineProperty(event, "target", { value: script });
+
+    expect(isChunkLoadError(event)).toBe(false);
+    window.dispatchEvent(event);
+    expect(reload).not.toHaveBeenCalled();
+
+    const icon = document.createElement("link");
+    icon.rel = "icon";
+    icon.href = "/favicon.js";
+    const iconEvent = new Event("error");
+    Object.defineProperty(iconEvent, "target", { value: icon });
+    expect(isChunkLoadError(iconEvent)).toBe(false);
+
+    cleanup();
   });
 
   it("ignores load failures of cross-origin scripts and styles", () => {
