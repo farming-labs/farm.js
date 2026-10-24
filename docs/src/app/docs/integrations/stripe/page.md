@@ -199,6 +199,11 @@ The same `ctx` includes `ctx.args.db`, `ctx.data`, request params, the raw reque
   needed none). Subscribe the webhook endpoint to `checkout.session.completed` and
   `checkout.session.async_payment_succeeded` so delayed payment methods are fulfilled when the
   money arrives.
+- Subscribe the webhook endpoint to `customer.subscription.updated`: a plan switch made in Stripe
+  (customer portal, Dashboard, or API) moves `planId` and `productId` to the configured product
+  whose `priceId` or `lookupKey` the subscription now bills. Seat add-on and meter prices never
+  count as the plan. A subscription that bills no configured product drops to the `free` plan with
+  a warning, so give every subscription product a `priceId` or `lookupKey`.
 - Store billing snapshots through the integration schema when the app needs fast entitlement reads.
 - Run `farm stripe migrate --apply` after upgrading so the additive
   `billing_checkout_session` table can persistently deduplicate success-page and webhook delivery.
