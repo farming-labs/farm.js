@@ -3,13 +3,15 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFailed, vi } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
 import { startDevServer } from "../server/create-server";
 
 describe("published plugin routes", () => {
   it("builds typed callers and serves validated routes from the Vercel output", async () => {
+    let phase = "fixture setup";
+    onTestFailed(() => console.error(`Plugin routes production test failed during: ${phase}`));
     const packageRoot = process.cwd();
     const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-plugin-routes-"));
     try {
@@ -110,6 +112,7 @@ export default defineConfig({
         "Plugin API routes require the default universal production build",
       );
       // The app config owns Vite settings; createServer's argument only locates it.
+      phase = "development requests and HMR";
       const dev = await startDevServer({ root }, 0);
       try {
         const address = dev.httpServer!.address();
@@ -160,10 +163,15 @@ export default defineConfig({
           .toContain("hmr-local");
         await fs.writeFile(sharedFile, before);
       } finally {
+        const requestPhase = phase;
+        phase = "development server shutdown";
         await dev.close();
+        phase = requestPhase;
       }
+      phase = "production build";
       await build(config, { root, preset: "vercel" });
 
+      phase = "generated caller type checking";
       const caller = path.join(root, "src", "caller.ts");
       await fs.writeFile(
         caller,
@@ -227,8 +235,10 @@ void check;
         );
       }
 
+      phase = "production module import";
       const entry = path.join(root, ".vercel", "output", "functions", "__nitro.func", "index.mjs");
       const server = await import(pathToFileURL(entry).href);
+      phase = "production context and validated requests";
       const contextResponse = await server.default.fetch(
         new Request("http://farm.test/backend/v2/context", {
           method: "POST",
@@ -255,6 +265,7 @@ void check;
         .spyOn(globalThis, "fetch")
         .mockRejectedValue(new Error("Local api must not fetch"));
       try {
+        phase = "production local callers";
         const page = await server.default.fetch(new Request("http://farm.test/server"));
         expect(page.status).toBe(200);
         expect(await page.text()).toContain("p1/u1");
@@ -282,12 +293,16 @@ void check;
       } finally {
         network.mockRestore();
       }
+      phase = "production bodyless POST";
       const sharedPost = await server.default.fetch(
         new Request("http://farm.test/backend/v2/shared", { method: "POST" }),
       );
       expect(await sharedPost.json()).toEqual({ source: "plugin" });
     } finally {
+      const testPhase = phase;
+      phase = "fixture cleanup";
       await fs.rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      phase = testPhase;
     }
   }, 120_000);
 });

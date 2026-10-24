@@ -121,6 +121,7 @@ describe("development server file exposure", () => {
 
   it("keeps developer-only files and tools off a farm preview URL", async () => {
     const { port, root } = await startApp();
+    const fsRoot = path.posix.join("/@fs", root.replace(/\\/g, "/"));
     const preview = (rawPath: string) => send(port, rawPath, { preview: true });
 
     for (const rawPath of [
@@ -137,9 +138,9 @@ describe("development server file exposure", () => {
       "/src/server/db.server.ts?url",
       "/@id/src/server/db.server.ts?raw",
       "/src/app/data.sqlite",
-      `/@fs${root}/secrets.json`,
-      `/@fs${root}/farm.config.ts`,
-      `/@fs${root}/src/app/page.tsx?raw`,
+      `${fsRoot}/secrets.json`,
+      `${fsRoot}/farm.config.ts`,
+      `${fsRoot}/src/app/page.tsx?raw`,
       "/__farm/devtools.json",
       "/__farm/devtools",
       "/__open-in-editor?file=farm.config.ts",
@@ -152,6 +153,7 @@ describe("development server file exposure", () => {
 
   it("still serves what the preview's browser needs", async () => {
     const { port, root } = await startApp();
+    const fsRoot = path.posix.join("/@fs", root.replace(/\\/g, "/"));
     const preview = (rawPath: string) => send(port, rawPath, { preview: true });
 
     const page = await preview("/");
@@ -163,7 +165,7 @@ describe("development server file exposure", () => {
     expect((await preview("/@farm/client.js")).status).not.toBe(403);
     expect((await preview("/hello.txt")).body).toBe("public hello");
     expect((await preview("/src/app/logo.svg")).status).toBe(200);
-    expect((await preview(`/@fs${root}/node_modules/react/index.js`)).status).toBe(200);
+    expect((await preview(`${fsRoot}/node_modules/react/index.js`)).status).toBe(200);
     expect(
       (await send(port, "/api/echo", { preview: true, method: "POST", body: "hi" })).body,
     ).toBe("hi");
