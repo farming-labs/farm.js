@@ -1946,23 +1946,28 @@ export function autumn<TInput extends AutumnIntegrationInput>(
               quantity: body.quantity,
             });
 
-            if (typeof hardLimit === "number" && projectedCurrentPeriodUsed > hardLimit) {
-              return Response.json({
+            const hardLimitReached = (used: number, projected: number) =>
+              Response.json({
                 key: body.key,
                 quantity: body.quantity,
                 customerId: resolved.customer.id,
                 eventName: meter.eventName ?? featureId,
                 eventIdentifier: body.idempotencyKey,
                 occurredAt: body.occurredAt ?? new Date().toISOString(),
-                currentPeriodUsed: currentUsed,
-                projectedCurrentPeriodUsed,
+                currentPeriodUsed: used,
+                projectedCurrentPeriodUsed: projected,
                 softLimit,
                 hardLimit,
                 state: "hard_limit_reached",
                 warning:
                   "The configured metered hard cap has been reached for the current billing period. Reported usage is blocked until the next cycle or a plan change.",
               } satisfies AutumnBillingReportUsageResult);
+
+            if (typeof hardLimit === "number" && projectedCurrentPeriodUsed > hardLimit) {
+              return hardLimitReached(currentUsed, projectedCurrentPeriodUsed);
             }
+
+            let nextUsed = projectedCurrentPeriodUsed;
 
             if (isPrepaidFeatureQuantity({ livePlan, product: active.product, featureId })) {
               if (!active.product?.autumnPlanId) {
@@ -1991,17 +1996,39 @@ export function autumn<TInput extends AutumnIntegrationInput>(
                 prorationBehavior: "prorate_immediately",
                 redirectMode: "never",
               });
-            } else {
-              // Autumn's current SDK/runtime track path is inconsistent across the published
-              // types/docs and the actual endpoint behavior. Update the balance usage directly so
-              // the example remains functional and type-safe for metered demos.
+            } else if (meter.aggregation === "last") {
+              // A last-value meter reports the period's absolute usage, so the write sets it.
               await sdk.balances.update({
                 customerId: resolved.customer.id ?? resolved.externalCustomerId,
                 featureId,
                 usage: projectedCurrentPeriodUsed,
               });
+            } else {
+              // Track adds to Autumn's stored usage atomically. Writing back the total read above
+              // let concurrent reports overwrite each other, so usage and the cap both lost them.
+              const customerId = resolved.customer.id ?? resolved.externalCustomerId;
+              const increment = meter.aggregation === "count" ? 1 : body.quantity;
+              const properties = { idempotencyKey: body.idempotencyKey };
+              const tracked = await sdk.track({
+                customerId,
+                featureId,
+                value: increment,
+                properties,
+              });
+              nextUsed = tracked.balance?.usage ?? projectedCurrentPeriodUsed;
+
+              // Reports that raced past the cap between the read and the increment are taken back
+              // out, so the cap holds; the accepted reports are never reversed.
+              if (typeof hardLimit === "number" && nextUsed > hardLimit) {
+                await sdk.track({
+                  customerId,
+                  featureId,
+                  value: -increment,
+                  properties: { ...properties, reversal: true },
+                });
+                return hardLimitReached(nextUsed - increment, nextUsed);
+              }
             }
-            const nextUsed = projectedCurrentPeriodUsed;
 
             setProjectedUsage({
               externalCustomerId: resolved.externalCustomerId,

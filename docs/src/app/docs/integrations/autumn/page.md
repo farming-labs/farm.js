@@ -160,6 +160,9 @@ autumn({
 - Set `AUTUMN_SECRET_KEY`, `AUTUMN_WEBHOOK_SECRET`, and `APP_BASE_URL`.
 - Keep Farm product IDs separate from provider IDs when you want a stable app contract.
 - Use `check` before expensive operations and `reportUsage` after successful work.
+- `reportUsage` adds to Autumn's stored usage with `track`, so parallel reports all count. When a
+  meter `guard` sets a hard cap, a report that pushes usage past it is taken back out and answered
+  with `state: "hard_limit_reached"`. `last` meters set the reported value instead.
 - The billing POST routes act for the signed-in caller from its session cookie, so a request a
   browser sends from another origin is refused with `403`: a page on another site cannot report
   usage, start a checkout or open the portal for your visitor. Calls with no `Origin` (your own
