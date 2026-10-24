@@ -3522,6 +3522,15 @@ async function resolveBillingSnapshotForSession(
   if (mismatchesCaller) {
     return null;
   }
+  // A session Farm did not create (Payment Link, Dashboard, older sessions) names no owner. Holding
+  // its id proves nothing, so it binds only to the owner its customer already belongs to; otherwise
+  // the caller would take over another customer's subscription and portal.
+  if (
+    sessionOwnerId === undefined &&
+    (!session.customerId || existingSnapshot?.stripeCustomerId !== session.customerId)
+  ) {
+    return null;
+  }
 
   return {
     snapshot: createBillingSnapshot(

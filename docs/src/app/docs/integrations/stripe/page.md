@@ -162,6 +162,11 @@ Checkout session ids appear in success URLs and browser history, so the session 
 customer, email, metadata, subscription, and line items only to the session's owner. Anyone else
 gets the `id`, `status`, `paymentStatus`, and `mode` with the identifying fields empty.
 
+A session Farm's checkout route created carries its owner in the metadata. A session created
+elsewhere (a Payment Link, the Dashboard) carries none, so Farm applies it only to the owner whose
+stored billing account already has that session's Stripe customer; it never links a new customer to
+whoever presents the session id.
+
 ## Billing owner
 
 Production billing usually needs an owner resolver. That resolver decides whether the billing account belongs to a user, organization, workspace, or team.
