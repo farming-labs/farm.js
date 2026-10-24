@@ -454,6 +454,59 @@ const testSource = String.raw`
     }
   }
 
+  // Controlled input updates must advance the native reset baseline, but
+  // focused number inputs still synchronize on React's blur path.
+  for (const reactivity of ["hybrid", "static"]) {
+    for (const hydrate of [false, true]) {
+      for (const type of ["text", "number"]) {
+        const initial = type === "number" ? "1" : "before";
+        const next = type === "number" ? "2" : "after";
+        let setValue;
+        const InputReset = createCompiledComponent({
+          displayName: "CompatibilityInputReset", reactivity,
+          initialize: () => [initial],
+          render(_props, state) {
+            setValue = (value) => state[0].set(value);
+            return React.createElement("form", null,
+              React.createElement("input", { type, value: state[0].get(), readOnly: true }));
+          },
+          bindings: [{ kind: "attribute", name: "value", path: [0], dependencies: [0],
+            read: (_props, state) => state[0].get() }],
+        });
+        const container = document.createElement("div");
+        document.body.append(container);
+        const tree = React.createElement(React.StrictMode, null, React.createElement(InputReset));
+        if (hydrate) container.innerHTML = renderToString(tree);
+        let root;
+        flushSync(() => {
+          root = hydrate ? hydrateRoot(container, tree) : createRoot(container);
+          if (!hydrate) root.render(tree);
+        });
+        await Promise.resolve(); await Promise.resolve();
+        const input = container.querySelector("input");
+        if (type === "number") input.focus();
+        setValue(next);
+        await Promise.resolve(); await Promise.resolve();
+        assert.equal(input.value, next);
+        if (type === "number") {
+          assert.equal(input.defaultValue, initial);
+          input.blur();
+        }
+        assert.equal(input.defaultValue, next);
+        container.querySelector("form").reset();
+        assert.equal(input.value, next);
+        setValue("");
+        await Promise.resolve(); await Promise.resolve();
+        container.querySelector("form").reset();
+        assert.equal(input.value, "");
+        assert.equal(input.defaultValue, "");
+        assert.equal(container.querySelector("input"), input);
+        flushSync(() => root.unmount());
+        container.remove();
+      }
+    }
+  }
+
   const Counter = createCompiledComponentWithFeatures({
     displayName: "CompatibilityCounter",
     reactivity: "hybrid",

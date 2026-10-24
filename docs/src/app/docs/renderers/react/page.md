@@ -1954,6 +1954,11 @@ selected options. The runtime avoids assigning an equal value, captures the focu
 selection before the compiler microtask, and restores the range after its keyed boundary commits.
 Composition handlers remain React event props, so IME event order is unchanged.
 
+Controlled input `value` updates also synchronize the native reset value, so a form reset uses
+the latest committed value. React-owned focused number inputs defer this synchronization to
+React's blur handling to preserve editing behavior. Checkbox and radio `defaultChecked` behavior
+is unchanged.
+
 React exposes `event.currentTarget` only while an event handler is running. If a functional
 compiler-state updater refers to one of its properties, the transform snapshots that property read
 before queuing the updater. This preserves the common keyed update shown above without retaining or

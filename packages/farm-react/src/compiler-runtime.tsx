@@ -3318,6 +3318,16 @@ function updateAttribute(element: Element, name: string, value: unknown): void {
   if (name === "value" && (isInputElement(element) || isTextAreaElement(element))) {
     const nextValue = value === null || value === undefined ? "" : String(value);
     if (element.value !== nextValue) element.value = nextValue;
+    // React synchronizes controlled input values with the native reset baseline.
+    // Focused number inputs defer this to blur to preserve in-progress editing.
+    if (
+      value != null &&
+      isInputElement(element) &&
+      (element.type !== "number" || element.ownerDocument.activeElement !== element) &&
+      element.defaultValue !== nextValue
+    ) {
+      element.defaultValue = nextValue;
+    }
     return;
   }
 
