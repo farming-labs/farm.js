@@ -143,7 +143,11 @@ return createMatchedHydrationRoute(matched, "/check", searchParams, undefined, s
   });
 
   it("uses the URL's params and search over the document's", async () => {
-    const props = await hydrationProps(serverDocumentProps({ id: "stale" }), { id: "7" }, { q: "1" });
+    const props = await hydrationProps(
+      serverDocumentProps({ id: "stale" }),
+      { id: "7" },
+      { q: "1" },
+    );
 
     expect(props.params).toEqual({ id: "7" });
     await expect(props.searchParams).resolves.toEqual({ q: "1" });
