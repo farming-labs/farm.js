@@ -80,6 +80,12 @@ import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { stripFarmBasePath } from "../base-path";
 import { appendFarmRedirectQuery } from "../redirect-query";
 import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
+import {
+  farmLayoutScopeContains,
+  getFarmLayoutPattern,
+  getFarmLayoutScope,
+  getFarmRouteDirectory,
+} from "./layout-scope";
 import { getFarmRendererComponentExtensions } from "../renderer";
 import type { ApplicationMetadataRouteKind } from "../metadata-route";
 import {
@@ -205,6 +211,10 @@ function compareRouteEntries(left: RouteEntry, right: RouteEntry): number {
   return compareRouteSpecificity(getRouteSpecificity(left), getRouteSpecificity(right));
 }
 
+function getRouteFolderDepth(entry: RouteEntry): number {
+  return getFarmRouteDirectory(entry.route.filePath).split("/").filter(Boolean).length;
+}
+
 /**
  * Manages route discovery and matching for the Farm.js application
  */
@@ -282,8 +292,12 @@ export class RouteManager {
         compareRouteEntries(left, right),
       ),
     );
+    // Root first. A route-group layout shares its URL depth with the layout around it
+    // (`(home)/layout.tsx` and `layout.tsx` are both "/"), so the folder depth breaks the tie.
     this.orderedLayouts = Array.from(this.layouts.values()).sort(
-      (left, right) => left.route.segments.length - right.route.segments.length,
+      (left, right) =>
+        left.route.segments.length - right.route.segments.length ||
+        getRouteFolderDepth(left) - getRouteFolderDepth(right),
     );
     for (const slot of this.routeSlots.values()) {
       if (!this.routeSlotOwnerSegments.has(slot.ownerPattern)) {
@@ -338,7 +352,7 @@ export class RouteManager {
     }
 
     // Find all matching layouts (from root to specific)
-    const layouts = this.findMatchingLayouts(normalizedPath, pathParts);
+    const layouts = this.findMatchingLayouts(normalizedPath, pathParts, matchedRoute);
     const slots = this.findMatchingRouteSlots(normalizedPath, pathParts, options.interceptFrom);
 
     return {
@@ -375,7 +389,7 @@ export class RouteManager {
     }
 
     const inherited = resolveFarmRouteRuleRuntimeConfig(pattern, this.config.routeRules);
-    const layouts = this.findMatchingLayouts(pattern);
+    const layouts = this.findMatchingLayouts(pattern, splitRoutePath(pattern), routeEntry);
     const layoutConfigs = [];
 
     for (const layout of layouts) {
@@ -721,10 +735,13 @@ export class RouteManager {
         depth: entry.route.segments.length,
         metadata,
       })),
-      (layoutPattern, routePattern) =>
-        layoutPattern === "/" ||
-        routePattern === layoutPattern ||
-        routePattern.startsWith(`${layoutPattern.replace(/\/$/, "")}/`),
+      (layoutPattern, routePattern) => {
+        const layout = this.layouts.get(layoutPattern);
+        const route = this.routes.get(routePattern);
+        return (
+          layout !== undefined && route !== undefined && this.layoutAppliesToRoute(layout, route)
+        );
+      },
     );
 
     for (const { entry, metadata } of [...layoutEntries, ...routeEntries]) {
@@ -746,10 +763,7 @@ export class RouteManager {
       const programmaticPage = this.programmaticPages.get(entry.modulePath);
       const layoutShouldHydrate = layoutEntries.some(
         ({ entry: layout, metadata: layoutMetadata }) =>
-          layoutMetadata.shouldHydrate &&
-          (layout.pattern === "/" ||
-            entry.pattern === layout.pattern ||
-            entry.pattern.startsWith(`${layout.pattern.replace(/\/$/, "")}/`)),
+          layoutMetadata.shouldHydrate && this.layoutAppliesToRoute(layout, entry),
       );
       return {
         pattern: entry.pattern,
@@ -1067,7 +1081,12 @@ export class RouteManager {
       for (const file of files) {
         const route = parseRoutePath(file);
         const modulePath = path.join(appDir, file);
-        const pattern = this.createRoutePattern(route);
+        // A layout inside a route group keeps its group in its pattern, so it nests inside the
+        // layout at the same URL instead of colliding with it.
+        const pattern =
+          kind === "layout"
+            ? getFarmLayoutPattern(this.createRoutePattern(route), file)
+            : this.createRoutePattern(route);
         const existing = target.get(pattern);
         if (existing?.sourceRoot === source.root) {
           throw new Error(
@@ -1255,16 +1274,35 @@ export class RouteManager {
   private findMatchingLayouts(
     pathname: string,
     pathnameParts = splitRoutePath(pathname),
+    page?: RouteEntry | null,
   ): RouteEntry[] {
     const matchingLayouts: RouteEntry[] = [];
+    const pageDirectory = page ? getFarmRouteDirectory(page.route.filePath) : undefined;
 
     for (const layoutEntry of this.orderedLayouts) {
-      if (matchRoutePrefixParts(pathnameParts, layoutEntry.route.segments)) {
+      if (
+        matchRoutePrefixParts(pathnameParts, layoutEntry.route.segments) &&
+        farmLayoutScopeContains(getFarmLayoutScope(layoutEntry.route.filePath), pageDirectory)
+      ) {
         matchingLayouts.push(layoutEntry);
       }
     }
 
     return matchingLayouts;
+  }
+
+  /** Whether a layout wraps a page route, by the same rule as findMatchingLayouts. */
+  private layoutAppliesToRoute(layout: RouteEntry, route: RouteEntry): boolean {
+    const layoutUrl = this.createRoutePattern(layout.route);
+    return (
+      (layoutUrl === "/" ||
+        route.pattern === layoutUrl ||
+        route.pattern.startsWith(`${layoutUrl.replace(/\/$/, "")}/`)) &&
+      farmLayoutScopeContains(
+        getFarmLayoutScope(layout.route.filePath),
+        getFarmRouteDirectory(route.route.filePath),
+      )
+    );
   }
 
   private findMatchingRouteSlots(

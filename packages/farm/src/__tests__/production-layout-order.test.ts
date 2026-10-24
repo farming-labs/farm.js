@@ -20,7 +20,7 @@ function runtime(input: Layout[]) {
   const layouts = input.map((layout) => ({ ...layout }));
   new Function("layoutRoutes", source.slice(sortStart, sortEnd))(layouts);
 
-  const start = source.lastIndexOf("function getApplicableLayouts(pathname) {");
+  const start = source.lastIndexOf("function getApplicableLayouts(pathname, route) {");
   const end = source.indexOf("\n}", start) + 2;
   expect(start).toBeGreaterThan(call);
   const emitted = new Function(`return \`${source.slice(start, end)}\`;`)();
@@ -31,7 +31,10 @@ function runtime(input: Layout[]) {
     "isFarmRouteActive",
     "createFarmLayoutSelector",
     setup + emitted + "; return getApplicableLayouts;",
-  )(layouts, isFarmRouteActive, createFarmLayoutSelector) as (pathname: string) => Layout[];
+  )(layouts, isFarmRouteActive, createFarmLayoutSelector) as (
+    pathname: string,
+    route?: { directory: string },
+  ) => Layout[];
   return { select, layouts };
 }
 
@@ -60,13 +63,33 @@ function previous(layouts: Layout[], pathname: string) {
   return layouts
     .filter(
       (layout) =>
-        layout.pattern === "/" || isFarmRouteActive(layout.pattern, normalized, { exact: false }),
+        // A route-group layout needs a matched page's folder, which these selections pass none of.
+        !layout.pattern.includes("(") &&
+        (layout.pattern === "/" || isFarmRouteActive(layout.pattern, normalized, { exact: false })),
     )
     .sort(
       (a, b) =>
         a.pattern.split("/").filter(Boolean).length - b.pattern.split("/").filter(Boolean).length,
     );
 }
+
+describe("production route-group layouts", () => {
+  it("wrap only the pages in their group, inside the layouts around them", () => {
+    const { select } = runtime(
+      ["/(home)/pricing", "/(home)", "/docs", "/"].map((pattern, id) => ({ pattern, id })),
+    );
+    const patterns = (pathname: string, directory?: string) =>
+      select(pathname, directory === undefined ? undefined : { directory }).map(
+        (layout) => layout.pattern,
+      );
+
+    expect(patterns("/", "(home)")).toEqual(["/", "/(home)"]);
+    expect(patterns("/pricing", "(home)/pricing")).toEqual(["/", "/(home)", "/(home)/pricing"]);
+    // A page outside the group, and a request with no page (not-found).
+    expect(patterns("/docs", "docs")).toEqual(["/", "/docs"]);
+    expect(patterns("/missing")).toEqual(["/"]);
+  });
+});
 
 describe("production layout ordering", () => {
   it.each([

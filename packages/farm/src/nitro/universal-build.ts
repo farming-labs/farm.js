@@ -14,6 +14,11 @@ import {
   resolveHashedClientCssHref,
   resolveHashedClientJsSrc,
 } from "./client-css-href";
+import {
+  farmLayoutAppliesToRoute,
+  getFarmLayoutPatternScope,
+  getFarmRouteDirectory,
+} from "../routing/layout-scope";
 import type { RouteManager, ApplicationMetadataRouteEntry } from "../routing/route-manager";
 import { compareRoutePatternSpecificity } from "../routing/specificity";
 import type { APIRouteManager } from "../api/route-manager";
@@ -161,6 +166,8 @@ type FarmNitroBuilder = typeof import("nitro/builder");
 type UniversalPageRoute = {
   pattern: string;
   modulePath: string;
+  /** The page file's folder in the app directory, route groups kept (`"(home)/blog"`). */
+  directory?: string;
   source?: string;
   markdownSourcePath?: string;
 };
@@ -1139,6 +1146,7 @@ export async function buildUniversal(
       pageRoutes.push({
         pattern,
         modulePath: entry.modulePath,
+        directory: getFarmRouteDirectory(entry.route.filePath),
         ...(markdownSourcePath
           ? {
               source: readFileSync(markdownSourcePath, "utf8"),
@@ -1595,10 +1603,10 @@ async function buildClient(
     }
   });
 
+  // A route-group layout needs the page inside its folder; a docs entry has no page folder.
+  const routeDirectories = new Map(pageRoutes.map((route) => [route.pattern, route.directory]));
   const layoutAppliesToRoute = (layoutPattern: string, routePattern: string) =>
-    layoutPattern === "/" ||
-    routePattern === layoutPattern ||
-    routePattern.startsWith(`${layoutPattern}/`);
+    farmLayoutAppliesToRoute(layoutPattern, routePattern, routeDirectories.get(routePattern));
 
   const adapterOwnsDocsRuntime = Boolean(
     isReactRenderer(config.renderer) &&
@@ -1829,6 +1837,10 @@ async function buildClient(
     config.basePath,
     generateClientCachePersistenceCode(resolveFarmClientCacheAdapterEntry(root, config.cache)),
     adapterOwnsDocsRuntime ? getFarmDocsAdapterConfigModule(config.docs) : undefined,
+    // Route-group layouts pick their pages by folder; only apps that have one ship the map.
+    clientLayouts.some((layout) => getFarmLayoutPatternScope(layout.pattern) !== undefined)
+      ? Object.fromEntries(pageRoutes.map((route) => [route.pattern, route.directory ?? ""]))
+      : undefined,
   );
 
   // Write the client entry to a temporary file
@@ -2846,6 +2858,7 @@ function generateClientHydrationEntry(
   basePath = "/",
   clientCachePersistence: ClientCachePersistenceEntryCode = { imports: "", init: "" },
   docsConfigModule?: string,
+  routeDirectories?: Record<string, string>,
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
   const clientPluginEntry: FarmClientPluginEntryCode = generateFarmClientPluginEntryCode(
@@ -2884,8 +2897,9 @@ function generateClientHydrationEntry(
     if (!layout.hasIsolatedClientBoundaries) {
       layoutImportStatements.push(`import Layout${index} from "${relativePath}";`);
     }
+    const scope = getFarmLayoutPatternScope(layout.pattern);
     layoutRegistrations.push(
-      `  { pattern: ${JSON.stringify(layout.pattern)}, Component: ${layout.hasIsolatedClientBoundaries ? "null" : `Layout${index}`}, shouldHydrate: ${JSON.stringify(layout.shouldHydrate)}, islandStrategy: ${JSON.stringify(layout.islandStrategy)} }`,
+      `  { pattern: ${JSON.stringify(layout.pattern)}, Component: ${layout.hasIsolatedClientBoundaries ? "null" : `Layout${index}`}, shouldHydrate: ${JSON.stringify(layout.shouldHydrate)}, islandStrategy: ${JSON.stringify(layout.islandStrategy)}${scope === undefined ? "" : `, scope: ${JSON.stringify(scope)}`} }`,
     );
   });
 
@@ -3356,13 +3370,30 @@ const layoutRoutes = [
 ${layoutRegistrations.join(",\n")}
 ];
 
+${
+  routeDirectories
+    ? `// Each page's folder, for route-group layouts, which wrap only the pages in their group.
+const farmPageDirectories = ${JSON.stringify(routeDirectories)};
+const farmPageDirectoryMatcher = createFarmRouter(Object.keys(farmPageDirectories).map(function(pattern) {
+  return { path: pattern, meta: farmPageDirectories[pattern] };
+}));
+function layoutScopeContainsPage(layout, normalizedPath) {
+  const matched = farmPageDirectoryMatcher.match(normalizedPath);
+  const directory = matched ? matched.route.meta : undefined;
+  return directory !== undefined && (directory === layout.scope || directory.startsWith(layout.scope + '/'));
+}
+`
+    : ""
+}
 // Get applicable layouts for a pathname (sorted by depth, root first)
 function getApplicableLayouts(pathname) {
   const applicable = [];
   const normalizedPath = getFarmRoutePathname(pathname).replace(/\\/$/, '') || '/';
   
   for (const layout of layoutRoutes) {
-    if (layout.pattern === '/' || isFarmRouteActive(layout.pattern, normalizedPath, { exact: false })) {
+    if (layout.scope !== undefined) {
+      if (${routeDirectories ? "layoutScopeContainsPage(layout, normalizedPath)" : "false"}) applicable.push(layout);
+    } else if (layout.pattern === '/' || isFarmRouteActive(layout.pattern, normalizedPath, { exact: false })) {
       applicable.push(layout);
     }
   }
@@ -5385,10 +5416,10 @@ function isolateFarmRouteServerPage(element) { return element; }`;
     config.renderer,
     Boolean(unsupportedIntegrationProvider),
   );
+  // A route-group layout needs the page inside its folder; a docs entry has no page folder.
+  const routeDirectories = new Map(pageRoutes.map((route) => [route.pattern, route.directory]));
   const layoutAppliesToRoute = (layoutPattern: string, routePattern: string) =>
-    layoutPattern === "/" ||
-    routePattern === layoutPattern ||
-    routePattern.startsWith(`${layoutPattern}/`);
+    farmLayoutAppliesToRoute(layoutPattern, routePattern, routeDirectories.get(routePattern));
   const layoutHydrationPlans = layoutRoutes.map((layout) => ({
     ...layout,
     hydration: getCachedClientModuleHydrationPlan(
@@ -5483,6 +5514,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
       pageRegistrations.push(`
   {
     pattern: ${JSON.stringify(route.pattern)},
+    directory: ${JSON.stringify(route.directory ?? "")},
     module: createFarmMarkdownRouteModule({
       source: ${JSON.stringify(route.source ?? "")},
       filePath: ${JSON.stringify(toBakedMarkdownSourcePath(config.root, route.modulePath))},
@@ -5510,6 +5542,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
     pageRegistrations.push(`
   {
     pattern: ${JSON.stringify(route.pattern)},
+    directory: ${JSON.stringify(route.directory ?? "")},
     module: ${varName},
     shouldHydrate: ${JSON.stringify(clientMetadata.shouldHydrate)},
     islandStrategy: ${JSON.stringify(clientMetadata.islandStrategy)},${
@@ -7662,10 +7695,11 @@ function getFarmPluginRequestOptions(request) {
 }
 
 /**
- * Get applicable layouts for a page path (from root to most specific)
+ * Get applicable layouts for a page path (from root to most specific). A route-group layout needs
+ * the matched page route; without one (not-found, docs) only URL-matched layouts apply.
  */
-function getApplicableLayouts(pathname) {
-  const applicable = selectApplicableLayouts(pathname);
+function getApplicableLayouts(pathname, route) {
+  const applicable = selectApplicableLayouts(pathname, route ? route.directory : undefined);
   // buildSSRInMemory already emits these immutable descriptors in stable depth
   // order. Filtering preserves that order, including equal-depth ties.
   return applicable;
@@ -8422,7 +8456,7 @@ async function handleFarmRequestInContext(
       const pageMetadata = route.module.metadata || {};
       
       // Get applicable layouts for this page
-      const applicableLayouts = getApplicableLayouts(routePathname);
+      const applicableLayouts = getApplicableLayouts(routePathname, route);
       const shouldHydrateLayout = applicableLayouts.some(
         (layout) => layout.shouldHydrate === true,
       );
@@ -9132,7 +9166,7 @@ async function handleFarmRequestInContext(
             ...(middlewareData?.size ? { middleware: { data: middlewareData } } : {}),
           });
 
-          const applicableLayouts = getApplicableLayouts(routePathname);
+          const applicableLayouts = getApplicableLayouts(routePathname, route);
           for (let i = applicableLayouts.length - 1; i >= 0; i--) {
             const LayoutComponent = applicableLayouts[i].module.default;
             if (LayoutComponent) {
@@ -9379,7 +9413,10 @@ async function handleFarmPluginRequest(request, runtimeOptions, adapterContext) 
   const pathname = runtimeOptions.route?.pathname || new URL(request.url).pathname;
   const routePattern = runtimeOptions.route?.pattern || null;
   const params = runtimeOptions.route?.params || {};
-  const layouts = getApplicableLayouts(getFarmRoutePathname(pathname));
+  const layouts = getApplicableLayouts(
+    getFarmRoutePathname(pathname),
+    routePattern ? pageRoutes.find((route) => route.pattern === routePattern) : undefined,
+  );
 
   await farmPluginRuntime.runHookParallel("beforeRouteMatch", {
     pathname,

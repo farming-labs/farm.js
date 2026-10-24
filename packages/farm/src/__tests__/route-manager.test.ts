@@ -758,10 +758,38 @@ export default function Layout({ children }) { return <><One /><Two /><Three />{
       expect(routeManager.matchRoute("/dashboard").route?.pattern).toBe("/dashboard");
 
       const dashboard = routeManager.matchRoute("/dashboard");
-      expect(dashboard.layouts.map((layout) => layout.pattern)).toEqual(["/", "/dashboard"]);
+      // A layout inside a route group keeps the group in its pattern, its identity.
+      expect(dashboard.layouts.map((layout) => layout.pattern)).toEqual(["/", "/(app)/dashboard"]);
       expect(routeManager.getMatchingLoading("/pricing")?.route.filePath).toBe(
         "(marketing)/pricing/loading.tsx",
       );
+    });
+
+    it("nests a route-group layout inside the root layout for the group's pages only", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["(home)/page.tsx", "(home)/pricing/page.tsx", "docs/page.tsx"];
+        }
+        if (pattern.includes("layout")) {
+          // The group layout first, so the order cannot come from discovery.
+          return ["(home)/layout.tsx", "layout.tsx", "docs/layout.tsx"];
+        }
+        return [];
+      });
+
+      await routeManager.discoverRoutes();
+
+      const layoutsFor = (pathname: string) =>
+        routeManager.matchRoute(pathname).layouts.map((layout) => layout.pattern);
+      // As in Next.js: app/layout.tsx wraps app/(home)/layout.tsx wraps the group's pages.
+      expect(layoutsFor("/")).toEqual(["/", "/(home)"]);
+      expect(layoutsFor("/pricing")).toEqual(["/", "/(home)"]);
+      // A page outside the group gets the URL's layouts but not the group's.
+      expect(layoutsFor("/docs")).toEqual(["/", "/docs"]);
+      // No page matched (the not-found page): only the root layout.
+      expect(layoutsFor("/missing")).toEqual(["/"]);
+      expect(routeManager.getLayouts().get("/")?.modulePath).toBe(appPath("layout.tsx"));
     });
 
     it("rejects pages from different groups that collapse to one URL", async () => {
