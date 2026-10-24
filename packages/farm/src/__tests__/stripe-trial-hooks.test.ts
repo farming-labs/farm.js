@@ -1210,6 +1210,107 @@ describe("stripe trial hooks", () => {
     expect(storedSnapshot.seatQuantity).toBe(8);
   });
 
+  it("never lets the upgrade request body choose Stripe proration", async () => {
+    const owner: StripeBillingOwner = { kind: "user", id: "user_seats" };
+    const snapshot: StripeBillingSnapshot = {
+      owner,
+      planId: "pro",
+      productId: "pro",
+      status: "active",
+      stripeCustomerId: "cus_seats",
+      stripeSubscriptionId: "sub_seats",
+      currentPeriodEnd: new Date("2026-04-30T00:00:00.000Z"),
+      cancelAtPeriodEnd: false,
+      trialEndsAt: null,
+      trialUsedAt: null,
+      seatQuantity: 1,
+      seatAllowanceOverride: null,
+      metadata: {},
+    };
+
+    async function upgrade(
+      seats: { mode: "subscription_quantity"; prorationBehavior?: "always_invoice" },
+      body: Record<string, unknown>,
+    ) {
+      const received: unknown[] = [];
+      const integration = stripe({
+        instance: {
+          async createCheckoutSession() {
+            throw new Error("not needed");
+          },
+          async createPortalSession() {
+            throw new Error("not needed");
+          },
+          async updateSubscription(input) {
+            received.push(input.prorationBehavior);
+            return {
+              customerId: "cus_seats",
+              subscriptionId: "sub_seats",
+              subscriptionStatus: "active",
+              currentPeriodEnd: "2026-04-30T00:00:00.000Z",
+              trialEndsAt: null,
+              cancelAtPeriodEnd: false,
+              lineItems: [
+                {
+                  description: "Pro",
+                  quantity: Number(body.quantity),
+                  amountSubtotal: null,
+                  amountTotal: null,
+                  currency: "usd",
+                  priceId: "price_pro",
+                  productId: "pro",
+                },
+              ],
+            };
+          },
+          async retrieveCheckoutSession() {
+            throw new Error("not needed");
+          },
+          async constructWebhookEvent() {
+            throw new Error("not needed");
+          },
+        },
+        billing: {
+          resolveOwner: () => owner,
+          seats,
+          plans: { free: {}, pro: { limits: { seats: 1 } } },
+          products: { pro: { kind: "subscription", planId: "pro", priceId: "price_pro" } },
+          hooks: {
+            getBillingAccount: async () => snapshot,
+            async saveBillingSnapshot() {},
+          },
+        },
+      });
+      const route = integration.routes.find(
+        (entry) =>
+          entry.path === "/billing/upgrade" && String(entry.method).toUpperCase() === "POST",
+      );
+      if (!route) throw new Error("Change route not found.");
+      const request = new Request("http://example.com/billing/upgrade", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-farm-integration-client": "1" },
+        body: JSON.stringify(body),
+      });
+      const response = await route.handler(
+        request,
+        createContext(request, "POST", "/billing/upgrade", integration.instance),
+      );
+      expect(response.status).toBe(200);
+      return received;
+    }
+
+    // Raising seats without proration, then lowering them before renewal, skipped the charge.
+    await expect(
+      upgrade({ mode: "subscription_quantity" }, { quantity: 100, prorationBehavior: "none" }),
+    ).resolves.toEqual(["create_prorations"]);
+    await expect(
+      upgrade(
+        { mode: "subscription_quantity", prorationBehavior: "always_invoice" },
+        { quantity: 100, prorationBehavior: "none" },
+      ),
+    ).resolves.toEqual(["always_invoice"]);
+  });
+
   it("persists a checkout session once and does not replay billing hooks", async () => {
     const owner: StripeBillingOwner = {
       kind: "organization",

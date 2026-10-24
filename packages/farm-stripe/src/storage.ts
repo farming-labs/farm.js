@@ -1,5 +1,6 @@
 import type Stripe from "stripe";
 import type { FarmIntegrationHandlerContext } from "@farm.js/core";
+import type { StripeBillingUpgradeProrationBehavior } from "./client.js";
 
 export type StripeBillingOwner = {
   kind: "user" | "organization";
@@ -48,6 +49,12 @@ export type StripeBillingSoftLimit =
 
 export interface StripeBillingSeatsOptions {
   mode?: StripeBillingSeatsMode;
+  /**
+   * How Stripe prorates a seat change made through the upgrade route. Only the server sets
+   * this; a `prorationBehavior` in the request body is ignored.
+   * @default "create_prorations"
+   */
+  prorationBehavior?: StripeBillingUpgradeProrationBehavior;
 }
 
 export interface StripeBillingMeterGuard {

@@ -5325,7 +5325,10 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               typeof body.quantity === "number" ? body.quantity : undefined,
               Number.NaN,
             );
-            const prorationBehavior = normalizeProrationBehavior(body.prorationBehavior);
+            // Proration decides what the owner is charged, so it is server config, never the body.
+            const prorationBehavior = normalizeProrationBehavior(
+              input.billing.seats?.prorationBehavior,
+            );
             const persistence = resolveBillingPersistence(
               input.billing,
               context,

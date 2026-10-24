@@ -199,6 +199,9 @@ The same `ctx` includes `ctx.args.db`, `ctx.data`, request params, the raw reque
   needed none). Subscribe the webhook endpoint to `checkout.session.completed` and
   `checkout.session.async_payment_succeeded` so delayed payment methods are fulfilled when the
   money arrives.
+- The upgrade route changes seat quantity with the proration set in `billing.seats.prorationBehavior`
+  (`"create_prorations"` by default, or `"always_invoice"` / `"none"`). A `prorationBehavior` in
+  the request body is ignored, so a caller cannot add seats without being charged for them.
 - Store billing snapshots through the integration schema when the app needs fast entitlement reads.
 - Run `farm stripe migrate --apply` after upgrading so the additive
   `billing_checkout_session` table can persistently deduplicate success-page and webhook delivery.

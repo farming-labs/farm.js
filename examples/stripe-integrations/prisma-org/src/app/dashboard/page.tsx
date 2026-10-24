@@ -1134,7 +1134,6 @@ export default function DashboardPage() {
       const result = await apiClient.billing.upgrade({
         body: {
           quantity: parsedQuantity,
-          prorationBehavior: "create_prorations",
         },
       });
 
