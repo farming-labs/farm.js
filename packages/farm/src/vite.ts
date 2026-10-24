@@ -5783,17 +5783,20 @@ async function hydrate() {
       return
     }
 
-    // Get props - either from server-injected props or by matching the current URL
-    if (!pageProps || !pageProps.params || Object.keys(pageProps.params).length === 0) {
-      // Extract params from URL using manifest route matching (fallback)
+    // Use the server-injected props. A document that carries no params (a route
+    // without any, or generated HTML) takes them from the current URL, keeping
+    // what the server rendered with, such as middleware data.
+    if (!pageProps.params || Object.keys(pageProps.params).length === 0) {
       const pathname = window.location.pathname;
       const foundRoute = findRoute(pathname);
-      pageProps = normalizeServerProps({
-        params: foundRoute?.params || {},
-        search: getCurrentSearchParams(),
-        searchParams: getCurrentSearchParams(),
+      const search = getCurrentSearchParams();
+      pageProps = {
+        search,
+        searchParams: search,
         path: pathname,
-      });
+        ...pageProps,
+        params: foundRoute?.params || {},
+      };
     }
     currentPageProps = pageProps;
 

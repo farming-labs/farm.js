@@ -3433,6 +3433,16 @@ async function loadRouteComponent(route) {
   return route.Component;
 }
 
+// The props the server rendered this document with, as the page receives them:
+// middleware data arrives as a plain object and is a Map again here.
+function reviveServerPageProps(serverProps) {
+  if (!serverProps || typeof serverProps !== "object") return {};
+  const middleware = serverProps.middleware;
+  return middleware && middleware.data && !(middleware.data instanceof Map)
+    ? { ...serverProps, middleware: { ...middleware, data: new Map(Object.entries(middleware.data)) } }
+    : serverProps;
+}
+
 async function createMatchedHydrationRoute(matched, pathname, searchParams, serverHtml, serverProps) {
   const hydrateLayouts = hasHydratableLayout(pathname);
   const params = matched.params;
@@ -3446,12 +3456,8 @@ async function createMatchedHydrationRoute(matched, pathname, searchParams, serv
     // rejected guard, deferred data) its server-rendered HTML is kept.
     if (Component.__farmServerProps === true) {
       if (!serverProps || serverProps.__farmRoutePropsResolved !== true) return null;
-      const middleware = serverProps.middleware;
       const props = {
-        ...serverProps,
-        ...(middleware && middleware.data && !(middleware.data instanceof Map)
-          ? { middleware: { ...middleware, data: new Map(Object.entries(middleware.data)) } }
-          : {}),
+        ...reviveServerPageProps(serverProps),
         searchParams: Promise.resolve(serverProps.search ?? searchParams),
       };
       pageElement = React.createElement(Component, props);
@@ -3462,7 +3468,13 @@ async function createMatchedHydrationRoute(matched, pathname, searchParams, serv
       );
       return null;
     } else {
-      const props = { params: params, searchParams: Promise.resolve(searchParams) };
+      // Keep what the server rendered with, such as middleware data, so the
+      // first render matches the HTML. A navigation passes the fetched document's props.
+      const props = {
+        ...reviveServerPageProps(serverProps),
+        params: params,
+        searchParams: Promise.resolve(searchParams),
+      };
       pageElement = React.createElement(Component, props);
     }
   } else if (hydrateLayouts) {
