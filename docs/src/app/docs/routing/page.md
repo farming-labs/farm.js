@@ -1466,6 +1466,26 @@ src/app/
 
 The group names are organizational. The URLs are still `/`, `/pricing`, and `/dashboard`.
 
+A group can have its own layout, as in Next.js. `(marketing)/layout.tsx` wraps only the pages
+inside `(marketing)/`, nested inside the root layout, even though its URL is `/` like the root
+layout's:
+
+```txt
+src/app/
+  layout.tsx            <- wraps every page
+  (marketing)/
+    layout.tsx          <- wraps / and /pricing, inside the root layout
+    page.tsx
+    pricing/
+      page.tsx
+  (app)/
+    dashboard/
+      page.tsx          <- root layout only
+```
+
+A request that matches no page, such as the 404 page, gets only the layouts its URL matches,
+never a group's.
+
 ## Pending Navigation UI
 
 Use `useNavigation()` for global route-transition UI: top progress bars, disabled navigation buttons, optimistic shells, or app-wide busy indicators. It tracks SPA navigations started by `Link` and `navigateTo`.
