@@ -275,8 +275,16 @@ Provider-specific adapters should use atomic increments or transactions when the
 supports them. Lease-capable adapters return an ownership token from `acquireLease` and only
 release the lease when `releaseLease(key, token)` still matches that owner.
 
+Adapter keys are opaque strings that can contain `/`, `:`, `?` and other URL characters, for example
+a PPR shell key carries the request path and query string. A custom adapter must store each key
+distinctly. If `get` returns an entry whose `key` belongs to another lookup, Farm treats the read as
+a miss and regenerates the value.
+
 For any Farm/unstorage-compatible client, `storageCacheAdapter(storage)` provides a portable
-baseline. `@farm.js/cache-redis` adds Redis-native atomic tag increments and regeneration leases.
+baseline. It percent-encodes keys and tags before handing them to the storage client, because
+unstorage drops everything after `?` and folds `/`, `\` and `:` into one separator, and it stores
+keys longer than 200 encoded characters under their SHA-256 hash so they stay within driver key
+limits. `@farm.js/cache-redis` adds Redis-native atomic tag increments and regeneration leases.
 
 **src/app/api/products/route.ts**
 
