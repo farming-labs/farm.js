@@ -14,11 +14,13 @@ import "@farm.js/core/css";
  */
 export type RoutePath =
   | "/"
+  | "/about"
   | "/agents"
   | "/agents/check"
   | `/agents/check/${string}`
   | "/blog"
   | "/blog/0.1.0"
+  | "/contact"
   | "/design"
   | "/docs"
   | `/docs/${string}`
@@ -119,14 +121,17 @@ export type RoutePath =
   | "/docs/testing"
   | "/docs/themes"
   | "/docs/upgrading"
+  | "/privacy"
   | "/telemetry";
 export type RoutePattern =
   | "/"
+  | "/about"
   | "/agents"
   | "/agents/check"
   | "/agents/check/[id]"
   | "/blog"
   | "/blog/0.1.0"
+  | "/contact"
   | "/design"
   | "/docs"
   | "/docs/[...docs]"
@@ -227,14 +232,17 @@ export type RoutePattern =
   | "/docs/testing"
   | "/docs/themes"
   | "/docs/upgrading"
+  | "/privacy"
   | "/telemetry";
 export type RouteModulePattern =
   | "/"
+  | "/about"
   | "/agents"
   | "/agents/check"
   | "/agents/check/[id]"
   | "/blog"
   | "/blog/0.1.0"
+  | "/contact"
   | "/design"
   | "/docs"
   | "/docs/[...docs]"
@@ -335,6 +343,7 @@ export type RouteModulePattern =
   | "/docs/testing"
   | "/docs/themes"
   | "/docs/upgrading"
+  | "/privacy"
   | "/telemetry";
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {
