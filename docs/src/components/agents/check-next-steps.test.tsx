@@ -3,7 +3,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { AgentCheckResult, StoredAgentCheck } from "../../lib/agents-check";
-import { AgentCheckNextSteps, buildFixPrompt, migrationGuideHref } from "./check-next-steps";
+import {
+  AgentCheckNextSteps,
+  buildFixPrompt,
+  buildMigrationPrompt,
+  migrationGuideHref,
+} from "./check-next-steps";
 
 const check = (overrides: Partial<AgentCheckResult>): AgentCheckResult => ({
   id: "markdown",
@@ -75,6 +80,17 @@ describe("agent check next steps", () => {
     expect(html).toContain('<button type="button" hidden="">Copy prompt to fix</button>');
   });
 
+  it("offers a migration prompt that points an agent at the Markdown guide", () => {
+    const prompt = buildMigrationPrompt(scan({ framework: "Next.js", checks: gaps }));
+    expect(prompt).toContain("Migrate this Next.js project to Farm.js.");
+    expect(prompt).toContain("https://farmjs.dev/docs/migrations/nextjs.md");
+    expect(buildMigrationPrompt(scan({ framework: "Hugo", checks: gaps }))).toContain(
+      "Migrate this project to Farm.js.",
+    );
+    const html = render(scan({ framework: "Next.js", checks: gaps }));
+    expect(html).toContain("<code>farmjs.dev/docs/migrations/nextjs.md</code>");
+  });
+
   it("asks a Farm.js site to upgrade first and shows the command", () => {
     for (const value of [
       scan({ farm: true, checks: gaps }),
@@ -82,7 +98,8 @@ describe("agent check next steps", () => {
     ]) {
       const html = render(value);
       expect(html).toContain('href="/docs/cli#upgrade-farm-packages"');
-      expect(html).toContain("Update to latest Farm.js<code>farm upgrade --latest</code>");
+      expect(html).toContain(">Update Farm.js</a>");
+      expect(html).toContain("<code>farm upgrade --latest</code>");
       expect(html).not.toContain("Migrate to Farm.js");
       expect(buildFixPrompt(value)).toContain("First upgrade every @farm.js/* package");
     }

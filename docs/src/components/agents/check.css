@@ -252,6 +252,10 @@
   .agent-check-action-group:not([data-quiet]) :is(a, button) {
     justify-content: center;
   }
+  /* Keep the command with the buttons it belongs to. */
+  .agent-check-action-group[data-quiet] {
+    order: 4;
+  }
 }
 .agent-check-actions :is(a, button) {
   display: inline-flex;
@@ -274,10 +278,31 @@
   background: #fff;
   color: #000;
 }
-.agent-check-primary code {
+/* A Farm site's upgrade command, on its own quiet line under the buttons. */
+.agent-check-command {
+  display: flex;
+  flex-basis: 100%;
+  order: 3;
+  align-items: center;
+  gap: 12px;
+  margin: -8px 0 0;
+  color: rgb(255 255 255 / 0.56);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+.agent-check-command code {
+  color: #ededed;
   font-family: inherit;
+  font-size: 12px;
   text-transform: none;
-  opacity: 0.6;
+}
+.agent-check-actions .agent-check-command button {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
 }
 .agent-check-action-status {
   align-self: center;
@@ -295,6 +320,7 @@
   .agent-check-actions :is(a, button):hover {
     border-color: rgb(255 255 255 / 0.42);
   }
+  .agent-check-actions .agent-check-command button:hover,
   .agent-check-actions [data-quiet] :is(a, button):hover {
     color: #ededed;
   }

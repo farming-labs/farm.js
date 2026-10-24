@@ -1,7 +1,7 @@
 import type { AgentCheckResult, StoredAgentCheck } from "../../lib/agents-check";
 import { agentCheckPath } from "../../lib/agents-check-messages";
 import { SITE_URL } from "../../lib/site";
-import { AgentCheckCopyPrompt } from "./check-copy-prompt";
+import { AgentCheckCopyPrompt, AgentCheckCopyText } from "./check-copy-prompt";
 
 /**
  * The first buttons under a report's score: what to do next. A site on Farm.js upgrades, since
@@ -89,22 +89,56 @@ export function buildFixPrompt(scan: StoredAgentCheck): string {
   ].join("\n\n");
 }
 
+/**
+ * A ready-to-paste prompt that moves the site to Farm.js. The Markdown guide it points at is
+ * written for coding agents: the whole procedure and a parity table for every feature.
+ */
+export function buildMigrationPrompt(scan: StoredAgentCheck): string {
+  const { report } = scan;
+  const guide = migrationGuideHref(report.framework);
+  const from = guide === "/docs/migrations" ? "this project" : `this ${report.framework} project`;
+  return [
+    `Migrate ${from} to Farm.js. The Farm.js agent-ready check (${SITE_URL}/agents/check) scored ${report.finalUrl} ${report.score}/100; Farm.js apps are agent-ready by default.`,
+    `Read ${SITE_URL}${guide}.md first and follow it exactly: it is written for coding agents and covers the procedure and every feature to rewrite. Keep the old setup until \`pnpm dev\`, \`pnpm build\` and \`pnpm start\` all pass on Farm.js.`,
+    `When you're done, deploy and scan again: ${SITE_URL}${agentCheckPath(report.url)}`,
+  ].join("\n\n");
+}
+
 export function AgentCheckNextSteps({ scan }: { scan: StoredAgentCheck }) {
   const { report } = scan;
   const hasGaps = reportGaps(scan).length > 0;
+  const farm = isFarmSite(scan);
   return (
-    <div className="agent-check-action-group" role="group" aria-label="Next step">
-      {isFarmSite(scan) ? (
-        <a className="agent-check-primary" href={FARM_UPGRADE_DOCS}>
-          Update to latest Farm.js
+    <>
+      <div className="agent-check-action-group" role="group" aria-label="Next step">
+        {farm ? (
+          <a className="agent-check-primary" href={FARM_UPGRADE_DOCS}>
+            Update Farm.js
+          </a>
+        ) : (
+          <a className="agent-check-primary" href={migrationGuideHref(report.framework)}>
+            Migrate to Farm.js
+          </a>
+        )}
+        {hasGaps ? <AgentCheckCopyPrompt prompt={buildFixPrompt(scan)} /> : null}
+      </div>
+      {farm ? (
+        <p className="agent-check-command">
+          <span>Upgrade</span>
           <code>{FARM_UPGRADE_COMMAND}</code>
-        </a>
+          <AgentCheckCopyText text={FARM_UPGRADE_COMMAND} label="Copy" copied="Copied" />
+        </p>
       ) : (
-        <a className="agent-check-primary" href={migrationGuideHref(report.framework)}>
-          Migrate to Farm.js
-        </a>
+        <p className="agent-check-command">
+          <span>Migrate with an agent</span>
+          <code>{`farmjs.dev${migrationGuideHref(report.framework)}.md`}</code>
+          <AgentCheckCopyText
+            text={buildMigrationPrompt(scan)}
+            label="Copy prompt"
+            copied="Copied"
+          />
+        </p>
       )}
-      {hasGaps ? <AgentCheckCopyPrompt prompt={buildFixPrompt(scan)} /> : null}
-    </div>
+    </>
   );
 }
