@@ -304,20 +304,35 @@ describe("stripe billing session lookup authorization", () => {
       session: sessionFor(ownerA, "cus_a"),
     });
 
-    await call("/billing/session?sessionId=cs_test_session", "GET");
+    const result = await call("/billing/session?sessionId=cs_test_session", "GET");
 
     expect(saved.map((snapshot) => snapshot.owner.id)).not.toContain(ownerB.id);
     expect(checkoutCompleted).not.toContain(`${ownerB.kind}:${ownerB.id}`);
+    expect(result.json).toMatchObject({ id: "cs_test_session", status: "complete" });
+    expect(JSON.stringify(result.json)).not.toContain("cus_a");
+    expect(JSON.stringify(result.json)).not.toContain(ownerA.email!);
   });
 
-  it("still persists the caller's own checkout", async () => {
+  it("returns only status fields to an anonymous caller", async () => {
+    const { call } = createIntegration({
+      signedInOwner: null,
+      session: sessionFor(ownerA, "cus_a"),
+    });
+
+    const result = await call("/billing/session?sessionId=cs_test_session", "GET");
+
+    expect(result.json).toMatchObject({ customerId: null, customerEmail: null, metadata: {} });
+  });
+
+  it("still persists and returns the caller's own checkout", async () => {
     const { call, saved } = createIntegration({
       signedInOwner: ownerA,
       session: sessionFor(ownerA, "cus_a"),
     });
 
-    await call("/billing/session?sessionId=cs_test_session", "GET");
+    const result = await call("/billing/session?sessionId=cs_test_session", "GET");
 
     expect(saved.map((snapshot) => snapshot.owner.id)).toContain(ownerA.id);
+    expect(result.json.customerId).toBe("cus_a");
   });
 });

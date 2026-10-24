@@ -31,9 +31,16 @@ export const integrations = {
       {
         id: "pro",
         name: "Pro",
-        prices: [{ interval: "month", amount: 2900, currency: "usd" }],
+        mode: "subscription",
+        currency: "usd",
+        unitAmount: 2900,
+        interval: "month",
       },
     ],
+    // Without `billing`, the portal opens only for the customer this returns.
+    async resolveCustomer(ctx) {
+      return ctx.req.get<string>("user.stripeCustomerId") ?? null;
+    },
   }),
 };
 ```
@@ -139,6 +146,21 @@ if (portal.data?.redirectTo) {
 ```
 
 Checkout and portal return paths must be same-origin, root-relative application paths. Protocol-relative paths such as `//example.com` are rejected.
+
+A portal session exposes invoices, payment methods, and cancellation, so the portal route only acts
+for an identified caller: the billing owner from `billing.resolveOwner`, or, without `billing`, the
+Stripe customer id returned by `resolveCustomer(ctx)`. A `customerId` or `sessionId` in the request
+must belong to that caller. With neither configured, the route answers `403`.
+
+**Read a checkout session**
+
+```ts
+const session = await apiClient.billing.session({ query: { sessionId } });
+```
+
+Checkout session ids appear in success URLs and browser history, so the session route returns the
+customer, email, metadata, subscription, and line items only to the session's owner. Anyone else
+gets the `id`, `status`, `paymentStatus`, and `mode` with the identifying fields empty.
 
 ## Billing owner
 

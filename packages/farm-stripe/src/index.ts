@@ -302,6 +302,16 @@ export interface StripeIntegrationInput {
    * cookies, so a request from any other origin is refused.
    */
   allowedOrigins?: readonly string[];
+  /**
+   * Resolve the Stripe customer the current caller may manage when `billing` is not configured,
+   * for example from your own session. The portal route opens only this customer's portal, and the
+   * session route includes a checkout's customer details only when the checkout belongs to it.
+   * Without `billing` or this resolver the portal route answers `403` and session lookups return
+   * status fields only. Ignored when `billing` is set: its `resolveOwner` is authoritative.
+   */
+  resolveCustomer?: (
+    context: FarmIntegrationHandlerContext,
+  ) => string | null | undefined | Promise<string | null | undefined>;
   productsPath?: string;
   statusPath?: string;
   currentChargesPath?: string;
@@ -5530,13 +5540,35 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
                 customerId = customerId ?? session.customerId ?? undefined;
               }
             } else {
-              // Without billing there is no owner to authenticate against, so
-              // the caller supplies the customer directly. This path is for
-              // server-side callers that already did their own authorization.
-              customerId = requestedCustomerId;
-              if (!customerId && requestedSessionId) {
+              // Without billing, the app's resolveCustomer is the only identity
+              // we trust. A customerId or sessionId from the request is a claim
+              // to verify against it, never the identity itself.
+              if (!input.resolveCustomer) {
+                return Response.json({ error: MISSING_PORTAL_CUSTOMER_ERROR }, { status: 403 });
+              }
+              customerId = (await input.resolveCustomer(context)) || undefined;
+              if (!customerId) {
+                return Response.json(
+                  { error: "Stripe portal requires an authenticated customer." },
+                  { status: 401 },
+                );
+              }
+
+              if (requestedCustomerId && requestedCustomerId !== customerId) {
+                return Response.json(
+                  { error: "Stripe portal customerId does not belong to the caller." },
+                  { status: 403 },
+                );
+              }
+
+              if (requestedSessionId) {
                 const session = await instance.retrieveCheckoutSession(requestedSessionId);
-                customerId = session.customerId ?? undefined;
+                if (session.customerId !== customerId) {
+                  return Response.json(
+                    { error: "Stripe portal sessionId does not belong to the caller." },
+                    { status: 403 },
+                  );
+                }
               }
             }
 
@@ -5610,6 +5642,10 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
 
             try {
               const session = await instance.retrieveCheckoutSession(sessionId);
+              // A checkout session id travels in success URLs, history, and
+              // referrers, so holding one is not proof of ownership: customer
+              // details are only returned to the session's own owner.
+              let ownedByCaller = false;
 
               if (input.billing) {
                 const persistence = resolveBillingPersistence(
@@ -5627,9 +5663,20 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
                     context,
                   ),
                 );
+                const owner = await resolveBillingOwner(input.billing, context, persistence.tools);
+                if (owner) {
+                  const snapshot = await persistence.getBillingAccount?.(owner);
+                  ownedByCaller = sessionBelongsToOwner(
+                    session,
+                    owner,
+                    snapshot?.stripeCustomerId ?? undefined,
+                  );
+                }
+              } else if (input.resolveCustomer && session.customerId) {
+                ownedByCaller = (await input.resolveCustomer(context)) === session.customerId;
               }
 
-              return Response.json(session);
+              return Response.json(ownedByCaller ? session : redactCheckoutSession(session));
             } catch (error) {
               return Response.json(
                 {
@@ -5655,6 +5702,32 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
     schema: integrationSchema,
     resolveClient: (config) => resolveConfiguredStorageRuntimeClient(config),
   });
+}
+
+const MISSING_PORTAL_CUSTOMER_ERROR =
+  "The Stripe portal route is not authorized. A portal session exposes invoices, payment " +
+  "methods, and cancellation, so it refuses callers it cannot identify. Pass `billing` with " +
+  "`resolveOwner`, or `resolveCustomer` returning the signed-in caller's Stripe customer id, " +
+  "to the stripe integration.";
+
+/**
+ * The checkout session as seen by a caller that does not own it: completion status only, with no
+ * customer identity, metadata, subscription, or line items.
+ */
+function redactCheckoutSession(session: StripeSessionResult): StripeSessionResult {
+  return {
+    id: session.id,
+    status: session.status,
+    paymentStatus: session.paymentStatus,
+    mode: session.mode,
+    customerId: null,
+    customerEmail: null,
+    amountSubtotal: null,
+    amountTotal: null,
+    currency: null,
+    metadata: {},
+    lineItems: [],
+  };
 }
 
 /**
