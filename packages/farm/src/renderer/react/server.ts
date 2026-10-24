@@ -7,6 +7,7 @@ import {
   isolateFarmServerPageGraph,
   wrapFarmIsolatedClientGraph,
 } from "../../client/isolated-boundary";
+import { renderFarmServerTreePage } from "../../client/server-tree";
 
 export class ErrorBoundary extends React.Component<
   {
@@ -50,6 +51,8 @@ export const wrapClientGraph = (element: React.ReactNode) =>
   wrapFarmIsolatedClientGraph(React, element);
 export const isolateServerPageGraph = (element: React.ReactNode) =>
   isolateFarmServerPageGraph(React, element);
+export const renderServerTreePage = (element: React.ReactNode) =>
+  renderFarmServerTreePage(React, element, { isolate: isolateServerPageGraph });
 export const renderToString = reactRenderToString;
 export const renderToPipeableStream = reactRenderToPipeableStream;
 

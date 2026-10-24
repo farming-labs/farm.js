@@ -2913,6 +2913,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                       pageShouldHydrate: shouldHydrate,
                       layoutShouldHydrate: shouldHydrateLayout,
                       islandStrategy: hydrationIslandStrategy,
+                      serverTree:
+                        "serverTree" in moduleMetadata && moduleMetadata.serverTree === true,
                     }),
                   ),
                 );
@@ -4390,7 +4392,7 @@ function generateClientCode(
       ? `import React, { hydrateRoot, createRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)}\nimport __farmAppSetup from ${JSON.stringify(toViteModuleId(appSetupPath, root))}\n__farmConfigureApp(__farmAppSetup)`
       : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
   const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'`
+    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'`
     : "";
   const docsAdapterImportBlock = generateFarmDocsAdapterClientRuntime(
     docsAdapterReact,
@@ -4414,8 +4416,22 @@ function disposeFarmIsolatedClientBoundaries(scope) {
 
 async function hydrateFarmIsolatedClientBoundaries(scope = document, signal) {
   await farmIsolatedHydrationRuntime.hydrate(scope, signal);
+}
+
+// A server-tree page (an async page below a hydrating layout) rebuilds in the layout's root.
+async function createFarmServerTreePageElement(source, pathname) {
+  try {
+    return await createFarmServerTreeElement(React, source, {
+      load: (reference) => import(/* @vite-ignore */ reference),
+      ServerHtml: FarmServerPage,
+      key: pathname,
+    });
+  } catch (error) {
+    console.warn('[Farm.js] Could not rebuild the server tree of ' + pathname + '; its server HTML was kept.', error);
+    return null;
+  }
 }`
-    : "";
+    : `async function createFarmServerTreePageElement() { return null; }`;
 
   return `
 ${rendererClientImports}
@@ -5350,14 +5366,23 @@ async function tryHydrateImportedPage(
   } else if (layoutShouldHydrate) {
     currentPageProps = existingProps || { params };
     const serverPage = document.getElementById('__farm_page__');
-    pageElement = createLayoutPageBoundary(
-      false,
-      islandStrategy,
-      null,
-      typeof hydrationOptions.serverHtml === 'string'
-        ? hydrationOptions.serverHtml
-        : serverPage ? serverPage.innerHTML : '',
-    );
+    const pageSource = typeof hydrationOptions.serverHtml === 'string'
+      ? hydrationOptions.serverHtml
+      : serverPage;
+    const serverTree = pageSource
+      ? await createFarmServerTreePageElement(pageSource, window.location.pathname)
+      : null;
+    if (signal?.aborted || !container?.isConnected) return false;
+    pageElement = serverTree
+      ? createLayoutPageBoundary(false, islandStrategy, serverTree)
+      : createLayoutPageBoundary(
+          false,
+          islandStrategy,
+          null,
+          typeof hydrationOptions.serverHtml === 'string'
+            ? hydrationOptions.serverHtml
+            : serverPage ? serverPage.innerHTML : '',
+        );
   }
   if (signal?.aborted || !container?.isConnected || !pageElement) return false;
 

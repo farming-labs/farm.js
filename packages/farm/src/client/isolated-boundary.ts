@@ -1,5 +1,6 @@
 import type React from "react";
 import type { FarmIslandStrategy } from "../island";
+import { markFarmClientReference, updateFarmServerTreeModule } from "./client-reference";
 
 const REACT_ELEMENT_TYPE = Symbol.for("react.transitional.element");
 const LEGACY_REACT_ELEMENT_TYPE = Symbol.for("react.element");
@@ -144,6 +145,11 @@ export function createFarmIsolatedClientBoundary(
   FarmIsolatedClientBoundary.displayName = `FarmIsolated(${
     Component.displayName || Component.name || exportName
   })`;
+  markFarmClientReference(FarmIsolatedClientBoundary, {
+    reference: moduleReference,
+    exportName,
+    Component,
+  });
   return FarmIsolatedClientBoundary;
 }
 
@@ -430,7 +436,8 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
     const originals = module.__farm_client_boundary_originals__ as
       | Record<string, unknown>
       | undefined;
-    let updated = 0;
+    // Server-tree pages render the module's components inside the layout's root.
+    let updated = updateFarmServerTreeModule(reference, module);
 
     for (const [container, record] of roots) {
       if (record.reference !== reference) continue;
@@ -497,9 +504,11 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
 export function createFarmServerPageBoundary(
   ReactRuntime: typeof React,
   runtime: Pick<ReturnType<typeof createFarmIsolatedHydrationRuntime>, "hydrate" | "dispose">,
-): React.ComponentType<Record<string, unknown> & { dangerouslySetInnerHTML: { __html: string } }> {
-  return function FarmServerPage(props) {
-    const ref = ReactRuntime.useRef<HTMLDivElement>(null);
+): React.ComponentType<
+  Record<string, unknown> & { as?: string; dangerouslySetInnerHTML: { __html: string } }
+> {
+  return function FarmServerPage({ as = "div", ...props }) {
+    const ref = ReactRuntime.useRef<HTMLElement>(null);
     const html = props.dangerouslySetInnerHTML.__html;
     ReactRuntime.useLayoutEffect(() => {
       const page = ref.current;
@@ -521,6 +530,6 @@ export function createFarmServerPageBoundary(
         });
       };
     }, [html]);
-    return ReactRuntime.createElement("div", { ...props, ref });
+    return ReactRuntime.createElement(as, { ...props, ref });
   };
 }

@@ -273,6 +273,8 @@ export interface FarmNavigationFragmentInput {
   pageShouldHydrate: boolean;
   layoutShouldHydrate: boolean;
   islandStrategy?: FarmIslandStrategy | null;
+  /** The page renders as a server tree inside its hydrating layout's root. */
+  serverTree?: boolean;
 }
 
 const warnedSuppressedAsyncHydrationModules = new Set<string>();
@@ -822,8 +824,12 @@ export class ServerRenderer {
       !input.pageShouldHydrate &&
       this.rendererRuntime.isolateServerPageGraph
     ) {
-      // As in renderPage: the layout keeps this page as server HTML, so its islands stay islands.
-      element = this.rendererRuntime.isolateServerPageGraph(element);
+      // As in renderPage: the layout keeps this page as server HTML, so its islands stay islands,
+      // unless the page renders as a server tree the layout's root rebuilds.
+      element =
+        input.serverTree && this.rendererRuntime.renderServerTreePage
+          ? await this.rendererRuntime.renderServerTreePage(element)
+          : this.rendererRuntime.isolateServerPageGraph(element);
     }
     element = this.createPageBoundary(element, {
       pageShouldHydrate: input.pageShouldHydrate,
@@ -1787,8 +1793,12 @@ export class ServerRenderer {
               this.rendererRuntime.isolateServerPageGraph
             ) {
               // The hydrating layout keeps this page as server HTML, so its client components
-              // render as their own islands instead of joining the layout's React tree.
-              pageElement = this.rendererRuntime.isolateServerPageGraph(pageElement);
+              // render as their own islands instead of joining the layout's React tree. A
+              // server-tree page instead joins it: the browser rebuilds the resolved tree there.
+              pageElement =
+                routeManifestEntry?.serverTree === true && this.rendererRuntime.renderServerTreePage
+                  ? await this.rendererRuntime.renderServerTreePage(pageElement)
+                  : this.rendererRuntime.isolateServerPageGraph(pageElement);
             }
 
             // Every route gets a stable HTML boundary. Server-only pages keep

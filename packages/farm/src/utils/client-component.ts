@@ -691,6 +691,21 @@ export function getClientModuleHydrationPlan(
 }
 
 /**
+ * An async page's client components hydrate inside its hydrating layout's React tree from a
+ * serialized server tree, so they read the layout's context. Islands that declare a deferred
+ * strategy keep hydrating as roots of their own on that schedule.
+ */
+export function usesFarmServerTree(
+  plan: Pick<ClientModuleHydrationPlan, "asyncOwnerIslands" | "isolatedBoundaries"> | undefined,
+): boolean {
+  return (
+    plan?.asyncOwnerIslands === true &&
+    plan.isolatedBoundaries.length > 0 &&
+    plan.isolatedBoundaries.every((boundary) => boundary.islandStrategy === "load")
+  );
+}
+
+/**
  * A Markdown page renders its configured MDX components into server HTML and has no route-wide
  * client root. Like an async owner, the client components those MDX components import hydrate
  * as isolated islands whatever the experiment mode is.

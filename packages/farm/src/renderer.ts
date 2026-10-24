@@ -298,6 +298,8 @@ export interface FarmServerRendererRuntime {
   wrapClientGraph?(element: unknown): unknown;
   /** Lets a server-only page under a route-owned client tree render its own isolated islands. */
   isolateServerPageGraph?(element: unknown): unknown;
+  /** Resolves an async page below a hydrating layout into a tree the browser rebuilds there. */
+  renderServerTreePage?(element: unknown): Promise<unknown>;
   /**
    * Optional: tag a plain function component so a renderer that compiles its
    * own components can tell the two apart. Renderers without the hook treat
