@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createFarmAiCatalogResponse, listFarmMCPLlmsTxtLinks } from "../ai-catalog";
 import { resolveFarmAgentConfig } from "../agent-config";
 import { createFarmDefaultLlmsTxt, resolveFarmLlmsTxtConfig } from "../llms-txt";
-import { _publishFarmMCPCatalog } from "../mcp-catalog";
+import { createFarmAppManifest, resolveFarmAppManifestInput } from "../app-manifest";
+import { _publishFarmMCPCatalog, registerFarmMCPServer } from "../mcp-catalog";
 import { onFarmEvent } from "../observability";
 
 const unpublish: Array<() => void> = [];
@@ -12,6 +13,12 @@ function publish(
   details?: Parameters<typeof _publishFarmMCPCatalog>[2],
 ) {
   unpublish.push(_publishFarmMCPCatalog(server, [], details));
+}
+
+function register(server: Parameters<typeof registerFarmMCPServer>[0]) {
+  const dispose = registerFarmMCPServer(server);
+  unpublish.push(dispose);
+  return dispose;
 }
 
 function get(url: string, init?: RequestInit) {
@@ -219,5 +226,133 @@ describe("ai catalog", () => {
       mcp,
     });
     expect(llms.sections).toEqual([{ title: "MCP", links: mcp }]);
+  });
+
+  it("lists a registered server at its literal path, below the app's basePath only", async () => {
+    // A docs runtime's MCP endpoint is not an API route: api.basePath never moves it.
+    register({
+      name: "dev.farmjs/docs",
+      version: "0.2.121",
+      title: "Farm.js docs",
+      description: "Search and read the Farm.js docs.",
+      path: "/api/docs/mcp",
+      protocolVersions: ["2025-06-18"],
+    });
+    const input = { basePath: "/console", apiServerBasePath: "/v1" };
+
+    const catalog = createFarmAiCatalogResponse(
+      new Request("https://farmjs.dev/console/.well-known/ai-catalog.json"),
+      input,
+    )!;
+    expect((await catalog.json()).entries).toEqual([
+      {
+        identifier: "urn:air:farmjs.dev:mcp:docs",
+        type: "application/mcp-server-card+json",
+        url: "https://farmjs.dev/console/api/docs/mcp/server-card",
+        displayName: "Farm.js docs",
+        description: "Search and read the Farm.js docs.",
+        version: "0.2.121",
+      },
+    ]);
+
+    const card = createFarmAiCatalogResponse(
+      new Request("https://farmjs.dev/console/api/docs/mcp/server-card"),
+      input,
+    )!;
+    expect(await card.json()).toMatchObject({
+      name: "dev.farmjs/docs",
+      title: "Farm.js docs",
+      remotes: [
+        {
+          type: "streamable-http",
+          url: "https://farmjs.dev/console/api/docs/mcp",
+          supportedProtocolVersions: ["2025-06-18"],
+        },
+      ],
+    });
+    for (const elsewhere of ["/v1/docs/mcp/server-card", "/api/docs/mcp/server-card"]) {
+      expect(
+        createFarmAiCatalogResponse(new Request(`https://farmjs.dev${elsewhere}`), input),
+      ).toBeNull();
+    }
+
+    // A path already below the basePath is not prefixed twice.
+    register({ name: "agent", version: "1.0.0", path: "/console/agent/mcp" });
+    const listed = listFarmMCPLlmsTxtLinks("https://farmjs.dev", input).map(({ url }) => url);
+    expect(listed).toEqual([
+      "https://farmjs.dev/console/api/docs/mcp",
+      "https://farmjs.dev/console/agent/mcp",
+      "https://farmjs.dev/console/.well-known/ai-catalog.json",
+    ]);
+  });
+
+  it("lists a server on another host, whose card that host serves", async () => {
+    register({ name: "docs", version: "1.0.0", url: "https://mcp.farmjs.dev/mcp/" });
+
+    const { entries } = await get("https://farmjs.dev/.well-known/ai-catalog.json")!.json();
+    expect(entries).toEqual([
+      expect.objectContaining({
+        identifier: "urn:air:farmjs.dev:mcp:docs",
+        url: "https://mcp.farmjs.dev/mcp/server-card",
+      }),
+    ]);
+    expect(get("https://farmjs.dev/mcp/server-card")).toBeNull();
+    expect(listFarmMCPLlmsTxtLinks("https://farmjs.dev")[0]).toMatchObject({
+      url: "https://mcp.farmjs.dev/mcp",
+    });
+  });
+
+  it("replaces a registration for the same endpoint, and removes it when disposed", async () => {
+    const first = register({ name: "docs", version: "1.0.0", path: "/api/docs/mcp" });
+    const second = register({ name: "docs", version: "2.0.0", path: "/api/docs/mcp/" });
+    const catalog = async () =>
+      (await get("https://acme.test/.well-known/ai-catalog.json")?.json())?.entries;
+
+    expect((await catalog()).map(({ version }: { version: string }) => version)).toEqual(["2.0.0"]);
+    // Disposing the replaced registration leaves the newer one.
+    first();
+    expect(await catalog()).toHaveLength(1);
+    second();
+    expect(get("https://acme.test/.well-known/ai-catalog.json")).toBeNull();
+    expect(get("https://acme.test/api/docs/mcp/server-card")).toBeNull();
+  });
+
+  it("keeps a server @farm.js/mcp publishes when one is registered at its endpoint", async () => {
+    publish({ name: "projects", version: "1.0.0", path: "/api/mcp", title: "Projects" });
+    register({ name: "other", version: "9.9.9", path: "/api/mcp" });
+
+    const { entries } = await get("https://acme.test/.well-known/ai-catalog.json")!.json();
+    expect(entries).toEqual([expect.objectContaining({ displayName: "Projects" })]);
+  });
+
+  it("leaves registered servers out of the /.well-known/farmjs manifest", () => {
+    register({ name: "docs", version: "1.0.0", path: "/api/docs/mcp" });
+    const manifest = createFarmAppManifest(
+      resolveFarmAppManifestInput({ basePath: "/" }, { build: "test", packages: {} }),
+    );
+    expect(manifest.mcp.servers).toEqual([]);
+  });
+
+  it("rejects a registration it could not list", () => {
+    const base = { name: "docs", version: "1.0.0" };
+    const cases: Array<[unknown, string]> = [
+      [{ ...base }, "exactly one of path and url"],
+      [{ ...base, path: "/mcp", url: "https://acme.test/mcp" }, "exactly one of path and url"],
+      [{ ...base, path: "mcp" }, "path must be an absolute app path"],
+      [{ ...base, path: "//evil.test/mcp" }, "path must be an absolute app path"],
+      [{ ...base, path: "/mcp?x=1" }, "path must be an absolute app path"],
+      [{ ...base, path: "/docs/../mcp" }, "path must be an absolute app path"],
+      [{ ...base, url: "/mcp" }, "url must be an absolute http(s) URL"],
+      [{ ...base, url: "javascript:alert(1)" }, "url must be an absolute http(s) URL"],
+      [{ ...base, url: "https://user:pass@acme.test/mcp" }, "url must be an absolute http(s) URL"],
+      [{ name: " ", version: "1", path: "/mcp" }, "name must be a non-empty string"],
+      [{ name: "docs", path: "/mcp" }, "version must be a non-empty string"],
+      [{ ...base, path: "/mcp", title: "" }, "title must be a non-empty string"],
+      [{ ...base, path: "/mcp", protocolVersions: [""] }, "protocolVersions"],
+    ];
+    for (const [server, message] of cases) {
+      expect(() => registerFarmMCPServer(server as never)).toThrow(message);
+    }
+    expect(get("https://acme.test/.well-known/ai-catalog.json")).toBeNull();
   });
 });
