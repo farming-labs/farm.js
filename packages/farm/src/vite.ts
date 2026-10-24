@@ -2063,14 +2063,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             });
             // The docs handler gets the body (MCP, feedback, AI) as in production. It is read
             // lazily, so a path the docs runtime declines keeps its body for the app's routes.
-            const docsResponse = await farmDocsHandler(
+            const docsBodyInit: RequestInit & { duplex?: "half" } =
               requestMethod === "GET" || requestMethod === "HEAD"
-                ? docsRequest.clone()
-                : new Request(docsRequest, {
-                    body: createFarmNodeRequestBodyStream(req),
-                    duplex: "half",
-                  } satisfies RequestInit & { duplex: "half" }),
-            );
+                ? {}
+                : { body: createFarmNodeRequestBodyStream(req), duplex: "half" };
+            const docsResponse = await farmDocsHandler(new Request(docsRequest, docsBodyInit));
             if (docsResponse) {
               if (await runAppMiddlewareForContentRoute()) return;
               await sendWebResponse(
