@@ -35,6 +35,30 @@ describe("redisCache", () => {
     await adapter.releaseLease?.("product:1", lease!);
     await expect(adapter.acquireLease?.("product:1", 1_000)).resolves.toEqual(expect.any(String));
   });
+
+  it("expires entries that carry expiresAt and keeps the rest", async () => {
+    const client = new FakeRedis();
+    const adapter = redisCache({ client, prefix: "test" });
+    const createdAt = Date.now();
+    const base = { value: "x", tags: [], createdAt };
+
+    await adapter.set("finite", {
+      ...base,
+      key: "finite",
+      revalidate: 30,
+      expiresAt: createdAt + 90_000,
+    });
+    await adapter.set("forever", { ...base, key: "forever", revalidate: false });
+
+    const finiteTtl = await client.pttl("test:finite");
+    expect(finiteTtl).toBeGreaterThan(89_000);
+    expect(finiteTtl).toBeLessThanOrEqual(90_000);
+    await expect(client.pttl("test:forever")).resolves.toBe(-1);
+
+    // Rewriting an entry without an expiry drops the old one.
+    await adapter.set("finite", { ...base, key: "finite", revalidate: false });
+    await expect(client.pttl("test:finite")).resolves.toBe(-1);
+  });
 });
 
 describe("redisRateLimitStorage", () => {
@@ -75,8 +99,10 @@ class FakeRedis implements FarmRedisClient {
   }
 
   async set(key: string, value: string, ...args: unknown[]): Promise<unknown> {
-    if (args.includes("NX") && this.values.has(key)) return null;
+    if (args.includes("NX") && this.read(key) !== null) return null;
     this.values.set(key, value);
+    // Like Redis, a SET without an expiry clears any previous one.
+    this.expiresAt.delete(key);
     const pxIndex = args.indexOf("PX");
     if (pxIndex >= 0 && typeof args[pxIndex + 1] === "number") {
       this.expiresAt.set(key, Date.now() + Number(args[pxIndex + 1]));

@@ -280,11 +280,22 @@ a PPR shell key carries the request path and query string. A custom adapter must
 distinctly. If `get` returns an entry whose `key` belongs to another lookup, Farm treats the read as
 a miss and regenerates the value.
 
+Entries with a finite `revalidate` carry an `expiresAt` timestamp. It covers the fresh window plus
+one more `revalidate` window as stale (never less than 60 seconds), so stale-while-revalidate readers
+can still serve the previous value. Adapters with native expiry should pass it to their backend so
+one-off keys, such as one PPR shell per query string or one server query entry per input, do not
+accumulate forever. Farm also deletes an entry it reads after `expiresAt`. Entries with
+`revalidate: false` or no `revalidate` never expire on their own and stay until they are replaced or
+invalidated.
+
 For any Farm/unstorage-compatible client, `storageCacheAdapter(storage)` provides a portable
 baseline. It percent-encodes keys and tags before handing them to the storage client, because
 unstorage drops everything after `?` and folds `/`, `\` and `:` into one separator, and it stores
 keys longer than 200 encoded characters under their SHA-256 hash so they stay within driver key
-limits. `@farm.js/cache-redis` adds Redis-native atomic tag increments and regeneration leases.
+limits. It passes the remaining lifetime as the unstorage `ttl` option, in seconds. Drivers that
+support `ttl` (memory, Redis, Upstash, Cloudflare KV, and others) drop expired entries; drivers that
+ignore it rely on the delete-on-read cleanup. `@farm.js/cache-redis` adds Redis-native atomic tag
+increments, regeneration leases, and `PX` expiry.
 
 **src/app/api/products/route.ts**
 

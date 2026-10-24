@@ -108,6 +108,12 @@ export interface FarmCacheEntry<T = unknown> {
   createdAt: number;
   createdVersion?: number;
   revalidate?: number | false;
+  /**
+   * Epoch milliseconds after which no reader can use the entry, so shared
+   * storage may drop it. Set only for entries with a finite `revalidate`.
+   * Adapters with native expiry (Redis PX, unstorage `ttl`) should honor it.
+   */
+  expiresAt?: number;
 }
 
 interface InternalFarmCacheEntry<T = unknown> {
@@ -177,7 +183,8 @@ export interface FarmCacheUserConfig {
 
 export interface FarmCacheStorage {
   getItem<T = unknown>(key: string): Promise<T | null>;
-  setItem<T = unknown>(key: string, value: T): Promise<unknown>;
+  /** `options.ttl` is in seconds, matching unstorage drivers that support expiry. */
+  setItem<T = unknown>(key: string, value: T, options?: { ttl?: number }): Promise<unknown>;
   removeItem(key: string): Promise<unknown>;
   clear?(base?: string): Promise<unknown>;
 }
@@ -209,7 +216,12 @@ export function storageCacheAdapter(
     name: "storage",
     get: async <T>(key: string) => storage.getItem<FarmCacheEntry<T>>(await entryKey(key)),
     set: async <T>(key: string, entry: FarmCacheEntry<T>) => {
-      await storage.setItem(await entryKey(key), entry);
+      const ttlMs = getFarmCacheEntryTtlMs(entry);
+      if (ttlMs === undefined) {
+        await storage.setItem(await entryKey(key), entry);
+      } else {
+        await storage.setItem(await entryKey(key), entry, { ttl: Math.ceil(ttlMs / 1000) });
+      }
     },
     delete: async (key: string) => {
       await storage.removeItem(await entryKey(key));
@@ -271,6 +283,35 @@ async function encodeStorageKeySegment(value: string): Promise<string> {
   let hex = "";
   for (const byte of new Uint8Array(digest)) hex += byte.toString(16).padStart(2, "0");
   return `sha256:${hex}`;
+}
+
+/**
+ * How long a stale entry stays readable in shared storage: one more revalidate
+ * window, and never less than this, so stale-while-revalidate readers and an
+ * entry written already stale (an ISR page seeded from an old file) still find it.
+ */
+const MIN_STALE_RETENTION_MS = 60_000;
+
+function getFarmCacheEntryExpiresAt(
+  createdAt: number,
+  revalidate: number | false | undefined,
+  now = Date.now(),
+): number | undefined {
+  if (typeof revalidate !== "number") return undefined;
+  const revalidateMs = revalidate * 1000;
+  return Math.max(createdAt + revalidateMs, now) + Math.max(revalidateMs, MIN_STALE_RETENTION_MS);
+}
+
+/**
+ * Remaining lifetime of an entry in shared storage, or undefined when it never
+ * expires on its own. Always at least 1ms so an expiry is never sent as "no expiry".
+ */
+function getFarmCacheEntryTtlMs(
+  entry: Pick<FarmCacheEntry, "expiresAt">,
+  now = Date.now(),
+): number | undefined {
+  if (typeof entry.expiresAt !== "number" || !Number.isFinite(entry.expiresAt)) return undefined;
+  return Math.max(1, Math.ceil(entry.expiresAt - now));
 }
 
 export interface GetFarmCacheEntryOptions {
@@ -421,6 +462,16 @@ export class FarmDataCache {
     }
 
     assertFarmCacheEntry(entry, key);
+    if (typeof entry.expiresAt === "number" && entry.expiresAt <= (options.now ?? Date.now())) {
+      // Adapters without native expiry keep expired entries until something removes them.
+      emitFarmEvent({ type: "cache.miss", key, reason: "expired" });
+      try {
+        await adapter.delete(`${namespace}:entry:${key}`);
+      } catch (error) {
+        emitFarmEvent({ type: "cache.error", key, operation: "delete", error });
+      }
+      return undefined;
+    }
     const stale = await this.isAdapterEntryStale(entry, options.now, adapter, namespace);
     if (generation !== this.generation) return undefined;
     if (stale) {
@@ -500,14 +551,17 @@ export class FarmDataCache {
     const tags = normalizeCacheOptionsTags(options);
     const capturedVersions =
       tagVersions ?? (await this.getAdapterTagVersions(Array.from(tags.values())));
+    const createdAt = options.createdAt ?? Date.now();
+    const expiresAt = getFarmCacheEntryExpiresAt(createdAt, revalidate);
     const entry: FarmCacheEntry<T> = {
       key,
       value,
       tags: Array.from(tags),
       tagVersions: capturedVersions,
-      createdAt: options.createdAt ?? Date.now(),
+      createdAt,
       createdVersion: createdVersion ?? ++this.version,
       revalidate,
+      ...(expiresAt === undefined ? {} : { expiresAt }),
     };
 
     if (this.local) {
