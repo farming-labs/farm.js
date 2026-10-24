@@ -1,4 +1,8 @@
-import { loadFarmDevModule, invalidateFailedFarmDevModules } from "./dev-module";
+import {
+  invalidateFailedFarmDevModules,
+  invalidateFarmDevDependents,
+  loadFarmDevModule,
+} from "./dev-module";
 import { createBundledEnv } from "./env";
 import type {
   AliasOptions,
@@ -3737,6 +3741,15 @@ if (import.meta.hot) {
         });
 
         return [];
+      }
+
+      // A module API routes import: the router still holds the handlers they loaded with, so
+      // load them again against the new code. Vite's own update for the file continues below.
+      if (
+        apiRouteManager &&
+        invalidateFarmDevDependents(server, file, apiRouteManager.getSourceFiles()).length > 0
+      ) {
+        await refreshRouteDiscovery?.(`updated ${file}`);
       }
 
       const isolatedHydrationMode = currentFarmConfig?.experimental?.isolatedClientHydration;
