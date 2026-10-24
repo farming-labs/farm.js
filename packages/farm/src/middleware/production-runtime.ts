@@ -658,9 +658,11 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     let currentRequest = contextState.getRequest();
     // Match the app path page routing sees: without basePath (the locale step
     // strips it too), so file and config middleware run beneath a basePath.
-    const initialPathname = options.i18n?.enabled
-      ? stripFarmLocaleFromPathname(ctx.pathname, options.i18n)
-      : stripFarmBasePath(ctx.pathname, options.i18n?.basePath ?? "/");
+    const toRoutePathname = (pathname: string) =>
+      options.i18n?.enabled
+        ? stripFarmLocaleFromPathname(pathname, options.i18n)
+        : stripFarmBasePath(pathname, options.i18n?.basePath ?? "/");
+    const initialPathname = toRoutePathname(ctx.pathname);
     let parentData: MiddlewareContext["parent"] | undefined;
 
     if (globalConfig) {
@@ -673,35 +675,36 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       }
     }
 
-    const applicable = entries
-      .map((entry) => ({
-        entry,
-        routeMatch:
-          entry.source === "config"
-            ? { matched: true }
-            : matchesMiddlewareRoute(initialPathname, entry),
-      }))
-      .filter((candidate) => candidate.routeMatch.matched);
-
-    if (applicable.length === 0) {
-      return {
-        request: currentRequest,
-        response: null,
-        data: new Map(ctx.data),
-        context: new Map(ctx.locals),
-        headers: mapToHeaders(contextState.headers),
-        handled: false,
-      };
+    // A ctx.rewrite() target is guarded as a direct request for it is: once a
+    // pass over the entries ends on a rewritten path, the entries matching that
+    // path which have not run yet get a pass of their own. Each entry runs at
+    // most once, so repeated rewrites end after at most one pass per entry.
+    const ran = new Set<ProductionMiddlewareEntry>();
+    function* applicableMiddleware() {
+      for (let pathname = initialPathname, pass = 0; ; pass++) {
+        if (pass > 0 && globalConfig) {
+          if (!matchesPreparedMiddlewareConfig(pathname, globalConfig, ctx).matched) return;
+        }
+        for (const entry of entries) {
+          if (ran.has(entry)) continue;
+          const routeMatch =
+            entry.source === "config" ? { matched: true } : matchesMiddlewareRoute(pathname, entry);
+          if (routeMatch.matched) yield { entry, routeMatch, pathname };
+        }
+        const rewrittenPathname = toRoutePathname(new URL(currentRequest.url).pathname);
+        if (rewrittenPathname === pathname) return;
+        pathname = rewrittenPathname;
+      }
     }
 
-    for (const candidate of applicable) {
-      const { entry, routeMatch } = candidate;
+    for (const { entry, routeMatch, pathname } of applicableMiddleware()) {
       const configMatch = entry.config
-        ? matchesPreparedMiddlewareConfig(initialPathname, entry.config, ctx)
+        ? matchesPreparedMiddlewareConfig(pathname, entry.config, ctx)
         : { matched: true };
       if (!configMatch.matched) {
         continue;
       }
+      ran.add(entry);
 
       if (parentData) {
         contextState = createWebMiddlewareContext(
@@ -723,7 +726,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       const middlewareStartTime = Date.now();
       const middlewareEvent = {
         route: entry.path,
-        pathname: initialPathname,
+        pathname,
         name: entry.filePath,
       };
       emitFarmEvent({ type: "middleware.start", ...middlewareEvent });

@@ -224,9 +224,11 @@ export class MiddlewareManager {
     const pathname = url.pathname;
     // Match the app path page routing sees: without basePath (the locale step
     // strips it too), as the production runner does.
-    const routePathname = this.i18n?.enabled
-      ? stripFarmLocaleFromPathname(pathname, this.i18n)
-      : stripFarmBasePath(pathname, this.i18n?.basePath ?? "/");
+    const toRoutePathname = (value: string) =>
+      this.i18n?.enabled
+        ? stripFarmLocaleFromPathname(value, this.i18n)
+        : stripFarmBasePath(value, this.i18n?.basePath ?? "/");
+    const routePathname = toRoutePathname(pathname);
     const method = req.method || "GET";
     const startTime = Date.now();
 
@@ -268,16 +270,48 @@ export class MiddlewareManager {
     ].join(" ");
     console.log(log);
 
+    // A ctx.rewrite() target is guarded as a direct request for it is, the
+    // same as the production runner: once a pass ends on a rewritten path, the
+    // middleware matching that path which has not run yet gets a pass of its
+    // own. Each one runs at most once, so repeated rewrites end.
+    const ran = new Set<DiscoveredMiddleware>();
+    const allMiddleware = [...this.configMiddleware, ...this.middleware];
+    const globalConfig = this.globalConfig;
+    const trustProxy = this.server?.trustProxy;
+    function* applicableMiddleware() {
+      let passPathname = routePathname;
+      let pass = applicable;
+      for (;;) {
+        for (const entry of pass) yield { ...entry, pathname: passPathname };
+        const rewrittenPathname = toRoutePathname(
+          resolveFarmRequestURL(req, { trustProxy }).pathname,
+        );
+        if (rewrittenPathname === passPathname) return;
+        passPathname = rewrittenPathname;
+        if (globalConfig && !matchesMiddlewareConfig(passPathname, globalConfig, ctx).matched) {
+          return;
+        }
+        pass = allMiddleware
+          .filter((mw) => !ran.has(mw))
+          .map((mw) => ({
+            mw,
+            routeMatch:
+              mw.source === "config" ? { matched: true } : matchesMiddlewareRoute(passPathname, mw),
+          }))
+          .filter((entry) => entry.routeMatch.matched);
+      }
+    }
+
     // Execute middleware in cascade order
-    for (const entry of applicable) {
+    for (const { mw, routeMatch, pathname: passPathname } of applicableMiddleware()) {
       // Check matcher configuration
-      const { mw, routeMatch } = entry;
       const configMatch = mw.config
-        ? this.matchesConfig(routePathname, mw.config, ctx)
+        ? this.matchesConfig(passPathname, mw.config, ctx)
         : { matched: true };
       if (!configMatch.matched) {
         continue;
       }
+      ran.add(mw);
       if (routeMatch.params) {
         ctx.params = { ...ctx.params, ...routeMatch.params };
       }

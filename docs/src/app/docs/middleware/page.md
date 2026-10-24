@@ -173,6 +173,10 @@ export default defineConfig({
 
 Multiple config middleware entries can match the same request. They run in array order before file middleware.
 
+`ctx.rewrite(url)` does not skip the target's guards. After the middleware matching the requested
+path has run, the config and file middleware matching the rewritten path runs too, as it would for a
+direct request. Each middleware runs at most once per request, so repeated rewrites cannot loop.
+
 ```ts
 import { defineConfig } from "@farm.js/core";
 
