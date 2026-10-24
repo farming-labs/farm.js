@@ -162,7 +162,10 @@ describe("client copies of programmatic pages", () => {
     await expect(
       mod.__farmResolveRouteProps({ params: { id: "1" }, searchParams: Promise.resolve({}) }),
     ).rejects.toThrow(/resolves its guard and data on the server/);
-    const element = await mod.default({
+    // Synchronous, so production and dev hydration can render it.
+    expect(mod.default.constructor.name).toBe("Function");
+    expect(() => mod.default({ params: { id: "1" } })).toThrow(/server-resolved props/);
+    const element = mod.default({
       params: { id: "1" },
       data: { title: "server" },
       __farmRoutePropsResolved: true,
