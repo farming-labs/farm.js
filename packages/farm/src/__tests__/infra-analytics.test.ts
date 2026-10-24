@@ -442,6 +442,56 @@ describe("recorder for servers without a plugin runtime", () => {
       expect.objectContaining({ route: "/[unmatched]", status: 404 }),
     ]);
   });
+
+  it("ties each MCP tool call to its request, even one an API route rewrote", async () => {
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 202 }));
+    const recorder = farmInfraAnalyticsRecorder(options, send);
+    const work: Promise<unknown>[] = [];
+    const tool = (name: string, outcome: "success" | "error") =>
+      emitFarmEvent({
+        type: "mcp.tool.complete",
+        route: "/api/mcp",
+        server: "store",
+        tool: name,
+        outcome,
+        durationMs: 4,
+      });
+    const request = new Request("https://app.example/api/mcp", {
+      method: "POST",
+      headers: { "user-agent": "Claude-User/1.0" },
+    });
+    await recorder.record(
+      request,
+      { route: { pattern: "/api/mcp" } },
+      (job) => work.push(job),
+      () =>
+        // The route handles a copy of the request, as API routes may.
+        _runWithCurrentRequest(new Request(request), async () => {
+          await Promise.resolve();
+          tool("list_orders", "success");
+          tool("refund_order", "error");
+          return new Response("{}");
+        }),
+    );
+    // Outside any request, and after close, a tool call isn't reported.
+    tool("outside", "success");
+    await Promise.all(work);
+    await recorder.close();
+    tool("after_close", "success");
+    const events = sentEvents(send);
+    const recorded = events.find(({ kind }) => kind === "request")!;
+    expect(events.filter(({ kind }) => kind === "mcp.tool")).toEqual(
+      ["list_orders:success", "refund_order:error"].map((call) =>
+        expect.objectContaining({
+          tool: call.split(":")[0],
+          outcome: call.split(":")[1],
+          requestId: recorded.requestId,
+          route: "/api/mcp",
+          agent: { family: "anthropic", category: "agent", identity: "self-reported" },
+        }),
+      ),
+    );
+  });
 });
 
 describe("bounded sender", () => {

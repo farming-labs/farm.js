@@ -45,6 +45,11 @@ a returned response does not replace cookies already written through `ctx.cookie
 
 Middleware can live near the routes it protects. Use it for auth, request metadata, A/B flags, rate limit checks, or headers that belong to an area of the app.
 Route-group directories such as `(marketing)` organize middleware without adding a URL segment.
+Middleware in sibling groups and in the folder above them all run, the shallower folder first:
+`src/app/middleware.ts`, then `src/app/(app)/middleware.ts`, then `src/app/(site)/middleware.ts`.
+Parallel route slots work the same way: `src/app/dashboard/@team/middleware.ts` runs for
+`/dashboard` and the URLs below it, because that is where the slot renders. It guards the whole
+request, not only the slot.
 
 **src/app/dashboard/middleware.ts**
 
@@ -173,6 +178,10 @@ export default defineConfig({
 
 Multiple config middleware entries can match the same request. They run in array order before file middleware.
 
+`ctx.rewrite(url)` does not skip the target's guards. After the middleware matching the requested
+path has run, the config and file middleware matching the rewritten path runs too, as it would for a
+direct request. Each middleware runs at most once per request, so repeated rewrites cannot loop.
+
 ```ts
 import { defineConfig } from "@farm.js/core";
 
@@ -204,9 +213,12 @@ Matchers can be strings, regular expressions, or functions. String matchers supp
 | ---------------------- | ---------------------------------------------------------------- |
 | `/dashboard/:path*`    | `/dashboard`, `/dashboard/settings`, `/dashboard/reports/weekly` |
 | `/dashboard/[section]` | `/dashboard/settings` with `ctx.params.section === "settings"`   |
+| `/team/:id?`           | `/team` and `/team/42`, but not `/team/42/edit`                  |
 | `/docs/[...slug]`      | `/docs`, `/docs/getting-started`, nested docs paths              |
+| `/docs/[[...slug]]`    | `/docs`, `/docs/getting-started`, nested docs paths              |
 | `/api/**`              | Every nested path below `/api`                                   |
 | `/api/*`               | One segment below `/api`                                         |
+| `/admin*`              | `/admin`, `/admin-panel`, but not `/admin/users`                 |
 | `/auth(.*)`            | `/auth` and nested auth paths                                    |
 
 Matchers are compared against the same pathname the router resolves the request

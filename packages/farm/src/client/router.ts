@@ -262,7 +262,11 @@ function readRouterState(basePath: string, routeMatcher: FarmRouter | null): Rou
 
   const pathname = normalizeClientPathname(url.pathname, basePath);
   const i18n = getFarmI18nClientState();
-  const routePathname = i18n ? stripFarmLocaleFromPathname(pathname, i18n) : pathname;
+  // `pathname` is already basePath-relative; the snapshot's basePath must not
+  // strip a second time, or `/console/console/x` matches the `/x` route.
+  const routePathname = i18n
+    ? stripFarmLocaleFromPathname(pathname, { ...i18n, basePath: "/" })
+    : pathname;
   return {
     pathname,
     searchParams: url.searchParams,

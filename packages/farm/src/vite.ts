@@ -103,6 +103,7 @@ import {
   resolveFarmDevtoolsConfig,
 } from "./devtools-config";
 import { generateFarmDevIndicatorsClientRuntime } from "./dev-indicators";
+import { createFarmDevPreviewGuard, getFarmDevFsDeny } from "./dev-preview-guard";
 import * as fs from "fs";
 import * as path from "path";
 import { pathToFileURL } from "node:url";
@@ -1134,15 +1135,14 @@ export function farmPlugin(
         resolve: {
           alias: { ...layerAliases, ...sourceAlias },
         },
-        ...(layerRoots.length
-          ? {
-              server: {
-                fs: {
-                  allow: [path.resolve(options.root || process.cwd()), ...layerRoots],
-                },
-              },
-            }
-          : {}),
+        server: {
+          fs: {
+            ...(layerRoots.length
+              ? { allow: [path.resolve(options.root || process.cwd()), ...layerRoots] }
+              : {}),
+            deny: getFarmDevFsDeny(userConfig.server?.fs?.deny, options),
+          },
+        },
       };
     },
 
@@ -1164,6 +1164,12 @@ export function farmPlugin(
     },
 
     async configureServer(viteServer) {
+      // First, so a tunnelled request is checked before Farm's routes and Vite's file serving.
+      viteServer.middlewares.use(
+        createFarmDevPreviewGuard(viteServer, {
+          getSourceRoots: () => getFarmSourceRoots(farmApp?.getConfig() ?? options),
+        }),
+      );
       if (typeof fontImports.configureServer === "function") {
         await fontImports.configureServer.call(this, viteServer);
       }
@@ -4361,7 +4367,7 @@ ${isolatedHydrationImport}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
 import { isFarmRouteActive } from '@farm.js/core/router'
-import { replayFarmQueuedInteraction, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
+import { isFarmBlockedNavigationURL, replayFarmQueuedInteraction, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -4532,6 +4538,7 @@ class LegacyManifestSPARouter {
   async navigate(href, options = {}) {
     const { replace = false, scroll = true } = options;
     const url = new URL(href, window.location.origin);
+    if (isFarmBlockedNavigationURL(url)) return;
     const pathname = url.pathname;
     const search = url.search;
     const fullPath = pathname + search;

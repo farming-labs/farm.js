@@ -128,7 +128,18 @@ import {
   REACT_RENDERER,
   resolveFarmRendererAppSetup,
 } from "../renderer";
-import { appendMiddlewareRoutePath } from "../middleware/path";
+import {
+  compileMiddlewareConfig,
+  matchesCompiledMiddlewareConfig,
+  matchesMiddlewareRoute,
+} from "../middleware/matcher";
+import {
+  appendMiddlewareDirectory,
+  appendMiddlewareRoutePath,
+  compareMiddlewareRouteLocations,
+  type MiddlewareRouteLocation,
+} from "../middleware/path";
+import type { MiddlewareContext, MiddlewareMatcher } from "../middleware/types";
 import type { FarmRenderer } from "../renderer";
 import { farmPluginMayAffectRuntimePath } from "../plugin-runtime-endpoint";
 
@@ -982,12 +993,15 @@ export async function discoverMiddlewareRoutes(
 ): Promise<UniversalMiddlewareRoute[]> {
   const fs = await import("fs/promises");
   const appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
-  const routes = new Map<string, UniversalMiddlewareRoute>();
+  // Keyed by folder, not URL path: route groups share a URL path, and every
+  // group's middleware has to run. A later layer still overrides the same folder.
+  const routes = new Map<string, MiddlewareRouteLocation & UniversalMiddlewareRoute>();
 
   async function walk(
     dir: string,
     routePath: string,
-    discovered: UniversalMiddlewareRoute[],
+    directory: string,
+    discovered: Array<MiddlewareRouteLocation & UniversalMiddlewareRoute>,
   ): Promise<void> {
     let entries: import("fs").Dirent[];
     try {
@@ -1003,6 +1017,7 @@ export async function discoverMiddlewareRoutes(
     if (middlewareFile) {
       discovered.push({
         path: routePath,
+        directory,
         filePath: path.join(dir, middlewareFile.name),
       });
     }
@@ -1012,24 +1027,26 @@ export async function discoverMiddlewareRoutes(
         continue;
       }
 
-      const childRoutePath = appendMiddlewareRoutePath(routePath, entry.name);
-      await walk(path.join(dir, entry.name), childRoutePath, discovered);
+      await walk(
+        path.join(dir, entry.name),
+        appendMiddlewareRoutePath(routePath, entry.name),
+        appendMiddlewareDirectory(directory, entry.name),
+        discovered,
+      );
     }
   }
 
   for (const sourceAppDir of appDirs) {
-    const discovered: UniversalMiddlewareRoute[] = [];
-    await walk(sourceAppDir, "/", discovered);
+    const discovered: Array<MiddlewareRouteLocation & UniversalMiddlewareRoute> = [];
+    await walk(sourceAppDir, "/", "", discovered);
     for (const route of discovered) {
-      routes.set(route.path, route);
+      routes.set(route.directory, route);
     }
   }
 
-  return Array.from(routes.values()).sort((a, b) => {
-    const depthA = a.path.split("/").filter(Boolean).length;
-    const depthB = b.path.split("/").filter(Boolean).length;
-    return depthA - depthB || a.path.localeCompare(b.path);
-  });
+  return Array.from(routes.values())
+    .sort(compareMiddlewareRouteLocations)
+    .map(({ path: routePath, filePath }) => ({ path: routePath, filePath }));
 }
 
 /**
@@ -2930,7 +2947,7 @@ function isFarmDocsPath() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientCancellation, createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 ${clientPluginEntry.imports}
 ${clientCachePersistence.imports}
@@ -2954,6 +2971,7 @@ ${generateUniversalRouterStateProperties()}
   
   navigate: async function(href, options = {}) {
     const url = new URL(href, window.location.href);
+    if (isFarmBlockedNavigationURL(url)) return;
     if (isFarmExternalNavigationURL(url, window.location.origin)) {
       this.cancelActiveNavigation();
       if (options.replace || options.action === "replace") window.location.replace(href);
@@ -3293,7 +3311,7 @@ ${layoutImports}
 ${rendererClientImports}
 ${isolatedHydrationImport}
 ${providerClientCode.imports}
-import { createClientCancellation, createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
+import { createClientCancellation, createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmBlockedNavigationURL, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";
 import { createFarmDeploymentMismatchError, createFarmDeploymentRequestHeaders, isFarmDeploymentMismatchResponse } from "@farm.js/core/deployment";
 import { createFarmRouter, isFarmRouteActive, matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -3818,6 +3836,7 @@ ${generateUniversalRouterStateProperties()}
   
   navigate: async function(href, options = {}) {
     const url = new URL(href, window.location.href);
+    if (isFarmBlockedNavigationURL(url)) return;
     if (isFarmExternalNavigationURL(url, window.location.origin)) {
       this.cancelActiveNavigation();
       if (options.replace || options.action === "replace") window.location.replace(href);
@@ -6355,9 +6374,12 @@ function getFarmI18nSnapshot() {
   return ${config.i18n.enabled ? "getFarmI18nClientSnapshot()" : "undefined"};
 }
 
+// The locale step strips farmI18nConfig.basePath itself. Stripping it first as
+// well removed it twice, so /console/console/secret served /secret while
+// middleware and integration guards, which strip it once, saw /console/secret.
 function getFarmRoutePathname(pathname) {
   return farmI18nRuntime
-    ? stripFarmLocaleFromPathname(stripFarmBasePath(pathname), farmI18nConfig)
+    ? stripFarmLocaleFromPathname(pathname, farmI18nConfig)
     : stripFarmBasePath(pathname);
 }
 
@@ -9478,45 +9500,43 @@ function middlewarePatternMatches(pattern: string | RegExp, pathname: string): b
   return new RegExp(`^${expression}/?$`).test(pathname);
 }
 
-function configMiddlewareMayHandlePath(
+/**
+ * Whether config middleware may run for a prerender candidate. This reuses the
+ * runtime matcher: a separate copy drifted (`/members/(.*)` kept its trailing
+ * slash and never met `/members/secret`), and the page was frozen into a
+ * public file that middleware never sees again.
+ *
+ * @internal
+ */
+export function configMiddlewareMayHandlePath(
   config: ResolvedFarmConfig["middleware"],
   pathname: string,
 ): boolean {
   if (!hasFarmMiddlewareConfig(config)) return false;
 
   const entries = (Array.isArray(config) ? config : [config]) as Array<{
-    matcher?: unknown | unknown[];
+    matcher?: MiddlewareMatcher | MiddlewareMatcher[];
     exclude?: Array<string | RegExp>;
   }>;
   return entries.some((entry) => {
-    if (entry.exclude?.some((pattern) => middlewarePatternMatches(pattern, pathname))) {
-      return false;
-    }
-
-    if (!entry.matcher) return true;
-    const matchers = Array.isArray(entry.matcher) ? entry.matcher : [entry.matcher];
-    return matchers.some((matcher) => {
-      // A request-aware matcher cannot be proven safe at build time.
-      if (typeof matcher === "function") return true;
-      return (
-        (typeof matcher === "string" || matcher instanceof RegExp) &&
-        middlewarePatternMatches(matcher, pathname)
-      );
-    });
+    if (!entry.matcher && !entry.exclude) return true;
+    const matchers = entry.matcher
+      ? (Array.isArray(entry.matcher) ? entry.matcher : [entry.matcher]).map((matcher) =>
+          // A request-aware matcher cannot be proven safe at build time.
+          typeof matcher === "function" ? () => true : matcher,
+        )
+      : undefined;
+    const compiled = compileMiddlewareConfig({ matcher: matchers, exclude: entry.exclude });
+    return matchesCompiledMiddlewareConfig(pathname, compiled, {} as MiddlewareContext).matched;
   });
 }
 
-function appMiddlewareMayHandlePath(
+/** @internal File middleware counterpart of `configMiddlewareMayHandlePath`. */
+export function appMiddlewareMayHandlePath(
   middlewareRoutes: readonly UniversalMiddlewareRoute[],
   pathname: string,
 ): boolean {
-  return middlewareRoutes.some((route) => {
-    if (route.path === "/") return true;
-    return (
-      middlewarePatternMatches(route.path, pathname) ||
-      middlewarePatternMatches(`${route.path}/**`, pathname)
-    );
-  });
+  return middlewareRoutes.some((route) => matchesMiddlewareRoute(pathname, route).matched);
 }
 
 /**

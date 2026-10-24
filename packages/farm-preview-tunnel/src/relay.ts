@@ -11,7 +11,7 @@ import {
   type TunnelRequestMessage,
   type TunnelResponseMessage,
 } from "./protocol.js";
-import { getHopByHopHeaderNames, getRecordHeader } from "./headers.js";
+import { getHopByHopHeaderNames, getRecordHeader, PREVIEW_REQUEST_HEADER } from "./headers.js";
 import { closeWebSocket } from "./websocket.js";
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -1047,12 +1047,17 @@ function normalizeIncomingHeaders(
       value === undefined ||
       hopByHopHeaders.has(lowerName) ||
       lowerName === "forwarded" ||
-      lowerName.startsWith("x-forwarded-")
+      lowerName.startsWith("x-forwarded-") ||
+      lowerName === PREVIEW_REQUEST_HEADER
     ) {
       continue;
     }
     normalized[name] = Array.isArray(value) ? value.join(", ") : value;
   }
+
+  // Marks the request as tunnelled so the dev server can keep developer-only files and tools off
+  // the public URL. Set here, not trusted from the visitor, so it can be neither forged nor removed.
+  normalized[PREVIEW_REQUEST_HEADER] = "1";
 
   const publicUrl = new URL(publicBaseUrl);
   normalized["x-forwarded-host"] = publicDomain

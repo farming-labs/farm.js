@@ -3346,8 +3346,34 @@ function updateAttribute(element: Element, name: string, value: unknown): void {
   } else if (value === true && !stringifiesBoolean) {
     element.setAttribute(attributeName, "");
   } else {
-    element.setAttribute(attributeName, String(value));
+    element.setAttribute(attributeName, compilerAttributeValue(element, name, String(value)));
   }
+}
+
+// React's sanitizeURL: a URL may start with C0 controls or spaces, and the
+// parser drops tabs and newlines anywhere, so all of these still mean javascript:.
+const JAVASCRIPT_URL =
+  // oxlint-disable-next-line no-control-regex
+  /^[\u0000-\u001F ]*j[\r\n\t]*a[\r\n\t]*v[\r\n\t]*a[\r\n\t]*s[\r\n\t]*c[\r\n\t]*r[\r\n\t]*i[\r\n\t]*p[\r\n\t]*t[\r\n\t]*:/i;
+// React 19 replaces these URLs; React 18 only warns and writes them.
+const BLOCKS_JAVASCRIPT_URLS = Number.parseInt(React.version, 10) > 18;
+
+/**
+ * The string React writes for a host prop: the same props React 19 runs
+ * through sanitizeURL (custom elements are left alone, as React does).
+ */
+function compilerAttributeValue(element: Element, name: string, value: string): string {
+  const tag = element.localName;
+  return BLOCKS_JAVASCRIPT_URLS &&
+    (name === "href" ||
+      name === "src" ||
+      name === "action" ||
+      name === "formAction" ||
+      (name === "data" && tag === "object")) &&
+    !tag.includes("-") &&
+    JAVASCRIPT_URL.test(value)
+    ? "javascript:throw new Error('React has blocked a javascript: URL as a security precaution.')"
+    : value;
 }
 
 type CompilerBlockRefresh = (afterCommit?: () => void, dirtyState?: ReadonlySet<number>) => void;

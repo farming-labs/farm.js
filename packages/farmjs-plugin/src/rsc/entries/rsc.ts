@@ -486,7 +486,15 @@ const farmMiddlewareRunner = createProductionMiddlewareRunner({
     .filter((entry) => entry.path !== null)
     // Root first, as core runs them: a nested guard can rely on what its
     // parent middleware set, and glob order is alphabetical, not by depth.
-    .sort((left, right) => middlewareRouteDepth(left.path) - middlewareRouteDepth(right.path)),
+    // Route groups share a URL path; the shallower file runs first, so
+    // '/middleware.ts' precedes '/(app)/middleware.ts'.
+    .sort(
+      (left, right) =>
+        middlewareRouteDepth(left.path) - middlewareRouteDepth(right.path) ||
+        left.path.localeCompare(right.path) ||
+        middlewareRouteDepth(left.filePath) - middlewareRouteDepth(right.filePath) ||
+        left.filePath.localeCompare(right.filePath),
+    ),
   i18n: ${JSON.stringify(ctx.i18n) ?? "undefined"},
   server: ${JSON.stringify(ctx.server) ?? "undefined"},
 });
@@ -501,10 +509,12 @@ debug('Discovered API routes:', Array.from(apiRouteMap.keys()));
 /**
  * Convert an app-relative middleware file path to the route it guards, with the
  * same rules as core's middleware discovery: a route group such as
- * '(protected)' adds no URL segment, and a '_private' or dot-prefixed folder
- * holds no routes, so its middleware never runs (null).
+ * '(protected)' or a parallel route slot such as '@team' adds no URL segment,
+ * and a '_private' or dot-prefixed folder holds no routes, so its middleware
+ * never runs (null).
  * e.g., '/middleware.ts' -> '/'
  * e.g., '/(protected)/dashboard/middleware.ts' -> '/dashboard'
+ * e.g., '/dashboard/@team/middleware.ts' -> '/dashboard'
  */
 function middlewarePathToRoute(filePath) {
   const segments = filePath
@@ -515,7 +525,9 @@ function middlewarePathToRoute(filePath) {
     return null;
   }
   const routeSegments = segments.filter(
-    (segment) => !(segment.startsWith('(') && segment.endsWith(')')),
+    (segment) =>
+      !(segment.startsWith('(') && segment.endsWith(')')) &&
+      !/^@[A-Za-z][A-Za-z0-9_-]*$/.test(segment),
   );
   return routeSegments.length === 0 ? '/' : '/' + routeSegments.join('/');
 }

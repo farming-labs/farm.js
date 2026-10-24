@@ -383,6 +383,78 @@ const testSource = String.raw`
     flushSync(() => targetRoot.unmount());
   }
 
+  // React 19 replaces javascript: URLs in host URL props with a throwing URL;
+  // React 18 writes them and warns. Compiled updates, both single-value
+  // bindings and keyed rows added after mount, must write what React writes.
+  {
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      const reactWrites = (tag, name, value) => {
+        const container = document.createElement("div");
+        const root = createRoot(container);
+        flushSync(() => root.render(React.createElement(tag, { [name]: "https://ok.example/" })));
+        flushSync(() => root.render(React.createElement(tag, { [name]: value })));
+        const written = container.firstChild.getAttribute(name === "formAction" ? "formaction" : name);
+        flushSync(() => root.unmount());
+        return written;
+      };
+      for (const payload of ["javascript:alert(1)", " JaVaScRiPt:alert(1)", "java\tscript:alert(1)"]) {
+        let setUrl;
+        let addRow;
+        const UrlBindings = createCompiledComponent({
+          displayName: "CompatibilityUrlBindings",
+          initialize: () => ["https://ok.example/", [{ id: "a", url: "https://ok.example/" }]],
+          render(_props, state, blocks) {
+            setUrl = (next) => state[0].set(next);
+            addRow = (row) => state[1].set((rows) => [...rows, row]);
+            const rows = () => state[1].get();
+            return React.createElement("main", null,
+              React.createElement("a", { href: state[0].get() }, "single"),
+              React.createElement("form", { action: state[0].get() },
+                React.createElement("button", { formAction: state[0].get() }, "send")),
+              React.createElement(blocks.KeyedRows, {
+                id: 0, items: rows, rowKey: (row) => row.id,
+                bindings: [{ kind: "attribute", name: "href", path: [0], read: (row) => row.url }],
+                create: (row) => ({ kind: "element", tag: "li", attributes: [], styles: [], children: [
+                  { kind: "element", tag: "a", attributes: [{ name: "href", value: row.url }], styles: [], children: [row.id] },
+                ] }),
+                render: () => React.createElement("ul", null, rows().map((row) =>
+                  React.createElement("li", { key: row.id }, React.createElement("a", { href: row.url }, row.id)))),
+              }),
+            );
+          },
+          bindings: [
+            { kind: "attribute", path: [0], dependencies: [0], name: "href", read: (_props, state) => state[0].get() },
+            { kind: "attribute", path: [1], dependencies: [0], name: "action", read: (_props, state) => state[0].get() },
+            { kind: "attribute", path: [1, 0], dependencies: [0], name: "formAction", read: (_props, state) => state[0].get() },
+            { kind: "block", id: 0, dependencies: [1] },
+          ],
+        });
+        const container = document.createElement("div");
+        document.body.append(container);
+        const root = createRoot(container);
+        flushSync(() => root.render(React.createElement(React.StrictMode, null, React.createElement(UrlBindings))));
+        const single = container.querySelector("a");
+        setUrl(payload);
+        addRow({ id: "b", url: payload });
+        await Promise.resolve(); await Promise.resolve();
+        assert.equal(container.querySelector("a"), single);
+        assert.equal(single.getAttribute("href"), reactWrites("a", "href", payload), "single href " + JSON.stringify(payload));
+        assert.equal(container.querySelector("form").getAttribute("action"), reactWrites("form", "action", payload));
+        assert.equal(container.querySelector("button").getAttribute("formaction"), reactWrites("button", "formAction", payload));
+        const rowLinks = [...container.querySelectorAll("li a")];
+        assert.equal(rowLinks.length, 2);
+        assert.equal(rowLinks[1].getAttribute("href"), reactWrites("a", "href", payload), "added row href " + JSON.stringify(payload));
+        if (Number.parseInt(React.version, 10) > 18) assert.match(single.getAttribute("href"), /^javascript:throw new Error\('React has blocked/);
+        flushSync(() => root.unmount());
+        container.remove();
+      }
+    } finally {
+      console.error = originalError;
+    }
+  }
+
   const Counter = createCompiledComponentWithFeatures({
     displayName: "CompatibilityCounter",
     reactivity: "hybrid",

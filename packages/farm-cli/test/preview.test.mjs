@@ -745,7 +745,9 @@ test("forwards a gateway request to the local target", async () => {
   const server = await createTestServer((req, res) => {
     res.statusCode = 201;
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ method: req.method, url: req.url }));
+    res.end(
+      JSON.stringify({ method: req.method, url: req.url, preview: req.headers["x-farm-preview"] }),
+    );
   });
 
   try {
@@ -762,6 +764,9 @@ test("forwards a gateway request to the local target", async () => {
         path: "/api/hello?from=gateway",
         headers: {
           "content-type": "text/plain",
+          // The dev server keeps developer-only files off marked requests; a visitor cannot
+          // choose the value.
+          "x-farm-preview": "forged",
         },
         body: Buffer.from("hello").toString("base64"),
         encoding: "base64",
@@ -773,6 +778,7 @@ test("forwards a gateway request to the local target", async () => {
     assert.deepEqual(JSON.parse(Buffer.from(response.body, "base64").toString()), {
       method: "POST",
       url: "/api/hello?from=gateway",
+      preview: "1",
     });
   } finally {
     await server.close();

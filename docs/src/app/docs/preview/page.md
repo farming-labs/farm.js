@@ -466,10 +466,34 @@ The preview URL forwards public internet traffic to your local app. Treat it lik
   still require their random session token in control-request query strings. Gateway operators
   should redact `/agent` and legacy control-request query strings from access logs.
 - Do not expose admin-only routes, local dashboards, or secret-bearing pages unless you trust the audience.
+- Keep hardcoded secrets out of source files. A preview serves your app's modules the way the dev
+  server does, so code under the source directory can be read as transformed JavaScript.
+- Don't treat the dev server's file serving as an access boundary. Farm narrows it for preview
+  traffic, described below, but the preview is still a development server.
 - Do not paste a preview URL into untrusted systems.
 - Rotate preview names after sharing sensitive routes.
 - Keep provider secrets in environment variables, not client code.
 - Remember that anyone with the URL can send requests while the session is active.
+
+### What the preview serves from your machine
+
+The preview relay and the polling gateway client mark every tunnelled request with an
+`x-farm-preview` header and overwrite any value a visitor sends. For marked requests, the
+dev server serves your pages, API routes, and actions as usual, plus what the browser needs to run
+the app: Vite's client, Farm's client entry, public files, dependencies under `node_modules`, and
+modules and assets inside the source directory (and layer source directories). It answers `403` for:
+
+- Files outside the source directory, such as `farm.config.ts`, `package.json`, local databases,
+  and scripts, and any workspace file reached through `/@fs/`, unless browser code already imports
+  that exact URL.
+- `?raw`, `?inline`, and `?url` requests unless app code imports that exact URL.
+- Non-asset files inside the source directory, such as `.json`, `.sqlite`, or `.yaml` files
+  requested directly.
+- DevTools (`/__farm/devtools*`) and Vite's open-in-editor endpoint.
+
+Independently of preview, the dev server never serves `.farm/` (the auth database, build caches,
+and the server bundle) or a custom `distDir`. Farm adds them to Vite's `server.fs.deny` and keeps
+Vite's default entries, or appends them to your own `server.fs.deny` list.
 
 ## Production Deployments
 
