@@ -1,4 +1,7 @@
-import { createProductionMiddlewareRunner } from "@farm.js/core/internal/production-runtime";
+import {
+  createProductionMiddlewareRunner,
+  resolveFarmI18nConfig,
+} from "@farm.js/core/internal/production-runtime";
 import { describe, expect, it } from "vitest";
 import type { EntryContext } from "../types.js";
 import { generateRscEntry } from "./rsc.js";
@@ -131,7 +134,7 @@ describe("RSC file middleware with api.basePath", () => {
     expect(entry).toContain('const farmApiBasePath = "/v2/api";');
     // The entry hands its API path to the middleware runner it dispatches API routes with.
     expect(entry).toMatch(
-      /createProductionMiddlewareRunner\(\{[\s\S]*?apiBasePath: farmApiBasePath,\n\}\);/,
+      /createProductionMiddlewareRunner\(\{[\s\S]*?apiBasePath: farmApiBasePath,\n/,
     );
 
     const modules = buildMiddlewareModules({
@@ -142,5 +145,66 @@ describe("RSC file middleware with api.basePath", () => {
       const result = await runner(new Request(`https://example.test${url}`));
       expect(result.response?.status, url).toBe(401);
     }
+  });
+});
+
+describe("RSC file middleware under a basePath or locale prefix", () => {
+  // RSC matchRoute() reads the request path as received, so pages under a basePath live in
+  // app/<basePath>/ and locale pages in app/[lang]/. Their middleware has to run for them.
+  async function blocked(
+    i18n: ReturnType<typeof resolveFarmI18nConfig>,
+    middlewares: Record<string, string>,
+    url: string,
+  ) {
+    const entry = generateRscEntry({ ...context, i18n, basePath: i18n.basePath });
+    expect(entry).toContain("rawPathRouting: true,");
+    const calls: string[] = [];
+    const modules = buildMiddlewareModules(
+      Object.fromEntries(
+        Object.entries(middlewares).map(([file, name]) => [
+          file,
+          {
+            default() {
+              calls.push(name);
+              return new Response("no", { status: 401 });
+            },
+          },
+        ]),
+      ),
+    );
+    const runner = createProductionMiddlewareRunner({ modules, i18n, rawPathRouting: true });
+    const result = await runner(new Request(`https://example.test${url}`));
+    return { status: result.response?.status ?? null, calls };
+  }
+
+  const basePath = resolveFarmI18nConfig(false, {
+    root: "/tmp",
+    mode: "production",
+    basePath: "/console",
+  });
+  const prefixed = resolveFarmI18nConfig(
+    { locales: ["en", "de"], defaultLocale: "en", routing: "prefix" },
+    { root: "/tmp", mode: "production", basePath: "/" },
+  );
+
+  it("guards app/<basePath>/ pages", async () => {
+    await expect(
+      blocked(basePath, { "/console/admin/middleware.ts": "nested" }, "/console/admin"),
+    ).resolves.toEqual({ status: 401, calls: ["nested"] });
+  });
+
+  it("guards app/[lang]/ pages", async () => {
+    await expect(
+      blocked(prefixed, { "/[lang]/admin/middleware.ts": "locale" }, "/de/admin"),
+    ).resolves.toEqual({ status: 401, calls: ["locale"] });
+  });
+
+  it("keeps guards that matched the stripped path", async () => {
+    await expect(
+      blocked(basePath, { "/admin/middleware.ts": "stripped" }, "/console/admin"),
+    ).resolves.toEqual({ status: 401, calls: ["stripped"] });
+    await expect(
+      blocked(prefixed, { "/admin/middleware.ts": "stripped" }, "/de/admin"),
+    ).resolves.toEqual({ status: 401, calls: ["stripped"] });
   });
 });

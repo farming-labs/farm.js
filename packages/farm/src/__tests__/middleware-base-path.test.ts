@@ -181,3 +181,27 @@ describe.each([
     expect((await run("/api/public")).seen).toEqual(["/v2/api/public"]);
   });
 });
+
+describe("production middleware runtime: raw-path routing (RSC)", () => {
+  it("matches the request path as well as the basePath-stripped path", async () => {
+    const ran: string[] = [];
+    const record = (name: string) => ({
+      default(ctx: MiddlewareContext) {
+        ran.push(`${name} ${ctx.pathname}`);
+      },
+    });
+    const runner = createProductionMiddlewareRunner({
+      config: [{ matcher: "/console/reports", handler: () => void ran.push("config") }],
+      modules: [
+        { path: "/console/reports", module: record("raw") },
+        { path: "/reports", module: record("stripped") },
+      ],
+      i18n,
+      rawPathRouting: true,
+    });
+
+    await runner(new Request("https://example.com/console/reports"));
+
+    expect(ran).toEqual(["config", "raw /console/reports", "stripped /console/reports"]);
+  });
+});

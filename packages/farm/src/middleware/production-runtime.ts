@@ -47,6 +47,11 @@ export interface ProductionMiddlewareRunnerOptions {
   server?: Pick<ResolvedFarmServerConfig, "trustProxy">;
   /** The app's public API path (`api.basePath`); `/api` middleware guards it too. */
   apiBasePath?: string;
+  /**
+   * @internal The app matches pages against the request path as received, without stripping
+   * basePath or locale (the RSC entry), so middleware matches that path too.
+   */
+  rawPathRouting?: boolean;
 }
 
 export interface ProductionMiddlewareRequestOptions {
@@ -667,12 +672,24 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       options.i18n?.enabled
         ? stripFarmLocaleFromPathname(pathname, options.i18n)
         : stripFarmBasePath(pathname, options.i18n?.basePath ?? "/");
-    const initialPathname = toRoutePathname(ctx.pathname);
+    const initialRequestPathname = ctx.pathname;
+    const initialPathname = toRoutePathname(initialRequestPathname);
+    // Middleware guards every path a page can match: with raw-path routing that includes the
+    // request path itself, so a guard under app/<basePath>/ or app/[lang]/ runs for its page.
+    const matchPathnames = (pathname: string, requestPathname: string) =>
+      options.rawPathRouting && requestPathname !== pathname
+        ? [
+            ...new Set([
+              ...toMiddlewarePathnames(pathname),
+              ...toMiddlewarePathnames(requestPathname),
+            ]),
+          ]
+        : toMiddlewarePathnames(pathname);
     let parentData: MiddlewareContext["parent"] | undefined;
 
     if (globalConfig) {
       const globalMatch = matchesMiddlewareConfigAt(
-        toMiddlewarePathnames(initialPathname),
+        matchPathnames(initialPathname, initialRequestPathname),
         globalConfig,
         ctx,
       );
@@ -690,8 +707,12 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     // most once, so repeated rewrites end after at most one pass per entry.
     const ran = new Set<ProductionMiddlewareEntry>();
     function* applicableMiddleware() {
-      for (let pathname = initialPathname, pass = 0; ; pass++) {
-        const pathnames = toMiddlewarePathnames(pathname);
+      for (
+        let pathname = initialPathname, requestPathname = initialRequestPathname, pass = 0;
+        ;
+        pass++
+      ) {
+        const pathnames = matchPathnames(pathname, requestPathname);
         if (pass > 0 && globalConfig) {
           if (!matchesMiddlewareConfigAt(pathnames, globalConfig, ctx).matched) return;
         }
@@ -701,17 +722,19 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             entry.source === "config"
               ? { matched: true }
               : matchesMiddlewareRouteAt(pathnames, entry);
-          if (routeMatch.matched) yield { entry, routeMatch, pathname };
+          if (routeMatch.matched) yield { entry, routeMatch, pathname, pathnames };
         }
-        const rewrittenPathname = toRoutePathname(new URL(currentRequest.url).pathname);
-        if (rewrittenPathname === pathname) return;
+        const rewrittenRequestPathname = new URL(currentRequest.url).pathname;
+        const rewrittenPathname = toRoutePathname(rewrittenRequestPathname);
+        if (rewrittenPathname === pathname && rewrittenRequestPathname === requestPathname) return;
         pathname = rewrittenPathname;
+        requestPathname = rewrittenRequestPathname;
       }
     }
 
-    for (const { entry, routeMatch, pathname } of applicableMiddleware()) {
+    for (const { entry, routeMatch, pathname, pathnames } of applicableMiddleware()) {
       const configMatch = entry.config
-        ? matchesMiddlewareConfigAt(toMiddlewarePathnames(pathname), entry.config, ctx)
+        ? matchesMiddlewareConfigAt(pathnames, entry.config, ctx)
         : { matched: true };
       if (!configMatch.matched) {
         continue;

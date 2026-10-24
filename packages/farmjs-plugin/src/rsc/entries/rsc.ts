@@ -498,6 +498,8 @@ const farmMiddlewareRunner = createProductionMiddlewareRunner({
   i18n: ${JSON.stringify(ctx.i18n) ?? "undefined"},
   server: ${JSON.stringify(ctx.server) ?? "undefined"},
   apiBasePath: farmApiBasePath,
+  // matchRoute() reads url.pathname as received, so middleware guards that path too.
+  rawPathRouting: true,
 });
 
 debug('Discovered pages:', Object.keys(pages));
