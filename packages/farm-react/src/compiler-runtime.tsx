@@ -3363,15 +3363,18 @@ const BLOCKS_JAVASCRIPT_URLS = Number.parseInt(React.version, 10) > 18;
  * through sanitizeURL (custom elements are left alone, as React does).
  */
 function compilerAttributeValue(element: Element, name: string, value: string): string {
+  if (
+    !BLOCKS_JAVASCRIPT_URLS ||
+    (name !== "href" &&
+      name !== "src" &&
+      name !== "action" &&
+      name !== "formAction" &&
+      name !== "data")
+  ) {
+    return value;
+  }
   const tag = element.localName;
-  return BLOCKS_JAVASCRIPT_URLS &&
-    (name === "href" ||
-      name === "src" ||
-      name === "action" ||
-      name === "formAction" ||
-      (name === "data" && tag === "object")) &&
-    !tag.includes("-") &&
-    JAVASCRIPT_URL.test(value)
+  return (name !== "data" || tag === "object") && !tag.includes("-") && JAVASCRIPT_URL.test(value)
     ? "javascript:throw new Error('React has blocked a javascript: URL as a security precaution.')"
     : value;
 }
