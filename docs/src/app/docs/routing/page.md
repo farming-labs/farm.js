@@ -838,6 +838,23 @@ from the rendered React page automatically.
 
 Export `metadata` for static head tags or `generateMetadata` when the values depend on route params, search params, middleware data, or route data. Farm merges layout metadata from root to leaf, then applies the page metadata last.
 
+Export `viewport` (or `generateViewport`) for the viewport tag, as in Next.js. Layouts and the page
+merge from root to page over the default `width=device-width, initial-scale=1`; `themeColor` and
+`colorScheme` render their own tags. Every document starts its head with `<meta charset="utf-8">` and
+the viewport tag, including one a root layout renders itself, unless that layout writes the tag.
+
+```tsx
+import type { Viewport } from "@farm.js/core";
+
+export const viewport: Viewport = {
+  maximumScale: 1,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
+};
+```
+
 During HTML-based client navigation, Farm reconciles the destination document's title, meta tags,
 canonical and alternate links, icons, manifest link, and
 [page JSON-LD](/docs/configuration#agent-readiness). Tags omitted by the destination are removed,

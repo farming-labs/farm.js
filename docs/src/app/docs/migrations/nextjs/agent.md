@@ -138,7 +138,7 @@ Docs: [/docs/routing](/docs/routing), [/docs/layouts](/docs/layouts).
 | Next.js                            | Farm                                                   | Status      | Notes                                                                                                                                                               |
 | ---------------------------------- | ------------------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `app/page.tsx`                     | `src/app/page.tsx`                                     | `same`      | Also `page.md` and `page.mdx`.                                                                                                                                      |
-| `app/layout.tsx` (root)            | `src/app/layout.tsx`                                   | `same`      | A full `<html><body>` layout works, as in the Farm templates; add the charset and viewport `<meta>` tags yourself. Or return a fragment and let Farm own the shell. |
+| `app/layout.tsx` (root)            | `src/app/layout.tsx`                                   | `same`      | A full `<html><body>` layout works, as in the Farm templates; Farm adds the charset and viewport `<meta>` tags unless the layout writes them. Or return a fragment and let Farm own the shell. |
 | Nested `layout.tsx`                | Same file                                              | `same`      | Props: `children`, `params`. Use `LayoutProps` from `@farm.js/core`.                                                                                                |
 | `loading.tsx`                      | Same file                                              | `same`      | Suspense fallback. Props type `LoadingProps`.                                                                                                                       |
 | `error.tsx`                        | Same file, keep `"use client"`                         | `same`      | Props `error` (typed `unknown`), `reset`. Type `ErrorProps`.                                                                                                        |
@@ -532,7 +532,7 @@ Docs: [/docs/routing#metadata-and-og-images](/docs/routing#metadata-and-og-image
 | `import type { Metadata, MetadataRoute } from "next"`     | `from "@farm.js/core"`                   | `rename`    |                                                                                                                                                                                                              |
 | `export const metadata`, `generateMetadata`               | Same exports                             | `same`      | `title.default`/`template`, `metadataBase`, `openGraph`, `twitter`, `robots`, `alternates`, `icons`, `manifest`, `verification`, `other`, `keywords`, `authors`.                                             |
 | `title.absolute`                                          | `title.absolute`                         | `keep`      | Names the page as written, past any parent template.                                                                                                                                                         |
-| `viewport`, `generateViewport`, `themeColor`              | None                                     | `none`      | Render `<meta name="viewport">` in a full-document root layout (Farm's generated shell adds a default one only when the layout returns a fragment). Set theme color with `other: { "theme-color": "#000" }`. |
+| `viewport`, `generateViewport`, `themeColor`              | `viewport`, `generateViewport`           | `same`      | Merged from root layout to page over the default `width=device-width, initial-scale=1`, with `themeColor` and `colorScheme`, as in Next. |
 | `app/favicon.ico`, `icon.*`, `apple-icon.*`               | Files in `public/` plus `metadata.icons` | `different` | `icons: { icon: "/favicon.ico", apple: "/apple-icon.png" }` in the root layout.                                                                                                                              |
 | `opengraph-image.png`, `twitter-image.png` (+ `.alt.txt`) | Same files                               | `same`      |                                                                                                                                                                                                              |
 | `opengraph-image.tsx`, `twitter-image.tsx`                | Same files                               | `rename`    | Return plain JSX (preferred) or keep `new ImageResponse(...)` imported from `@farm.js/core/og`. `params` is a plain object.                                                                                  |
@@ -667,17 +667,13 @@ export const metadata: Metadata = { title: "Create Next App", icons: "/favicon.i
 export default function RootLayout({ children }: LayoutProps) {
   return (
     <html lang="en">
-      <head>
-        <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>{children}</body>
     </html>
   );
 }
 ```
 
-A root layout that returns its own `<html>` document must render the charset and viewport tags itself, as above (the Farm templates do the same); Next added them automatically. A root layout that returns a fragment gets them from Farm's generated shell. `localFont` options must be static and assigned at module scope; `family` is required.
+Farm adds the charset and viewport tags to a root layout's own `<html>` document, as Next does, unless the layout writes them; the `viewport` export sets the viewport tag. `localFont` options must be static and assigned at module scope; `family` is required.
 
 `next/dynamic` with `ssr: false`:
 
