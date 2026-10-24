@@ -695,6 +695,22 @@ function hasRollupPlugins(plugins: unknown): boolean {
   return Boolean(plugins);
 }
 
+/**
+ * Whether `cache` has settings the production server can only get from the
+ * bundled config module: the adapter is a live client, and namespace,
+ * maxEntries and lease are read from the same object. `cache.client` is
+ * browser-only and is compiled into the client entry instead.
+ */
+export function hasFarmServerCacheConfig(cache: ResolvedFarmConfig["cache"] | undefined): boolean {
+  if (!cache || typeof cache !== "object") return false;
+  return (
+    cache.adapter !== undefined ||
+    cache.namespace !== undefined ||
+    cache.maxEntries !== undefined ||
+    cache.lease !== undefined
+  );
+}
+
 export function hasFarmRuntimeConfigModule(
   config: Pick<ResolvedFarmConfig, "layers">,
   configModulePath: string | null,
@@ -4454,6 +4470,7 @@ async function buildSSRInMemory(
   const hasRouteContextConfig = hasCustomFarmRouteContext(config);
   const hasServerRuntimePlugins = hasFarmServerRuntimePlugins(config);
   const hasPluginRoutes = hasFarmPluginRoutes(config);
+  const hasServerCacheConfig = hasFarmServerCacheConfig(config.cache);
   const configModulePath =
     hasServerRuntimeIntegrations ||
     hasObservabilityHandler ||
@@ -4462,6 +4479,7 @@ async function buildSSRInMemory(
     hasRouteContextConfig ||
     hasServerRuntimePlugins ||
     hasPluginRoutes ||
+    hasServerCacheConfig ||
     hasIntegrationProviders
       ? await findFarmConfigPath(root)
       : null;
