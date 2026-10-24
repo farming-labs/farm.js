@@ -4352,7 +4352,7 @@ ${isolatedHydrationImport}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
 import { isFarmRouteActive } from '@farm.js/core/router'
-import { replayFarmQueuedInteraction, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
+import { isFarmBlockedNavigationURL, replayFarmQueuedInteraction, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from '@farm.js/core/internal/client-runtime'
 import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -4523,6 +4523,7 @@ class LegacyManifestSPARouter {
   async navigate(href, options = {}) {
     const { replace = false, scroll = true } = options;
     const url = new URL(href, window.location.origin);
+    if (isFarmBlockedNavigationURL(url)) return;
     const pathname = url.pathname;
     const search = url.search;
     const fullPath = pathname + search;

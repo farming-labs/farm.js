@@ -296,6 +296,12 @@ cross-origin URLs use normal document navigation instead of Farm's local page-da
 Internal router paths use the configured application `basePath`, matching `Link`; already-prefixed
 paths are preserved.
 
+Router navigation only leaves the page for `http:`, `https:`, `mailto:`, and `tel:` URLs. A
+`javascript:`, `data:`, `vbscript:`, or `blob:` target is ignored and logged as a console error,
+after the browser's own URL parsing, so leading spaces, mixed case, and embedded tabs are caught
+too. This makes `router.push(searchParams.get("next"))` safe against script URLs, but you should
+still check that a redirect target from the query string points somewhere you expect.
+
 ## Navigation blocking
 
 Use `useBlocker` when a client component needs to protect unsaved work before SPA navigation continues.
