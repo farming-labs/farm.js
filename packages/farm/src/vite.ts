@@ -5272,6 +5272,12 @@ async function tryHydrateImportedPage(
       return false;
     }
 
+    if (PageComponent.__farmServerProps === true && existingProps?.__farmRoutePropsResolved !== true) {
+      // This route's guard and data run only on the server, and it did not
+      // resolve them (it rendered error or notFound UI): keep its HTML.
+      return false;
+    }
+
     currentPageComponent = PageComponent;
     currentPageProps = await buildRouteComponentProps(
       pageModule,

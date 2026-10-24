@@ -3418,6 +3418,9 @@ async function createMatchedHydrationRoute(matched, pathname, searchParams, serv
   if (matched.route.pageShouldHydrate) {
     const Component = await loadRouteComponent(matched.route);
     if (!Component) return null;
+    // A programmatic page whose guard and data run only on the server cannot
+    // resolve its props here, so its server-rendered HTML is kept.
+    if (Component.__farmServerProps === true) return null;
     if (typeof Component === "function" && Component.constructor && Component.constructor.name === "AsyncFunction") {
       console.warn(
         "[Farm.js] Skipping hydration for " + pathname +

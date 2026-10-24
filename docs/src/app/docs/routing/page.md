@@ -75,6 +75,13 @@ export default defineRoutes(({ page, api }) => [
 Prefer a file route when the URL maps to a folder. Reach for `defineRoutes` for colocated
 features, URLs a folder can't express, and route lists generated from data or configuration.
 
+The browser loads the routes file to hydrate its pages, so the client build keeps only what that
+needs: components, `pending`/`error`/`notFound`, params and search options, and actions. It removes
+`guard`, `data`, `staticPaths`, `generateMetadata`, and `api()` handlers from inline route options,
+along with the imports and top-level helpers only they use, so database clients and credentials
+stay on the server. Write route options inline for this to apply. A client build fails if the
+routes file, or an application module it keeps, still imports a Node builtin such as `node:fs`.
+
 ## Named slots and intercepted routes
 
 An `@name` directory gives its owning layout another rendered node alongside `children`. Use slots
