@@ -2890,6 +2890,98 @@ function resolveSeatQuantityFromSubscriptionData(
   return getSeatQuantityFromSubscriptionEvent(eventData) ?? existingSnapshot.seatQuantity;
 }
 
+type StripeSubscriptionEventItem = {
+  priceId: string | null;
+  lookupKey: string | null;
+  productId: string | null;
+};
+
+function getSubscriptionEventItems(
+  eventData: Record<string, unknown>,
+): StripeSubscriptionEventItem[] | null {
+  const items = eventData.items;
+  if (!items || typeof items !== "object" || !("data" in items) || !Array.isArray(items.data)) {
+    return null;
+  }
+
+  return items.data.flatMap((item: unknown) => {
+    const price =
+      item &&
+      typeof item === "object" &&
+      "price" in item &&
+      item.price &&
+      typeof item.price === "object"
+        ? (item.price as Record<string, unknown>)
+        : null;
+    if (!price) {
+      return [];
+    }
+
+    const product =
+      price.product && typeof price.product === "object"
+        ? (price.product as Record<string, unknown>)
+        : null;
+    const productMetadata =
+      product?.metadata && typeof product.metadata === "object"
+        ? (product.metadata as Record<string, unknown>)
+        : null;
+
+    return [
+      {
+        priceId: typeof price.id === "string" ? price.id : null,
+        lookupKey: typeof price.lookup_key === "string" ? price.lookup_key : null,
+        productId:
+          typeof productMetadata?.productId === "string" ? productMetadata.productId : null,
+      },
+    ];
+  });
+}
+
+/**
+ * The configured subscription product a subscription's base item bills, so a plan switch made in
+ * Stripe (portal, Dashboard, API) reaches the snapshot. Configured seat add-on and meter prices
+ * never count as the base plan. `null` means the subscription bills no configured product; `undefined` means
+ * the payload cannot tell (no items, or a `price_data` product with no Stripe price to compare).
+ */
+function resolveSubscriptionEventProduct(
+  eventData: Record<string, unknown>,
+  products: readonly ResolvedStripeProduct[],
+  existingSnapshot: StripeBillingSnapshot,
+): ResolvedStripeProduct | null | undefined {
+  const items = getSubscriptionEventItems(eventData);
+  if (!items || items.length === 0) {
+    return undefined;
+  }
+
+  const addOnPriceIds = new Set(
+    products.flatMap((product) => [
+      ...(product.seatPriceId ? [product.seatPriceId] : []),
+      ...Object.values(product.meterPriceIds ?? {}),
+    ]),
+  );
+  const baseItems = items.filter((item) => !(item.priceId && addOnPriceIds.has(item.priceId)));
+  const matches = products.filter(
+    (product) =>
+      product.kind === "subscription" &&
+      baseItems.some(
+        (item) =>
+          (product.priceId && item.priceId === product.priceId) ||
+          (product.lookupKey && item.lookupKey === product.lookupKey) ||
+          item.productId === product.id,
+      ),
+  );
+  if (matches.length > 0) {
+    return matches.find((product) => product.id === existingSnapshot.productId) ?? matches[0];
+  }
+
+  const current = findConfiguredProduct(products, existingSnapshot.productId);
+  if (current && !current.priceId && !current.lookupKey) {
+    return undefined;
+  }
+
+  return null;
+}
+
 async function resolveBillingUsage(
   billing: StripeBillingOptions | undefined,
   owner: StripeBillingOwner,
@@ -3776,8 +3868,32 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
                   typeof event.data.status === "string"
                 ) {
                   const nextStatus = normalizeBillingStatus(event.data.status, existing.status);
+                  const subscriptionProduct = resolveSubscriptionEventProduct(
+                    event.data as Record<string, unknown>,
+                    configuredProducts,
+                    existing,
+                  );
+                  // A price no configured product bills grants no plan, rather than keeping the old one.
+                  if (subscriptionProduct === null && existing.planId !== "free") {
+                    console.warn(
+                      `[farm:stripe] Subscription ${existing.stripeSubscriptionId ?? "(unknown)"} bills no configured billing product; moving its owner to the free plan.`,
+                    );
+                  }
+                  const planned: StripeBillingSnapshot =
+                    subscriptionProduct === undefined
+                      ? existing
+                      : {
+                          ...existing,
+                          productId: subscriptionProduct?.id ?? null,
+                          planId: subscriptionProduct
+                            ? (subscriptionProduct.planId ??
+                              (subscriptionProduct.id === existing.productId
+                                ? existing.planId
+                                : "free"))
+                            : "free",
+                        };
                   nextSnapshot = {
-                    ...existing,
+                    ...planned,
                     status: nextStatus,
                     stripeSubscriptionId:
                       "id" in event.data && typeof event.data.id === "string"
@@ -3800,7 +3916,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
                             event.data as Record<string, unknown>,
                             input.billing,
                             configuredProducts,
-                            existing,
+                            planned,
                           )
                         : existing.seatQuantity,
                     seatAllowanceOverride: existing.seatAllowanceOverride,

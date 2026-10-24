@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { FarmIntegrationHandlerContext } from "../integrations";
 import { stripe } from "../../../farm-integrations/src/stripe/index";
 import type {
@@ -1546,4 +1546,135 @@ describe("stripe trial hooks", () => {
       sessionId: "cs_session_lookup_2",
     });
   });
+
+  it("moves the plan with the subscription's price on customer.subscription.updated", async () => {
+    const owner: StripeBillingOwner = { kind: "user", id: "user_switch" };
+    let storedSnapshot: StripeBillingSnapshot = {
+      owner,
+      planId: "pro",
+      productId: "pro",
+      status: "active",
+      stripeCustomerId: "cus_switch",
+      stripeSubscriptionId: "sub_switch",
+      currentPeriodEnd: new Date("2026-04-30T00:00:00.000Z"),
+      cancelAtPeriodEnd: false,
+      trialEndsAt: null,
+      trialUsedAt: null,
+      seatQuantity: 1,
+      seatAllowanceOverride: null,
+      metadata: {},
+    };
+    const integration = stripe({
+      instance: {
+        async createCheckoutSession() {
+          throw new Error("not needed");
+        },
+        async createPortalSession() {
+          throw new Error("not needed");
+        },
+        async retrieveCheckoutSession() {
+          throw new Error("not needed");
+        },
+        async constructWebhookEvent(input: { payload: string }) {
+          return JSON.parse(input.payload) as {
+            id: string;
+            type: string;
+            data: Record<string, unknown>;
+          };
+        },
+      },
+      billing: {
+        resolveOwner: () => owner,
+        plans: {
+          free: { features: { pro: false } },
+          basic: { features: { pro: false } },
+          pro: { features: { pro: true, sso: true } },
+          team: { features: { pro: true } },
+        },
+        products: {
+          basic: { kind: "subscription", planId: "basic", priceId: "price_basic" },
+          pro: {
+            kind: "subscription",
+            planId: "pro",
+            priceId: "price_pro",
+            seatPriceId: "price_pro_seat",
+            meterPriceIds: { api: "price_pro_meter" },
+          },
+          team: { kind: "subscription", planId: "team", lookupKey: "team_monthly" },
+        },
+        meters: { api: { aggregation: "sum", ingestion: "raw", eventName: "api_calls" } },
+        hooks: {
+          getBillingAccount: async () => storedSnapshot,
+          getBillingAccountByStripeCustomerId: async () => storedSnapshot,
+          async saveBillingSnapshot(snapshot) {
+            storedSnapshot = snapshot;
+          },
+        },
+      },
+    });
+    const findRoute = (path: string, method: string) => {
+      const route = integration.routes.find(
+        (entry) => entry.path === path && String(entry.method).toUpperCase() === method,
+      );
+      if (!route) throw new Error(`Route not found: ${method} ${path}`);
+      return route;
+    };
+
+    async function switchTo(prices: Array<{ id: string; lookup_key?: string }>) {
+      const request = new Request("http://example.com/billing/webhook", {
+        method: "POST",
+        headers: { "stripe-signature": "test" },
+        body: JSON.stringify({
+          id: "evt_switch",
+          type: "customer.subscription.updated",
+          data: {
+            id: "sub_switch",
+            customer: "cus_switch",
+            status: "active",
+            items: { data: prices.map((price) => ({ quantity: 1, price })) },
+          },
+        }),
+      });
+      const response = await findRoute("/billing/webhook", "POST").handler(
+        request,
+        createContext(request, "POST", "/billing/webhook", integration.instance),
+      );
+      expect(response.status).toBe(200);
+
+      const featuresRequest = new Request("http://example.com/billing/features");
+      const features = await findRoute("/billing/features", "GET").handler(
+        featuresRequest,
+        createContext(featuresRequest, "GET", "/billing/features", integration.instance),
+      );
+      return JSON.parse(await features.text()) as Record<string, unknown>;
+    }
+
+    // Paying for basic must not keep pro's features.
+    await expect(switchTo([{ id: "price_basic" }])).resolves.toMatchObject({
+      planId: "basic",
+      features: { pro: false },
+    });
+    expect(storedSnapshot.productId).toBe("basic");
+
+    await expect(
+      switchTo([{ id: "price_new", lookup_key: "team_monthly" }]),
+    ).resolves.toMatchObject({ planId: "team" });
+
+    // Seat add-on and meter prices are never the base plan.
+    await expect(
+      switchTo([{ id: "price_pro" }, { id: "price_pro_seat" }, { id: "price_pro_meter" }]),
+    ).resolves.toMatchObject({ planId: "pro", features: { pro: true, sso: true } });
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(
+        switchTo([{ id: "price_pro_seat" }, { id: "price_unknown" }]),
+      ).resolves.toMatchObject({ planId: "free", features: { pro: false } });
+      expect(storedSnapshot.productId).toBeNull();
+      expect(warn).toHaveBeenCalledOnce();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
 });
