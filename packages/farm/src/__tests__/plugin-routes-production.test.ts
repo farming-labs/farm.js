@@ -1,12 +1,16 @@
 // @vitest-environment node
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import ts from "typescript";
-import { describe, expect, it, onTestFailed, vi } from "vitest";
+import { describe, expect, it, onTestFailed } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
 import { startDevServer } from "../server/create-server";
+
+const execFileAsync = promisify(execFile);
 
 describe("published plugin routes", () => {
   it("builds typed callers and serves validated routes from the Vercel output", async () => {
@@ -235,69 +239,25 @@ void check;
         );
       }
 
-      phase = "production module import";
+      phase = "production requests in isolated process";
       const entry = path.join(root, ".vercel", "output", "functions", "__nitro.func", "index.mjs");
-      const server = await import(pathToFileURL(entry).href);
-      phase = "production context and validated requests";
-      const contextResponse = await server.default.fetch(
-        new Request("http://farm.test/backend/v2/context", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: "{}",
-        }),
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        [
+          fileURLToPath(new URL("./fixtures/plugin-routes-production-probe.mjs", import.meta.url)),
+          pathToFileURL(entry).href,
+        ],
+        { cwd: packageRoot, timeout: 30_000 },
       );
-      expect(await contextResponse.json()).toEqual({ preserved: true });
-      const call = (title: string, token = "valid") =>
-        server.default.fetch(
-          new Request("http://farm.test/backend/v2/projects/p1/uploads/u1", {
-            method: "POST",
-            headers: { "content-type": "application/json", "x-token": token },
-            body: JSON.stringify({ title }),
-          }),
-        );
-      const response = await call("  Hello  ");
-      expect(response.status).toBe(200);
-      expect(response.headers.get("x-plugin-route")).toBe("yes");
-      expect(await response.json()).toEqual({ id: "p1/u1", title: "Hello" });
-      expect((await call("blocked")).status).toBe(400);
-      expect((await call("Hello", "invalid")).status).toBe(401);
-      const network = vi
-        .spyOn(globalThis, "fetch")
-        .mockRejectedValue(new Error("Local api must not fetch"));
-      try {
-        phase = "production local callers";
-        const page = await server.default.fetch(new Request("http://farm.test/server"));
-        expect(page.status).toBe(200);
-        expect(await page.text()).toContain("p1/u1");
-        const shared = await server.default.fetch(
-          new Request("http://farm.test/backend/v2/shared"),
-        );
-        expect(await shared.json()).toEqual({
-          source: "file",
-          data: { id: "p1/u1", title: "Local" },
-          error: null,
-        });
-        const denied = await server.default.fetch(
-          new Request("http://farm.test/backend/v2/shared?token=invalid"),
-        );
-        expect((await denied.json()).error).toBe(401);
-        const invalid = await server.default.fetch(
-          new Request("http://farm.test/backend/v2/shared?title=blocked"),
-        );
-        expect((await invalid.json()).error).toBe(400);
-        const failed = await server.default.fetch(
-          new Request("http://farm.test/backend/v2/shared?title=private"),
-        );
-        expect((await failed.json()).error).toBe(500);
-        expect(network).not.toHaveBeenCalled();
-      } finally {
-        network.mockRestore();
-      }
-      phase = "production bodyless POST";
-      const sharedPost = await server.default.fetch(
-        new Request("http://farm.test/backend/v2/shared", { method: "POST" }),
-      );
-      expect(await sharedPost.json()).toEqual({ source: "plugin" });
+      expect(stdout.trim()).toBe("plugin routes verified");
+      // Importing the runtime here retains its bundled Rolldown native binding
+      // until the test worker exits, preventing fixture cleanup on Windows.
+      phase = "native module lifetime check";
+      expect(
+        (process.report.getReport() as { sharedObjects: string[] }).sharedObjects.filter((file) =>
+          file.startsWith(root),
+        ),
+      ).toEqual([]);
     } finally {
       const testPhase = phase;
       phase = "fixture cleanup";
