@@ -794,7 +794,8 @@ for (const template of [
     dependency: "@farm.js/auth",
     homePagePattern: /auth\.session\(\)/,
     brandPattern: /FARMJS \/ Auth starter/,
-    instructionPattern: /FARMJS Auth uses local SQLite automatically/,
+    instructionPattern:
+      /FARMJS Auth uses local SQLite automatically and generates a random \.farm\/auth-secret/,
     betterCall: "1.3.2",
   },
   {

@@ -49,7 +49,7 @@ Farm builds the absolute redirect URI from the incoming request origin and `call
 | `WORKOS_COOKIE_PASSWORD`      | Production  | Encrypts and seals the AuthKit session cookie. |
 | `FARM_WORKOS_COOKIE_PASSWORD` | Alternative | Backward-compatible cookie password name.      |
 
-Development has a local fallback cookie password. Production startup fails without an explicit password.
+Without a cookie password, development generates a random one once per app in `.farm/workos-secret` (gitignored) and reuses it across restarts. Production startup fails without an explicit password.
 
 ## Choose SDK ownership
 

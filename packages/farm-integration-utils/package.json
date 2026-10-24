@@ -24,6 +24,10 @@
       "types": "./dist/config.d.ts",
       "import": "./dist/config.js"
     },
+    "./dev-secret": {
+      "types": "./dist/dev-secret.d.ts",
+      "import": "./dist/dev-secret.js"
+    },
     "./cookies": {
       "types": "./dist/cookies.d.ts",
       "import": "./dist/cookies.js"

@@ -85,7 +85,7 @@ callback, logout, or profile routes.
 | `AUTH0_SECRET`        | Production                | Signs state and local session cookies.                                    |
 | `APP_BASE_URL`        | Recommended in production | Public app origin used for callbacks and protected-route redirects.       |
 
-Farm provides a development-only fallback for `AUTH0_SECRET`. Production startup fails when no secret is configured.
+Without `AUTH0_SECRET`, development generates a random secret once per app in `.farm/auth0-secret` (gitignored) and reuses it across restarts. Production startup fails when no secret is configured.
 
 ## Routes and methods
 
