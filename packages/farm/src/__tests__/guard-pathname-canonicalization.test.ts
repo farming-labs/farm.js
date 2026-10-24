@@ -15,6 +15,8 @@ import { MiddlewareManager } from "../middleware/manager";
 import { createProductionMiddlewareRunner } from "../middleware/production-runtime";
 import type { MiddlewareMatcher } from "../middleware/types";
 import {
+  appMiddlewareMayHandlePath,
+  configMiddlewareMayHandlePath,
   discoverMiddlewareRoutes,
   generateRuntimePathMatcherSource,
 } from "../nitro/universal-build";
@@ -628,5 +630,89 @@ describe("basePath with i18n strips the base path once", () => {
       production: servesSecret,
       integration: servesSecret,
     });
+  });
+});
+
+describe("prerendering agrees with the runtime middleware matcher", () => {
+  // A prerendered page becomes a public file that middleware never sees, so
+  // the build may only prerender a path when runtime middleware would skip it.
+  // The build used its own matcher copy: `/members/(.*)` kept the trailing
+  // slash and never met `/members/secret`, so a guarded page shipped as a
+  // static file served to everyone.
+  const cases: Array<{ matcher: string; exclude?: string[]; pathname: string }> = [
+    { matcher: "/members/(.*)", pathname: "/members/secret" },
+    { matcher: "/members/(.*)", pathname: "/members" },
+    { matcher: "/members(.*)", pathname: "/members/secret" },
+    { matcher: "/members/:path*", pathname: "/members/a/b" },
+    { matcher: "/(.*)", exclude: ["/docs/[[...slug]]"], pathname: "/docs" },
+    { matcher: "/(.*)", exclude: ["/docs/[[...slug]]"], pathname: "/docs/a" },
+    { matcher: "/(.*)", exclude: ["/a/:p?"], pathname: "/a" },
+    { matcher: "/(.*)", exclude: ["/a/:p?"], pathname: "/a/b" },
+    { matcher: "/(.*)", exclude: ["/public(.*)"], pathname: "/public/page" },
+    { matcher: "/members/(.*)", pathname: "/other" },
+    { matcher: "/members/(.*)", pathname: "/membership" },
+  ];
+
+  it.each(cases)(
+    "$matcher (exclude $exclude) at $pathname",
+    async ({ matcher, exclude, pathname }) => {
+      let ran = false;
+      const runner = createProductionMiddlewareRunner({
+        config: [
+          {
+            matcher: [matcher],
+            exclude,
+            handler() {
+              ran = true;
+            },
+          },
+        ],
+      });
+      await runner(new Request(`https://farm.test${pathname}`));
+      const buildKeepsServerHandled = configMiddlewareMayHandlePath(
+        [{ matcher: [matcher], exclude, handler() {} }] as never,
+        pathname,
+      );
+      expect({ pathname, buildKeepsServerHandled }).toEqual({
+        pathname,
+        buildKeepsServerHandled: ran,
+      });
+    },
+  );
+
+  it("keeps a request-aware matcher server-handled", () => {
+    expect(
+      configMiddlewareMayHandlePath([{ matcher: [() => false], handler() {} }] as never, "/x"),
+    ).toBe(true);
+  });
+
+  it("matches file middleware routes like the production runner", async () => {
+    for (const [routePath, pathname] of [
+      ["/members", "/members/secret"],
+      ["/members", "/members"],
+      ["/docs/[[...slug]]", "/docs/a/b"],
+      ["/members", "/membership"],
+    ] as const) {
+      let ran = false;
+      const runner = createProductionMiddlewareRunner({
+        modules: [
+          {
+            path: routePath,
+            module: {
+              default: async (_ctx: unknown, next: () => Promise<void>) => {
+                ran = true;
+                await next();
+              },
+            },
+          },
+        ],
+      });
+      await runner(new Request(`https://farm.test${pathname}`));
+      expect({
+        routePath,
+        pathname,
+        build: appMiddlewareMayHandlePath([{ path: routePath } as never], pathname),
+      }).toEqual({ routePath, pathname, build: ran });
+    }
   });
 });

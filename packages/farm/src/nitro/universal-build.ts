@@ -129,11 +129,17 @@ import {
   resolveFarmRendererAppSetup,
 } from "../renderer";
 import {
+  compileMiddlewareConfig,
+  matchesCompiledMiddlewareConfig,
+  matchesMiddlewareRoute,
+} from "../middleware/matcher";
+import {
   appendMiddlewareDirectory,
   appendMiddlewareRoutePath,
   compareMiddlewareRouteLocations,
   type MiddlewareRouteLocation,
 } from "../middleware/path";
+import type { MiddlewareContext, MiddlewareMatcher } from "../middleware/types";
 import type { FarmRenderer } from "../renderer";
 import { farmPluginMayAffectRuntimePath } from "../plugin-runtime-endpoint";
 
@@ -9494,45 +9500,43 @@ function middlewarePatternMatches(pattern: string | RegExp, pathname: string): b
   return new RegExp(`^${expression}/?$`).test(pathname);
 }
 
-function configMiddlewareMayHandlePath(
+/**
+ * Whether config middleware may run for a prerender candidate. This reuses the
+ * runtime matcher: a separate copy drifted (`/members/(.*)` kept its trailing
+ * slash and never met `/members/secret`), and the page was frozen into a
+ * public file that middleware never sees again.
+ *
+ * @internal
+ */
+export function configMiddlewareMayHandlePath(
   config: ResolvedFarmConfig["middleware"],
   pathname: string,
 ): boolean {
   if (!hasFarmMiddlewareConfig(config)) return false;
 
   const entries = (Array.isArray(config) ? config : [config]) as Array<{
-    matcher?: unknown | unknown[];
+    matcher?: MiddlewareMatcher | MiddlewareMatcher[];
     exclude?: Array<string | RegExp>;
   }>;
   return entries.some((entry) => {
-    if (entry.exclude?.some((pattern) => middlewarePatternMatches(pattern, pathname))) {
-      return false;
-    }
-
-    if (!entry.matcher) return true;
-    const matchers = Array.isArray(entry.matcher) ? entry.matcher : [entry.matcher];
-    return matchers.some((matcher) => {
-      // A request-aware matcher cannot be proven safe at build time.
-      if (typeof matcher === "function") return true;
-      return (
-        (typeof matcher === "string" || matcher instanceof RegExp) &&
-        middlewarePatternMatches(matcher, pathname)
-      );
-    });
+    if (!entry.matcher && !entry.exclude) return true;
+    const matchers = entry.matcher
+      ? (Array.isArray(entry.matcher) ? entry.matcher : [entry.matcher]).map((matcher) =>
+          // A request-aware matcher cannot be proven safe at build time.
+          typeof matcher === "function" ? () => true : matcher,
+        )
+      : undefined;
+    const compiled = compileMiddlewareConfig({ matcher: matchers, exclude: entry.exclude });
+    return matchesCompiledMiddlewareConfig(pathname, compiled, {} as MiddlewareContext).matched;
   });
 }
 
-function appMiddlewareMayHandlePath(
+/** @internal File middleware counterpart of `configMiddlewareMayHandlePath`. */
+export function appMiddlewareMayHandlePath(
   middlewareRoutes: readonly UniversalMiddlewareRoute[],
   pathname: string,
 ): boolean {
-  return middlewareRoutes.some((route) => {
-    if (route.path === "/") return true;
-    return (
-      middlewarePatternMatches(route.path, pathname) ||
-      middlewarePatternMatches(`${route.path}/**`, pathname)
-    );
-  });
+  return middlewareRoutes.some((route) => matchesMiddlewareRoute(pathname, route).matched);
 }
 
 /**
