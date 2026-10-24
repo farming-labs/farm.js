@@ -239,6 +239,18 @@
   text-transform: uppercase;
   cursor: pointer;
 }
+/* The next step comes first and reads like the site's primary button. */
+.agent-check-actions .agent-check-primary {
+  gap: 10px;
+  border-color: #fff;
+  background: #fff;
+  color: #000;
+}
+.agent-check-primary code {
+  font-family: inherit;
+  text-transform: none;
+  opacity: 0.6;
+}
 .agent-check-action-status {
   align-self: center;
   color: #ff8a8a;
@@ -254,6 +266,10 @@
 @media (hover: hover) and (pointer: fine) {
   .agent-check-actions :is(a, button):hover {
     border-color: rgb(255 255 255 / 0.42);
+  }
+  .agent-check-actions .agent-check-primary:hover {
+    border-color: #fff;
+    background: rgb(255 255 255 / 0.88);
   }
 }
 

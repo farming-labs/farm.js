@@ -2,6 +2,7 @@
 
 import { type ReactNode, useEffect, useRef } from "react";
 import { agentCheckErrorMessage } from "../../lib/agents-check-messages";
+import { AgentCheckNextSteps } from "./check-next-steps";
 import { AgentCheckReportSections } from "./check-report";
 import { resetAgentCheck, runAgentCheck, useAgentCheck } from "./check-store";
 
@@ -27,6 +28,7 @@ export function AgentCheckIntro({ children }: { children: ReactNode }) {
         scan={scan}
         actions={
           <>
+            <AgentCheckNextSteps scan={scan} />
             <button
               type="button"
               disabled={pending}
