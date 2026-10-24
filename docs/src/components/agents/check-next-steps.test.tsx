@@ -67,8 +67,8 @@ describe("agent check next steps", () => {
     expect(migrationGuideHref(null)).toBe("/docs/migrations");
 
     const html = render(scan({ framework: "Next.js", checks: gaps }));
-    expect(html.startsWith('<a class="agent-check-primary" href="/docs/migrations/nextjs">')).toBe(
-      true,
+    expect(html).toMatch(
+      /^<div class="agent-check-action-group" role="group" aria-label="Next step"><a class="agent-check-primary" href="\/docs\/migrations\/nextjs">/,
     );
     expect(html).toContain(">Migrate to Farm.js</a>");
     // Copying needs JavaScript: the button renders hidden until it hydrates.

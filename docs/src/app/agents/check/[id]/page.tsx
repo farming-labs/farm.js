@@ -50,11 +50,18 @@ export default async function AgentCheckReportPage({ params }: PageProps<"/agent
               actions={
                 <>
                   <AgentCheckNextSteps scan={scan} />
-                  <AgentCheckCopyLink />
-                  <a href={`/agents/check?url=${encodeURIComponent(scan.report.url)}`}>
-                    Scan again
-                  </a>
-                  <a href="/agents/check">Check another site</a>
+                  <div
+                    className="agent-check-action-group"
+                    data-quiet=""
+                    role="group"
+                    aria-label="Report"
+                  >
+                    <AgentCheckCopyLink />
+                    <a href={`/agents/check?url=${encodeURIComponent(scan.report.url)}`}>
+                      Scan again
+                    </a>
+                    <a href="/agents/check">Check another site</a>
+                  </div>
                 </>
               }
             />

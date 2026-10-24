@@ -29,30 +29,37 @@ export function AgentCheckIntro({ children }: { children: ReactNode }) {
         actions={
           <>
             <AgentCheckNextSteps scan={scan} />
-            <button
-              type="button"
-              disabled={pending}
-              aria-busy={pending || undefined}
-              onClick={() =>
-                void runAgentCheck(scan.report.url).then((id) => {
-                  if (id) window.location.assign(`/agents/check/${id}`);
-                })
-              }
+            <div
+              className="agent-check-action-group"
+              data-quiet=""
+              role="group"
+              aria-label="Report"
             >
-              {pending ? "Scanning…" : "Scan again"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                resetAgentCheck();
-                requestAnimationFrame(() => document.getElementById("agent-check-url")?.focus());
-              }}
-            >
-              Check another site
-            </button>
-            <span className="agent-check-action-status" role="status" aria-live="polite">
-              {error && !pending ? agentCheckErrorMessage(error) : ""}
-            </span>
+              <button
+                type="button"
+                disabled={pending}
+                aria-busy={pending || undefined}
+                onClick={() =>
+                  void runAgentCheck(scan.report.url).then((id) => {
+                    if (id) window.location.assign(`/agents/check/${id}`);
+                  })
+                }
+              >
+                {pending ? "Scanning…" : "Scan again"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  resetAgentCheck();
+                  requestAnimationFrame(() => document.getElementById("agent-check-url")?.focus());
+                }}
+              >
+                Check another site
+              </button>
+              <span className="agent-check-action-status" role="status" aria-live="polite">
+                {error && !pending ? agentCheckErrorMessage(error) : ""}
+              </span>
+            </div>
           </>
         }
       />

@@ -92,7 +92,7 @@ export function AgentCheckNextSteps({ scan }: { scan: StoredAgentCheck }) {
   const { report } = scan;
   const hasGaps = reportGaps(scan).length > 0;
   return (
-    <>
+    <div className="agent-check-action-group" role="group" aria-label="Next step">
       {isFarmSite(scan) ? (
         <a className="agent-check-primary" href={FARM_UPGRADE_DOCS}>
           Update to latest Farm.js
@@ -104,6 +104,6 @@ export function AgentCheckNextSteps({ scan }: { scan: StoredAgentCheck }) {
         </a>
       )}
       {hasGaps ? <AgentCheckCopyPrompt prompt={buildFixPrompt(scan)} /> : null}
-    </>
+    </div>
   );
 }
