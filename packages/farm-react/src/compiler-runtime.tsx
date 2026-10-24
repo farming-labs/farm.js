@@ -9926,22 +9926,24 @@ function createKeyedRowsBlockComponentCore(
         } else {
           applyKeyedRowBindings(this.currentProps, existing, rows.items[index], index);
         }
-        const conditionalValues = this.readConditionalValues(
-          this.currentProps,
-          rows.items[index],
-          index,
-        );
-        for (const [id, values] of conditionalValues) {
-          if (options.conditionals?.changed(existing.conditionalValues.get(id), values)) {
-            conditionalChanges.push({
-              key,
-              id,
-              item: rows.items[index],
-              index,
-            });
+        if (options.conditionals) {
+          const conditionalValues = this.readConditionalValues(
+            this.currentProps,
+            rows.items[index],
+            index,
+          );
+          for (const [id, values] of conditionalValues) {
+            if (options.conditionals.changed(existing.conditionalValues.get(id), values)) {
+              conditionalChanges.push({
+                key,
+                id,
+                item: rows.items[index],
+                index,
+              });
+            }
           }
+          existing.conditionalValues = conditionalValues;
         }
-        existing.conditionalValues = conditionalValues;
         existing.item = rows.items[index];
         existing.index = index;
       }
