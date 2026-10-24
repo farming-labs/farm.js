@@ -19,6 +19,7 @@ import {
   resolveFarmIsolatedClientHydrationMode,
   resolveModuleSourcePath,
   stripUseClientDirective,
+  usesFarmServerTree,
 } from "../utils/client-component";
 
 const tempDirs: string[] = [];
@@ -1023,6 +1024,8 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
     expect(plan.isolatedBoundaries.map((boundary) => boundary.modulePath)).toEqual([
       path.join(siteDir, "star-button.tsx"),
     ]);
+    // Under a hydrating layout, the re-exported async page renders through the server tree.
+    expect(usesFarmServerTree(plan)).toBe(true);
 
     expect(getClientModuleMetadata(syncPage, root)).toEqual({
       isClientComponent: false,
