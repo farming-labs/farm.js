@@ -6368,9 +6368,12 @@ function getFarmI18nSnapshot() {
   return ${config.i18n.enabled ? "getFarmI18nClientSnapshot()" : "undefined"};
 }
 
+// The locale step strips farmI18nConfig.basePath itself. Stripping it first as
+// well removed it twice, so /console/console/secret served /secret while
+// middleware and integration guards, which strip it once, saw /console/secret.
 function getFarmRoutePathname(pathname) {
   return farmI18nRuntime
-    ? stripFarmLocaleFromPathname(stripFarmBasePath(pathname), farmI18nConfig)
+    ? stripFarmLocaleFromPathname(pathname, farmI18nConfig)
     : stripFarmBasePath(pathname);
 }
 

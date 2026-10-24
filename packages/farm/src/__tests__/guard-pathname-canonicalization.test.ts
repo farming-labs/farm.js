@@ -1,11 +1,15 @@
 // @vitest-environment node
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { matchAPIRoute } from "../api/route-pattern";
+import { stripFarmBasePath } from "../base-path";
+import { resolveFarmI18nConfig } from "../i18n/config";
+import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import { defineIntegration, dispatchIntegrationRequest } from "../integrations";
 import { MiddlewareManager } from "../middleware/manager";
 import { createProductionMiddlewareRunner } from "../middleware/production-runtime";
@@ -15,6 +19,7 @@ import {
   generateRuntimePathMatcherSource,
 } from "../nitro/universal-build";
 import { resolveFarmRequestURL } from "../server/request";
+import { RouteManager } from "../routing/route-manager";
 import type { RouteSegment } from "../types";
 import { matchRoute } from "../utils";
 
@@ -536,5 +541,92 @@ describe("optional catch-all and wildcard matchers", () => {
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("basePath with i18n strips the base path once", () => {
+  // The built page router stripped basePath and then let the locale step strip
+  // it again, while every guard stripped it once. `/console/console/secret`
+  // rendered the `/secret` page and its guards, seeing `/console/secret`,
+  // never ran.
+  const i18n = resolveFarmI18nConfig(
+    { locales: ["en", "de"], defaultLocale: "en", routing: "prefix-except-default" },
+    { basePath: "/console" },
+  );
+  const source = fsSync.readFileSync(
+    new URL("../nitro/universal-build.ts", import.meta.url),
+    "utf8",
+  );
+  const start = source.indexOf(
+    "function getFarmRoutePathname(pathname) {\n  return farmI18nRuntime",
+  );
+  const productionRoutePathname = new Function(
+    "farmI18nRuntime",
+    "farmI18nConfig",
+    "stripFarmLocaleFromPathname",
+    "stripFarmBasePath",
+    `${source.slice(start, source.indexOf("\n}\n", start) + 3)}return getFarmRoutePathname;`,
+  )({}, i18n, stripFarmLocaleFromPathname, (pathname: string) =>
+    stripFarmBasePath(pathname, "/console"),
+  ) as (pathname: string) => string;
+
+  it.each([
+    ["/console/secret", "/secret"],
+    ["/console/de/secret", "/secret"],
+    ["/console/console/secret", "/console/secret"],
+    ["/console/console/de/secret", "/console/de/secret"],
+    ["/console/de/console/secret", "/console/secret"],
+  ])("%s routes to %s, and every guard sees the same path", async (pathname, routePath) => {
+    expect(start).toBeGreaterThan(-1);
+    expect(productionRoutePathname(pathname)).toBe(routePath);
+    // The dev page router already strips once.
+    expect(
+      (
+        RouteManager.prototype as unknown as { toRoutePathname(pathname: string): string }
+      ).toRoutePathname.call(
+        { config: { basePath: "/console" }, getI18nConfig: () => i18n },
+        pathname,
+      ),
+    ).toBe(routePath);
+    const servesSecret = routePath === "/secret";
+
+    const ran = { dev: false, production: false };
+    const fileGuard = (key: keyof typeof ran) => ({
+      default: async (_ctx: unknown, next: () => Promise<void>) => {
+        ran[key] = true;
+        await next();
+      },
+    });
+    await createProductionMiddlewareRunner({
+      modules: [{ path: "/secret", module: fileGuard("production") }],
+      i18n,
+    })(new Request(`https://farm.test${pathname}`));
+    const appDir = fsSync.mkdtempSync(path.join(os.tmpdir(), "farm-base-path-i18n-"));
+    try {
+      fsSync.mkdirSync(path.join(appDir, "secret"));
+      fsSync.writeFileSync(path.join(appDir, "secret", "middleware.ts"), "export {};\n");
+      const vite = {
+        environments: {
+          ssr: { runner: { import: vi.fn().mockResolvedValue(fileGuard("dev")) } },
+        },
+      };
+      const manager = new MiddlewareManager(appDir, vite as never, undefined, i18n);
+      await manager.discover();
+      const req = createRequest(pathname);
+      await manager.execute(req, new ServerResponse(req));
+    } finally {
+      fsSync.rmSync(appDir, { recursive: true, force: true });
+    }
+    const integration = await runIntegrationGuard("/secret(.*)", pathname, {
+      basePath: "/console",
+      i18n,
+    });
+
+    expect({ pathname, ...ran, integration: integration.ran }).toEqual({
+      pathname,
+      dev: servesSecret,
+      production: servesSecret,
+      integration: servesSecret,
+    });
   });
 });
