@@ -59,6 +59,17 @@ export interface Auth0IntegrationInput {
   audience?: string;
   scopes?: string[];
   tokenEndpointAuthMethod?: "auto" | "client_secret_basic" | "client_secret_post" | "none";
+  /**
+   * Session cookie name. A `__Host-` name (`__Host-farm_auth0_session`) cannot be set or
+   * shadowed by a sibling subdomain; Farm adds the `Secure` and `Path=/` it requires.
+   * @default "farm_auth0_session"
+   */
+  cookieName?: string;
+  /**
+   * Login state cookie name, held between the redirect to Auth0 and the callback.
+   * @default "farm_auth0_state"
+   */
+  stateCookieName?: string;
   log?: FarmIntegrationLogger;
 }
 
@@ -343,6 +354,17 @@ async function exchangeCode(
   throw new Error(lastFailure);
 }
 
+function resolveCookieName(value: string | undefined, fallback: string, option: string): string {
+  if (value === undefined) return fallback;
+  // RFC 6265 token: no separators, whitespace, or control characters.
+  if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(value)) {
+    throw new Error(
+      `Auth0 integration ${option} must be a valid cookie name, got ${JSON.stringify(value)}.`,
+    );
+  }
+  return value;
+}
+
 export function auth0(input: Auth0IntegrationInput = {}) {
   if (input.instance) {
     return defineIntegration({
@@ -372,8 +394,15 @@ export function auth0(input: Auth0IntegrationInput = {}) {
     input.allowedOrigins,
     "auth0.allowedOrigins",
   );
-  const stateCookieName = "farm_auth0_state";
-  const sessionCookieName = "farm_auth0_session";
+  const stateCookieName = resolveCookieName(
+    input.stateCookieName,
+    "farm_auth0_state",
+    "stateCookieName",
+  );
+  const sessionCookieName = resolveCookieName(input.cookieName, "farm_auth0_session", "cookieName");
+  if (stateCookieName === sessionCookieName) {
+    throw new Error("Auth0 integration cookieName and stateCookieName must differ.");
+  }
   const callbackSettings = resolveCallbackSettings(
     {
       callbackUrl: input.callbackUrl,

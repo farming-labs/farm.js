@@ -170,6 +170,26 @@ Only root-relative `returnTo` values are accepted. Invalid or external values fa
 | `tokenEndpointAuthMethod` | `auto`                 | `client_secret_basic`, `client_secret_post`, `none`, or automatic selection. |
 | `protectedRoutes`         | None                   | One matcher or a list of matchers.                                           |
 | `allowedOrigins`          | App origin only        | Extra origins allowed to drive sign-out.                                     |
+| `cookieName`              | `farm_auth0_session`   | Session cookie name.                                                         |
+| `stateCookieName`         | `farm_auth0_state`     | Login state cookie name.                                                     |
+
+## Cookie names
+
+A sibling subdomain (`evil.example.com` next to `app.example.com`) can set a cookie for
+`.example.com` with a longer `Path`. Browsers send that cookie first, so it would pick which session
+or login state the app reads. A `__Host-` name cannot be set from another host, so use one in
+production:
+
+```ts
+auth0({
+  cookieName: "__Host-farm_auth0_session",
+  stateCookieName: "__Host-farm_auth0_state",
+});
+```
+
+Farm adds the `Secure`, `Path=/`, and no-`Domain` attributes the prefix requires. Browsers accept
+such cookies over https and from `http://localhost`; on another plain-http dev host keep the
+defaults. Renaming the session cookie signs existing users out once.
 
 ## Cross-site request protection
 

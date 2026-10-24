@@ -190,6 +190,14 @@ Signed-out requests receive a `307` redirect to `/login` with the original root-
 | `protectedRoutes` | None               | One matcher or a list of matchers.           |
 | `allowedOrigins`  | App origin only    | Extra origins allowed to post sign-out.      |
 
+## Cookie names
+
+A sibling subdomain can set a cookie for the parent domain with a longer `Path`, and browsers send
+it first, so it would pick the session the app reads. A `__Host-` name cannot be set from another
+host, so use one in production: `workos({ cookieName: "__Host-wos-session" })`. Farm adds the
+`Secure`, `Path=/`, and no-`Domain` attributes the prefix requires; browsers accept them over https
+and from `http://localhost`. Renaming the cookie signs existing users out once.
+
 ## Cross-site request protection
 
 The sign-out route (`POST /logout`) only accepts requests from the app's own origin. A cross-site
