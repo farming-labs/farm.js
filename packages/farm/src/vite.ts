@@ -1743,6 +1743,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               rootDir: farmConfig.root,
               srcDir: farmConfig.srcDir,
               docs: farmConfig.docs,
+              diagnostics: true,
             })
           : null;
       const farmDocsFontAssets = new Map(
