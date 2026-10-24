@@ -608,6 +608,32 @@ send `Access-Control-Allow-Origin: *` and an `ETag`, and answer `If-None-Match` 
 The catalog follows the app `basePath`; cards live below the endpoint, which follows `api.basePath`.
 Turn discovery off with `agent: { aiCatalog: false }`. An app without an MCP server serves none of it.
 
+### List an MCP server Farm does not serve
+
+An endpoint another runtime serves, such as an agent server mounted beside the app or a server on
+another host, joins the same catalog with `registerFarmMCPServer`. Call it when the server starts;
+it returns a function that removes the entry:
+
+```ts title="src/lib/agent-mcp.ts"
+import { registerFarmMCPServer } from "@farm.js/core/api/runtime";
+
+export const unregister = registerFarmMCPServer({
+  name: "com.example.app/agent",
+  version: "1.0.0",
+  title: "Support agent",
+  description: "Answer support questions with the help center.",
+  path: "/agent/mcp",
+});
+```
+
+`path` is the endpoint's path in this app, below the app `basePath`. It is taken literally, never
+moved by `api.basePath`, and Farm serves its card at `<path>/server-card`. Use `url` instead for an
+endpoint on another origin; the catalog then points at `<url>/server-card`, which that host serves.
+Pass `protocolVersions` to list the versions the endpoint accepts in its card. Registering the same
+endpoint again replaces the entry. Registered servers appear in the AI catalog, `ard.json`, and
+`llms.txt`, but not in the `/.well-known/farmjs` manifest, which lists the tools Farm serves itself.
+The [docs engine](/docs/docs-engine)'s MCP endpoint is listed this way when its adapter registers it.
+
 ## Observe tool executions
 
 Subscribe through the existing [observability API](/docs/observability), not by inspecting MCP

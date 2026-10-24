@@ -1275,6 +1275,106 @@ export default { basePath: "/workspace", plugins: [${plugin}] };`,
     }
   }, 120_000);
 
+  it("lists the MCP endpoint a docs runtime registers, without @farm.js/mcp", async () => {
+    const root = await createProductionFixture();
+    // A docs runtime like @farming-labs/farmjs: it knows its MCP route, name, and version.
+    await fs.mkdir(path.join(root, "node_modules", "fake-docs-adapter"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "node_modules", "fake-docs-adapter", "package.json"),
+      JSON.stringify({
+        name: "fake-docs-adapter",
+        type: "module",
+        exports: { "./server": "./server.js", "./react": "./react.js" },
+      }),
+    );
+    await fs.writeFile(
+      path.join(root, "node_modules", "fake-docs-adapter", "server.js"),
+      `export function createFarmDocsRuntimeHandler(_config, options) {
+  options.registerMCPServer?.({
+    name: "dev.farmjs/docs",
+    version: "0.2.121",
+    title: "Fixture Docs",
+    path: "/api/docs/mcp",
+  });
+  return async (request) => {
+    const { pathname } = new URL(request.url);
+    if (pathname === "/api/docs/mcp/server-card") return new Response("adapter card");
+    return pathname === "/api/docs/mcp" ? Response.json({ mcp: true }) : null;
+  };
+}`,
+    );
+    await fs.writeFile(
+      path.join(root, "node_modules", "fake-docs-adapter", "react.js"),
+      "export function hydrateFarmDocs() {}",
+    );
+    await fs.mkdir(path.join(root, "docs"), { recursive: true });
+    await fs.writeFile(path.join(root, "docs", "guide.md"), "# Guide\n");
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          // The docs MCP is not an API route, so the API's public path never moves it.
+          api: { basePath: "/v1" },
+          agent: { llmsTxt: { full: false } },
+          docs: {
+            enabled: true,
+            entry: "/docs",
+            contentDir: "docs",
+            adapter: {
+              id: "fake",
+              protocol: 1,
+              server: "fake-docs-adapter/server",
+              react: "fake-docs-adapter/react",
+            },
+          },
+          generateBuildId: () => "production-docs-mcp-catalog-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const origin = new URL(response.url).origin;
+          const { entries } = await response.json();
+          expect(entries).toEqual([
+            expect.objectContaining({
+              identifier: "urn:air:127.0.0.1:mcp:docs",
+              url: `${origin}/api/docs/mcp/server-card`,
+              displayName: "Fixture Docs",
+              version: "0.2.121",
+            }),
+          ]);
+
+          // Core answers the card before the docs runtime, as in dev.
+          const card = await fetch(entries[0].url);
+          expect(card.headers.get("content-type")).toBe(
+            "application/mcp-server-card+json; charset=utf-8",
+          );
+          expect(await card.json()).toMatchObject({
+            name: "dev.farmjs/docs",
+            remotes: [{ type: "streamable-http", url: `${origin}/api/docs/mcp` }],
+          });
+          expect(await (await fetch(`${origin}/api/docs/mcp`)).json()).toEqual({ mcp: true });
+
+          const llms = await (await fetch(`${origin}/llms.txt`)).text();
+          expect(llms).toContain("## MCP");
+          expect(llms).toContain(`- [Fixture Docs](${origin}/api/docs/mcp)`);
+        },
+        "/.well-known/ai-catalog.json",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("reads server env where the server runs instead of storing it in the build output", async () => {
     const root = await createProductionFixture();
     const previous = process.env.FARM_TEST_DATABASE_URL;

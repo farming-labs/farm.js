@@ -89,7 +89,8 @@ export interface FarmAgentUserConfig {
    */
   apiCatalog?: boolean;
   /**
-   * Advertise the app's MCP servers (the top-level `mcp` config or `apiMcp()`):
+   * Advertise the app's MCP servers (the top-level `mcp` config, `apiMcp()`, and
+   * endpoints listed with `registerFarmMCPServer`, such as the docs engine's):
    * `/.well-known/ai-catalog.json` (and `/.well-known/ard.json`) lists a server
    * card for each, served at `<endpoint>/server-card`, and the generated
    * `/llms.txt` names each endpoint. Nothing is served when the app has no MCP

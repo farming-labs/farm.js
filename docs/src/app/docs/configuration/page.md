@@ -616,8 +616,10 @@ When the app mounts an MCP server, through the top-level [`mcp`](/docs/plugins/m
 `/.well-known/ard.json`) listing a server card for it, serves the card at `<endpoint>/server-card`,
 and adds an `MCP` section to the generated `llms.txt` that names the endpoint. The card carries only
 the server's identity and URL, never its tools, and listing it does not skip `authorize`.
-[MCP discovery](/docs/plugins/mcp#discovery) shows both documents. `aiCatalog: false` turns all
-three off; an app without an MCP server serves none of them.
+[MCP discovery](/docs/plugins/mcp#discovery) shows both documents. MCP servers Farm does not serve,
+such as the [docs engine](/docs/docs-engine)'s endpoint, join the catalog through
+[`registerFarmMCPServer`](/docs/plugins/mcp#list-an-mcp-server-farm-does-not-serve).
+`aiCatalog: false` turns all three off; an app without an MCP server serves none of them.
 
 ### API catalog
 
