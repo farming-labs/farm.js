@@ -1,4 +1,4 @@
-// @vitest-environment node
+// @vitest-environment jsdom
 import { afterEach, expect, it } from "vitest";
 import { createRouteDataCacheKey } from "../cache";
 import { getFarmClientDataCache } from "../client-cache";

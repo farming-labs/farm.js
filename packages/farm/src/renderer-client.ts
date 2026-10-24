@@ -15,6 +15,7 @@ import type { ServerQuery } from "./server-query";
 import {
   createServerQueryCallKey,
   fetchServerQuery,
+  isFarmServerQueryBrowserRuntime,
   type ServerQueryFetchOptions,
 } from "./server-query-runtime";
 import { getTheme, setTheme, subscribeTheme, toggleTheme } from "./theme/runtime";
@@ -292,6 +293,26 @@ export function createRendererQuery<TInput, TData>(
   input: TInput,
   options: FarmRendererQueryOptions = {},
 ): FarmRendererQuery<TData> {
+  // Vue, Solid, and Svelte run setup (and subscribe) during server rendering.
+  // Like React's server snapshot, a server render never reads or fills the
+  // process-wide browser cache: it renders idle and the browser fetches.
+  if (!isFarmServerQueryBrowserRuntime()) {
+    const snapshot: FarmRendererQuerySnapshot<TData> = {
+      data: undefined,
+      error: null,
+      status: "idle",
+      pending: false,
+      fetching: false,
+      stale: true,
+    };
+    return {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      refetch: () => fetchServerQuery(query, input),
+      dispose() {},
+    };
+  }
+
   const cache = getFarmClientDataCache();
   const key = createServerQueryCallKey(query, input);
   const listeners = new Set<() => void>();
