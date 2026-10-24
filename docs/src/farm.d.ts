@@ -17,7 +17,6 @@ export type RoutePath =
   | "/about"
   | "/agents"
   | "/agents/check"
-  | `/agents/check/${string}`
   | "/blog"
   | "/blog/0.1.0"
   | "/contact"
@@ -128,7 +127,6 @@ export type RoutePattern =
   | "/about"
   | "/agents"
   | "/agents/check"
-  | "/agents/check/[id]"
   | "/blog"
   | "/blog/0.1.0"
   | "/contact"
@@ -239,7 +237,6 @@ export type RouteModulePattern =
   | "/about"
   | "/agents"
   | "/agents/check"
-  | "/agents/check/[id]"
   | "/blog"
   | "/blog/0.1.0"
   | "/contact"

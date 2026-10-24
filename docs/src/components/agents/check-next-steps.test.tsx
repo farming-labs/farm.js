@@ -97,7 +97,11 @@ describe("agent check next steps", () => {
   it("builds a prompt with every gap, most points first, and its fix", () => {
     const prompt = buildFixPrompt(scan({ framework: "Next.js", checks: gaps }));
     expect(prompt).toContain("Make https://example.com/ fully agent-ready");
-    expect(prompt).toContain("scored it 72/100: https://farmjs.dev/agents/check/abc123def456");
+    expect(prompt).toContain(
+      "agent-ready check (https://farmjs.dev/agents/check) scored it 72/100.",
+    );
+    // Reports are linked by site, never by id.
+    expect(prompt).not.toContain("abc123def456");
     expect(prompt).toContain("so the site scores 100/100");
     expect(prompt).not.toContain("upgrade every @farm.js");
     expect(prompt).not.toContain("Canonical URL");

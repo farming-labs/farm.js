@@ -1,4 +1,5 @@
 import type { AgentCheckResult, StoredAgentCheck } from "../../lib/agents-check";
+import { agentCheckPath } from "../../lib/agents-check-messages";
 import { SITE_URL } from "../../lib/site";
 import { AgentCheckCopyPrompt } from "./check-copy-prompt";
 
@@ -73,7 +74,7 @@ export function buildFixPrompt(scan: StoredAgentCheck): string {
   const gaps = reportGaps(scan);
   const farm = isFarmSite(scan);
   const intro = [
-    `Make ${report.finalUrl} fully agent-ready. The Farm.js agent-ready check scored it ${report.score}/100: ${SITE_URL}/agents/check/${scan.id}`,
+    `Make ${report.finalUrl} fully agent-ready. The Farm.js agent-ready check (${SITE_URL}/agents/check) scored it ${report.score}/100.`,
     "Fix every gap below in this codebase so the site scores 100/100.",
   ];
   if (farm) {
@@ -84,7 +85,7 @@ export function buildFixPrompt(scan: StoredAgentCheck): string {
   return [
     intro.join("\n"),
     `Gaps, the most points first:\n\n${gaps.map((check, index) => describeGap(check, index, farm)).join("\n\n")}`,
-    `When you're done, deploy and scan again: ${SITE_URL}/agents/check?url=${encodeURIComponent(report.url)}`,
+    `When you're done, deploy and scan again: ${SITE_URL}${agentCheckPath(report.url)}`,
   ].join("\n\n");
 }
 

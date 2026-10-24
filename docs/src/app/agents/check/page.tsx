@@ -1,4 +1,4 @@
-import type { Metadata } from "@farm.js/core";
+import type { Metadata, MetadataProps, PagePropsWithMiddleware } from "@farm.js/core";
 import { ArrowRight, ScanSearch } from "lucide-react";
 import { AgentCheckForm } from "../../../components/agents/check-form";
 import { AgentCheckIntro } from "../../../components/agents/check-intro";
@@ -14,13 +14,22 @@ import {
 import "../../../components/agents/waitlist.css";
 import "../../../components/agents/check.css";
 import "../agents.css";
+import type { AgentCheckMiddlewareData } from "./middleware";
 
-export const metadata = {
+const metadata = {
   openGraph: { title: "Agent-ready check — Farm.js", url: "/agents/check" },
   title: "Agent-ready check — Farm.js",
   description:
     "Score any website on what AI agents can read and call: Markdown, llms.txt, robots.txt, MCP, OpenAPI and structured data, with a fix for each gap.",
 } satisfies Metadata;
+
+// /agents/check?url=<site> shows one site's result, so only the bare page is indexed.
+export async function generateMetadata({
+  searchParams,
+}: MetadataProps<"/agents/check">): Promise<Metadata> {
+  const search = await searchParams;
+  return search.url || search.error ? { ...metadata, robots: { index: false } } : metadata;
+}
 
 const checks = [
   [
@@ -71,8 +80,11 @@ const checks = [
   ],
 ] as const;
 
-// Synchronous like /agents, so the hero's grid and selection wire hydrate with the page.
-export default function AgentCheckPage() {
+// Synchronous like /agents, so the hero's grid and selection wire hydrate with the page. A report
+// for a form post without JavaScript arrives through the middleware's data.
+export default function AgentCheckPage({
+  middleware,
+}: PagePropsWithMiddleware<AgentCheckMiddlewareData, "/agents/check">) {
   return (
     <div className="farm-home farm-agents min-h-screen overflow-x-clip bg-black font-sans text-white">
       <a className="agents-skip-link" href="#agent-check-content">
@@ -84,7 +96,7 @@ export default function AgentCheckPage() {
         <div className="farm-page-content min-w-0">
           <SiteHeader activePage="agents" />
           <main id="agent-check-content" tabIndex={-1}>
-            <AgentCheckIntro>
+            <AgentCheckIntro initialScan={middleware?.data.get("agentCheckScan")}>
               <section className="agents-hero farm-full-rule" aria-labelledby="agent-check-title">
                 <div className="agents-hero-copy">
                   <div className="agents-eyebrow">

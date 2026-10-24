@@ -27,7 +27,7 @@ farmjs.dev is hosted on [Vercel](https://vercel.com). Like any web server, Verce
 
 ## Tools and forms
 
-**Agent-ready check.** When you run the check at [/agents/check](/agents/check), the address you enter is sent to Farm.js Infrastructure at `app.farmjs.dev`, which loads public pages of that site (about fifteen requests) and stores the report. Each report gets a random link that anyone who has it can open; report pages are marked so search engines do not index them. Your IP address is passed along so the service can limit how many checks one visitor runs.
+**Agent-ready check.** When you run the check at [/agents/check](/agents/check), the address you enter is sent to Farm.js Infrastructure at `app.farmjs.dev`, which loads public pages of that site (about fifteen requests) and stores the report. A result's link names the site it checked (`/agents/check?url=…`) and runs the check again when someone opens it; those pages are marked so search engines do not index them. Your IP address is passed along so the service can limit how many checks one visitor runs.
 
 **Agent infrastructure waitlist.** The waitlist on [/agents](/agents) stores the email address you submit, the page you signed up from, and the time, in the site's database. Farming Labs uses it to send updates about agent infrastructure and early access. Email [contact@farming-labs.dev](mailto:contact@farming-labs.dev) to be removed.
 

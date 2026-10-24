@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
 const fetchMock = vi.fn<typeof fetch>();
+const scan = {
+  id: "abc123def456",
+  createdAt: "2026-10-19T20:47:00.000Z",
+  report: { url: "https://vercel.com/", score: 83, checks: [] },
+};
 const originalUrl = process.env.FARMJS_API_URL;
 const originalKey = process.env.FARMJS_API_KEY;
 
@@ -16,10 +21,10 @@ beforeEach(() => {
   process.env.FARMJS_API_URL = "https://infra.test/";
   process.env.FARMJS_API_KEY = "farmjs_test-key";
   fetchMock.mockReset();
-  // Starting a scan answers with its id; reading the saved report 404s unless a test stores one.
+  // Starting a scan answers with its id, and the saved report reads back.
   fetchMock.mockImplementation(async (input) =>
     String(input).includes("/api/reports/")
-      ? Response.json({ error: "not_found" }, { status: 404 })
+      ? Response.json(scan)
       : Response.json({ id: "abc123def456" }, { status: 201 }),
   );
   vi.stubGlobal("fetch", fetchMock);
@@ -54,7 +59,7 @@ describe("agent-ready check proxy", () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ id: "abc123def456" });
+    await expect(response.json()).resolves.toEqual({ id: "abc123def456", scan });
     const [target, init] = fetchMock.mock.calls[0]!;
     expect(target).toBe("https://infra.test/api/scans");
     expect(init?.method).toBe("POST");
@@ -74,11 +79,31 @@ describe("agent-ready check proxy", () => {
     expect(headers["x-farm-client-address"]).toBeUndefined();
   });
 
-  it("redirects a form post to the report", async () => {
+  it("redirects a form post to the check for its site, with the report's id in a cookie", async () => {
     const response = await POST(formRequest("vercel.com"));
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe("https://farmjs.dev/agents/check/abc123def456");
+    expect(response.headers.get("location")).toBe(
+      "https://farmjs.dev/agents/check?url=https%3A%2F%2Fvercel.com%2F",
+    );
+    expect(response.headers.get("set-cookie")).toBe(
+      "agent_check_report=abc123def456; Path=/agents/check; Max-Age=600; HttpOnly; SameSite=Lax; Secure",
+    );
+  });
+
+  it("sends a form post back with an error when the report can't be read", async () => {
+    fetchMock.mockImplementation(async (input) =>
+      String(input).includes("/api/reports/")
+        ? Response.json({ error: "not_found" }, { status: 404 })
+        : Response.json({ id: "abc123def456" }, { status: 201 }),
+    );
+    const response = await POST(formRequest("vercel.com"));
+
+    expect(response.status).toBe(303);
+    const location = new URL(response.headers.get("location")!);
+    expect(location.pathname).toBe("/agents/check");
+    expect(location.searchParams.get("error")).toBe("unavailable");
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("sends a failed form post back to the form with the error and the url", async () => {
@@ -116,32 +141,27 @@ describe("agent-ready check proxy", () => {
     delete process.env.FARMJS_API_KEY;
     const response = await POST(jsonRequest({ url: "vercel.com" }));
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ id: "abc123def456" });
+    await expect(response.json()).resolves.toEqual({ id: "abc123def456", scan });
     const [target, init] = fetchMock.mock.calls[0]!;
     expect(target).toBe("https://app.farmjs.dev/api/scans");
     expect(new Headers(init?.headers).has("authorization")).toBe(false);
   });
 
   it("returns the finished report so the page can show it in place", async () => {
-    const scan = {
-      id: "abc123def456",
-      createdAt: "2026-10-19T20:47:00.000Z",
-      report: { url: "https://vercel.com/", score: 83, checks: [] },
-    };
-    fetchMock.mockImplementation(async (input) =>
-      String(input).includes("/api/reports/")
-        ? Response.json(scan)
-        : Response.json({ id: "abc123def456" }, { status: 201 }),
-    );
     const response = await POST(jsonRequest({ url: "vercel.com" }));
     await expect(response.json()).resolves.toEqual({ id: "abc123def456", scan });
     expect(fetchMock.mock.calls[1]![0]).toBe("https://infra.test/api/reports/abc123def456");
   });
 
-  it("still answers with the id when the report can't be read yet", async () => {
+  it("answers 502 when the report can't be read, since the page has nothing to show", async () => {
+    fetchMock.mockImplementation(async (input) =>
+      String(input).includes("/api/reports/")
+        ? Response.json({ error: "not_found" }, { status: 404 })
+        : Response.json({ id: "abc123def456" }, { status: 201 }),
+    );
     const response = await POST(jsonRequest({ url: "vercel.com" }));
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ id: "abc123def456" });
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({ error: "unavailable" });
   });
 
   it("answers 503 when the service is unreachable", async () => {
