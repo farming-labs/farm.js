@@ -977,6 +977,33 @@ When streamed action input exceeds the limit, Farm cancels it without awaiting p
 
 Rejected requests use generic, non-cacheable responses: `403` for origin failures, `413` for oversized bodies, and `415` for unsupported content types. Detailed parsing or execution errors stay in server logs.
 
+### Middleware does not protect actions
+
+An action is addressed by its id, not by the route that renders it. The browser POSTs it to the
+current page's URL, and any page URL works, so the action runs under the middleware of whatever URL
+the request names. A guard in `src/app/admin/middleware.ts` does not stop a POST to `/` that invokes
+an action defined for the admin page. Next.js behaves the same way.
+
+Authorize inside every action that reads or changes protected data:
+
+```ts
+"use server";
+
+import { auth } from "@farm.js/auth/server";
+import { db } from "@/db";
+
+export async function deleteProject(projectId: string) {
+  const user = await auth.user({ required: true });
+  const project = await db.project.findUnique({ where: { id: projectId } });
+  if (project?.ownerId !== user.id) throw new Error("Forbidden");
+  await db.project.delete({ where: { id: projectId } });
+}
+```
+
+For checks that many actions share, define them as `createServerFn` functions with
+`createServerMiddleware` (see [Composable middleware](/docs/api-client#composable-middleware)): that
+middleware runs for every call of the function, whichever URL carried it.
+
 ## Next-style route exports
 
 Farm route modules can expose compact rendering options directly on the page when the behavior belongs to that route.
@@ -1220,5 +1247,5 @@ Prefer a CI release or commit identifier when a deployment runs on multiple serv
 - Prefer `routeRules` for broad URL patterns and platform-level cache/header behavior.
 - Keep `serverActions.allowedOrigins` empty unless the deployment has a known proxy-origin mismatch.
 - Give every rolling release one stable `deploymentId`; do not generate a different value per server instance.
-- Treat every server action as a public endpoint and authorize the current user inside the action or middleware.
+- Treat every server action as a public endpoint and authorize the current user inside the action or its `createServerMiddleware`; route middleware does not run for the action's own route.
 - Keep `farm.config.ts` as the single control plane instead of spreading framework behavior across many root files.
