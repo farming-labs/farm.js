@@ -155,6 +155,18 @@ autumn({
 });
 ```
 
+Farm names the owner's Autumn customer `<kind>_<id>` when the id only uses letters, digits, `_`,
+and `-` (and does not start or end with `-`), such as the random ids auth providers issue. Any other
+id, such as an email or a non-ASCII handle, is encoded as `<kind>_-<base64url of the id>` so no two
+owners share a customer. Return your own id from `billing.resolveExternalCustomerId(owner)` to
+choose it yourself.
+
+Before this, such ids were lossy: `a.b` and `a-b` both became `user_a-b`, and ids with no ASCII
+letters became `user_unknown`. If your owner ids are emails or handles, their owners now get new
+Autumn customers. To keep the existing ones while you move them, return
+`legacyAutumnExternalCustomerId(owner)` (from `@farm.js/autumn`) from
+`resolveExternalCustomerId`; owners that collided under it still share one customer.
+
 ## Production notes
 
 - Set `AUTUMN_SECRET_KEY`, `AUTUMN_WEBHOOK_SECRET`, and `APP_BASE_URL`.

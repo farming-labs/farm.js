@@ -761,12 +761,31 @@ function getOwnerExternalCustomerId(
     return billing.resolveExternalCustomerId(owner, tools);
   }
 
-  const normalizedId = owner.id
+  const normalizedId = normalizeLegacyAutumnCustomerId(owner.id);
+  // An id the normalization keeps as is maps as it always has. Any other id (`a.b`, an email, a
+  // non-ASCII handle, an empty id) used to collapse onto another owner's customer (`a.b` and `a-b`
+  // both became `user_a-b`), so it is encoded instead. A normalized id never starts with `-`, so
+  // `kind_-<base64url>` cannot collide with it.
+  if (normalizedId && normalizedId === owner.id) {
+    return `${owner.kind}_${normalizedId}`;
+  }
+  return `${owner.kind}_-${Buffer.from(owner.id, "utf8").toString("base64url")}`;
+}
+
+function normalizeLegacyAutumnCustomerId(id: string): string {
+  return id
     .trim()
     .replace(/[^a-zA-Z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
 
-  return `${owner.kind}_${normalizedId || "unknown"}`;
+/**
+ * The Autumn customer id Farm derived before ids it could not keep as is were encoded. Owners
+ * with such ids (emails, handles) share customers under it; return it from
+ * `billing.resolveExternalCustomerId` only to keep existing customers while migrating them.
+ */
+export function legacyAutumnExternalCustomerId(owner: AutumnBillingOwner): string {
+  return `${owner.kind}_${normalizeLegacyAutumnCustomerId(owner.id) || "unknown"}`;
 }
 
 function resolveAutumnPlanLimitReference(
