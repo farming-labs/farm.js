@@ -19,18 +19,26 @@ export interface HealthRuntimeState {
   closed: boolean;
   startupReport?: HealthReport;
   startupPromise?: Promise<HealthReport>;
+  /** Readiness run shared by every request that arrives while it is pending. */
+  readinessPromise?: Promise<HealthReport>;
+  /** Last readiness result, reused until `expiresAt`. */
+  readinessCache?: { report: HealthReport; expiresAt: number };
+  /** Check invocations that have not settled yet, including ones a timeout already gave up on. */
+  runningChecks: Map<ResolvedHealthCheck, Promise<boolean>>;
 }
 
 export function createHealthRuntimeState(): HealthRuntimeState {
   return {
     controller: new AbortController(),
     closed: false,
+    runningChecks: new Map(),
   };
 }
 
 export function closeHealthRuntime(state: HealthRuntimeState): void {
   if (state.closed) return;
   state.closed = true;
+  state.readinessCache = undefined;
   state.controller.abort(new Error("Farm health runtime closed"));
 }
 
@@ -42,7 +50,7 @@ export async function evaluateStartup(
   if (state.startupReport) return state.startupReport;
   if (state.startupPromise) return state.startupPromise;
 
-  const pending = runChecks(options.startupChecks, "startup", state.controller.signal);
+  const pending = runChecks(state, options.startupChecks, "startup");
   state.startupPromise = pending;
   try {
     const report = await pending;
@@ -60,29 +68,51 @@ export async function evaluateReadiness(
   options: ResolvedHealthOptions,
 ): Promise<HealthReport> {
   if (state.closed) return unavailableReport();
+  const cached = state.readinessCache;
+  if (cached && cached.expiresAt > Date.now()) return cached.report;
+  if (state.readinessPromise) return state.readinessPromise;
+
+  const pending = runReadiness(state, options);
+  state.readinessPromise = pending;
+  try {
+    const report = await pending;
+    if (options.cacheMs > 0 && !state.closed) {
+      state.readinessCache = { report, expiresAt: Date.now() + options.cacheMs };
+    }
+    return report;
+  } finally {
+    if (state.readinessPromise === pending) state.readinessPromise = undefined;
+  }
+}
+
+async function runReadiness(
+  state: HealthRuntimeState,
+  options: ResolvedHealthOptions,
+): Promise<HealthReport> {
   const startup = await evaluateStartup(state, options);
   if (startup.status === "unavailable") return startup;
 
-  const readiness = await runChecks(options.checks, "readiness", state.controller.signal);
+  const readiness = await runChecks(state, options.checks, "readiness");
   return mergeReports(startup, readiness);
 }
 
 async function runChecks(
+  state: HealthRuntimeState,
   checks: ResolvedHealthCheck[],
   probe: HealthProbe,
-  runtimeSignal: AbortSignal,
 ): Promise<HealthReport> {
   const results = await Promise.all(
-    checks.map(async (check) => [check.name, await runCheck(check, probe, runtimeSignal)] as const),
+    checks.map(async (check) => [check.name, await runCheck(state, check, probe)] as const),
   );
   return createReport(new Map(results));
 }
 
 async function runCheck(
+  state: HealthRuntimeState,
   definition: ResolvedHealthCheck,
   probe: HealthProbe,
-  runtimeSignal: AbortSignal,
 ): Promise<HealthCheckResult> {
+  const runtimeSignal = state.controller.signal;
   const startedAt = Date.now();
   const controller = new AbortController();
   const abortForRuntime = () => controller.abort(runtimeSignal.reason);
@@ -102,18 +132,30 @@ async function runCheck(
   }, definition.timeoutMs);
   timeout.unref?.();
 
-  const completion = Promise.resolve()
-    .then(() =>
-      definition.check({
-        name: definition.name,
-        probe,
-        signal: controller.signal,
-      }),
-    )
-    .then(
-      (result) => result !== false,
-      () => false,
-    );
+  // A check that ignores its signal keeps running after a timeout. Join that invocation instead of
+  // starting another one, so slow dependencies never accumulate concurrent checks.
+  let completion = state.runningChecks.get(definition);
+  if (!completion) {
+    const started = Promise.resolve()
+      .then(() =>
+        definition.check({
+          name: definition.name,
+          probe,
+          signal: controller.signal,
+        }),
+      )
+      .then(
+        (result) => result !== false,
+        () => false,
+      )
+      .finally(() => {
+        if (state.runningChecks.get(definition) === started) {
+          state.runningChecks.delete(definition);
+        }
+      });
+    state.runningChecks.set(definition, started);
+    completion = started;
+  }
 
   const passed = await Promise.race([completion, interruption]);
   clearTimeout(timeout);

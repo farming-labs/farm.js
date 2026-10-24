@@ -91,6 +91,13 @@ health({
 });
 ```
 
+Readiness requests that arrive together share one run of the checks, and the result is reused for
+`cache` (one second by default) before the checks run again. A check that ignores its signal and is
+still running after a timeout is never started a second time; the next run waits on the same
+invocation instead. A burst of probes, or a public `/health/ready` URL, therefore never multiplies
+the load on the dependency being checked. Set `cache: false` to rerun the checks for each request
+once the shared run settles.
+
 Keep readiness checks cheap and shallow. Check the dependency needed to serve requests, not every
 service reachable from it. Never put a database or provider check in liveness because a shared
 dependency outage should stop traffic, not restart every healthy application process.
@@ -114,7 +121,7 @@ health({
 
 Farm retries failed startup checks when `/health/startup` or `/health/ready` is requested. Once all
 required startup checks pass, that result is latched for the lifetime of the runtime. Readiness then
-runs only the checks in `checks` on each request.
+runs only the checks in `checks`, subject to the readiness cache.
 
 ## Configure the hosting platform
 
@@ -232,9 +239,10 @@ endpoints run.
 
 | Option          | Default                                            | Purpose                                                       |
 | --------------- | -------------------------------------------------- | ------------------------------------------------------------- |
-| `checks`        | `{}`                                               | Named checks evaluated for every readiness request.           |
+| `checks`        | `{}`                                               | Named checks evaluated for readiness.                         |
 | `startupChecks` | `{}`                                               | Named checks retried until required startup work passes once. |
 | `timeout`       | `"1s"`                                             | Default timeout for each check.                               |
+| `cache`         | `"1s"`                                             | How long a readiness result is reused, or `false`.            |
 | `details`       | `false`                                            | Safe response details or a request predicate that enables it. |
 | `paths`         | `/health/live`, `/health/ready`, `/health/startup` | Application-relative endpoint paths.                          |
 
