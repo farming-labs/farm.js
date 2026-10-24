@@ -1,6 +1,7 @@
 import type { LayoutProps, Metadata } from "@farm.js/core";
 import { defineLayoutFonts, localFont } from "@farm.js/core/font";
 import { Databuddy } from "@databuddy/sdk/react";
+import { WebMCPDocsSearch } from "../components/webmcp-docs-search";
 import { SITE_URL } from "../lib/site";
 import "./globals.css";
 
@@ -67,6 +68,7 @@ export default function RootLayout({ children }: LayoutProps) {
         {children}
       </div>
       <Databuddy clientId="0af7dbbd-628a-44c9-8814-df4138a061b0" trackWebVitals={true} />
+      <WebMCPDocsSearch />
     </>
   );
 }
