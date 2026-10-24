@@ -11226,6 +11226,15 @@ export const keyedRowsReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
   }),
 };
 
+export const keyedRowsPlainReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
+  name: "keyed-rows:plain-reorder-hinted",
+  create: (owner) => ({
+    KeyedRows: createKeyedRowsBlockComponentCore(owner, {
+      keyedUpdates: keyedReorderUpdateRuntime,
+    }),
+  }),
+};
+
 export const keyedRowsMapReorderHintedRuntimeFeature: CompilerRuntimeFeature = {
   name: "keyed-rows:map-reorder-hinted",
   create: (owner) => ({

@@ -31,7 +31,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.compiled).toEqual(["Table"]);
     expect(result.optimizations.keyedArraySortHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArraySort");
-    expect(result.code).toContain("keyedRowsReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainReorderHintedRuntimeFeature");
     expect(result.code).toContain("reorderIndexIndependent");
   });
 
@@ -64,7 +64,7 @@ describe("React AOT keyed-array sort hints", () => {
       expect(result.diagnostics).toEqual([]);
       expect(result.optimizations.keyedArraySortHints).toBe(1);
       expect(result.code).toContain("createCompilerKeyedArraySort");
-      expect(result.code).toContain("keyedRowsReorderHintedRuntimeFeature");
+      expect(result.code).toContain("keyedRowsPlainReorderHintedRuntimeFeature");
       expect(result.code).toContain("reorderIndexIndependent");
       await expect(
         transformWithEsbuild(result.code, "/app/KeyedArraySortHints.tsx", {
@@ -94,7 +94,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.optimizations.keyedArrayReorderHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArraySort");
     expect(result.code).toContain("createCompilerKeyedArrayReorder");
-    expect(result.code).toContain("keyedRowsReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainReorderHintedRuntimeFeature");
     expect(result.code).not.toContain("keyedRowsEveryHintedRuntimeFeature");
   });
 
@@ -122,7 +122,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.optimizations.keyedArrayReorderHints).toBe(2);
     expect(result.code).toContain("createCompilerKeyedArraySort");
     expect(result.code).toContain("createCompilerKeyedArrayReorder");
-    expect(result.code).toContain("keyedRowsReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainReorderHintedRuntimeFeature");
   });
 
   it("lowers every step returned from an exact updater block", async () => {
@@ -150,7 +150,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.optimizations.keyedArrayReorderHints).toBe(1);
     expect(result.code.match(/createCompilerKeyedArraySort\(/g)).toHaveLength(2);
     expect(result.code.match(/createCompilerKeyedArrayReorder\(/g)).toHaveLength(1);
-    expect(result.code).toContain("keyedRowsReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainReorderHintedRuntimeFeature");
     await expect(
       transformWithEsbuild(result.code, "/app/KeyedArraySortHints.tsx", {
         loader: "tsx",

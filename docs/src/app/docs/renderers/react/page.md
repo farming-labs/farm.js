@@ -1464,6 +1464,12 @@ Metadata is recorded only when the result is an ordinary native array, the execu
 native `toReversed()` method, and the reorder chain starts at the committed collection. A custom or
 unavailable method therefore keeps its normal behavior and never enters the fast path.
 
+When every compiled keyed-row plan in a component is plain and has no identity, `Set`, or `Map`
+target bindings, reverse and sort hints omit the unused target-update runtime from the bundle.
+Separate map and append updates and complete reconciliation remain available. Components that need
+target bindings, nested host blocks, row conditionals, or combined structural hints retain their
+existing runtime capabilities. No new option is required.
+
 At update time, Farm verifies the committed source token, equal lengths, every source row identity,
 and the exact reversed result before moving the DOM. The runtime leaves one row in place and moves
 the other rows through connected `insertBefore()` operations, the minimum `n - 1` moves for a

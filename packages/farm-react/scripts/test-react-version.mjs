@@ -89,6 +89,7 @@ const testSource = String.raw`
     keyedRowsFilterHintedRuntimeFeature,
     keyedRowsFilterOnlyRuntimeFeature,
     keyedRowsPrependOnlyRuntimeFeature,
+    keyedRowsPlainReorderHintedRuntimeFeature,
     keyedRowsHintedRuntimeFeature,
     keyedRowsStructuralAppendMapHintedRuntimeFeature,
     keyedRowsIdentityRuntimeFeature,
@@ -951,6 +952,59 @@ const testSource = String.raw`
   }
   assert.deepEqual(nestedRecoveryFailures, []);
   delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+
+  assert.equal(createRequire(import.meta.url)("@farm.js/react/compiler-runtime").keyedRowsPlainReorderHintedRuntimeFeature.name, "keyed-rows:plain-reorder-hinted");
+  for (const reactivity of ["hybrid", "static"]) {
+    for (const hydrate of [false, true]) {
+      let update;
+      const PlainReorder = createCompiledComponentWithFeatures({
+        displayName: "CompatibilityPlainReorder", reactivity,
+        initialize: () => [["b", "a", "c"]],
+        render(_props, state, blocks) {
+          const items = () => state[0].get();
+          update = (next) => state[0].set(next);
+          return React.createElement("main", null, React.createElement(blocks.KeyedRows, {
+            id: 0, collectionDependency: 0, dependencies: [0], structureDependencies: [0],
+            reorderIndexIndependent: true, items, rowKey: (item) => item, bindings: [],
+            create: (item) => ({ kind: "element", tag: "input", attributes: [
+              {name: "value", value: item}, {name: "readOnly", value: true},
+            ], styles: [], children: [] }),
+            render: () => React.createElement("div", null, items().map(item => React.createElement("input", {key: item, value: item, readOnly: true}))),
+          }));
+        },
+        bindings: [{kind: "block", id: 0, dependencies: [0]}],
+      }, [keyedRowsPlainReorderHintedRuntimeFeature]);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const tree = React.createElement(React.StrictMode, null, React.createElement(PlainReorder));
+      const errors = [];
+      if (hydrate) container.innerHTML = renderToString(tree);
+      let root;
+      flushSync(() => {
+        root = hydrate ? hydrateRoot(container, tree, {onRecoverableError: error => errors.push(error)}) : createRoot(container);
+        if (!hydrate) root.render(tree);
+      });
+      const nodes = [...container.querySelectorAll("input")];
+      nodes[1].focus(); nodes[1].setSelectionRange(0, 1);
+      try {
+        for (const [next, expected] of [
+          [previous => createCompilerKeyedArrayReorder(previous, previous.toReversed), [nodes[2], nodes[1], nodes[0]]],
+          [previous => createCompilerKeyedArraySort(previous, previous.toSorted), [nodes[1], nodes[0], nodes[2]]],
+          [previous => [previous[2], previous[0], previous[1]], [nodes[2], nodes[1], nodes[0]]],
+        ]) {
+          flushSync(() => update(next));
+          await Promise.resolve(); await Promise.resolve();
+          assert.deepEqual([...container.querySelectorAll("input")], expected);
+          assert.equal(document.activeElement, nodes[1]);
+          assert.deepEqual([nodes[1].selectionStart, nodes[1].selectionEnd], [0, 1]);
+        }
+        assert.deepEqual(errors, []);
+      } finally {
+        flushSync(() => root.unmount());
+        container.remove();
+      }
+    }
+  }
 
   let reverseCompatibilityRows = () => undefined;
   let mapReverseParityCompatibilityRows = () => undefined;
