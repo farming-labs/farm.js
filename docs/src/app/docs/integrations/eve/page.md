@@ -38,7 +38,7 @@ export default defineConfig({
 });
 ```
 
-The key `agent` is a convention and can be renamed. During `farm dev`, Farm starts Eve on an available loopback port and exposes its `/eve` and `/.well-known/workflow` routes through the Farm origin.
+The key `agent` is a convention and can be renamed. During `farm dev`, Farm starts Eve on an available loopback port and exposes its `/eve` and `/.well-known/workflow` routes through the Farm origin. The development proxy refuses cross-site requests to those routes with `403`, so another page open in the browser cannot drive the local Eve process. Same-origin requests, requests without an `Origin` header, and top-level `GET` navigations still pass.
 
 This is the Farm-managed path: omit `origin` and pass runtime options such as `root`, `dev`, and
 `vercel` to the integration. Farm starts or composes the Eve service from that configuration.

@@ -232,10 +232,89 @@ export function applyAgentRuntimeViteProxy(
           target: origin,
           changeOrigin: true,
           ws: input.webSockets === true,
+          bypass: rejectCrossSiteAgentDevRequest,
         },
       },
     },
   };
+}
+
+interface AgentDevProxyRequest {
+  method?: string;
+  url?: string;
+  headers: Record<string, string | string[] | undefined>;
+  socket: { end(data: string): void };
+}
+
+interface AgentDevProxyResponse {
+  statusCode: number;
+  setHeader(name: string, value: string): void;
+  end(body?: string): void;
+}
+
+/**
+ * Vite's proxy checks neither Origin nor Host, and a WebSocket upgrade is not subject to CORS, so
+ * any page the developer visits could otherwise drive the local agent runtime and read its replies.
+ * Only same-origin browser requests, top-level navigations, and non-browser clients get through.
+ *
+ * Vite treats a returned string as "handled" once the response has ended (HTTP) and stops without
+ * touching the socket (WebSocket upgrade, where `response` is undefined), so the 403 is sent here.
+ */
+function rejectCrossSiteAgentDevRequest(
+  request: AgentDevProxyRequest,
+  response: AgentDevProxyResponse | undefined,
+): string | undefined {
+  if (isAllowedAgentDevRequest(request, response === undefined)) return undefined;
+
+  const body = "Cross-site request to the agent runtime was blocked";
+  if (response) {
+    response.statusCode = 403;
+    response.setHeader("content-type", "text/plain; charset=utf-8");
+    response.end(body);
+  } else {
+    request.socket.end(
+      `HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${body.length}\r\n\r\n${body}`,
+    );
+  }
+  return request.url || "/";
+}
+
+function isAllowedAgentDevRequest(request: AgentDevProxyRequest, upgrade: boolean): boolean {
+  const fetchSite = readSingleHeader(request.headers["sec-fetch-site"])?.toLowerCase();
+  const origin = readSingleHeader(request.headers.origin);
+  const method = (request.method || "GET").toUpperCase();
+  // A cross-site link to an agent route (an OAuth callback, for example) is a plain navigation
+  // whose response the linking page cannot read.
+  const navigation =
+    !upgrade &&
+    (method === "GET" || method === "HEAD") &&
+    readSingleHeader(request.headers["sec-fetch-mode"])?.toLowerCase() === "navigate";
+
+  if (navigation) return true;
+  if (fetchSite === "cross-site") return false;
+  if (origin === undefined) return true;
+
+  let originHost: string;
+  try {
+    const parsed = new URL(origin);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+    originHost = parsed.host.toLowerCase();
+  } catch {
+    // Includes the opaque "null" origin of sandboxed frames and file: pages.
+    return false;
+  }
+
+  // `farm preview` forwards to the dev server with a localhost Host and the public preview host in
+  // X-Forwarded-Host. A browser cannot set that header on a cross-site WebSocket or simple request.
+  const hosts = [
+    readSingleHeader(request.headers.host),
+    readSingleHeader(request.headers["x-forwarded-host"])?.split(",")[0],
+  ];
+  return hosts.some((host) => host?.trim().toLowerCase() === originHost);
+}
+
+function readSingleHeader(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 export async function proxyAgentRuntimeRequest(
@@ -559,7 +638,14 @@ function createProxyRequestHeaders(input: Headers, incomingUrl: URL): Headers {
   // incomingUrl is the framework's trusted resolution of this request - a
   // legitimately proxied value is already folded into it when trustProxy is
   // configured. Preserving client-supplied forwarded headers here would hand
-  // the upstream attacker-controlled authority, so they are always replaced.
+  // the upstream attacker-controlled authority or client address, so every
+  // forwarding header is dropped and only Farm's own values are set.
+  const forwardingHeaders = ["x-real-ip", "true-client-ip"];
+  for (const name of headers.keys()) {
+    if (name === "forwarded" || name.startsWith("x-forwarded-")) forwardingHeaders.push(name);
+  }
+  // Deleted after iterating because Headers iteration is live.
+  for (const name of forwardingHeaders) headers.delete(name);
   headers.set("x-forwarded-host", incomingUrl.host);
   headers.set("x-forwarded-proto", incomingUrl.protocol.replace(":", ""));
   return headers;
