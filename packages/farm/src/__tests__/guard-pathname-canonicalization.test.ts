@@ -1,13 +1,19 @@
 // @vitest-environment node
+import fs from "node:fs/promises";
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
-import { describe, expect, it } from "vitest";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import { matchAPIRoute } from "../api/route-pattern";
 import { defineIntegration, dispatchIntegrationRequest } from "../integrations";
 import { MiddlewareManager } from "../middleware/manager";
 import { createProductionMiddlewareRunner } from "../middleware/production-runtime";
 import type { MiddlewareMatcher } from "../middleware/types";
-import { generateRuntimePathMatcherSource } from "../nitro/universal-build";
+import {
+  discoverMiddlewareRoutes,
+  generateRuntimePathMatcherSource,
+} from "../nitro/universal-build";
 import { resolveFarmRequestURL } from "../server/request";
 import type { RouteSegment } from "../types";
 import { matchRoute } from "../utils";
@@ -438,5 +444,94 @@ describe("integration guards take the middleware matcher syntax", () => {
     expect((await runIntegrationGuard("/dashboard(.*)", "/console/fr/dashboard", both)).ran).toBe(
       true,
     );
+  });
+});
+
+describe("optional catch-all and wildcard matchers", () => {
+  // `[[...slug]]` compiled as one required segment, so a guard on it skipped
+  // the bare `/docs` page the optional catch-all serves.
+  it.each([
+    ["/docs/[[...slug]]", "/docs"],
+    ["/docs/[[...slug]]", "/docs/a"],
+    ["/docs/[[...slug]]", "/docs/a/b"],
+    ["/admin*", "/admin"],
+    ["/admin*", "/admin-panel"],
+    ["/files/*.pdf", "/files/report.pdf"],
+  ])("%s guards %s", async (matcher, pathname) => {
+    expect(await collectGuards(matcher, pathname)).toEqual({
+      devMiddleware: true,
+      productionMiddleware: true,
+      integration: true,
+    });
+  });
+
+  it.each([
+    ["/docs/[[...slug]]", "/docsx"],
+    ["/admin*", "/admin/users"],
+    ["/admin*", "/xadmin"],
+    ["/files/*.pdf", "/files/report.txt"],
+  ])("%s still does not guard %s", async (matcher, pathname) => {
+    expect(await collectGuards(matcher, pathname)).toEqual({
+      devMiddleware: false,
+      productionMiddleware: false,
+      integration: false,
+    });
+  });
+
+  it("captures the optional catch-all under its own name", async () => {
+    expect((await runProductionGuard("/docs/[[...slug]]", "/docs/a/b")).params).toEqual({
+      slug: "a/b",
+    });
+    expect((await runDevGuard("/docs/[[...slug]]", "/docs")).params).toEqual({ slug: "" });
+  });
+
+  it("runs docs/[[...slug]]/middleware.ts for every path its page serves", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-optional-catch-all-"));
+    const appDir = path.join(root, "src", "app");
+    await fs.mkdir(path.join(appDir, "docs", "[[...slug]]"), { recursive: true });
+    await fs.writeFile(path.join(appDir, "docs", "[[...slug]]", "middleware.ts"), "export {};\n");
+
+    try {
+      const ran: string[] = [];
+      const handler = async (ctx: { pathname: string }, next: () => Promise<void>) => {
+        ran.push(ctx.pathname);
+        await next();
+      };
+      const manager = new MiddlewareManager(appDir, {
+        environments: {
+          ssr: { runner: { import: vi.fn().mockResolvedValue({ default: handler }) } },
+        },
+      } as never);
+      await manager.discover();
+      const production = createProductionMiddlewareRunner({
+        modules: (await discoverMiddlewareRoutes(appDir)).map((entry) => ({
+          path: entry.path,
+          module: { default: handler },
+        })),
+      });
+
+      for (const [pathname, guarded] of [
+        ["/docs", true],
+        ["/docs/", true],
+        ["/docs/intro", true],
+        ["/docs/a/b", true],
+        ["/docsx", false],
+      ] as const) {
+        expect(prodPageMatches("/docs/[[...slug]]", pathname)).toBe(guarded);
+        ran.length = 0;
+        const req = createRequest(pathname);
+        await manager.execute(req, new ServerResponse(req));
+        const devRan = ran.length > 0;
+        ran.length = 0;
+        await production(new Request(`https://farm.test${pathname}`));
+        expect({ pathname, dev: devRan, production: ran.length > 0 }).toEqual({
+          pathname,
+          dev: guarded,
+          production: guarded,
+        });
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 });

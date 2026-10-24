@@ -105,7 +105,7 @@ function toMatcherList(matcher: MiddlewareConfig["matcher"]): MiddlewareMatcher[
 }
 
 function escapeRegex(value: string): string {
-  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+  return value.replace(/[|\\{}()[\]^$*+?.]/g, "\\$&");
 }
 
 function parseColonParam(segment: string): { name: string; modifier?: string } {
@@ -146,6 +146,14 @@ function compilePathPattern(pattern: string, trailingSlash = false): CompiledPat
         return "/(.+)";
       }
       return "/([^/]+)";
+    }
+
+    // `[[...slug]]` is an optional catch-all: like `[...slug]`, it also meets
+    // the bare parent path. Checked first, or the `[` branch below reads it as
+    // one required segment named `[...slug]`.
+    if (segment.startsWith("[[...") && segment.endsWith("]]")) {
+      params.push(segment.slice(5, -2));
+      return "(?:/(.*))?";
     }
 
     if (segment.startsWith("[...") && segment.endsWith("]")) {
