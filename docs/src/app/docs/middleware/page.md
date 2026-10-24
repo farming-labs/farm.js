@@ -55,6 +55,11 @@ Parallel route slots work the same way: `src/app/dashboard/@team/middleware.ts` 
 `/dashboard` and the URLs below it, because that is where the slot renders. It guards the whole
 request, not only the slot.
 
+An intercepting folder guards the URL it intercepts: `src/app/feed/@modal/(.)photo/middleware.ts`
+runs for `/feed/photo` and below, the same URLs as `src/app/feed/photo/middleware.ts`. A
+`src/app/_private/page.tsx` is routed at `/_private`, so `src/app/_private/middleware.ts` guards it.
+Middleware in a dot-prefixed folder never runs.
+
 **src/app/dashboard/middleware.ts**
 
 ```ts

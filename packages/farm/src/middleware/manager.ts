@@ -176,7 +176,8 @@ export class MiddlewareManager {
     // Recursively check subdirectories
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
-      if (entry.isDirectory() && !entry.name.startsWith(".") && !entry.name.startsWith("_")) {
+      // `_private` folders still route their pages, so their middleware has to guard them.
+      if (entry.isDirectory() && !entry.name.startsWith(".")) {
         await this.discoverInDirectory(
           path.join(dir, entry.name),
           appendMiddlewareRoutePath(routePath, entry.name),

@@ -76,7 +76,8 @@ export function createRouteSlotContainerId(name: string, ownerPattern: string): 
   return `__farm_slot_${name}_${owner || "root"}__`;
 }
 
-function parseInterceptionMarker(
+/** The `(.)`, `(..)`, `(..)(..)`, or `(...)` prefix of an intercepting folder, relative to its slot's owner. */
+export function parseInterceptionMarker(
   segment: string | undefined,
 ): { up: number; root?: boolean; remainder: string } | null {
   if (!segment) return null;

@@ -84,14 +84,57 @@ describe("RSC file middleware discovery", () => {
     expect(modules.map((entry) => entry.path)).toEqual(["/dashboard", "/dashboard/settings"]);
   });
 
-  it("ignores middleware in private and dot folders, like core", () => {
+  it("guards _private folders, whose pages are routed, and ignores dot folders, like core", () => {
     const modules = buildMiddlewareModules({
       "/_components/middleware.ts": { default: () => {} },
       "/dashboard/_lib/middleware.ts": { default: () => {} },
       "/.cache/middleware.ts": { default: () => {} },
       "/dashboard/middleware.ts": { default: () => {} },
     });
-    expect(modules.map((entry) => entry.path)).toEqual(["/dashboard"]);
+    expect(modules.map((entry) => entry.path)).toEqual([
+      "/_components",
+      "/dashboard",
+      "/dashboard/_lib",
+    ]);
+  });
+
+  it("maps intercepting folders to the URL they intercept, like core", () => {
+    const modules = buildMiddlewareModules({
+      "/feed/@modal/(.)photo/middleware.ts": { default: () => {} },
+      "/feed/list/@modal/(..)photo/middleware.ts": { default: () => {} },
+      "/a/b/c/@modal/(..)(..)photo/middleware.ts": { default: () => {} },
+      "/feed/@modal/(...)photo/middleware.ts": { default: () => {} },
+    });
+    expect(modules.map((entry) => entry.path).sort()).toEqual([
+      "/a/photo",
+      "/feed/photo",
+      "/feed/photo",
+      "/photo",
+    ]);
+  });
+
+  it("does not route pages inside parallel route slots, which RSC does not render", () => {
+    const entry = generateRscEntry(context);
+    const start = entry.indexOf("const pageRoutes = ");
+    const source = entry.slice(start, entry.indexOf(".sort(", start));
+    const pageRoutes = new Function(
+      "pages",
+      "parseRoutePath",
+      "getRoutePatternSpecificity",
+      `${extractFunction(entry, "filePathToRoute")}\nreturn ${source.slice("const pageRoutes = ".length)};`,
+    )(
+      {
+        "/feed/page.tsx": {},
+        "/feed/@modal/(.)photo/[id]/page.tsx": {},
+        "/_private/page.tsx": {},
+      },
+      () => ({ segments: [] }),
+      () => 0,
+    ) as Array<{ filePath: string }>;
+    expect(pageRoutes.map((route) => route.filePath)).toEqual([
+      "/feed/page.tsx",
+      "/_private/page.tsx",
+    ]);
   });
 
   it("runs root middleware before nested middleware", async () => {

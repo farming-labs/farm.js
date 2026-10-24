@@ -1025,7 +1025,8 @@ export async function discoverMiddlewareRoutes(
     }
 
     for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name.startsWith("_")) {
+      // `_private` folders still route their pages, so their middleware has to guard them.
+      if (!entry.isDirectory() || entry.name.startsWith(".")) {
         continue;
       }
 
