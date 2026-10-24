@@ -8,6 +8,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin, ViteDevServer } from "vite";
 import { resolveFarmI18nConfig } from "../i18n/config";
 import { MiddlewareManager } from "./manager";
+import type { FarmMiddlewareConfig } from "./types";
 
 export interface FarmMiddlewarePluginOptions {
   /** Source directory (default: `src`). */
@@ -19,6 +20,8 @@ export interface FarmMiddlewarePluginOptions {
    * value so `src/app/api/**` middleware guards it.
    */
   apiBasePath?: string;
+  /** Config middleware (`defineConfig({ middleware })`), run before `middleware.ts` files. */
+  middleware?: FarmMiddlewareConfig;
   /** Enable debug logging. */
   debug?: boolean;
 }
@@ -44,7 +47,7 @@ export function farmMiddlewarePlugin(options: FarmMiddlewarePluginOptions = {}):
     manager = new MiddlewareManager(
       getMiddlewareAppDirectory(server.config.root, srcDir),
       server,
-      undefined,
+      options.middleware,
       i18n,
       undefined,
       options.apiBasePath,
