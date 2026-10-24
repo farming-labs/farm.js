@@ -2142,6 +2142,8 @@ export const listTodos = defineWebMCPTool({
       );
       await build(config, { root, preset: "node-server" });
       const serverDir = path.join(root, ".farm", ".output", "server");
+      // Reading WebMCP tools is build work: the server never loads the parser's native binary.
+      await expect(fs.stat(path.join(serverDir, "node_modules", "rolldown"))).rejects.toThrow();
       const linked = { FARMJS_API_KEY: key, FARMJS_API_URL: "http://127.0.0.1:9" };
 
       // Not linked to Farm Infra: Farm serves nothing there.

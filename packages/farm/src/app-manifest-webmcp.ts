@@ -7,9 +7,9 @@
  * runtime (`z.toJSONSchema(...)`) is reported as such, without guessing.
  */
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import fg from "fast-glob";
-import { parseAst } from "rolldown/parseAst";
 
 export interface FarmAppManifestWebMCPTool {
   name: string;
@@ -43,6 +43,8 @@ const LANGS: Record<string, "ts" | "tsx" | "js" | "jsx"> = {
 };
 
 type Node = { type: string; [key: string]: any };
+
+let parseAst: (typeof import("rolldown/parseAst"))["parseAst"] | undefined;
 
 /** A literal JSON value, or NOT_STATIC for anything computed. */
 function staticValue(node: Node | null | undefined): unknown {
@@ -145,6 +147,13 @@ export function findFarmWebMCPTools(
 ): FarmAppManifestWebMCPTool[] {
   if (!code.includes(WEBMCP_CLIENT)) return [];
   const lang = LANGS[path.extname(filename).slice(1)] ?? "tsx";
+  // Required on the first module that imports the client rather than imported, so loading
+  // core (a production server does, through farm.config) never loads the native parser.
+  parseAst ??= (
+    createRequire(typeof __filename === "string" ? __filename : import.meta.url)(
+      "rolldown/parseAst",
+    ) as typeof import("rolldown/parseAst")
+  ).parseAst;
   let program: Node;
   try {
     program = parseAst(code, { lang }) as unknown as Node;
