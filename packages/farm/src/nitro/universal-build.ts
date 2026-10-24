@@ -85,6 +85,7 @@ import {
   generateFarmDocsAdapterClientRuntime,
   getFarmDocsAdapterConfigModule,
 } from "../docs/adapter-client";
+import { farmDocsClientConfigPlugin } from "../docs/client-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "../docs/fonts";
 import { compileFarmDocsManifest } from "../docs/compiler";
 import { compileFarmDocsAdapterEdgeManifest } from "../docs/adapter";
@@ -1927,6 +1928,9 @@ async function buildClient(
         ...(rendererVitePlugins as any[]),
         ...(config.vite.plugins || []),
         farmServerOnlyEntriesPlugin(),
+        farmDocsClientConfigPlugin(
+          adapterOwnsDocsRuntime ? getFarmDocsAdapterConfigModule(config.docs) : undefined,
+        ),
         // Plugin to redirect @farm.js/core imports to client-only exports
         {
           name: "farm-client-only-imports",

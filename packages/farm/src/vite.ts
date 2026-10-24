@@ -152,6 +152,7 @@ import {
   generateFarmDocsAdapterClientRuntime,
   getFarmDocsAdapterConfigModule,
 } from "./docs/adapter-client";
+import { isFarmDocsClientConfigModule, redactFarmDocsClientConfig } from "./docs/client-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "./docs/fonts";
 import {
   createFarmNodeRequestAbortSignal,
@@ -3350,6 +3351,14 @@ export const manifest = getManifest();
     },
 
     async transform(code, id, transformOptions) {
+      if (!transformOptions?.ssr) {
+        // The docs config module reaches the browser for adapter hydration: without credentials.
+        const docsConfigModule = getFarmDocsAdapterConfigModule(farmApp?.getConfig()?.docs);
+        if (isFarmDocsClientConfigModule(id, docsConfigModule)) {
+          const redacted = redactFarmDocsClientConfig(code, id.split("?")[0]);
+          if (redacted !== null) return { code: redacted, map: null };
+        }
+      }
       if (!transformOptions?.ssr) {
         const currentConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
         if (currentConfig.experimental?.serverActions !== true || !serverFnTransformActive) {

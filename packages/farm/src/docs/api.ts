@@ -5,6 +5,7 @@ import type {
   DocsSitemapPageInput,
 } from "@farming-labs/docs";
 import path from "node:path";
+import { isSecretDocsConfigKey } from "./config-secrets";
 import { docsEngine, loadFarmDocsEngine } from "./engine";
 import { resolveDocsConfig } from "../config";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./types";
@@ -440,16 +441,6 @@ function buildAgentSpec(context: FarmDocsAPIContext, request: Request) {
 }
 
 const REDACTED_DOCS_CONFIG_VALUE = "[redacted]";
-
-/**
- * Same rule as the docs engine's config map: scalars under apiKey, token, secret, password,
- * authorization, or credential keys are server-owned, while `*Env` names stay visible.
- */
-function isSecretDocsConfigKey(key: string): boolean {
-  const normalized = key.replace(/[-_]/g, "").toLowerCase();
-  if (!normalized || normalized.endsWith("env")) return false;
-  return /apikey|token|secret|password|authorization|credential/.test(normalized);
-}
 
 /** Copy a config value with server-owned credentials replaced. `headers` maps are always credentials. */
 function redactDocsConfigValue(value: unknown, key: string, inHeaders: boolean): unknown {
