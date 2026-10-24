@@ -48,9 +48,12 @@ export {
   addMetadataImageReference,
   addMetadataMarkdownAlternate,
   mergeMetadata,
+  mergeModuleViewport,
   renderMetadataHead,
+  renderViewportHead,
   resolveFarmNotFoundMetadata,
 } from "../metadata";
+export { ensureFarmDocumentMeta } from "../server/full-document";
 export { createFarmMetadataRouteResponse } from "../metadata-route";
 export { generateNativeMCPPluginSource } from "./native-mcp-source";
 export {

@@ -65,7 +65,9 @@ import {
   addMetadataImageReference,
   addMetadataMarkdownAlternate,
   mergeMetadata,
+  mergeModuleViewport,
   renderMetadataHead,
+  renderViewportHead,
   resolveFarmNotFoundMetadata,
   type FarmMetadataImageReference,
   type MetadataImageKind,
@@ -2118,6 +2120,9 @@ export class ServerRenderer {
           }),
         );
       }
+      metadata = await mergeModuleViewport(metadata, layoutModule, {
+        params: options.pageProps.params,
+      });
     }
 
     metadata = mergeMetadata(metadata, (options.routeModule as any).metadata);
@@ -2130,6 +2135,13 @@ export class ServerRenderer {
         await (options.routeModule as any).generateMetadata(options.pageProps),
       );
     }
+    metadata = await mergeModuleViewport(
+      metadata,
+      options.skipGeneratedRouteMetadata
+        ? { viewport: (options.routeModule as any).viewport }
+        : (options.routeModule as any),
+      options.pageProps,
+    );
 
     if (!metadata.manifest) {
       const manifestMatch = this.routeManager.getMatchingMetadataRoute(
@@ -2777,6 +2789,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         tags: metaTags,
         hasFavicon,
         hasExplicitTitle,
+        viewport: viewportTags,
       } = renderMetadataHead((req as any).__FARM_METADATA__, {
         pathname: getFarmMetadataPathname(req),
         jsonLd: this.config.agent?.jsonLd,
@@ -2817,6 +2830,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           : rendererHead;
         html = composeFarmFullDocument(documentHtml, {
           fallbackIcon: !hasFavicon,
+          viewport: viewportTags,
           htmlAttributes: `${
             i18nSnapshot
               ? ` lang="${escapeHtmlAttribute(i18nSnapshot.locale)}" dir="${escapeHtmlAttribute(i18nSnapshot.direction)}"`
@@ -2854,7 +2868,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
 <head>
   ${themeDocument.head}
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${viewportTags}
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">
   ${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   ${documentTitleTag}${metaTags}${alternateTags}${rendererHead ? `\n  ${rendererHead}` : ""}
@@ -3112,6 +3126,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         title,
         tags: metaTags,
         hasFavicon,
+        viewport: viewportTags,
       } = renderMetadataHead((req as any).__FARM_METADATA__, {
         pathname: getFarmMetadataPathname(req),
         jsonLd: this.config.agent?.jsonLd,
@@ -3173,7 +3188,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
 <head>
   ${themeDocument.head}
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${viewportTags}
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">
   ${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   <title>${title}</title>${metaTags}${i18nAlternateTags}
@@ -3650,6 +3665,8 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
       getFarmTheme(),
     );
     const rendererHydrationScript = this.rendererRuntime.generateHydrationScript?.() || "";
+    // The route metadata, when the caller has it, also carries the merged `viewport` exports.
+    const viewportTags = renderViewportHead((alternates.metadata as Record<string, any>)?.viewport);
 
     // A layout that returns its own full `<html>` document must not be nested
     // inside this shell (that yields invalid nested `<html>`/`<head>`/`<body>`).
@@ -3661,6 +3678,7 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
         metadataHead ? removeFarmDocumentTitles(fullDocument) : fullDocument,
         {
           fallbackIcon: !metadataHead,
+          viewport: viewportTags,
           htmlAttributes: `${
             i18nSnapshot
               ? ` lang="${escapeHtmlAttribute(i18nSnapshot.locale)}" dir="${escapeHtmlAttribute(i18nSnapshot.direction)}"`
@@ -3696,7 +3714,7 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
 <head>
   ${themeDocument.head}
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${viewportTags}
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(this.getDeploymentId())}">
   ${metadataHead ?? '<link rel="icon" href="data:,">\n  <title>Farm.js App</title>'}${alternateLinks}
   ${fontHead}

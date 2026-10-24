@@ -1,4 +1,4 @@
-import type { Metadata } from "./types";
+import type { Metadata, Viewport } from "./types";
 import type { FarmAgentJsonLd } from "./agent-config";
 import { renderFarmAgentJsonLd, serializeJsonLd } from "./agent-json-ld";
 
@@ -19,6 +19,8 @@ export interface RenderedMetadataHead {
   hasFavicon: boolean;
   /** False when the title is the framework fallback rather than configured. */
   hasExplicitTitle: boolean;
+  /** The viewport tag, then any theme-color and color-scheme tags. */
+  viewport: string;
 }
 
 /**
@@ -49,6 +51,7 @@ export async function resolveFarmNotFoundMetadata(
     if (typeof layout.generateMetadata === "function") {
       metadata = mergeMetadata(metadata, await layout.generateMetadata({ params: {} }));
     }
+    metadata = await mergeModuleViewport(metadata, layout, { params: {} });
   }
   // The page's own metadata is merged onto the layouts in one step, so a layout title
   // template wraps whichever title applies: the page's, or the 404 default.
@@ -62,6 +65,7 @@ export async function resolveFarmNotFoundMetadata(
       own = mergeMetadata(own, generated);
       if (generated?.title !== undefined) latestTitle = generated.title;
     }
+    own = await mergeModuleViewport(own, notFoundModule, { params: {}, searchParams: {} });
   }
   // Combining into `own` turns `{ absolute }` into `{ default }`, which the layouts' template
   // would then wrap, so an absolute title goes on as written.
@@ -88,7 +92,88 @@ export function mergeMetadata(
     alternates: mergeNestedMetadata((base as any).alternates, (next as any).alternates),
     icons: mergeNestedMetadata((base as any).icons, (next as any).icons),
     verification: mergeNestedMetadata(base.verification, next.verification),
+    viewport: mergeNestedMetadata(base.viewport, next.viewport),
   };
+}
+
+/**
+ * Merge a layout's or page's `viewport` export and `generateViewport()` result onto the metadata
+ * collected so far, as Next.js does: each module overrides the keys it sets.
+ */
+export async function mergeModuleViewport(
+  metadata: MetadataRecord,
+  module: Record<string, any> | null | undefined,
+  props: unknown,
+): Promise<MetadataRecord> {
+  let merged = metadata;
+  if (isRecord(module?.viewport)) {
+    merged = mergeMetadata(merged, { viewport: module.viewport });
+  }
+  if (typeof module?.generateViewport === "function") {
+    const generated = await module.generateViewport(props);
+    if (isRecord(generated)) merged = mergeMetadata(merged, { viewport: generated });
+  }
+  return merged;
+}
+
+const DEFAULT_VIEWPORT: Viewport = { width: "device-width", initialScale: 1 };
+const VIEWPORT_CONTENT_KEYS = [
+  ["width", "width"],
+  ["height", "height"],
+  ["initialScale", "initial-scale"],
+  ["minimumScale", "minimum-scale"],
+  ["maximumScale", "maximum-scale"],
+  ["userScalable", "user-scalable"],
+  ["viewportFit", "viewport-fit"],
+  ["interactiveWidget", "interactive-widget"],
+] as const;
+
+/**
+ * The viewport tag Next.js renders: the default `width=device-width, initial-scale=1` with the
+ * merged `viewport` exports over it, plus `theme-color` and `color-scheme` tags when set. The tags
+ * carry FARM_METADATA_ATTRIBUTE, so client navigation replaces them but never a viewport tag the
+ * app wrote into its own document.
+ */
+export function renderViewportHead(viewport: unknown): string {
+  const marker = ` ${FARM_METADATA_ATTRIBUTE}`;
+  if (typeof viewport === "string") {
+    return `<meta name="viewport" content="${escapeAttribute(viewport)}"${marker}>`;
+  }
+  const resolved: Record<string, unknown> = {
+    ...DEFAULT_VIEWPORT,
+    ...(isRecord(viewport) ? viewport : {}),
+  };
+  const content = VIEWPORT_CONTENT_KEYS.flatMap(([key, name]) => {
+    const value = resolved[key];
+    if (value === undefined || value === null || value === "") return [];
+    if (typeof value === "boolean") return [`${name}=${value ? "yes" : "no"}`];
+    return [`${name}=${String(value)}`];
+  }).join(", ");
+  const tags = content
+    ? [`<meta name="viewport" content="${escapeAttribute(content)}"${marker}>`]
+    : [];
+
+  const themeColors = Array.isArray(resolved.themeColor)
+    ? resolved.themeColor
+    : resolved.themeColor === undefined
+      ? []
+      : [resolved.themeColor];
+  for (const entry of themeColors) {
+    const color = typeof entry === "string" ? entry : isRecord(entry) ? entry.color : undefined;
+    const content = normalizeContent(color);
+    if (!content) continue;
+    const media = isRecord(entry) ? normalizeContent(entry.media) : undefined;
+    tags.push(
+      `<meta name="theme-color" content="${escapeAttribute(content)}"${
+        media ? ` media="${escapeAttribute(media)}"` : ""
+      }${marker}>`,
+    );
+  }
+  const colorScheme = normalizeContent(resolved.colorScheme);
+  if (colorScheme) {
+    tags.push(`<meta name="color-scheme" content="${escapeAttribute(colorScheme)}"${marker}>`);
+  }
+  return tags.join("\n  ");
 }
 
 function mergeMetadataTitle(base: Metadata["title"], next: Metadata["title"]): Metadata["title"] {
@@ -319,6 +404,7 @@ export function renderMetadataHead(
     tags: tags.length > 0 ? `\n  ${tags.join("\n  ")}` : "",
     hasFavicon,
     hasExplicitTitle: Boolean(explicitTitle),
+    viewport: renderViewportHead(resolvedMetadata.viewport),
   };
 }
 

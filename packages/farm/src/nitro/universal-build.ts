@@ -5709,6 +5709,9 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   mergeRouteRenderingDirectiveConfig,
   manageFarmLinkHeaderPreloads,
   mergeMetadata,
+  mergeModuleViewport,
+  ensureFarmDocumentMeta,
+  renderViewportHead,
   matchesFarmIfNoneMatch,
   normalizeRevalidatePath,
   reportFarmPreloadWarnings,
@@ -8753,6 +8756,9 @@ async function handleFarmRequestInContext(
               await layout.module.generateMetadata({ params: pageProps.params }),
             );
           }
+          mergedMetadata = await mergeModuleViewport(mergedMetadata, layout.module, {
+            params: pageProps.params,
+          });
         }
         mergedMetadata = mergeMetadata(mergedMetadata, pageMetadata);
         if (!routeStateRejected && typeof route.module.generateMetadata === "function") {
@@ -8761,6 +8767,11 @@ async function handleFarmRequestInContext(
             await route.module.generateMetadata(pageProps),
           );
         }
+        mergedMetadata = await mergeModuleViewport(
+          mergedMetadata,
+          routeStateRejected ? { viewport: route.module.viewport } : route.module,
+          pageProps,
+        );
 
         if (!mergedMetadata.manifest) {
           const manifestMatch = getMatchingApplicationMetadataRoute(routePathname, "manifest");
@@ -8808,6 +8819,7 @@ async function handleFarmRequestInContext(
         const title = renderedMetadata.title;
         const metaTags = renderedMetadata.tags;
         const hasFavicon = renderedMetadata.hasFavicon;
+        const viewportTags = renderedMetadata.viewport;
 
         const hasPrivateRequestHeaders = hasPrivateFarmRequestHeaders(
           request,
@@ -8859,7 +8871,7 @@ async function handleFarmRequestInContext(
           const streamPrefix = '<!DOCTYPE html>\\n<html lang="en">\\n<head>\\n' +
             farmThemeDocument.head + '\\n' +
             '  <meta charset="utf-8">\\n' +
-            '  <meta name="viewport" content="width=device-width, initial-scale=1">\\n' +
+            '  ' + viewportTags + '\\n' +
             (hasFavicon ? '' : '  <link rel="icon" href="data:,">\\n') +
             '  <title>' + title + '</title>' + metaTags + '\\n' +
             '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n' +
@@ -8990,6 +9002,9 @@ async function handleFarmRequestInContext(
                 '  <script type="module" src="/__farm_client_js_src__"></script>\\n</body>',
             );
           
+          // Last, so the charset (and the viewport, unless the layout wrote one) open the head.
+          fullHtml = ensureFarmDocumentMeta(fullHtml, viewportTags);
+
           // Add DOCTYPE if not present
           if (!fullHtml.trim().startsWith('<!DOCTYPE')) {
             fullHtml = '<!DOCTYPE html>\\n' + fullHtml;
@@ -9000,7 +9015,7 @@ async function handleFarmRequestInContext(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  \${viewportTags}
   \${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   \${suppressDefaultTitle ? "" : "<title>" + title + "</title>"}\${metaTags}\${rendererHead ? "\\n  " + rendererHead : ""}
   <link rel="stylesheet" href="/__farm_client_css_href__">
@@ -9298,6 +9313,7 @@ async function handleFarmRequestInContext(
           () => '  ' + renderFarmClientBootstrapScript() + '\\n' +
             '  <script type="module" src="/__farm_client_js_src__"></script>\\n</body>',
         );
+      fullHtml = ensureFarmDocumentMeta(fullHtml, notFoundMetadata.viewport);
       if (!fullHtml.trim().startsWith('<!DOCTYPE')) {
         fullHtml = '<!DOCTYPE html>\\n' + fullHtml;
       }
@@ -9306,7 +9322,7 @@ async function handleFarmRequestInContext(
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  \${notFoundMetadata.viewport}
   \${notFoundMetadata.hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   <link rel="stylesheet" href="/__farm_client_css_href__">
   <title>\${notFoundMetadata.title}</title>\${notFoundMetadata.tags}

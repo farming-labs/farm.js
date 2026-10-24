@@ -538,6 +538,8 @@ export interface RouteModule<TRoute extends FarmRoutePropsTarget = FarmRouteProp
   generateStaticParams?: GenerateStaticParams<TRoute>;
   metadata?: Metadata & Record<string, any>;
   generateMetadata?: (props: MetadataProps<TRoute>) => Promise<Metadata> | Metadata;
+  viewport?: Viewport;
+  generateViewport?: (props: MetadataProps<TRoute>) => Promise<Viewport> | Viewport;
 }
 
 /** A value accepted for one static route parameter. */
@@ -588,10 +590,36 @@ export interface LayoutModule<TRoute extends FarmRoutePropsTarget = FarmRoutePro
   maxDuration?: FarmRouteMaxDuration;
   metadata?: Metadata & Record<string, any>;
   generateMetadata?: (props: LayoutMetadataProps<TRoute>) => Promise<Metadata> | Metadata;
+  viewport?: Viewport;
+  generateViewport?: (props: LayoutMetadataProps<TRoute>) => Promise<Viewport> | Viewport;
 }
 
 /** A schema.org JSON-LD object, such as `{ "@context": "https://schema.org", "@type": "Article" }`. */
 export type MetadataJsonLd = object;
+
+/** A `theme-color` entry, optionally for one `prefers-color-scheme` media query. */
+export interface ThemeColorDescriptor {
+  color: string;
+  media?: string;
+}
+
+/**
+ * The `viewport` export of a layout or page, and the return value of `generateViewport()`, as in
+ * Next.js. Layouts and the page merge from root to page over the default
+ * `width=device-width, initial-scale=1`.
+ */
+export interface Viewport {
+  width?: string | number;
+  height?: string | number;
+  initialScale?: number;
+  minimumScale?: number;
+  maximumScale?: number;
+  userScalable?: boolean;
+  viewportFit?: "auto" | "cover" | "contain";
+  interactiveWidget?: "resizes-visual" | "resizes-content" | "overlays-content";
+  themeColor?: string | ThemeColorDescriptor | ThemeColorDescriptor[];
+  colorScheme?: string;
+}
 
 export interface Metadata {
   metadataBase?: string | URL;

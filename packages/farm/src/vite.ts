@@ -185,7 +185,7 @@ import {
   parseFarmLayoutChainHeader,
 } from "./navigation/render-plan";
 import { resolveFarmPageDataFailure } from "./navigation/page-data-error";
-import { addMetadataMarkdownAlternate, mergeMetadata } from "./metadata";
+import { addMetadataMarkdownAlternate, mergeMetadata, mergeModuleViewport } from "./metadata";
 import { FARM_CONFIG_REWRITES_PLUGIN_NAME } from "./plugins/rewrites";
 import { isFarmPreviewDeploymentEnvironment } from "./deployment-environment";
 import { FARM_PREVIEW_ROBOTS_TAG } from "./preview-noindex";
@@ -2779,6 +2779,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                       await (layoutModule as any).generateMetadata({ params: routeProps.params }),
                     );
                   }
+                  mergedMetadata = await mergeModuleViewport(mergedMetadata, layoutModule, {
+                    params: routeProps.params,
+                  });
                 }
                 mergedMetadata = mergeMetadata(mergedMetadata, (routeModule as any).metadata);
                 if (typeof (routeModule as any).generateMetadata === "function") {
@@ -2787,6 +2790,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     await (routeModule as any).generateMetadata(routeProps),
                   );
                 }
+                mergedMetadata = await mergeModuleViewport(mergedMetadata, routeModule, routeProps);
                 mergedMetadata = addMetadataMarkdownAlternate(
                   mergedMetadata,
                   getFarmMarkdownAlternatePath(farmApp.getConfig().md, targetRequestUrl.pathname),
