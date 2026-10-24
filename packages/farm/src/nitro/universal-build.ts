@@ -5281,10 +5281,10 @@ function generateVirtualEntryCode(
     !applicationMetadataRoutes.some(
       (metadata) => metadata.kind === "robots" && metadata.pattern === "/",
     );
-  // agent.aiCatalog lists MCP servers, which only @farm.js/mcp mounts.
-  const servesAiCatalog =
-    config.agent?.aiCatalog !== false &&
-    (config.plugins || []).some((plugin) => plugin.name === "farm:api-mcp");
+  // agent.aiCatalog lists the MCP servers @farm.js/mcp mounts and those registered with
+  // registerFarmMCPServer, which a docs runtime or app code does when the server starts,
+  // so the build cannot tell whether any will be. With none, it answers nothing.
+  const servesAiCatalog = config.agent?.aiCatalog !== false;
   const hasPluginRuntime = hasRuntimeIntegrationConfig || hasServerRuntimePlugins;
   // Decided when the server starts, from its environment; see createFarmInfraAnalyticsPlugin.
   const hasInfraAnalyticsRuntime =
@@ -5689,6 +5689,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
   createFarmDefaultLlmsTxt,
   createFarmLlmsMarkdownReader,
   listFarmMCPLlmsTxtLinks,
+  registerFarmMCPServer,
   renderFarmLlmsFullTxt,
   createFarmLlmsFullRenderer,
   createFarmThemeDocumentParts,
@@ -6315,6 +6316,8 @@ const farmDocsHandler = ${
       getApplicableLayouts(getFarmRoutePathname(pathname)).map((layout) => layout.module),
     ),
   loadReactModule: async () => FarmDocsAdapterReact,
+  // Lists the docs MCP endpoint in /.well-known/ai-catalog.json for the server's lifetime.
+  registerMCPServer: registerFarmMCPServer,
 })`
           : `createFarmDocsHandler(farmDocsResolvedConfig, {
   root: farmDocsRuntimeRoot,
@@ -8055,6 +8058,23 @@ async function handleFarmRequestInContext(
   }
 
   ${
+    servesAiCatalog
+      ? `
+  // agent.aiCatalog: the AI catalog of MCP servers and each server's card. Cards
+  // live below the MCP endpoint, so this answers before the docs runtime and the
+  // API routes, as in dev.
+  const farmAiCatalogResponse = createFarmAiCatalogResponse(request, {
+    basePath: ${JSON.stringify(config.basePath)},
+    apiServerBasePath: farmLocalAPIBasePath,
+  });
+  if (farmAiCatalogResponse) {
+    return applyProductionMiddlewareHeaders(farmAiCatalogResponse, middlewareHeaders);
+  }
+  `
+      : ""
+  }
+
+  ${
     config.docs?.enabled
       ? `
   // Docs responses are served after app middleware so route guards and
@@ -8132,22 +8152,6 @@ async function handleFarmRequestInContext(
     if (markdownResponse) {
       return applyProductionMiddlewareHeaders(markdownResponse, middlewareHeaders);
     }
-  }
-  `
-      : ""
-  }
-
-  ${
-    servesAiCatalog
-      ? `
-  // agent.aiCatalog: the AI catalog of MCP servers and each server's card. Cards
-  // live below the MCP endpoint, so this answers before the API routes, as in dev.
-  const farmAiCatalogResponse = createFarmAiCatalogResponse(request, {
-    basePath: ${JSON.stringify(config.basePath)},
-    apiServerBasePath: farmLocalAPIBasePath,
-  });
-  if (farmAiCatalogResponse) {
-    return applyProductionMiddlewareHeaders(farmAiCatalogResponse, middlewareHeaders);
   }
   `
       : ""

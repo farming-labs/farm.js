@@ -6,7 +6,9 @@
  * entries at `/.well-known/ard.json`.
  *
  * The servers come from the catalogs `@farm.js/mcp` publishes at runtime, so the
- * top-level `mcp` config and `apiMcp()` in `plugins` are both listed. Cards carry
+ * top-level `mcp` config and `apiMcp()` in `plugins` are both listed, and from
+ * `registerFarmMCPServer`, for endpoints Farm does not serve (a docs runtime's MCP,
+ * or a server on another host, which serves its own card). Cards carry
  * identity and the endpoint only, never tools, so listing a server that requires
  * authorization reveals nothing its endpoint does not already answer.
  *
@@ -16,7 +18,7 @@ import { emitFarmAgentRead } from "./agent-identity";
 import { resolveFarmAPIServerRoutePath } from "./api/server-path";
 import { applyFarmBasePath } from "./base-path";
 import type { FarmLlmsTxtLink } from "./llms-txt";
-import { _listFarmMCPCatalogs } from "./mcp-catalog";
+import { _listFarmMCPCatalogs, _listFarmRegisteredMCPServers } from "./mcp-catalog";
 import { matchesFarmIfNoneMatch } from "./server-http";
 
 export const FARM_AI_CATALOG_PATH = "/.well-known/ai-catalog.json";
@@ -58,21 +60,58 @@ export interface FarmAiCatalogEntry {
 }
 
 export interface FarmMCPServerListing {
-  /** Public path of the server card. */
-  cardPath: string;
+  /** Public path of the server card when this app serves it; a remote server serves its own. */
+  cardPath?: string;
   card: FarmMCPServerCard;
   entry: FarmAiCatalogEntry;
 }
 
-/** Every MCP server the app mounts, with its card, for a request to `origin`. */
+interface FarmMCPServerSource {
+  name: string;
+  version: string;
+  title?: string;
+  description?: string;
+  protocolVersions?: readonly string[];
+  /** A public path on this origin, or an absolute URL on another one. */
+  endpoint: string;
+  local: boolean;
+}
+
+/** The MCP servers `@farm.js/mcp` publishes, then the registered ones, one per endpoint. */
+function listFarmMCPServerSources(input: FarmAiCatalogInput): FarmMCPServerSource[] {
+  const sources = new Map<string, FarmMCPServerSource>();
+  for (const { server, details } of _listFarmMCPCatalogs()) {
+    const endpoint = resolveFarmAPIServerRoutePath(server.path, input.apiServerBasePath);
+    if (sources.has(endpoint)) continue;
+    sources.set(endpoint, {
+      ...server,
+      protocolVersions: details?.protocolVersions,
+      endpoint,
+      local: true,
+    });
+  }
+  for (const server of _listFarmRegisteredMCPServers()) {
+    // A literal app path: below the app's basePath, never rewritten through api.basePath.
+    const endpoint = server.path ? applyFarmBasePath(server.path, input.basePath) : server.url!;
+    if (sources.has(endpoint)) continue;
+    sources.set(endpoint, { ...server, endpoint, local: Boolean(server.path) });
+  }
+  return [...sources.values()];
+}
+
+function serverCardLocation(endpoint: string): string {
+  return `${endpoint.replace(/\/$/, "")}${FARM_MCP_SERVER_CARD_SUFFIX}`;
+}
+
+/** Every MCP server the app lists, with its card, for a request to `origin`. */
 export function listFarmMCPServerCards(
   origin: string,
   input: FarmAiCatalogInput = {},
 ): FarmMCPServerListing[] {
   const host = new URL(origin).hostname;
-  return _listFarmMCPCatalogs().map(({ server, details }) => {
-    const endpoint = resolveFarmAPIServerRoutePath(server.path, input.apiServerBasePath);
-    const cardPath = `${endpoint}${FARM_MCP_SERVER_CARD_SUFFIX}`;
+  return listFarmMCPServerSources(input).map((server) => {
+    const endpointUrl = server.local ? `${origin}${server.endpoint}` : server.endpoint;
+    const cardPath = server.local ? serverCardLocation(server.endpoint) : undefined;
     const slug = cardSlug(server.name);
     const description = truncate(server.description?.trim() || `MCP server for ${host}`);
     const card: FarmMCPServerCard = {
@@ -86,20 +125,20 @@ export function listFarmMCPServerCards(
       remotes: [
         {
           type: "streamable-http",
-          url: `${origin}${endpoint}`,
-          ...(details?.protocolVersions?.length
-            ? { supportedProtocolVersions: [...details.protocolVersions] }
+          url: endpointUrl,
+          ...(server.protocolVersions?.length
+            ? { supportedProtocolVersions: [...server.protocolVersions] }
             : {}),
         },
       ],
     };
     return {
-      cardPath,
+      ...(cardPath ? { cardPath } : {}),
       card,
       entry: {
         identifier: `urn:air:${host}:mcp:${slug}`,
         type: SERVER_CARD_TYPE,
-        url: `${origin}${cardPath}`,
+        url: cardPath ? `${origin}${cardPath}` : serverCardLocation(endpointUrl),
         displayName: server.title ?? server.name,
         description,
         version: server.version,
@@ -155,6 +194,7 @@ export function createFarmAiCatalogResponse(
 
   const ard = pathname === applyFarmBasePath(FARM_ARD_PATH, input.basePath);
   const catalogPath = ard || pathname === applyFarmBasePath(FARM_AI_CATALOG_PATH, input.basePath);
+  if (!catalogPath && !pathname.endsWith(FARM_MCP_SERVER_CARD_SUFFIX)) return null;
   const servers = listFarmMCPServerCards(url.origin, input);
   const card = catalogPath ? undefined : servers.find((server) => server.cardPath === pathname);
   if (!servers.length || (!catalogPath && !card)) return null;

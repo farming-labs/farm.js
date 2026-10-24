@@ -67,6 +67,7 @@ import {
 } from "./app-markdown";
 import { applyWebResponseHeaders, sendWebResponse } from "./server/response";
 import { createFarmAiCatalogResponse } from "./ai-catalog";
+import { registerFarmMCPServer } from "./mcp-catalog";
 import {
   createFarmApiCatalogResponse,
   FARM_API_CATALOG_PATH,
@@ -1103,6 +1104,12 @@ export function farmPlugin(
   let refreshRouteDiscovery: ((reason: string) => Promise<void>) | null = null;
   let workflowHandler: ((request: Request) => Promise<Response | null>) | null = null;
   let isBuild = false;
+  // MCP servers the docs runtime lists in the AI catalog, removed when the dev server closes.
+  const docsMCPServerDisposers = new Set<() => void>();
+  const releaseDocsMCPServers = () => {
+    for (const dispose of docsMCPServerDisposers) dispose();
+    docsMCPServerDisposers.clear();
+  };
   const logUpdate = (tag: "PAGE" | "API" | "MIDDLEWARE" | "TYPE", message: string) => {
     const pc = createCliColors();
     const log = [
@@ -1578,6 +1585,8 @@ export function farmPlugin(
         );
         return resolveFarmLayoutFonts(layoutModules);
       };
+      // A restarted server's docs runtime registers its MCP endpoint again.
+      releaseDocsMCPServers();
       const farmDocsHandler = farmDocsDevRuntime
         ? farmDocsDevRuntime.hasFarmDocsRuntimeAdapter(farmConfig.docs)
           ? await farmDocsDevRuntime.createFarmDocsAdapterHandler(farmConfig.docs, {
@@ -1596,6 +1605,14 @@ export function farmPlugin(
                   return import(/* @vite-ignore */ pathToFileURL(resolved.id).href);
                 }
                 return loadFarmDevModule(server, resolved?.id ?? specifier);
+              },
+              registerMCPServer: (mcpServer) => {
+                const dispose = registerFarmMCPServer(mcpServer);
+                docsMCPServerDisposers.add(dispose);
+                return () => {
+                  docsMCPServerDisposers.delete(dispose);
+                  dispose();
+                };
               },
             })
           : farmDocsDevRuntime.createFarmDocsHandler(farmConfig.docs, {
@@ -3565,6 +3582,7 @@ if (import.meta.hot) {
     async closeBundle() {
       // SSG: Pre-render static pages at build time. Vite also runs this hook
       // when a dev server closes, after its SSR module runner has stopped.
+      if (!isBuild) releaseDocsMCPServers();
       if (!farmApp || !isBuild) return;
 
       try {
