@@ -558,6 +558,36 @@ function parseClientModuleMetadata(
   };
 }
 
+// `export { default } from "./page"`: the module renders another module's default export.
+const DEFAULT_REEXPORT = /export\s*\{\s*default(?:\s+as\s+default)?\s*\}\s*from\s*(["'])([^"']+)\1/;
+
+/**
+ * A page or layout whose default export is re-exported from a local module renders that module's
+ * component, so its hydration is analyzed in that module: its async default and client imports.
+ */
+function resolveDefaultReexport(
+  ownerPath: string,
+  content: string | null,
+  root?: string,
+): string | null {
+  const match = content ? DEFAULT_REEXPORT.exec(content) : null;
+  if (!match) return null;
+  const imported = resolveImportedModule(ownerPath, match[2]!, root);
+  return imported.local ? imported.path : null;
+}
+
+function resolveOwnerSourcePath(resolvedPath: string | null, root?: string): string | null {
+  const seen = new Set<string>();
+  let current = resolvedPath;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const target = resolveDefaultReexport(current, readIfExists(current), root);
+    if (!target) return current;
+    current = target;
+  }
+  return current;
+}
+
 export function getClientModuleMetadata(modulePath: string, root?: string): ClientModuleMetadata {
   const resolvedPath = resolveModuleSourcePath(modulePath, root);
   return inspectClientModuleMetadata(resolvedPath, root, new Set(), true);
@@ -602,7 +632,7 @@ export function getClientModuleHydrationPlan(
 
   // Legacy metadata already inspected the owner. Only reread it when isolation
   // analysis is needed, including async-owner islands with the experiment off.
-  const resolvedPath = resolveModuleSourcePath(modulePath, root);
+  const resolvedPath = resolveOwnerSourcePath(resolveModuleSourcePath(modulePath, root), root);
   const content = readIfExists(resolvedPath ?? "");
   const parsed = parseClientModuleMetadata(content, true);
   if (!resolvedPath) return emptyPlan("the owner source could not be resolved");
@@ -1374,6 +1404,11 @@ function inspectClientModuleMetadata(
   visited.add(resolvedPath);
 
   const content = readIfExists(resolvedPath);
+  // An owner (the page or layout itself) that re-exports another module's default is that module.
+  if (inspectIslandExport) {
+    const target = resolveDefaultReexport(resolvedPath, content, root);
+    if (target) return inspectClientModuleMetadata(target, root, visited, true);
+  }
   const parsed = parseClientModuleMetadata(content, inspectIslandExport);
   if (parsed.isClientComponent) {
     return {

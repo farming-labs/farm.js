@@ -989,6 +989,48 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
     });
   });
 
+  it("analyzes a page that re-exports another module's default as that module", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-reexport-"));
+    tempDirs.push(root);
+
+    const siteDir = path.join(root, "src", "site");
+    const appDir = path.join(root, "src", "app");
+    fs.mkdirSync(siteDir, { recursive: true });
+    fs.mkdirSync(path.join(appDir, "sync"), { recursive: true });
+    fs.writeFileSync(
+      path.join(siteDir, "star-button.tsx"),
+      '"use client";\nexport function StarButton() { return null; }\n',
+    );
+    fs.writeFileSync(
+      path.join(siteDir, "home.tsx"),
+      'import { StarButton } from "./star-button";\nexport default async function Home() { return <StarButton />; }\n',
+    );
+    fs.writeFileSync(
+      path.join(siteDir, "sync.tsx"),
+      'import { StarButton } from "./star-button";\nexport default function Sync() { return <StarButton />; }\n',
+    );
+    const asyncPage = path.join(appDir, "page.tsx");
+    fs.writeFileSync(asyncPage, '"use ssg; 3600";\nexport { default } from "../site/home";\n');
+    const syncPage = path.join(appDir, "sync", "page.tsx");
+    fs.writeFileSync(syncPage, 'export { default } from "../../site/sync";\n');
+
+    expect(getClientModuleMetadata(asyncPage, root)).toMatchObject({
+      shouldHydrate: false,
+      suppressedAsyncHydration: true,
+    });
+    const plan = getClientModuleHydrationPlan(asyncPage, root, "off", { asyncOwnerIslands: true });
+    expect(plan).toMatchObject({ asyncOwnerIslands: true, hasIsolatedClientBoundaries: true });
+    expect(plan.isolatedBoundaries.map((boundary) => boundary.modulePath)).toEqual([
+      path.join(siteDir, "star-button.tsx"),
+    ]);
+
+    expect(getClientModuleMetadata(syncPage, root)).toEqual({
+      isClientComponent: false,
+      shouldHydrate: true,
+      islandStrategy: "load",
+    });
+  });
+
   describe("Markdown pages", () => {
     function markdownProject(componentsSource: string) {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-markdown-"));
