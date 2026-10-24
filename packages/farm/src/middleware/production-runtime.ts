@@ -28,9 +28,11 @@ import {
 import {
   compileMiddlewareConfig,
   compileMiddlewareRoute,
-  matchesMiddlewareRoute,
   matchesMiddlewareConfig as matchesPreparedMiddlewareConfig,
+  matchesMiddlewareConfigAt,
+  matchesMiddlewareRouteAt,
 } from "./matcher";
+import { createFarmAPIMiddlewarePathnames } from "../api/server-path";
 
 export interface ProductionMiddlewareModuleEntry {
   path: string;
@@ -43,6 +45,8 @@ export interface ProductionMiddlewareRunnerOptions {
   modules?: ProductionMiddlewareModuleEntry[];
   i18n?: ResolvedFarmI18nConfig;
   server?: Pick<ResolvedFarmServerConfig, "trustProxy">;
+  /** The app's public API path (`api.basePath`); `/api` middleware guards it too. */
+  apiBasePath?: string;
 }
 
 export interface ProductionMiddlewareRequestOptions {
@@ -639,6 +643,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
   const entries = [...configMiddleware.entries, ...fileMiddleware];
   const globalConfig = configMiddleware.globalConfig;
   if (globalConfig) compileMiddlewareConfig(globalConfig);
+  const toMiddlewarePathnames = createFarmAPIMiddlewarePathnames(options.apiBasePath);
 
   return async function runProductionMiddleware(
     request: Request,
@@ -666,7 +671,11 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     let parentData: MiddlewareContext["parent"] | undefined;
 
     if (globalConfig) {
-      const globalMatch = matchesPreparedMiddlewareConfig(initialPathname, globalConfig, ctx);
+      const globalMatch = matchesMiddlewareConfigAt(
+        toMiddlewarePathnames(initialPathname),
+        globalConfig,
+        ctx,
+      );
       if (!globalMatch.matched) {
         return emptyResult(request);
       }
@@ -682,13 +691,16 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     const ran = new Set<ProductionMiddlewareEntry>();
     function* applicableMiddleware() {
       for (let pathname = initialPathname, pass = 0; ; pass++) {
+        const pathnames = toMiddlewarePathnames(pathname);
         if (pass > 0 && globalConfig) {
-          if (!matchesPreparedMiddlewareConfig(pathname, globalConfig, ctx).matched) return;
+          if (!matchesMiddlewareConfigAt(pathnames, globalConfig, ctx).matched) return;
         }
         for (const entry of entries) {
           if (ran.has(entry)) continue;
           const routeMatch =
-            entry.source === "config" ? { matched: true } : matchesMiddlewareRoute(pathname, entry);
+            entry.source === "config"
+              ? { matched: true }
+              : matchesMiddlewareRouteAt(pathnames, entry);
           if (routeMatch.matched) yield { entry, routeMatch, pathname };
         }
         const rewrittenPathname = toRoutePathname(new URL(currentRequest.url).pathname);
@@ -699,7 +711,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
 
     for (const { entry, routeMatch, pathname } of applicableMiddleware()) {
       const configMatch = entry.config
-        ? matchesPreparedMiddlewareConfig(pathname, entry.config, ctx)
+        ? matchesMiddlewareConfigAt(toMiddlewarePathnames(pathname), entry.config, ctx)
         : { matched: true };
       if (!configMatch.matched) {
         continue;

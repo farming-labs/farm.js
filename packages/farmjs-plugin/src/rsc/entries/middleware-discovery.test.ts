@@ -124,3 +124,23 @@ describe("RSC file middleware discovery", () => {
     expect(calls).toEqual(["root", "app", "site"]);
   });
 });
+
+describe("RSC file middleware with api.basePath", () => {
+  it("guards src/app/api routes at the public API path", async () => {
+    const entry = generateRscEntry({ ...context, apiBasePath: "/v2/api" });
+    expect(entry).toContain('const farmApiBasePath = "/v2/api";');
+    // The entry hands its API path to the middleware runner it dispatches API routes with.
+    expect(entry).toMatch(
+      /createProductionMiddlewareRunner\(\{[\s\S]*?apiBasePath: farmApiBasePath,\n\}\);/,
+    );
+
+    const modules = buildMiddlewareModules({
+      "/api/admin/middleware.ts": { default: () => new Response("no", { status: 401 }) },
+    });
+    const runner = createProductionMiddlewareRunner({ modules, apiBasePath: "/v2/api" });
+    for (const url of ["/v2/api/admin/users", "/api/admin/users"]) {
+      const result = await runner(new Request(`https://example.test${url}`));
+      expect(result.response?.status, url).toBe(401);
+    }
+  });
+});

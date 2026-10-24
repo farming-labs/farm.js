@@ -497,6 +497,7 @@ const farmMiddlewareRunner = createProductionMiddlewareRunner({
     ),
   i18n: ${JSON.stringify(ctx.i18n) ?? "undefined"},
   server: ${JSON.stringify(ctx.server) ?? "undefined"},
+  apiBasePath: farmApiBasePath,
 });
 
 debug('Discovered pages:', Object.keys(pages));

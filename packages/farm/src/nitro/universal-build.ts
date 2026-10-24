@@ -7384,6 +7384,7 @@ const farmMiddlewareRunner = ${
   modules: fileMiddlewareModules,
   i18n: farmI18nConfig,
   server: farmServerConfig,
+  apiBasePath: farmLocalAPIBasePath,
 })`
       : "null"
   };

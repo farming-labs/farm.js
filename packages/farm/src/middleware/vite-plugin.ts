@@ -14,6 +14,11 @@ export interface FarmMiddlewarePluginOptions {
   srcDir?: string;
   /** Application base path (default: `/`). */
   basePath?: string;
+  /**
+   * Public API path served by `farmApiPlugin({ basePath })` (default: `/api`). Pass the same
+   * value so `src/app/api/**` middleware guards it.
+   */
+  apiBasePath?: string;
   /** Enable debug logging. */
   debug?: boolean;
 }
@@ -41,6 +46,8 @@ export function farmMiddlewarePlugin(options: FarmMiddlewarePluginOptions = {}):
       server,
       undefined,
       i18n,
+      undefined,
+      options.apiBasePath,
     );
     await manager.discover();
     discoveryComplete = true;
