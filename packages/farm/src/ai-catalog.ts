@@ -175,19 +175,22 @@ export function listFarmMCPLlmsTxtLinks(
  * Answers `/.well-known/ai-catalog.json`, `/.well-known/ard.json`, and each
  * `<endpoint>/server-card`, or returns `null` for any other request and when
  * the app mounts no MCP server, so the request goes on as if Farm served nothing.
+ * Every request passes through here; `requestUrl`, the caller's parse of
+ * `request.url`, saves parsing it again.
  */
 export function createFarmAiCatalogResponse(
   request: Request,
   input: FarmAiCatalogInput = {},
+  requestUrl?: URL,
 ): Response | null {
   let url: URL;
   try {
-    url = new URL(request.url);
+    url = requestUrl ?? new URL(request.url);
   } catch {
     return null;
   }
   const { pathname } = url;
-  // Every request passes through here, so leave before listing anything.
+  // Leave before listing anything.
   if (!pathname.endsWith(FARM_MCP_SERVER_CARD_SUFFIX) && !pathname.includes("/.well-known/")) {
     return null;
   }

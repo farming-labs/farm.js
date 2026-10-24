@@ -8063,10 +8063,11 @@ async function handleFarmRequestInContext(
   // agent.aiCatalog: the AI catalog of MCP servers and each server's card. Cards
   // live below the MCP endpoint, so this answers before the docs runtime and the
   // API routes, as in dev.
-  const farmAiCatalogResponse = createFarmAiCatalogResponse(request, {
-    basePath: ${JSON.stringify(config.basePath)},
-    apiServerBasePath: farmLocalAPIBasePath,
-  });
+  const farmAiCatalogResponse = createFarmAiCatalogResponse(
+    request,
+    { basePath: ${JSON.stringify(config.basePath)}, apiServerBasePath: farmLocalAPIBasePath },
+    url,
+  );
   if (farmAiCatalogResponse) {
     return applyProductionMiddlewareHeaders(farmAiCatalogResponse, middlewareHeaders);
   }
