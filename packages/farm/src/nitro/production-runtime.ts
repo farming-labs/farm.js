@@ -22,6 +22,7 @@ export {
   createLateRedirectRecovery,
 } from "../navigation/late-navigation-recovery";
 export {
+  _getRequestReadCount,
   _runWithCurrentRequest,
   getCurrentRequest,
   resolveFarmWebRequestOrigin,

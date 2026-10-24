@@ -5563,6 +5563,7 @@ function isolateFarmRouteServerPage(element) { return element; }`;
       ? `import { mergePluginAPIRoutes, getAllowedAPIRouteMethods, invokeAPIRouteEndpoint, createStaticAPIRouteMatcherAtBasePath, resolveAPIRouteEndpoint } from "@farm.js/core/api/runtime";`
       : "";
   const productionRuntimeImport = `import {
+  _getRequestReadCount,
   _runWithAfterRequest,
   _runWithCurrentRequest,
   _runWithAPIRequestRuntime,
@@ -8278,6 +8279,9 @@ async function handleFarmRequestInContext(
         emitFarmEvent({ type: "ppr.shell.miss", route: pathname, key: pprCacheKey });
       }
 
+      // Reads from here on belong to the page render, not to middleware.
+      const requestReadsBeforeRender = _getRequestReadCount();
+
       // Get the page component and metadata
       let PageComponent = route.module.default;
       let pageStatus = 200;
@@ -8586,7 +8590,7 @@ async function handleFarmRequestInContext(
         // the request's resolved Suspense content. Until the production runtime
         // can persist and resume the partial shell itself, buffer streamed PPR
         // responses for late status errors but do not cache their dynamic HTML.
-        const shouldCachePPRShell = Boolean(pprCacheKey && !renderedPage.stream);
+        let shouldCachePPRShell = Boolean(pprCacheKey && !renderedPage.stream);
         if (!shouldCachePPRShell && pprCacheKey) {
           pprCanCache = false;
           emitFarmEvent({
@@ -8648,6 +8652,17 @@ async function handleFarmRequestInContext(
             : ""
         }
 
+        // headers(), cookies(), or getCurrentRequest() read during the render,
+        // in the page, a layout, metadata, or anything they import, makes this
+        // HTML one visitor's: never a shared PPR shell or CDN response.
+        const renderReadRequest = _getRequestReadCount() !== requestReadsBeforeRender;
+        if (renderReadRequest && shouldCachePPRShell) {
+          shouldCachePPRShell = false;
+          pprCanCache = false;
+          emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: "request-read" });
+          emitFarmEvent({ type: "cache.bypass", route: pathname, reason: "request-read" });
+        }
+
         const renderedMetadata = renderMetadataHead(mergedMetadata, { pathname, jsonLd: ${JSON.stringify(config.agent?.jsonLd ?? false)} });
         const title = renderedMetadata.title;
         const metaTags = renderedMetadata.tags;
@@ -8659,6 +8674,7 @@ async function handleFarmRequestInContext(
         );
         const hasRequestScopedRender = Boolean(
           pageStatus >= 400 ||
+          renderReadRequest ||
           request.headers.get("x-farm-intercept-from") ||
           hasPrivateRequestHeaders ||
           hasConfiguredRouteContext ||

@@ -19,6 +19,19 @@ function getRequestStore(): AsyncLocalStorage<Request> {
 
 const requestStore = getRequestStore();
 
+// How many times app code read each request through getCurrentRequest(),
+// headers(), or cookies(). Renderers compare it across a render: HTML that
+// read the request is per-visitor and must not enter a shared shell or CDN
+// cache, wherever the read lives (page, layout, or an imported helper).
+const REQUEST_READS_KEY = Symbol.for("@farm.js/core/request-reads");
+
+function getRequestReads(): WeakMap<Request, number> {
+  const runtime = globalThis as typeof globalThis & Record<PropertyKey, unknown>;
+  return ((runtime[REQUEST_READS_KEY] as WeakMap<Request, number> | undefined) ??= new WeakMap());
+}
+
+const requestReads = getRequestReads();
+
 _setCurrentRequestResolver(() => requestStore.getStore());
 
 export interface FarmRequestURLOptions {
@@ -152,7 +165,18 @@ export function getCurrentRequest(): Request {
     );
   }
 
+  requestReads.set(request, (requestReads.get(request) ?? 0) + 1);
   return request;
+}
+
+/**
+ * @internal How many times app code has read `request` (default: the current
+ * request). Compare two readings to learn whether a render read the request.
+ */
+export function _getRequestReadCount(
+  request: Request | undefined = requestStore.getStore(),
+): number {
+  return request ? (requestReads.get(request) ?? 0) : 0;
 }
 
 // Some runtimes (StackBlitz WebContainers among them) lose AsyncLocalStorage

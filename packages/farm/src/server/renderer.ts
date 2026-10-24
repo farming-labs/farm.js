@@ -46,10 +46,12 @@ import {
   isFarmIntegrationProviderComponentReference,
 } from "../integrations";
 import {
+  _getRequestReadCount,
   _runWithCurrentRequest,
   createWebRequestFromFarmRequest,
   resolveFarmRequestURL,
 } from "./request";
+import { _resolveCurrentRequest } from "./request-bridge";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { getFarmAppDirectories } from "../layers";
@@ -1503,6 +1505,14 @@ export class ServerRenderer {
         });
       }
 
+      // Metadata runs in the outer request scope and the page in its own, so
+      // count reads on both: a render that read the request is per-visitor.
+      const outerRequest = _resolveCurrentRequest();
+      const countRequestReads = () =>
+        (outerRequest ? _getRequestReadCount(outerRequest) : 0) +
+        _getRequestReadCount(currentRequest);
+      const requestReadsBeforeRender = countRequestReads();
+
       let LoadingFallbackComponent: any = null;
       if (loadingBoundaryEntry) {
         const loadingModule = await this.routeManager.loadRouteModule(
@@ -1865,7 +1875,22 @@ export class ServerRenderer {
                   : undefined,
                 onComplete:
                   pprShellOptions && req.method !== "HEAD"
-                    ? (html) => this.cachePPRShell(pprShellOptions, html)
+                    ? (html) => {
+                        if (countRequestReads() !== requestReadsBeforeRender) {
+                          emitFarmEvent({
+                            type: "ppr.shell.bypass",
+                            route: pathname,
+                            reason: "request-read",
+                          });
+                          emitFarmEvent({
+                            type: "cache.bypass",
+                            route: pathname,
+                            reason: "request-read",
+                          });
+                          return;
+                        }
+                        return this.cachePPRShell(pprShellOptions, html);
+                      }
                     : undefined,
               },
             );

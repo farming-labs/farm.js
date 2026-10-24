@@ -302,6 +302,13 @@ When a production render actually suspends, Farm currently buffers that response
 errors and bypasses the shared PPR shell cache. This preserves fresh request-specific content
 instead of caching a completed response as though it were a reusable partial shell.
 
+A render that reads the request with `headers()`, `cookies()`, or `getCurrentRequest()` is one
+visitor's HTML, wherever the read happens: the page, a layout, `generateMetadata`, or a helper they
+import. Farm never stores that render as a PPR shell, in development or production. Production
+sends it with `X-Farm-PPR: bypass` and `Cache-Control: private, no-store`. The same applies to a `revalidate` route whose layout reads the
+request: it renders per request instead of advertising a shared `s-maxage`. Reads in middleware do
+not count, since they run before the page renders.
+
 ```tsx
 import { Suspense } from "react";
 
