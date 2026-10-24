@@ -349,6 +349,7 @@ describe("stripe trial hooks", () => {
         type: "invoice.paid",
         data: {
           customer: "cus_test_123",
+          subscription: "sub_test_123",
         },
       }),
       { "stripe-signature": "test" },
@@ -1676,5 +1677,4 @@ describe("stripe trial hooks", () => {
       warn.mockRestore();
     }
   });
-
 });

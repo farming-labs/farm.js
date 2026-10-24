@@ -2227,6 +2227,37 @@ function resolvePlanLimitReference(
   return null;
 }
 
+/** The subscription an invoice bills: `subscription` before Stripe API 2025-03, `parent` after. */
+function getInvoiceSubscriptionId(invoice: Record<string, unknown>): string | null {
+  const idOf = (value: unknown) =>
+    typeof value === "string"
+      ? value
+      : value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string"
+        ? (value as { id: string }).id
+        : null;
+  const parent = invoice.parent as { subscription_details?: { subscription?: unknown } } | null;
+  return idOf(invoice.subscription) ?? idOf(parent?.subscription_details?.subscription);
+}
+
+/**
+ * The snapshot features and limits are read from. A subscription that is canceled, unpaid, or
+ * never completed its first payment grants the free plan, whatever plan it was for; `past_due`
+ * keeps the plan while Stripe retries the payment.
+ */
+function getEntitledBillingSnapshot<T extends StripeBillingSnapshot | null | undefined>(
+  snapshot: T,
+): T {
+  if (
+    !snapshot ||
+    (snapshot.status !== "canceled" &&
+      snapshot.status !== "unpaid" &&
+      snapshot.status !== "incomplete")
+  ) {
+    return snapshot;
+  }
+  return { ...snapshot, planId: "free", seatQuantity: null };
+}
+
 function isPastDueBillingStatus(status: string | null | undefined): boolean {
   return status === "past_due" || status === "unpaid";
 }
@@ -3839,15 +3870,40 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               if (existing) {
                 let nextSnapshot: StripeBillingSnapshot | null = null;
 
-                if (event.type === "invoice.payment_failed") {
+                const invoiceForSubscription =
+                  existing.stripeSubscriptionId !== null &&
+                  getInvoiceSubscriptionId(event.data as Record<string, unknown>) ===
+                    existing.stripeSubscriptionId;
+
+                // Only the subscription's own invoices move its status: paying (or failing)
+                // a one-off invoice must not revive a canceled subscription.
+                if (event.type === "invoice.payment_failed" && invoiceForSubscription) {
                   nextSnapshot = {
                     ...existing,
                     status: "past_due",
                   };
-                } else if (event.type === "invoice.paid") {
+                } else if (event.type === "invoice.paid" && invoiceForSubscription) {
                   nextSnapshot = {
                     ...existing,
                     status: "active",
+                  };
+                } else if (
+                  event.type === "customer.subscription.deleted" &&
+                  existing.stripeSubscriptionId !== null &&
+                  "id" in event.data &&
+                  event.data.id === existing.stripeSubscriptionId
+                ) {
+                  // The subscription has ended: its plan, period and seats end with it.
+                  nextSnapshot = {
+                    ...existing,
+                    planId: "free",
+                    productId: null,
+                    status: "canceled",
+                    stripeSubscriptionId: null,
+                    currentPeriodEnd: null,
+                    cancelAtPeriodEnd: false,
+                    trialEndsAt: null,
+                    seatQuantity: null,
                   };
                 } else if (event.type === "customer.subscription.trial_will_end") {
                   const trialWillEndSnapshot = {
@@ -4077,6 +4133,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             }
           }
 
+          const entitled = getEntitledBillingSnapshot(snapshot);
+          const entitledPlanId = entitled?.planId ?? "free";
           return Response.json(
             serializeBillingSnapshot(
               snapshot ?? {
@@ -4094,9 +4152,9 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
                 seatAllowanceOverride: null,
               },
               input.billing,
-              getBillingFeatures(input.billing, snapshot?.planId ?? "free"),
-              getBillingLimits(input.billing, snapshot?.planId ?? "free", snapshot),
-              getBillingEntitlements(input.billing, snapshot?.planId ?? "free", snapshot),
+              getBillingFeatures(input.billing, entitledPlanId),
+              getBillingLimits(input.billing, entitledPlanId, entitled),
+              getBillingEntitlements(input.billing, entitledPlanId, entitled),
             ),
           );
         },
@@ -4139,7 +4197,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             persistence.getBillingAccount,
             "getBillingAccount",
           );
-          const snapshot = await getBillingAccount(owner);
+          const snapshot = getEntitledBillingSnapshot(await getBillingAccount(owner));
           const planId = snapshot?.planId ?? "free";
 
           return Response.json({
@@ -4186,7 +4244,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             persistence.getBillingAccount,
             "getBillingAccount",
           );
-          const snapshot = await getBillingAccount(owner);
+          const snapshot = getEntitledBillingSnapshot(await getBillingAccount(owner));
           const planId = snapshot?.planId ?? "free";
 
           return Response.json({
@@ -4250,7 +4308,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               persistence.getBillingAccount,
               "getBillingAccount",
             );
-            const snapshot = await getBillingAccount(owner);
+            const snapshot = getEntitledBillingSnapshot(await getBillingAccount(owner));
             const planId = snapshot?.planId ?? "free";
             const limit = getBillingLimitForKey(input.billing, planId, snapshot, key);
 
@@ -5163,7 +5221,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               persistence.getBillingAccount,
               "getBillingAccount",
             );
-            const snapshot = await getBillingAccount(owner);
+            const snapshot = getEntitledBillingSnapshot(await getBillingAccount(owner));
             const planId = snapshot?.planId ?? "free";
             const limit = getBillingLimitForKey(input.billing, planId, snapshot, key);
 

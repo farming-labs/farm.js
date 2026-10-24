@@ -207,6 +207,11 @@ The same `ctx` includes `ctx.args.db`, `ctx.data`, request params, the raw reque
   whose `priceId` or `lookupKey` the subscription now bills. Seat add-on and meter prices never
   count as the plan. A subscription that bills no configured product drops to the `free` plan with
   a warning, so give every subscription product a `priceId` or `lookupKey`.
+- Subscribe it to `customer.subscription.deleted`, `invoice.paid`, and `invoice.payment_failed` as
+  well. When the subscription ends, the owner moves to the `free` plan with status `canceled`.
+  Invoice events change the status only for the owner's current subscription, so a one-off invoice
+  never reactivates a canceled one. Features and limits come from the plan only while the status is
+  `active`, `trialing`, or `past_due`; `canceled`, `unpaid`, and `incomplete` get the `free` plan's.
 - Store billing snapshots through the integration schema when the app needs fast entitlement reads.
 - Run `farm stripe migrate --apply` after upgrading so the additive
   `billing_checkout_session` table can persistently deduplicate success-page and webhook delivery.
