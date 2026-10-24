@@ -231,9 +231,17 @@ export default async function RepoPage() {
 React cannot run an `async` component in the browser, so the page itself stays server-rendered and
 never ships to the client. Each eligible client boundary it renders hydrates as its own island, with
 the props the server passed it. This works by default in React apps; it does not need
-`experimental.isolatedClientHydration`. Under a parent layout that hydrates as a whole route, the
-layout keeps the async page as server HTML and the islands inside it still hydrate, including
-after client navigation between pages of that layout.
+`experimental.isolatedClientHydration`.
+
+Under a parent layout that hydrates as a whole route, such as one that wraps the app in a client
+provider, the async page hydrates inside the layout's React tree instead. Farm resolves the page on
+the server into its elements and client-component references, embeds that tree in the HTML, and the
+browser rebuilds it under the layout, so the page's client components read the layout's context and
+share its state. Server JSX passed as `children` to a client component stays server output, Suspense
+content streams in, and the tree is rebuilt after client navigation between pages of that layout.
+A part the server cannot describe this way, such as a server component that calls hooks or a client
+component whose props do not serialize, stays server HTML whose own client components hydrate as
+islands.
 
 Navigating away cancels pending island work and unmounts its roots without waiting for hydration.
 React's early-update diagnostic during that synchronous cancellation is expected; hydration
@@ -242,7 +250,8 @@ mismatches, updates to live roots, and other errors are still reported.
 Islands have the same limits as [isolated client leaves](#isolated-client-leaves-without-rsc):
 
 - Props must be serializable. Passing server-rendered JSX as `children` or another prop
-  (`<ClientShell><ServerList /></ClientShell>`) does not cross the boundary.
+  (`<ClientShell><ServerList /></ClientShell>`) does not cross the boundary, except as `children`
+  under a hydrating layout (above).
 - A client component must use a supported export shape and must not sit where the HTML parser moves
   it, such as directly inside `<table>`.
 - An integration provider that wraps the whole route, and does not declare
