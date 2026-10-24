@@ -4509,6 +4509,32 @@ export const ProgrammaticNotFoundRoute = createRoute("/programmatic-not-found", 
   component: ProgrammaticPage,
 });
 
+export const ProgrammaticGuardedRoute = createRoute("/programmatic-guarded/[id]", {
+  guard() {
+    notFound();
+  },
+  generateMetadata({ params }) {
+    return {
+      title: "guarded-private-title-" + params.id,
+      description: "guarded-private-description",
+      openGraph: { title: "guarded-private-og" },
+    };
+  },
+  notFound: ProgrammaticNotFound,
+  component: ProgrammaticPage,
+});
+
+export const ProgrammaticGuardErrorRoute = createRoute("/programmatic-guard-error", {
+  guard() {
+    throw new Error("guard-refused");
+  },
+  generateMetadata() {
+    return { title: "guard-error-private-title" };
+  },
+  error: ProgrammaticError,
+  component: ProgrammaticPage,
+});
+
 export const ProgrammaticRedirectRoute = createRoute("/programmatic-redirect", {
   data: {
     async main() {
@@ -4524,6 +4550,8 @@ export default defineRoutes(() => [
   ProgrammaticPendingRoute,
   ProgrammaticErrorRoute,
   ProgrammaticNotFoundRoute,
+  ProgrammaticGuardedRoute,
+  ProgrammaticGuardErrorRoute,
   ProgrammaticRedirectRoute,
 ]);
 `.trim(),
@@ -4615,6 +4643,26 @@ export default defineRoutes(() => [
             await expect(response.text()).resolves.toContain("programmatic-not-found");
           },
           "/programmatic-not-found",
+        );
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(404);
+            const html = await response.text();
+            expect(html).toContain("programmatic-not-found");
+            expect(html).not.toContain("guarded-private");
+          },
+          "/programmatic-guarded/42",
+        );
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(500);
+            const html = await response.text();
+            expect(html).toContain("guard-refused");
+            expect(html).not.toContain("guard-error-private-title");
+          },
+          "/programmatic-guard-error",
         );
         await runProductionRequest(
           serverDir,

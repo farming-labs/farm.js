@@ -1406,6 +1406,10 @@ export class ServerRenderer {
         __farmRoutePropsPromise?: Promise<Record<string, unknown>>;
         __farmRoutePropsResolved?: true;
       };
+      // A rejected guard or loader renders the route's notFound/error
+      // component, and the route's generateMetadata must not describe the
+      // resource the caller was refused. Matches the production handler.
+      let routeStateRejected = false;
 
       try {
         pageProps = await parseRouteModuleProps(routeModule, {
@@ -1416,6 +1420,7 @@ export class ServerRenderer {
       } catch (error) {
         if (isFarmRedirectError(error)) throw error;
 
+        routeStateRejected = true;
         const routeStateProps = {
           ...rawPageProps,
           search: searchParamsObject,
@@ -1736,6 +1741,7 @@ export class ServerRenderer {
         routeModule,
         pageProps,
         pathname,
+        skipGeneratedRouteMetadata: routeStateRejected,
       });
 
       // Store metadata on request for renderWithSSR
@@ -2095,6 +2101,7 @@ export class ServerRenderer {
     routeModule: RouteModule;
     pageProps: PageProps;
     pathname: string;
+    skipGeneratedRouteMetadata?: boolean;
   }): Promise<Record<string, any>> {
     let metadata: Record<string, any> = {};
 
@@ -2111,7 +2118,10 @@ export class ServerRenderer {
     }
 
     metadata = mergeMetadata(metadata, (options.routeModule as any).metadata);
-    if (typeof (options.routeModule as any).generateMetadata === "function") {
+    if (
+      !options.skipGeneratedRouteMetadata &&
+      typeof (options.routeModule as any).generateMetadata === "function"
+    ) {
       metadata = mergeMetadata(
         metadata,
         await (options.routeModule as any).generateMetadata(options.pageProps),

@@ -8365,6 +8365,10 @@ async function handleFarmRequestInContext(
           });
         }
         let pageProps;
+        // A rejected guard or loader renders the route's notFound/error
+        // component, and the route's generateMetadata must not run for it:
+        // it would describe the resource the caller was refused.
+        let routeStateRejected = false;
         try {
           // Resolve top-level route state before starting the HTTP stream so
           // redirects, notFound(), and failures keep their real status. Route
@@ -8399,6 +8403,7 @@ async function handleFarmRequestInContext(
         } catch (routeStateError) {
           if (isFarmRedirectError(routeStateError)) throw routeStateError;
 
+          routeStateRejected = true;
           const routeComponents = route.module.__farmRouteComponents;
           const routeStateProps = {
             ...rawPageProps,
@@ -8638,7 +8643,7 @@ async function handleFarmRequestInContext(
           }
         }
         mergedMetadata = mergeMetadata(mergedMetadata, pageMetadata);
-        if (typeof route.module.generateMetadata === "function") {
+        if (!routeStateRejected && typeof route.module.generateMetadata === "function") {
           mergedMetadata = mergeMetadata(
             mergedMetadata,
             await route.module.generateMetadata(pageProps),

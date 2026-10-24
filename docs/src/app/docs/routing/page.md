@@ -780,6 +780,10 @@ export const ProductRoute = createRoute("/products/[id]", {
 
 Redirects are not rendered through `error`; they escape so Farm can return a real redirect response.
 
+When a guard or data hook throws and Farm renders `error` or `notFound`, the route's
+`generateMetadata` does not run: the document keeps only layout and static metadata, so a refused
+request never carries the title or description of the resource it was refused.
+
 ## Nested segments
 
 Folders become URL segments. Use normal folders for visible path segments and dynamic folders when the value comes from the URL.
