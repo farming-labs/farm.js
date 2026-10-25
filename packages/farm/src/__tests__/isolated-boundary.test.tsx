@@ -814,7 +814,9 @@ describe("isolated client boundary", () => {
 
     // Every request renders the same props: one warning per component, not per render.
     renderToString(<Boundary {...props} />);
-    expect(warn.mock.calls.filter(([message]) => String(message).includes("Could not isolate"))).toHaveLength(1);
+    expect(
+      warn.mock.calls.filter(([message]) => String(message).includes("Could not isolate")),
+    ).toHaveLength(1);
   });
 
   it("preserves SSR and reports the original module-load error", async () => {
