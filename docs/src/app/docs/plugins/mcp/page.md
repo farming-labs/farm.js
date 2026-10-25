@@ -696,6 +696,7 @@ bounded post-response work where the host requires it.
 | `allowUnauthenticated` | `false`       | Deliberately permit a public MCP endpoint instead of `authorize`.                               |
 | `oauth`                | none          | Advertise OAuth authorization servers and scopes through RFC 9728 metadata and the 401.         |
 | `maxBatchSize`         | `25`          | Most JSON-RPC messages in one batched POST; larger batches get `400` before `authorize` runs.   |
+| `maxToolInputElements` | `10000`       | Most array elements and object members in one call's arguments; more is refused before it runs. |
 | `resources`            | none          | Read-only context from `defineResource()`, at a fixed URI or a URI template.                    |
 | `prompts`              | none          | Reusable prompt templates from `definePrompt()`.                                                |
 | `path`                 | `/api/mcp`    | Canonical Farm API path for the Streamable HTTP endpoint.                                       |

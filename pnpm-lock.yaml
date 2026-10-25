@@ -2608,8 +2608,8 @@ importers:
         specifier: workspace:*
         version: link:../farm
       '@modelcontextprotocol/server':
-        specifier: 2.0.0
-        version: 2.0.0
+        specifier: ^2.3.0
+        version: 2.3.0
       zod:
         specifier: ^4.1.12
         version: 4.3.6

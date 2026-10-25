@@ -239,7 +239,11 @@ function createHandler(
   const resourceNames = new Set(resources.map(({ name }) => name));
   const promptNames = new Set(prompts.map(({ definition }) => definition.name));
   const mcp = createMcpHandler(({ requestInfo, authInfo }) => {
-    const server = new McpServer(serverInfo, { capabilities: { tools: {} } });
+    const server = new McpServer(serverInfo, {
+      capabilities: { tools: {} },
+      // Bounds the work of validating one call's arguments; the SDK sets no limit.
+      maxToolInputElements: options.maxToolInputElements,
+    });
     const allowed = authInfo?.extra?.farmAllowedTools as readonly string[] | undefined;
     const allowedNames = allowed === undefined ? undefined : new Set(allowed);
     // A fresh server is created per HTTP request. Unregistered tools are neither
@@ -1153,15 +1157,17 @@ function toolError(message: string) {
 
 interface NormalizedOptions extends Omit<
   APIMCPOptions,
-  "path" | "name" | "version" | "maxBatchSize"
+  "path" | "name" | "version" | "maxBatchSize" | "maxToolInputElements"
 > {
   path: `/api/${string}`;
   name: string;
   version: string;
   maxBatchSize: number;
+  maxToolInputElements: number;
 }
 
 const DEFAULT_MAX_BATCH_SIZE = 25;
+const DEFAULT_MAX_TOOL_INPUT_ELEMENTS = 10_000;
 
 function validateOAuth(oauth: NonNullable<APIMCPOptions["oauth"]>): void {
   const servers = oauth?.authorizationServers;
@@ -1211,10 +1217,18 @@ function validateOptions(options: APIMCPOptions): NormalizedOptions {
   if (!Number.isInteger(maxBatchSize) || maxBatchSize < 1) {
     throw new TypeError("apiMcp maxBatchSize must be a positive integer.");
   }
+  const maxToolInputElements = options.maxToolInputElements ?? DEFAULT_MAX_TOOL_INPUT_ELEMENTS;
+  if (
+    maxToolInputElements !== Infinity &&
+    (!Number.isInteger(maxToolInputElements) || maxToolInputElements < 1)
+  ) {
+    throw new TypeError("apiMcp maxToolInputElements must be a positive integer or Infinity.");
+  }
   return {
     ...options,
     path,
     maxBatchSize,
+    maxToolInputElements,
     name: options.name ?? "farm-api",
     version: options.version ?? "1.0.0",
   };

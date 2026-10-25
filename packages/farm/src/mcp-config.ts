@@ -208,6 +208,12 @@ export interface FarmMCPConfig {
    */
   maxBatchSize?: number;
   /**
+   * Most array elements and object members, counted together across nested values, one tool
+   * call's arguments may contain. Larger arguments are refused before validation or the tool
+   * runs. `Infinity` removes the limit. @default 10000
+   */
+  maxToolInputElements?: number;
+  /**
    * OAuth discovery for MCP clients. When set, a rejected request's 401 points at
    * RFC 9728 Protected Resource Metadata naming these authorization servers, which
    * Farm serves at `/.well-known/oauth-protected-resource/<endpoint path>`.
