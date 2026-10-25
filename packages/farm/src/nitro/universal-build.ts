@@ -116,7 +116,11 @@ import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "..
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { buildFarmVercelRoutes } from "./vercel-assets";
 import { createFarmNetlifyEntry, resolveNitroNetlifyEntry } from "./netlify-entry";
-import { createFarmNodeServerEntry } from "./node-server-entry";
+import {
+  createFarmNodeServerEntry,
+  FARM_NODE_ENV_MODULE_FILE,
+  FARM_NODE_ENV_MODULE_SOURCE,
+} from "./node-server-entry";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import type { FarmI18nCatalogs } from "../i18n/types";
@@ -10386,6 +10390,10 @@ function toFarmNodeResponse(request, response) {
   const farmNodeServerEntryPath =
     preset === "node-server" ? path.join(ssrOutputDir, "farm-node-server-entry.mjs") : null;
   if (farmNodeServerEntryPath && nodeAdapterModule) {
+    await fs.writeFile(
+      path.join(ssrOutputDir, FARM_NODE_ENV_MODULE_FILE),
+      FARM_NODE_ENV_MODULE_SOURCE,
+    );
     await fs.writeFile(
       farmNodeServerEntryPath,
       createFarmNodeServerEntry({

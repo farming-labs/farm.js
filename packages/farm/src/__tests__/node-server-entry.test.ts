@@ -2,7 +2,10 @@
 
 import { transform } from "esbuild";
 import { describe, expect, it } from "vitest";
-import { createFarmNodeServerEntry } from "../nitro/node-server-entry";
+import {
+  createFarmNodeServerEntry,
+  FARM_NODE_ENV_MODULE_SOURCE,
+} from "../nitro/node-server-entry";
 import { resolveFarmServerConfig } from "../server-http";
 
 describe("Farm production Node entry", () => {
@@ -20,6 +23,8 @@ describe("Farm production Node entry", () => {
     });
 
     await expect(transform(source, { loader: "js", format: "esm" })).resolves.toBeDefined();
+    // NODE_ENV is set before any other module, the app's included, evaluates.
+    expect(source.trimStart().startsWith('import "./farm-node-env.mjs";')).toBe(true);
     expect(source).toContain('import "#nitro/virtual/polyfills"');
     expect(source).toContain('from "#nitro/runtime/app"');
     expect(source).toContain('from "#nitro/runtime/runtime-config"');
@@ -45,5 +50,16 @@ describe("Farm production Node entry", () => {
     expect(source).toContain("await server.serve()");
     expect(source).toContain("void server.close(true)");
     expect(source).toContain('from "./nitro-entry.mjs"');
+  });
+
+  it("sets NODE_ENV to production unless the deployment set one", () => {
+    const run = (initial: string | undefined) => {
+      const env: Record<string, string | undefined> = { NODE_ENV: initial };
+      new Function("process", FARM_NODE_ENV_MODULE_SOURCE)({ env });
+      return env.NODE_ENV;
+    };
+    expect(run(undefined)).toBe("production");
+    expect(run("")).toBe("production");
+    expect(run("staging")).toBe("staging");
   });
 });
