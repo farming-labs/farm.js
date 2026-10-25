@@ -20,6 +20,20 @@ export function isFarmBlockedNavigationURL(url: URL): boolean {
   return true;
 }
 
+/**
+ * True when the browser would run `href` as script if a user followed it.
+ * React 19 refuses to render these, but React 18 and preact/compat render
+ * them verbatim, so Farm's own `Link` checks for itself. Only `javascript:`:
+ * other schemes (`data:`, `blob:`, `sms:`, ...) stay valid typed Link targets.
+ */
+export function isFarmScriptURL(href: string): boolean {
+  try {
+    return new URL(href, "http://farm.invalid").protocol === "javascript:";
+  } catch {
+    return false;
+  }
+}
+
 export function isFarmExternalNavigationURL(url: URL, currentOrigin: string): boolean {
   return (url.protocol !== "http:" && url.protocol !== "https:") || url.origin !== currentOrigin;
 }

@@ -207,6 +207,8 @@ Internal `Link` hrefs stay app-relative: when `basePath: "/console"` is configur
 renders and navigates to `/console/about`. Do not add the base path to route hrefs yourself.
 For a reusable custom-scheme type, use ``ExternalHref<`customapp:${string}`>`` (or declaration-merge
 `LinkExternalUriSchemes` when the scheme should belong to the default `ExternalHref` union).
+A `Link` whose href is a `javascript:` URL renders without an `href`, and a click on it is ignored and
+logged, under React 18, React 19, and Preact alike, so an untrusted URL passed to `Link` cannot run script.
 
 **Client navigation**
 
