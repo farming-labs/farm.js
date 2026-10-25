@@ -581,6 +581,13 @@ export default function Page() { return <main>must not render</main>; }`,
         return new Response("members require sign-in", { status: 401 });
       },
     },
+    {
+      matcher: "/partners",
+      handler(ctx, next) {
+        if (ctx.request.headers["x-api-key"] === "partner-key") return next();
+        return new Response("partners require a key", { status: 401 });
+      },
+    },
   ],
 };`,
     );
@@ -599,6 +606,7 @@ export default function Layout({ children }) {
     );
     await writeModule(root, "src/app/open/page.md", `# Open notes\n\nopen-notes-source\n`);
     await writeModule(root, "src/app/members/page.md", `# Members\n\nmembers-only-source\n`);
+    await writeModule(root, "src/app/partners/page.md", `# Partners\n\npartners-only-source\n`);
 
     const server = await createServer({ root, images: { provider: "none" } });
     servers.add(server);
@@ -624,11 +632,31 @@ export default function Layout({ children }) {
     expect(membersPage.status).toBe(200);
     await expect(membersPage.text()).resolves.toContain("members-only-source");
 
+    // A guard trusting a custom header sees the anonymous check without it, so a key holder
+    // cannot put the page's source under a public cache, by `.md` or by negotiation.
+    const keyed = { "x-api-key": "partner-key" };
+    const partnersMarkdown = await fetch(`${origin}/partners.md`, { headers: keyed });
+    expect(partnersMarkdown.status).toBe(404);
+    expect(partnersMarkdown.headers.get("cache-control")).toBe("private, no-store");
+    await expect(partnersMarkdown.text()).resolves.not.toContain("partners-only-source");
+    const partnersNegotiated = await fetch(`${origin}/partners`, {
+      headers: { ...keyed, accept: "text/markdown" },
+    });
+    // The key holder may read the page; whatever represents it stays out of shared caches.
+    expect(partnersNegotiated.headers.get("cache-control")).toBe("private, no-store");
+    await partnersNegotiated.body?.cancel();
+
     // Routes outside every matcher keep serving their markdown source.
     const openResponse = await fetch(`${origin}/open.md`);
     expect(openResponse.status).toBe(200);
     expect(openResponse.headers.get("content-type")).toContain("text/markdown");
+    expect(openResponse.headers.get("cache-control")).toContain("public");
     await expect(openResponse.text()).resolves.toContain("open-notes-source");
+    // A public page's source is the same, and still public, for a caller with a key.
+    const keyedOpen = await fetch(`${origin}/open.md`, { headers: keyed });
+    expect(keyedOpen.status).toBe(200);
+    expect(keyedOpen.headers.get("cache-control")).toContain("public");
+    await expect(keyedOpen.text()).resolves.toContain("open-notes-source");
   }, 30_000);
 
   it("keeps literal exposure and dynamic fallbacks after a long list of route misses", async () => {

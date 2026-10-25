@@ -76,9 +76,11 @@ The browser still renders `page.tsx` at `/pricing`. Requests to `/pricing.md`, o
 `/pricing` with `Accept: text/markdown`, receive the exact contents of `page.md`.
 
 The source is served only for a page an anonymous visitor may open. Farm checks by requesting the
-page without cookies or an `Authorization` header, through the same middleware and integration
-guards, so a page behind sign-in has no `.md` version: `/account.md` answers `404` even for a
-signed-in caller, and the page is left out of `llms-full.txt`.
+page through the same middleware and integration guards with only standard browser and proxy
+headers (no cookies, `Authorization`, or custom headers such as an API key), so a page behind
+sign-in has no `.md` version: `/account.md` answers `404` even for a signed-in caller, and the page
+is left out of `llms-full.txt`. A guard that checks the client IP address still sees the caller's
+address in that check.
 
 ## Configure MDX components
 

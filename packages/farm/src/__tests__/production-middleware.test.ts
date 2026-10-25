@@ -678,6 +678,30 @@ describe("production middleware runtime", () => {
       expect(signedInPublicMarkdown.status).toBe(200);
       await expect(signedInPublicMarkdown.text()).resolves.toContain("public-notes-source");
 
+      // A guard trusting a custom header sees the anonymous check without it, so a key
+      // holder cannot put the page's source under a public cache.
+      const keyed = { "x-api-key": "partner-key" };
+      const partnersMarkdown = await serverModule.default.fetch(
+        new Request("https://example.test/partners.md", { headers: keyed }),
+      );
+      expect(partnersMarkdown.status).toBe(404);
+      expect(partnersMarkdown.headers.get("cache-control")).toBe("private, no-store");
+      expect(await partnersMarkdown.text()).not.toContain("partners-only-source");
+      const partnersNegotiated = await serverModule.default.fetch(
+        new Request("https://example.test/partners", {
+          headers: { ...keyed, accept: "text/markdown" },
+        }),
+      );
+      // The key holder may read the page; whatever represents it stays out of shared caches.
+      expect(partnersNegotiated.headers.get("cache-control") ?? "").not.toContain("public");
+      await partnersNegotiated.body?.cancel();
+      const keyedPublicMarkdown = await serverModule.default.fetch(
+        new Request("https://example.test/public-notes.md", { headers: keyed }),
+      );
+      expect(keyedPublicMarkdown.status).toBe(200);
+      expect(keyedPublicMarkdown.headers.get("cache-control")).toContain("public");
+      await expect(keyedPublicMarkdown.text()).resolves.toContain("public-notes-source");
+
       const generatedMetadataResponse = await serverModule.default.fetch(
         new Request("https://example.test/metadata/42?variant=featured"),
       );

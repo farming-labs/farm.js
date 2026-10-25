@@ -500,6 +500,22 @@ export async function middleware(request: Request) {
     path.join(root, "src", "app", "members", "page.md"),
     `# Members\n\nmembers-only-source\n`,
   );
+  // Guarded on a custom header rather than a cookie or Authorization.
+  await fs.mkdir(path.join(root, "src", "app", "partners"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "src", "app", "partners", "middleware.ts"),
+    `
+export async function middleware(request: Request) {
+  if (request.headers.get("x-api-key") !== "partner-key") {
+    return new Response("partners require a key", { status: 401 });
+  }
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "partners", "page.md"),
+    `# Partners\n\npartners-only-source\n`,
+  );
   await fs.mkdir(path.join(root, "src", "app", "public-notes"), { recursive: true });
   await fs.writeFile(
     path.join(root, "src", "app", "public-notes", "page.md"),
