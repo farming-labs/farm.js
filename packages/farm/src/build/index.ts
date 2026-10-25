@@ -25,6 +25,7 @@ import { createFarmSourceAlias, mergeFarmViteConfig } from "../server/vite-confi
 import { getFarmRendererComponentExtensions, loadFarmRendererVitePlugins } from "../renderer";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "./production-vite";
 import { withProductionNodeEnv } from "./production-node-env";
+import { createFarmProjectModuleSsrEnvironment } from "./project-module-runner";
 
 interface BuildOptions {
   preset?: string;
@@ -363,6 +364,16 @@ async function createProjectModuleServer(
       ...viteConfig.optimizeDeps,
       noDiscovery: true,
     },
+    // An app or plugin that brings its own SSR environment keeps it.
+    environments: viteConfig.environments?.ssr?.dev?.createEnvironment
+      ? viteConfig.environments
+      : {
+          ...viteConfig.environments,
+          ssr: {
+            ...viteConfig.environments?.ssr,
+            ...(await createFarmProjectModuleSsrEnvironment()),
+          },
+        },
   });
 }
 
