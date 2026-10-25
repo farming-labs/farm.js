@@ -15,6 +15,13 @@ The endpoint defaults to `/api/mcp` and implements MCP Streamable HTTP. It is a 
 unlike [WebMCP](/docs/plugins/webmcp), which registers tools in a supporting browser while a page is
 open.
 
+Without `@farm.js/mcp`, every app already serves a
+[read-only MCP server](/docs/configuration#default-mcp-server) at `/mcp` that lists, searches, and
+reads its public pages as Markdown. Configuring `@farm.js/mcp` replaces it: the default steps aside
+as soon as the top-level `mcp` config or `apiMcp()` is set, an API route answers `/api/mcp`, an app
+route answers `/mcp`, or a server is listed with `registerFarmMCPServer`. Turn the default off
+without adding a server with `agent: { mcp: false }`.
+
 ## Install and configure
 
 ```bash
@@ -609,7 +616,9 @@ Cards hold identity and the endpoint only, never tools, resources, or credential
 server does not open it: `authorize` still runs on every request. Both documents are public,
 send `Access-Control-Allow-Origin: *` and an `ETag`, and answer `If-None-Match` with `304`.
 The catalog follows the app `basePath`; cards live below the endpoint, which follows `api.basePath`.
-Turn discovery off with `agent: { aiCatalog: false }`. An app without an MCP server serves none of it.
+Turn discovery off with `agent: { aiCatalog: false }`. The
+[default read-only server](/docs/configuration#default-mcp-server) at `/mcp` is listed the same way
+while it serves; an app with neither serves none of it.
 
 ### List an MCP server Farm does not serve
 

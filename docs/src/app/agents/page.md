@@ -9,10 +9,11 @@ Your agents, MCP servers, and website—connected, managed, and observable from 
 
 ## Agent-ready with one config block
 
-Pages answer agents in Markdown by default, listed in `llms.txt` and described with JSON-LD and Open Graph from your metadata. Everything else is opt-in: an `mcp` block exposes the tools you choose, and an integration runs an agent beside your app. Discovery never grants permission; your app still authorizes every action.
+Pages answer agents in Markdown by default, listed in `llms.txt`, readable through a read-only MCP server at `/mcp`, and described with JSON-LD and Open Graph from your metadata. Everything else is opt-in: an `mcp` block exposes the tools you choose, and an integration runs an agent beside your app. Discovery never grants permission; your app still authorizes every action.
 
 - **Agent runtimes.** Register Eve or Cloudflare Agents in `farm.config.ts` (`integrations: { agent: eve() }`). `farm dev` starts the runtime and serves its routes on your app's origin. In production they ship together on Vercel (Eve) or in one Worker built with the `cloudflare-module` preset (Cloudflare Agents). On other targets, deploy the runtime separately and set its `origin`; Farm proxies to it. See [agent integrations](/docs/integrations/eve).
 - **Readable by default.** Pages answer agents with a Markdown mirror, by `.md` suffix or `Accept: text/markdown`. `llms.txt`, `sitemap.xml`, and JSON-LD are on too (turn any of them off with `agent: { llmsTxt: false, sitemap: false, jsonLd: false }`); OpenAPI (`openapi`) stays off until you turn it on in config. See [Markdown mirrors](/docs/markdown) and [agent readiness](/docs/configuration#agent-readiness).
+- **A read-only MCP server by default.** `/mcp` lists, searches, and reads your public pages as Markdown for MCP clients, until you serve your own MCP server (`agent: { mcp: false }` turns it off). See the [default MCP server](/docs/configuration#default-mcp-server).
 - **API routes as MCP tools (experimental).** Expose selected endpoints and standalone tools through one Streamable HTTP server. Each route keeps its validation and middleware, under one shared authorization policy. See the [MCP example](https://github.com/farming-labs/farm.js/tree/main/examples/api-mcp).
 - **WebMCP (experimental).** Components register named tools while the page is open. They call your same-origin APIs with the user's own session, in browsers that support WebMCP. See the [WebMCP plugin](/docs/plugins/webmcp).
 

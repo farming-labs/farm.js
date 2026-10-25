@@ -49,6 +49,7 @@ import {
   _getRequestReadCount,
   _runWithCurrentRequest,
   createWebRequestFromFarmRequest,
+  getCurrentRequestOrNull,
   resolveFarmRequestURL,
 } from "./request";
 import { _resolveCurrentRequest } from "./request-bridge";
@@ -111,6 +112,14 @@ import { normalizeFarmAPIConfig } from "../api/config";
 import { resolveFarmAPIServerBasePath } from "../api/server-path";
 import { createFarmAgentRobots, resolveFarmAgentCrawlers } from "../agent-crawlers";
 import { createFarmDefaultSitemap, resolveFarmAgentSitemap } from "../agent-sitemap";
+import {
+  collectFarmDefaultMCPPages,
+  createFarmDefaultMCPServer,
+  farmConfigMountsMCP,
+  FARM_DEFAULT_MCP_PATH,
+  isFarmDefaultMCPPathname,
+  resolveFarmDefaultMCPServer,
+} from "../agent-mcp";
 import {
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
@@ -566,6 +575,17 @@ function createRouteStateProps(input: {
   };
 }
 
+/** The app's package name and version, which name the default MCP server. */
+function readAppPackageIdentity(root: string | undefined): { name?: unknown; version?: unknown } {
+  try {
+    return JSON.parse(
+      fs.readFileSync(path.join(root || process.cwd(), "package.json"), "utf8"),
+    ) as { name?: unknown; version?: unknown };
+  } catch {
+    return {};
+  }
+}
+
 export class ServerRenderer {
   private config: Required<FarmConfig>;
   private routeManager: RouteManager;
@@ -576,6 +596,8 @@ export class ServerRenderer {
   private rendererRuntime!: FarmServerRendererRuntime;
   private appliedAppSetupModule: unknown;
   private security: ResolvedFarmSecurityConfig;
+  private apiRouteExists?: (path: string) => boolean;
+  private defaultMCPServer?: ReturnType<typeof createFarmDefaultMCPServer>;
 
   constructor(
     config: Required<FarmConfig>,
@@ -1364,6 +1386,12 @@ export class ServerRenderer {
       routeSlots = match.slots ?? [];
 
       if (!route) {
+        // agent.mcp: no app route answered /mcp, so the default read-only server may.
+        if (isFarmDefaultMCPPathname(pathname) && this.getDefaultMCPServer()) {
+          await this.renderDefaultMCP(req, res);
+          completeRender(res.statusCode || 200, pathname);
+          return;
+        }
         emitFarmEvent({ type: "route.notFound", pathname });
         await this.render404(req, res);
         completeRender(404);
@@ -2454,6 +2482,78 @@ export class ServerRenderer {
     }
   }
 
+  /** Lets the default MCP server see the app's API routes, which the dev server owns. */
+  setAPIRouteLookup(exists: (path: string) => boolean): void {
+    this.apiRouteExists = exists;
+  }
+
+  /**
+   * The default read-only MCP server (`agent.mcp`), or undefined when the app has an MCP
+   * server of its own: a route that answers /mcp, an API route at /api/mcp, `@farm.js/mcp`,
+   * or a registered server such as the docs engine's. Production applies the same rules.
+   */
+  getDefaultMCPServer(): ReturnType<typeof createFarmDefaultMCPServer> | undefined {
+    if (this.config.agent?.mcp !== true || farmConfigMountsMCP(this.config)) return undefined;
+    if (this.apiRouteExists?.("/api/mcp")) return undefined;
+    if (this.routeManager.matchRoute(FARM_DEFAULT_MCP_PATH).route) return undefined;
+    this.defaultMCPServer ??= createFarmDefaultMCPServer(
+      readAppPackageIdentity(this.config.root),
+      FARM_VERSION,
+    );
+    return resolveFarmDefaultMCPServer(this.defaultMCPServer);
+  }
+
+  private async renderDefaultMCP(req: FarmRequest, res: FarmResponse): Promise<void> {
+    const server = this.getDefaultMCPServer()!;
+    // renderPage already wrapped the body in the current request; read it from there.
+    const request =
+      getCurrentRequestOrNull() ??
+      createWebRequestFromFarmRequest(req, { trustProxy: this.config.server?.trustProxy });
+    try {
+      const { handleFarmDefaultMCPRequest } = await import("../agent-mcp-handler");
+      const origin = new URL(request.url).origin;
+      const response = await handleFarmDefaultMCPRequest(request, {
+        server,
+        basePath: this.config.basePath,
+        listPages: async () => {
+          const sources = await Promise.all(
+            [...this.routeManager.getRoutes()]
+              .filter(([pattern]) => !pattern.includes("["))
+              .map(async ([pattern, route]) => ({
+                pattern,
+                // The page itself surfaces a load error. Without its module a guard cannot
+                // be ruled out, so the page is left out.
+                module: await this.routeManager
+                  .loadRouteModule(route.modulePath)
+                  .catch(() => ({ __farmRouteGuard: true })),
+              })),
+          );
+          return collectFarmDefaultMCPPages(sources, {
+            origin,
+            basePath: this.config.basePath,
+            markdown: resolveMarkdownConfig(this.config.md as any),
+          });
+        },
+        // Pages are read through this server's own socket, with no cookies, as llms-full.txt does.
+        readMarkdown: this.createDevMarkdownReader(req),
+      });
+      await sendWebResponse(res as any, response);
+    } catch (error) {
+      logger.error(`Default MCP server failed: ${error}`);
+      await sendWebResponse(
+        res as any,
+        new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: null,
+            error: { code: -32603, message: "Internal error." },
+          }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+  }
+
   /** Same inputs the production server gives llms.txt: static pages and root metadata. */
   private async createLlmsTxtContext(
     request: Request,
@@ -2509,6 +2609,7 @@ export class ServerRenderer {
                     this.config.api as { baseURL?: string; basePath?: string },
                   ),
                 ),
+                defaultMCP: () => this.getDefaultMCPServer(),
               }),
       }),
       ...(options.full ? { markdown: this.createDevMarkdownReader(options.req) } : {}),

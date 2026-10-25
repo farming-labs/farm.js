@@ -1509,6 +1509,10 @@ export function farmPlugin(
         },
       });
       await apiRouteManager.discoverRoutes();
+      // The default MCP server steps aside for an app API route at /api/mcp.
+      farmApp
+        .getServerRenderer()
+        .setAPIRouteLookup((routePath) => apiRouteManager.getRoutes().has(routePath));
       let discoveredWorkflows: FarmDiscoveredWorkflow[] = [];
       const hasWorkflowDirectory =
         workflowConfig.enabled &&
@@ -2029,14 +2033,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   [FARM_INFRA_SIGNATURE_HEADER]: header(FARM_INFRA_SIGNATURE_HEADER),
                 },
               }),
-              resolveFarmAppManifestInput(farmConfig, {
-                build: "development",
-                packages: farmAppPackages,
-                // Read again on each request; unchanged files come from a cache.
-                webmcpTools: farmConfig.plugins?.some(({ name }) => name === "farm:webmcp")
-                  ? collectFarmWebMCPTools(farmConfig.root ?? process.cwd(), farmConfig.srcDir)
-                  : [],
-              }),
+              {
+                ...resolveFarmAppManifestInput(farmConfig, {
+                  build: "development",
+                  packages: farmAppPackages,
+                  // Read again on each request; unchanged files come from a cache.
+                  webmcpTools: farmConfig.plugins?.some(({ name }) => name === "farm:webmcp")
+                    ? collectFarmWebMCPTools(farmConfig.root ?? process.cwd(), farmConfig.srcDir)
+                    : [],
+                }),
+                defaultMCP: () => farmApp.getServerRenderer().getDefaultMCPServer(),
+              },
             );
             await sendWebResponse(res, manifest);
             return;
@@ -2071,7 +2078,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   "if-none-match": String(req.headers["if-none-match"] ?? ""),
                 },
               }),
-              { basePath: farmConfig.basePath, apiServerBasePath },
+              {
+                basePath: farmConfig.basePath,
+                apiServerBasePath,
+                defaultMCP: () => farmApp.getServerRenderer().getDefaultMCPServer(),
+              },
             );
             if (aiCatalog) {
               if (await runAppMiddlewareForContentRoute()) return;

@@ -254,6 +254,29 @@ test("reports broken surfaces as failures or warnings", async () => {
   assert.match(byCode.AGENT_MCP.message, /without WWW-Authenticate/);
 });
 
+test("falls back to the default MCP server at /mcp", async () => {
+  const app = completeApp();
+  const requested = [];
+  const report = await runFarmAgentCheck({
+    url: "https://acme.test",
+    fetch: async (input, init) => {
+      const { pathname } = new URL(String(input));
+      requested.push(`${init?.method ?? "GET"} ${pathname}`);
+      if (pathname === "/.well-known/api-catalog") return notFound();
+      if (pathname === "/api/mcp") return Response.json({ error: "not found" }, { status: 404 });
+      if (pathname === "/mcp" && init?.method === "POST") {
+        return Response.json({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18" } });
+      }
+      return app(input, init);
+    },
+  });
+  const byCode = Object.fromEntries(report.checks.map((check) => [check.code, check]));
+  assert.ok(requested.indexOf("POST /api/mcp") < requested.indexOf("POST /mcp"));
+  assert.equal(byCode.AGENT_MCP.title, "MCP endpoint is public");
+  assert.match(byCode.AGENT_MCP.message, /https:\/\/acme\.test\/mcp accepted/);
+  assert.ok(requested.includes("GET /mcp/server-card"));
+});
+
 test("finds the MCP endpoint in another catalog by its title, or at --mcp", async () => {
   const app = completeApp();
   const requested = [];

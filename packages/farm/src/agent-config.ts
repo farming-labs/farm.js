@@ -2,8 +2,8 @@
  * Agent-readiness configuration: primitives that make a Farm site easier for AI agents and
  * crawlers to discover, resolve, and use. The ones that only describe the site agents can
  * already read (JSON-LD, llms.txt, the sitemap, and the AI catalog of MCP servers the app
- * already serves) are on by default; the ones that expose more (crawler rules, an API catalog)
- * are opt-in. Each one turns off with `false`.
+ * already serves, plus a read-only MCP server over the same public pages) are on by default; the
+ * ones that expose more (crawler rules, an API catalog) are opt-in. Each one turns off with `false`.
  */
 import {
   resolveFarmAgentCrawlers,
@@ -125,6 +125,19 @@ export interface FarmAgentUserConfig {
    * @default true
    */
   manifest?: boolean;
+  /**
+   * Serve a read-only MCP server (Streamable HTTP) at `/mcp` with tools that list,
+   * search, and read the app's public pages as Markdown: the static pages llms.txt and
+   * the sitemap list, without pages whose metadata says noindex or pages behind a route
+   * `guard`. Pages are read like an anonymous visitor, never with the caller's cookies.
+   * It steps aside when the app has an MCP server of its own: a route that answers
+   * `/mcp`, an API route at `/api/mcp`, the top-level `mcp` config or `apiMcp()`, or a
+   * server listed with `registerFarmMCPServer` (the docs engine's MCP). Left unset, it
+   * is served unless the docs engine is enabled, which serves its own.
+   *
+   * @default true without docs, false with docs
+   */
+  mcp?: boolean;
 }
 
 export interface ResolvedFarmAgentConfig {
@@ -136,6 +149,7 @@ export interface ResolvedFarmAgentConfig {
   apiCatalog: boolean;
   aiCatalog: boolean;
   manifest: boolean;
+  mcp: boolean;
 }
 
 /** What an app gets without an `agent` block: the site described, nothing more exposed. */
@@ -165,6 +179,8 @@ export function resolveFarmAgentConfig(
     apiCatalog: resolveFarmAgentBoolean(input?.apiCatalog, "apiCatalog", false),
     aiCatalog: resolveFarmAgentBoolean(input?.aiCatalog, "aiCatalog", true),
     manifest: resolveFarmAgentBoolean(input?.manifest, "manifest", true),
+    // Same rule as llms.txt: the docs engine serves its own MCP server at /mcp.
+    mcp: resolveFarmAgentBoolean(input?.mcp, "mcp", !context.docs),
   };
 }
 

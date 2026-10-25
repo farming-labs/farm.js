@@ -13,7 +13,7 @@ export interface FarmAgentCheckOptions {
   url?: string;
   /** The page to check, relative to the base URL. @default "/" */
   path?: string;
-  /** Path of the MCP endpoint. @default the catalog's MCP item, or "/api/mcp" */
+  /** Path of the MCP endpoint. @default the catalog's MCP item, or "/api/mcp", then "/mcp" */
   mcpPath?: string;
   /** Per-request timeout. @default 5000 */
   timeoutMs?: number;
@@ -777,7 +777,9 @@ async function checkApis(
         },
   );
 
-  // The catalog names its MCP endpoint by title or by an /mcp path; Farm's default is /api/mcp.
+  // The catalog names its MCP endpoint by title or by an /mcp path. Without one, try the
+  // top-level mcp config's /api/mcp, then /mcp, where every app serves a read-only server
+  // of its pages (agent.mcp) when it has no MCP server of its own.
   const mcpHref = mcpPath
     ? undefined
     : targets("item").find(
@@ -785,26 +787,37 @@ async function checkApis(
           (typeof target.title === "string" && /\bmcp\b/i.test(target.title)) ||
           /\/mcp\/?$/i.test(new URL(target.href, catalogUrl).pathname),
       )?.href;
-  const mcpUrl = mcpHref
+  const initialize = (url: string) =>
+    probe(url, {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "farm-agent-check", version: "1.0.0" },
+        },
+      }),
+    });
+  const answers = (answer: Probe) =>
+    answer.status === 401 || (answer.status >= 200 && answer.status < 300);
+  let mcpUrl = mcpHref
     ? new URL(mcpHref, catalogUrl).href
     : at(`/${(mcpPath ?? "/api/mcp").replace(/^\/+/, "")}`);
-  const mcp = await probe(mcpUrl, {
-    method: "POST",
-    headers: {
-      accept: "application/json, text/event-stream",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: "2025-06-18",
-        capabilities: {},
-        clientInfo: { name: "farm-agent-check", version: "1.0.0" },
-      },
-    }),
-  });
+  let mcp = await initialize(mcpUrl);
+  if (!mcpHref && !mcpPath && !answers(mcp)) {
+    const fallback = await initialize(at("/mcp"));
+    if (answers(fallback)) {
+      mcpUrl = at("/mcp");
+      mcp = fallback;
+    }
+  }
   if (mcp.status === 401) {
     const challenge = mcp.headers.get("www-authenticate");
     add(
@@ -843,7 +856,7 @@ async function checkApis(
       status: "info",
       code: "AGENT_MCP",
       title: "No MCP endpoint",
-      message: `Nothing answered at ${mcpUrl}.`,
+      message: `Nothing answered at ${mcpUrl}${mcpPath ? "" : ` or ${at("/mcp")}`}.`,
       action: "Add the top-level mcp config to expose API routes and server functions as tools.",
     });
   }

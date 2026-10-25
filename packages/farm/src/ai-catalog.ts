@@ -18,7 +18,11 @@ import { emitFarmAgentRead } from "./agent-identity";
 import { resolveFarmAPIServerRoutePath } from "./api/server-path";
 import { applyFarmBasePath } from "./base-path";
 import type { FarmLlmsTxtLink } from "./llms-txt";
-import { _listFarmMCPCatalogs, _listFarmRegisteredMCPServers } from "./mcp-catalog";
+import {
+  _listFarmMCPCatalogs,
+  _listFarmRegisteredMCPServers,
+  type FarmMCPServerRegistration,
+} from "./mcp-catalog";
 import { createFarmWeakETag, matchesFarmIfNoneMatch } from "./server-http";
 
 export const FARM_AI_CATALOG_PATH = "/.well-known/ai-catalog.json";
@@ -38,6 +42,11 @@ export interface FarmAiCatalogInput {
   basePath?: string;
   /** The app's public API path, which maps to Farm's canonical `/api`. */
   apiServerBasePath?: string;
+  /**
+   * The default read-only server (`agent.mcp`), when this app would serve it. It is
+   * listed only while no other MCP server is, the same rule that decides whether it answers.
+   */
+  defaultMCP?: () => (FarmMCPServerRegistration & { path: `/${string}` }) | undefined;
 }
 
 export interface FarmMCPServerCard {
@@ -77,7 +86,10 @@ interface FarmMCPServerSource {
   local: boolean;
 }
 
-/** The MCP servers `@farm.js/mcp` publishes, then the registered ones, one per endpoint. */
+/**
+ * The MCP servers `@farm.js/mcp` publishes, then the registered ones, one per endpoint,
+ * or the default read-only server when there are none.
+ */
 function listFarmMCPServerSources(input: FarmAiCatalogInput): FarmMCPServerSource[] {
   const sources = new Map<string, FarmMCPServerSource>();
   for (const { server, details } of _listFarmMCPCatalogs()) {
@@ -95,6 +107,13 @@ function listFarmMCPServerSources(input: FarmAiCatalogInput): FarmMCPServerSourc
     const endpoint = server.path ? applyFarmBasePath(server.path, input.basePath) : server.url!;
     if (sources.has(endpoint)) continue;
     sources.set(endpoint, { ...server, endpoint, local: Boolean(server.path) });
+  }
+  if (sources.size === 0 && input.defaultMCP) {
+    const server = input.defaultMCP();
+    if (server) {
+      const endpoint = applyFarmBasePath(server.path, input.basePath);
+      sources.set(endpoint, { ...server, endpoint, local: true });
+    }
   }
   return [...sources.values()];
 }

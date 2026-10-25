@@ -447,7 +447,8 @@ mixed declarations, the resolved catalog, and permission checks.
 of them may use it. The ones that only describe what agents can already read are on by default:
 `jsonLd` (a schema.org `WebSite` built from your metadata), `llmsTxt` and `sitemap` (an index of
 your static pages and a `/sitemap.xml` of them, when the [docs engine](/docs/docs-engine) isn't
-serving its own), `aiCatalog` (discovery
+serving its own), `mcp` (a [read-only MCP server](#default-mcp-server) over those same pages at
+`/mcp`, when the app has no MCP server of its own), `aiCatalog` (discovery
 for the [MCP server](/docs/plugins/mcp#discovery) you already serve, when you serve one), and
 `manifest` (the [app manifest](#app-manifest) at `/.well-known/farmjs.json`). The rest,
 which expose more or change who may crawl, are opt-in. Turn a default off with `false`, for example
@@ -455,7 +456,14 @@ on an internal tool:
 
 ```ts title="farm.config.ts"
 export default defineConfig({
-  agent: { jsonLd: false, llmsTxt: false, sitemap: false, aiCatalog: false, manifest: false },
+  agent: {
+    jsonLd: false,
+    llmsTxt: false,
+    sitemap: false,
+    mcp: false,
+    aiCatalog: false,
+    manifest: false,
+  },
 });
 ```
 
@@ -590,6 +598,42 @@ export default defineConfig({
 or a root [`sitemap.ts`](/docs/routing#application-metadata-routes), which can list dynamic pages,
 replaces the generated file.
 
+### Default MCP server
+
+Left unset, `mcp` serves a read-only [MCP](https://modelcontextprotocol.io) server at `/mcp`
+(Streamable HTTP) with three tools over the app's public pages:
+
+| Tool           | What it does                                                                      |
+| -------------- | --------------------------------------------------------------------------------- |
+| `list_pages`   | Each page's path, title, URL, and description.                                    |
+| `search_pages` | Pages whose title, description, or path matches every word of a `query`.          |
+| `read_page`    | One page as Markdown, from its [Markdown mirror](/docs/markdown), by path or URL. |
+
+The pages are the static pages `llms.txt` and the sitemap list that have a Markdown mirror: dynamic
+routes, pages whose metadata says `robots: { index: false }`, and pages behind a route
+[`guard`](/docs/routing#route-guards) are left out, and `read_page` answers only for a listed page.
+Pages are read the way `llms-full.txt` reads them, as a fresh request without the caller's cookies
+or credentials, so a page middleware keeps private answers as signed out. The server has no write
+tools and never reaches API routes, server functions, sessions, or environment values.
+
+It names itself after the app's `package.json` (`name` and `version`, or Farm's version without
+one), and joins the [AI catalog](#ai-catalog), its card at `/mcp/server-card`, the `MCP` section of
+`llms.txt`, and the [app manifest](#app-manifest), which lists its tools. It follows the app
+`basePath`. The handler loads on the first `/mcp` request; other requests only compare a path.
+
+The app's own MCP always wins, in development and in production alike. The default steps aside when:
+
+- a route of the app answers `/mcp` (a page, a programmatic route, or a dynamic route that matches it);
+- an API route is mounted at `/api/mcp`;
+- `@farm.js/mcp` is configured, through the top-level [`mcp`](/docs/plugins/mcp) config or `apiMcp()`;
+- another MCP server is listed with
+  [`registerFarmMCPServer`](/docs/plugins/mcp#list-an-mcp-server-farm-does-not-serve), as the
+  [docs engine](/docs/docs-engine) does for its own MCP endpoint.
+
+With the docs engine enabled, `mcp` is off by default, since the docs engine serves `/mcp`
+itself. `mcp: false` turns it off. React Server Components apps (`experimental.serverComponents`)
+don't serve it yet.
+
 ### AI crawlers
 
 `crawlers` serves a generated `/robots.txt` with a group per category you set:
@@ -638,7 +682,7 @@ The app's own file wins. Farm serves `/robots.txt` from, in order:
 ### AI catalog
 
 When the app mounts an MCP server, through the top-level [`mcp`](/docs/plugins/mcp) config or
-`apiMcp()`, Farm serves `/.well-known/ai-catalog.json` (and the same entries at
+`apiMcp()`, or serves the [default one](#default-mcp-server), Farm serves `/.well-known/ai-catalog.json` (and the same entries at
 `/.well-known/ard.json`) listing a server card for it, serves the card at `<endpoint>/server-card`,
 and adds an `MCP` section to the generated `llms.txt` that names the endpoint. The card carries only
 the server's identity and URL, never its tools, and listing it does not skip `authorize`.

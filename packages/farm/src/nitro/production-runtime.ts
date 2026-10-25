@@ -64,6 +64,8 @@ export {
 } from "../owned-response";
 export { createFarmAgentRobots } from "../agent-crawlers";
 export { createFarmDefaultSitemap } from "../agent-sitemap";
+export { collectFarmDefaultMCPPages, resolveFarmDefaultMCPServer } from "../agent-mcp";
+export { handleFarmDefaultMCPRequest } from "../agent-mcp-handler";
 export { createFarmAiCatalogResponse, listFarmMCPLlmsTxtLinks } from "../ai-catalog";
 export { registerFarmMCPServer } from "../mcp-catalog";
 export { createFarmApiCatalogResponse } from "../api-catalog";

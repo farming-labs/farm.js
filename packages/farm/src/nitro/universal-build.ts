@@ -9,6 +9,12 @@ import {
 } from "../app-manifest";
 import { resolveFarmAppPackages } from "../app-manifest-packages";
 import { collectFarmWebMCPTools } from "../app-manifest-webmcp";
+import {
+  createFarmDefaultMCPServer,
+  farmConfigMountsMCP,
+  FARM_DEFAULT_MCP_PATH,
+} from "../agent-mcp";
+import { FARM_VERSION } from "../version";
 import type { RedirectConfig, ResolvedFarmConfig, RewriteConfig } from "../config";
 import { hasCustomFarmRouteContext, resolveDeployOutputPath } from "../config";
 import {
@@ -4900,6 +4906,15 @@ async function buildSSRInMemory(
   };
 }
 
+/** The app's package name and version, which name the default MCP server. */
+function readFarmAppPackageIdentity(root: string): { name?: unknown; version?: unknown } {
+  try {
+    return JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
 /** When each static page's file last changed, for the generated sitemap's lastmod. */
 function readFarmPageLastModified(pageRoutes: UniversalPageRoute[]): Record<string, string> {
   const lastModified: Record<string, string> = {};
@@ -5391,6 +5406,13 @@ function generateVirtualEntryCode(
     !applicationMetadataRoutes.some(
       (metadata) => metadata.kind === "sitemap" && metadata.pattern === "/",
     );
+  // agent.mcp serves the default read-only MCP server at /mcp unless the app mounts
+  // @farm.js/mcp or has an API route at /api/mcp. A page route that answers /mcp, and an
+  // MCP server published or registered at runtime, are checked when a request asks.
+  const servesDefaultMCP =
+    config.agent?.mcp === true &&
+    !farmConfigMountsMCP(config) &&
+    !apiRoutes.some((route) => route.path === "/api/mcp");
   // agent.aiCatalog lists the MCP servers @farm.js/mcp mounts and those registered with
   // registerFarmMCPServer, which a docs runtime or app code does when the server starts,
   // so the build cannot tell whether any will be. With none, it answers nothing.
@@ -5812,6 +5834,9 @@ function renderFarmRouteServerTree(element) { return element; }`;
   createFarmMetadataRouteResponse,
   createFarmAgentRobots,
   createFarmDefaultSitemap,
+  collectFarmDefaultMCPPages,
+  resolveFarmDefaultMCPServer,
+  handleFarmDefaultMCPRequest,
   createFarmAiCatalogResponse,
   createFarmApiCatalogResponse,
   createFarmAppManifestResponse,
@@ -6507,7 +6532,7 @@ ${
               ? collectFarmWebMCPTools(config.root, config.srcDir)
               : [],
           }),
-        )};\n`
+        )};\n${servesDefaultMCP ? "farmAppManifestInput.defaultMCP = getFarmDefaultMCPServer;\n" : ""}`
       : ""
   }
 function isFarmLocalAPIPathname(pathname) {
@@ -7455,6 +7480,44 @@ function createFarmAgentSitemapResponse(request) {
 `
     : ""
 }
+${
+  servesDefaultMCP
+    ? `// agent.mcp: the default read-only MCP server at /mcp, as in development. It steps
+// aside for a page route that answers /mcp and for any MCP server published or
+// registered at runtime, such as the docs engine's.
+const farmDefaultMCPServer = ${JSON.stringify(
+        createFarmDefaultMCPServer(readFarmAppPackageIdentity(config.root), FARM_VERSION),
+      )};
+let farmDefaultMCPRouteFree;
+function getFarmDefaultMCPServer() {
+  if (farmDefaultMCPRouteFree === undefined) {
+    farmDefaultMCPRouteFree = !matchPageRoute(${JSON.stringify(FARM_DEFAULT_MCP_PATH)});
+  }
+  return farmDefaultMCPRouteFree ? resolveFarmDefaultMCPServer(farmDefaultMCPServer) : undefined;
+}
+async function handleFarmDefaultMCP(request) {
+  const origin = new URL(request.url).origin;
+  return handleFarmDefaultMCPRequest(request, {
+    server: getFarmDefaultMCPServer(),
+    basePath: ${JSON.stringify(config.basePath)},
+    listPages: () =>
+      collectFarmDefaultMCPPages(
+        pageRoutes.map((route) => ({ pattern: route.pattern, module: route.module })),
+        { origin, basePath: ${JSON.stringify(config.basePath)}, markdown: farmMarkdownConfig },
+      ),
+    // A fresh request through this handler, so the caller's cookies never shape a page.
+    // The handler sees paths below the base path, as the server passes them in.
+    readMarkdown: (url) => {
+      const page = new URL(url);
+      page.pathname = stripFarmBasePath(page.pathname);
+      return farmDefaultMCPReadMarkdown(page.href);
+    },
+  });
+}
+const farmDefaultMCPReadMarkdown = createFarmLlmsMarkdownReader((page) => handleFarmRequest(page));
+`
+    : ""
+}
 // Static pages and root metadata for llms.txt, built the same way as in development.
 function createFarmLlmsTxtContext(request, full) {
   const origin = new URL(request.url).origin;
@@ -7479,7 +7542,7 @@ function createFarmLlmsTxtContext(request, full) {
         servesAiCatalog
           ? `mcp: listFarmMCPLlmsTxtLinks(origin, {
         basePath: ${JSON.stringify(config.basePath)},
-        apiServerBasePath: farmLocalAPIBasePath,
+        apiServerBasePath: farmLocalAPIBasePath,${servesDefaultMCP ? "\n        defaultMCP: getFarmDefaultMCPServer," : ""}
       }),`
           : ""
       }
@@ -8280,7 +8343,10 @@ async function handleFarmRequestInContext(
   // API routes, as in dev.
   const farmAiCatalogResponse = createFarmAiCatalogResponse(
     request,
-    { basePath: ${JSON.stringify(config.basePath)}, apiServerBasePath: farmLocalAPIBasePath },
+    {
+      basePath: ${JSON.stringify(config.basePath)},
+      apiServerBasePath: farmLocalAPIBasePath,${servesDefaultMCP ? "\n      defaultMCP: getFarmDefaultMCPServer," : ""}
+    },
     url,
   );
   if (farmAiCatalogResponse) {
@@ -9474,6 +9540,22 @@ async function handleFarmRequestInContext(
     }
   }
 
+${
+  servesDefaultMCP
+    ? `
+  // agent.mcp: no app route answered /mcp, so the default read-only server may.
+  if (
+    normalizeRuntimePath(routePathname) === ${JSON.stringify(FARM_DEFAULT_MCP_PATH)} &&
+    getFarmDefaultMCPServer()
+  ) {
+    return applyProductionMiddlewareHeaders(
+      await handleFarmDefaultMCP(request),
+      middlewareHeaders,
+    );
+  }
+`
+    : ""
+}
   // 404 fallback - render proper HTML page
   return renderFarmNotFoundResponse();
 

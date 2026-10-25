@@ -11,6 +11,7 @@
  * prompts, and endpoint tools leave out their HTTP route. A request Farm Infra signed for
  * the app's `FARMJS_API_KEY` gets the full view. Kept free of Node built-ins: Web Crypto only.
  */
+import { FARM_DEFAULT_MCP_TOOLS } from "./agent-mcp";
 import type { FarmAppManifestWebMCPTool } from "./app-manifest-webmcp";
 import { _listFarmMCPCatalogs, type FarmMCPCatalogDetails } from "./mcp-catalog";
 import { createFarmWeakETag, matchesFarmIfNoneMatch } from "./server-http";
@@ -99,6 +100,11 @@ export interface FarmAppManifestInput {
    * The public manifest is still served; `agent.manifest: false` turns that off.
    */
   analytics: boolean;
+  /**
+   * The default read-only MCP server (`agent.mcp`) while the app would serve it. Set by the
+   * server at runtime, not serialized: it answers only while no other MCP server is listed.
+   */
+  defaultMCP?: () => { name: string; version: string; path: string } | undefined;
 }
 
 export function resolveFarmAppManifestInput(
@@ -161,7 +167,7 @@ export function createFarmAppManifest(
   input: FarmAppManifestInput,
   { full = false }: { full?: boolean } = {},
 ): FarmAppManifest {
-  return {
+  const manifest: FarmAppManifest = {
     schemaVersion: 1,
     app: {
       farm: FARM_VERSION,
@@ -208,6 +214,34 @@ export function createFarmAppManifest(
     agent: input.agent,
     plugins: input.plugins,
   };
+  manifest.mcp.servers.push(...listDefaultServer(input));
+  return manifest;
+}
+
+/** The default server lists its tools to anyone: it answers anonymous clients. */
+function listDefaultServer(input: FarmAppManifestInput): FarmAppManifest["mcp"]["servers"] {
+  const server = input.defaultMCP?.();
+  if (!server) return [];
+  return [
+    {
+      name: server.name,
+      version: server.version,
+      path: server.path,
+      authorization: "none",
+      resources: [],
+      prompts: [],
+      tools: FARM_DEFAULT_MCP_TOOLS.map((tool) => ({
+        name: tool.name,
+        title: tool.title,
+        description: tool.description,
+        // Standalone tools with no endpoint behind them, like defineTool's.
+        source: "defineTool",
+        ...tool.annotations,
+        inputSchema: tool.inputSchema,
+        ...("outputSchema" in tool ? { outputSchema: tool.outputSchema } : {}),
+      })),
+    },
+  ];
 }
 
 const encoder = new TextEncoder();
