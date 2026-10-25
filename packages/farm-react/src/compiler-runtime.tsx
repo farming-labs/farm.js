@@ -3042,6 +3042,8 @@ export interface CompilerKeyedRowsBlockProps {
    * row can be cloned from one already built with its bindings reapplied.
    */
   cloneRows?: boolean;
+  /** Compiler-emitted lookup sharing plain-row binding path prefixes. */
+  targets?: (root: Element) => (Element | null)[];
 }
 
 export interface CompilerKeyedRange {
@@ -4521,7 +4523,7 @@ function readKeyedRowBindingValues(
 }
 
 type CompilerKeyedRowSource = Pick<CompilerKeyedRowsBlockProps, "bindings" | "create"> &
-  Partial<Pick<CompilerKeyedRowsBlockProps, "cloneRows">>;
+  Partial<Pick<CompilerKeyedRowsBlockProps, "cloneRows" | "targets">>;
 
 // With cloneRows, everything outside the bindings is identical for every row.
 // Once one row is built from its descriptor, the rest clone it and reapply
@@ -4549,12 +4551,21 @@ function createKeyedRowInstance(
     conditionalValues: EMPTY_KEYED_ROW_CONDITIONAL_VALUES,
   };
   if (props.cloneRows) {
-    const targets: (Element | null)[] = [];
+    let targets = props.targets?.(element);
     let found = true;
-    for (const binding of props.bindings) {
-      const target = findCompilerHostTarget(element, binding.path);
-      found &&= target !== null;
-      targets.push(target);
+    if (
+      !targets ||
+      targets.length !== props.bindings.length ||
+      !props.bindings.every((_, index) => targets![index] != null)
+    ) {
+      // Validate every binding, including sparse lookup results, before using
+      // generated targets. Incomplete lookups retain the full existing walk.
+      targets = [];
+      for (const binding of props.bindings) {
+        const target = findCompilerHostTarget(element, binding.path);
+        found &&= target !== null;
+        targets.push(target);
+      }
     }
     if (found) instance.targets = targets as Element[];
     if (template) {
