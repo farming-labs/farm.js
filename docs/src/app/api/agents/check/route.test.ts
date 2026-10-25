@@ -3,6 +3,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
+// Reports come back with the newest Farm.js release, read from npm.
+vi.mock("../../../../lib/farm-latest", () => ({ latestFarmVersion: async () => "0.1.35" }));
+
 const fetchMock = vi.fn<typeof fetch>();
 const scan = {
   id: "abc123def456",
@@ -59,7 +62,10 @@ describe("agent-ready check proxy", () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ id: "abc123def456", scan });
+    await expect(response.json()).resolves.toEqual({
+      id: "abc123def456",
+      scan: { ...scan, latestFarmVersion: "0.1.35" },
+    });
     const [target, init] = fetchMock.mock.calls[0]!;
     expect(target).toBe("https://infra.test/api/scans");
     expect(init?.method).toBe("POST");
@@ -141,7 +147,10 @@ describe("agent-ready check proxy", () => {
     delete process.env.FARMJS_API_KEY;
     const response = await POST(jsonRequest({ url: "vercel.com" }));
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ id: "abc123def456", scan });
+    await expect(response.json()).resolves.toEqual({
+      id: "abc123def456",
+      scan: { ...scan, latestFarmVersion: "0.1.35" },
+    });
     const [target, init] = fetchMock.mock.calls[0]!;
     expect(target).toBe("https://app.farmjs.dev/api/scans");
     expect(new Headers(init?.headers).has("authorization")).toBe(false);
@@ -149,7 +158,10 @@ describe("agent-ready check proxy", () => {
 
   it("returns the finished report so the page can show it in place", async () => {
     const response = await POST(jsonRequest({ url: "vercel.com" }));
-    await expect(response.json()).resolves.toEqual({ id: "abc123def456", scan });
+    await expect(response.json()).resolves.toEqual({
+      id: "abc123def456",
+      scan: { ...scan, latestFarmVersion: "0.1.35" },
+    });
     expect(fetchMock.mock.calls[1]![0]).toBe("https://infra.test/api/reports/abc123def456");
   });
 

@@ -4,6 +4,9 @@ import type { RequestMiddlewareContext } from "@farm.js/core/middleware";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { middleware } from "./middleware";
 
+// Reports come back with the newest Farm.js release, read from npm.
+vi.mock("../../../lib/farm-latest", () => ({ latestFarmVersion: async () => "0.1.35" }));
+
 const fetchMock = vi.fn<typeof fetch>();
 const scan = {
   id: "abc123def456",
@@ -67,7 +70,7 @@ describe("agent check middleware", () => {
       cookie: "abc123def456",
     });
     expect(await result).toBeUndefined();
-    expect(data.get("agentCheckScan")).toEqual(scan);
+    expect(data.get("agentCheckScan")).toEqual({ ...scan, latestFarmVersion: "0.1.35" });
     expect(headers.get("cache-control")).toBe("private, no-store");
   });
 
