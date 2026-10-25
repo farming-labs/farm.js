@@ -190,6 +190,8 @@ HOST=0.0.0.0 PORT=3000 pnpm start
 
 For a VPS, run the same start command behind nginx, Caddy, systemd, or a process manager such as PM2. Environment variables should be provided by the host at runtime, not committed into the bundle.
 
+The server sets `NODE_ENV=production` when the environment leaves it unset, as `next start` does, so packages that read it at runtime agree with the browser bundle. A value the host sets wins.
+
 ### Docker
 
 `farm build` writes a self-contained server, so a multi-stage image installs everything to build and copies only the output into the runtime stage:
