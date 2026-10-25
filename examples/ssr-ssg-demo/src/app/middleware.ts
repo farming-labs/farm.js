@@ -11,7 +11,7 @@ export default middleware()
     await next();
   })
   .when(
-    (ctx: MiddlewareContext) => ctx.pathname.startsWith('/api'),
+    (ctx: MiddlewareContext) => ctx.routePathname.startsWith('/api'),
     async (ctx: MiddlewareContext, next: NextFunction) => {
       ctx.headers.set('X-API-Version', '1.0.0');
       await next();

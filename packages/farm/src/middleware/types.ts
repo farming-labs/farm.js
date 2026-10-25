@@ -67,6 +67,8 @@ export interface RequestMiddlewareContext<
 > {
   readonly url: URL;
   readonly pathname: string;
+  /** The pathname the router matches: decoded once, without basePath or locale. */
+  readonly routePathname: string;
   readonly searchParams: URLSearchParams;
   readonly method: string;
   readonly params: Record<string, string>;
@@ -188,7 +190,13 @@ export interface MiddlewareContext {
   request: IncomingMessage;
   response: ServerResponse;
   url: URL;
+  /** Request pathname as received: still percent-encoded and carrying basePath/locale. */
   pathname: string;
+  /**
+   * The pathname the router matches: decoded once, without basePath or locale. String matchers
+   * compare this value; compare it in path checks too. Updated by `rewrite()`.
+   */
+  readonly routePathname: string;
   searchParams: URLSearchParams;
   method: string;
 

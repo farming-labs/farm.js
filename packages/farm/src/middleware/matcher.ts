@@ -283,14 +283,52 @@ function matchPattern(
   };
 }
 
+/** `ctx` with `pathname` read as `routePathname`; everything else, writes included, is `ctx`. */
+function withRoutePathname(ctx: MiddlewareContext, routePathname: string): MiddlewareContext {
+  return new Proxy(ctx, {
+    get(target, key) {
+      return key === "pathname" || key === "routePathname"
+        ? routePathname
+        : Reflect.get(target, key, target);
+    },
+  });
+}
+
+/**
+ * Evaluate a function matcher or `.when()` condition. Apps write these against
+ * `ctx.pathname`, the raw request path, which is still percent-encoded and still
+ * carries basePath/locale, while string matchers and the router see the route
+ * pathname. Checking the predicate against both keeps `/%61dmin` and
+ * `/console/admin` from walking past `ctx.pathname.startsWith("/admin")`. Only
+ * adds matches: a predicate true for the raw path stays true.
+ */
+export function matchesMiddlewarePredicate(
+  predicate: (ctx: MiddlewareContext) => boolean,
+  ctx: MiddlewareContext,
+  getRoutePathname: () => string | undefined = () => ctx.routePathname,
+): boolean {
+  if (predicate(ctx)) return true;
+  const routePathname = getRoutePathname();
+  if (routePathname === undefined || routePathname === ctx.pathname) return false;
+  return Boolean(predicate(withRoutePathname(ctx, routePathname)));
+}
+
+/** The route pathname for a request path, as string matchers compare it. */
+export function toMiddlewareRoutePathname(
+  pathname: string,
+  toRoutePathname: (pathname: string) => string = (value) => value,
+): string {
+  return canonicalizeRequestPathname(toRoutePathname(pathname));
+}
+
 export function matchesCompiledMiddlewareConfig(
   pathname: string,
   config: CompiledMiddlewareConfig,
   ctx: MiddlewareContext,
 ): { matched: boolean; params?: Record<string, string> } {
   let canonicalPathname: string | undefined;
-  // Canonicalize at most once for the whole config, and skip the work entirely
-  // for configs containing only function matchers.
+  // Canonicalize at most once for the whole config, and only when a pattern or
+  // a function matcher that missed the raw path needs it.
   const getCanonicalPathname = () => (canonicalPathname ??= canonicalizeRequestPathname(pathname));
 
   if (config.exclude) {
@@ -304,7 +342,7 @@ export function matchesCompiledMiddlewareConfig(
   if (config.matcher) {
     for (const matcher of config.matcher) {
       if (typeof matcher === "function") {
-        if (matcher(ctx)) {
+        if (matchesMiddlewarePredicate(matcher, ctx, getCanonicalPathname)) {
           return { matched: true };
         }
         continue;

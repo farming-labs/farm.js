@@ -11,9 +11,14 @@ import { stripFarmBasePath } from "../base-path";
 import { resolveFarmI18nConfig } from "../i18n/config";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import { defineIntegration, dispatchIntegrationRequest } from "../integrations";
+import { middleware } from "../middleware/chain";
 import { MiddlewareManager } from "../middleware/manager";
 import { createProductionMiddlewareRunner } from "../middleware/production-runtime";
-import type { MiddlewareMatcher } from "../middleware/types";
+import type {
+  FarmMiddlewareConfig,
+  MiddlewareContext,
+  MiddlewareMatcher,
+} from "../middleware/types";
 import {
   appMiddlewareMayHandlePath,
   configMiddlewareMayHandlePath,
@@ -769,5 +774,143 @@ describe("prerendering agrees with the runtime middleware matcher", () => {
         build: appMiddlewareMayHandlePath([{ path: routePath } as never], pathname),
       }).toEqual({ routePath, pathname, build: ran });
     }
+  });
+});
+
+describe("function matchers and .when() conditions see the route pathname", () => {
+  // String matchers compare the route pathname (decoded once, basePath and
+  // locale stripped), but a function matcher or `.when()` condition got only
+  // `ctx.pathname`, the raw request path. `/%61pi/admin` then walked past
+  // `ctx.pathname.startsWith("/api/admin")` while the router served
+  // `/api/admin`, and under `basePath: "/console"` a check written for the
+  // app path, as the docs say, never ran at all.
+  const consoleBase = resolveFarmI18nConfig(undefined, { basePath: "/console" });
+  type Seen = { ran: boolean; pathname?: string; routePathname?: string };
+
+  async function runBoth(
+    entry: (seen: Seen) => FarmMiddlewareConfig,
+    pathname: string,
+    i18n?: ReturnType<typeof resolveFarmI18nConfig>,
+  ): Promise<{ dev: Seen; production: Seen }> {
+    const dev: Seen = { ran: false };
+    const production: Seen = { ran: false };
+    const req = createRequest(pathname);
+    await new MiddlewareManager("/tmp", undefined, entry(dev), i18n).execute(
+      req,
+      new ServerResponse(req),
+    );
+    await createProductionMiddlewareRunner({ config: entry(production), i18n })(
+      new Request(`https://farm.test${pathname}`),
+    );
+    return { dev, production };
+  }
+
+  const record = (seen: Seen) => (ctx: MiddlewareContext) => {
+    seen.ran = true;
+    seen.pathname = ctx.pathname;
+    seen.routePathname = ctx.routePathname;
+  };
+  const fnMatcher =
+    (prefix: string) =>
+    (seen: Seen): FarmMiddlewareConfig => [
+      {
+        matcher: (ctx: MiddlewareContext) => ctx.pathname.startsWith(prefix),
+        handler: record(seen),
+      },
+    ];
+  const whenCondition =
+    (prefix: string) =>
+    (seen: Seen): FarmMiddlewareConfig => [
+      {
+        handlers: middleware()
+          .when(
+            (ctx) => ctx.pathname.startsWith(prefix),
+            async (ctx, next) => {
+              record(seen)(ctx);
+              await next();
+            },
+          )
+          .build().handlers,
+      },
+    ];
+
+  it.each([
+    ["/api/admin", true],
+    ["/%61pi/admin", true],
+    ["/api/%61dmin", true],
+    ["/%61pi/admin/1", true],
+    ["/api/public", false],
+  ])("a function matcher for /api/admin guards %s: %s", async (pathname, ran) => {
+    const { dev, production } = await runBoth(fnMatcher("/api/admin"), pathname);
+    expect({ pathname, dev: dev.ran, production: production.ran }).toEqual({
+      pathname,
+      dev: ran,
+      production: ran,
+    });
+  });
+
+  it.each([
+    ["/admin/1", true],
+    ["/%61dmin/1", true],
+    ["/other", false],
+  ])("a .when() condition for /admin guards %s: %s", async (pathname, ran) => {
+    const { dev, production } = await runBoth(whenCondition("/admin"), pathname);
+    expect({ pathname, dev: dev.ran, production: production.ran }).toEqual({
+      pathname,
+      dev: ran,
+      production: ran,
+    });
+  });
+
+  it.each([
+    ["/console/admin", true],
+    ["/console/admin/1", true],
+    ["/console/%61dmin/1", true],
+    ["/console/other", false],
+  ])("under basePath, guards written for the app path guard %s: %s", async (pathname, ran) => {
+    for (const entry of [fnMatcher("/admin"), whenCondition("/admin")]) {
+      const { dev, production } = await runBoth(entry, pathname, consoleBase);
+      expect({ pathname, dev: dev.ran, production: production.ran }).toEqual({
+        pathname,
+        dev: ran,
+        production: ran,
+      });
+    }
+  });
+
+  it("exposes ctx.routePathname and leaves ctx.pathname raw", async () => {
+    const { dev, production } = await runBoth(
+      (seen) => [{ handler: record(seen) }],
+      "/console/%61dmin/1",
+      consoleBase,
+    );
+    for (const seen of [dev, production]) {
+      expect(seen).toEqual({
+        ran: true,
+        pathname: "/console/%61dmin/1",
+        routePathname: "/admin/1",
+      });
+    }
+  });
+
+  it("updates ctx.routePathname on rewrite", async () => {
+    const seen: string[] = [];
+    const entry: FarmMiddlewareConfig = [
+      {
+        handler(ctx) {
+          ctx.rewrite("/console/%62illing");
+          seen.push(ctx.routePathname);
+        },
+      },
+    ];
+    const req = createRequest("/console/start");
+    await new MiddlewareManager("/tmp", undefined, entry, consoleBase).execute(
+      req,
+      new ServerResponse(req),
+    );
+    await createProductionMiddlewareRunner({ config: entry, i18n: consoleBase })(
+      new Request("https://farm.test/console/start"),
+    );
+    expect(seen).toEqual(["/billing", "/billing"]);
   });
 });

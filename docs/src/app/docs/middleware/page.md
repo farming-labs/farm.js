@@ -245,6 +245,30 @@ That pathname is relative to the app's `basePath`. With `basePath: "/console"`, 
 `/console/dashboard` meets a `/dashboard` matcher and runs `src/app/dashboard/middleware.ts`;
 leave the base path out of matchers.
 
+`ctx.routePathname` is that pathname: decoded once, without the base path or locale prefix, and
+updated by `ctx.rewrite()`. `ctx.pathname` stays the request path as it arrived, still encoded and
+still carrying both. Compare `ctx.routePathname` in function matchers and `.when()` conditions:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  middleware: [
+    {
+      matcher: (ctx) => ctx.routePathname.startsWith("/api/admin"),
+      handler(ctx) {
+        ctx.json({ error: "Unauthorized" }, 401);
+      },
+    },
+  ],
+});
+```
+
+A function matcher or `.when()` condition that reads `ctx.pathname` is also checked against the
+route pathname, and the middleware runs when either check passes, so `/%61pi/admin` and
+`/console/api/admin` cannot skip a guard written for `/api/admin`. Keep these predicates free of side
+effects; Farm may call them more than once per request.
+
 When a matcher has params, the handler can read them from `ctx.params`.
 
 ```ts

@@ -31,6 +31,7 @@ import {
   matchesMiddlewareConfig as matchesPreparedMiddlewareConfig,
   matchesMiddlewareConfigAt,
   matchesMiddlewareRouteAt,
+  toMiddlewareRoutePathname,
 } from "./matcher";
 import { createFarmAPIMiddlewarePathnames } from "../api/server-path";
 
@@ -388,6 +389,7 @@ function createWebMiddlewareContext(
   parent?: MiddlewareContext["parent"],
   trustProxy = false,
   clientAddress?: string,
+  toRoutePathname?: (pathname: string) => string,
 ): WebMiddlewareContextState {
   let currentRequest = withNodeRequestShape(request, trustProxy, clientAddress);
   let handledResponse: Response | null = null;
@@ -411,6 +413,7 @@ function createWebMiddlewareContext(
     response: responseShim.response as any,
     url,
     pathname: url.pathname,
+    routePathname: toMiddlewareRoutePathname(url.pathname, toRoutePathname),
     searchParams: url.searchParams,
     method: currentRequest.method || "GET",
     params: {},
@@ -455,6 +458,7 @@ function createWebMiddlewareContext(
       ctx.request = currentRequest as any;
       ctx.url = nextUrl;
       ctx.pathname = nextUrl.pathname;
+      ctx.routePathname = toMiddlewareRoutePathname(nextUrl.pathname, toRoutePathname);
       ctx.searchParams = nextUrl.searchParams;
       ctx.route = nextUrl.pathname;
     },
@@ -658,20 +662,21 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       return emptyResult(request);
     }
 
-    let contextState = createWebMiddlewareContext(
-      request,
-      undefined,
-      options.server?.trustProxy === true,
-      requestOptions.clientAddress,
-    );
-    let ctx = contextState.ctx;
-    let currentRequest = contextState.getRequest();
     // Match the app path page routing sees: without basePath (the locale step
     // strips it too), so file and config middleware run beneath a basePath.
     const toRoutePathname = (pathname: string) =>
       options.i18n?.enabled
         ? stripFarmLocaleFromPathname(pathname, options.i18n)
         : stripFarmBasePath(pathname, options.i18n?.basePath ?? "/");
+    let contextState = createWebMiddlewareContext(
+      request,
+      undefined,
+      options.server?.trustProxy === true,
+      requestOptions.clientAddress,
+      toRoutePathname,
+    );
+    let ctx = contextState.ctx;
+    let currentRequest = contextState.getRequest();
     const initialRequestPathname = ctx.pathname;
     const initialPathname = toRoutePathname(initialRequestPathname);
     // Middleware guards every path a page can match: with raw-path routing that includes the
@@ -747,6 +752,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
           parentData,
           options.server?.trustProxy === true,
           requestOptions.clientAddress,
+          toRoutePathname,
         );
         ctx = contextState.ctx;
       }

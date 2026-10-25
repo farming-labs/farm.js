@@ -64,8 +64,10 @@ declare module "@farm.js/core/middleware" {
    * Middleware context passed to each middleware function
    */
   export interface MiddlewareContext {
-    /** Request pathname */
+    /** Request pathname as received: still percent-encoded and carrying basePath/locale */
     pathname: string;
+    /** The pathname the router matches: decoded once, without basePath or locale */
+    readonly routePathname: string;
     /** Request URL */
     url: string;
     /** HTTP method (GET, POST, etc.) */
@@ -104,6 +106,8 @@ declare module "@farm.js/core/middleware" {
   > {
     readonly url: URL;
     readonly pathname: string;
+    /** The pathname the router matches: decoded once, without basePath or locale */
+    readonly routePathname: string;
     readonly searchParams: URLSearchParams;
     readonly method: string;
     readonly params: Record<string, string>;
