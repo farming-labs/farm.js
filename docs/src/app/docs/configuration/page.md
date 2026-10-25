@@ -1161,7 +1161,11 @@ export default defineConfig({
 On Netlify, an `isr` rule caches a response on Netlify's CDN only when Farm sends it with a shared
 `Cache-Control`. A response Farm marks `private` or `no-store` (a request with cookies or an
 `Authorization` header, middleware data, a render that read the request, an error, or a dynamic
-render with no cache policy such as `revalidate`) is never stored for other visitors.
+render with no cache policy such as `revalidate`) is never stored for other visitors. The same
+holds for any other response of an `isr` route, API routes and middleware responses included:
+only a `200` to a request without `Cookie` or `Authorization`, with no `Set-Cookie` and no `Vary`
+on either, is cached on the CDN. The rest are sent `Cache-Control: private, no-store` unless they
+set their own.
 
 API routes remain same-origin by default in development and production. Add `cors` only to route patterns that intentionally form a cross-origin browser API.
 
