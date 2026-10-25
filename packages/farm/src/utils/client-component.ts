@@ -647,6 +647,7 @@ export function getClientModuleHydrationPlan(
   // library, say) stays static HTML instead of keeping every local island static too.
   const inspection = collectIsolatedClientBoundaries(resolvedPath, root, {
     allowDynamicCardinality: asyncOwner,
+    allowElementProps: asyncOwner,
     staticPackageBoundaries: asyncOwner,
   });
   if (inspection.boundaries.length === 0) {
@@ -1290,6 +1291,12 @@ function collectIsolatedClientBoundaries(
     /** Accept boundaries rendered a data-dependent number of times. */
     allowDynamicCardinality?: boolean;
     /**
+     * Accept boundaries that receive React elements (`children` or element props). Only for async
+     * owners: below a hydrating layout the server tree carries the elements, and elsewhere a
+     * boundary whose props do not serialize keeps its server HTML at runtime.
+     */
+    allowElementProps?: boolean;
+    /**
      * Render package client components as static server HTML instead of rejecting the owner.
      * Only for owners with no route-wide fallback, where rejecting leaves everything static.
      */
@@ -1370,7 +1377,7 @@ function collectIsolatedClientBoundaries(
           fallbackReason = `the client boundary imported from ${specifier} renders inside <${container}>, where the HTML parser relocates its hydration marker`;
           return 0;
         }
-        if (passesElementValuedProps(content, localBindings)) {
+        if (!options.allowElementProps && passesElementValuedProps(content, localBindings)) {
           fallbackReason = `the client boundary imported from ${specifier} receives React elements, which cannot cross the boundary as serialized props`;
           return 0;
         }
@@ -1434,12 +1441,14 @@ function inspectClientModuleMetadata(
   }
 
   let importsClientBoundary = false;
+  let importsAsyncOwner = false;
   let importedIslandStrategy: FarmIslandStrategy | null = null;
   for (const specifier of getImportSpecifiers(content)) {
     const imported = resolveImportedModule(resolvedPath, specifier, root);
     const importedMetadata = imported.local
       ? inspectClientModuleMetadata(imported.path, root, visited, false)
       : inspectPackageClientBoundary(imported.path, root, visited);
+    if (importedMetadata.suppressedAsyncHydration) importsAsyncOwner = true;
     if (importedMetadata.isClientComponent || importedMetadata.shouldHydrate) {
       importsClientBoundary = true;
       if (importedIslandStrategy === null) {
@@ -1458,7 +1467,9 @@ function inspectClientModuleMetadata(
   // module would throw, blank the server-rendered HTML, and re-run the page's
   // data fetching in a loop. Keep async server pages server-only even when
   // they import client components.
-  if (shouldHydrate && hasAsyncDefaultExport(content)) {
+  // An async server component it renders (one that renders client components) cannot run in a
+  // client root either, so the module's client components hydrate as islands, as an async page's do.
+  if ((shouldHydrate && hasAsyncDefaultExport(content)) || importsAsyncOwner) {
     return {
       isClientComponent: false,
       shouldHydrate: false,

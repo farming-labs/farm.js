@@ -990,6 +990,75 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
     });
   });
 
+  it("hydrates the client components of an async server component a page renders as islands", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-async-section-"));
+    tempDirs.push(root);
+
+    const appDir = path.join(root, "src", "app");
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(appDir, "star-button.tsx"),
+      '"use client";\nexport function StarButton() { return null; }\n',
+    );
+    fs.writeFileSync(
+      path.join(appDir, "repo-section.tsx"),
+      'import { StarButton } from "./star-button";\nexport default async function RepoSection() { return <StarButton />; }\n',
+    );
+    // Neither page is async itself: the async component it renders cannot run in a client root.
+    const page = path.join(appDir, "page.tsx");
+    fs.writeFileSync(
+      page,
+      'import RepoSection from "./repo-section";\nexport default function Page() { return <main><RepoSection /></main>; }\n',
+    );
+
+    expect(getClientModuleMetadata(page, root)).toMatchObject({
+      shouldHydrate: false,
+      suppressedAsyncHydration: true,
+    });
+    const plan = getClientModuleHydrationPlan(page, root, "off", { asyncOwnerIslands: true });
+    expect(plan.asyncOwnerIslands).toBe(true);
+    expect(plan.isolatedBoundaries.map((boundary) => boundary.modulePath)).toEqual([
+      path.join(appDir, "star-button.tsx"),
+    ]);
+  });
+
+  it("keeps an async page's client boundaries that receive React elements", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-async-elements-"));
+    tempDirs.push(root);
+
+    const appDir = path.join(root, "src", "app");
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(appDir, "shell.tsx"),
+      '"use client";\nexport function Shell(props) { return props.children; }\n',
+    );
+    const asyncPage = path.join(appDir, "page.tsx");
+    fs.writeFileSync(
+      asyncPage,
+      'import { Shell } from "./shell";\nexport default async function Page() { return <Shell toc={<nav />}><article /></Shell>; }\n',
+    );
+
+    // Below a hydrating layout the server tree carries the elements; elsewhere the boundary keeps
+    // its server HTML at runtime. Either way the analysis keeps the island.
+    const plan = getClientModuleHydrationPlan(asyncPage, root, "off", { asyncOwnerIslands: true });
+    expect(plan.fallbackReason).toBeUndefined();
+    expect(plan.isolatedBoundaries.map((boundary) => boundary.modulePath)).toEqual([
+      path.join(appDir, "shell.tsx"),
+    ]);
+    expect(usesFarmServerTree(plan)).toBe(true);
+
+    // A synchronous page keeps rejecting them: it hydrates as a whole instead.
+    const syncPage = path.join(appDir, "sync", "page.tsx");
+    fs.mkdirSync(path.dirname(syncPage), { recursive: true });
+    fs.writeFileSync(
+      syncPage,
+      'import { Shell } from "../shell";\nexport default function Page() { return <Shell toc={<nav />}><article /></Shell>; }\n',
+    );
+    expect(getClientModuleHydrationPlan(syncPage, root, "enabled").fallbackReason).toMatch(
+      /receives React elements/,
+    );
+  });
+
   it("analyzes a page that re-exports another module's default as that module", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-reexport-"));
     tempDirs.push(root);
@@ -1257,12 +1326,12 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
     });
 
     it("keeps correctness fallbacks and reports why", () => {
+      // Element children no longer reject an async page's islands: below a hydrating layout the
+      // server tree carries them, and elsewhere that one boundary keeps its server HTML.
       const { root, pageFile } = asyncPage("<StarButton><p>server child</p></StarButton>");
       expect(getClientModuleHydrationPlan(pageFile, root, "off", islands)).toMatchObject({
-        suppressedAsyncHydration: true,
-        hasIsolatedClientBoundaries: false,
-        fallbackReason:
-          "the client boundary imported from ./star-button receives React elements, which cannot cross the boundary as serialized props",
+        hasIsolatedClientBoundaries: true,
+        asyncOwnerIslands: true,
       });
 
       const reexport = asyncPage(
