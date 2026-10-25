@@ -7529,7 +7529,9 @@ async function handleFarmDefaultMCP(request) {
     },
   });
 }
-const farmDefaultMCPReadMarkdown = createFarmLlmsMarkdownReader((page) => handleFarmRequest(page));
+// \`fetch\` is this module's outer request entry: plugin runtime hooks run and the page
+// gets its own request context, as for a direct request.
+const farmDefaultMCPReadMarkdown = createFarmLlmsMarkdownReader((page) => fetch(page));
 `
     : ""
 }
@@ -7562,14 +7564,15 @@ function createFarmLlmsTxtContext(request, full) {
           : ""
       }
     }),
-    // llms-full.txt reads each page's .md mirror through this same handler,
-    // with a fresh request so the caller's cookies never shape its content.
-    // HEAD discards the body, so it reads nothing.
+    // llms-full.txt reads each page's .md mirror through this module's outer
+    // request entry, so plugin runtime hooks run and each read has a fresh request
+    // context: the caller's cookies never shape its content. HEAD discards the
+    // body, so it reads nothing.
     ...(full
       ? {
           markdown: request.method.toUpperCase() === "HEAD"
             ? async () => null
-            : createFarmLlmsMarkdownReader((page) => handleFarmRequest(page)),
+            : createFarmLlmsMarkdownReader((page) => fetch(page)),
         }
       : {}),
   };

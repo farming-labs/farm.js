@@ -613,8 +613,9 @@ The pages are the static pages `llms.txt` and the sitemap list that have a Markd
 routes, pages whose metadata says `robots: { index: false }`, and pages behind a route
 [`guard`](/docs/routing#route-guards) are left out, and `read_page` answers only for a listed page.
 Pages are read the way `llms-full.txt` reads them, as a fresh request without the caller's cookies
-or credentials, so a page middleware keeps private answers as signed out. The server has no write
-tools and never reaches API routes, server functions, sessions, or environment values.
+or credentials, so a page middleware or plugin `runtime.before` hook keeps private answers as signed
+out. The server has no write tools and never reaches API routes, server functions, sessions, or
+environment values.
 
 It names itself after the app's `package.json` (`name` and `version`, or Farm's version without
 one), and joins the [AI catalog](#ai-catalog), its card at `/mcp/server-card`, the `MCP` section of

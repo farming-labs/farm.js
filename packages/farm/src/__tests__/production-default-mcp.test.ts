@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { build } from "../build";
-import { resolveConfig, type FarmConfig } from "../config";
+import { loadConfig, resolveConfig, type FarmConfig } from "../config";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -61,8 +61,10 @@ async function buildApp(
     await fs.mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
     await fs.writeFile(path.join(root, relativePath), source);
   }
+  const fileConfig = files["farm.config.ts"] ? await loadConfig(root, undefined, "production") : {};
   const resolved = await resolveConfig(
     {
+      ...fileConfig,
       root,
       srcDir: "src",
       images: { provider: "none" },
@@ -83,10 +85,19 @@ async function buildApp(
   return (await import(/* @vite-ignore */ pathToFileURL(functionPath).href)).default;
 }
 
-function mcp(method: string, params?: unknown, base = "https://acme.test") {
+function mcp(
+  method: string,
+  params?: unknown,
+  base = "https://acme.test",
+  headers: Record<string, string> = {},
+) {
   return new Request(`${base}/mcp`, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      ...headers,
+    },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, ...(params ? { params } : {}) }),
   });
 }
@@ -194,6 +205,73 @@ describe("production default MCP server", () => {
       expect(((await catalog.json()) as any).entries).toEqual([
         expect.objectContaining({ url: "https://acme.test/base/mcp/server-card" }),
       ]);
+    });
+  }, 240_000);
+
+  it("reads pages as a fresh anonymous request through the plugin runtime", async () => {
+    await withRoot(async (root) => {
+      const handler = await buildApp(
+        root,
+        {},
+        {
+          // The documented authorization pattern: a runtime.before hook refuses /internal.
+          "farm.config.ts": `import { definePlugin } from "@farm.js/core";
+export default {
+  agent: { llmsTxt: { title: "Acme" } },
+  plugins: [
+    definePlugin({
+      name: "acme:internal-auth",
+      runtime: {
+        before({ request }) {
+          if (new URL(request.url).pathname.startsWith("/internal")) {
+            return new Response("staff only", { status: 401 });
+          }
+        },
+      },
+    }),
+  ],
+};
+`,
+          "src/app/internal/handbook/page.tsx": [
+            'export const metadata = { title: "Handbook" };',
+            "export default function Page() { return <p>INTERNAL-HANDBOOK</p>; }",
+          ].join("\n"),
+          "src/app/whoami/page.tsx": [
+            'import { cookies } from "@farm.js/core/headers";',
+            'export const metadata = { title: "Who am I" };',
+            "export default async function Page() {",
+            '  const session = (await cookies()).get("session")?.value ?? "none";',
+            "  return <p>session={session}</p>;",
+            "}",
+          ].join("\n"),
+        },
+      );
+      const call = async (name: string, args: Record<string, unknown>) =>
+        (
+          (await (
+            await handler.fetch(
+              mcp("tools/call", { name, arguments: args }, undefined, { cookie: "session=CALLER" }),
+            )
+          ).json()) as { result: any }
+        ).result;
+
+      const direct = await handler.fetch(new Request("https://acme.test/internal/handbook"));
+      expect(direct.status).toBe(401);
+      const handbook = await call("read_page", { path: "/internal/handbook" });
+      expect(handbook.isError).toBe(true);
+      expect(JSON.stringify(handbook)).not.toContain("INTERNAL-HANDBOOK");
+
+      const whoami = await call("read_page", { path: "/whoami" });
+      expect(whoami.content[0].text).toContain("session=none");
+      expect(whoami.content[0].text).not.toContain("CALLER");
+
+      const llmsFull = await handler.fetch(
+        new Request("https://acme.test/llms-full.txt", { headers: { cookie: "session=CALLER" } }),
+      );
+      const full = await llmsFull.text();
+      expect(full).not.toContain("INTERNAL-HANDBOOK");
+      expect(full).toContain("session=none");
+      expect(full).not.toContain("CALLER");
     });
   }, 240_000);
 });
