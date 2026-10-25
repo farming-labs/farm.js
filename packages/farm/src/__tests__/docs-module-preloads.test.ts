@@ -11,7 +11,10 @@ import {
   readFarmDocsModulePreloads,
 } from "../docs/module-preloads";
 
-const ROOT = "/app";
+// Use the host's absolute paths, including the drive letter on Windows, just
+// like Vite's module IDs and the resolved project root in a real build.
+const ROOT = path.resolve("/app");
+const moduleId = (relative: string) => path.join(ROOT, relative);
 const chunk = (
   fileName: string,
   options: { facade?: string; imports?: string[]; entry?: boolean; name?: string } = {},
@@ -35,64 +38,80 @@ function bundle() {
       chunk("chunks/runtime.js"),
       chunk("chunks/react.js"),
       chunk("chunks/adapter.js", {
-        facade: "/app/node_modules/@farming-labs/farmjs/dist/react.js",
+        facade: moduleId("node_modules/@farming-labs/farmjs/dist/react.js"),
         imports: ["chunks/react.js", "chunks/runtime.js"],
       }),
       chunk("chunks/docs.config.js", {
-        facade: "/app/docs.config.ts",
+        facade: moduleId("docs.config.ts"),
         imports: ["chunks/react.js"],
       }),
       chunk("chunks/page-a.js", {
-        facade: "/app/src/app/docs/page.mdx",
+        facade: moduleId("src/app/docs/page.mdx"),
         imports: ["chunks/react.js", "chunks/tabs.js"],
       }),
       chunk("chunks/tabs.js", { imports: ["chunks/react.js"] }),
-      chunk("chunks/page-b.js", { facade: "/app/src/app/docs/guide/page.md?import" }),
-      chunk("chunks/outside.js", { facade: "/elsewhere/readme.md" }),
+      chunk("chunks/page-b.js", { facade: moduleId("src/app/docs/guide/page.md") + "?import" }),
+      chunk("chunks/outside.js", { facade: path.resolve("/elsewhere/readme.md") }),
+      chunk("chunks/neighbor.js", { facade: ROOT + "-other/readme.md" }),
       { type: "asset", fileName: "farm-client.css" },
     ].map((output) => [output.fileName, output]),
   );
 }
 
 const runtimeModuleIds = [
-  "/app/node_modules/@farming-labs/farmjs/dist/react.js",
-  "/app/docs.config.ts",
+  moduleId("node_modules/@farming-labs/farmjs/dist/react.js"),
+  moduleId("docs.config.ts"),
 ];
 const files = (manifest: ReturnType<typeof collectFarmDocsModulePreloads>, indexes: number[]) =>
   indexes.map((index) => manifest!.files[index]);
 
 describe("docs module preloads", () => {
-  it("lists the entry and docs adapter graph once, and each page's own chunks", () => {
-    const manifest = collectFarmDocsModulePreloads(bundle(), {
-      root: ROOT,
-      entryName: "farm-client",
-      runtimeModuleIds,
-    });
+  it.each(["native", "forward slash", "backslash"])(
+    "lists the entry and docs adapter graph once, and each page's own chunks (%s IDs)",
+    (separator) => {
+      const outputs = bundle();
+      for (const output of Object.values(outputs)) {
+        if ("facadeModuleId" in output && output.facadeModuleId) {
+          if (separator === "forward slash")
+            output.facadeModuleId = output.facadeModuleId.replace(/\\/g, "/");
+          if (separator === "backslash")
+            output.facadeModuleId = output.facadeModuleId.replace(/\//g, "\\");
+        }
+      }
+      const manifest = collectFarmDocsModulePreloads(outputs, {
+        root: ROOT,
+        entryName: "farm-client",
+        runtimeModuleIds,
+      });
 
-    expect(files(manifest, manifest!.runtime)).toEqual([
-      "farm-client-h1.js",
-      "chunks/runtime.js",
-      "chunks/adapter.js",
-      "chunks/react.js",
-      "chunks/docs.config.js",
-    ]);
-    // Chunks already in the runtime list are not repeated per page.
-    expect(files(manifest, manifest!.pages["/src/app/docs/page.mdx"]!)).toEqual([
-      "chunks/page-a.js",
-      "chunks/tabs.js",
-    ]);
-    expect(files(manifest, manifest!.pages["/src/app/docs/guide/page.md"]!)).toEqual([
-      "chunks/page-b.js",
-    ]);
-    expect(Object.keys(manifest!.pages)).not.toContain("/elsewhere/readme.md");
-  });
+      expect(files(manifest, manifest!.runtime)).toEqual([
+        "farm-client-h1.js",
+        "chunks/runtime.js",
+        "chunks/adapter.js",
+        "chunks/react.js",
+        "chunks/docs.config.js",
+      ]);
+      // Chunks already in the runtime list are not repeated per page.
+      expect(files(manifest, manifest!.pages["/src/app/docs/page.mdx"]!)).toEqual([
+        "chunks/page-a.js",
+        "chunks/tabs.js",
+      ]);
+      expect(files(manifest, manifest!.pages["/src/app/docs/guide/page.md"]!)).toEqual([
+        "chunks/page-b.js",
+      ]);
+      expect(Object.keys(manifest!.pages)).toEqual([
+        "/src/app/docs/page.mdx",
+        "/src/app/docs/guide/page.md",
+      ]);
+    },
+  );
 
   it("records nothing when the bundle has no docs adapter chunk", () => {
     expect(
       collectFarmDocsModulePreloads(bundle(), {
         root: ROOT,
         entryName: "farm-client",
-        runtimeModuleIds: ["/app/node_modules/other/react.js"],
+        runtimeModuleIds: [moduleId("node_modules/other/react.js")],
       }),
     ).toBeNull();
   });
@@ -118,15 +137,15 @@ describe("docs module preloads", () => {
       const plugin = createFarmDocsModulePreloadPlugin({
         root: ROOT,
         buildDir,
-        importer: "/app/.farm/tmp/entry.tsx",
+        importer: moduleId(".farm/tmp/entry.tsx"),
         entryName: "farm-client",
-        modules: ["@farming-labs/farmjs/react", "/app/docs.config.ts"],
+        modules: ["@farming-labs/farmjs/react", moduleId("docs.config.ts")],
       });
       await plugin.buildStart.call({
         resolve: async (specifier: string) => ({
-          id: specifier.startsWith("/")
+          id: path.isAbsolute(specifier)
             ? specifier
-            : "/app/node_modules/@farming-labs/farmjs/dist/react.js",
+            : moduleId("node_modules/@farming-labs/farmjs/dist/react.js"),
         }),
       });
       await plugin.generateBundle(undefined, bundle());
