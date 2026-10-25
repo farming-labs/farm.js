@@ -185,4 +185,20 @@ describe("development redirect() and notFound()", () => {
     expect(lateScriptRedirect.status).toBe(200);
     expect(await lateScriptRedirect.text()).not.toContain("window.location.replace");
   }, 60_000);
+
+  it("answers the Markdown mirror of a redirecting page with the redirect, as production does", async () => {
+    const origin = await startProject();
+    const get = (pathname: string) => fetch(`${origin}${pathname}`, { redirect: "manual" });
+
+    // Before, the dev mirror followed the redirect and returned the target page
+    // (a sign-in page in a real app) as 200 Markdown.
+    for (const pathname of ["/sync-redirect.md", "/middleware-redirect.md"]) {
+      const response = await get(pathname);
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe("/");
+      const body = await response.text();
+      expect(body).toContain("redirects to");
+      expect(body).not.toContain("home");
+    }
+  }, 60_000);
 });

@@ -1,3 +1,5 @@
+import type { FarmMarkdownResolvedConfig } from "@farm.js/core/markdown";
+import type { ResolvedFarmLlmsTxtConfig } from "@farm.js/core/internal/production-runtime";
 import type { ResolvedFarmI18nConfig } from "@farm.js/core/i18n";
 import type {
   FarmServerActionsConfig,
@@ -113,6 +115,15 @@ export interface EntryContext {
    * Farm's normal config merge order.
    */
   middlewareConfigPaths?: string[];
+
+  /** Modules that export `{ mcp }`, read from the app's config files, in layer order. */
+  mcpConfigPaths?: string[];
+
+  /** Resolved Markdown mirror settings (core's `md`): `.md` pages and `Accept: text/markdown`. */
+  markdown?: FarmMarkdownResolvedConfig;
+
+  /** Resolved `agent.llmsTxt`: the generated `/llms.txt` and `/llms-full.txt`. */
+  llmsTxt?: ResolvedFarmLlmsTxtConfig;
 
   /** Whether debug mode is enabled */
   debug: boolean;

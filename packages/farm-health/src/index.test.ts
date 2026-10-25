@@ -138,6 +138,57 @@ describe("health plugin", () => {
     expect(timeoutAborted).toBe(true);
   });
 
+  it("shares one readiness run and never overlaps a check that ignores its signal", async () => {
+    vi.useFakeTimers();
+    try {
+      let release!: () => void;
+      const database = vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            release = () => resolve(true);
+          }),
+      );
+      const runtime = await setup(health({ timeout: 20, cache: 50, checks: { database } }));
+
+      const burst = Array.from({ length: 500 }, () => runtime.request("/health/ready"));
+      await vi.advanceTimersByTimeAsync(20);
+      const responses = await Promise.all(burst);
+      expect(responses.every((response) => response.status === 503)).toBe(true);
+      expect(database).toHaveBeenCalledOnce();
+
+      // Inside the cache window the result is reused without touching the dependency.
+      expect((await runtime.request("/health/ready")).status).toBe(503);
+      expect(database).toHaveBeenCalledOnce();
+
+      // After the window the timed-out invocation is still running, so readiness joins it.
+      await vi.advanceTimersByTimeAsync(50);
+      const joined = runtime.request("/health/ready");
+      await vi.advanceTimersByTimeAsync(0);
+      release();
+      expect((await joined).status).toBe(200);
+      expect(database).toHaveBeenCalledOnce();
+
+      // Once it settles, the next run after the window starts a fresh invocation.
+      await vi.advanceTimersByTimeAsync(50);
+      const fresh = runtime.request("/health/ready");
+      await vi.advanceTimersByTimeAsync(0);
+      release();
+      expect((await fresh).status).toBe(200);
+      expect(database).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reruns readiness checks for each settled request when caching is disabled", async () => {
+    const database = vi.fn().mockReturnValue(true);
+    const runtime = await setup(health({ cache: false, checks: { database } }));
+
+    expect((await runtime.request("/health/ready")).status).toBe(200);
+    expect((await runtime.request("/health/ready")).status).toBe(200);
+    expect(database).toHaveBeenCalledTimes(2);
+  });
+
   it("turns every probe unavailable when the runtime closes", async () => {
     const runtime = await setup(health({ checks: { database: () => true } }));
 

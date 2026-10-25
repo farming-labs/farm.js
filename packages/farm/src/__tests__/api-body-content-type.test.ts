@@ -62,11 +62,44 @@ describe("API route body content types", () => {
     expect(handler).toHaveBeenCalledOnce();
   });
 
+  it("does not parse a typeless body from another origin as JSON", async () => {
+    const { endpoint, handler } = deleteAccount();
+
+    // A browser sends a Blob or byte body with no content type, and a cross-site
+    // page can do so in a no-cors fetch with the visitor's cookies.
+    const request = new Request("https://farm.test/api/account", {
+      method: "POST",
+      headers: { origin: "https://evil.example", "sec-fetch-site": "cross-site" },
+      body: new TextEncoder().encode(JSON.stringify({ confirm: true })),
+    });
+    request.headers.delete("content-type");
+
+    const response = await invokeAPIRouteEndpoint(endpoint, request);
+
+    expect(response.status).toBe(400);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("still parses a typeless body from the app's own pages", async () => {
+    const { endpoint, handler } = deleteAccount();
+
+    const request = new Request("https://farm.test/api/account", {
+      method: "POST",
+      headers: { origin: "https://farm.test", "sec-fetch-site": "same-origin" },
+      body: new TextEncoder().encode(JSON.stringify({ confirm: true })),
+    });
+    request.headers.delete("content-type");
+
+    const response = await invokeAPIRouteEndpoint(endpoint, request);
+
+    expect(response.status).toBe(200);
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
   it("still accepts a JSON body from a caller that declares no content type", async () => {
     const { endpoint, handler } = deleteAccount();
 
-    // Browsers always attach a content type, so this path is only reachable by
-    // non-browser clients; it stays permissive for them.
+    // A server or script that omits the header keeps this permissive path.
     const request = new Request("https://farm.test/api/account", {
       method: "POST",
       body: JSON.stringify({ confirm: true }),

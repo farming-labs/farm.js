@@ -188,7 +188,53 @@ HOST=0.0.0.0 PORT=3000 pnpm start
 
 `farm start` is equivalent for the `node` target and adds `--port`/`--host` flags plus clear errors when the configured target has no local server. It runs through the `farm` CLI, which is a devDependency, so on hosts that remove devDependencies before starting the app, use the `node` command instead. New starters use it as their `start` script.
 
-For Docker, copy the app, install its dependencies including devDependencies (`farm build` needs the CLI), run `farm build`, expose the selected port, and start `node .output/server/index.mjs`. The generated server is self-contained, so the runtime image only needs the output directory, not `node_modules`. For a VPS, run the same start command behind nginx, Caddy, systemd, or a process manager such as PM2. Environment variables should be provided by the host at runtime, not committed into the bundle.
+For a VPS, run the same start command behind nginx, Caddy, systemd, or a process manager such as PM2. Environment variables should be provided by the host at runtime, not committed into the bundle.
+
+The server sets `NODE_ENV=production` when the environment leaves it unset, as `next start` does, so packages that read it at runtime agree with the browser bundle. A value the host sets wins.
+
+### Docker
+
+`farm build` writes a self-contained server, so a multi-stage image installs everything to build and copies only the output into the runtime stage:
+
+```dockerfile
+FROM node:22-slim AS build
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . ./
+RUN npm run build
+
+FROM node:22-slim
+
+WORKDIR /app
+COPY --from=build /app/.farm/.output ./.farm/.output
+
+ENV NODE_ENV=production
+EXPOSE 3000
+CMD ["node", ".farm/.output/server/index.mjs"]
+```
+
+The build stage keeps devDependencies because `farm build` runs the CLI. The runtime stage does not need `node_modules`. This file uses the default output directory, `.farm/.output`; if you set `deploy.output`, copy and start that directory instead. Add a `.dockerignore` with `node_modules`, `.farm`, and `.git` so local builds stay out of the image.
+
+### Hosting platforms
+
+Any platform that builds from a Git repository and runs a long-lived Node.js process can host a Farm app, including Coolify, Dokploy, Railway, Render, Fly.io, Zeabur, Clever Cloud, and Heroku. They need the same settings:
+
+| Setting       | Value                                                                    |
+| ------------- | ------------------------------------------------------------------------ |
+| Node.js       | 22.13 or later                                                           |
+| Build command | `npm run build` (runs `farm build`)                                      |
+| Start command | `npm start` (runs `node .farm/.output/server/index.mjs` in new starters) |
+| Port          | The server reads `PORT` (or `NITRO_PORT`) from the platform, else `3000` |
+
+Buildpack builders such as Nixpacks and Railpack detect a Node.js app and run these scripts without extra configuration. Platforms that build from a container image can use the Dockerfile above.
+
+A few details decide whether the first deploy works:
+
+- **Install devDependencies for the build.** `farm build` needs `@farm.js/cli`. If the platform installs production dependencies only, enable devDependencies for the build step or deploy with the Dockerfile.
+- **Start with `node`, not `farm start`, when devDependencies are pruned.** Some builders remove devDependencies before the app starts, and `farm start` comes from the CLI.
+- **Build for Node.js.** If `farm.config.ts` sets `deploy.target` to another platform, such as `vercel`, remove it or set it to `node`. A platform target builds output that only that platform can serve.
 
 ## Nitro preset pass-through
 

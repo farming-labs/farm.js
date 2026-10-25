@@ -20,6 +20,7 @@ export function startPanel(root: HTMLElement) {
     ["routes", "Routes", "route"],
     ["api", "API", "api"],
     ["systems", "Systems", "layers"],
+    ["plugins", "Plugins", "blocks"],
     ["runtime", "Runtime", "runtime"],
     ...(root.dataset.inspect === "true" ? [["inspect", "Inspect", "search"]] : []),
     ["diagnostics", "Diagnostics", "activity"],
@@ -38,6 +39,8 @@ export function startPanel(root: HTMLElement) {
   let disposed = false;
   let controller: AbortController | undefined;
   let moduleController: AbortController | undefined;
+  let hmrPending = false;
+  let staleNotice = "";
   const copyValues = new Map<string, string>();
   let theme = "system";
   try {
@@ -80,7 +83,8 @@ export function startPanel(root: HTMLElement) {
     if (!views.some(([key]) => key === next)) return;
     view = next;
     window.history.replaceState(null, "", `#${view}`);
-    render();
+    if (view === "inspect" && staleNotice && !hmrPending) void refresh();
+    else render();
   }
   async function get<T>(path: string, signal: AbortSignal): Promise<T> {
     const response = await window.fetch(path, {
@@ -99,6 +103,7 @@ export function startPanel(root: HTMLElement) {
     return response.json() as Promise<T>;
   }
   async function refresh() {
+    if (hmrPending) return;
     const sequence = ++refreshSequence;
     controller?.abort();
     controller = new AbortController();
@@ -114,6 +119,7 @@ export function startPanel(root: HTMLElement) {
           "Unexpected DevTools snapshot. Check that core and the plugin are up to date.",
         );
       snapshot = next;
+      staleNotice = "";
       selectedRoute = Math.min(selectedRoute, Math.max(0, next.routes.length - 1));
       selectedApi = Math.min(selectedApi, Math.max(0, next.apiRoutes.length - 1));
       status.textContent = `${next.project.name} · Updated ${new Date(next.generatedAt).toLocaleTimeString()}`;
@@ -258,7 +264,26 @@ export function startPanel(root: HTMLElement) {
         .map(([key, value]) => property(key, value ? "On" : "Off"))
         .join("")}</dl></details></section>`;
   }
+  function renderPlugins() {
+    const plugins = snapshot!.plugins ?? [];
+    const hookList = (hooks: string[]) =>
+      hooks.length
+        ? hooks.map((hook) => `<div class="fd-tree-item">${inlineCode(hook)}</div>`).join("")
+        : '<p class="fd-subtitle">No hooks declared.</p>';
+    main.innerHTML =
+      heading(
+        "Plugins",
+        "Active Farm plugins in execution order. Pre → normal → post.",
+        `${plugins.length} registered`,
+      ) +
+      `<section class="fd-section fd-flush-top"><p class="fd-subtitle">Hook names describe registration, not a trace of calls. Parallel lifecycle hooks may finish in a different order. Config, public data, and private state are not included.</p>${plugins.map((plugin) => `<details class="fd-plugin"><summary><span class="fd-mono">${plugin.order}.</span> ${esc(plugin.name)} <span class="fd-tag">${esc(plugin.enforce)}</span></summary><dl class="fd-properties">${property("Version", plugin.version || "Not declared")}${property("API routes", plugin.routes ? "Declared" : "None")}</dl><div class="fd-runtime-grid"><section><h3>Server hooks</h3>${hookList(plugin.serverHooks)}</section><section><h3>Client hooks</h3>${hookList(plugin.clientHooks)}</section></div></details>`).join("") || empty("No active Farm plugins. Register a plugin in farm.config.ts to see its lifecycle here.")}</section>`;
+  }
   async function inspect() {
+    if (hmrPending) {
+      main.innerHTML =
+        heading("Inspect", "Browser source and cached Vite output.") + empty(staleNotice);
+      return;
+    }
     const sequence = ++moduleSequence;
     moduleController?.abort();
     moduleController = new AbortController();
@@ -321,7 +346,7 @@ export function startPanel(root: HTMLElement) {
       if (disposed || sequence !== moduleSequence || view !== "inspect") return;
       copyValues.set("module-source", detail.source);
       copyValues.set("module-output", detail.transformed);
-      target.innerHTML = `<div class="fd-pipeline"><span class="fd-label">SOURCE → VITE OUTPUT</span><p class="fd-subtitle">Current file on disk and the latest cached browser transform. Refresh the app after edits.</p></div><div class="fd-comparison">${codeBlock(detail.source, "Source", "module-source")}${codeBlock(detail.transformed, "Served JavaScript", "module-output")}</div><section class="fd-section"><details><summary>Imports (${detail.imports.length})</summary>${detail.imports.map((item) => `<div class="fd-tree-item">${inlineCode(item)}</div>`).join("") || empty("No imports.")}</details><details><summary>Importers (${detail.importers.length})</summary>${detail.importers.map((item) => `<div class="fd-tree-item">${inlineCode(item)}</div>`).join("") || empty("No importers.")}</details></section>`;
+      target.innerHTML = `<div class="fd-pipeline"><span class="fd-label">SOURCE → VITE OUTPUT</span><p class="fd-subtitle" data-module-state role="status">${esc(staleNotice || "Current file on disk and cached browser output. Refreshes after HMR.")}</p></div><div class="fd-comparison">${codeBlock(detail.source, "Source", "module-source")}${codeBlock(detail.transformed, "Served JavaScript", "module-output")}</div><section class="fd-section"><details><summary>Imports (${detail.imports.length})</summary>${detail.imports.map((item) => `<div class="fd-tree-item">${inlineCode(item)}</div>`).join("") || empty("No imports.")}</details><details><summary>Importers (${detail.importers.length})</summary>${detail.importers.map((item) => `<div class="fd-tree-item">${inlineCode(item)}</div>`).join("") || empty("No importers.")}</details></section>`;
     } catch (error) {
       if (disposed || sequence !== moduleSequence || view !== "inspect") return;
       target.innerHTML = empty((error as Error).message);
@@ -341,6 +366,7 @@ export function startPanel(root: HTMLElement) {
       routes: snapshot.routes.length,
       api: snapshot.apiRoutes.length,
       diagnostics: snapshot.diagnostics.length,
+      plugins: snapshot.plugins?.length ?? 0,
     };
     root
       .querySelectorAll<HTMLElement>("[data-count]")
@@ -361,6 +387,9 @@ export function startPanel(root: HTMLElement) {
         break;
       case "systems":
         systems();
+        break;
+      case "plugins":
+        renderPlugins();
         break;
       case "runtime":
         renderRuntime();
@@ -444,6 +473,46 @@ export function startPanel(root: HTMLElement) {
         window.location.origin,
       );
   };
+  const onHmr = (event: MessageEvent) => {
+    if (
+      disposed ||
+      window.parent === window ||
+      event.source !== window.parent ||
+      event.origin !== window.location.origin ||
+      event.data?.type !== "farm:devtools:hmr"
+    )
+      return;
+    const state = event.data.state;
+    if (!["pending", "ready", "error", "disconnected"].includes(state)) return;
+    hmrPending = state === "pending" || state === "disconnected";
+    if (state === "ready") {
+      if (view === "inspect") void refresh();
+      else {
+        staleNotice = "App updated. Refresh to capture the latest workspace.";
+        status.textContent = staleNotice;
+      }
+      return;
+    }
+    // In-flight reads belong to the previous revision. Keep visible code labeled
+    // stale until Vite confirms the update, without clearing the user's selection.
+    controller?.abort();
+    moduleController?.abort();
+    ++refreshSequence;
+    ++moduleSequence;
+    root.removeAttribute("aria-busy");
+    staleNotice =
+      state === "pending"
+        ? "HMR pending · Showing previous source and output"
+        : state === "error"
+          ? "HMR failed · Showing previous source and output"
+          : "Disconnected · Showing previous source and output";
+    status.textContent = staleNotice;
+    const label = main.querySelector<HTMLElement>("[data-module-state]");
+    if (label) {
+      label.textContent = staleNotice;
+      label.classList.add("fd-amber");
+    }
+  };
   root
     .querySelectorAll<HTMLButtonElement>("[data-view]")
     .forEach((button) => (button.onclick = () => navigate(button.dataset.view!)));
@@ -463,6 +532,7 @@ export function startPanel(root: HTMLElement) {
   systemTheme.addEventListener("change", applyTheme);
   root.addEventListener("click", onClick);
   document.addEventListener("keydown", onKeydown);
+  window.addEventListener("message", onHmr);
   root.querySelector<HTMLButtonElement>("[data-close]")!.focus();
   void refresh();
   return {
@@ -472,6 +542,7 @@ export function startPanel(root: HTMLElement) {
       moduleController?.abort();
       root.removeEventListener("click", onClick);
       document.removeEventListener("keydown", onKeydown);
+      window.removeEventListener("message", onHmr);
       systemTheme.removeEventListener("change", applyTheme);
     },
   };

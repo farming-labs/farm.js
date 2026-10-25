@@ -91,7 +91,36 @@ import type { AppIntegrations } from "./integrations";
 export const { api, apiClient } = createIntegrations<AppIntegrations>();
 ```
 
-Use `api` in trusted server code. Only expose `apiClient` to the browser when the application has added its own authorization around job routes.
+Use `api` in trusted server code. Job routes start provider runs with the app's credentials, so
+by default they answer only these in-process server calls: an HTTP request, including `apiClient`
+in the browser, gets `403`.
+
+To let HTTP callers in, pass `authorize`. It receives a copy of the request, so it can read the
+body, plus the task key (`null` for the task list) and the operation. Return `true` to allow the
+request, `false` to answer `403`, or a `Response` to answer with:
+
+```ts
+import { getSession } from "./auth";
+
+export const appIntegrations = {
+  jobs: jobs({
+    runtime: trigger({
+      apiKey: process.env.TRIGGER_SECRET_KEY,
+      projectRef: process.env.TRIGGER_PROJECT_REF,
+    }),
+    tasks,
+    async authorize(request, { task, operation }) {
+      const session = await getSession(request);
+      if (!session) return new Response("Sign in first", { status: 401 });
+      return task === "sendWelcomeEmail" && operation === "trigger";
+    },
+  }),
+} as const;
+```
+
+`status` and `cancel` take any handle ID the caller sends, so check that the run belongs to the
+caller before allowing them. With Trigger.dev, a task's `status` and `cancel` routes only act on
+that task's own runs.
 
 ## Trigger one run
 
@@ -337,7 +366,7 @@ Change the route prefix with `jobs({ basePath: "/api/automation", ... })`.
 
 - Implement and deploy the matching provider task or event function.
 - Keep object keys and provider IDs stable.
-- Restrict browser access to trigger, status, and cancel routes.
+- Keep job routes server-only, or allow HTTP callers with `authorize` and check who they are.
 - Use idempotency keys for user-retriable actions.
 - Persist handle IDs when a later request needs status or cancellation.
 - Verify each option against the selected runtime capability matrix.

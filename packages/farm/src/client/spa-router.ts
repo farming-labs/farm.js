@@ -9,7 +9,11 @@ import {
   isFarmDeploymentMismatchResponse,
 } from "../deployment";
 import { getHashTargetElement } from "./hash-target";
-import { isFarmExternalNavigationURL, resolveFarmNavigationURL } from "./navigation-url";
+import {
+  isFarmBlockedNavigationURL,
+  isFarmExternalNavigationURL,
+  resolveFarmNavigationURL,
+} from "./navigation-url";
 import { applyFarmMetadataToDocument, type NavigationMetadata } from "./metadata-reconciler";
 import type { FarmClientNavigationSession, FarmClientPluginManager } from "./plugin";
 import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-state";
@@ -306,6 +310,8 @@ export class SPARouter {
 
     // Relative targets resolve against the current document, not the origin.
     const url = resolveFarmNavigationURL(href, window.location.href);
+    // Every document navigation below, including the error fallback, uses this URL.
+    if (isFarmBlockedNavigationURL(url)) return;
     const pathname = url.pathname;
     const search = url.search;
     const fullPath = pathname + search;

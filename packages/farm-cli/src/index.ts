@@ -88,6 +88,12 @@ export {
   type GenerateFarmOptions,
 } from "./generate";
 export {
+  formatFarmAgentCheckReport,
+  runFarmAgentCheck,
+  type FarmAgentCheckOptions,
+  type FarmAgentCheckReport,
+} from "./agent-check";
+export {
   formatFarmDoctorReport,
   runFarmDoctor,
   type FarmDoctorCheck,

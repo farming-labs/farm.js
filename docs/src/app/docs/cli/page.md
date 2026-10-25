@@ -42,6 +42,7 @@ React is the default renderer. `--renderer preact`, `--renderer solid`, `--rende
 | farm doctor --registry           | Verify the public Farm beta tags against the npm registry.           |
 | farm doctor --fix                | Apply safe, additive project corrections.                            |
 | farm explain /products/42        | Explain the files and runtime behavior for one URL.                  |
+| farm agent check                 | Check how AI agents can read and use the running app.                |
 | farm preview                     | Create a public URL for a running local app.                         |
 | farm login                       | Sign in to Farm Preview without starting a preview.                  |
 | farm whoami                      | Show which credential farm preview would use.                        |
@@ -130,9 +131,9 @@ farm migrate tanstack --write
 
 Framework migrations are deterministic codemods. They inspect the project, print a dry-run plan by default, and only write when `--write` is passed. Existing target files are skipped unless `--force` is passed.
 
-The Next.js migrator copies `app` or `src/app` into Farm's `src/app`, creates `farm.config.ts`, creates a minimal root layout when needed, rewrites supported imports from `next/link`, `next/navigation`, and `next/headers`, and updates package scripts to `farm dev`, `farm build`, and `node .output/server/index.mjs`.
+The Next.js migrator copies `app` or `src/app` into Farm's `src/app`, creates `farm.config.ts`, creates a minimal root layout when needed, rewrites supported imports from `next/link`, `next/navigation`, and `next/headers`, and updates package scripts to `farm dev`, `farm build`, and `node .farm/.output/server/index.mjs`.
 
-The TanStack migrator converts file routes from `src/routes` or `routes` into `src/app/**/page.tsx`, maps `$id` to `[id]`, maps `$` to `[...splat]`, and adds a default export for simple `component: ComponentName` route files.
+The TanStack migrator converts file routes from `src/routes` or `routes` into `src/app/**/page.tsx`, maps `$id` to `[id]`, maps `$` to `[...splat]`, adds a default export for simple `component: ComponentName` route files, and updates package scripts to `farm dev`, `farm build`, and `node .farm/.output/server/index.mjs`.
 
 Both migrators leave source files in place and print manual review notes for framework-specific APIs.
 
@@ -219,6 +220,42 @@ The command exits with a non-zero status only when a check fails. Warnings keep 
 `farm doctor --fix` applies only corrections Farm can make without replacing application code. Today that means creating a missing `src/app/layout.tsx`; an existing file is never overwritten. The command reruns diagnostics after each correction and reports exactly which files it created.
 
 See [Doctor](/docs/doctor) for diagnostics, the JSON contract, and CI examples, and [Built-in DevTools](/docs/devtools) for the browser dashboard.
+
+## Check agent readiness
+
+```bash
+farm agent check
+farm agent check https://acme.com
+farm agent check http://localhost:3000/docs --path /getting-started
+farm agent check --mcp /api/tools --json
+```
+
+`farm agent check` probes a running app over HTTP the way an AI agent meets it, so it works the
+same against `farm dev`, `farm start`, or a deployed site. It defaults to `http://localhost:3000`;
+a URL with a path is treated as the app's `basePath`, and `--path` picks the page to check.
+
+| Check                   | Passes when                                                                                                                 |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Page metadata           | The page has a title, description, canonical link, and `lang`; JSON-LD is reported separately.                              |
+| Readable HTML           | The server HTML carries at least 500 characters of text, so agents that skip JavaScript read the page.                      |
+| Headings and markup     | The page has an H1, heading levels don't skip, and text is at least 5% of the HTML.                                         |
+| Markdown mirror         | The page advertises its `.md` mirror, the mirror answers, and a missing `.md` answers a Markdown 404.                       |
+| Content negotiation     | `Accept: text/markdown` on the page URL returns Markdown. Prerendered pages report this as info.                            |
+| Partial reads           | The mirror serves `?outline`, `?section`, `?max_tokens`, and ETags.                                                         |
+| Missing pages           | An unknown page answers 404, and Markdown for `Accept: text/markdown`. A 200 fails.                                         |
+| llms.txt                | `/llms.txt` lists pages, and `/llms-full.txt` answers.                                                                      |
+| Crawlers                | `/robots.txt` exists and does not block every agent; the sitemap it names (or `/sitemap.xml`) lists pages with `<lastmod>`. |
+| Organization            | The JSON-LD Organization has a `contactPoint` and an `address`. Reported as info.                                           |
+| About, contact, privacy | Each has a page with at least 500 characters, or a link to one on another site. Reported as info.                           |
+| API catalog             | `/.well-known/api-catalog` is an RFC 9727 Linkset, and the OpenAPI spec it lists answers.                                   |
+| MCP                     | The MCP endpoint (from the catalog, `--mcp`, or `/api/mcp`) answers a 401 with `WWW-Authenticate`.                          |
+| MCP discovery           | `/.well-known/ai-catalog.json`, `<endpoint>/server-card`, or `llms.txt` points clients to the endpoint. Info.               |
+
+A surface that is off is reported as info or a warning with the config that turns it on, such as
+`agent: { llmsTxt: true }`. A surface that is advertised but broken, such as an OpenAPI spec listed in
+the catalog that does not answer, fails, and the command exits with code 1. `--json` prints the
+report for CI. The MCP check sends one unauthenticated `initialize` request; every other check is a
+`GET` or `HEAD`.
 
 ## Explain a route
 

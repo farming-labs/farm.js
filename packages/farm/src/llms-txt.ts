@@ -9,6 +9,7 @@
  * renderer and the generated production server both call into this module, so
  * the two serve the same file.
  */
+import { FARM_INTERNAL_READ_HEADER } from "./agent-identity";
 import { applyFarmBasePath } from "./base-path";
 import {
   getFarmMarkdownMirrorPath,
@@ -68,8 +69,9 @@ export interface FarmLlmsTxtUserConfig {
    */
   full?: boolean;
   /**
-   * Seconds a CDN may cache the generated files. Rendering llms-full.txt renders
-   * every listed page, so cache it on busy sites. Defaults to no caching.
+   * Seconds a CDN may cache the generated files, and the production server may
+   * reuse an llms-full.txt render, which renders every listed page. Defaults to
+   * no caching; concurrent llms-full.txt requests still share one render.
    */
   revalidate?: number;
 }
@@ -170,6 +172,8 @@ export function collectFarmLlmsTxtPages(
       continue;
     }
     if (exclude.some((pattern) => matchesFarmMarkdownRoutePattern(pattern, path))) continue;
+    // A page its author keeps out of search stays out of the agent index too.
+    if (isFarmMetadataNoIndex(source.metadata)) continue;
 
     // llmstxt.org prefers links to Markdown; use the page's mirror when it has one.
     const target = isFarmMarkdownMirrorExposed(options.markdown, path)
@@ -187,13 +191,31 @@ export function collectFarmLlmsTxtPages(
   return [...pages.values()].sort((left, right) => left.path.localeCompare(right.path));
 }
 
+/** True when page metadata asks search engines not to index the page. */
+export function isFarmMetadataNoIndex(metadata: unknown): boolean {
+  if (!metadata || typeof metadata !== "object") return false;
+  const robots = (metadata as { robots?: unknown }).robots;
+  if (typeof robots === "string") {
+    return robots
+      .split(",")
+      .map((directive) => directive.trim().toLowerCase())
+      .some((directive) => directive === "noindex" || directive === "none");
+  }
+  return Boolean(
+    robots && typeof robots === "object" && (robots as { index?: unknown }).index === false,
+  );
+}
+
 export function createFarmDefaultLlmsTxt(options: {
   origin: string;
   pages: FarmLlmsTxtPage[];
   config: ResolvedFarmLlmsTxtConfig;
   rootMetadata?: unknown;
+  /** The app's MCP endpoints and AI catalog, listed in an "MCP" section. */
+  mcp?: FarmLlmsTxtLink[];
 }): FarmLlmsTxt {
   const { config, pages } = options;
+  const mcp = options.mcp ?? [];
   const summary = config.summary ?? readMetadataString(options.rootMetadata, "description");
 
   return {
@@ -204,18 +226,21 @@ export function createFarmDefaultLlmsTxt(options: {
       new URL(options.origin).host,
     ...(summary ? { summary } : {}),
     ...(config.details ? { details: config.details } : {}),
-    sections: pages.length
-      ? [
-          {
-            title: "Pages",
-            links: pages.map(({ title, url, description }) => ({
-              title,
-              url,
-              ...(description ? { description } : {}),
-            })),
-          },
-        ]
-      : [],
+    sections: [
+      ...(pages.length
+        ? [
+            {
+              title: "Pages",
+              links: pages.map(({ title, url, description }) => ({
+                title,
+                url,
+                ...(description ? { description } : {}),
+              })),
+            },
+          ]
+        : []),
+      ...(mcp.length ? [{ title: "MCP", links: mcp }] : []),
+    ],
   };
 }
 
@@ -278,7 +303,9 @@ export function createFarmLlmsMarkdownReader(
   return async (url) => {
     try {
       const response = await fetchMarkdown(
-        new Request(url, { headers: { accept: "text/markdown" } }),
+        new Request(url, {
+          headers: { accept: "text/markdown", [FARM_INTERNAL_READ_HEADER]: "llms-full" },
+        }),
       );
       const type = response.headers.get("content-type") ?? "";
       if (!response.ok || !type.toLowerCase().startsWith("text/markdown")) {
@@ -293,6 +320,16 @@ export function createFarmLlmsMarkdownReader(
 }
 
 /**
+ * How long llms-full.txt waits for one page's Markdown. Farm has no per-render
+ * timeout to reuse, so this is a conservative bound: a page that never finishes
+ * is left out instead of holding the response, and the shared render queue,
+ * open forever.
+ */
+export const FARM_LLMS_FULL_PAGE_TIMEOUT_MS = 30_000;
+
+const LLMS_PAGE_TIMED_OUT = Symbol("farm.llms.pageTimedOut");
+
+/**
  * Renders llms-full.txt: the llms.txt header, then one block per linked page with
  * its Markdown inlined, in the layout the docs engine uses. A string passes
  * through unchanged. Only same-origin links are fetched.
@@ -303,6 +340,10 @@ export async function renderFarmLlmsFullTxt(
     origin: string;
     readMarkdown: (url: string) => Promise<string | null>;
     concurrency?: number;
+    /** Milliseconds to wait for one page's Markdown before leaving it out. */
+    pageTimeout?: number;
+    /** Called when a page is left out because it did not answer in time. */
+    onIncomplete?: () => void;
   },
 ): Promise<string> {
   // Validates the value, and returns strings unchanged apart from the final newline.
@@ -320,8 +361,24 @@ export async function renderFarmLlmsFullTxt(
     }
   }
 
+  const pageTimeout = options.pageTimeout ?? FARM_LLMS_FULL_PAGE_TIMEOUT_MS;
+  const readWithinTimeout = async (url: string) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<typeof LLMS_PAGE_TIMED_OUT>((resolve) => {
+      timer = setTimeout(resolve, pageTimeout, LLMS_PAGE_TIMED_OUT);
+    });
+    try {
+      const content = await Promise.race([options.readMarkdown(url), timedOut]);
+      if (content !== LLMS_PAGE_TIMED_OUT) return content;
+      // Listed without its content, like a page that needs sign-in.
+      options.onIncomplete?.();
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   const contents = await mapWithConcurrency(links, options.concurrency ?? 4, (link) =>
-    shouldInlineLlmsLink(link.url, options.origin) ? options.readMarkdown(link.url) : null,
+    shouldInlineLlmsLink(link.url, options.origin) ? readWithinTimeout(link.url) : null,
   );
 
   const blocks = [`# ${toSingleLine(llms.title)}`];
@@ -336,6 +393,71 @@ export async function renderFarmLlmsFullTxt(
   });
   if (pages.length) blocks.push(pages.join("\n\n---\n\n"));
   return `${blocks.join("\n\n")}\n`;
+}
+
+/**
+ * Shares llms-full.txt renders, which read every listed page. Requests for the
+ * same origin while a render runs, or within `revalidate` seconds after it, get
+ * that result; renders run one at a time, so a burst of requests, even with
+ * varied Host headers, cannot multiply page renders. The content is the same for
+ * every caller: pages are read with fresh requests that carry no credentials.
+ * A render that calls `incomplete()`, because a page timed out, is answered but
+ * not reused, so the next request tries that page again.
+ */
+export function createFarmLlmsFullRenderer(
+  options: { revalidate?: number; now?: () => number; maxEntries?: number } = {},
+): (
+  origin: string,
+  render: (shared: { incomplete: () => void }) => Promise<string>,
+  onSettled?: (complete: boolean) => void,
+) => Promise<string> {
+  const now = options.now ?? Date.now;
+  const ttl = (options.revalidate ?? 0) * 1000;
+  const maxEntries = options.maxEntries ?? 16;
+  const entries = new Map<
+    string,
+    { body: Promise<string>; expires: number; complete: () => boolean }
+  >();
+  let queue: Promise<unknown> = Promise.resolve();
+
+  // Callers learn whether the body they get is complete, including callers
+  // that joined another request's render, so a partial body is not cached.
+  const settle = (
+    body: Promise<string>,
+    complete: () => boolean,
+    onSettled?: (c: boolean) => void,
+  ) => (onSettled ? body.then((value) => (onSettled(complete()), value)) : body);
+
+  return (origin, render, onSettled) => {
+    const entry = entries.get(origin);
+    if (entry && entry.expires > now()) return settle(entry.body, entry.complete, onSettled);
+    entries.delete(origin);
+
+    let complete = true;
+    const body = queue.then(() =>
+      render({
+        incomplete: () => {
+          complete = false;
+        },
+      }),
+    );
+    queue = body.catch(() => {});
+    const pending = { body, expires: Number.POSITIVE_INFINITY, complete: () => complete };
+    entries.set(origin, pending);
+    // Map order is insertion order, so the first key is the oldest entry.
+    if (entries.size > maxEntries) entries.delete(entries.keys().next().value!);
+    body.then(
+      () => {
+        if (entries.get(origin) !== pending) return;
+        if (ttl > 0 && complete) pending.expires = now() + ttl;
+        else entries.delete(origin);
+      },
+      () => {
+        if (entries.get(origin) === pending) entries.delete(origin);
+      },
+    );
+    return settle(body, pending.complete, onSettled);
+  };
 }
 
 // Markdown sources keep their YAML frontmatter, whose --- lines would read as page

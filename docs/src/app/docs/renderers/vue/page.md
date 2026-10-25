@@ -117,6 +117,39 @@ async function callServer() {
 The endpoint can call a validated `createServerFn`; its handler, database access, and secrets remain
 in the server bundle.
 
+## Install Vue plugins
+
+Pass an app setup module to `vue()` to install plugins such as Pinia, vue-i18n, or a component
+library with `app.use()`:
+
+**farm.config.ts**
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { vue } from "@farm.js/vue";
+
+export default defineConfig({
+  renderer: vue({ app: "./src/vue-app.ts" }),
+});
+```
+
+**src/vue-app.ts**
+
+```ts
+import { defineVueApp } from "@farm.js/vue";
+import { createPinia } from "pinia";
+
+export default defineVueApp((app, { ssr }) => {
+  app.use(createPinia());
+});
+```
+
+Farm calls the function for every Vue app it creates: once per server render, so plugin state such
+as a Pinia store is never shared between requests, and once for each hydrated root in the browser.
+`ssr` is `true` on the server. State created during the server render is not transferred to the
+browser; stores start from their initial state when the page hydrates. In development, edits to the
+module apply on the next request.
+
 ## Current boundaries
 
 Use the Vue-native composables for reactive router, action, server-query, theme, and i18n state:

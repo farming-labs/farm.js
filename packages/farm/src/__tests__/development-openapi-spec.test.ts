@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ViteDevServer } from "vite";
+import { _publishFarmMCPCatalog } from "../mcp-catalog";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
 
@@ -102,4 +103,101 @@ describe("development OpenAPI spec route", () => {
     expect(reference.status).toBe(200);
     expect(await reference.text()).toContain("<title>Dev API</title>");
   }, 30_000);
+
+  it("lists the OpenAPI surfaces at /.well-known/api-catalog", async () => {
+    const origin = await startApp(`basePath: "/app", agent: { apiCatalog: true },`);
+
+    const response = await fetch(`${origin}/app/.well-known/api-catalog`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/linkset+json");
+    expect(response.headers.get("link")).toBe('</app/.well-known/api-catalog>; rel="api-catalog"');
+    const { linkset } = await response.json();
+    const api = linkset[1];
+    expect(linkset[0].item).toEqual([{ href: api.anchor }]);
+    // Every listed link resolves on this server.
+    expect((await fetch(`${origin}${api.anchor}/health`)).status).toBe(200);
+    expect((await fetch(`${origin}${api["service-desc"][0].href}`)).status).toBe(200);
+    expect((await fetch(`${origin}${api["service-doc"][0].href}`)).status).toBe(200);
+  }, 30_000);
+
+  it("does not serve /.well-known/api-catalog unless agent.apiCatalog is on", async () => {
+    const origin = await startApp();
+    expect((await fetch(`${origin}/.well-known/api-catalog`)).status).toBe(404);
+  }, 30_000);
+
+  it("lists the app's MCP servers at /.well-known/ai-catalog.json and in llms.txt", async () => {
+    // What @farm.js/mcp does when it mounts its endpoint; the dev server runs in this process.
+    const unpublish = _publishFarmMCPCatalog(
+      { name: "projects", version: "1.2.0", path: "/api/mcp", title: "Projects" },
+      [],
+    );
+    try {
+      const origin = await startApp(`basePath: "/app",`);
+
+      const catalog = await fetch(`${origin}/app/.well-known/ai-catalog.json`);
+      expect(catalog.status).toBe(200);
+      expect(catalog.headers.get("content-type")).toBe(
+        "application/ai-catalog+json; charset=utf-8",
+      );
+      const { entries } = await catalog.json();
+      expect(entries).toEqual([
+        expect.objectContaining({
+          identifier: "urn:air:localhost:mcp:projects",
+          url: `${origin}/api/mcp/server-card`,
+        }),
+      ]);
+
+      const card = await fetch(entries[0].url);
+      expect(card.status).toBe(200);
+      expect(await card.json()).toMatchObject({
+        name: "localhost/projects",
+        version: "1.2.0",
+        remotes: [{ type: "streamable-http", url: `${origin}/api/mcp` }],
+      });
+
+      const plain = await startApp();
+      const llms = await (await fetch(`${plain}/llms.txt`)).text();
+      expect(llms).toContain("## MCP");
+      expect(llms).toContain(`- [Projects](${plain}/api/mcp)`);
+
+      const optedOut = await startApp(`agent: { aiCatalog: false },`);
+      expect((await fetch(`${optedOut}/.well-known/ai-catalog.json`)).status).toBe(404);
+      expect((await fetch(`${optedOut}/api/mcp/server-card`)).status).toBe(404);
+      expect(await (await fetch(`${optedOut}/llms.txt`)).text()).not.toContain("## MCP");
+    } finally {
+      unpublish();
+    }
+  }, 60_000);
+
+  it("serves /.well-known/farmjs.json as production does, beneath the basePath", async () => {
+    // A server with authorize: anonymous readers see it, not its tools.
+    const unpublish = _publishFarmMCPCatalog(
+      { name: "admin", version: "1.0.0", path: "/api/mcp" },
+      [{ name: "ban_user", kind: "endpoint", method: "POST", path: "/api/ban" }],
+      { public: false },
+    );
+    try {
+      const origin = await startApp(`basePath: "/app",`);
+      const response = await fetch(`${origin}/app/.well-known/farmjs.json`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+      const manifest = await response.json();
+      expect(manifest.app).toMatchObject({ basePath: "/app", build: "development" });
+      expect(manifest.mcp.servers).toEqual([
+        expect.objectContaining({ name: "admin", authorization: "required", tools: [] }),
+      ]);
+      const etag = response.headers.get("etag")!;
+      const cached = await fetch(`${origin}/app/.well-known/farmjs`, {
+        headers: { "if-none-match": etag },
+      });
+      expect(cached.status).toBe(304);
+
+      const optedOut = await startApp(`agent: { manifest: false },`);
+      const off = await fetch(`${optedOut}/.well-known/farmjs.json`);
+      expect(off.headers.get("content-type") ?? "").not.toContain("application/json");
+    } finally {
+      unpublish();
+    }
+  }, 60_000);
 });

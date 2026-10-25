@@ -16,13 +16,17 @@
   },
   "dependencies": {
     "@farm.js/core": "workspace:*",
+    "@farming-labs/docs": "^0.2.118",
+    "@vercel/og": "^1.0.1",
     "better-call": "^1.0.19",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "zod": "^4.1.12"
+    "sharp": "^0.35.5",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@farm.js/cli": "workspace:*",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "tailwindcss": "^4.0.0",

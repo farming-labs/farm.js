@@ -78,6 +78,20 @@ describe("Farm i18n configuration", () => {
     expect(() =>
       resolveFarmI18nConfig({ ...base, cookie: { sameSite: "invalid" as "lax" } }),
     ).toThrow('must be "lax", "strict", or "none"');
+    expect(() =>
+      resolveFarmI18nConfig({ ...base, cookie: { sameSite: "none", secure: false } }),
+    ).toThrow('cannot be false when i18n.cookie.sameSite is "none"');
+  });
+
+  it("marks a SameSite=None locale cookie Secure outside production", () => {
+    const config = resolveFarmI18nConfig(
+      { locales: ["en"], defaultLocale: "en", cookie: { sameSite: "none" } },
+      { root: "/app", mode: "development" },
+    );
+
+    expect(createFarmLocaleCookie("en", config)).toBe(
+      "farm_locale=en; Max-Age=31536000; Path=/; SameSite=None; Secure",
+    );
   });
 
   it("serializes a validated custom locale cookie", () => {

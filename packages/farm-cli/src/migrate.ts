@@ -1,7 +1,7 @@
 import { loadConfig, logger } from "@farm.js/core/internal/cli-runtime";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 type FarmMigrationCommand =
@@ -663,31 +663,28 @@ async function collectFiles(dir: string): Promise<string[]> {
   return files.sort();
 }
 
-const SHARED_SOURCE_SKIP = new Set([
-  "node_modules",
-  ".next",
-  ".output",
-  ".farm",
-  ".vercel",
-  ".git",
-  "dist",
-  "build",
-  "out",
-  "coverage",
-  "public",
-  "pages",
-]);
+// Build output, static assets, and the Pages Router live at the project root (pages/ also
+// under src/). Deeper folders with these names, such as lib/build/, are ordinary source.
+const SHARED_SOURCE_ROOT_SKIP = ["dist", "build", "out", "coverage", "public", "pages"];
 
 /** Code files outside the App Router, for import rewrites. Content files are left alone. */
 async function collectSharedSourceFiles(root: string, appDir: string): Promise<string[]> {
-  const appDirs = new Set([path.resolve(appDir), path.resolve(root, "src", "app")]);
+  const skipped = new Set([
+    path.resolve(appDir),
+    path.resolve(root, "src", "app"),
+    path.resolve(root, "src", "pages"),
+    ...SHARED_SOURCE_ROOT_SKIP.map((name) => path.resolve(root, name)),
+  ]);
   const files: string[] = [];
   const visit = async (dir: string) => {
     for (const entry of await readdir(dir)) {
-      if (SHARED_SOURCE_SKIP.has(entry) || entry.startsWith(".")) continue;
+      if (entry === "node_modules" || entry.startsWith(".")) continue;
       const fullPath = path.join(dir, entry);
-      if (appDirs.has(path.resolve(fullPath))) continue;
-      const info = await stat(fullPath);
+      if (skipped.has(path.resolve(fullPath))) continue;
+      // lstat: a symlink can loop back to a parent (ELOOP) or point outside the project,
+      // where the migration must not write. Files it links to inside the root are visited
+      // at their real path.
+      const info = await lstat(fullPath);
       if (info.isDirectory()) await visit(fullPath);
       else if (info.isFile() && /\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$/.test(entry)) {
         files.push(fullPath);
@@ -704,9 +701,18 @@ function readTsconfigSourceAlias(root: string): string | null {
   if (!existsSync(tsconfigPath)) return null;
   try {
     const raw = stripJsonComments(readFileSync(tsconfigPath, "utf8")).replace(/,(\s*[}\]])/g, "$1");
-    const target = JSON.parse(raw)?.compilerOptions?.paths?.["@/*"]?.[0];
+    const compilerOptions = JSON.parse(raw)?.compilerOptions;
+    const target = compilerOptions?.paths?.["@/*"]?.[0];
     if (typeof target !== "string") return null;
-    return /^(\.\/)?src\/\*$/.test(target) ? null : target;
+    const prefix = target === "*" ? "." : target.endsWith("/*") ? target.slice(0, -2) : null;
+    if (prefix === null) return target;
+    // `paths` resolve against `baseUrl` when it is set, as TypeScript does.
+    const baseUrl = typeof compilerOptions.baseUrl === "string" ? compilerOptions.baseUrl : ".";
+    const directory = path.resolve(root, baseUrl, prefix);
+    if (directory === path.resolve(root, "src")) return null;
+    const relative = toPosix(path.relative(root, directory));
+    if (!relative) return "./*";
+    return relative.startsWith("..") ? `${relative}/*` : `./${relative}/*`;
   } catch {
     return null;
   }
@@ -741,6 +747,61 @@ function stripJsonComments(source: string): string {
   return output;
 }
 
+// What @farm.js/core/navigation and @farm.js/core/headers export (values and types). An import
+// from next/navigation or next/headers is rewritten only when every name it takes is here; the
+// CLI tests keep these lists equal to core's entry points.
+const FARM_NEXT_MODULE_EXPORTS: Record<string, { target: string; names: ReadonlySet<string> }> = {
+  "next/navigation": {
+    target: "@farm.js/core/navigation",
+    names: new Set([
+      "FarmRedirectSignal",
+      "FarmRedirectStatus",
+      "getFarmRedirectError",
+      "isFarmNotFoundError",
+      "isFarmRedirectError",
+      "notFound",
+      "permanentRedirect",
+      "redirect",
+      "usePathname",
+      "useRouter",
+      "useSearchParams",
+    ]),
+  },
+  "next/headers": {
+    target: "@farm.js/core/headers",
+    names: new Set([
+      "ReadonlyHeaders",
+      "ReadonlyRequestCookies",
+      "RequestCookie",
+      "cookies",
+      "headers",
+    ]),
+  },
+};
+
+const NEXT_COMPAT_STATEMENT =
+  /\b(import|export)(\s+type)?(\s+[\w$\s,{}*]*?)\s*from\s*["'](next\/(?:navigation|headers))["']/g;
+
+/** Names an import/export clause takes from `moduleId` that Farm's counterpart lacks. */
+function unsupportedNextNames(moduleId: string, clause: string): string[] {
+  const supported = FARM_NEXT_MODULE_EXPORTS[moduleId].names;
+  const named = clause.match(/\{([^}]*)\}/);
+  const outside = clause.replace(/\{[^}]*\}/, "").trim();
+  const unsupported: string[] = [];
+  // `* as nav`, `export *`, or a default import can reach any name, so none is verifiable.
+  if (outside.includes("*")) unsupported.push("*");
+  else if (outside.replace(/,/g, "").trim()) unsupported.push("default");
+  for (const specifier of named?.[1].split(",") ?? []) {
+    const name = specifier
+      .trim()
+      .replace(/^type\s+/, "")
+      .split(/\s+as\s+/)[0]
+      .trim();
+    if (name && !supported.has(name)) unsupported.push(name);
+  }
+  return unsupported;
+}
+
 function transformNextContent(content: string) {
   return content
     .replace(/import\s+([A-Za-z_$][\w$]*)\s+from\s+["']next\/link["'];?/g, (_match, localName) =>
@@ -748,16 +809,40 @@ function transformNextContent(content: string) {
         ? `import { Link } from "@farm.js/core/client";`
         : `import { Link as ${localName} } from "@farm.js/core/client";`,
     )
-    .replace(/from\s+["']next\/navigation["']/g, `from "@farm.js/core/navigation"`)
-    .replace(/from\s+["']next\/headers["']/g, `from "@farm.js/core/headers"`);
+    .replace(NEXT_COMPAT_STATEMENT, (statement, keyword, typeOnly, clause, moduleId) =>
+      unsupportedNextNames(moduleId, clause).length
+        ? statement
+        : `${keyword}${typeOnly ?? ""}${clause} from "${FARM_NEXT_MODULE_EXPORTS[moduleId].target}"`,
+    );
 }
 
 function collectNextManualNotes(relative: string, content: string, plan: FrameworkMigrationPlan) {
-  const imports = Array.from(content.matchAll(/from\s+["'](next\/[^"']+)["']/g)).map(
-    (match) => match[1],
-  );
-  for (const importId of imports) {
-    plan.manual.push(`Review ${toPosix(relative)}; it still imports ${importId}.`);
+  const file = toPosix(relative);
+  const unsupportedByStatement = new Map<number, string[]>();
+  for (const match of content.matchAll(NEXT_COMPAT_STATEMENT)) {
+    unsupportedByStatement.set(
+      match.index! + match[0].length,
+      unsupportedNextNames(match[4], match[3]),
+    );
+  }
+  for (const match of content.matchAll(/from\s*["'](next\/[^"']+)["']/g)) {
+    const importId = match[1];
+    const unsupported = unsupportedByStatement.get(match.index! + match[0].length);
+    if (!unsupported?.length) {
+      plan.manual.push(`Review ${file}; it still imports ${importId}.`);
+      continue;
+    }
+    const names = unsupported.map((name) =>
+      name === "*" ? "every name (*)" : name === "default" ? "a default export" : name,
+    );
+    plan.manual.push(
+      `Review ${file}; it still imports ${importId} because ${FARM_NEXT_MODULE_EXPORTS[importId].target} does not export ${names.join(", ")}.`,
+    );
+  }
+  for (const match of content.matchAll(/\b(import|require)\s*\(\s*["'](next\/[^"']+)["']\s*\)/g)) {
+    plan.manual.push(
+      `Review ${file}; it loads ${match[2]} with ${match[1]}(), which the migration does not rewrite.`,
+    );
   }
 
   if (/getServerSideProps|getStaticProps|getInitialProps/.test(content)) {
@@ -823,16 +908,24 @@ function createMigratedPackageJson(packageJson: any, source: FarmFrameworkMigrat
   const changes: string[] = [];
   nextPackageJson.scripts = nextPackageJson.scripts || {};
 
+  // `farm build` writes the server to .farm/.output with the farm.config.ts this migration
+  // creates, the same start command new Farm projects use.
+  const startScript = "node .farm/.output/server/index.mjs";
   const scriptReplacements =
     source === "next"
       ? [
           ["dev", "farm dev", /(^|\s)next\s+dev(\s|$)/],
           ["build", "farm build", /(^|\s)next\s+build(\s|$)/],
-          ["start", "node .output/server/index.mjs", /(^|\s)next\s+start(\s|$)/],
+          ["start", startScript, /(^|\s)next\s+start(\s|$)/],
         ]
       : [
           ["dev", "farm dev", /(^|\s)vite(\s|$)|(^|\s)vinxi\s+dev(\s|$)/],
           ["build", "farm build", /(^|\s)vite\s+build(\s|$)|(^|\s)vinxi\s+build(\s|$)/],
+          [
+            "start",
+            startScript,
+            /(^|\s)vinxi\s+start(\s|$)|(^|\s)node\s+\.?\/?\.output\/server\/index\.mjs(\s|$)/,
+          ],
         ];
 
   for (const [name, value, matcher] of scriptReplacements as [string, string, RegExp][]) {

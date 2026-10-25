@@ -15,6 +15,13 @@ The endpoint defaults to `/api/mcp` and implements MCP Streamable HTTP. It is a 
 unlike [WebMCP](/docs/plugins/webmcp), which registers tools in a supporting browser while a page is
 open.
 
+Without `@farm.js/mcp`, every app already serves a
+[read-only MCP server](/docs/configuration#default-mcp-server) at `/mcp` that lists, searches, and
+reads its public pages as Markdown. Configuring `@farm.js/mcp` replaces it: the default steps aside
+as soon as the top-level `mcp` config or `apiMcp()` is set, an API route answers `/api/mcp`, an app
+route answers `/mcp`, or a server is listed with `registerFarmMCPServer`. Turn the default off
+without adding a server with `agent: { mcp: false }`.
+
 ## Install and configure
 
 ```bash
@@ -42,7 +49,10 @@ unless that endpoint opts in or is explicitly selected in `mcp.tools`.
 ## Declare tools in config
 
 You can keep MCP declarations in `farm.config.ts` and reference existing endpoint instances.
-The endpoint still owns its validation, middleware, and handler:
+The endpoint still owns its validation, middleware, and handler. A tool call is a request for the
+endpoint's own path, with the agent's headers and cookies, so the app middleware and integration
+guards that protect that path run first, as they do for a direct request; a refusal comes back as
+a tool error with its status.
 
 ```ts title="src/app/api/projects/route.ts"
 import { createEndpoint } from "@farm.js/core/api";
@@ -220,6 +230,74 @@ true`). Set the hints in `mcp` when the function is safe to repeat or only reads
 Only functions listed in `mcp.tools` are exposed, and only through `authorize`. Adding `mcp` metadata
 alone publishes nothing, and functions keep working for your UI either way.
 
+## Resources and prompts
+
+Tools let an agent act. Resources give it read-only context to load, and prompts are reusable
+message templates a client can offer its user. Declare both next to `tools`:
+
+```ts title="farm.config.ts"
+import { defineConfig } from "@farm.js/core";
+import { definePrompt, defineResource } from "@farm.js/mcp";
+import { z } from "zod";
+import { getNote, listNotes } from "./src/lib/notes";
+
+export default defineConfig({
+  mcp: {
+    authorize: authorizeAgent,
+    resources: [
+      defineResource({
+        name: "handbook",
+        uri: "docs://handbook",
+        mimeType: "text/markdown",
+        read: () => "# Handbook\n\nHow the team works.",
+      }),
+      defineResource({
+        name: "note",
+        uriTemplate: "notes://{id}",
+        list: async ({ authorization }) =>
+          (await listNotes(authorization.subject)).map((note) => ({
+            uri: `notes://${note.id}`,
+            name: note.title,
+          })),
+        read: async ({ variables, authorization }) => {
+          const note = await getNote(String(variables.id), authorization.subject);
+          return note ? { json: note } : null;
+        },
+      }),
+    ],
+    prompts: [
+      definePrompt({
+        name: "summarize_note",
+        description: "Summarize one note.",
+        arguments: z.object({ id: z.string(), tone: z.string().default("plain") }),
+        render: ({ id, tone }) => `Summarize note ${id} in a ${tone} tone.`,
+      }),
+    ],
+  },
+});
+```
+
+A resource has a fixed absolute `uri` or an RFC 6570 `uriTemplate`. A template's `list` returns the
+concrete URIs to show in `resources/list`; leave it out to list none. `read` receives the requested
+`uri`, the template `variables`, and the same `authorization`, `request`, and `signal` as a standalone
+tool. It returns content in one of these shapes:
+
+- A string, sent with the resource's `mimeType` (default `text/plain`).
+- `{ text, mimeType }`.
+- `{ json }`, sent as `application/json`.
+- `{ blob, mimeType }` with a `Uint8Array` or `ArrayBuffer`, sent base64-encoded.
+
+`read` can also return a list of these, or `null` to answer "resource not found".
+
+A prompt's `arguments` is an object schema of strings, since MCP sends prompt arguments as strings.
+Its JSON Schema lists the arguments to clients, and the schema itself validates them before
+`render` runs, with its defaults and transforms. `render` returns the prompt text, sent as one user
+message, or a list of `{ role, text }` messages.
+
+Resources and prompts run behind the same `authorize` as tools. An error thrown inside `read`,
+`list`, or `render` is logged on the server and answered with a generic message, so private details
+never reach the client. A server can offer only resources and prompts, with no tools.
+
 ## Validate tool results
 
 Add `outputSchema` to a standalone tool to check its returned data before sending it to the
@@ -290,11 +368,15 @@ Every `authorize` call receives:
   initialization and listing. For a JSON-RPC batch, Farm calls `authorize` for every item with
   that item's tool name and rejects the entire batch before dispatch when any item is denied;
   compare it against the catalog rather than trusting it.
+- `resource` and `prompt`: the untrusted requested URI for a `resources/read` and name for a
+  `prompts/get`, the same way.
 
 Return `false` to reject the entire request with HTTP 401. Otherwise return a `subject` and,
 optionally, `tools`, an array of allowed **tool names**. Omit this return field to retain access to
 all configured tools; return `tools: []` to allow the MCP connection but no tools. Unknown names
 or malformed permission lists fail closed with a server error.
+`resources` and `prompts` work the same way for resource and prompt names: omit them to allow all,
+or return `[]` to allow none.
 
 Every allowed item in a batch must resolve to the same subject, scopes, and allowed tool names
 because one HTTP batch has one authenticated identity.
@@ -312,6 +394,38 @@ in endpoint middleware or a standalone tool's `execute` function. Standalone too
 returned principal as `authorization`; endpoint-backed tools continue to authenticate through
 their existing middleware using forwarded credentials. The principal is not injected into an
 endpoint's context. This config does not implement an OAuth authorization server or issue tokens.
+
+### OAuth discovery
+
+A rejected request's 401 carries `WWW-Authenticate: Bearer`. When your tokens come from an OAuth
+authorization server, set `oauth` so MCP clients can find it and sign the user in, as the
+[MCP authorization spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
+describes:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  mcp: {
+    authorize: verifyAccessToken,
+    oauth: {
+      authorizationServers: ["https://auth.example.com"],
+      scopes: ["projects:read", "projects:write"],
+    },
+  },
+});
+```
+
+The 401 then links the endpoint's
+[RFC 9728](https://www.rfc-editor.org/rfc/rfc9728) metadata:
+
+```http
+WWW-Authenticate: Bearer resource_metadata="https://app.example.com/.well-known/oauth-protected-resource/api/mcp", scope="projects:read projects:write"
+```
+
+Farm serves that metadata, naming the endpoint as the `resource` and listing the authorization
+servers and scopes. It is built from the request, so it names the endpoint URL the client used.
+`authorize` still validates every token, including its audience; `oauth` only advertises where
+tokens come from. With a `basePath`, the metadata URL sits at the origin root, as RFC 9728 places it,
+so the proxy in front of the app must forward `/.well-known/oauth-protected-resource/*` to it.
 
 ## Keep the API route authoritative
 
@@ -394,7 +508,7 @@ Farm maps route inputs into one MCP argument object:
 
 | Route input | Tool argument | Notes                                                                 |
 | ----------- | ------------- | --------------------------------------------------------------------- |
-| Params      | `params`      | Includes dynamic, catch-all, and optional catch-all segments.         |
+| Params      | `params`      | Dynamic, catch-all, and optional catch-all segments; see below.       |
 | Query       | `query`       | Preserves repeated query values as arrays.                            |
 | JSON body   | `body`        | Available for methods that accept a request body.                     |
 | Headers     | `headers`     | Credential and request-provenance headers are never agent-controlled. |
@@ -408,9 +522,34 @@ For example, a tool call for `GET /api/projects/[team]` can send:
 }
 ```
 
+A param value always stays inside the tool's own route. A dynamic segment such as `[team]` takes
+one non-empty value without `/`, and a catch-all such as `[...path]` takes an array of segments.
+`.` and `..` are rejected as tool errors in either, because the URL would resolve them into
+another route.
+
 The route's Standard Schema implementation must be convertible to JSON Schema. Zod 4 routes work
 without additional configuration. Selected routes currently need JSON responses; binary,
 multipart, and streaming responses are rejected as tool errors.
+
+## Forms that are also tools
+
+When a page's form submits to an API route that is exposed as a tool, the page's Markdown mirror
+says so. Its [`?actions` view](/docs/markdown#describe-a-pages-forms) adds the tool to that form:
+
+```json
+{
+  "type": "form",
+  "method": "POST",
+  "action": "/api/contact",
+  "fields": [{ "name": "email", "type": "email", "required": true }],
+  "tool": { "name": "contact_submit", "endpoint": "/api/mcp" }
+}
+```
+
+An agent reading the page can then call `contact_submit` through MCP instead of posting the form.
+The match uses the form's method and action against the endpoints this server exposes, including
+a custom `api.baseURL`. Forms bound to server functions in a React Server Components app are not
+matched yet; see [React Server Components apps](#react-server-components-apps) for MCP itself.
 
 ## Connect a client
 
@@ -427,6 +566,90 @@ curl http://localhost:3000/api/mcp \
 
 Do not put production tokens in source, browser code, an MCP tool description, or a checked-in
 client configuration.
+
+## Discovery
+
+Clients find the server from your origin alone. Farm serves an
+[AI Catalog](https://github.com/Agent-Card/ai-catalog) at `/.well-known/ai-catalog.json` that lists
+an [MCP server card](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/seps/2127-mcp-server-cards.md)
+for each mounted MCP server, and serves each card at `<endpoint>/server-card`, the location the
+server card extension reserves:
+
+```json title="/.well-known/ai-catalog.json"
+{
+  "specVersion": "1.0",
+  "entries": [
+    {
+      "identifier": "urn:air:app.example.com:mcp:project-tools",
+      "type": "application/mcp-server-card+json",
+      "url": "https://app.example.com/api/mcp/server-card",
+      "displayName": "Project tools",
+      "description": "Create and search projects.",
+      "version": "1.0.0"
+    }
+  ]
+}
+```
+
+```json title="/api/mcp/server-card"
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
+  "name": "com.example.app/project-tools",
+  "version": "1.0.0",
+  "title": "Project tools",
+  "description": "Create and search projects.",
+  "websiteUrl": "https://app.example.com",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://app.example.com/api/mcp",
+      "supportedProtocolVersions": ["2026-07-28", "2025-11-25", "2025-06-18"]
+    }
+  ]
+}
+```
+
+The same entries answer at `/.well-known/ard.json` for
+[Agentic Resource Discovery](https://agenticresourcediscovery.org/spec/) crawlers, and the generated
+[`llms.txt`](/docs/configuration#agent-readiness) gets an `MCP` section naming each endpoint and the
+catalog. The card carries the `name`, `version`, `title`, and `description` the server reports during
+initialization, so the two agree. A `name` without a slash is namespaced by the request host in the
+card (`project-tools` on `app.example.com` becomes `com.example.app/project-tools`), and a missing
+`description` reads `MCP server for <host>`.
+
+Cards hold identity and the endpoint only, never tools, resources, or credentials, so listing a
+server does not open it: `authorize` still runs on every request. Both documents are public,
+send `Access-Control-Allow-Origin: *` and an `ETag`, and answer `If-None-Match` with `304`.
+The catalog follows the app `basePath`; cards live below the endpoint, which follows `api.basePath`.
+Turn discovery off with `agent: { aiCatalog: false }`. The
+[default read-only server](/docs/configuration#default-mcp-server) at `/mcp` is listed the same way
+while it serves; an app with neither serves none of it.
+
+### List an MCP server Farm does not serve
+
+An endpoint another runtime serves, such as an agent server mounted beside the app or a server on
+another host, joins the same catalog with `registerFarmMCPServer`. Call it when the server starts;
+it returns a function that removes the entry:
+
+```ts title="src/lib/agent-mcp.ts"
+import { registerFarmMCPServer } from "@farm.js/core/api/runtime";
+
+export const unregister = registerFarmMCPServer({
+  name: "com.example.app/agent",
+  version: "1.0.0",
+  title: "Support agent",
+  description: "Answer support questions with the help center.",
+  path: "/agent/mcp",
+});
+```
+
+`path` is the endpoint's path in this app, below the app `basePath`. It is taken literally, never
+moved by `api.basePath`, and Farm serves its card at `<path>/server-card`. Use `url` instead for an
+endpoint on another origin; the catalog then points at `<url>/server-card`, which that host serves.
+Pass `protocolVersions` to list the versions the endpoint accepts in its card. Registering the same
+endpoint again replaces the entry. Registered servers appear in the AI catalog, `ard.json`, and
+`llms.txt`, but not in the `/.well-known/farmjs.json` manifest, which lists the tools Farm serves itself.
+The [docs engine](/docs/docs-engine)'s MCP endpoint is listed this way when its adapter registers it.
 
 ## Observe tool executions
 
@@ -471,9 +694,16 @@ bounded post-response work where the host requires it.
 | `authorize`            | required      | Receive the tool catalog and server identity; return a subject and optional allowed tool names. |
 | `tools`                | route opt-ins | Compose endpoint references, server functions, and standalone `defineTool()` definitions.       |
 | `allowUnauthenticated` | `false`       | Deliberately permit a public MCP endpoint instead of `authorize`.                               |
+| `oauth`                | none          | Advertise OAuth authorization servers and scopes through RFC 9728 metadata and the 401.         |
+| `maxBatchSize`         | `25`          | Most JSON-RPC messages in one batched POST; larger batches get `400` before `authorize` runs.   |
+| `maxToolInputElements` | `10000`       | Most array elements and object members in one call's arguments; more is refused before it runs. |
+| `resources`            | none          | Read-only context from `defineResource()`, at a fixed URI or a URI template.                    |
+| `prompts`              | none          | Reusable prompt templates from `definePrompt()`.                                                |
 | `path`                 | `/api/mcp`    | Canonical Farm API path for the Streamable HTTP endpoint.                                       |
 | `name`                 | `farm-api`    | MCP server name returned during initialization.                                                 |
 | `version`              | `1.0.0`       | Application server version returned during initialization.                                      |
+| `title`                | none          | Display name returned during initialization and in the server card.                             |
+| `description`          | none          | What the server does, returned during initialization and in the server card (100 characters).   |
 
 Tool metadata supports `name`, `title`, `description`, `readOnlyHint`, `destructiveHint`,
 `idempotentHint`, and `openWorldHint`. Annotations describe intent to the client; they do not enforce
@@ -501,3 +731,29 @@ Normal applications do not need this manual form.
 
 The runnable [`examples/api-mcp`](https://github.com/farming-labs/farm.js/tree/main/examples/api-mcp)
 shows two endpoint-backed tools and a standalone search tool sharing one authorization policy.
+
+## React Server Components apps
+
+Apps built with `defineConfig` from `@farm.js/plugin/rsc` take the same `mcp` option:
+
+```ts title="vite.config.ts"
+import { defineConfig } from "@farm.js/plugin/rsc";
+import { productQuery } from "./src/actions/server-query.ts";
+import { GET as listUsers } from "./src/api/users/route.ts";
+
+export default defineConfig({
+  mcp: {
+    authorize: authorizeAgent,
+    tools: [{ endpoint: listUsers, name: "list_users" }, productQuery],
+  },
+});
+```
+
+Declare `mcp` directly in the config object. The RSC server reads that property, and only the
+imports and declarations it uses, from the config file, so your Vite plugins never load at runtime.
+The config file then has to be statically readable: an `mcp` that comes from a spread, or
+top-level code other than imports and declarations, fails at startup with the reason. `oauth` is
+not supported in RSC apps yet. Validate tokens in `authorize` instead.
+
+[`examples/rsc-demo`](https://github.com/farming-labs/farm.js/tree/main/examples/rsc-demo) serves
+an endpoint tool and a server query this way.

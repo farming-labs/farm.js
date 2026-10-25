@@ -383,7 +383,9 @@ export default defineConfig({
 
 The locale cookie `path` must be a root-relative pathname; cookie attributes, URL queries and
 hashes, dot segments, backslashes, and encoded path separators are rejected. `sameSite` accepts
-`"lax"`, `"strict"`, or `"none"`.
+`"lax"`, `"strict"`, or `"none"`. `secure` defaults to `true` in production; with
+`sameSite: "none"` it defaults to `true` in every mode and cannot be `false`, because browsers
+discard a `SameSite=None` cookie without `Secure`.
 
 For a custom catalog layout, include `{locale}` in the path:
 

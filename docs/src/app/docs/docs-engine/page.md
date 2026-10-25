@@ -15,6 +15,16 @@ agent-discovery routes without filesystem access.
 
 ## Enable docs
 
+The docs runtime renders with `@farming-labs/docs`, which the app installs:
+
+```bash
+pnpm add @farming-labs/docs
+```
+
+When docs are enabled (in `farm.config.ts`, or by a discovered `docs.config.*` or `docs.json`) and
+the package is missing, `farm dev` and `farm build` stop with that install command. The React
+starters already declare it.
+
 **farm.config.ts**
 
 ```ts
@@ -88,6 +98,12 @@ automatically. Route wrappers are only needed when you want to override the defa
 - /api/docs?format=llms
 - /api/docs?format=sitemap-xml
 - /api/docs/agent/spec
+
+`/api/docs?format=config` is public, so it returns only the documented docs config fields with
+credentials replaced by `"[redacted]"`: values under `apiKey`, `token`, `secret`, `password`,
+`authorization`, or `credential` keys, and every `headers` value. The server keeps the real values
+for search, Ask AI, and Docs Cloud. `/api/docs?format=diagnostics` reports filesystem paths, so
+only `farm dev` serves it; production answers 404.
 
 ## Configure the docs experience
 

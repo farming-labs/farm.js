@@ -11,6 +11,14 @@ export type {
   RouteMethod,
 } from "./api/route";
 export type { RouteSchema } from "./api/route-schema";
+// Here as well as on the main entry: a plugin that reads Farm's devtools settings must not
+// import the main entry, which loads React and breaks Preact, Solid, Vue, and Svelte apps
+// that don't install it.
+export {
+  resolveFarmDevtoolsConfig,
+  type ResolvedFarmDevtoolsConfig,
+  type FarmDevtoolsUserConfig,
+} from "./devtools-config";
 export type { EndpointMCPMetadata, EndpointMCPOptions } from "./api/endpoint";
 // Reachable from every route a plugin declares (each endpoint carries its
 // OpenAPI metadata), so it must be nameable from this entry the same way
@@ -1574,6 +1582,31 @@ export class PluginManager {
 
     const plugins = this.getSortedPlugins().filter(include);
 
+    if (hookName === "onError") {
+      // Reporters must not suppress each other or let cleanup race a pending
+      // report. Keep invocation order/concurrency, then surface the first
+      // observed reporter failure only after every started report has settled.
+      const failures: unknown[] = [];
+      const reports: Promise<void>[] = [];
+      for (const plugin of plugins) {
+        for (const hook of this.getPluginHooks(plugin, hookName)) {
+          reports.push(
+            (async () => {
+              try {
+                const hookContext = this.getHookContext(plugin, hookName, args);
+                await hook.apply(plugin, [...args, hookContext]);
+              } catch (error) {
+                failures.push(error);
+              }
+            })(),
+          );
+        }
+      }
+      await Promise.all(reports);
+      if (failures.length > 0) throw failures[0];
+      return false;
+    }
+
     // Run selected hooks sequentially for deterministic execution and short-circuiting.
     const sequentialHooks = new Set<keyof FarmPlugin>([
       "ready",
@@ -1623,11 +1656,18 @@ export class PluginManager {
     } else {
       // Run other hooks in parallel
       const promises: Promise<any>[] = [];
-      for (const plugin of plugins) {
-        for (const hook of this.getPluginHooks(plugin, hookName)) {
-          const hookContext = this.getHookContext(plugin, hookName, args);
-          promises.push((hook as any).apply(plugin, [...args, hookContext]));
+      try {
+        for (const plugin of plugins) {
+          for (const hook of this.getPluginHooks(plugin, hookName)) {
+            const hookContext = this.getHookContext(plugin, hookName, args);
+            promises.push((hook as any).apply(plugin, [...args, hookContext]));
+          }
         }
+      } catch (error) {
+        // A synchronous failure skips the normal Promise.all below. Observe
+        // already-started work without waiting for it or invoking later hooks.
+        void Promise.all(promises).catch(() => {});
+        throw error;
       }
       await Promise.all(promises);
     }

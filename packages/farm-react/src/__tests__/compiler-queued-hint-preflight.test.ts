@@ -76,9 +76,13 @@ function root(expression = "rows.map(row => row)"): babel.types.JSXElement {
   return statement.expression;
 }
 
-function unchanged(result: Result, input: babel.types.JSXElement, before: string) {
-  expect(result.root).not.toBe(input);
-  expect(result.root).toEqual(t.cloneNode(input, true));
+function unchanged(result: Result, input: babel.types.JSXElement, before: string, enabled = true) {
+  if (enabled) {
+    expect(result.root).not.toBe(input);
+    expect(result.root).toEqual(t.cloneNode(input, true));
+  } else {
+    expect(result.root).toBe(input);
+  }
   const counters = Object.entries(result).filter(([key]) => /count$/i.test(key));
   expect(counters.length).toBeGreaterThan(0);
   expect(counters.every(([, value]) => value === 0)).toBe(true);
@@ -97,7 +101,7 @@ describe.each(names)("queued hint preflight: %s", (name) => {
   it("preserves the disabled pass without inspecting possible helper calls", () => {
     const analysis = probe(name);
     const input = root(`${analysis.helpers[0].name}(current)`);
-    unchanged(analysis.run(input, false), input, JSON.stringify(input));
+    unchanged(analysis.run(input, false), input, JSON.stringify(input), false);
     expect(analysis.traversals()).toBe(0);
   });
 

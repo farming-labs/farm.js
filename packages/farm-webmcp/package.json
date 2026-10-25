@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/webmcp",
-  "version": "0.1.0-beta.20",
+  "version": "0.1.0-beta.33",
   "description": "Explicit, typed WebMCP tools for Farm.js applications",
   "keywords": [
     "agents",
@@ -36,6 +36,7 @@
   },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "build:runtime": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc --noCheck",
     "dev": "tsc --watch",
     "type-check": "tsc --noEmit",
     "test": "vitest run"

@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Check, Copy, LoaderCircle, RefreshCw, Terminal } from "lucide-react";
+import { Bot, Check, Copy, LoaderCircle, RefreshCw, Terminal } from "../icons";
 import type { LucideIcon } from "lucide-react";
 import type { KeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -35,7 +35,7 @@ const commands: readonly CommandOption[] = [
   {
     label: "Agent",
     command: [
-      "Farm.js is the framework for modern product-integrated apps. Build this as a production-ready Farm.js product app.",
+      "Farm.js is the full-stack framework for the web and agents. Build this as a production-ready Farm.js app.",
       "Before editing:",
       "1. Read the Farm.js site skill at https://farmjs.dev/skill.md and the agent working rules at https://farmjs.dev/AGENTS.md.",
       "2. Use https://farmjs.dev/llms.txt as the compact framework map. Start with https://farmjs.dev/docs/getting-started.md, https://farmjs.dev/docs/project-structure.md, and https://farmjs.dev/docs/reference.md, then fetch the smallest task-specific pages linked from the map.",
@@ -167,7 +167,7 @@ export function InstallCommand() {
               key={item.label}
               aria-controls="install-command-panel"
               aria-selected={activeIndex === index}
-              className="group relative flex h-7 min-w-0 items-center justify-center gap-1 border-r border-white/10 px-1 font-mono text-[8px] font-normal uppercase tracking-normal text-white/42 transition-[background-color,color] duration-150 last:border-r-0 hover:bg-white/[0.055] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white aria-selected:bg-white aria-selected:text-black sm:h-8 sm:text-[9px]"
+              className="farm-install-tab group font-mono"
               id={`install-tab-${item.label.toLowerCase()}`}
               onClick={() => selectCommand(index)}
               onKeyDown={(event) => handleTabKeyDown(event, index)}

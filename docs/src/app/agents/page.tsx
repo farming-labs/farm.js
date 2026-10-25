@@ -37,7 +37,7 @@ export const metadata = {
   openGraph: { title: "Agent infrastructure — Farm.js", url: "/agents" },
   title: "Agent infrastructure — Farm.js",
   description:
-    "Farm.js apps serve Markdown versions of every page by default, and config turns on llms.txt, JSON-LD, MCP tools, WebMCP, and agent runtimes. Plus upcoming infrastructure for deploying agents and MCP servers.",
+    "Farm.js apps serve Markdown versions of every page, llms.txt and JSON-LD by default, and config turns on MCP tools, WebMCP, and agent runtimes. Plus upcoming infrastructure for deploying agents and MCP servers.",
 } satisfies Metadata;
 
 // What ships in v0.1.0, as opposed to the upcoming infrastructure further down the page.
@@ -62,7 +62,7 @@ const availableNow = [
     title: "Every page in Markdown.",
     code: 'curl -H "Accept: text/markdown" /pricing',
     description:
-      "Pages answer agents with a Markdown mirror, by .md suffix or Accept header. llms.txt, JSON-LD, and OpenAPI stay off until you turn them on in config.",
+      "Pages answer agents with a Markdown mirror, by .md suffix or Accept header, listed in llms.txt and sitemap.xml and described with JSON-LD by default. OpenAPI stays off until you turn it on in config.",
     href: "/docs/markdown",
     link: "Markdown mirrors",
   },
@@ -210,8 +210,8 @@ export default function AgentsPage() {
                   </h2>
                 </div>
                 <p>
-                  Pages answer agents in Markdown by default. An agent block in farm.config.ts adds
-                  llms.txt and JSON-LD, and an mcp block exposes the tools you choose. Discovery
+                  Pages answer agents in Markdown by default, with llms.txt, JSON-LD and Open Graph
+                  built from your metadata. An mcp block exposes the tools you choose. Discovery
                   never grants permission; your app still authorizes every action.
                 </p>
               </div>

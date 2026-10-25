@@ -98,6 +98,10 @@ export interface StripeCheckoutResult {
 
 export interface StripeBillingUpgradeInput {
   quantity: number;
+  /**
+   * @deprecated Ignored. The server applies `billing.seats.prorationBehavior`, so a caller
+   * cannot choose what it is charged.
+   */
   prorationBehavior?: StripeBillingUpgradeProrationBehavior;
 }
 

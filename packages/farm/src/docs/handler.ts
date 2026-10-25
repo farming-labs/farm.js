@@ -1,25 +1,11 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
-import {
-  buildDocsAgentDiscoverySpec,
-  buildDocsSitemapManifest,
-  isDocsAgentDiscoveryRequest,
-  isDocsAgentsRequest,
-  isDocsSkillRequest,
-  renderDocsAgentsDocument,
-  renderDocsLlmsTxt,
-  renderDocsMarkdownDocument,
-  renderDocsRobotsTxt,
-  renderDocsSitemapMarkdown,
-  renderDocsSitemapXml,
-  renderDocsSkillDocument,
-  resolveDocsLlmsTxtFormat,
-  resolveDocsRobotsRequest,
-  resolveDocsSitemapRequest,
-  type DocsLlmsTxtPageInput,
-  type DocsMarkdownPage,
-  type DocsSitemapPageInput,
+import type {
+  DocsLlmsTxtPageInput,
+  DocsMarkdownPage,
+  DocsSitemapPageInput,
 } from "@farming-labs/docs";
+import { docsEngine, loadFarmDocsEngine } from "./engine";
 import { marked, Renderer } from "marked";
 import { highlight } from "sugar-high";
 import { FARM_NAVIGATION_HEAD_SELECTOR } from "../client/document-head";
@@ -700,7 +686,7 @@ function createFarmDocsPublicResponse(
   let loadedPages: LoadedFarmDocsPage[] | undefined;
   const getPages = () => (loadedPages ??= getLoadedDocsPages(contentDir, docs));
   const sitemapManifest = () =>
-    buildDocsSitemapManifest({
+    docsEngine().buildDocsSitemapManifest({
       pages: getPages().map(toDocsSitemapPage),
       entry: docs.entry,
       siteTitle: getDocsTitle(docs),
@@ -711,9 +697,9 @@ function createFarmDocsPublicResponse(
     "Cache-Control": "public, max-age=60",
   });
 
-  const llmsFormat = resolveDocsLlmsTxtFormat(url);
+  const llmsFormat = docsEngine().resolveDocsLlmsTxtFormat(url);
   if (llmsFormat) {
-    const generated = renderDocsLlmsTxt(
+    const generated = docsEngine().renderDocsLlmsTxt(
       getPages().map(toDocsLlmsPage),
       getDocsLlmsOptions(docs, request),
     );
@@ -723,10 +709,10 @@ function createFarmDocsPublicResponse(
     });
   }
 
-  const sitemapFormat = resolveDocsSitemapRequest(url, docs.config.sitemap ?? true);
+  const sitemapFormat = docsEngine().resolveDocsSitemapRequest(url, docs.config.sitemap ?? true);
   if (sitemapFormat === "xml") {
     return new Response(
-      renderDocsSitemapXml(sitemapManifest(), {
+      docsEngine().renderDocsSitemapXml(sitemapManifest(), {
         baseUrl: url.origin,
         includeLastmod: true,
       }),
@@ -738,7 +724,7 @@ function createFarmDocsPublicResponse(
   }
   if (sitemapFormat === "markdown") {
     return new Response(
-      renderDocsSitemapMarkdown(sitemapManifest(), {
+      docsEngine().renderDocsSitemapMarkdown(sitemapManifest(), {
         includeDescriptions: true,
       }),
       {
@@ -748,9 +734,9 @@ function createFarmDocsPublicResponse(
     );
   }
 
-  if (resolveDocsRobotsRequest(url, docs.config.robots ?? true)) {
+  if (docsEngine().resolveDocsRobotsRequest(url, docs.config.robots ?? true)) {
     return new Response(
-      renderDocsRobotsTxt({
+      docsEngine().renderDocsRobotsTxt({
         entry: docs.entry,
         sitemap: docs.config.sitemap ?? true,
         robots: docs.config.robots ?? true,
@@ -763,8 +749,8 @@ function createFarmDocsPublicResponse(
     );
   }
 
-  if (isDocsAgentDiscoveryRequest(url)) {
-    const spec = buildDocsAgentDiscoverySpec(getDocsDiscoveryOptions(docs, request));
+  if (docsEngine().isDocsAgentDiscoveryRequest(url)) {
+    const spec = docsEngine().buildDocsAgentDiscoverySpec(getDocsDiscoveryOptions(docs, request));
     const title = getDocsTitle(docs);
     return new Response(
       JSON.stringify({
@@ -784,9 +770,9 @@ function createFarmDocsPublicResponse(
     );
   }
 
-  if (isDocsAgentsRequest(url)) {
+  if (docsEngine().isDocsAgentsRequest(url)) {
     return new Response(
-      `${renderDocsAgentsDocument(getDocsDiscoveryOptions(docs, request)).trim()}\n`,
+      `${docsEngine().renderDocsAgentsDocument(getDocsDiscoveryOptions(docs, request)).trim()}\n`,
       {
         status: 200,
         headers: textHeaders("text/markdown; charset=utf-8"),
@@ -794,9 +780,9 @@ function createFarmDocsPublicResponse(
     );
   }
 
-  if (isDocsSkillRequest(url)) {
+  if (docsEngine().isDocsSkillRequest(url)) {
     return new Response(
-      `${renderDocsSkillDocument(getDocsDiscoveryOptions(docs, request)).trim()}\n`,
+      `${docsEngine().renderDocsSkillDocument(getDocsDiscoveryOptions(docs, request)).trim()}\n`,
       {
         status: 200,
         headers: textHeaders("text/markdown; charset=utf-8"),
@@ -1779,6 +1765,7 @@ export function createFarmDocsHandler(
 
   return async function handleFarmDocsRequest(request: Request): Promise<Response | null> {
     if (!docs?.enabled || (request.method !== "GET" && request.method !== "HEAD")) return null;
+    await loadFarmDocsEngine();
 
     const contentDir = resolveFarmDocsContentDir(docs, options);
     const requestUrl = new URL(request.url);
@@ -1830,7 +1817,7 @@ export function createFarmDocsHandler(
       return omitFarmDocsHeadBody(
         request,
         new Response(
-          renderDocsMarkdownDocument(toFarmDocsMarkdownPage(page), {
+          docsEngine().renderDocsMarkdownDocument(toFarmDocsMarkdownPage(page), {
             origin,
             llms: docs.config.llmsTxt ?? true,
             sitemap: docs.config.sitemap,

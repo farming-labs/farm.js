@@ -1,7 +1,9 @@
 import {
   defineIntegration,
   defineIntegrationAPI,
+  FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY,
   integrationRoute,
+  type FarmIntegrationHandlerContext,
   type FarmIntegrationLogger,
 } from "@farm.js/core";
 import { api } from "@farm.js/core/client";
@@ -335,10 +337,39 @@ interface ResolvedInngestJobsConfig {
 
 type ResolvedJobsConfig = ResolvedTriggerJobsConfig | ResolvedInngestJobsConfig;
 
+export type JobsRouteOperation =
+  | "tasks"
+  | "trigger"
+  | "batchTrigger"
+  | "schedule"
+  | "status"
+  | "cancel";
+
+export interface JobsAuthorizeContext {
+  /** The task key, or `null` for the task list. */
+  task: string | null;
+  operation: JobsRouteOperation;
+}
+
+/**
+ * Decides whether an HTTP request may use a job route. Return `true` to allow
+ * it, `false` to answer 403, or a Response to answer with. The request is a
+ * clone, so its body can be read.
+ */
+export type JobsAuthorize = (
+  request: Request,
+  context: JobsAuthorizeContext,
+) => boolean | Response | Promise<boolean | Response>;
+
 export interface JobsIntegrationInputBase<TTasks extends JobsTaskMap> {
   basePath?: string;
   tasks: TTasks;
   log?: FarmIntegrationLogger;
+  /**
+   * Job routes answer only server calls (`api`) by default. Set this to let
+   * HTTP requests, such as `apiClient` in the browser, reach them.
+   */
+  authorize?: JobsAuthorize;
 }
 
 type JobsIntegrationRuntimeInput<TTasks extends JobsTaskMap> = JobsIntegrationInputBase<TTasks> & {
@@ -1036,6 +1067,30 @@ function createTriggerRuntime(config: TriggerJobsRuntimeConfig): JobsRuntimeAdap
     };
   }
 
+  // The secret key reaches every run in the project, so a task's status and
+  // cancel routes only act on that task's own runs.
+  async function retrieveRun(
+    resolved: ReturnType<typeof resolve>,
+    task: JobsNormalizedTask,
+    handleId: string,
+  ) {
+    const data = await requestJSON(
+      `${resolved.apiBaseUrl}/api/v3/runs/${encodeURIComponent(handleId)}`,
+      {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${resolved.apiKey}`,
+          accept: "application/json",
+        },
+      },
+    );
+    const taskIdentifier =
+      typeof data === "object" && data ? (data as Record<string, unknown>).taskIdentifier : null;
+    if (typeof taskIdentifier === "string" && taskIdentifier !== task.remoteId) {
+      throw new JobsRuntimeError(`Run ${handleId} was not found for task "${task.key}".`, 404);
+    }
+    return data;
+  }
   return {
     kind: "trigger",
     capabilities: TRIGGER_CAPABILITIES,
@@ -1171,17 +1226,7 @@ function createTriggerRuntime(config: TriggerJobsRuntimeConfig): JobsRuntimeAdap
         );
       }
 
-      const data = await requestJSON(
-        `${resolved.apiBaseUrl}/api/v3/runs/${encodeURIComponent(handleId)}`,
-        {
-          method: "GET",
-          headers: {
-            authorization: `Bearer ${resolved.apiKey}`,
-            accept: "application/json",
-          },
-        },
-      );
-
+      const data = await retrieveRun(resolved, task, handleId);
       const run = typeof data === "object" && data ? (data as Record<string, unknown>) : {};
       return {
         handleId,
@@ -1208,6 +1253,7 @@ function createTriggerRuntime(config: TriggerJobsRuntimeConfig): JobsRuntimeAdap
         );
       }
 
+      await retrieveRun(resolved, task, handleId);
       await requestJSON(
         `${resolved.apiBaseUrl}/api/v2/runs/${encodeURIComponent(handleId)}/cancel`,
         {
@@ -1753,6 +1799,33 @@ function normalizeCancelInput(body: unknown) {
   return (body === undefined ? {} : readJsonBody(body)) as unknown as JobsCancelBody;
 }
 
+async function authorizeJobsRequest(
+  authorize: JobsAuthorize | undefined,
+  request: Request,
+  context: FarmIntegrationHandlerContext,
+  authorizeContext: JobsAuthorizeContext,
+): Promise<Response | undefined> {
+  // Server code calling `api` dispatches in-process and is already trusted.
+  if (context.req.get(FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY) === true) {
+    return undefined;
+  }
+  // A job route starts provider runs with the app's credentials, so an HTTP
+  // caller needs the app's say-so.
+  if (!authorize) {
+    return Response.json(
+      {
+        error:
+          "Job routes answer only server calls. Pass jobs({ authorize }) to allow HTTP requests.",
+      },
+      { status: 403 },
+    );
+  }
+  const decision = await authorize(request.clone(), authorizeContext);
+  if (decision instanceof Response) return decision;
+  if (decision === true) return undefined;
+  return Response.json({ error: "Forbidden" }, { status: 403 });
+}
+
 export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInput<TTasks>) {
   const basePath = normalizeBasePath(input.basePath);
   const tasksPath = joinPath(basePath, "tasks");
@@ -1774,7 +1847,12 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
     routes: [
       integrationRoute.get<typeof tasksPath, JobsTaskMetadata[]>(tasksPath, {
         responseFormat: "json",
-        handler() {
+        async handler(request, context) {
+          const blocked = await authorizeJobsRequest(input.authorize, request, context, {
+            task: null,
+            operation: "tasks",
+          });
+          if (blocked) return blocked;
           return Response.json(normalizedTasks.map((task) => task.metadata));
         },
       }),
@@ -1785,7 +1863,12 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
           JobsTriggerResult
         >(task.metadata.paths.trigger, {
           responseFormat: "json",
-          async handler(request) {
+          async handler(request, context) {
+            const blocked = await authorizeJobsRequest(input.authorize, request, context, {
+              task: task.key,
+              operation: "trigger",
+            });
+            if (blocked) return blocked;
             try {
               const parsed = await parseRequestBody(request);
               const body = normalizeTriggerInput(
@@ -1811,7 +1894,12 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
           JobsBatchTriggerResult
         >(task.metadata.paths.batchTrigger, {
           responseFormat: "json",
-          async handler(request) {
+          async handler(request, context) {
+            const blocked = await authorizeJobsRequest(input.authorize, request, context, {
+              task: task.key,
+              operation: "batchTrigger",
+            });
+            if (blocked) return blocked;
             try {
               const body = normalizeBatchTriggerInput<TTasks[typeof task.key & keyof TTasks]>(
                 await parseRequestBody(request),
@@ -1858,7 +1946,12 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
           JobsScheduleResult
         >(task.metadata.paths.schedule, {
           responseFormat: "json",
-          async handler(request) {
+          async handler(request, context) {
+            const blocked = await authorizeJobsRequest(input.authorize, request, context, {
+              task: task.key,
+              operation: "schedule",
+            });
+            if (blocked) return blocked;
             try {
               const parsed = await parseRequestBody(request);
               const body = normalizeScheduleInput(
@@ -1885,7 +1978,12 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
           JobsStatusQuery
         >(task.metadata.paths.status, {
           responseFormat: "json",
-          async handler(request) {
+          async handler(request, context) {
+            const blocked = await authorizeJobsRequest(input.authorize, request, context, {
+              task: task.key,
+              operation: "status",
+            });
+            if (blocked) return blocked;
             try {
               const handleId = new URL(request.url).searchParams.get("handleId") || "";
               if (!handleId) {
@@ -1920,7 +2018,12 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
           task.metadata.paths.cancel,
           {
             responseFormat: "json",
-            async handler(request) {
+            async handler(request, context) {
+              const blocked = await authorizeJobsRequest(input.authorize, request, context, {
+                task: task.key,
+                operation: "cancel",
+              });
+              if (blocked) return blocked;
               try {
                 const body = normalizeCancelInput(await parseRequestBody(request));
                 const handleId = typeof body.handleId === "string" ? body.handleId : "";

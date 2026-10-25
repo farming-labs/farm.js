@@ -31,15 +31,21 @@ import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import { stripFarmBasePath } from "../base-path";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { createCliColors } from "../cli-colors";
-import { appendMiddlewareRoutePath } from "./path";
+import {
+  appendMiddlewareDirectory,
+  appendMiddlewareRoutePath,
+  compareMiddlewareRouteLocations,
+  type MiddlewareRouteLocation,
+} from "./path";
 import type { FarmServerConfig, ResolvedFarmServerConfig } from "../server-http";
 import { resolveFarmRequestURL } from "../server/request";
 import {
   compileMiddlewareConfig,
-  matchesMiddlewareConfig,
   compileMiddlewareRoute,
-  matchesMiddlewareRoute,
+  matchesMiddlewareConfigAt,
+  matchesMiddlewareRouteAt,
 } from "./matcher";
+import { createFarmAPIMiddlewarePathnames } from "../api/server-path";
 
 export interface DiscoveredMiddleware {
   path: string;
@@ -64,6 +70,7 @@ export class MiddlewareManager {
   private appDirs: string[];
   private i18n?: ResolvedFarmI18nConfig;
   private server?: FarmServerConfig | ResolvedFarmServerConfig;
+  private toMiddlewarePathnames: (pathname: string) => readonly string[];
 
   constructor(
     appDir: string | readonly string[],
@@ -71,11 +78,14 @@ export class MiddlewareManager {
     config?: FarmMiddlewareConfig,
     i18n?: ResolvedFarmI18nConfig,
     server?: FarmServerConfig | ResolvedFarmServerConfig,
+    /** The app's public API path (`api.basePath`); `/api` middleware guards it too. */
+    apiBasePath?: string,
   ) {
     this.appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
     this.viteServer = viteServer;
     this.i18n = i18n;
     this.server = server;
+    this.toMiddlewarePathnames = createFarmAPIMiddlewarePathnames(apiBasePath);
     this.configure(config);
   }
 
@@ -111,23 +121,27 @@ export class MiddlewareManager {
    * Discover all middleware.ts files
    */
   async discover(): Promise<void> {
-    const middlewareByPath = new Map<string, DiscoveredMiddleware>();
+    // Keyed by folder, not URL path: route groups share a URL path, and every
+    // group's middleware has to run. A later layer still overrides the same folder.
+    const middlewareByDirectory = new Map<
+      string,
+      { location: MiddlewareRouteLocation; middleware: DiscoveredMiddleware }
+    >();
     for (const appDir of this.appDirs) {
-      const discovered: DiscoveredMiddleware[] = [];
-      await this.discoverInDirectory(appDir, "/", discovered);
-      for (const middleware of discovered) {
-        compileMiddlewareRoute(middleware);
-        middlewareByPath.set(middleware.path, middleware);
+      const discovered: Array<{
+        location: MiddlewareRouteLocation;
+        middleware: DiscoveredMiddleware;
+      }> = [];
+      await this.discoverInDirectory(appDir, "/", "", discovered);
+      for (const entry of discovered) {
+        compileMiddlewareRoute(entry.middleware);
+        middlewareByDirectory.set(entry.location.directory, entry);
       }
     }
-    this.middleware = Array.from(middlewareByPath.values());
-
-    // Sort by path depth (root first, then nested)
-    this.middleware.sort((a, b) => {
-      const depthA = a.path.split("/").filter(Boolean).length;
-      const depthB = b.path.split("/").filter(Boolean).length;
-      return depthA - depthB;
-    });
+    // Root first, then nested; the same order production discovery emits.
+    this.middleware = Array.from(middlewareByDirectory.values())
+      .sort((left, right) => compareMiddlewareRouteLocations(left.location, right.location))
+      .map((entry) => entry.middleware);
 
     if (process.env.FARM_VERBOSE && this.middleware.length > 0) {
       logger.success(`Discovered ${this.middleware.length} middleware files`);
@@ -143,7 +157,8 @@ export class MiddlewareManager {
   private async discoverInDirectory(
     dir: string,
     routePath: string,
-    discovered: DiscoveredMiddleware[],
+    directory: string,
+    discovered: Array<{ location: MiddlewareRouteLocation; middleware: DiscoveredMiddleware }>,
   ): Promise<void> {
     if (!fs.existsSync(dir)) {
       return;
@@ -154,17 +169,21 @@ export class MiddlewareManager {
     if (middlewareFile) {
       const middleware = await this.loadMiddleware(middlewareFile, routePath);
       if (middleware) {
-        discovered.push(middleware);
+        discovered.push({ location: { path: routePath, directory }, middleware });
       }
     }
 
     // Recursively check subdirectories
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
-      if (entry.isDirectory() && !entry.name.startsWith(".") && !entry.name.startsWith("_")) {
-        const subPath = path.join(dir, entry.name);
-        const subRoutePath = appendMiddlewareRoutePath(routePath, entry.name);
-        await this.discoverInDirectory(subPath, subRoutePath, discovered);
+      // `_private` folders still route their pages, so their middleware has to guard them.
+      if (entry.isDirectory() && !entry.name.startsWith(".")) {
+        await this.discoverInDirectory(
+          path.join(dir, entry.name),
+          appendMiddlewareRoutePath(routePath, entry.name),
+          appendMiddlewareDirectory(directory, entry.name),
+          discovered,
+        );
       }
     }
   }
@@ -224,9 +243,12 @@ export class MiddlewareManager {
     const pathname = url.pathname;
     // Match the app path page routing sees: without basePath (the locale step
     // strips it too), as the production runner does.
-    const routePathname = this.i18n?.enabled
-      ? stripFarmLocaleFromPathname(pathname, this.i18n)
-      : stripFarmBasePath(pathname, this.i18n?.basePath ?? "/");
+    const toRoutePathname = (value: string) =>
+      this.i18n?.enabled
+        ? stripFarmLocaleFromPathname(value, this.i18n)
+        : stripFarmBasePath(value, this.i18n?.basePath ?? "/");
+    const routePathname = toRoutePathname(pathname);
+    const toMiddlewarePathnames = this.toMiddlewarePathnames;
     const method = req.method || "GET";
     const startTime = Date.now();
 
@@ -250,7 +272,10 @@ export class MiddlewareManager {
     }> = [
       ...this.configMiddleware.map((mw) => ({ mw, routeMatch: { matched: true } })),
       ...this.middleware
-        .map((mw) => ({ mw, routeMatch: matchesMiddlewareRoute(routePathname, mw) }))
+        .map((mw) => ({
+          mw,
+          routeMatch: matchesMiddlewareRouteAt(toMiddlewarePathnames(routePathname), mw),
+        }))
         .filter((entry) => entry.routeMatch.matched),
     ];
 
@@ -268,16 +293,51 @@ export class MiddlewareManager {
     ].join(" ");
     console.log(log);
 
+    // A ctx.rewrite() target is guarded as a direct request for it is, the
+    // same as the production runner: once a pass ends on a rewritten path, the
+    // middleware matching that path which has not run yet gets a pass of its
+    // own. Each one runs at most once, so repeated rewrites end.
+    const ran = new Set<DiscoveredMiddleware>();
+    const allMiddleware = [...this.configMiddleware, ...this.middleware];
+    const globalConfig = this.globalConfig;
+    const trustProxy = this.server?.trustProxy;
+    function* applicableMiddleware() {
+      let passPathname = routePathname;
+      let pass = applicable;
+      for (;;) {
+        for (const entry of pass) yield { ...entry, pathname: passPathname };
+        const rewrittenPathname = toRoutePathname(
+          resolveFarmRequestURL(req, { trustProxy }).pathname,
+        );
+        if (rewrittenPathname === passPathname) return;
+        passPathname = rewrittenPathname;
+        const passPathnames = toMiddlewarePathnames(passPathname);
+        if (globalConfig && !matchesMiddlewareConfigAt(passPathnames, globalConfig, ctx).matched) {
+          return;
+        }
+        pass = allMiddleware
+          .filter((mw) => !ran.has(mw))
+          .map((mw) => ({
+            mw,
+            routeMatch:
+              mw.source === "config"
+                ? { matched: true }
+                : matchesMiddlewareRouteAt(passPathnames, mw),
+          }))
+          .filter((entry) => entry.routeMatch.matched);
+      }
+    }
+
     // Execute middleware in cascade order
-    for (const entry of applicable) {
+    for (const { mw, routeMatch, pathname: passPathname } of applicableMiddleware()) {
       // Check matcher configuration
-      const { mw, routeMatch } = entry;
       const configMatch = mw.config
-        ? this.matchesConfig(routePathname, mw.config, ctx)
+        ? this.matchesConfig(passPathname, mw.config, ctx)
         : { matched: true };
       if (!configMatch.matched) {
         continue;
       }
+      ran.add(mw);
       if (routeMatch.params) {
         ctx.params = { ...ctx.params, ...routeMatch.params };
       }
@@ -397,7 +457,7 @@ export class MiddlewareManager {
     config: MiddlewareConfig,
     ctx: MiddlewareContext,
   ): { matched: boolean; params?: Record<string, string> } {
-    return matchesMiddlewareConfig(pathname, config, ctx);
+    return matchesMiddlewareConfigAt(this.toMiddlewarePathnames(pathname), config, ctx);
   }
 
   /**

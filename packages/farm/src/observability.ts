@@ -1,3 +1,4 @@
+import type { FarmAgentIdentity } from "./agent-identity";
 import {
   _runWithFarmRequestSpan,
   configureFarmTracing,
@@ -212,6 +213,23 @@ export type FarmMCPEvent = FarmEventBase & {
   durationMs: number;
 };
 
+/**
+ * An agent surface answered a request: a Markdown mirror or `page.md`, llms.txt,
+ * llms-full.txt, the API catalog, the AI catalog (`ai-catalog.json` or `ard.json`),
+ * or an MCP server card. `agent` is what the User-Agent declares,
+ * not a verified identity.
+ */
+export type FarmAgentEvent = FarmEventBase & {
+  type: "agent.read";
+  surface: "markdown" | "llms" | "llms-full" | "api-catalog" | "ai-catalog" | "mcp-server-card";
+  /** The path served, such as `/pricing.md`; never the query string. */
+  route: string;
+  /** For Markdown, the partial view asked for. */
+  view?: "outline" | "section" | "parts" | "actions";
+  status: number;
+  agent: FarmAgentIdentity;
+};
+
 export type FarmMiddlewareEvent =
   | (FarmEventBase & { type: "middleware.start"; route?: string; name?: string })
   | (FarmEventBase & {
@@ -280,6 +298,7 @@ export type FarmEvent =
   | FarmAPIEvent
   | FarmIntegrationEvent
   | FarmMCPEvent
+  | FarmAgentEvent
   | FarmMiddlewareEvent
   | FarmStorageEvent
   | FarmBuildEvent

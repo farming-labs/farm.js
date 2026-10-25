@@ -1,3 +1,4 @@
+import { _withFarmResponseHeaders } from "../owned-response";
 import type {
   CookieJar,
   CookieOptions,
@@ -27,9 +28,11 @@ import {
 import {
   compileMiddlewareConfig,
   compileMiddlewareRoute,
-  matchesMiddlewareRoute,
   matchesMiddlewareConfig as matchesPreparedMiddlewareConfig,
+  matchesMiddlewareConfigAt,
+  matchesMiddlewareRouteAt,
 } from "./matcher";
+import { createFarmAPIMiddlewarePathnames } from "../api/server-path";
 
 export interface ProductionMiddlewareModuleEntry {
   path: string;
@@ -42,6 +45,13 @@ export interface ProductionMiddlewareRunnerOptions {
   modules?: ProductionMiddlewareModuleEntry[];
   i18n?: ResolvedFarmI18nConfig;
   server?: Pick<ResolvedFarmServerConfig, "trustProxy">;
+  /** The app's public API path (`api.basePath`); `/api` middleware guards it too. */
+  apiBasePath?: string;
+  /**
+   * @internal The app matches pages against the request path as received, without stripping
+   * basePath or locale (the RSC entry), so middleware matches that path too.
+   */
+  rawPathRouting?: boolean;
 }
 
 export interface ProductionMiddlewareRequestOptions {
@@ -638,6 +648,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
   const entries = [...configMiddleware.entries, ...fileMiddleware];
   const globalConfig = configMiddleware.globalConfig;
   if (globalConfig) compileMiddlewareConfig(globalConfig);
+  const toMiddlewarePathnames = createFarmAPIMiddlewarePathnames(options.apiBasePath);
 
   return async function runProductionMiddleware(
     request: Request,
@@ -657,13 +668,31 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     let currentRequest = contextState.getRequest();
     // Match the app path page routing sees: without basePath (the locale step
     // strips it too), so file and config middleware run beneath a basePath.
-    const initialPathname = options.i18n?.enabled
-      ? stripFarmLocaleFromPathname(ctx.pathname, options.i18n)
-      : stripFarmBasePath(ctx.pathname, options.i18n?.basePath ?? "/");
+    const toRoutePathname = (pathname: string) =>
+      options.i18n?.enabled
+        ? stripFarmLocaleFromPathname(pathname, options.i18n)
+        : stripFarmBasePath(pathname, options.i18n?.basePath ?? "/");
+    const initialRequestPathname = ctx.pathname;
+    const initialPathname = toRoutePathname(initialRequestPathname);
+    // Middleware guards every path a page can match: with raw-path routing that includes the
+    // request path itself, so a guard under app/<basePath>/ or app/[lang]/ runs for its page.
+    const matchPathnames = (pathname: string, requestPathname: string) =>
+      options.rawPathRouting && requestPathname !== pathname
+        ? [
+            ...new Set([
+              ...toMiddlewarePathnames(pathname),
+              ...toMiddlewarePathnames(requestPathname),
+            ]),
+          ]
+        : toMiddlewarePathnames(pathname);
     let parentData: MiddlewareContext["parent"] | undefined;
 
     if (globalConfig) {
-      const globalMatch = matchesPreparedMiddlewareConfig(initialPathname, globalConfig, ctx);
+      const globalMatch = matchesMiddlewareConfigAt(
+        matchPathnames(initialPathname, initialRequestPathname),
+        globalConfig,
+        ctx,
+      );
       if (!globalMatch.matched) {
         return emptyResult(request);
       }
@@ -672,35 +701,45 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       }
     }
 
-    const applicable = entries
-      .map((entry) => ({
-        entry,
-        routeMatch:
-          entry.source === "config"
-            ? { matched: true }
-            : matchesMiddlewareRoute(initialPathname, entry),
-      }))
-      .filter((candidate) => candidate.routeMatch.matched);
-
-    if (applicable.length === 0) {
-      return {
-        request: currentRequest,
-        response: null,
-        data: new Map(ctx.data),
-        context: new Map(ctx.locals),
-        headers: mapToHeaders(contextState.headers),
-        handled: false,
-      };
+    // A ctx.rewrite() target is guarded as a direct request for it is: once a
+    // pass over the entries ends on a rewritten path, the entries matching that
+    // path which have not run yet get a pass of their own. Each entry runs at
+    // most once, so repeated rewrites end after at most one pass per entry.
+    const ran = new Set<ProductionMiddlewareEntry>();
+    function* applicableMiddleware() {
+      for (
+        let pathname = initialPathname, requestPathname = initialRequestPathname, pass = 0;
+        ;
+        pass++
+      ) {
+        const pathnames = matchPathnames(pathname, requestPathname);
+        if (pass > 0 && globalConfig) {
+          if (!matchesMiddlewareConfigAt(pathnames, globalConfig, ctx).matched) return;
+        }
+        for (const entry of entries) {
+          if (ran.has(entry)) continue;
+          const routeMatch =
+            entry.source === "config"
+              ? { matched: true }
+              : matchesMiddlewareRouteAt(pathnames, entry);
+          if (routeMatch.matched) yield { entry, routeMatch, pathname, pathnames };
+        }
+        const rewrittenRequestPathname = new URL(currentRequest.url).pathname;
+        const rewrittenPathname = toRoutePathname(rewrittenRequestPathname);
+        if (rewrittenPathname === pathname && rewrittenRequestPathname === requestPathname) return;
+        pathname = rewrittenPathname;
+        requestPathname = rewrittenRequestPathname;
+      }
     }
 
-    for (const candidate of applicable) {
-      const { entry, routeMatch } = candidate;
+    for (const { entry, routeMatch, pathname, pathnames } of applicableMiddleware()) {
       const configMatch = entry.config
-        ? matchesPreparedMiddlewareConfig(initialPathname, entry.config, ctx)
+        ? matchesMiddlewareConfigAt(pathnames, entry.config, ctx)
         : { matched: true };
       if (!configMatch.matched) {
         continue;
       }
+      ran.add(entry);
 
       if (parentData) {
         contextState = createWebMiddlewareContext(
@@ -722,7 +761,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       const middlewareStartTime = Date.now();
       const middlewareEvent = {
         route: entry.path,
-        pathname: initialPathname,
+        pathname,
         name: entry.filePath,
       };
       emitFarmEvent({ type: "middleware.start", ...middlewareEvent });
@@ -844,7 +883,6 @@ export function applyProductionMiddlewareHeaders(
     return response;
   }
 
-  const headers = new Headers(response.headers);
   const getSetCookie = (middlewareHeaders as Headers & { getSetCookie?: () => string[] })
     .getSetCookie;
   const setCookies = getSetCookie
@@ -852,21 +890,17 @@ export function applyProductionMiddlewareHeaders(
     : middlewareHeaders.get("set-cookie")
       ? [middlewareHeaders.get("set-cookie")!]
       : [];
-  for (const [key, value] of middlewareHeaders) {
-    if (key.toLowerCase() === "set-cookie") continue;
-    // A returned Response's headers are authoritative and preserved (matching
-    // the dev runtime, where the Response is applied after ctx.headers). ctx
-    // headers only add keys the Response did not already set.
-    if (headers.has(key)) continue;
-    headers.set(key, value);
-  }
-  for (const cookie of setCookies) {
-    headers.append("Set-Cookie", cookie);
-  }
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
+  return _withFarmResponseHeaders(response, (headers) => {
+    for (const [key, value] of middlewareHeaders) {
+      if (key.toLowerCase() === "set-cookie") continue;
+      // A returned Response's headers are authoritative and preserved (matching
+      // the dev runtime, where the Response is applied after ctx.headers). ctx
+      // headers only add keys the Response did not already set.
+      if (headers.has(key)) continue;
+      headers.set(key, value);
+    }
+    for (const cookie of setCookies) {
+      headers.append("Set-Cookie", cookie);
+    }
   });
 }

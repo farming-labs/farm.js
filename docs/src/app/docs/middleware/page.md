@@ -13,12 +13,16 @@ Run request behavior before routes, pass request-scoped data to pages, and short
 Farm runs middleware in development and production builds. For every request, Farm finds matching `farm.config.ts` middleware entries first, then matching `src/app/**/middleware.ts` files from the root segment down to the route segment.
 
 Apps with `experimental.serverComponents` run both middleware forms through the same request
-pipeline. Farm extracts an explicit `middleware` property and the imports and local bindings it
+pipeline. Farm extracts an explicit `middleware` property, from `farm.config.ts` or from
+`defineConfig` from `@farm.js/plugin/rsc` in `vite.config.ts`, and the imports and local bindings it
 references into a server-only RSC module. This preserves handler closures, regular-expression
 matchers, and function matchers without shipping unrelated build plugins or integrations. Config
-middleware still runs before matching `src/app/**/middleware.ts` files. Farm reports an error for a
-dynamic config shape or a spread that makes the middleware value ambiguous; declare the property
-directly or move that middleware to `src/app/**/middleware.ts`.
+middleware still runs before matching `src/app/**/middleware.ts` files. RSC pages match the
+request path as received, so pages under a `basePath` or locale prefix live in
+`src/app/<basePath>/` or `src/app/[lang]/`; middleware there runs for them, and middleware matching
+the path without the prefix runs as well. Farm reports an error for a dynamic config shape or a
+spread that makes the middleware value ambiguous; declare the property directly or move that
+middleware to `src/app/**/middleware.ts`.
 
 In development, a middleware edit is activated only after the complete middleware tree loads
 successfully. A syntax or import error is reported through Vite while the last valid tree remains
@@ -45,6 +49,16 @@ a returned response does not replace cookies already written through `ctx.cookie
 
 Middleware can live near the routes it protects. Use it for auth, request metadata, A/B flags, rate limit checks, or headers that belong to an area of the app.
 Route-group directories such as `(marketing)` organize middleware without adding a URL segment.
+Middleware in sibling groups and in the folder above them all run, the shallower folder first:
+`src/app/middleware.ts`, then `src/app/(app)/middleware.ts`, then `src/app/(site)/middleware.ts`.
+Parallel route slots work the same way: `src/app/dashboard/@team/middleware.ts` runs for
+`/dashboard` and the URLs below it, because that is where the slot renders. It guards the whole
+request, not only the slot.
+
+An intercepting folder guards the URL it intercepts: `src/app/feed/@modal/(.)photo/middleware.ts`
+runs for `/feed/photo` and below, the same URLs as `src/app/feed/photo/middleware.ts`. A
+`src/app/_private/page.tsx` is routed at `/_private`, so `src/app/_private/middleware.ts` guards it.
+Middleware in a dot-prefixed folder never runs.
 
 **src/app/dashboard/middleware.ts**
 
@@ -173,6 +187,11 @@ export default defineConfig({
 
 Multiple config middleware entries can match the same request. They run in array order before file middleware.
 
+`ctx.rewrite(url)` does not skip the target's guards. After the middleware matching the requested
+path has run, the config and file middleware matching the rewritten path runs too, as it would for a
+direct request. Integration guards, such as an auth integration's `protectedRoutes`, run for the
+rewritten path too. Each middleware runs at most once per request, so repeated rewrites cannot loop.
+
 ```ts
 import { defineConfig } from "@farm.js/core";
 
@@ -204,9 +223,12 @@ Matchers can be strings, regular expressions, or functions. String matchers supp
 | ---------------------- | ---------------------------------------------------------------- |
 | `/dashboard/:path*`    | `/dashboard`, `/dashboard/settings`, `/dashboard/reports/weekly` |
 | `/dashboard/[section]` | `/dashboard/settings` with `ctx.params.section === "settings"`   |
+| `/team/:id?`           | `/team` and `/team/42`, but not `/team/42/edit`                  |
 | `/docs/[...slug]`      | `/docs`, `/docs/getting-started`, nested docs paths              |
+| `/docs/[[...slug]]`    | `/docs`, `/docs/getting-started`, nested docs paths              |
 | `/api/**`              | Every nested path below `/api`                                   |
 | `/api/*`               | One segment below `/api`                                         |
+| `/admin*`              | `/admin`, `/admin-panel`, but not `/admin/users`                 |
 | `/auth(.*)`            | `/auth` and nested auth paths                                    |
 
 Matchers are compared against the same pathname the router resolves the request

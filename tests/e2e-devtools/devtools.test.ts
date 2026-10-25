@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 async function openPanel(page: Page) {
@@ -161,9 +161,9 @@ test("real routes, API metadata, highlighted transforms, and snapshot copying", 
   const navIcons = await panel
     .locator(".fd-nav-button svg")
     .evaluateAll((elements) => elements.map((element) => element.innerHTML));
-  expect(navIcons).toHaveLength(8);
+  expect(navIcons).toHaveLength(9);
   expect(navIcons.every((markup) => markup.length > 0)).toBe(true);
-  expect(new Set(navIcons).size).toBe(8);
+  expect(new Set(navIcons).size).toBe(9);
   await expect(panel.getByAltText("Farm.js logo")).toBeVisible();
   expect(
     await panel.getByAltText("Farm.js logo").evaluate((img: HTMLImageElement) => img.naturalWidth),
@@ -409,6 +409,75 @@ test("development endpoints enforce the request boundary", async ({ request }, i
   expect(response.status()).toBe(200);
 });
 
+test("Plugins shows active registration order and separate lifecycle hooks", async ({
+  page,
+  request,
+}, info) => {
+  test.skip(info.project.name !== "development");
+  const panel = await openPanel(page);
+  const snapshot = await (await request.get("/__farm/devtools.json")).json();
+  const devtools = snapshot.plugins.find(
+    (plugin: { name: string }) => plugin.name === "farm:devtools",
+  );
+  expect(devtools).toMatchObject({
+    enforce: "pre",
+    serverHooks: ["configure"],
+    clientHooks: ["client.setup", "client.close"],
+  });
+  expect(snapshot.plugins.some((plugin: { name: string }) => plugin.name === "farm:hints")).toBe(
+    true,
+  );
+  await panel.getByRole("button", { name: /^Plugins/ }).click();
+  await expect(panel.getByRole("heading", { name: "Plugins", exact: true })).toBeVisible();
+  await panel.locator("summary").filter({ hasText: "farm:devtools" }).click();
+  await expect(panel.getByRole("main")).toContainText("client.setup");
+  await expect(panel.getByRole("main")).toContainText("Server hooks");
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    expect(
+      await panel.locator("body").evaluate((body) => body.scrollWidth <= body.clientWidth),
+    ).toBe(true);
+  }
+});
+
+test("Inspect refreshes the selected module after real HMR and labels pending output", async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== "development");
+  const panel = await openPanel(page);
+  await panel.getByRole("button", { name: "Inspect", exact: true }).click();
+  await panel.getByLabel("MODULE", { exact: true }).selectOption({ label: "src/app/counter.tsx" });
+  await expect(panel.locator("pre").first()).toContainText("useState");
+  const selected = await panel.locator("select").inputValue();
+  const file = path.resolve("examples/hints-demo/src/app/counter.tsx");
+  const original = await readFile(file, "utf8");
+  const updated = original + '\nexport const devtoolsHmrProbe = "live-inspect-updated";\n';
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === "/src/app/counter.tsx" && url.searchParams.has("t"),
+    async (route) => {
+      await gate;
+      await route.continue();
+    },
+  );
+  try {
+    await writeFile(file, updated);
+    await expect(panel.locator("[data-module-state]")).toContainText("HMR pending");
+    await expect(panel.locator("pre").first()).not.toContainText("devtoolsHmrProbe");
+    release();
+    await expect(panel.locator("pre").first()).toContainText("live-inspect-updated");
+    await expect(panel.locator("pre").nth(1)).toContainText("live-inspect-updated");
+    await expect(panel.locator("select")).toHaveValue(selected);
+    await expect(panel.locator("[data-module-state]")).not.toContainText("Showing previous");
+  } finally {
+    release();
+    if ((await readFile(file, "utf8")) === updated) await writeFile(file, original);
+  }
+});
+
 test("production has no launcher, inspector endpoints, or UI assets", async ({
   page,
   request,
@@ -435,7 +504,9 @@ test("production has no launcher, inspector endpoints, or UI assets", async ({
   for (const file of await readdir(output, { recursive: true })) {
     if (/\.(js|css)$/.test(file)) {
       const source = await readFile(path.join(output, file), "utf8");
-      expect(source, file).not.toMatch(/farm-devtools|__FARM_DEVTOOLS__|--sh-keyword/);
+      expect(source, file).not.toMatch(
+        /farm-devtools|farm:devtools:hmr|__FARM_DEVTOOLS__|--sh-keyword/,
+      );
     }
   }
 });

@@ -180,6 +180,7 @@ onFarmEvent((event) => {
 | Middleware           | middleware.start, middleware.complete, middleware.shortCircuit, middleware.error |
 | Integrations         | integration.ready, integration.api.call.start, integration.webhook.verified      |
 | MCP                  | mcp.tool.complete (registered callback outcome, not an agent run)                |
+| Agents               | agent.read (Markdown mirror, llms.txt, or API catalog read)                      |
 | Integration database | storage.query.start, storage.schema.ready                                        |
 | Build                | build.start, routes.generated, types.generated, manifest.generated               |
 
@@ -232,6 +233,7 @@ unsubscribe();
 | PPR                  | `ppr.shell.hit`, `ppr.shell.miss`, `ppr.shell.cached`, `ppr.shell.bypass`, `ppr.shell.invalidated`, `ppr.suspense.holeDetected`, `ppr.refresh.start`, `ppr.refresh.complete`, `ppr.refresh.error`                                  |
 | API                  | `api.request.start`, `api.request.complete`, `api.validation.failed`, `api.error`                                                                                                                                                  |
 | MCP                  | `mcp.tool.complete` — configured server, transport route, tool name, outcome and duration; no tool payloads                                                                                                                        |
+| Agents               | `agent.read` — surface (`markdown`, `llms`, `llms-full`, `api-catalog`), path, Markdown view (`outline`, `section`, `parts`, `actions`), status, and the agent the User-Agent declares                                             |
 | Integrations         | `integration.registered`, `integration.config.validated`, `integration.ready`, `integration.disposed`, `integration.api.call.start`, `integration.api.call.complete`, `integration.webhook.verified`, `integration.webhook.failed` |
 | Middleware           | `middleware.start`, `middleware.complete`, `middleware.shortCircuit`, `middleware.error`                                                                                                                                           |
 | Integration database | `storage.query.start`, `storage.query.complete`, `storage.query.error`, `storage.schema.ready`, `storage.schema.error`                                                                                                             |
@@ -241,6 +243,32 @@ Middleware events include the matched middleware route, request pathname, middle
 MCP completion events distinguish tool errors from successful HTTP transport responses. They cover
 registered callbacks only, excluding authorization and SDK rejections before callback execution.
 See [MCP tool observability](/docs/plugins/mcp#observe-tool-executions) for payload and coverage details.
+
+## Agent reads
+
+`agent.read` fires each time an agent surface answers: a Markdown mirror or `page.md` (including
+`?outline`, `?section`, `?max_tokens` parts, and `?actions`), `/llms.txt` or `/llms-full.txt`,
+`/.well-known/api-catalog`, `/.well-known/ai-catalog.json` or `/.well-known/ard.json`
+(`ai-catalog`), and an MCP server card (`mcp-server-card`). It carries the path served, never the query string, the status, and the
+agent the request's User-Agent declares:
+
+```ts
+onFarmEvent((event) => {
+  if (event.type !== "agent.read") return;
+  // { surface: "markdown", route: "/pricing.md", view: "parts", status: 200,
+  //   agent: { family: "openai", category: "agent", identity: "self-reported" } }
+  metrics.increment("agent_reads", { surface: event.surface, family: event.agent.family });
+});
+```
+
+`agent.category` is `agent` for user-triggered fetchers such as ChatGPT-User, Claude-User, and
+Perplexity-User, and `crawler` for indexing and training crawlers such as GPTBot, ClaudeBot, and
+PerplexityBot. The identity is `self-reported`: any client can send these tokens, so use it to
+understand traffic, never to grant access. Farm's own reads, such as llms-full.txt reading each
+page, are not reported.
+
+`classifyFarmAgent(userAgent)` from `@farm.js/core` returns the same identity for any request, for
+example in middleware.
 
 ## Middleware event payloads
 

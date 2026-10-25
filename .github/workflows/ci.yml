@@ -596,6 +596,7 @@ jobs:
         run: |
           node benchmarks/frameworks/run.mjs --self-check
           node --test benchmarks/compiler-analysis/run.test.mjs
+          node --test examples/react-compiler-js-framework-benchmark/scripts/prepare-metadata.test.mjs examples/react-compiler-js-framework-benchmark/scripts/summarize-official.test.mjs
 
   lint:
     name: Lint
@@ -653,6 +654,8 @@ jobs:
           pnpm --filter @farm.js/react build
         env:
           NODE_OPTIONS: --max-old-space-size=12288
+      - name: Verify native input reset parity in development and production
+        run: pnpm --dir packages/farm-react exec node scripts/test-input-reset-browser.mjs
       # Production build of the compiler example, then a real browser through
       # every compiled component (bindings, blocks, keyed rows, ranges, islands).
       - name: Verify compiled output in the browser

@@ -55,6 +55,27 @@ These changes landed between the last beta and 0.1.0. Most apps need no code cha
   by Farm.
 - **DevTools version.** `@farm.js/devtools` is now released with core and shares its version.
 
+## Feature packages the app installs
+
+Starting with 0.1.22, `@farm.js/core` no longer installs the packages behind optional features.
+An app that uses one of these features declares the package itself. New starters already do, and
+`farm doctor` reports a feature that is in use without its package.
+
+| Feature                                                    | Install                         |
+| ---------------------------------------------------------- | ------------------------------- |
+| Built-in Tailwind CSS (a stylesheet imports `tailwindcss`) | `pnpm add -D @tailwindcss/vite` |
+| `opengraph-image`/`twitter-image` JSX, `@farm.js/core/og`  | `pnpm add @vercel/og`           |
+| Image optimization on Node, Vercel, Netlify, and in dev    | `pnpm add sharp`                |
+| Docs engine (`docs` enabled, or a `docs.config.*` file)    | `pnpm add @farming-labs/docs`   |
+
+Without `@tailwindcss/vite`, Farm keeps building without Tailwind and logs the install command the
+first time a stylesheet imports `tailwindcss`. Without `@vercel/og`, `farm build` fails with the
+install command when the app has a generated metadata image or imports `@farm.js/core/og`; static
+`opengraph-image.png` files do not need it. Without `sharp`, `images.provider: "auto"` serves
+original image URLs (the documented `provider: "none"` behavior) and logs the install command, and
+`images.provider: "node"` fails. Without `@farming-labs/docs`, `farm dev` and `farm build` fail
+with the install command when docs are enabled.
+
 ## Deprecated APIs to replace before 0.2
 
 These still work in 0.1 and are scheduled for removal in a later minor release.

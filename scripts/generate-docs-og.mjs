@@ -373,42 +373,42 @@ try {
                   <span>Build / Ship / Scale</span>
                 </div>
                 <h1>
-                  <span>a framework for</span>
-                  <span>product-integrated apps</span>
+                  <span>the framework for</span>
+                  <span>the web and agents</span>
                 </h1>
                 <p class="summary">
-                  Routing, typed APIs, middleware, integrations, docs, and deployment—connected as one product.
+                  Agent-ready by default, and open to any agent runtime: Eve, Cloudflare&nbsp;Agents, the AI&nbsp;SDK, Mastra, and more.
                 </p>
               </section>
 
               <aside class="architecture">
                 <div class="architecture-label">
-                  <strong>One product</strong>
+                  <strong>One app</strong>
                 </div>
 
                 <div class="layer product">
                   <div class="layer-mark">01</div>
                   <div class="layer-body">
-                    <div class="layer-title">Product surface</div>
-                    <div class="layer-items">UI · ROUTES · DOCS</div>
+                    <div class="layer-title">For people</div>
+                    <div class="layer-items">PAGES · ROUTES · STREAMING SSR</div>
                   </div>
                 </div>
                 <div class="layer application">
                   <div class="layer-mark">02</div>
                   <div class="layer-body">
-                    <div class="layer-title">Application core</div>
-                    <div class="layer-items">TYPED APIs · MIDDLEWARE</div>
+                    <div class="layer-title">For agents</div>
+                    <div class="layer-items">MARKDOWN · LLMS.TXT · MCP</div>
                   </div>
                 </div>
                 <div class="layer platform">
                   <div class="layer-mark">03</div>
                   <div class="layer-body">
-                    <div class="layer-title">Connected stack</div>
-                    <div class="layer-items">DATA · AUTH · DEPLOY</div>
+                    <div class="layer-title">On any host</div>
+                    <div class="layer-items">NODE · VERCEL · NETLIFY · CLOUDFLARE</div>
                   </div>
                 </div>
 
-                <div class="architecture-note"><strong>Bring your stack.</strong> Farm.js makes it work together.</div>
+                <div class="architecture-note"><strong>Bring your own agent.</strong> One open runtime contract.</div>
               </aside>
             </div>
 

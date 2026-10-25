@@ -8,6 +8,61 @@ test.beforeAll(async () => {
   ]);
 });
 
+// /agents and the blog have authored Markdown sources; /telemetry is an HTML
+// mirror, whose unauthenticated sign-in form exercises real form extraction.
+for (const pathname of ["/agents.md", "/blog/0.1.0.md", "/telemetry.md"]) {
+  test(`evaluates Markdown preconditions in the emitted server at ${pathname}`, async ({
+    request,
+  }) => {
+    for (const query of ["", "?outline", "?actions", "?max_tokens=100"]) {
+      const url = `${pathname}${query}`;
+      const first = await request.get(url);
+      expect(first.status()).toBe(200);
+      const etag = first.headers().etag;
+      expect(etag).toMatch(/^W\/"/);
+      const body = await first.text();
+      if (query === "?actions") {
+        expect(first.headers()["content-type"]).toBe("application/json; charset=utf-8");
+        const actions = JSON.parse(body).actions;
+        if (pathname === "/telemetry.md")
+          expect(actions).toContainEqual(
+            expect.objectContaining({
+              method: "POST",
+              action: "/api/telemetry/dashboard/session",
+              fields: expect.arrayContaining([
+                expect.objectContaining({ name: "token", type: "password", required: true }),
+              ]),
+            }),
+          );
+        else expect(actions).toEqual([]);
+      }
+      for (const method of ["GET", "HEAD"]) {
+        for (const match of [etag, etag.slice(2), '"unrelated"']) {
+          const failed = await request.fetch(url, {
+            method,
+            headers: { "if-match": match, "if-none-match": "*" },
+          });
+          expect(failed.status()).toBe(412);
+          expect(failed.headers()["cache-control"]).toBe("no-store");
+          expect(await failed.text()).toBe("");
+        }
+        const existing = await request.fetch(url, {
+          method,
+          headers: { "if-match": "*", "if-unmodified-since": "Wed, 21 Oct 2015 07:28:00 GMT" },
+        });
+        expect(existing.status()).toBe(200);
+        expect(await existing.text()).toBe(method === "HEAD" ? "" : body);
+        const cached = await request.fetch(url, {
+          method,
+          headers: { "if-match": "*", "if-none-match": etag },
+        });
+        expect(cached.status()).toBe(304);
+        expect(await cached.text()).toBe("");
+      }
+    }
+  });
+}
+
 test("boots the emitted docs site and navigates into the guide", async ({ page }) => {
   const browserErrors: string[] = [];
   page.on("console", (message) => {

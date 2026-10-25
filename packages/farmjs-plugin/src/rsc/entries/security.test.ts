@@ -126,7 +126,7 @@ describe("generated server action security", () => {
 
   it("binds paired local callers to the RSC request's route runtime", async () => {
     const entry = generateRscEntry(context);
-    const start = entry.indexOf("async function handler(request, context)");
+    const start = entry.indexOf("async function handleFarmPageOrMarkdown(request, context)");
     const end = entry.indexOf("export default", start);
     const { api } = createApiClients<{
       hello: {
@@ -144,6 +144,7 @@ describe("generated server action security", () => {
       "handleAPIRequest",
       "handleFarmRequest",
       "farmApiBasePath",
+      "farmMarkdownConfig",
       `${entry.slice(start, end)}; return handler;`,
     )(
       _runWithAPIRequestRuntime,
@@ -152,6 +153,7 @@ describe("generated server action security", () => {
       dispatch,
       async () => Response.json(await api.hello.get()),
       "/backend",
+      { enabled: false },
     );
     const response = await handle(
       new Request("https://farm.test/page", { headers: { cookie: "session=rsc" } }),

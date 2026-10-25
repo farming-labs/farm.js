@@ -379,6 +379,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-batch-position-hinted"
   | "keyed-rows-window-position-hinted"
   | "keyed-rows-reorder-hinted"
+  | "keyed-rows-plain-reorder-hinted"
   | "keyed-rows-map-reorder-hinted"
   | "keyed-rows-all-hinted"
   | "keyed-rows-mapped-rolling-window-hinted"
@@ -470,6 +471,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-batch-position-hinted": "keyedRowsBatchPositionHintedRuntimeFeature",
   "keyed-rows-window-position-hinted": "keyedRowsWindowPositionHintedRuntimeFeature",
   "keyed-rows-reorder-hinted": "keyedRowsReorderHintedRuntimeFeature",
+  "keyed-rows-plain-reorder-hinted": "keyedRowsPlainReorderHintedRuntimeFeature",
   "keyed-rows-map-reorder-hinted": "keyedRowsMapReorderHintedRuntimeFeature",
   "keyed-rows-all-hinted": "keyedRowsAllHintedRuntimeFeature",
   "keyed-rows-mapped-rolling-window-hinted": "keyedRowsMappedRollingWindowHintedRuntimeFeature",
@@ -689,6 +691,14 @@ function runtimeFeaturesForPlans(
       features.add("keyed-rows-prepend-only");
     } else if (
       keyedRowsFeature === "keyed-rows" &&
+      hintSuffix === "-reorder-hinted" &&
+      keyedTargetKinds.size === 0
+    ) {
+      // Every keyed plan must be target-free. Keep the existing reorder,
+      // map, append, and complete-reconciliation capabilities.
+      features.add("keyed-rows-plain-reorder-hinted");
+    } else if (
+      keyedRowsFeature === "keyed-rows" &&
       hintSuffix === "-filter-hinted" &&
       keyedTargetKinds.size === 1 &&
       keyedTargetKinds.has("identity")
@@ -790,6 +800,17 @@ function collectStateDependencies(
 }
 
 function referencesIdentifier(expression: t.Expression, name: string): boolean {
+  // Only proven misses bypass scope analysis. Matching properties, bindings,
+  // and JSX names still need the existing reference/shadowing checks below.
+  let possible = false;
+  t.traverseFast(expression, (node) => {
+    if ((t.isIdentifier(node) || t.isJSXIdentifier(node)) && node.name === name) {
+      possible = true;
+      return t.traverseFast.stop;
+    }
+  });
+  if (!possible) return false;
+
   let referenced = false;
   traverse(expressionFile(cloneExpression(expression)), {
     ReferencedIdentifier(path) {
@@ -900,13 +921,12 @@ function containsPotentialKeyedMembershipCall(
   expression: t.Expression,
   reactiveByValue: ReadonlyMap<string, StateBinding>,
 ): boolean {
+  // Presence is syntactic only; keyedMembershipTarget still proves scope and ownership.
   let found = false;
-  traverse(expressionFile(cloneExpression(expression)), {
-    CallExpression(path) {
-      if (!isPotentialKeyedMembershipCall(path.node, reactiveByValue)) return;
-      found = true;
-      path.stop();
-    },
+  t.traverseFast(expression, (node) => {
+    if (!t.isCallExpression(node) || !isPotentialKeyedMembershipCall(node, reactiveByValue)) return;
+    found = true;
+    return t.traverseFast.stop;
   });
   return found;
 }
@@ -933,13 +953,12 @@ function containsPotentialKeyedMapLookupCall(
   expression: t.Expression,
   reactiveByValue: ReadonlyMap<string, StateBinding>,
 ): boolean {
+  // Presence is syntactic only; keyedMapLookupTarget still proves scope and ownership.
   let found = false;
-  traverse(expressionFile(cloneExpression(expression)), {
-    CallExpression(path) {
-      if (!isPotentialKeyedMapLookupCall(path.node, reactiveByValue)) return;
-      found = true;
-      path.stop();
-    },
+  t.traverseFast(expression, (node) => {
+    if (!t.isCallExpression(node) || !isPotentialKeyedMapLookupCall(node, reactiveByValue)) return;
+    found = true;
+    return t.traverseFast.stop;
   });
   return found;
 }
@@ -1065,6 +1084,18 @@ function keyedMapLookupTarget(
 }
 
 function collectReferencedLocals(expression: t.Expression, names: ReadonlySet<string>): string[] {
+  if (names.size === 0) return [];
+  // Only proven misses bypass cloning and scope construction. Matching binding,
+  // property, and JSX names still require the full reference analysis below.
+  let possible = false;
+  t.traverseFast(expression, (node) => {
+    if ((t.isIdentifier(node) || t.isJSXIdentifier(node)) && names.has(node.name)) {
+      possible = true;
+      return t.traverseFast.stop;
+    }
+  });
+  if (!possible) return [];
+
   const references = new Set<string>();
   traverse(expressionFile(cloneExpression(expression)), {
     ReferencedIdentifier(path) {
@@ -1083,6 +1114,7 @@ function rewriteDerivedAccess<T extends t.Expression>(
   expression: T,
   derivedByName: ReadonlyMap<string, t.Expression>,
 ): T {
+  if (derivedByName.size === 0) return cloneExpression(expression);
   const file = expressionFile(cloneExpression(expression));
   traverse(file, {
     ReferencedIdentifier(path) {
@@ -1503,6 +1535,9 @@ function keyedMapUpdatePipeline(
   return outerCallbacks.reverse();
 }
 
+// Hint passes may borrow the unchanged root when their eligibility set is empty.
+// Callers adopt a returned root only after a positive rewrite count and successful
+// reanalysis. Any pass that can mutate still clones before traversing.
 function rewriteKeyedMapUpdateHints(
   root: t.JSXElement,
   hintedStateIndices: ReadonlySet<number>,
@@ -1510,7 +1545,7 @@ function rewriteKeyedMapUpdateHints(
   helperIdentifier: t.Identifier,
   safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number } {
-  if (hintedStateIndices.size === 0) return { root: t.cloneNode(root, true), count: 0 };
+  if (hintedStateIndices.size === 0) return { root, count: 0 };
   const file = expressionFile(t.cloneNode(root, true));
   let count = 0;
   traverse(file, {
@@ -1596,7 +1631,7 @@ function rewriteKeyedArrayAppendHints(
   helperIdentifier: t.Identifier,
   safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number } {
-  if (hintedStateIndices.size === 0) return { root: t.cloneNode(root, true), count: 0 };
+  if (hintedStateIndices.size === 0) return { root, count: 0 };
   const file = expressionFile(t.cloneNode(root, true));
   let count = 0;
   traverse(file, {
@@ -1699,7 +1734,7 @@ function rewriteKeyedArrayPrependHints(
   safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
   if (hintedStateIndices.size === 0) {
-    return { root: t.cloneNode(root, true), count: 0, stateIndices: new Set() };
+    return { root, count: 0, stateIndices: new Set() };
   }
   const file = expressionFile(t.cloneNode(root, true));
   const stateIndices = new Set<number>();
@@ -1810,7 +1845,7 @@ function rewriteKeyedArrayRollingWindowHints(
   safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
   if (hintedStateIndices.size === 0) {
-    return { root: t.cloneNode(root, true), count: 0, stateIndices: new Set() };
+    return { root, count: 0, stateIndices: new Set() };
   }
   const file = expressionFile(t.cloneNode(root, true));
   const stateIndices = new Set<number>();
@@ -1993,7 +2028,7 @@ function rewriteKeyedArrayPositionHints(
 } {
   if (hintedStateIndices.size === 0) {
     return {
-      root: t.cloneNode(root, true),
+      root,
       count: 0,
       batchInsertCount: 0,
       windowReplaceCount: 0,
@@ -2167,7 +2202,7 @@ function rewriteKeyedArrayReorderHints(
   helperIdentifier: t.Identifier,
 ): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
   if (hintedStateIndices.size === 0) {
-    return { root: t.cloneNode(root, true), count: 0, stateIndices: new Set() };
+    return { root, count: 0, stateIndices: new Set() };
   }
   const file = expressionFile(t.cloneNode(root, true));
   const stateIndices = new Set<number>();
@@ -2406,7 +2441,7 @@ function rewriteKeyedArrayReorderPipelineHints(
 } {
   if (hintedStateIndices.size === 0) {
     return {
-      root: t.cloneNode(root, true),
+      root,
       filterCount: 0,
       mapCount: 0,
       mapReorderCount: 0,
@@ -2693,7 +2728,7 @@ function rewriteQueuedKeyedArrayReorderMapHints(
       structuralSortIdentifier,
     ])
   )
-    return { root: t.cloneNode(root, true), mapCount: 0 };
+    return { root: allowed ? t.cloneNode(root, true) : root, mapCount: 0 };
   const file = expressionFile(t.cloneNode(root, true));
   let mapCount = 0;
 
@@ -2861,7 +2896,7 @@ function rewriteQueuedKeyedArrayMappedStructuralHints(
     ])
   ) {
     return {
-      root: t.cloneNode(root, true),
+      root: allowed ? t.cloneNode(root, true) : root,
       mapCount: 0,
       structuralCount: 0,
       stateIndices: new Set(),
@@ -3021,7 +3056,7 @@ function rewriteQueuedKeyedArrayStructuralMapHints(
     ])
   ) {
     return {
-      root: t.cloneNode(root, true),
+      root: allowed ? t.cloneNode(root, true) : root,
       mapCount: 0,
       mappedStructuralAppendCount: 0,
       structuralAppendMapCount: 0,
@@ -3204,7 +3239,7 @@ function rewriteQueuedKeyedArrayStructuralPrependMapHints(
     ])
   ) {
     return {
-      root: t.cloneNode(root, true),
+      root: allowed ? t.cloneNode(root, true) : root,
       mapCount: 0,
       mappedStructuralPrependCount: 0,
       structuralPrependMapCount: 0,
@@ -3398,7 +3433,7 @@ function rewriteQueuedKeyedArrayRollingWindowMapHints(
     return {
       chainedMapCount: 0,
       chainedRollingWindowCount: 0,
-      root: t.cloneNode(root, true),
+      root: allowed ? t.cloneNode(root, true) : root,
       leadingMapCount: 0,
       mappedRollingWindowCount: 0,
       rollingWindowCount: 0,
@@ -3630,7 +3665,7 @@ function rewriteQueuedKeyedArrayStructuralReorderHints(
     ])
   ) {
     return {
-      root: t.cloneNode(root, true),
+      root: allowed ? t.cloneNode(root, true) : root,
       reorderCount: 0,
       sortCount: 0,
       replacedMapReorderCount: 0,
@@ -3821,7 +3856,7 @@ function rewriteQueuedKeyedArrayMapReorderHints(
     ])
   ) {
     return {
-      root: t.cloneNode(root, true),
+      root: allowed ? t.cloneNode(root, true) : root,
       mapCount: 0,
       mapReorderCount: 0,
       mapSortCount: 0,
@@ -3985,7 +4020,7 @@ function rewriteKeyedArraySortHints(
   safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
   if (hintedStateIndices.size === 0) {
-    return { root: t.cloneNode(root, true), count: 0, stateIndices: new Set() };
+    return { root, count: 0, stateIndices: new Set() };
   }
   const file = expressionFile(t.cloneNode(root, true));
   const stateIndices = new Set<number>();
@@ -4072,7 +4107,7 @@ function rewriteKeyedArraySliceHints(
   safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
   if (hintedStateIndices.size === 0) {
-    return { root: t.cloneNode(root, true), count: 0, stateIndices: new Set() };
+    return { root, count: 0, stateIndices: new Set() };
   }
   const file = expressionFile(t.cloneNode(root, true));
   const stateIndices = new Set<number>();
@@ -4157,7 +4192,7 @@ function rewriteKeyedArrayFilterHints(
   safeGlobals: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number; stateIndices: ReadonlySet<number> } {
   if (hintedStateIndices.size === 0) {
-    return { root: t.cloneNode(root, true), count: 0, stateIndices: new Set() };
+    return { root, count: 0, stateIndices: new Set() };
   }
   const file = expressionFile(t.cloneNode(root, true));
   const stateIndices = new Set<number>();
@@ -4607,7 +4642,7 @@ function rewriteKeyedCollectionUpdateHints(
   mutationHelper: t.Identifier,
   globalCollections: ReadonlySet<string>,
 ): { root: t.JSXElement; count: number } {
-  if (targetKinds.size === 0) return { root: t.cloneNode(root, true), count: 0 };
+  if (targetKinds.size === 0) return { root, count: 0 };
   const file = expressionFile(t.cloneNode(root, true));
   let count = 0;
 
@@ -7435,6 +7470,59 @@ function canCloneKeyedRows(plan: KeyedRowsPlan): boolean {
   return cloneable(plan.row);
 }
 
+function keyedRowBindingTargets(plan: KeyedRowsPlan): t.ArrowFunctionExpression | undefined {
+  if (!canCloneKeyedRows(plan)) return undefined;
+  const root = t.identifier("row");
+  const targets = new Map<string, t.Identifier>([["", root]]);
+  const statements: t.Statement[] = [];
+  let independentReads = 0;
+  for (const binding of plan.bindings) {
+    const path: number[] = [];
+    for (const index of binding.path) {
+      independentReads += index + 1;
+      for (let sibling = 0; sibling <= index; sibling += 1) {
+        const key = [...path, sibling].join(".");
+        if (targets.has(key)) continue;
+        // Keep wide/deep rows on the compact generic walker.
+        if (statements.length === 32) return undefined;
+        const parent = targets.get(
+          sibling === 0 ? path.join(".") : [...path, sibling - 1].join("."),
+        )!;
+        const target = t.identifier(`target${statements.length}`);
+        statements.push(
+          t.variableDeclaration("const", [
+            t.variableDeclarator(
+              target,
+              t.optionalMemberExpression(
+                parent,
+                t.identifier(sibling === 0 ? "firstElementChild" : "nextElementSibling"),
+                false,
+                true,
+              ),
+            ),
+          ]),
+        );
+        targets.set(key, target);
+      }
+      path.push(index);
+    }
+  }
+  if (statements.length >= independentReads) return undefined;
+  return t.arrowFunctionExpression(
+    [root],
+    t.blockStatement([
+      ...statements,
+      t.returnStatement(
+        t.arrayExpression(
+          plan.bindings.map((binding) =>
+            t.logicalExpression("??", targets.get(binding.path.join("."))!, t.nullLiteral()),
+          ),
+        ),
+      ),
+    ]),
+  );
+}
+
 function keyedRowsBoundary(
   blockRuntime: t.Identifier,
   plan: KeyedRowsPlan,
@@ -7460,6 +7548,7 @@ function keyedRowsBoundary(
     ...plan.conditionals.map((conditional) => conditional.test),
   ]);
   const delegatedEvents = canDelegateKeyedRowEvents(plan);
+  const bindingTargets = keyedRowBindingTargets(plan);
   const renderSource = keyedRowsRenderSource(plan, eventFactory, conditionalFactory);
   const renderFactoryParameters =
     plan.conditionals.length > 0
@@ -7608,6 +7697,9 @@ function keyedRowsBoundary(
                 t.jsxExpressionContainer(t.booleanLiteral(true)),
               ),
             ]
+          : []),
+        ...(bindingTargets
+          ? [t.jsxAttribute(t.jsxIdentifier("targets"), t.jsxExpressionContainer(bindingTargets))]
           : []),
         ...(canCloneKeyedRows(plan)
           ? [

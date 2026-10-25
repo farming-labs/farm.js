@@ -25,7 +25,7 @@ describe("generated after lifecycle", () => {
     expect(entry).toContain("async function handler(request, context)");
     expect(entry).toContain("return _runWithAPIRequestRuntime({");
     expect(entry).toContain(
-      "}, () => _runWithCurrentRequest(request, () =>\n    _runWithAfterRequest(request, () => handleFarmRequest(request, context), context)",
+      "}, () => _runWithCurrentRequest(request, () =>\n    _runWithAfterRequest(request, () => handleFarmPageOrMarkdown(request, context), context)",
     );
     expect(entry).toContain("export default { fetch: handler }");
   });

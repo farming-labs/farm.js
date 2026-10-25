@@ -5,7 +5,7 @@ import "./preact.css";
 
 export const metadata: Metadata = {
   title: "FARMJS Preact App",
-  description: "A framework for product-integrated apps",
+  description: "Built with Farm.js, the framework for the web and agents",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml", sizes: "any" }],
   },

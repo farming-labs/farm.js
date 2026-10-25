@@ -1,10 +1,22 @@
-import { createServer as createViteServer, type ViteDevServer } from "vite";
+import type { ViteDevServer } from "vite";
 import type { FarmConfig } from "../types";
 import { farmI18nClientBridgePlugin, farmPlugin, farmServerOnlyEntriesPlugin } from "../vite";
 import { logger } from "../utils";
 import { readSchemaTables } from "../schema-owner";
-import { loadConfig, resolveConfig } from "../config";
-import { FarmRuntimeShutdownError, PluginManager } from "../plugin";
+import {
+  isResolvedFarmConfig,
+  loadConfig,
+  resolveConfig,
+  type FarmUserConfig,
+  type ResolvedFarmConfig,
+} from "../config";
+import { setEnv, type EnvParser } from "../env";
+import { PluginManager } from "../plugin";
+import {
+  closeViteDevServer,
+  createFarmDevLifecyclePlugin,
+  createViteDevServer,
+} from "./dev-lifecycle";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
 import fs from "fs";
 import path from "path";
@@ -25,6 +37,9 @@ import { FARM_VERSION } from "../version";
 import { getFarmAppDirectories } from "../layers";
 import { createCliColors } from "../cli-colors";
 import { createFarmThemeCssPlugin } from "../theme/vite";
+import { loadTailwindVitePlugin } from "../build/tailwind";
+import { loadFarmDocsEngine } from "../docs/engine";
+import { resolveFarmImageProviderForRuntime } from "../image-runtime";
 import {
   createFarmInstrumentationLifecycle,
   loadFarmInstrumentation,
@@ -34,34 +49,6 @@ import {
 import { loadFarmRendererVitePlugins, resolveFarmRenderer } from "../renderer";
 
 export const DEFAULT_FARM_DEV_SERVER_PORT = 3000;
-
-/**
- * Upper bound on waiting for Vite's own close. Vite 5.4 can strand its plugin
- * container's in-flight promises when closed after dependency discovery has
- * started (#1263); farm's shutdown must not inherit that hang.
- */
-const VITE_CLOSE_TIMEOUT_MS = 10_000;
-
-type VitePendingRequest = {
-  request: Promise<unknown>;
-};
-
-async function drainVitePendingRequests(server: ViteDevServer): Promise<void> {
-  // Each Vite environment waits for this registry while it closes its plugin
-  // container and dependency optimizer. That order can strand
-  // optimized-dependency loads: the optimizer is gone, but the plugin hook
-  // still awaits its processing promise. Drain every registry first while the
-  // optimizers can finish; a request in one environment can start another.
-  const registries = Object.values(server.environments ?? {}).map(
-    (environment) =>
-      (environment as { _pendingRequests?: Map<string, VitePendingRequest> })._pendingRequests,
-  );
-  const pending = () => registries.flatMap((registry) => (registry ? [...registry.values()] : []));
-
-  for (let requests = pending(); requests.length > 0; requests = pending()) {
-    await Promise.allSettled(requests.map(({ request }) => request));
-  }
-}
 
 // Farm.js branding plugin for createServer
 function createBrandingPlugin() {
@@ -157,12 +144,83 @@ function withPortFlag(vite: FarmConfig["vite"], port: number | undefined): FarmC
   return port === undefined ? vite : { ...vite, server: { ...vite?.server, port } };
 }
 
+function inlineEnvScope(scope: Record<string, unknown> | undefined) {
+  return Object.fromEntries(
+    Object.entries(scope || {}).map(([key, value]) => [
+      key,
+      typeof value === "function" ||
+      (value && typeof value === "object" && "parse" in value && typeof value.parse === "function")
+        ? (value as EnvParser)
+        : () => value,
+    ]),
+  );
+}
+
+async function resolveInlineConfig(
+  config: FarmConfig,
+  mode: "development" | "production",
+): Promise<ResolvedFarmConfig> {
+  // Programmatic callers can pass resolveConfig's output. Re-resolving it would
+  // parse environment values again and duplicate layer/integration plugins.
+  if (isResolvedFarmConfig(config)) {
+    setEnv(config.env);
+    return { ...config };
+  }
+
+  // The runtime config type also permits individually resolved fields. Keep
+  // their ownership and disabled state instead of treating them as user input.
+  const docs = config.docs;
+  const resolvedDocs =
+    docs && typeof docs === "object" && "enabled" in docs && "entry" in docs && "config" in docs
+      ? docs
+      : undefined;
+  const i18n = config.i18n;
+  const resolvedI18n = i18n && "enabled" in i18n ? i18n : undefined;
+  const auth = config.auth;
+  const resolvedAuth =
+    auth &&
+    typeof auth === "object" &&
+    typeof auth.emailAndPassword === "object" &&
+    "enabled" in auth.emailAndPassword
+      ? auth
+      : undefined;
+  const resolved = await resolveConfig(
+    {
+      ...config,
+      ...(resolvedDocs ? { docs: false } : {}),
+      ...(resolvedI18n ? { i18n: false } : {}),
+      ...(resolvedAuth ? { auth: false } : {}),
+      ...(config.layers ? { extends: [] } : {}),
+      // FarmConfig also accepts literal runtime env values. Adapt only inline
+      // input; file/layer config keeps the normal parser validation contract.
+      env: config.env && {
+        server: inlineEnvScope(config.env.server),
+        public: inlineEnvScope(config.env.public),
+      },
+    },
+    mode,
+  );
+  if (resolvedDocs) resolved.docs = resolvedDocs as ResolvedFarmConfig["docs"];
+  if (resolvedI18n) resolved.i18n = resolvedI18n;
+  if (resolvedAuth) resolved.auth = resolvedAuth as ResolvedFarmConfig["auth"];
+  if (config.layers) {
+    resolved.extends = config.extends || [];
+    resolved.layers = [...config.layers];
+  }
+  return resolved;
+}
+
 /**
  * Create a Vite development server with Farm.js integration
  */
-export async function createServer(config: FarmConfig = {}, options: { port?: number } = {}) {
+export async function createServer(
+  config: FarmConfig | FarmUserConfig = {},
+  options: { port?: number } = {},
+) {
   let pluginManager: PluginManager | null = null;
   let instrumentation: FarmInstrumentationLifecycle | null = null;
+  let server: ViteDevServer | undefined;
+  let pendingViteServer: ViteDevServer | undefined;
   try {
     const root = config.root || process.cwd();
 
@@ -170,12 +228,13 @@ export async function createServer(config: FarmConfig = {}, options: { port?: nu
     const mode = process.env.NODE_ENV === "production" ? "production" : "development";
     const userConfig = await loadConfig(root, undefined, mode);
 
-    const resolvedConfig = userConfig ? await resolveConfig(userConfig, mode) : null;
-    const instrumentationConfig = resolvedConfig || config;
-    const instrumentationRoot = instrumentationConfig.root || root;
+    const resolvedConfig = userConfig
+      ? await resolveConfig(userConfig, mode)
+      : await resolveInlineConfig(config, mode);
+    const instrumentationRoot = resolvedConfig.root;
     const instrumentationFile = resolveFarmInstrumentationFile(
       instrumentationRoot,
-      instrumentationConfig.srcDir || "src",
+      resolvedConfig.srcDir,
     );
     const instrumentationModule = await loadFarmInstrumentation(
       instrumentationFile,
@@ -190,43 +249,39 @@ export async function createServer(config: FarmConfig = {}, options: { port?: nu
 
     // Initialize plugin manager
     pluginManager = new PluginManager({
-      config: resolvedConfig || config,
+      config: resolvedConfig,
       isDev: mode === "development",
       isProd: mode === "production",
     });
 
-    // Add built-in plugins if config is available
-    if (resolvedConfig) {
-      const redirects = await resolvedConfig.redirects();
-      const headers = await resolvedConfig.headers();
-      const rewrites = await resolvedConfig.rewrites();
+    // File and inline config share the same plugin registration path.
+    const redirects = await resolvedConfig.redirects();
+    const headers = await resolvedConfig.headers();
+    const rewrites = await resolvedConfig.rewrites();
 
-      if (redirects.length > 0) {
-        pluginManager.addPlugin(createRedirectsPlugin(redirects, { i18n: resolvedConfig.i18n }));
-      }
-
-      if (headers.length > 0) {
-        pluginManager.addPlugin(createHeadersPlugin(headers, { i18n: resolvedConfig.i18n }));
-      }
-
-      if (rewrites.length > 0) {
-        pluginManager.addPlugin(createRewritesPlugin(rewrites, { i18n: resolvedConfig.i18n }));
-      }
-
-      // Compression is applied by production adapters. Its hook is a no-op in
-      // development, so do not put every dev response through that lifecycle.
-      if (resolvedConfig.compress && mode === "production") {
-        pluginManager.addPlugin(createCompressionPlugin());
-      }
-
-      if (resolvedConfig.plugins) {
-        pluginManager.addPlugins(resolvedConfig.plugins);
-      }
+    if (redirects.length > 0) {
+      pluginManager.addPlugin(createRedirectsPlugin(redirects, { i18n: resolvedConfig.i18n }));
     }
+
+    if (headers.length > 0) {
+      pluginManager.addPlugin(createHeadersPlugin(headers, { i18n: resolvedConfig.i18n }));
+    }
+
+    if (rewrites.length > 0) {
+      pluginManager.addPlugin(createRewritesPlugin(rewrites, { i18n: resolvedConfig.i18n }));
+    }
+
+    // Compression is applied by production adapters. Its hook is a no-op in
+    // development, so do not put every dev response through that lifecycle.
+    if (resolvedConfig.compress && mode === "production") {
+      pluginManager.addPlugin(createCompressionPlugin());
+    }
+
+    pluginManager.addPlugins(resolvedConfig.plugins);
 
     // Only an app whose environment links it to a Farm Infra project gets this plugin.
     const infraAnalytics =
-      (resolvedConfig || config).analytics !== false ? createFarmInfraAnalyticsPlugin() : null;
+      resolvedConfig.analytics !== false ? createFarmInfraAnalyticsPlugin() : null;
     if (infraAnalytics) pluginManager.addPlugin(infraAnalytics);
 
     if (mode === "development") {
@@ -239,10 +294,17 @@ export async function createServer(config: FarmConfig = {}, options: { port?: nu
     // Run config hooks
     await pluginManager.runHookParallel("init");
 
-    let finalConfig = resolvedConfig || config;
+    let finalConfig: FarmConfig = resolvedConfig;
     finalConfig = await pluginManager.runHookSerial("config", finalConfig);
     finalConfig.renderer = resolveFarmRenderer(finalConfig.renderer);
     const projectRoot = finalConfig.root || process.cwd();
+    finalConfig.images = resolveFarmImageProviderForRuntime(finalConfig.images, {
+      root: projectRoot,
+      dev: true,
+    });
+    if (finalConfig.docs && (finalConfig.docs === true || finalConfig.docs.enabled !== false)) {
+      await loadFarmDocsEngine();
+    }
     const rendererVitePlugins = await loadFarmRendererVitePlugins(
       finalConfig.renderer,
       projectRoot,
@@ -254,17 +316,10 @@ export async function createServer(config: FarmConfig = {}, options: { port?: nu
     if (shouldUseProjectPostcss) {
       logger.info("📦 Using project PostCSS/Tailwind configuration");
     } else {
-      try {
-        const tailwindcss = (await import("@tailwindcss/vite")).default;
-        tailwindVitePlugin = tailwindcss();
-      } catch (error) {
-        logger.warn(
-          `Tailwind plugin auto-enable failed; continuing without it: ${(error as Error).message}`,
-        );
-      }
+      tailwindVitePlugin = await loadTailwindVitePlugin();
     }
 
-    const server = await createViteServer(
+    server = await createViteDevServer(
       mergeFarmViteConfig(
         {
           root: projectRoot,
@@ -279,6 +334,7 @@ export async function createServer(config: FarmConfig = {}, options: { port?: nu
             farmPlugin(finalConfig, pluginManager),
             farmEnvironmentFunctionsPlugin(),
             createBrandingPlugin(),
+            createFarmDevLifecyclePlugin(pluginManager, instrumentation),
           ],
           server: {
             middlewareMode: false,
@@ -332,106 +388,15 @@ export async function createServer(config: FarmConfig = {}, options: { port?: nu
         },
         withPortFlag(finalConfig.vite, options.port),
       ),
+      (candidate) => {
+        pendingViteServer = candidate;
+      },
     );
 
+    pendingViteServer = undefined;
     (server as any).__farmPluginManager = pluginManager;
     (server as any).__farmResolvedConfig = resolvedConfig;
     (server as any).__farmInstrumentation = instrumentation;
-    const closeViteServer = server.close.bind(server);
-
-    /**
-     * Tear the whole dev runtime down once, collecting every failure.
-     *
-     * Plugin disposers own real resources — database pools, queue consumers —
-     * so a caller awaiting close() has to be able to await them too, and a
-     * failure has to surface instead of disappearing into an event listener.
-     */
-    let shutdownPromise: Promise<void> | undefined;
-    const shutdownFarmDevRuntime = (): Promise<void> => {
-      shutdownPromise ??= (async () => {
-        const failures: Array<{ label: string; error: unknown }> = [];
-        const step = async (label: string, run: () => Promise<unknown> | undefined) => {
-          try {
-            await run();
-          } catch (error) {
-            failures.push({ label, error });
-          }
-        };
-
-        // Finish Vite's active transforms, stop serving, release what the
-        // plugins hold, then flush telemetry last so shutdown problems are
-        // still reported.
-        // Vite's close() can deadlock after the client entry has been
-        // transformed: background pre-transforms of its bare imports wait in
-        // the optimized-deps load hook for a dependency run that
-        // depsOptimizer.close() cancels without settling, and the plugin
-        // container then awaits those promises forever (#1263). Draining
-        // Vite's pending transform registry before close preserves its normal
-        // optimizer and pre-transform behavior without triggering that order.
-        // Bound the whole operation so farm's own teardown — plugin disposers,
-        // instrumentation — still runs if Vite finds another shutdown failure.
-        await step("Vite server close", async () => {
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          const timedOut = new Promise<"timeout">((resolve) => {
-            timer = setTimeout(() => resolve("timeout"), VITE_CLOSE_TIMEOUT_MS);
-            timer.unref?.();
-          });
-          try {
-            const outcome = await Promise.race([
-              (async () => {
-                await drainVitePendingRequests(server);
-                await closeViteServer();
-                return "closed" as const;
-              })(),
-              timedOut,
-            ]);
-            if (outcome === "timeout") {
-              logger.error(
-                `Vite server close did not settle within ${VITE_CLOSE_TIMEOUT_MS}ms; ` +
-                  "continuing shutdown without it (https://github.com/farming-labs/farm.js/issues/1263)",
-              );
-              // Best effort, all idempotent: make sure nothing keeps serving
-              // even though the container promise is stranded.
-              await Promise.allSettled([
-                new Promise<void>((resolve) => {
-                  if (!server.httpServer || !server.httpServer.listening) return resolve();
-                  server.httpServer.close(() => resolve());
-                }),
-                Promise.resolve(server.watcher?.close?.()).catch(() => {}),
-                Promise.resolve((server as any).ws?.close?.()).catch(() => {}),
-              ]);
-            }
-          } finally {
-            if (timer) clearTimeout(timer);
-          }
-        });
-        await step("Plugin runtime shutdown", () =>
-          pluginManager?.closeRuntime("dev-server-closed"),
-        );
-        await step("Instrumentation shutdown", () => instrumentation?.shutdown());
-
-        // A single failure propagates unchanged so existing callers keep the
-        // error they already handle; several are aggregated with their stage.
-        if (failures.length === 1) throw failures[0]!.error;
-        if (failures.length > 1) {
-          throw new FarmRuntimeShutdownError(
-            `Dev server shutdown failed during ${failures.map(({ label }) => label).join(", ")}`,
-            failures.map(({ error }) => error),
-          );
-        }
-      })();
-      return shutdownPromise;
-    };
-
-    server.close = shutdownFarmDevRuntime;
-    // A directly closed HTTP server still has to release the same resources.
-    // close() is memoized, so this cannot double-dispose.
-    server.httpServer?.once("close", () => {
-      shutdownFarmDevRuntime().catch((error) => {
-        logger.warn(`Dev server shutdown failed: ${error}`);
-      });
-    });
-
     // Update plugin manager with vite server
     pluginManager.updateContext({ config: finalConfig, viteServer: server });
     await pluginManager.setupPlugins();
@@ -445,13 +410,40 @@ export async function createServer(config: FarmConfig = {}, options: { port?: nu
 
     return server;
   } catch (error) {
-    if (pluginManager) {
-      await pluginManager.runHookParallel("onError", {
+    // The caller never receives a server on failure, so creation owns cleanup.
+    // Report secondary failures without replacing the original startup error or
+    // preventing the remaining resources from being released.
+    const attempt = async (operation: string, run: () => unknown) => {
+      try {
+        await run();
+      } catch (cleanupError) {
+        console.error(`Failed to ${operation} after a server creation failure:`, cleanupError);
+      }
+    };
+    await attempt("run plugin error hooks", () =>
+      pluginManager?.runHookParallel("onError", {
         phase: "createServer",
         error,
-      });
+      }),
+    );
+    if (server) {
+      // The existing close owner drains Vite, plugins, and instrumentation,
+      // even when an individual shutdown step rejects.
+      await attempt("close the dev server", server.close.bind(server));
+    } else {
+      const partialServer = pendingViteServer;
+      if (partialServer) {
+        await attempt("close the partially created Vite server", () =>
+          closeViteDevServer(partialServer, partialServer.close.bind(partialServer)),
+        );
+      }
+      // Construction may fail before the lifecycle wrapper is installed.
+      // These owners are idempotent if a late Vite hook fails after installation.
+      await attempt("close the plugin runtime", () =>
+        pluginManager?.closeRuntime("dev-server-creation-failed"),
+      );
+      await attempt("shut down instrumentation", () => instrumentation?.shutdown());
     }
-    await instrumentation?.shutdown().catch(() => {});
     logger.error(`Failed to create server: ${error}`);
     throw error;
   }
@@ -481,17 +473,27 @@ export function noticeSchemaChangesInBackground(
 /**
  * Start the development server
  */
-export async function startDevServer(config: FarmConfig = {}, port?: number) {
+export async function startDevServer(config: FarmConfig | FarmUserConfig = {}, port?: number) {
   const server = await createServer(config, { port });
+  const pluginManager = (server as any).__farmPluginManager as PluginManager | undefined;
 
   try {
     await server.listen(port);
-    const pluginManager = (server as any).__farmPluginManager as PluginManager | undefined;
     // Shutdown is owned by the close() installed in createServer, which awaits
     // the plugin runtime and reports failures rather than swallowing them.
     await pluginManager?.startRuntime();
     noticeSchemaChangesInBackground((server as any).__farmResolvedConfig);
   } catch (error) {
+    // Creation failures are reported by createServer above. Failures in listen
+    // or runtime.start need their own notification while plugin state is alive.
+    try {
+      await pluginManager?.runHookParallel("onError", { phase: "startDevServer", error });
+    } catch (reportError) {
+      console.error(
+        "Failed to run plugin error hooks after a dev server start failure:",
+        reportError,
+      );
+    }
     // createServer already opened watchers, instrumentation, and plugin
     // resources. A failure here — an occupied port is the common one — would
     // otherwise leave all of them running with no handle to close them, since

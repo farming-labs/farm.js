@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE } from "../server/vite-config";
 import { logger } from "../utils";
 import { defineConfig, farmPlugin, farmServerOnlyEntriesPlugin } from "../vite";
+import { withoutNodePath } from "./without-node-path";
 
 describe("Farm Vite dependency optimization", () => {
   it("pre-bundles framework and route UI entries with React", async () => {
@@ -33,34 +34,57 @@ describe("Farm Vite dependency optimization", () => {
 });
 
 describe("Farm Vite server-only entries", () => {
-  it("rejects @farm.js/core/og in the development browser graph only", async () => {
-    const config = await defineConfig();
-    const names = (config.plugins as Array<{ name?: string }>).map((plugin) => plugin?.name);
-    expect(names).toContain("farm:server-only-entries");
+  type ResolveId = (
+    this: { error(message: string): never },
+    id: string,
+    importer: string | undefined,
+    options: { ssr?: boolean },
+  ) => unknown;
 
-    const resolveId = farmServerOnlyEntriesPlugin().resolveId as (
-      this: { error(message: string): never },
-      id: string,
-      importer: string | undefined,
-      options: { ssr?: boolean },
-    ) => unknown;
+  function createResolveId(root: string) {
+    const plugin = farmServerOnlyEntriesPlugin();
+    (plugin.configResolved as (config: { root: string }) => void)({ root });
     const context = {
       error(message: string): never {
         throw new Error(message);
       },
     };
+    return (plugin.resolveId as ResolveId).bind(context);
+  }
 
-    expect(() =>
-      resolveId.call(context, "@farm.js/core/og", "/app/src/components/share.tsx", {}),
-    ).toThrow(
+  it("rejects @farm.js/core/og in the development browser graph only", async () => {
+    const config = await defineConfig();
+    const names = (config.plugins as Array<{ name?: string }>).map((plugin) => plugin?.name);
+    expect(names).toContain("farm:server-only-entries");
+
+    // The core package resolves @vercel/og from its own dependencies.
+    const resolveId = createResolveId(process.cwd());
+
+    expect(() => resolveId("@farm.js/core/og", "/app/src/components/share.tsx", {})).toThrow(
       "@farm.js/core/og is server-only and cannot be imported into client code (imported by /app/src/components/share.tsx)",
     );
     expect(
-      resolveId.call(context, "@farm.js/core/og", "/app/src/app/api/card/route.tsx", {
-        ssr: true,
-      }),
+      resolveId("@farm.js/core/og", "/app/src/app/api/card/route.tsx", { ssr: true }),
     ).toBeNull();
-    expect(resolveId.call(context, "@farm.js/core/client", "/app/src/page.tsx", {})).toBeNull();
+    expect(resolveId("@farm.js/core/client", "/app/src/page.tsx", {})).toBeNull();
+  });
+
+  it("names the install command when a server graph imports @farm.js/core/og without @vercel/og", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-og-missing-"));
+    try {
+      await fs.writeFile(path.join(root, "package.json"), "{}");
+      const resolveId = createResolveId(root);
+
+      await withoutNodePath(() => {
+        expect(() =>
+          resolveId("@farm.js/core/og", "/app/src/app/api/card/route.tsx", { ssr: true }),
+        ).toThrow(
+          '@farm.js/core/og needs @vercel/og, which is not installed (imported by /app/src/app/api/card/route.tsx). Install "@vercel/og" to render OG and metadata images: pnpm add @vercel/og',
+        );
+      });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 });
 

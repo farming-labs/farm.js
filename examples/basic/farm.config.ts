@@ -1,4 +1,4 @@
-import { defineConfig, definePlugin, type FarmPlugin } from '@farm.js/core';
+import { defineConfig, definePlugin } from '@farm.js/core';
 import { createLoggerPlugin, createEnvPlugin } from '@farm.js/core/plugin/server';
 import { z } from 'zod';
 import { storageDemoClients, STORAGE_DEMO_MOUNTS } from './src/lib/storage-demo.ts';
@@ -10,21 +10,6 @@ declare global {
     __FARM_CLIENT_PLUGIN_EVENTS__?: string[];
   }
 }
-
-const myCustomPlugin: FarmPlugin = {
-  name: 'my-custom-plugin',
-  
-  async beforeRequest(req, res, context) {
-    res.setHeader('X-Powered-By', 'Farm.js');
-  },
-
-  async transformHTML(html, context) {
-    return html.replace(
-      '</head>',
-      '<meta name="custom" content="Farm.js App" /></head>'
-    );
-  },
-};
 
 const runtimeLifecyclePlugin = definePlugin({
   name: 'runtime-lifecycle-e2e',

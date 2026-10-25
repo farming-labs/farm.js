@@ -2,25 +2,27 @@ import { readFileSync, existsSync, readdirSync, mkdirSync } from "fs";
 import { createRequire } from "module";
 import { join, relative, dirname, extname } from "path";
 import { initSync, parse } from "es-module-lexer";
-import type { Loader } from "esbuild";
 import { writeFileIfChanged } from "./write-file-if-changed";
 import { registerAPIRouteShape } from "./api/route-shape";
 import { isFarmAPIRouteFileName } from "./api/route-files";
 
 let moduleLexerInitialized = false;
 
-const JSX_ROUTE_LOADERS: Record<string, Loader> = { ".jsx": "jsx", ".tsx": "tsx" };
-let esbuildTransformSync: typeof import("esbuild").transformSync | undefined;
+type JSXRouteLang = "jsx" | "tsx";
+const JSX_ROUTE_LANGS: Record<string, JSXRouteLang> = { ".jsx": "jsx", ".tsx": "tsx" };
+let oxcTransformSync: (typeof import("rolldown/utils"))["transformSync"] | undefined;
 
 // Required on the first JSX route rather than imported, so loading core never
-// loads esbuild (which refuses to start in DOM-like test environments).
-function transformJSXRoute(content: string, loader: Loader, filePath: string): string {
-  esbuildTransformSync ??= (
+// loads the native transformer until a route needs it.
+function transformJSXRoute(content: string, lang: JSXRouteLang, filePath: string): string {
+  oxcTransformSync ??= (
     createRequire(typeof __filename === "string" ? __filename : import.meta.url)(
-      "esbuild",
-    ) as typeof import("esbuild")
+      "rolldown/utils",
+    ) as typeof import("rolldown/utils")
   ).transformSync;
-  return esbuildTransformSync(content, { loader, sourcefile: filePath }).code;
+  const result = oxcTransformSync(filePath, content, { lang, sourceType: "module" });
+  if (result.errors.length > 0) throw result.errors[0];
+  return result.code;
 }
 
 const API_CLIENT_METHOD_SEGMENTS = new Set([
@@ -147,8 +149,8 @@ export class APITypeGenerator {
     const httpMethods = ["GET", "HEAD", "QUERY", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
     // es-module-lexer cannot read JSX, so compile route.tsx/route.jsx first. The
     // output is only lexed for export names, and type-only exports are erased.
-    const loader = JSX_ROUTE_LOADERS[extname(filePath)];
-    const source = loader ? transformJSXRoute(content, loader, filePath) : content;
+    const lang = JSX_ROUTE_LANGS[extname(filePath)];
+    const source = lang ? transformJSXRoute(content, lang, filePath) : content;
     const [, exports] = parse(source);
     const valueExports = new Set(
       exports

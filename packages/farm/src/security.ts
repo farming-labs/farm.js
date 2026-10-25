@@ -1,3 +1,5 @@
+import { _markFarmOwnedResponse, _withFarmResponseHeaders } from "./owned-response";
+
 export type FarmCspDirectiveValue = string | readonly string[] | boolean | null | undefined;
 
 export type FarmCspDirectives = Readonly<Record<string, FarmCspDirectiveValue>>;
@@ -258,17 +260,17 @@ export function applyFarmCspNonceToResponse(
 
   const nonce = createFarmCspNonce(security)!;
   const securityHeader = getFarmSecurityHeader(security, nonce)!;
+
+  if (!response.body) {
+    return _withFarmResponseHeaders(response, (headers) => {
+      headers.set(securityHeader.key, securityHeader.value);
+      headers.delete("content-length");
+    });
+  }
+
   const headers = new Headers(response.headers);
   headers.set(securityHeader.key, securityHeader.value);
   headers.delete("content-length");
-
-  if (!response.body) {
-    return new Response(null, {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    });
-  }
 
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
@@ -286,11 +288,14 @@ export function applyFarmCspNonceToResponse(
     }),
   );
 
-  return new Response(body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  // The nonce rewrite replaces the body, so this is a new Response Farm owns.
+  return _markFarmOwnedResponse(
+    new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    }),
+  );
 }
 
 /**

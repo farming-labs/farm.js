@@ -316,7 +316,7 @@ if (
 }
 if (
   !keyedReorderOn.code.includes("FarmCompiledKeyedRows") ||
-  !keyedReorderOn.code.includes("keyed-rows:reorder-hinted") ||
+  !keyedReorderOn.code.includes("keyed-rows:plain-reorder-hinted") ||
   !keyedReorderOn.code.includes("reorderIndexIndependent")
 ) {
   throw new Error("Keyed reorder fixture did not retain its isolated reorder-hint runtime.");
@@ -335,7 +335,7 @@ if (keyedReorderOn.code.includes("keyed-rows:map-reorder-hinted")) {
 }
 if (
   !keyedSortOn.code.includes("FarmCompiledKeyedRows") ||
-  !keyedSortOn.code.includes("keyed-rows:reorder-hinted") ||
+  !keyedSortOn.code.includes("keyed-rows:plain-reorder-hinted") ||
   !keyedSortOn.code.includes("reorderIndexIndependent")
 ) {
   throw new Error("Keyed sort fixture did not retain its isolated reorder-hint runtime.");
@@ -368,7 +368,8 @@ for (const [name, output] of [
   }
   if (
     output.code.includes("reorderIndexIndependent") ||
-    output.code.includes("keyed-rows:reorder-hinted")
+    output.code.includes("keyed-rows:reorder-hinted") ||
+    output.code.includes("keyed-rows:plain-reorder-hinted")
   ) {
     throw new Error(`${name} fixture retained the optional reorder-hint runtime.`);
   }

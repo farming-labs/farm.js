@@ -14,7 +14,8 @@ import { imageSize } from "image-size";
 import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
-import { resolveConfig } from "../config";
+import { signFarmInfraManifestRequest } from "../app-manifest";
+import { loadConfig, resolveConfig } from "../config";
 import { defineIntegration } from "../integrations";
 import { definePlugin } from "../plugin";
 import { logger } from "../utils";
@@ -384,6 +385,63 @@ async function expectNitroFallback(root: string): Promise<void> {
 }
 
 describe("production prebuilt SSR output", () => {
+  it("finishes error reporting after another reporter fails in built Node output", async () => {
+    const root = await createProductionFixture();
+    const markerPath = path.join(root, "reported.json");
+    try {
+      await fs.writeFile(
+        path.join(root, "farm.config.ts"),
+        `import { writeFile } from "node:fs/promises";
+export default { plugins: [
+  {
+    name: "failing-reporter",
+    runtime: { before({ request }) {
+      if (new URL(request.url).pathname === "/failure") throw new Error("original request failure");
+    } },
+    onError() { throw new Error("reporter failure"); },
+  },
+  {
+    name: "remaining-reporter",
+    async onError({ error, phase }) {
+      await writeFile(${JSON.stringify(markerPath)}, JSON.stringify({ message: error.message, phase }));
+    },
+  },
+] };`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "error-reporter-isolation-test",
+          plugins: [
+            definePlugin({ name: "failing-reporter", runtime: { before() {} }, onError() {} }),
+            definePlugin({ name: "remaining-reporter", onError() {} }),
+          ],
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(500);
+          await response.text();
+          expect(JSON.parse(await fs.readFile(markerPath, "utf8"))).toEqual({
+            message: "original request failure",
+            phase: "runtime",
+          });
+          const healthy = await fetch(new URL("/", response.url));
+          expect(healthy.status).toBe(200);
+          expect(await healthy.text()).toContain("prebuilt SSR output");
+        },
+        "/failure",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("preserves root-to-leaf layout order in a built nested dynamic route", async () => {
     const root = await createProductionFixture();
     try {
@@ -1069,6 +1127,7 @@ export default function Page() {
           images: { provider: "none" },
           telemetry: false,
           openapi: { enabled: true, title: "Base Path API" },
+          agent: { apiCatalog: true },
           generateBuildId: () => "production-base-path-openapi-test",
         },
         "production",
@@ -1086,6 +1145,21 @@ export default function Page() {
           expect(spec.status).toBe(200);
           expect((await spec.json()).paths["/health"].get.operationId).toBe("get_health");
 
+          const catalog = await fetch(new URL("/workspace/.well-known/api-catalog", response.url));
+          expect(catalog.status).toBe(200);
+          expect(catalog.headers.get("content-type")).toContain("application/linkset+json");
+          expect(catalog.headers.get("link")).toBe(
+            '</workspace/.well-known/api-catalog>; rel="api-catalog"',
+          );
+          const [, catalogApi] = (await catalog.json()).linkset;
+          // The links resolve on the production server, as in development.
+          expect((await fetch(new URL(`${catalogApi.anchor}/health`, response.url))).status).toBe(
+            200,
+          );
+          expect(
+            (await fetch(new URL(catalogApi["service-desc"][0].href, response.url))).status,
+          ).toBe(200);
+
           const page = await fetch(new URL("/workspace/admin", response.url), {
             headers: { accept: "text/html" },
           });
@@ -1098,6 +1172,203 @@ export default function Page() {
           expect(await markdown.text()).toContain("admin page");
         },
         "/workspace/docs/reference",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("lists the MCP server in /.well-known/ai-catalog.json, its card, and llms.txt", async () => {
+    const root = await createProductionFixture();
+    // What @farm.js/mcp does when it mounts its endpoint.
+    const plugin = `{
+    name: "farm:api-mcp",
+    routes: ({ route }) => {
+      _publishFarmMCPCatalog(
+        { name: "fixture", version: "2.0.0", path: "/api/mcp", title: "Fixture" },
+        [],
+        { protocolVersions: ["2025-11-25"] },
+      );
+      return [route.post("/api/mcp", { handler: () => Response.json({ ok: true }) })];
+    },
+  }`;
+
+    try {
+      await fs.writeFile(
+        path.join(root, "farm.config.ts"),
+        `import { _publishFarmMCPCatalog } from "@farm.js/core/api/runtime";
+export default { basePath: "/workspace", plugins: [${plugin}] };`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          basePath: "/workspace",
+          images: { provider: "none" },
+          telemetry: false,
+          plugins: [
+            definePlugin({
+              name: "farm:api-mcp",
+              routes: ({ route }) => [
+                route.post("/api/mcp", { handler: () => Response.json({ ok: true }) }),
+              ],
+            }),
+          ],
+          generateBuildId: () => "production-ai-catalog-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(response.headers.get("content-type")).toBe(
+            "application/ai-catalog+json; charset=utf-8",
+          );
+          const origin = new URL(response.url).origin;
+          const { entries } = await response.json();
+          expect(entries).toEqual([
+            expect.objectContaining({
+              identifier: "urn:air:127.0.0.1:mcp:fixture",
+              type: "application/mcp-server-card+json",
+              url: `${origin}/api/mcp/server-card`,
+              displayName: "Fixture",
+            }),
+          ]);
+
+          const ard = await fetch(`${origin}/workspace/.well-known/ard.json`);
+          expect((await ard.json()).entries).toEqual(entries);
+
+          // The card is served below the endpoint, before the API routes answer.
+          const card = await fetch(entries[0].url);
+          expect(card.status).toBe(200);
+          expect(card.headers.get("access-control-allow-origin")).toBe("*");
+          expect(await card.json()).toMatchObject({
+            version: "2.0.0",
+            title: "Fixture",
+            remotes: [
+              {
+                type: "streamable-http",
+                url: `${origin}/api/mcp`,
+                supportedProtocolVersions: ["2025-11-25"],
+              },
+            ],
+          });
+          const etag = card.headers.get("etag")!;
+          expect((await fetch(entries[0].url, { headers: { "if-none-match": etag } })).status).toBe(
+            304,
+          );
+          expect((await fetch(`${origin}/api/mcp`, { method: "POST" })).status).toBe(200);
+
+          const llms = await (await fetch(`${origin}/workspace/llms.txt`)).text();
+          expect(llms).toContain("## MCP");
+          expect(llms).toContain(`- [Fixture](${origin}/api/mcp)`);
+          expect(llms).toContain(`(${origin}/workspace/.well-known/ai-catalog.json)`);
+        },
+        "/workspace/.well-known/ai-catalog.json",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("lists the MCP endpoint a docs runtime registers, without @farm.js/mcp", async () => {
+    const root = await createProductionFixture();
+    // A docs runtime like @farming-labs/farmjs: it knows its MCP route, name, and version.
+    await fs.mkdir(path.join(root, "node_modules", "fake-docs-adapter"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "node_modules", "fake-docs-adapter", "package.json"),
+      JSON.stringify({
+        name: "fake-docs-adapter",
+        type: "module",
+        exports: { "./server": "./server.js", "./react": "./react.js" },
+      }),
+    );
+    await fs.writeFile(
+      path.join(root, "node_modules", "fake-docs-adapter", "server.js"),
+      `export function createFarmDocsRuntimeHandler(_config, options) {
+  options.registerMCPServer?.({
+    name: "dev.farmjs/docs",
+    version: "0.2.121",
+    title: "Fixture Docs",
+    path: "/api/docs/mcp",
+  });
+  return async (request) => {
+    const { pathname } = new URL(request.url);
+    if (pathname === "/api/docs/mcp/server-card") return new Response("adapter card");
+    return pathname === "/api/docs/mcp" ? Response.json({ mcp: true }) : null;
+  };
+}`,
+    );
+    await fs.writeFile(
+      path.join(root, "node_modules", "fake-docs-adapter", "react.js"),
+      "export function hydrateFarmDocs() {}",
+    );
+    await fs.mkdir(path.join(root, "docs"), { recursive: true });
+    await fs.writeFile(path.join(root, "docs", "guide.md"), "# Guide\n");
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          // The docs MCP is not an API route, so the API's public path never moves it.
+          api: { basePath: "/v1" },
+          agent: { llmsTxt: { full: false } },
+          docs: {
+            enabled: true,
+            entry: "/docs",
+            contentDir: "docs",
+            adapter: {
+              id: "fake",
+              protocol: 1,
+              server: "fake-docs-adapter/server",
+              react: "fake-docs-adapter/react",
+            },
+          },
+          generateBuildId: () => "production-docs-mcp-catalog-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const origin = new URL(response.url).origin;
+          const { entries } = await response.json();
+          expect(entries).toEqual([
+            expect.objectContaining({
+              identifier: "urn:air:127.0.0.1:mcp:docs",
+              url: `${origin}/api/docs/mcp/server-card`,
+              displayName: "Fixture Docs",
+              version: "0.2.121",
+            }),
+          ]);
+
+          // Core answers the card before the docs runtime, as in dev.
+          const card = await fetch(entries[0].url);
+          expect(card.headers.get("content-type")).toBe(
+            "application/mcp-server-card+json; charset=utf-8",
+          );
+          expect(await card.json()).toMatchObject({
+            name: "dev.farmjs/docs",
+            remotes: [{ type: "streamable-http", url: `${origin}/api/docs/mcp` }],
+          });
+          expect(await (await fetch(`${origin}/api/docs/mcp`)).json()).toEqual({ mcp: true });
+
+          const llms = await (await fetch(`${origin}/llms.txt`)).text();
+          expect(llms).toContain("## MCP");
+          expect(llms).toContain(`- [Fixture Docs](${origin}/api/docs/mcp)`);
+        },
+        "/.well-known/ai-catalog.json",
       );
     } finally {
       await fs.rm(root, { recursive: true, force: true });
@@ -1152,6 +1423,196 @@ export default function Page() {
     } finally {
       if (previous === undefined) delete process.env.FARM_TEST_DATABASE_URL;
       else process.env.FARM_TEST_DATABASE_URL = previous;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("answers the Markdown mirror of a sign-in-protected page with its redirect", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.mkdir(path.join(root, "src", "app", "account"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "account", "page.tsx"),
+        `
+import { redirect } from "@farm.js/core/navigation";
+
+export default function Account() {
+  redirect("/login?next=%2Faccount");
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "production-markdown-redirect-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          // Before, the mirror gave up on the bodiless redirect and the request fell
+          // through to a 404 saying the page had not been published.
+          expect(response.status).toBe(307);
+          expect(response.headers.get("location")).toBe("/login?next=%2Faccount");
+          expect(await response.text()).toContain("redirects to");
+        },
+        "/account.md",
+        { redirect: "manual" },
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("describes a page's forms at its Markdown mirror's ?actions view", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.mkdir(path.join(root, "src", "app", "contact"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "contact", "page.tsx"),
+        `export default function Contact() {
+  return (
+    <main>
+      <h1>Contact</h1>
+      <form method="post" action="/api/contact">
+        <label htmlFor="email">Email</label>
+        <input id="email" name="email" type="email" required />
+        <button>Send</button>
+      </form>
+    </main>
+  );
+}`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "production-markdown-actions-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(await response.text()).toContain("Actions: /contact.md?actions");
+
+          const actions = await fetch(new URL("/contact.md?actions", response.url));
+          expect(actions.status).toBe(200);
+          expect(actions.headers.get("content-type")).toBe("application/json; charset=utf-8");
+          expect((await actions.json()).actions).toEqual([
+            {
+              type: "form",
+              method: "POST",
+              action: "/api/contact",
+              enctype: "application/x-www-form-urlencoded",
+              fields: [{ name: "email", type: "email", label: "Email", required: true }],
+              submit: [{ label: "Send" }],
+            },
+          ]);
+
+          // The other views reach the production mirror too: a page that fits a
+          // budget comes back whole, and a bad cursor is reported, not ignored.
+          const outline = await fetch(new URL("/contact.md?outline", response.url));
+          expect(await outline.text()).toContain("- [Contact](/contact.md?section=contact)");
+          const budgeted = await fetch(new URL("/contact.md?max_tokens=100", response.url));
+          expect(budgeted.status).toBe(200);
+          expect(budgeted.headers.get("link") ?? "").not.toContain('rel="next"');
+          expect(await budgeted.text()).toContain("# Contact");
+          const stale = await fetch(
+            new URL("/contact.md?max_tokens=100&cursor=1.stale", response.url),
+          );
+          expect(stale.status).toBe(409);
+        },
+        "/contact.md",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("advertises the Markdown mirror of a prerendered page", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.mkdir(path.join(root, "src", "app", "pricing"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "pricing", "page.tsx"),
+        `export const dynamic = "force-static";\nexport default function Pricing() { return <main><h1>Pricing</h1><p>Plans.</p></main>; }`,
+      );
+      await fs.mkdir(path.join(root, "src", "app", "about"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "about", "page.tsx"),
+        `export const dynamic = "force-static";\nexport default function About() { return <main><h1>About</h1></main>; }`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          // A lowercase Link of the app's own sits next to the mirror's Link.
+          routeRules: {
+            "/about": { headers: { link: '</about.css>; rel="preload"; as="style"' } },
+          },
+          generateBuildId: () => "production-prerender-markdown-link-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+      // The page is served as a static file, so it cannot negotiate Accept; the
+      // Link header is how agents find its mirror.
+      expect(
+        await fs
+          .stat(path.join(root, ".farm", ".output", "public", "pricing", "index.html"))
+          .then(() => true),
+      ).toBe(true);
+
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.headers.get("content-type")).toContain("text/html");
+          expect(response.headers.get("link")).toBe(
+            '</pricing.md>; rel="alternate"; type="text/markdown"',
+          );
+        },
+        "/pricing",
+      );
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.headers.get("content-type")).toContain("text/html");
+          expect(response.headers.get("link")).toBe(
+            '</about.css>; rel="preload"; as="style", </about.md>; rel="alternate"; type="text/markdown"',
+          );
+        },
+        "/about",
+      );
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+          expect(await response.text()).toContain("# Pricing");
+        },
+        "/pricing.md",
+      );
+    } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 120_000);
@@ -1802,6 +2263,347 @@ export function CopyButton({ text }) {
     },
     120_000,
   );
+
+  it("records MCP tool calls in an app whose plugins only add routes", async () => {
+    const root = await createProductionFixture();
+    const received: string[] = [];
+    const receiver = createHttpServer((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => (body += chunk));
+      request.on("end", () => {
+        received.push(body);
+        response.writeHead(202).end();
+      });
+    });
+    await new Promise<void>((resolve) => receiver.listen(0, "127.0.0.1", resolve));
+    const receiverPort = (receiver.address() as { port: number }).port;
+    const events = () => received.flatMap((body) => JSON.parse(body).events);
+
+    try {
+      // Like @farm.js/mcp without OAuth: a route and no runtime hooks, so the server has no
+      // plugin runtime. The route reports its tool calls the way @farm.js/mcp does, after an
+      // await, as a tool callback would.
+      await fs.writeFile(
+        path.join(root, "farm.config.ts"),
+        `import { definePlugin } from "@farm.js/core";
+import { emitFarmEvent } from "@farm.js/core/observability";
+const call = (tool, outcome) =>
+  emitFarmEvent({ type: "mcp.tool.complete", route: "/api/mcp", server: "fixture", tool, outcome, durationMs: 3 });
+export default {
+  plugins: [definePlugin({
+    name: "fixture-mcp",
+    routes: ({ route }) => [
+      route.post("/api/mcp", {
+        handler: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          call("list_users", "success");
+          call("remove_user", "error");
+          return { ok: true };
+        },
+      }),
+    ],
+  })],
+};
+`,
+      );
+      const userConfig = await loadConfig(root, undefined, "production");
+      const config = await resolveConfig(
+        {
+          ...userConfig,
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "infra-tool-calls-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          await vi.waitFor(() => expect(events()).toHaveLength(3), { timeout: 5_000 });
+        },
+        "/api/mcp",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "user-agent": "Claude-User/1.0" },
+          body: "{}",
+        },
+        {
+          FARMJS_API_KEY: `fti_${"r".repeat(43)}`,
+          FARMJS_API_URL: `http://127.0.0.1:${receiverPort}`,
+        },
+      );
+      const request = events().find(({ kind }) => kind === "request");
+      expect(request).toMatchObject({ method: "POST", status: 200 });
+      // Each call is tied to the request that carried it.
+      expect(
+        events()
+          .filter(({ kind }) => kind === "mcp.tool")
+          .map(({ tool, outcome, requestId, route, agent }) => ({
+            tool,
+            outcome,
+            requestId,
+            route,
+            agent,
+          })),
+      ).toEqual(
+        ["list_users:success", "remove_user:error"].map((call) => ({
+          tool: call.split(":")[0],
+          outcome: call.split(":")[1],
+          requestId: request.requestId,
+          route: request.route,
+          agent: request.agent,
+        })),
+      );
+    } finally {
+      await new Promise((resolve) => receiver.close(resolve));
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("serves /.well-known/farmjs.json to anyone, and the full view to Farm Infra's signed request", async () => {
+    const root = await createProductionFixture();
+    const key = `fti_${"m".repeat(43)}`;
+    const keyHash = createHash("sha256").update(key).digest("hex");
+    // What @farm.js/mcp does when it mounts its endpoint: publish the tools and their schemas.
+    // "fixture" is public; "admin" requires authorize.
+    const publish = `_publishFarmMCPCatalog(
+      { name: "fixture", version: "1.0.0", path: "/api/mcp" },
+      [
+        { name: "list_users", title: "List users", kind: "standalone", readOnlyHint: true },
+        { name: "remove_user", kind: "endpoint", method: "DELETE", path: "/api/users/[id]", destructiveHint: true },
+      ],
+      {
+        public: true,
+        schemas: { list_users: { input: { type: "object", properties: { q: { type: "string" } } } } },
+        resources: [{ name: "handbook", uri: "docs://handbook" }],
+        prompts: [],
+      },
+    );
+    _publishFarmMCPCatalog(
+      { name: "admin", version: "1.0.0", path: "/api/admin/mcp" },
+      [{ name: "ban_user", kind: "standalone" }],
+      { public: false, resources: [{ name: "audit", uri: "admin://audit" }] },
+    );`;
+
+    try {
+      await fs.writeFile(
+        path.join(root, "farm.config.ts"),
+        `import { _publishFarmMCPCatalog } from "@farm.js/core/api/runtime";
+import { defineIntegration } from "@farm.js/core";
+export default {
+  integrations: { errors: defineIntegration({ category: "monitoring", type: "fixture-errors", instance: {} }) },
+  plugins: [{ name: "farm:webmcp" }, {
+    name: "fixture-mcp",
+    routes: ({ route }) => {
+      ${publish}
+      return [route.post("/api/mcp", { handler: () => Response.json({ ok: true }) })];
+    },
+  }],
+};`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          deploymentId: "manifest-test",
+          integrations: {
+            errors: defineIntegration({
+              category: "monitoring",
+              type: "fixture-errors",
+              instance: {},
+            }),
+          },
+          plugins: [
+            // The webmcp plugin's name turns on reading WebMCP tools from the source.
+            definePlugin({ name: "farm:webmcp" }),
+            definePlugin({
+              name: "fixture-mcp",
+              routes: ({ route }) => [
+                route.post("/api/mcp", { handler: () => Response.json({ ok: true }) }),
+              ],
+            }),
+          ],
+        },
+        "production",
+      );
+      // A browser tool in the app's source, read at build time; nothing imports it.
+      await fs.writeFile(
+        path.join(root, "src", "lib", "browser-tools.ts"),
+        `import { defineWebMCPTool } from "@farm.js/webmcp/client";
+export const listTodos = defineWebMCPTool({
+  name: "list_todos",
+  description: "List the current todos.",
+  inputSchema: { type: "object", additionalProperties: false },
+  annotations: { readOnlyHint: true },
+  execute: async () => ({ todos: [] }),
+});`,
+      );
+      await build(config, { root, preset: "node-server" });
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      // Reading WebMCP tools is build work: the server never loads the parser's native binary.
+      await expect(fs.stat(path.join(serverDir, "node_modules", "rolldown"))).rejects.toThrow();
+      const linked = { FARMJS_API_KEY: key, FARMJS_API_URL: "http://127.0.0.1:9" };
+
+      // Anyone, linked to Farm Infra or not: the public view.
+      for (const env of [undefined, linked]) {
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+            expect(response.headers.get("cache-control")).toBe(
+              "public, max-age=0, must-revalidate",
+            );
+            expect(response.headers.get("access-control-allow-origin")).toBe("*");
+            const manifest = await response.json();
+            expect(manifest).toMatchObject({
+              schemaVersion: 1,
+              app: { basePath: "/", build: "manifest-test" },
+              integrations: [{ key: "errors", category: "monitoring", type: "fixture-errors" }],
+            });
+            expect(manifest.mcp.servers).toEqual([
+              expect.objectContaining({
+                name: "fixture",
+                authorization: "none",
+                resources: [{ name: "handbook", uri: "docs://handbook" }],
+                tools: [
+                  expect.objectContaining({ name: "list_users", source: "defineTool" }),
+                  { name: "remove_user", source: "endpoint", destructiveHint: true },
+                ],
+              }),
+              {
+                name: "admin",
+                version: "1.0.0",
+                path: "/api/admin/mcp",
+                authorization: "required",
+                resources: [],
+                prompts: [],
+                tools: [],
+              },
+            ]);
+            const body = JSON.stringify(manifest);
+            for (const hidden of [key, "/api/users/[id]", "ban_user", "admin://audit"]) {
+              expect(body).not.toContain(hidden);
+            }
+          },
+          "/.well-known/farmjs.json",
+          undefined,
+          env,
+        );
+      }
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(response.headers.get("cache-control")).toBe("private, no-store");
+          const manifest = await response.json();
+          expect(manifest).toMatchObject({
+            schemaVersion: 1,
+            app: { basePath: "/", build: "manifest-test" },
+            mcp: {
+              servers: [
+                {
+                  name: "fixture",
+                  path: "/api/mcp",
+                  authorization: "none",
+                  resources: [{ name: "handbook", uri: "docs://handbook" }],
+                  tools: [
+                    {
+                      name: "list_users",
+                      source: "defineTool",
+                      readOnlyHint: true,
+                      inputSchema: { type: "object", properties: { q: { type: "string" } } },
+                    },
+                    {
+                      name: "remove_user",
+                      source: "endpoint",
+                      method: "DELETE",
+                      path: "/api/users/[id]",
+                      destructiveHint: true,
+                    },
+                  ],
+                },
+                // Infra's view lists the tools of a server that requires authorize.
+                {
+                  name: "admin",
+                  authorization: "required",
+                  tools: [{ name: "ban_user" }],
+                  resources: [{ name: "audit" }],
+                },
+              ],
+            },
+            webmcp: {
+              enabled: true,
+              tools: [
+                {
+                  name: "list_todos",
+                  description: "List the current todos.",
+                  readOnlyHint: true,
+                  inputSchema: { type: "object", additionalProperties: false },
+                  inputSchemaSource: "literal",
+                },
+              ],
+            },
+            integrations: [{ key: "errors", category: "monitoring", type: "fixture-errors" }],
+          });
+          expect(manifest.plugins).toEqual(expect.arrayContaining(["farm:webmcp", "fixture-mcp"]));
+          expect(JSON.stringify(manifest)).not.toContain(key);
+        },
+        "/.well-known/farmjs.json",
+        { headers: { "farmjs-infra-signature": await signFarmInfraManifestRequest(keyHash) } },
+        linked,
+      );
+      // Farm 0.1.34 served it at /.well-known/farmjs: that path still answers, signed or not.
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(await response.json()).toMatchObject({ schemaVersion: 1 });
+        },
+        "/.well-known/farmjs",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("serves no /.well-known/farmjs.json with agent.manifest: false, signed or not", async () => {
+    const root = await createProductionFixture();
+    const key = `fti_${"o".repeat(43)}`;
+    const keyHash = createHash("sha256").update(key).digest("hex");
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          agent: { manifest: false },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.headers.get("content-type") ?? "").not.toContain("application/json");
+        },
+        "/.well-known/farmjs.json",
+        { headers: { "farmjs-infra-signature": await signFarmInfraManifestRequest(keyHash) } },
+        { FARMJS_API_KEY: key, FARMJS_API_URL: "http://127.0.0.1:9" },
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
 
   it("marks Nitro's prerender worker so built-in analytics ignores build requests", async () => {
     const root = await createProductionFixture();
@@ -4090,6 +4892,32 @@ export const ProgrammaticNotFoundRoute = createRoute("/programmatic-not-found", 
   component: ProgrammaticPage,
 });
 
+export const ProgrammaticGuardedRoute = createRoute("/programmatic-guarded/[id]", {
+  guard() {
+    notFound();
+  },
+  generateMetadata({ params }) {
+    return {
+      title: "guarded-private-title-" + params.id,
+      description: "guarded-private-description",
+      openGraph: { title: "guarded-private-og" },
+    };
+  },
+  notFound: ProgrammaticNotFound,
+  component: ProgrammaticPage,
+});
+
+export const ProgrammaticGuardErrorRoute = createRoute("/programmatic-guard-error", {
+  guard() {
+    throw new Error("guard-refused");
+  },
+  generateMetadata() {
+    return { title: "guard-error-private-title" };
+  },
+  error: ProgrammaticError,
+  component: ProgrammaticPage,
+});
+
 export const ProgrammaticRedirectRoute = createRoute("/programmatic-redirect", {
   data: {
     async main() {
@@ -4105,6 +4933,8 @@ export default defineRoutes(() => [
   ProgrammaticPendingRoute,
   ProgrammaticErrorRoute,
   ProgrammaticNotFoundRoute,
+  ProgrammaticGuardedRoute,
+  ProgrammaticGuardErrorRoute,
   ProgrammaticRedirectRoute,
 ]);
 `.trim(),
@@ -4196,6 +5026,26 @@ export default defineRoutes(() => [
             await expect(response.text()).resolves.toContain("programmatic-not-found");
           },
           "/programmatic-not-found",
+        );
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(404);
+            const html = await response.text();
+            expect(html).toContain("programmatic-not-found");
+            expect(html).not.toContain("guarded-private");
+          },
+          "/programmatic-guarded/42",
+        );
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(500);
+            const html = await response.text();
+            expect(html).toContain("guard-refused");
+            expect(html).not.toContain("guard-error-private-title");
+          },
+          "/programmatic-guard-error",
         );
         await runProductionRequest(
           serverDir,
@@ -4926,6 +5776,11 @@ export default function OpenGraphImage() {
       expect(serverOutput).toContain("renderToReadableStream");
       expect(serverOutput).not.toMatch(/\bfrom\s*["']react(?:-dom(?:\/server)?)?["']/);
       expect(serverOutput).not.toMatch(/\bimport\s*\(?\s*["']react(?:-dom(?:\/server)?)?["']/);
+      // React picks its development or production build from NODE_ENV at
+      // runtime unless the bundler replaces the check; the worker ships only
+      // production. This warning exists only in React's development builds.
+      expect(serverOutput).not.toContain("Each child in a list should have a unique");
+      expect(serverOutput).not.toMatch(/process\.env\.NODE_ENV|\.env\.NODE_ENV\s*===/);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

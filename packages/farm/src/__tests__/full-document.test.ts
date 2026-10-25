@@ -13,6 +13,7 @@ import {
   ensureFarmDocumentRoot,
   extractFarmFullDocument,
   hasFarmDocumentIcon,
+  HOISTED_HEAD_ELEMENT,
   isFarmFullDocument,
   opensFarmFullDocument,
   removeFarmDocumentTitles,
@@ -38,8 +39,43 @@ function productionExtractor(): typeof extractFarmFullDocument {
   const end = source.indexOf("function ensureFarmDocumentHead(markup)", start);
   expect(start).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
-  const generated = new Function("return `" + source.slice(start, end) + "`;")();
+  const generated = new Function(
+    "HOISTED_HEAD_ELEMENT",
+    "return `" + source.slice(start, end) + "`;",
+  )(HOISTED_HEAD_ELEMENT);
   return new Function(generated + "; return extractFarmFullDocument;")();
+}
+
+// Render a full-document root layout inside Farm's boundary wrapper with real React output.
+async function renderLayout(head: React.ReactNode): Promise<string> {
+  const tree = React.createElement(
+    "div",
+    { "data-farm-layout-boundary": "true", style: { display: "contents" } },
+    React.createElement(
+      "html",
+      { lang: "en" },
+      React.createElement("head", null, head),
+      React.createElement("body", null, React.createElement("main", null, "hello")),
+    ),
+  );
+  const chunks: Buffer[] = [];
+  const destination = new Writable({
+    write(chunk, _encoding, done) {
+      chunks.push(Buffer.from(chunk));
+      done();
+    },
+  });
+  const completed = finished(destination);
+  const stream = renderToPipeableStream(tree, {
+    onAllReady() {
+      stream.pipe(destination);
+    },
+    onError(error) {
+      destination.destroy(error instanceof Error ? error : new Error(String(error)));
+    },
+  });
+  await completed;
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 function productionEnsureHead(): typeof ensureFarmDocumentHead {
@@ -104,6 +140,15 @@ describe.each([
     ).toBe(
       '<html><head></head><body class="app"><div id="root"><nav>n</nav><main>m</main></div></body></html>',
     );
+  });
+
+  it("wraps the body even when page content has id=root", () => {
+    const document =
+      '<html><head></head><body><nav>n</nav><main><h3 id="root"><a href="#root">Root</a></h3></main></body></html>';
+    const wrapped = ensureRoot(document);
+    expect(wrapped).toContain('<body><div id="root"><nav>n</nav>');
+    expect(wrapped).toContain('<h3 id="root">');
+    expect(wrapped.endsWith("</main></div></body></html>")).toBe(true);
   });
 
   it("leaves a document that already has #root unchanged", () => {
@@ -212,6 +257,41 @@ describe.each([
         "<body><main>hello</main></body></html>",
     );
   });
+
+  it.each([
+    [
+      "an async script",
+      React.createElement("script", { async: true, src: "https://analytics.example/a.js" }),
+      '<script async="" src="https://analytics.example/a.js"></script>',
+    ],
+    [
+      "a precedence style",
+      React.createElement(
+        "style",
+        { href: "theme", precedence: "default" },
+        "body{color:red}main>p{margin:0}",
+      ),
+      '<style data-precedence="default" data-href="theme">body{color:red}main>p{margin:0}</style>',
+    ],
+    [
+      "a charset meta and title",
+      [
+        React.createElement("meta", { key: "c", charSet: "utf-8" }),
+        React.createElement("title", { key: "t" }, "App"),
+      ],
+      '<meta charSet="utf-8"/><title>App</title>',
+    ],
+  ])(
+    "finds a wrapped document behind %s React hoists ahead of it",
+    async (_name, head, hoisted) => {
+      const markup = await renderLayout(head);
+      // React writes the element before Farm's wrapper, not inside the layout's <head>.
+      expect(markup.startsWith(hoisted)).toBe(true);
+      expect(extract(markup)).toBe(
+        `<html lang="en"><head>${hoisted}</head><body><main>hello</main></body></html>`,
+      );
+    },
+  );
 
   it("returns hoisted elements to a document that renders no <head>", () => {
     expect(
@@ -333,6 +413,26 @@ describe("full-document detection", () => {
       classifyFarmDocumentPrefix(`${hoisted}<div style="display:contents"><html lang="en">`),
     ).toBe("document");
     expect(classifyFarmDocumentPrefix(`${hoisted}${fragmentMarkup}`)).toBe("fragment");
+  });
+
+  it("classifies a layout whose async scripts and precedence styles React hoisted", async () => {
+    const markup = await renderLayout([
+      React.createElement("meta", { key: "c", charSet: "utf-8" }),
+      React.createElement("title", { key: "t" }, "App"),
+      React.createElement("script", { key: "s", async: true, src: "/analytics.js" }),
+      React.createElement("style", { key: "p", href: "theme", precedence: "high" }, "a{}"),
+    ]);
+    const hoisted = markup.slice(0, markup.indexOf("<div"));
+    expect(hoisted).toContain("<script async");
+    expect(hoisted).toContain("data-precedence");
+    expect(classifyFarmDocumentPrefix(hoisted)).toBe("pending");
+    expect(classifyFarmDocumentPrefix(markup)).toBe("document");
+    expect(opensFarmFullDocument(markup)).toBe(true);
+  });
+
+  it("still treats an inline script or unhoisted style ahead of a layout as a fragment", () => {
+    expect(classifyFarmDocumentPrefix(`<script>boot()</script>${fragmentMarkup}`)).toBe("fragment");
+    expect(classifyFarmDocumentPrefix(`<style>a{}</style>${fragmentMarkup}`)).toBe("fragment");
   });
 
   it("opensFarmFullDocument sees a streamed prefix before </html> arrives", () => {

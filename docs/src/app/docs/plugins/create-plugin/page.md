@@ -8,6 +8,75 @@ section: "Plugin Ecosystem"
 
 Build a plugin when behavior belongs to the framework rather than one product integration. Good examples include request tracing, security policy, HTML transforms, route analysis, deployment adapters, development tooling, and global instrumentation.
 
+## Options reference
+
+Every option a plugin can set. The sections below show each one in use.
+
+| Option                                      | Runs in           | What it is for                                                                  |
+| ------------------------------------------- | ----------------- | ------------------------------------------------------------------------------- |
+| `name` (required)                           | -                 | Unique id, used in errors, devtools, `dependsOn`, and `farm <name> migrate`.    |
+| `version`                                   | -                 | The plugin's own version, shown in diagnostics.                                 |
+| `enforce`                                   | -                 | `"pre"` or `"post"`: run before or after plugins without `enforce`.             |
+| [`options`](#validate-options)              | config load       | A Standard Schema for the app's options; `definePlugin` then returns a factory. |
+| [`configure`](#transform-config)            | dev, build        | Change the Farm config before the pipeline is created.                          |
+| [`setup`](#a-complete-runtime-plugin)       | dev, build, start | Create private state, passed to every hook as `state`.                          |
+| [`runtime`](#runtime-hooks)                 | dev, production   | Own endpoints, add request context, rewrite requests and responses.             |
+| [`router`](#observe-routes)                 | dev, build        | Observe route discovery and page-route matching.                                |
+| [`render`](#transform-rendered-html)        | dev, production   | Run before a page renders, or rewrite its HTML.                                 |
+| [`build`](#extend-builds)                   | production build  | Run around the build and change the Nitro build config.                         |
+| [`dev`](#development-hooks)                 | development       | Use the Vite dev server and react to file updates.                              |
+| [`client`](#add-browser-behavior)           | browser           | Hydration, navigation, browser error, performance, and cleanup hooks.           |
+| [`routes`](#typed-api-routes)               | dev, production   | Typed API routes without files in `src/app`.                                    |
+| [`schema`](/docs/plugins/schema-tables)     | CLI, runtime      | Tables the plugin stores data in, created by `farm <name> migrate`.             |
+| [`database`](/docs/plugins/schema-tables)   | CLI, runtime      | Where those tables live when not in the app's `storage.client`.                 |
+| [`dependsOn`](#depend-on-another-plugin)    | config load       | Plugins or integrations this one needs; the config fails without them.          |
+| [`migrations`](/docs/plugins/schema-tables) | CLI               | Table changes Farm can't infer, such as a renamed column.                       |
+
+Plugins run in three groups: `enforce: "pre"`, then plugins without `enforce`, then `"post"`.
+Within a group they run in the order they appear in `plugins`.
+
+### Runtime hooks
+
+Each runtime hook receives one event with `request`, `req` (the shared request store), `state`,
+`kind` (`"page"`, `"api"`, `"action"`, `"endpoint"`, ...), `route`, `signal`, `waitUntil()`,
+`config`, `isDev`, and `isProd`. `before`, `after`, and `error` also get `ctx`.
+
+| Hook        | Called                                                    | Returns                                                                 |
+| ----------- | --------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `endpoints` | (an array) exact paths the plugin answers itself          | Each `handler` returns a `Response`                                     |
+| `start`     | Once, when the runtime starts                             | Nothing                                                                 |
+| `context`   | At the start of each request                              | A plain object merged into `ctx`, or nothing                            |
+| `before`    | Before Farm's route handler                               | A new `Request` to replace it, a `Response` to answer early, or nothing |
+| `after`     | After a response exists, including early answers          | A new `Response` to replace it, or nothing                              |
+| `error`     | When the request throws (also gets `error`, `durationMs`) | Nothing                                                                 |
+| `close`     | Once, when the runtime shuts down (gets `reason`)         | Nothing                                                                 |
+
+### Router, render, build, and dev hooks
+
+These hooks receive their payload, then a context with `state`, `config`, `isDev`, and `isProd`.
+
+| Hook                | Receives                                                      | Returns                      |
+| ------------------- | ------------------------------------------------------------- | ---------------------------- |
+| `router.discovered` | One page, layout, middleware, or API route as Farm scans it   | Nothing                      |
+| `router.generated`  | `{ routes, pageCount, layoutCount }`                          | Nothing                      |
+| `router.before`     | `{ pathname, method }` before page-route matching             | Nothing                      |
+| `router.after`      | `{ pathname, matched, routePattern, params, layoutPatterns }` | Nothing                      |
+| `render.before`     | `{ pathname, method, routePattern, params }`                  | Nothing                      |
+| `render.html`       | The rendered HTML, then the render info                       | New HTML, or nothing         |
+| `build.before`      | `{ root, preset, universal, distDir, outputDir }`             | Nothing                      |
+| `build.configure`   | The Nitro build config                                        | A changed config, or nothing |
+| `build.after`       | The build info plus `success`                                 | Nothing                      |
+| `dev.server`        | The Vite dev server                                           | Nothing                      |
+| `dev.update`        | `{ file, modules }`                                           | Nothing                      |
+
+### Other supported hooks
+
+| Hook              | Called                                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------ |
+| `configResolved`  | In development, once the dev server's config is final                                                  |
+| `onError`         | When Farm reports an error, with `phase` (such as `"runtime"` or `"render-page"`), `error`, and `meta` |
+| `afterNitroBuild` | After the Nitro production build, with `{ root, preset, distDir, outputDir }`                          |
+
 ## Typed API routes
 
 Plugins can own API handlers without creating files in the app's routing directory. Declare
@@ -583,17 +652,23 @@ Request-driven serverless and edge hosts may initialize lazily and may not expos
 
 Flat hooks continue to work for existing plugins:
 
-| Legacy hook                                         | Structured hook                                    |
-| --------------------------------------------------- | -------------------------------------------------- |
-| `config`                                            | `configure`                                        |
-| `ready` / `shutdown`                                | `runtime.start` / `runtime.close`                  |
-| `beforeRequest` / `beforeApiHandler`                | `runtime.before`                                   |
-| `afterResponse` / `afterApiHandler`                 | `runtime.after`                                    |
-| `routeDiscovered` / `routesGenerated`               | `router.discovered` / `router.generated`           |
-| `beforeRouteMatch` / `afterRouteMatch`              | `router.before` / `router.after`                   |
-| `beforeRender` / `afterRender`                      | `render.before` / `render.html`                    |
-| `beforeBundle` / `beforeNitroBuild` / `afterBundle` | `build.before` / `build.configure` / `build.after` |
-| `devServerCreated` / `hmrUpdate`                    | `dev.server` / `dev.update`                        |
+| Legacy hook                                                       | Structured hook                   |
+| ----------------------------------------------------------------- | --------------------------------- |
+| `init`                                                            | `setup`                           |
+| `config`                                                          | `configure`                       |
+| `ready` / `shutdown`                                              | `runtime.start` / `runtime.close` |
+| `beforeRequest` / `beforeApiHandler`                              | `runtime.before`                  |
+| `afterResponse` / `afterApiHandler`                               | `runtime.after`                   |
+| `routeDiscovered` / `middlewareDiscovered` / `apiRouteDiscovered` | `router.discovered`               |
+| `routesGenerated`                                                 | `router.generated`                |
+| `beforeRouteMatch` / `afterRouteMatch`                            | `router.before` / `router.after`  |
+| `beforeRender`                                                    | `render.before`                   |
+| `afterRender` / `transformHTML`                                   | `render.html`                     |
+| `transformPage`                                                   | `render.before` or `render.html`  |
+| `buildStart` / `beforeBundle`                                     | `build.before`                    |
+| `buildEnd` / `afterBundle`                                        | `build.after`                     |
+| `beforeNitroBuild`                                                | `build.configure`                 |
+| `devServerCreated` / `hmrUpdate`                                  | `dev.server` / `dev.update`       |
 
 Do not define both the legacy and structured form of the same phase in one plugin. Farm intentionally executes both for compatibility.
 

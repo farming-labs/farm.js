@@ -28,7 +28,7 @@ describe("Farm DevTools client runtime", () => {
     // the @farm.js/devtools views that reuse the same launcher. Stale views
     // silently fall back to Overview and strip a matching application hash at launch.
     expect(runtime).toContain(
-      'const validViews = new Set(["overview", "routes", "api", "systems", "runtime", "raw", "inspect", "diagnostics"])',
+      'const validViews = new Set(["overview", "routes", "api", "systems", "plugins", "runtime", "raw", "inspect", "diagnostics"])',
     );
   });
 
@@ -49,7 +49,7 @@ describe("Farm DevTools client runtime", () => {
 
 describe("DevTools modal scroll lifecycle", () => {
   const host = window as unknown as {
-    __FARM_DEVTOOLS__: { open(): void; close(): void };
+    __FARM_DEVTOOLS__: { open(view?: string): void; close(): void };
     __FARM_DEVTOOLS_RUNTIME__?: { dispose(): void };
   };
   const install = () => {
@@ -64,6 +64,12 @@ describe("DevTools modal scroll lifecycle", () => {
     document.body.removeAttribute("style");
     document.body.innerHTML = "";
     vi.useRealTimers();
+  });
+
+  it("accepts the Plugins view through the existing launcher API", () => {
+    install().open("plugins");
+    const frame = document.querySelector<HTMLIFrameElement>("#__farm_devtools_overlay__ > iframe");
+    expect(frame?.getAttribute("src")).toBe("/__farm/devtools?embedded=1#plugins");
   });
 
   it("locks the page until dismissal, then restores inline styles and focus", () => {

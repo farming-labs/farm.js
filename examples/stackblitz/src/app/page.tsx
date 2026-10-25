@@ -21,7 +21,7 @@ export default function HomePage() {
           </h1>
 
           <p className="playground-lede">
-            A product-integrated full-stack framework on Vite: typesafe APIs
+            A full-stack framework for the web and agents: typesafe APIs
             and server functions, integrations as typed modules, and an
             experimental compiler that turns component updates into direct DOM
             patches. This page rendered on the server at{" "}

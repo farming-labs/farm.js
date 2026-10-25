@@ -536,7 +536,6 @@ async function loadWorkflowModule(filePath: string, root: string): Promise<Recor
   const fs = await import("fs/promises");
   const path = await import("path");
   const { pathToFileURL } = await import("url");
-  const { build } = await import("esbuild");
   const outDir = path.join(root, ".farm", ".workflow-loader");
   await fs.mkdir(outDir, { recursive: true });
   const outfile = path.join(
@@ -544,19 +543,14 @@ async function loadWorkflowModule(filePath: string, root: string): Promise<Recor
     `workflow-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`,
   );
 
-  await build({
-    absWorkingDir: root,
-    entryPoints: [filePath],
+  const { bundleNodeModule } = await import("./build/node-module-bundle");
+  await bundleNodeModule({
+    root,
+    entry: filePath,
     outfile,
-    bundle: true,
-    format: "esm",
-    platform: "node",
     target: `node${process.versions.node.split(".")[0]}`,
-    packages: "external",
-    external: ["@farm.js/core", "@farm.js/core/*", "nitro", "nitro/*"],
-    jsx: "automatic",
-    logLevel: "silent",
-    sourcemap: "inline",
+    externalPackages: true,
+    external: [/^@farm\.js\/core(?:\/|$)/, /^nitro(?:\/|$)/],
   });
 
   try {

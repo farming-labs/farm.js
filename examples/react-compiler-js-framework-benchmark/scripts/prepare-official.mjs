@@ -4,6 +4,11 @@ import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
+import {
+  assertCompilerOutput,
+  benchmarkVariants,
+  readBenchmarkVersions,
+} from "./prepare-metadata.mjs";
 
 const exampleRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const benchmarkRoot = path.resolve(process.argv[2] || process.env.JS_FRAMEWORK_BENCHMARK_DIR || "");
@@ -24,28 +29,8 @@ assert.equal(
   `${benchmarkRoot} is not a js-framework-benchmark checkout.`,
 );
 
-const variants = [
-  {
-    directory: "farm-react-off",
-    script: "build:off",
-    version: "react-19.2.0-compiler-off",
-    compiled: false,
-  },
-  {
-    directory: "farm-react-static",
-    script: "build:static",
-    version: "0.1.0-beta.5-static-react-19.2.0",
-    compiled: true,
-    reactivity: "static",
-  },
-  {
-    directory: "farm-react-hybrid",
-    script: "build:hybrid",
-    version: "0.1.0-beta.5-hybrid-react-19.2.0",
-    compiled: true,
-    reactivity: "hybrid",
-  },
-];
+const versions = await readBenchmarkVersions(exampleRoot);
+const variants = benchmarkVariants(versions);
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
@@ -83,10 +68,7 @@ const prepared = [];
 for (const variant of variants) {
   await run("pnpm", ["run", variant.script]);
   const source = await readFile(path.join(exampleRoot, "build", "dist", "main.js"), "utf8");
-  const delegated = source.includes("delegateEvents:!0") || source.includes("delegateEvents:true");
-  assert.equal(delegated, variant.compiled, `${variant.directory} delegation marker mismatch.`);
-  assert.equal(source.includes('displayName:"Main"'), variant.compiled);
-  if (variant.reactivity) assert(source.includes(`reactivity:"${variant.reactivity}"`));
+  assertCompilerOutput(source, variant);
 
   const target = path.join(keyedRoot, variant.directory);
   assert.equal(path.dirname(target), keyedRoot, "Framework target escaped frameworks/keyed.");
@@ -102,9 +84,10 @@ for (const variant of variants) {
 
   prepared.push({
     directory: variant.directory,
+    version: variant.version,
     gzipBytes: gzipSync(source).byteLength,
     rawBytes: Buffer.byteLength(source),
   });
 }
 
-console.log(JSON.stringify({ benchmarkRoot, prepared }, null, 2));
+console.log(JSON.stringify({ benchmarkRoot, versions, prepared }, null, 2));

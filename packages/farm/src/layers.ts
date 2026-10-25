@@ -1,10 +1,16 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { mkdir, unlink } from "node:fs/promises";
-import { createRequire } from "node:module";
+import { createRequire, isBuiltin } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import type { Plugin } from "rolldown";
+import {
+  bundleNodeModule,
+  isDeclarationFile,
+  resolvePackageWithoutTsconfig,
+} from "./build/node-module-bundle";
 
-type EsbuildTransform = (typeof import("esbuild"))["transform"];
+type OxcTransform = (typeof import("rolldown/utils"))["transform"];
 
 export type FarmLayerEntry = string;
 
@@ -217,7 +223,7 @@ export function getFarmLayerAliases(
 
 // Matches Windows drive-letter (`E:\`, `E:/`) and UNC (`\\server\share`) paths,
 // which would otherwise pass the "bare specifier" filter below. `path.isAbsolute`
-// only recognizes these on Windows, but esbuild can hand us such paths on any
+// only recognizes these on Windows, but the bundler can hand us such paths on any
 // platform (e.g. in cross-platform tests), and no valid package name contains
 // `:` or starts with `\`.
 const WINDOWS_ABSOLUTE_PATH_RE = /^(?:[A-Za-z]:[\\/]|\\\\)/;
@@ -230,86 +236,78 @@ function toExternalSpecifier(resolvedPath: string): string {
   return path.isAbsolute(resolvedPath) ? pathToFileURL(resolvedPath).href : resolvedPath;
 }
 
-export function createFarmConfigResolutionPlugin(options: {
-  transform: EsbuildTransform;
-}): import("esbuild").Plugin {
+const BARE_SPECIFIER_RE = /^[^./]/;
+
+export function createFarmConfigResolutionPlugin(options: { transform: OxcTransform }): Plugin {
   const configEntryChecks = new Map<string, Promise<boolean>>();
 
   return {
     name: "farm-config-package-resolution",
-    setup(pluginBuild) {
-      pluginBuild.onResolve({ filter: /^@farm\.js\/core$/ }, async (args) => {
-        if (
-          args.pluginData?.farmConfigExternal ||
-          args.kind !== "import-statement" ||
-          !args.importer
-        ) {
-          return;
-        }
+    async resolveId(source, importer, extraOptions) {
+      // The filter is meant to catch bare package specifiers, but Windows
+      // absolute paths (`E:\...`) match it too, including the entry point
+      // itself, which must never be marked external.
+      if (
+        !importer ||
+        extraOptions.isEntry ||
+        !BARE_SPECIFIER_RE.test(source) ||
+        source.startsWith("\0") ||
+        isBuiltin(source) ||
+        path.isAbsolute(source) ||
+        WINDOWS_ABSOLUTE_PATH_RE.test(source)
+      ) {
+        return null;
+      }
 
-        let configEntryCheck = configEntryChecks.get(args.importer);
+      // A tsconfig `paths` entry that points at a declaration file is for the
+      // editor only (esbuild ignored those matches); Node loads the package.
+      const resolveRuntimePath = async (specifier: string): Promise<string | undefined> => {
+        const resolved = await this.resolve(specifier, importer, {
+          kind: extraOptions.kind,
+          skipSelf: true,
+        });
+        if (!resolved?.id || !isDeclarationFile(resolved.id)) return resolved?.id;
+        return (
+          (await resolvePackageWithoutTsconfig(specifier, importer, extraOptions.kind)) ?? undefined
+        );
+      };
+
+      if (source === FARM_CORE_PACKAGE && extraOptions.kind === "import-statement") {
+        let configEntryCheck = configEntryChecks.get(importer);
         if (!configEntryCheck) {
-          configEntryCheck = onlyImportsFarmConfigHelpers(args.importer, options.transform);
-          configEntryChecks.set(args.importer, configEntryCheck);
+          configEntryCheck = onlyImportsFarmConfigHelpers(importer, options.transform);
+          configEntryChecks.set(importer, configEntryCheck);
         }
-        if (!(await configEntryCheck)) return;
-
-        const resolved = await pluginBuild.resolve(FARM_CONFIG_ENTRY, {
-          importer: args.importer,
-          kind: args.kind,
-          namespace: args.namespace,
-          resolveDir: args.resolveDir,
-          pluginData: { farmConfigExternal: true },
-        });
-        if (resolved.errors.length > 0 || !resolved.path) return;
-
-        return {
-          path: toExternalSpecifier(resolved.path),
-          external: true,
-          warnings: resolved.warnings,
-        };
-      });
-
-      pluginBuild.onResolve({ filter: /^[^./]/ }, async (args) => {
-        // The filter is meant to catch bare package specifiers, but Windows
-        // absolute paths (`E:\...`) match it too — including the entry point
-        // itself, which esbuild rejects when marked external.
-        if (
-          args.kind === "entry-point" ||
-          path.isAbsolute(args.path) ||
-          WINDOWS_ABSOLUTE_PATH_RE.test(args.path)
-        ) {
-          return;
+        if (await configEntryCheck) {
+          const configEntry = await resolveRuntimePath(FARM_CONFIG_ENTRY);
+          if (configEntry) {
+            return { id: toExternalSpecifier(configEntry), external: true };
+          }
         }
-        if (args.pluginData?.farmConfigExternal) return;
+      }
 
-        const resolved = await pluginBuild.resolve(args.path, {
-          importer: args.importer,
-          kind: args.kind,
-          namespace: args.namespace,
-          resolveDir: args.resolveDir,
-          pluginData: { farmConfigExternal: true },
-        });
+      const resolvedId = await resolveRuntimePath(source);
+      if (!resolvedId) {
+        return { id: source, external: true };
+      }
 
-        if (resolved.errors.length > 0 || !resolved.path) {
-          return { path: args.path, external: true };
-        }
-
-        return {
-          path: toExternalSpecifier(resolved.path),
-          external: true,
-          warnings: resolved.warnings,
-        };
-      });
+      return { id: toExternalSpecifier(resolvedId), external: true };
     },
   };
 }
+
+/**
+ * The app root whose config is being evaluated, read by integrations that keep local development
+ * state under `<root>/.farm` (`farm dev --root` can differ from the working directory). Set on
+ * globalThis because the CLI loads config through core's CommonJS build.
+ */
+const FARM_CONFIG_ROOT = Symbol.for("farm.configRoot");
 
 export async function loadFarmConfigFile<TConfig = Record<string, any>>(
   configPath: string,
   options: { root: string; cacheRoot?: string },
 ): Promise<TConfig> {
-  const { build, transform } = await import("esbuild");
+  const { transform } = await import("rolldown/utils");
   const cacheRoot = path.resolve(options.cacheRoot || options.root);
   const configCacheDir = path.join(cacheRoot, ".farm", ".config-loader");
   await mkdir(configCacheDir, { recursive: true });
@@ -319,21 +317,18 @@ export async function loadFarmConfigFile<TConfig = Record<string, any>>(
     `farm-config-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`,
   );
 
-  await build({
-    absWorkingDir: path.resolve(options.root),
-    entryPoints: [path.resolve(configPath)],
+  await bundleNodeModule({
+    root: path.resolve(options.root),
+    entry: path.resolve(configPath),
     outfile: modulePath,
-    bundle: true,
-    format: "esm",
-    platform: "node",
     target: `node${process.versions.node.split(".")[0]}`,
     plugins: [createFarmConfigResolutionPlugin({ transform })],
-    jsx: "automatic",
-    logLevel: "silent",
-    sourcemap: "inline",
   });
 
   const moduleUrl = `${pathToFileURL(modulePath).href}?t=${Date.now()}`;
+  const configRootState = globalThis as typeof globalThis & { [FARM_CONFIG_ROOT]?: string };
+  const previousConfigRoot = configRootState[FARM_CONFIG_ROOT];
+  configRootState[FARM_CONFIG_ROOT] = cacheRoot;
   try {
     const loaded = await import(/* @vite-ignore */ moduleUrl);
     const config = loaded.default || loaded;
@@ -342,24 +337,25 @@ export async function loadFarmConfigFile<TConfig = Record<string, any>>(
     }
     return config as TConfig;
   } finally {
+    configRootState[FARM_CONFIG_ROOT] = previousConfigRoot;
     await unlink(modulePath).catch(() => undefined);
   }
 }
 
 async function onlyImportsFarmConfigHelpers(
   importer: string,
-  transform: EsbuildTransform,
+  transform: OxcTransform,
 ): Promise<boolean> {
   try {
     const source = readFileSync(importer, "utf8");
     if (!source.includes(FARM_CORE_PACKAGE)) return false;
 
-    const transformed = await transform(source, {
-      format: "esm",
-      jsx: "automatic",
-      loader: getEsbuildLoader(importer),
-      sourcefile: importer,
+    const transformed = await transform(importer, source, {
+      lang: getSourceLang(importer),
+      sourceType: "module",
+      jsx: { runtime: "automatic" },
     });
+    if (transformed.errors.length > 0) return false;
     const references = [...transformed.code.matchAll(FARM_CORE_REFERENCE_RE)];
     if (references.length === 0) return false;
 
@@ -390,7 +386,7 @@ async function onlyImportsFarmConfigHelpers(
   }
 }
 
-function getEsbuildLoader(file: string): "js" | "jsx" | "ts" | "tsx" {
+function getSourceLang(file: string): "js" | "jsx" | "ts" | "tsx" {
   switch (path.extname(file)) {
     case ".ts":
     case ".mts":

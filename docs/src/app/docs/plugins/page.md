@@ -186,6 +186,36 @@ Only define the groups your plugin needs.
 
 Both hooks receive Farm's plugin context. `setup` additionally receives the resolved `env`. Its returned state is private to that plugin instance and is not serialized to the browser.
 
+Framework `onError` dispatch invokes every selected reporter in plugin order and awaits
+all returned promises, even if another reporter throws or rejects. Reporters can run
+concurrently. After all settle, the first observed reporter failure is surfaced to the
+dispatch caller; startup and request handling report it separately from the original
+failure. Keep error reporters finite: they are awaited before the caller continues.
+
+Other parallel hooks remain fail-fast: a synchronous throw stops dispatch before later
+hooks are invoked and rejects with the same thrown value. Farm still observes promises
+from already-started hooks so their later rejections are handled. This does not wait for
+or cancel that work; asynchronous failures retain normal `Promise.all` behavior.
+
+In development, a native Vite restart keeps the same Farm plugin runtime and instrumentation
+alive; it does not rerun `setup` or dispose resources registered with `lifecycle.onShutdown()`.
+Awaiting the Farm dev server's `close()` waits for an in-progress restart, closes the current
+Vite server, and then awaits plugin cleanup and instrumentation shutdown exactly once. Cleanup
+errors reject `close()`. New restart requests are rejected once final shutdown begins.
+
+If initial development-server creation fails, Farm awaits cleanup of the resources it has
+created before rejecting: Vite's server once `configureServer` begins (even if a Vite hook
+fails before the server is returned), registered plugin shutdown hooks and disposers, and
+instrumentation. This includes failures in `configureServer`, its returned post hook, and
+middleware-mode `buildStart`. A failing `onError` hook or cleanup step is reported
+separately and does not replace the original startup error or skip the remaining cleanup.
+
+Development startup failures are sent to `onError` before cleanup: errors during creation
+use `phase: "createServer"`, while errors when listening (such as an occupied port) or
+running `runtime.start` use `phase: "startDevServer"`. A creation failure is not reported
+again by the startup wrapper. Async error hooks are awaited while plugin resources are
+still available; a failed error hook does not prevent cleanup or replace the startup error.
+
 ### Runtime hooks
 
 | Hook                | Runs                                                         | May return                                                       |

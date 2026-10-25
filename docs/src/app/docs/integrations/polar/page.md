@@ -141,4 +141,9 @@ Polar works especially well when the product is developer-facing, open-source, s
 - Set `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`, `POLAR_SERVER`, and `APP_BASE_URL`.
 - Use sandbox/server config for local testing and production config for live billing.
 - Store the external customer ID with the billing owner so portal and status reads stay stable.
+- The billing POST routes act for the signed-in caller from its session cookie, so a request a
+  browser sends from another origin is refused with `403`: a page on another site cannot report
+  usage, start a checkout or open the portal for your visitor. Calls with no `Origin` (your own
+  server, a script) are unaffected. If your frontend runs on another origin, list it in
+  `allowedOrigins`, using the same syntax as `serverActions.allowedOrigins`.
 - Test checkout return URLs, portal return URLs, webhook signatures, and entitlement checks.

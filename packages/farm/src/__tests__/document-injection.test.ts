@@ -3,6 +3,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { renderViewportHead } from "../metadata";
+import { ensureFarmDocumentMeta } from "../server/full-document";
 
 const universalBuildSource = fs.readFileSync(
   path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
@@ -39,8 +41,8 @@ function renderFarmClientBootstrapScript(
   );
 }
 
-function createInjector() {
-  return new Function(
+function createInjector(viewportTags = renderViewportHead(undefined)) {
+  const inject = new Function(
     "html",
     "title",
     "metaTags",
@@ -52,8 +54,11 @@ function createInjector() {
     "clientPageProps",
     "renderFarmClientBootstrapScript",
     "renderFarmRendererHydrationScript",
+    "ensureFarmDocumentMeta",
+    "viewportTags",
     "let fullHtml;\n" + extractEmittedFullDocumentInjection() + "\nreturn fullHtml;",
-  ) as (
+  );
+  return ((...args: unknown[]) => inject(...args, ensureFarmDocumentMeta, viewportTags)) as (
     html: string,
     title: string,
     metaTags: string,
@@ -177,5 +182,50 @@ describe("generated full-document injection", () => {
     expect(universalBuildSource).toContain(
       `() => '<html lang="en"' + farmThemeDocument.attributes + '>'`,
     );
+  });
+
+  it("opens a layout's document head with the charset and the route's viewport", () => {
+    const viewport = renderViewportHead({ maximumScale: 1, themeColor: "#fff" });
+    const fullHtml = createInjector(viewport)(
+      "<html><head><title>App</title></head><body><main>page</main></body></html>",
+      "Farm.js App",
+      "",
+      "",
+      false,
+      { hasExplicitTitle: false },
+      {},
+      [],
+      {},
+      renderFarmClientBootstrapScript,
+      () => "",
+    );
+
+    const head = fullHtml.slice(fullHtml.indexOf("<head>"), fullHtml.indexOf("</head>"));
+    expect(head.startsWith('<head><meta charset="utf-8">')).toBe(true);
+    expect(head).toContain(
+      '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" data-farm-metadata>',
+    );
+    expect(head).toContain('<meta name="theme-color" content="#fff" data-farm-metadata>');
+  });
+
+  it("keeps the charset and viewport a layout's document writes itself", () => {
+    const fullHtml = createInjector()(
+      '<html><head><meta charSet="utf-8"/><meta name="viewport" content="width=500"/></head>' +
+        "<body><main>page</main></body></html>",
+      "Farm.js App",
+      "",
+      "",
+      false,
+      { hasExplicitTitle: false },
+      {},
+      [],
+      {},
+      renderFarmClientBootstrapScript,
+      () => "",
+    );
+
+    expect(fullHtml.match(/<meta\b[^>]*charset/gi)).toHaveLength(1);
+    expect(fullHtml.match(/name="viewport"/g)).toHaveLength(1);
+    expect(fullHtml).toContain('content="width=500"');
   });
 });

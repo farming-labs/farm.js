@@ -20,6 +20,17 @@ rows, and installs self-contained production artifacts at:
 - `frameworks/keyed/farm-react-static`
 - `frameworks/keyed/farm-react-hybrid`
 
+Version labels come from the installed renderer and React packages, not a hard-coded release or
+dependency range. Preparation rejects mismatched React/React DOM versions. The Vite config deduplicates
+React and React DOM to the example's pinned copies, including imports from the workspace renderer.
+Compiler-marker validation accepts minifier quote styles but still rejects missing compilation,
+missing delegation, or the wrong reactivity mode. Run `pnpm test:harness` for these reporting guards.
+
+The checked-in results below describe their recorded versions and environment; they are not updated
+by preparing newer artifacts. Keep previous results separately when rerunning with a new version.
+When testing workspace compiler changes, build `@farm.js/react` first: a package version alone does
+not identify unpublished source edits or refresh its built compiler.
+
 Build the official `frameworks/keyed/react-hooks` entry and start the benchmark server. Validate
 identity before measuring:
 
@@ -57,7 +68,19 @@ pnpm summarize:official /absolute/path/to/js-framework-benchmark
 The summarizer requires exactly one result file per framework and operation, rejects stale
 duplicates, verifies keyed/type metadata, recomputes every median from its raw samples, validates
 the documented sample counts, and reads the current official CPU weights from the checked-out
-harness. For a deliberately reduced rerun, pass the actual counts explicitly, for example:
+harness. Each filename must match its JSON framework identity, and all CPU, memory, and size results
+within one variant must have the same full framework/version label. The report retains that label
+in `results.<variant>.framework`; different variants keep their own labels. Mixed-version results
+fail before replacing an existing report. These labels do not distinguish separate runs or
+unpublished builds of the same version; keep those results separately as well. Run
+`pnpm test:harness` for preparation and report-validation coverage.
+
+CPU total medians, per-operation speedup ratios, and aggregate speedups must be positive and finite.
+Invalid calculations fail before replacing an existing report; they are not clamped or omitted.
+Individual zero total samples remain valid when their median is positive, and zero script, paint,
+memory, and size metrics remain supported. Valid samples and scoring formulas are unchanged.
+
+For a deliberately reduced rerun, pass the actual counts explicitly, for example:
 
 ```bash
 FARM_BENCHMARK_CPU_SAMPLES=3 \

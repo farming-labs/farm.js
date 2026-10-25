@@ -50,8 +50,10 @@ import {
   type FarmLayerEntry,
   type ResolvedFarmLayer,
 } from "./layers";
+import { bundleNodeModule } from "./build/node-module-bundle";
 import path from "path";
 import { logger } from "./utils";
+import { setFarmProjectSourceDir } from "./utils/source-dir";
 import { normalizeFarmDeploymentId } from "./deployment";
 import { normalizeFarmConfigBasePath } from "./base-path";
 import { resolveFarmDevtoolsConfig, type ResolvedFarmDevtoolsConfig } from "./devtools-config";
@@ -486,6 +488,11 @@ export function hasCustomFarmRouteContext(config: ResolvedFarmConfig): boolean {
   return config[FARM_RESOLVED_CUSTOM_CONTEXT] === true;
 }
 
+/** @internal Every resolveConfig result carries this marker, including the default context. */
+export function isResolvedFarmConfig(config: BaseFarmConfig): config is ResolvedFarmConfig {
+  return Object.prototype.hasOwnProperty.call(config, FARM_RESOLVED_CUSTOM_CONTEXT);
+}
+
 export type FarmLayerConfig = Omit<
   FarmUserConfig,
   | "root"
@@ -817,7 +824,6 @@ export async function loadDocsConfig(
       return { config: JSON.parse(content), configPath: resolvedPath };
     }
 
-    const { build } = await import("esbuild");
     const configCacheDir = path.join(root, ".farm", ".config-loader");
     await fs.mkdir(configCacheDir, { recursive: true });
     const modulePath = path.join(
@@ -825,18 +831,12 @@ export async function loadDocsConfig(
       `docs-config-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`,
     );
 
-    await build({
-      absWorkingDir: root,
-      entryPoints: [resolvedPath],
+    await bundleNodeModule({
+      root,
+      entry: resolvedPath,
       outfile: modulePath,
-      bundle: true,
-      format: "esm",
-      platform: "node",
       target: `node${process.versions.node.split(".")[0]}`,
-      packages: "external",
-      jsx: "automatic",
-      logLevel: "silent",
-      sourcemap: "inline",
+      externalPackages: true,
     });
 
     const moduleUrl = pathToFileURL(modulePath).href + `?t=${Date.now()}`;
@@ -1049,6 +1049,7 @@ export async function resolveConfig(
   const deploy = resolveDeployConfig(userConfig);
   const root = userConfig.root || process.cwd();
   const srcDir = userConfig.srcDir || "src";
+  setFarmProjectSourceDir(root, srcDir);
   const docs = await resolveDocsConfig(userConfig.docs, { root, srcDir });
   const md = resolveMarkdownConfig(userConfig.md);
   const mdx = resolveMdxConfig(userConfig.mdx);
@@ -1131,7 +1132,7 @@ export async function resolveConfig(
       ppr: false,
       ...userConfig.experimental,
     },
-    agent: resolveFarmAgentConfig(userConfig.agent),
+    agent: resolveFarmAgentConfig(userConfig.agent, { docs: docs.enabled }),
     plugins: [
       ...resolveIntegrationPlugins(integrations),
       ...(nativeMCPPlugin ? [nativeMCPPlugin] : []),

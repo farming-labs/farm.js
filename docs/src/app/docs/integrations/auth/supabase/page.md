@@ -207,6 +207,31 @@ The middleware checks the current Supabase cookie session. Signed-out requests r
 | `protectedRoutes` | None                          | One matcher or a list of matchers.             |
 | `allowedOrigins`  | App origin only               | Extra origins allowed to post the auth routes. |
 
+## Cookie names
+
+A sibling subdomain can set a cookie for the parent domain with a longer `Path`, and browsers send
+it first, so it would pick the session the app reads. A `__Host-` name cannot be set from another
+host. Supabase names its cookies after `cookieOptions.name`, so set it in the factory, and the same
+name on any browser client:
+
+```ts
+export const auth = supabase({
+  instance: ({ createClient, options }) =>
+    createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
+      ...options,
+      cookieOptions: { name: "__Host-sb-auth" },
+    }),
+});
+
+// Browser client: the prefix also needs Secure and Path=/ there.
+createBrowserClient(url, anonKey, {
+  cookieOptions: { name: "__Host-sb-auth", secure: true, path: "/" },
+});
+```
+
+Farm adds the `Secure`, `Path=/`, and no-`Domain` attributes on the server. Browsers accept them over
+https and from `http://localhost`. Renaming the cookie signs existing users out once.
+
 ## Cross-site request protection
 
 `POST /auth/login`, `POST /auth/signup`, and `/auth/logout` only accept requests

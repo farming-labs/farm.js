@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -21,6 +30,12 @@ async function assertRendererNeutralStarter(generatedDir, packageJson) {
   assert.equal(packageJson.dependencies["@farming-labs/theme"], undefined);
   assert.equal(packageJson.dependencies.react, undefined);
   assert.equal(packageJson.dependencies["react-dom"], undefined);
+  // GHSA-mrhx-c7xc-m3w5 is fixed in zod 4.6.6.
+  const zod = packageJson.dependencies.zod
+    .replace(/^[\^~]/, "")
+    .split(".")
+    .map(Number);
+  assert.ok(zod[0] > 4 || (zod[0] === 4 && (zod[1] > 6 || (zod[1] === 6 && zod[2] >= 6))));
   await assert.rejects(readFile(path.join(generatedDir, "docs.config.ts"), "utf8"));
   await assert.rejects(readFile(path.join(generatedDir, "docs.json"), "utf8"));
   await assert.rejects(readFile(path.join(generatedDir, "src/app/docs/page.md"), "utf8"));
@@ -39,7 +54,7 @@ test("spaces the CLI banner and matches the website hero copy", async () => {
   }
 
   assert.equal(lines[8], "");
-  assert.match(lines[9], /Create FARMJS App.*a framework for product-integrated apps/);
+  assert.match(lines[9], /Create FARMJS App.*the framework for the web and agents/);
   assert.doesNotMatch(lines.join("\n"), /React (?:meta-)?framework/i);
 });
 
@@ -599,7 +614,7 @@ test("generates a Vue SFC starter with typed server interaction", async () => {
       packageJson.dependencies["@farm.js/vue"],
       await workspaceRendererVersion("farm-vue"),
     );
-    assert.equal(packageJson.dependencies.vue, "3.5.41");
+    assert.equal(packageJson.dependencies.vue, "3.5.44");
     await assertRendererNeutralStarter(generatedDir, packageJson);
     assert.equal(packageJson.scripts["type-check"], "vue-tsc --noEmit");
     assert.ok(packageJson.devDependencies["@farm.js/devtools"]);
@@ -785,7 +800,8 @@ for (const template of [
     dependency: "@farm.js/auth",
     homePagePattern: /auth\.session\(\)/,
     brandPattern: /FARMJS \/ Auth starter/,
-    instructionPattern: /FARMJS Auth uses local SQLite automatically/,
+    instructionPattern:
+      /FARMJS Auth uses local SQLite automatically and generates a random \.farm\/auth-secret/,
     betterCall: "1.3.2",
   },
   {
@@ -1108,7 +1124,7 @@ test("generates every official integration starter", async () => {
       }
 
       if (template.name === "authjs") {
-        assert.equal(packageJson.dependencies["@auth/core"], "0.34.3");
+        assert.equal(packageJson.dependencies["@auth/core"], "^0.41.3");
         assert.match(
           await readFile(path.join(generatedDir, "src/lib/auth.ts"), "utf8"),
           /GitHub\(\{/,
@@ -1126,75 +1142,85 @@ test("generates every official integration starter", async () => {
   }
 });
 
-test("installs dependencies with the invoking package manager", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-install-"));
-  const binDir = path.join(tempDir, "bin");
-  const markerPath = path.join(tempDir, "install.json");
-  const runnerPath = path.join(binDir, "fake-package-manager.cjs");
-  const executablePath = path.join(binDir, process.platform === "win32" ? "pnpm.cmd" : "pnpm");
+for (const { name, userAgent, windowsExtension } of [
+  { name: "pnpm", userAgent: "pnpm/10.15.0 npm/? node/v22.0.0", windowsExtension: ".cmd" },
+  // Bun installs bun.exe on Windows, not a .cmd shim. A .bat launcher stands in
+  // for it: the installer must resolve the bare name rather than assume .cmd.
+  { name: "bun", userAgent: "bun/1.2.0 npm/? node/v22.0.0", windowsExtension: ".bat" },
+]) {
+  test(`installs dependencies with the invoking package manager (${name})`, async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-install-"));
+    const binDir = path.join(tempDir, "bin");
+    const markerPath = path.join(tempDir, "install.json");
+    const runnerPath = path.join(binDir, "fake-package-manager.cjs");
+    const executablePath = path.join(
+      binDir,
+      process.platform === "win32" ? `${name}${windowsExtension}` : name,
+    );
 
-  try {
-    await mkdir(binDir, { recursive: true });
-    await writeFile(
-      runnerPath,
-      `const { writeFileSync } = require("node:fs");
+    try {
+      await mkdir(binDir, { recursive: true });
+      await writeFile(
+        runnerPath,
+        `const { writeFileSync } = require("node:fs");
 writeFileSync(process.env.FARM_CREATE_APP_INSTALL_MARKER, JSON.stringify({
   args: process.argv.slice(2),
   cwd: process.cwd(),
 }));
 `,
-    );
-
-    if (process.platform === "win32") {
-      await writeFile(executablePath, `@"${process.execPath}" "${runnerPath}" %*\r\n`);
-    } else {
-      await writeFile(
-        executablePath,
-        `#!/bin/sh\nexec "${process.execPath}" "${runnerPath}" "$@"\n`,
       );
-      await chmod(executablePath, 0o755);
-    }
 
-    const output = execFileSync(
-      process.execPath,
-      [
-        path.join(packageDir, "bin/create-farm-app.js"),
-        "generated-app",
-        "--template",
-        "basic",
-        "--typescript",
-      ],
-      {
-        cwd: tempDir,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          FARM_CREATE_APP_INSTALL_MARKER: markerPath,
-          PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
-          npm_config_user_agent: "pnpm/10.15.0 npm/? node/v22.0.0",
+      if (process.platform === "win32") {
+        await writeFile(executablePath, `@"${process.execPath}" "${runnerPath}" %*\r\n`);
+      } else {
+        await writeFile(
+          executablePath,
+          `#!/bin/sh\nexec "${process.execPath}" "${runnerPath}" "$@"\n`,
+        );
+        await chmod(executablePath, 0o755);
+      }
+
+      const output = execFileSync(
+        process.execPath,
+        [
+          path.join(packageDir, "bin/create-farm-app.js"),
+          "generated-app",
+          "--template",
+          "basic",
+          "--typescript",
+        ],
+        {
+          cwd: tempDir,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            FARM_CREATE_APP_INSTALL_MARKER: markerPath,
+            PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
+            npm_config_user_agent: userAgent,
+          },
         },
-      },
-    );
+      );
 
-    const invocation = JSON.parse(await readFile(markerPath, "utf8"));
-    const generatedPackage = JSON.parse(
-      await readFile(path.join(tempDir, "generated-app/package.json"), "utf8"),
-    );
+      const invocation = JSON.parse(await readFile(markerPath, "utf8"));
+      const generatedPackage = JSON.parse(
+        await readFile(path.join(tempDir, "generated-app/package.json"), "utf8"),
+      );
 
-    assert.deepEqual(invocation.args, ["install"]);
-    assert.equal(
-      await realpath(invocation.cwd),
-      await realpath(path.join(tempDir, "generated-app")),
-    );
-    assert.equal(generatedPackage.packageManager, "pnpm@10.15.0");
-    assert.match(output, /Installing dependencies with pnpm/);
-    assert.match(output, /Dependencies installed/);
-    assert.match(output, /pnpm dev/);
-    assert.doesNotMatch(output, /pnpm install/);
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
-  }
-});
+      assert.deepEqual(invocation.args, ["install"]);
+      assert.equal(
+        await realpath(invocation.cwd),
+        await realpath(path.join(tempDir, "generated-app")),
+      );
+      assert.equal(generatedPackage.packageManager, userAgent.split(" ")[0].replace("/", "@"));
+      assert.match(output, new RegExp(`Installing dependencies with ${name}`));
+      assert.match(output, /Dependencies installed/);
+      assert.match(output, new RegExp(`${name} (run )?dev`));
+      assert.doesNotMatch(output, new RegExp(`${name} install`));
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+}
 
 test("uses the invoking package manager throughout generated guidance", async () => {
   const tempDir = await mkdtemp(
@@ -1368,3 +1394,146 @@ test("generates starters that start the built server and deploy to Vercel explic
 function escapeRegExp(input) {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+/**
+ * Feature packages that @farm.js/core declares as optional peers. A starter that
+ * uses the feature must declare the package, or it breaks on a clean install.
+ */
+const optionalCorePeers = [
+  {
+    name: "@tailwindcss/vite",
+    section: "devDependencies",
+    async isUsed(generatedDir) {
+      const stylesheets = await readGeneratedFiles(generatedDir, /\.css$/);
+      return stylesheets.some((source) => /@import\s+["']tailwindcss["']/.test(source));
+    },
+  },
+  {
+    name: "@farming-labs/docs",
+    section: "dependencies",
+    async isUsed(generatedDir) {
+      // Farm enables docs for an explicit config or a discovered docs.config.* / docs.json.
+      const [config] = await readGeneratedFiles(generatedDir, /^farm\.config\.[cm]?[jt]s$/);
+      const docsFiles = await readGeneratedFiles(
+        generatedDir,
+        /^docs\.(?:config\.[cm]?[jt]s|json)$/,
+      );
+      return docsFiles.length > 0 || /\bdocs:\s*(?:true|\{)/.test(config ?? "");
+    },
+  },
+];
+
+async function readGeneratedFiles(directory, pattern) {
+  const sources = [];
+  for (const entry of await readdir(directory, { withFileTypes: true, recursive: true })) {
+    const parent = entry.parentPath ?? entry.path;
+    if (!entry.isFile() || !pattern.test(entry.name) || parent.includes("node_modules")) continue;
+    sources.push(await readFile(path.join(parent, entry.name), "utf8"));
+  }
+  return sources;
+}
+
+test("generated starters declare the optional core peers their features use", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-optional-peers-"));
+  const starters = [
+    ...["basic", "auth", "better-auth", "react-compiler"].map((template) => ({ template })),
+    ...["preact", "solid", "svelte", "vue"].map((renderer) => ({ template: "basic", renderer })),
+    ...integrationTemplates.map(({ name }) => ({ template: name })),
+  ];
+  const used = new Set();
+
+  try {
+    for (const { template, renderer } of starters) {
+      const projectName = `${template}-${renderer || "react"}-app`;
+      execFileSync(
+        process.execPath,
+        [
+          path.join(packageDir, "bin/create-farm-app.js"),
+          projectName,
+          "--template",
+          template,
+          ...(renderer ? ["--renderer", renderer] : []),
+          "--typescript",
+          "--skip-install",
+        ],
+        {
+          cwd: tempDir,
+          env: { ...process.env, npm_config_user_agent: "pnpm/11.18.0 npm/? node/v22.0.0" },
+          stdio: "pipe",
+        },
+      );
+      const generatedDir = path.join(tempDir, projectName);
+      const packageJson = JSON.parse(
+        await readFile(path.join(generatedDir, "package.json"), "utf8"),
+      );
+
+      for (const peer of optionalCorePeers) {
+        if (!(await peer.isUsed(generatedDir))) continue;
+        used.add(peer.name);
+        assert.equal(
+          typeof packageJson[peer.section]?.[peer.name],
+          "string",
+          `${projectName} uses ${peer.name} but does not declare it in ${peer.section}`,
+        );
+      }
+    }
+
+    // Guard against a detector that silently stops matching the starters.
+    assert.deepEqual([...used].sort(), optionalCorePeers.map(({ name }) => name).sort());
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("basic starters ship what agents read: server-rendered copy and an Open Graph image", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-agent-ready-"));
+  const image = await readFile(
+    path.join(packageDir, "templates/basic/src/app/opengraph-image.png"),
+  );
+  const pages = {
+    react: "src/app/page.tsx",
+    preact: "src/app/page.tsx",
+    solid: "src/app/page.tsx",
+    vue: "src/app/page.vue",
+    svelte: "src/app/page.svelte",
+  };
+
+  try {
+    for (const [renderer, page] of Object.entries(pages)) {
+      const projectName = `agent-ready-${renderer}-app`;
+      execFileSync(
+        process.execPath,
+        [
+          path.join(packageDir, "bin/create-farm-app.js"),
+          projectName,
+          "--template",
+          "basic",
+          ...(renderer === "react" ? [] : ["--renderer", renderer]),
+          "--typescript",
+          "--skip-install",
+        ],
+        { cwd: tempDir, stdio: "pipe" },
+      );
+      const generatedDir = path.join(tempDir, projectName);
+      // Copied byte for byte: og:image for the whole app through the file convention.
+      assert.deepEqual(
+        await readFile(path.join(generatedDir, "src/app/opengraph-image.png")),
+        image,
+        renderer,
+      );
+      // Agent checks treat a page with a few words of HTML as an empty client shell, so the
+      // starter says what it is in the server-rendered markup.
+      const source = await readFile(path.join(generatedDir, page), "utf8");
+      const text = source
+        .slice(source.indexOf("<main"))
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\{[^}]*\}/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      assert.ok(text.length > 500, `${renderer}: ${text.length} characters of text`);
+      assert.match(source, /class(?:Name)?="feature-list"/, renderer);
+    }
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});

@@ -318,6 +318,9 @@ function parseIpv6Hextets(value: string): number[] | null {
     if (!octets) return null;
     tail = [(octets[0]! << 8) | octets[1]!, (octets[2]! << 8) | octets[3]!];
     text = text.slice(0, lastColon);
+    // In "64:ff9b::1.2.3.4" the tail's colon closes a "::"; restore it, or the
+    // compression parses as a trailing empty group and the address is dropped.
+    if (text.endsWith(":")) text += ":";
     // "::1.2.3.4" leaves "::" here, and "1.2.3.4" alone leaves "" — not IPv6.
     if (text === "") return null;
   }
@@ -400,6 +403,19 @@ export function isPrivateImageAddress(address: string): boolean {
       ((h4 === 0 && h5 === 0xffff) || (h4 === 0xffff && h5 === 0) || (h4 === 0 && h5 === 0));
     if (embedsIpv4 && (h6 !== 0 || h7 !== 0)) {
       return isPrivateIpv4([h6 >> 8, h6 & 0xff, h7 >> 8, h7 & 0xff]);
+    }
+    // Translation prefixes route to the IPv4 host they carry, so they are as
+    // private as it: NAT64 (64:ff9b::/96) holds it in the low 32 bits and
+    // 6to4 (2002::/16) in bits 16-47. Local-use NAT64 (64:ff9b:1::/48) may
+    // place it at any RFC 6052 offset, so none of that prefix is public.
+    if (h0 === 0x64 && h1 === 0xff9b) {
+      if (h2 === 1) return true;
+      if (h2 === 0 && h3 === 0 && h4 === 0 && h5 === 0) {
+        return isPrivateIpv4([h6 >> 8, h6 & 0xff, h7 >> 8, h7 & 0xff]);
+      }
+    }
+    if (h0 === 0x2002) {
+      return isPrivateIpv4([h1 >> 8, h1 & 0xff, h2 >> 8, h2 & 0xff]);
     }
 
     // Unspecified (::) and loopback (::1) in any spelling.

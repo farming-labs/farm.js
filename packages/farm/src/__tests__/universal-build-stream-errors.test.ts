@@ -30,7 +30,9 @@ function instantiateStreamRenderer(
     path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
     "utf-8",
   );
-  const start = source.indexOf("async function renderFarmElement(ReactDOMServer, element)");
+  const start = source.indexOf(
+    "async function renderFarmElement(ReactDOMServer, element, routeKey)",
+  );
   const end = source.indexOf("function createFarmDocumentStream(");
   expect(start).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
@@ -38,6 +40,7 @@ function instantiateStreamRenderer(
     "isFarmRedirectError",
     "isFarmNotFoundError",
     "farmRendererStreamingCapabilities",
+    "farmReactSyncRender",
     "TextEncoder",
     "TextDecoder",
     "ReadableStream",
@@ -47,6 +50,7 @@ function instantiateStreamRenderer(
     isFarmRedirectError,
     isFarmNotFoundError,
     streamingCapabilities,
+    true,
     primitives.TextEncoder,
     primitives.TextDecoder,
     primitives.ReadableStream,
@@ -196,6 +200,72 @@ describe("generated renderer allocation eligibility", () => {
         expect((await reader.read()).done).toBe(true);
       }
     }
+  });
+
+  it("renders a route with renderToString after a streaming render finished, with the same markup", async () => {
+    const renderer = instantiateStreamRenderer({ node: true, web: false });
+    const page = () =>
+      React.createElement(
+        "html",
+        { lang: "en" },
+        React.createElement("body", null, React.createElement("p", null, "🌱 ", 1)),
+      );
+    let syncCalls = 0;
+    const counted = {
+      ...ReactDOMServer,
+      renderToString(element: React.ReactNode) {
+        syncCalls++;
+        return ReactDOMServer.renderToString(element);
+      },
+    };
+
+    const streamed = await renderer.renderFarmElement(counted, page(), "/doc");
+    expect(syncCalls).toBe(0);
+    expect(streamed.html?.startsWith("<!DOCTYPE html>")).toBe(true);
+
+    const sync = await renderer.renderFarmElement(counted, page(), "/doc");
+    expect(syncCalls).toBe(1);
+    expect(sync.html).toBe(streamed.html);
+  });
+
+  it("goes back to streaming for good once a learned route suspends", async () => {
+    const renderer = instantiateStreamRenderer({ node: true, web: false });
+    let suspend = false;
+    let release!: () => void;
+    const pending = new Promise<void>((done) => {
+      release = done;
+    });
+    function Child() {
+      if (suspend) throw pending;
+      return React.createElement("p", null, "ready");
+    }
+    const page = () =>
+      React.createElement(
+        React.Suspense,
+        { fallback: React.createElement("p", null, "loading") },
+        React.createElement(Child),
+      );
+    let syncCalls = 0;
+    const counted = {
+      ...ReactDOMServer,
+      renderToString(element: React.ReactNode) {
+        syncCalls++;
+        return ReactDOMServer.renderToString(element);
+      },
+    };
+
+    await renderer.renderFarmElement(counted, page(), "/flip");
+    suspend = true;
+    const fallback = await renderer.renderFarmElement(counted, page(), "/flip");
+    expect(syncCalls).toBe(1);
+    expect(fallback.html).toBeUndefined();
+    expect(fallback.stream).toBeDefined();
+    release();
+    suspend = false;
+    await new Response(fallback.stream).text();
+
+    await renderer.renderFarmElement(counted, page(), "/flip");
+    expect(syncCalls).toBe(1);
   });
 
   it("preserves real React synchronous output and Suspense streaming", async () => {

@@ -185,6 +185,60 @@ test("replaces client-supplied forwarding headers at the relay boundary", async 
   }
 });
 
+test("marks every tunnelled request for the dev server and ignores a visitor's marker", async () => {
+  // A raw agent, like the native one, forwards the headers the relay hands it, so the relay
+  // must set the marker itself rather than rely on the agent.
+  const relay = createPersistentPreviewRelay({ registrationToken: RELAY_TOKEN });
+  const address = await relay.listen();
+  const socket = new WebSocket(address.websocketUrl);
+  const seen = [];
+  try {
+    await once(socket, "open");
+    const ready = once(socket, "message");
+    socket.send(JSON.stringify({ type: "register", name: "raw-agent", token: RELAY_TOKEN }));
+    const { publicUrl } = JSON.parse((await ready)[0].toString());
+    socket.on("message", (data) => {
+      const message = JSON.parse(data.toString());
+      if (message.type !== "request") return;
+      seen.push(message.headers["x-farm-preview"]);
+      socket.send(JSON.stringify({ type: "response", id: message.id, status: 204, headers: {} }));
+    });
+
+    assert.equal((await fetch(publicUrl)).status, 204);
+    assert.equal((await fetch(publicUrl, { headers: { "x-farm-preview": "" } })).status, 204);
+    assert.equal(
+      (await fetch(publicUrl, { headers: { "X-Farm-Preview": "trusted-local" } })).status,
+      204,
+    );
+    assert.deepEqual(seen, ["1", "1", "1"]);
+  } finally {
+    socket.close();
+    await relay.close();
+  }
+});
+
+test("the TypeScript agent marks requests it forwards to the local app", async () => {
+  const target = createServer((request, response) => {
+    response.end(String(request.headers["x-farm-preview"]));
+  });
+  await listen(target);
+  const relay = createPersistentPreviewRelay({ registrationToken: RELAY_TOKEN });
+  const relayAddress = await relay.listen();
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: relayAddress.websocketUrl,
+    token: RELAY_TOKEN,
+    name: "marked",
+    targetUrl: `http://127.0.0.1:${target.address().port}`,
+  });
+  try {
+    assert.equal(await (await fetch(agent.publicUrl)).text(), "1");
+  } finally {
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
 test("removes headers nominated by Connection in both proxy directions", async () => {
   const target = createServer((request, response) => {
     response.setHeader("connection", "x-response-hop");
@@ -218,7 +272,7 @@ test("removes headers nominated by Connection in both proxy directions", async (
   }
 });
 
-test("preserves repeated cookies and removes encoding after decoding a response", async () => {
+test("preserves repeated cookies host-only and removes encoding after decoding a response", async () => {
   const target = createServer((_request, response) => {
     response.statusCode = 200;
     response.setHeader("content-encoding", "gzip");
@@ -226,6 +280,8 @@ test("preserves repeated cookies and removes encoding after decoding a response"
     response.setHeader("set-cookie", [
       "access=one; Path=/; HttpOnly",
       "refresh=two; Path=/; HttpOnly",
+      // Would reach every other preview under the relay's domain.
+      "theme=dark; Domain=.example.test; Path=/",
     ]);
     response.end(gzipSync(Buffer.from("decoded preview response")));
   });
@@ -248,6 +304,7 @@ test("preserves repeated cookies and removes encoding after decoding a response"
     assert.deepEqual(getSetCookies(response.headers), [
       "access=one; Path=/; HttpOnly",
       "refresh=two; Path=/; HttpOnly",
+      "theme=dark; Path=/",
     ]);
   } finally {
     await agent.close();

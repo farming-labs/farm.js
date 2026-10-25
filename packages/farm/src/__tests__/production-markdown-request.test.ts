@@ -28,6 +28,8 @@ function runtime(config = resolveMarkdownConfig(undefined)) {
       const url = new URL(request.url);
       const adapterContext = {};
       const middlewareHeaders = undefined;
+      // A top-level constant of the generated server.
+      const farmLocalAPIBasePath = "/api";
       ${source.slice(start, end)}
       return null;
     };`,
@@ -44,6 +46,161 @@ function runtime(config = resolveMarkdownConfig(undefined)) {
 
 describe("production Markdown request ownership", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it.each(["GET", "HEAD"])(
+    "serves the actions JSON through the production %s caller",
+    async (method) => {
+      const r = runtime();
+      r.renderPage.mockImplementation(
+        () =>
+          new Response(
+            '<main><form method="post"><input name="email"><button>Send</button></form></main>',
+            { headers: { "content-type": "text/html" } },
+          ),
+      );
+      for (const suffix of [".md", ""]) {
+        const response = await r.run(
+          new Request(`https://farm.test/page${suffix}?actions&ref=nav`, {
+            method,
+            headers: { accept: "text/markdown" },
+          }),
+        );
+        expect(response?.status).toBe(200);
+        expect(response?.headers.get("content-type")).toBe("application/json; charset=utf-8");
+        const body = await response!.text();
+        expect(method === "HEAD" ? body : JSON.parse(body).actions[0].action).toBe(
+          method === "HEAD" ? "" : "/page?ref=nav",
+        );
+        const cached = await r.run(
+          new Request(`https://farm.test/page${suffix}?actions&ref=nav`, {
+            method,
+            headers: { accept: "text/markdown", "if-none-match": response!.headers.get("etag")! },
+          }),
+        );
+        expect(cached?.status).toBe(304);
+        expect(await cached!.text()).toBe("");
+      }
+    },
+  );
+
+  it.each(["GET", "HEAD"])(
+    "evaluates Markdown preconditions through the production %s caller",
+    async (method) => {
+      for (const suffix of [".md", ""]) {
+        for (const match of ["*", '"html"']) {
+          const r = runtime();
+          const response = await r.run(
+            new Request(`https://farm.test/page${suffix}`, {
+              method,
+              headers: {
+                accept: "text/markdown",
+                "if-match": match,
+                "if-unmodified-since": "Wed, 21 Oct 2015 07:28:00 GMT",
+              },
+            }),
+          );
+          expect(response?.status).toBe(match === "*" ? 200 : 412);
+          expect(await response?.text()).toBe(
+            match !== "*" || method === "HEAD" ? "" : "Source: /page\n\n# Farm 🌱\n",
+          );
+          expect(r.renderPage).toHaveBeenCalledOnce();
+          for (const name of ["if-match", "if-unmodified-since"])
+            expect(r.renderPage.mock.calls[0][0].headers.has(name)).toBe(false);
+        }
+      }
+    },
+  );
+
+  it.each(["GET", "HEAD"])(
+    "isolates cache validators and ranges through the production %s caller",
+    async (method) => {
+      for (const suffix of [".md", ""]) {
+        const r = runtime();
+        r.renderPage.mockImplementation((request) =>
+          request.headers.has("if-none-match") || request.headers.has("if-modified-since")
+            ? new Response(null, {
+                status: 304,
+                headers: { "content-type": "text/html", etag: '"html"' },
+              })
+            : new Response("<h1>Whole page</h1>", { headers: { "content-type": "text/html" } }),
+        );
+        const response = await r.run(
+          new Request(`https://farm.test/page${suffix}`, {
+            method,
+            headers: {
+              accept: "text/markdown",
+              "if-none-match": '"html"',
+              "if-modified-since": "Wed, 21 Oct 2015 07:28:00 GMT",
+              range: "bytes=0-7",
+              "if-range": '"html"',
+            },
+          }),
+        );
+        expect(response?.status).toBe(200);
+        expect(await response?.text()).toBe(
+          method === "HEAD" ? "" : "Source: /page\n\n# Whole page\n",
+        );
+        expect(r.renderPage).toHaveBeenCalledOnce();
+        for (const name of ["if-none-match", "if-modified-since", "range", "if-range"])
+          expect(r.renderPage.mock.calls[0][0].headers.has(name)).toBe(false);
+      }
+    },
+  );
+
+  it.each(["GET", "HEAD"])(
+    "preserves HTML errors through the production %s caller",
+    async (method) => {
+      for (const suffix of [".md", ""]) {
+        const r = runtime();
+        r.renderPage.mockReturnValue(
+          new Response("<h1>Unavailable</h1><p>Try later.</p>", {
+            status: 503,
+            headers: { "content-type": "text/html", "retry-after": "60" },
+          }),
+        );
+        const response = await r.run(
+          new Request(`https://farm.test/page${suffix}?section=missing`, {
+            method,
+            headers: { accept: "text/markdown" },
+          }),
+        );
+        expect(response?.status).toBe(503);
+        expect(response?.headers.get("retry-after")).toBe("60");
+        expect(await response?.text()).toBe(
+          method === "HEAD" ? "" : "Source: /page\n\n# Unavailable\n\nTry later.\n",
+        );
+        expect(r.renderPage).toHaveBeenCalledOnce();
+      }
+    },
+  );
+
+  it.each([204, 205, 304, 429])(
+    "returns terminal %s without falling through to route dispatch",
+    async (status) => {
+      const r = runtime();
+      const limited = new Response(status === 429 ? "Slow down" : null, {
+        status,
+        headers: {
+          "retry-after": "60",
+          "content-type": status === 429 ? "text/plain" : "text/html",
+        },
+      });
+      r.renderPage.mockReturnValue(limited);
+      expect(await r.run(new Request("https://farm.test/page.md"))).toBe(limited);
+      expect(r.renderPage).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("forwards the incoming signal through the production mirror call", async () => {
+    const controller = new AbortController();
+    const r = runtime();
+    const pending = r.run(new Request("https://farm.test/page.md", { signal: controller.signal }));
+    controller.abort("request cancelled");
+    await pending;
+    const pageRequest = r.renderPage.mock.calls[0][0];
+    expect(pageRequest.signal.aborted).toBe(true);
+    expect(pageRequest.signal.reason).toBe("request cancelled");
+  });
 
   it.each([undefined, "text/html", "text/markdown;q=0", "*/*", "application/json"])(
     "reuses the caller's URL for ordinary HTML negotiation (%s)",

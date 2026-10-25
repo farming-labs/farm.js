@@ -37,7 +37,9 @@ changes to local storage for cross-tab updates. The cookie path follows the conf
 ## Tailwind dark variants
 
 When the built-in Tailwind integration processes a stylesheet containing `@import "tailwindcss"`,
-FARMJS connects the `dark:` variant to its `data-theme` selector automatically:
+FARMJS connects the `dark:` variant to its `data-theme` selector automatically. The integration runs
+when the app installs `tailwindcss` and `@tailwindcss/vite` (`pnpm add -D tailwindcss
+@tailwindcss/vite`) and has no PostCSS config of its own:
 
 ```tsx
 export function Panel() {

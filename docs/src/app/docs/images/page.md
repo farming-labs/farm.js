@@ -115,6 +115,18 @@ elements themselves. Configure or audit the budget with `performance.preload` in
 
 ## Configuration
 
+Optimization on Node, Vercel, Netlify, and in development uses [Sharp](https://sharp.pixelplumbing.com/), which the app installs:
+
+```bash
+pnpm add sharp
+```
+
+Without it, `provider: "auto"` turns optimization off for that run, as if `provider` were
+`"none"`: `Image` emits original URLs, the optimizer endpoint is not mounted, and Farm logs the
+install command once at dev startup and build. `provider: "node"` requires Sharp and fails dev
+startup and the build when it is missing. Static imports also skip their blur placeholder without
+Sharp.
+
 ```ts
 import { defineConfig } from "@farm.js/core";
 
@@ -164,9 +176,10 @@ SVG optimization and private-network sources are disabled by default. `dangerous
 
 ## Deployment providers
 
-- Node, Vercel, and Netlify use Sharp. Farm packages the installed native runtime with production output.
+- Node, Vercel, and Netlify use Sharp. Farm packages the app's installed native runtime with production output.
 - Cloudflare presets use the platform image transform API and do not include Sharp.
-- Development uses Sharp so local behavior is deterministic across deployment targets.
+- Development uses Sharp so local behavior is deterministic across deployment targets, so a
+  Cloudflare app installs Sharp too when it wants optimized images in `farm dev`.
 - `provider: "none"` emits original image URLs and does not mount the optimizer endpoint.
 
 The optimizer forwards request cancellation to source fetching and returns sanitized errors. Unexpected details stay in server logs.

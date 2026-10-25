@@ -12,7 +12,7 @@ const nitroIndexPath = path.join(process.cwd(), "src", "nitro", "index.ts");
 
 function extractRenderPageElement(source: string): string {
   const start = source.indexOf("const renderPageElement = async () => {");
-  const endMarker = "return renderFarmElement(ReactDOMServer, wrappedElement);";
+  const endMarker = "return renderFarmElement(ReactDOMServer, wrappedElement, route.pattern);";
   const endIndex = source.indexOf(endMarker, start);
   expect(start).toBeGreaterThan(-1);
   expect(endIndex).toBeGreaterThan(-1);

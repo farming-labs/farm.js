@@ -115,8 +115,8 @@ Common config fields:
 - `integrations`: provider integrations object
 - `auth`: built-in email/password auth and sessions
 - `mcp`: authenticated MCP transport for opted-in typed API routes
-- `agent`: opt-in agent readiness: an `llmsTxt` index of static pages, schema.org `jsonLd`,
-  and AI `crawlers` robots.txt rules
+- `agent`: agent readiness: an `llmsTxt` index, `sitemap`, and read-only `mcp` server of static
+  pages and schema.org `jsonLd` (on by default), AI `crawlers` robots.txt rules (opt-in)
 - `theme`: light, dark, and system behavior
 - `storage.mounts`: named storage instances
 - `migrations`: one-shot schema and provider commands
@@ -143,6 +143,8 @@ Read `docs/src/app/docs/configuration/page.md` before adding an unfamiliar optio
 - `src/app/users/[id]/page.tsx` maps to `/users/:id`
 - `src/app/docs/[...slug]/page.tsx` maps to catch-all docs paths
 - `[[...slug]]` is optional catch-all; route groups do not appear in URLs
+- A route group's `layout`, `loading`, and `error` files apply only to the pages inside that group,
+  nested inside the parent layouts
 - Named slots and intercepted routes are supported
 - Farm writes typed `Link href` declarations into `src/farm.d.ts`
 - Typed `href` supports query strings and hashes, for example `/users/123?tab=profile`
@@ -430,14 +432,18 @@ Use `definePlugin` for custom behavior:
 import { definePlugin } from "@farm.js/core";
 
 export const plugin = definePlugin({
-  name: "request-context-demo",
-  beforeRequest(req, _res, context) {
-    context.req.set("demo.path", req.url, {
-      exposeToPage: true,
-    });
+  name: "acme:request-context",
+  runtime: {
+    context({ request, req }) {
+      const path = new URL(request.url).pathname;
+      req.set("demo.path", path, { exposeToPage: true });
+      return { path };
+    },
   },
 });
 ```
+
+Hooks are grouped: `runtime` (`endpoints`, `start`, `context`, `before`, `after`, `error`, `close`), `router`, `render` (`before`, `html`), `build`, `dev`, and `client`. Flat hooks such as `beforeRequest`, `afterResponse`, and `transformHTML` are deprecated; see `PLUGIN_SYSTEM.md` for every option.
 
 Built-in server plugins are imported from `@farm.js/core/plugin/server`, including logger and compression helpers. Plugins run in order; use `enforce: "pre"` or `enforce: "post"` when order matters.
 
@@ -453,10 +459,19 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
   second). A static `public/llms.txt` or `public/llms-full.txt` overrides each, and so do
   `src/app/llms.ts` and `src/app/llms-full.ts`, which return the whole file as a string or the
   structured format and receive the generated `pages` and `defaults`.
+- Apps without docs serve a generated `/sitemap.xml` of static pages (`agent.sitemap`, with
+  `include`/`exclude`; `false` turns it off). `public/sitemap.xml` or `src/app/sitemap.ts` wins.
+- Apps without docs serve a read-only MCP server at `/mcp` (`agent.mcp`): `list_pages`,
+  `search_pages`, and `read_page` over the public static pages, read anonymously as Markdown. It
+  steps aside for an app route at `/mcp`, an API route at `/api/mcp`, `@farm.js/mcp`, or a
+  `registerFarmMCPServer` entry (the docs MCP); `agent: { mcp: false }` turns it off.
 - Use `agent.crawlers: { search, training }` (`"allow"` or `"block"`, plus `rules` and `sitemap`)
   for a generated `/robots.txt` naming AI search and training crawlers. `public/robots.txt`, then
   `src/app/robots.ts`, win over it; it wins over the docs engine's robots.txt.
 - Use `md`/`mdx` for page mirrors and content routes; use `openapi` for API references.
+- Every app serves a public `/.well-known/farmjs.json` manifest (Farm version and packages, MCP
+  tools and schemas, WebMCP tools, integration providers, plugin names; never config or env).
+  MCP servers with `authorize` are listed without their tools. `agent.manifest: false` turns it off.
 - Use `agent.noindexPreviews: true` to send `X-Robots-Tag: noindex, nofollow` on preview
   deployments (`FARM_PREVIEW=1`, `VERCEL_ENV=preview`, Netlify deploy-preview/branch-deploy at
   build time, Render PR previews). Test locally with `FARM_PREVIEW=1 farm dev`.
@@ -516,5 +531,9 @@ run its client generation immediately before type checking or building.
 - Do not use compatibility `@farm.js/integrations/*` imports for new code when a dedicated adapter exists.
 - Cron is not a durable workflow engine; protect production routes with `CRON_SECRET` and design handlers for repeated or overlapping delivery.
 - In monorepos with pnpm and Prisma, generated clients can be stale or shared; run `prisma generate` immediately before builds.
+- Feature packages are optional peers of `@farm.js/core`; install the ones the app uses:
+  `@tailwindcss/vite` for built-in Tailwind CSS, `@vercel/og` for generated metadata images and
+  `@farm.js/core/og`, `sharp` for image optimization, `@farming-labs/docs` for the docs engine.
+  `farm doctor` reports a missing one.
 - Run `pnpm format` before `pnpm lint` if `oxfmt --check` fails.
 - Existing lint warnings may be present; treat nonzero exit codes as failures.

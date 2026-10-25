@@ -397,6 +397,7 @@ async function createProjectReport(
     collectRouterChecks(config, checks);
     await collectGeneratedArtifactChecks(config, options.configPath, root, checks);
     collectEntrypointChecks(config, root, checks);
+    collectOptionalPackageChecks(config, root, checks);
     report.target = collectDeploymentChecks(config, userConfig, checks);
     collectCronChecks(config, options.env || process.env, checks);
   }
@@ -985,6 +986,154 @@ function collectEntrypointChecks(
       action: "Run the selected package manager's install command.",
     });
   }
+}
+
+/**
+ * Feature packages that @farm.js/core declares as optional peers. An app that
+ * uses the feature must install the package itself.
+ */
+type OptionalFeaturePackage = {
+  name: string;
+  dev?: boolean;
+  purpose: string;
+  /** Whether core fails (`fail`) or keeps going without the feature (`warn`). */
+  missingStatus: "warn" | "fail" | ((config: ResolvedFarmConfig) => "warn" | "fail");
+  /** Where the app uses the feature, or undefined when it does not. */
+  findUse(config: ResolvedFarmConfig, root: string): string | undefined;
+};
+
+const OPTIONAL_FEATURE_PACKAGES: readonly OptionalFeaturePackage[] = [
+  {
+    name: "@tailwindcss/vite",
+    dev: true,
+    purpose: "enable built-in Tailwind CSS support",
+    missingStatus: "warn",
+    findUse: findTailwindUse,
+  },
+  {
+    name: "@vercel/og",
+    purpose: "render OG and metadata images",
+    missingStatus: "fail",
+    findUse: findOgImageUse,
+  },
+  {
+    name: "sharp",
+    purpose: "optimize images",
+    // `provider: "node"` fails without Sharp; `auto` serves original image URLs.
+    missingStatus: (config) => (config.images.provider === "node" ? "fail" : "warn"),
+    findUse: findImageOptimizationUse,
+  },
+  {
+    name: "@farming-labs/docs",
+    purpose: "use the docs engine",
+    missingStatus: "fail",
+    findUse: (config) =>
+      config.docs?.enabled ? `docs is enabled at ${config.docs.entry || "/docs"}` : undefined,
+  },
+];
+
+const POSTCSS_CONFIG_FILE =
+  /^(?:postcss\.config\.(?:[cm]?[jt]s|json)|\.postcssrc(?:\.(?:json|[cm]?[jt]s))?)$/;
+const TAILWIND_CSS_IMPORT = /@import\s+["']tailwindcss["']/;
+const GENERATED_METADATA_IMAGE_FILE = /^(?:opengraph|twitter)-image\.(?:[cm]?[jt]sx?|vue|svelte)$/;
+const SOURCE_FILE = /(?<!\.d)\.(?:[cm]?[jt]sx?|vue|svelte)$/;
+const CORE_OG_IMPORT = /["']@farm\.js\/core\/og["']/;
+const CORE_IMAGE_IMPORT = /["']@farm\.js\/core\/image["']/;
+
+function collectOptionalPackageChecks(
+  config: ResolvedFarmConfig,
+  root: string,
+  checks: FarmDoctorCheck[],
+): void {
+  for (const feature of OPTIONAL_FEATURE_PACKAGES) {
+    const use = feature.findUse(config, root);
+    if (!use) continue;
+    if (isPackageInstalled(config.root, feature.name)) {
+      checks.push({
+        status: "pass",
+        code: "OPTIONAL_PACKAGE_INSTALLED",
+        title: `${feature.name} is installed`,
+        message: `${use}, and ${feature.name} resolves.`,
+      });
+      continue;
+    }
+    checks.push({
+      status:
+        typeof feature.missingStatus === "function"
+          ? feature.missingStatus(config)
+          : feature.missingStatus,
+      code: "OPTIONAL_PACKAGE_MISSING",
+      title: `${feature.name} is not installed`,
+      message: `${use}, but ${feature.name} does not resolve from ${toPosix(path.relative(root, config.root)) || "the app root"}.`,
+      action: `Install "${feature.name}" to ${feature.purpose}: pnpm add ${feature.dev ? "-D " : ""}${feature.name}`,
+    });
+  }
+}
+
+function isPackageInstalled(root: string, name: string): boolean {
+  try {
+    createRequire(path.join(root, "package.json")).resolve(`${name}/package.json`);
+    return true;
+  } catch (error) {
+    // The package is installed but does not export its manifest.
+    return (error as { code?: unknown }).code === "ERR_PACKAGE_PATH_NOT_EXPORTED";
+  }
+}
+
+function findTailwindUse(config: ResolvedFarmConfig, root: string): string | undefined {
+  // A project PostCSS config replaces Farm's built-in Tailwind support.
+  if (readdirSync(config.root).some((file) => POSTCSS_CONFIG_FILE.test(file))) return undefined;
+  const stylesheet = findFile(path.join(config.root, config.srcDir), (file) =>
+    file.endsWith(".css") ? TAILWIND_CSS_IMPORT.test(readFileSync(file, "utf8")) : false,
+  );
+  return stylesheet ? `${toPosix(path.relative(root, stylesheet))} imports tailwindcss` : undefined;
+}
+
+function findOgImageUse(config: ResolvedFarmConfig, root: string): string | undefined {
+  const sourceRoot = path.join(config.root, config.srcDir);
+  const generated = findFile(sourceRoot, (file) =>
+    GENERATED_METADATA_IMAGE_FILE.test(path.basename(file)),
+  );
+  if (generated) return `${toPosix(path.relative(root, generated))} renders a metadata image`;
+  const importer = findFile(sourceRoot, (file) =>
+    SOURCE_FILE.test(file) ? CORE_OG_IMPORT.test(readFileSync(file, "utf8")) : false,
+  );
+  return importer
+    ? `${toPosix(path.relative(root, importer))} imports @farm.js/core/og`
+    : undefined;
+}
+
+function findImageOptimizationUse(config: ResolvedFarmConfig, root: string): string | undefined {
+  const provider = config.images.provider;
+  if (provider === "none") return undefined;
+  if (provider === "node") return 'images.provider is "node"';
+  const importer = findFile(path.join(config.root, config.srcDir), (file) =>
+    SOURCE_FILE.test(file) ? CORE_IMAGE_IMPORT.test(readFileSync(file, "utf8")) : false,
+  );
+  return importer
+    ? `${toPosix(path.relative(root, importer))} imports @farm.js/core/image, so optimized images fall back to their original URLs`
+    : undefined;
+}
+
+function findFile(directory: string, matches: (file: string) => boolean): string | undefined {
+  if (!existsSync(directory)) return undefined;
+  const pending = [directory];
+  while (pending.length) {
+    const current = pending.pop();
+    if (!current) continue;
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isFile() && matches(entryPath)) return entryPath;
+      if (
+        entry.isDirectory() &&
+        !entry.name.startsWith(".") &&
+        !WORKSPACE_SCAN_IGNORES.has(entry.name)
+      ) {
+        pending.push(entryPath);
+      }
+    }
+  }
+  return undefined;
 }
 
 type RegistryPackageMetadata = {

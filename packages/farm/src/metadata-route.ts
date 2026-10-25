@@ -1,3 +1,4 @@
+import { emitFarmAgentRead } from "./agent-identity";
 import {
   serializeFarmLlmsTxt,
   type FarmLlmsTxt,
@@ -112,6 +113,8 @@ export interface FarmMetadataRouteModule {
 
 export interface FarmMetadataRouteResponseOptions {
   method?: string;
+  /** The request being answered, so llms.txt reads can be reported as agent traffic. */
+  request?: Request;
 }
 
 function isResponse(value: unknown): value is Response {
@@ -252,6 +255,10 @@ export function createFarmMetadataRouteResponse(
   const method = (options.method || "GET").toUpperCase();
   if (method !== "GET" && method !== "HEAD") {
     return new Response(null, { status: 405, headers: { Allow: "GET, HEAD" } });
+  }
+
+  if ((kind === "llms" || kind === "llms-full") && options.request) {
+    emitFarmAgentRead(options.request, kind, isResponse(value) ? value.status : 200);
   }
 
   if (isResponse(value)) {

@@ -1,5 +1,5 @@
 /// <reference lib="es2021.weakref" />
-import { createRouteDataCacheKey, type RouteDataCacheKey } from "./cache";
+import { createRouteDataCacheKey, type RouteDataCacheKey } from "./cache-key";
 import { subscribeFarmCacheInvalidation } from "./cache-invalidation";
 
 export type FarmClientCacheKey = RouteDataCacheKey;

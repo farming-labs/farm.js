@@ -170,3 +170,24 @@ describe("metadata head rendering", () => {
     ).not.toContain("ld+json");
   });
 });
+
+describe("Open Graph defaults", () => {
+  it("falls back to the page's title and description when it sets no Open Graph data", () => {
+    const head = renderMetadataHead({ title: "Acme", description: "Tools for teams." }).tags;
+    expect(head).toContain('<meta property="og:title" content="Acme">');
+    expect(head).toContain('<meta property="og:description" content="Tools for teams.">');
+    expect(head).toContain('<meta property="og:type" content="website">');
+  });
+
+  it("keeps Open Graph values the page sets, and emits nothing for a page with neither", () => {
+    const head = renderMetadataHead({
+      title: "Acme",
+      description: "Tools for teams.",
+      openGraph: { title: "Acme for teams", description: "Shared tools." },
+    }).tags;
+    expect(head).toContain('<meta property="og:title" content="Acme for teams">');
+    expect(head).toContain('<meta property="og:description" content="Shared tools.">');
+    expect(head).not.toContain('<meta property="og:description" content="Tools for teams.">');
+    expect(renderMetadataHead({}).tags).not.toContain("og:");
+  });
+});

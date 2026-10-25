@@ -1,6 +1,6 @@
 # @farm.js/core
 
-Core Farm.js framework for modern integrated apps
+The core of Farm.js, the framework for the web and agents.
 
 See [Stability and Support](https://farmjs.dev/docs/stability) for what this package guarantees.
 

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { createEndpoint, createRouteFactory } from "@farm.js/core/api";
 import type { FarmMCPConfig } from "@farm.js/core";
 import { invokeAPIRouteEndpoint, mergePluginAPIRoutes } from "@farm.js/core/api/runtime";
-import { apiMcp } from "./index.js";
+import { apiMcp, definePrompt, defineResource, defineTool } from "./index.js";
 
 const route = createRouteFactory();
 
@@ -178,6 +178,219 @@ describe("apiMcp", () => {
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: "Unauthorized" });
     expect(response.headers.get("cache-control")).toBe("no-store");
+    // A 401 must carry a challenge (RFC 9110); MCP clients authenticate with Bearer tokens.
+    expect(response.headers.get("www-authenticate")).toBe("Bearer");
+  });
+
+  it("links OAuth protected resource metadata from the 401 when oauth is configured", async () => {
+    const oauth = {
+      authorizationServers: ["https://auth.example.com"],
+      scopes: ["projects:read", "projects:write"],
+    };
+    const authorize = () => false as const;
+    const { endpoint } = createFixture({ config: { authorize, oauth } });
+    const response = await sendMCP(endpoint, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+      params: {},
+    });
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe(
+      'Bearer resource_metadata="http://farm.test/.well-known/oauth-protected-resource/api/mcp", scope="projects:read projects:write"',
+    );
+
+    const before = apiMcp({ authorize, oauth, name: "acme" }).runtime!.before!;
+    const metadata = (await before({
+      request: new Request("http://farm.test/.well-known/oauth-protected-resource/api/mcp"),
+    } as never)) as Response;
+    expect(metadata.status).toBe(200);
+    expect(metadata.headers.get("content-type")).toBe("application/json");
+    expect(await metadata.json()).toEqual({
+      resource: "http://farm.test/api/mcp",
+      authorization_servers: ["https://auth.example.com"],
+      scopes_supported: ["projects:read", "projects:write"],
+      bearer_methods_supported: ["header"],
+      resource_name: "acme",
+    });
+
+    // The endpoint's public path can differ from /api/mcp through api.baseURL.
+    const mapped = (await before({
+      request: new Request("http://farm.test/.well-known/oauth-protected-resource/v1/mcp"),
+    } as never)) as Response;
+    expect((await mapped.json()).resource).toBe("http://farm.test/v1/mcp");
+
+    const post = (await before({
+      request: new Request("http://farm.test/.well-known/oauth-protected-resource/api/mcp", {
+        method: "POST",
+      }),
+    } as never)) as Response;
+    expect(post.status).toBe(405);
+    for (const pathname of ["/.well-known/oauth-protected-resource/api/other", "/api/mcp", "/"]) {
+      expect(
+        await before({ request: new Request(`http://farm.test${pathname}`) } as never),
+      ).toBeUndefined();
+    }
+  });
+
+  it("publishes its endpoint tools so core can name the tool behind a form", async () => {
+    const { _findFarmMCPEndpointTool } = await import("@farm.js/core/api/runtime");
+    const create = route.post("/api/notes", {
+      mcp: { name: "create_note" },
+      input: { body: z.object({ text: z.string() }) },
+      handler: () => ({ ok: true }),
+    });
+    const plugin = apiMcp({ authorize: () => ({ subject: "x" }) });
+    mergePluginAPIRoutes(
+      [{ path: create.path, methods: [create.method], endpoints: { POST: create.endpoint } }],
+      [plugin],
+    );
+    expect(_findFarmMCPEndpointTool("POST", "/api/notes")).toEqual({
+      name: "create_note",
+      endpoint: "/api/mcp",
+    });
+    // An endpoint tool's schema comes from its route input, for the app manifest.
+    const catalogs = (globalThis as Record<symbol, Map<string, any>>)[
+      Symbol.for("farm.mcp.catalogs")
+    ];
+    expect(catalogs.get("/api/mcp").details.schemas.create_note.input).toMatchObject({
+      type: "object",
+      properties: { body: { type: "object", properties: { text: { type: "string" } } } },
+    });
+    // Publishing adds no runtime hook, which would bundle the plugin runtime into servers.
+    expect(plugin.runtime).toBeUndefined();
+  });
+
+  it("reports its title and description, and publishes them for the server card", async () => {
+    const health = route.get("/api/health", { mcp: true, handler: () => ({ ok: true }) });
+    const plugin = apiMcp({
+      allowUnauthenticated: true,
+      path: "/api/card-mcp",
+      name: "projects",
+      version: "3.1.0",
+      title: "Projects",
+      description: "Create and search projects.",
+    });
+    const routes = mergePluginAPIRoutes(
+      [{ path: health.path, methods: [health.method], endpoints: { GET: health.endpoint } }],
+      [plugin],
+    );
+    const endpoint = routes.find((entry) => entry.path === "/api/card-mcp")!.endpoints.POST;
+    const payload = await readMCP(
+      await sendMCP(endpoint, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-11-25",
+          capabilities: {},
+          clientInfo: { name: "test", version: "1" },
+        },
+      }),
+    );
+    expect(payload.result.serverInfo).toEqual({
+      name: "projects",
+      version: "3.1.0",
+      title: "Projects",
+      description: "Create and search projects.",
+    });
+
+    const catalogs = (globalThis as Record<symbol, Map<string, any>>)[
+      Symbol.for("farm.mcp.catalogs")
+    ];
+    const published = catalogs.get("/api/card-mcp");
+    expect(published.server).toEqual({
+      name: "projects",
+      version: "3.1.0",
+      title: "Projects",
+      description: "Create and search projects.",
+      path: "/api/card-mcp",
+    });
+    expect(published.details.protocolVersions).toContain("2025-11-25");
+    // No authorize: anonymous clients list its tools, so the public manifest may too.
+    expect(published.details.public).toBe(true);
+
+    expect(() => apiMcp({ allowUnauthenticated: true, description: " " })).toThrow(
+      "apiMcp description must be a non-empty string.",
+    );
+  });
+
+  it("publishes each tool's schemas, its resources and its prompts for the app manifest", () => {
+    const plugin = apiMcp({
+      path: "/api/manifest-mcp",
+      authorize: () => ({ subject: "x" }),
+      tools: [
+        defineTool({
+          name: "search_notes",
+          inputSchema: z.object({ query: z.string() }),
+          outputSchema: z.object({ notes: z.array(z.string()) }),
+          readOnlyHint: true,
+          execute: () => ({ notes: [] }),
+        }),
+      ],
+      resources: [
+        defineResource({
+          name: "handbook",
+          uri: "docs://handbook",
+          mimeType: "text/markdown",
+          read: () => "# Handbook",
+        }),
+      ],
+      prompts: [
+        definePrompt({
+          name: "summarize",
+          description: "Summarize a note.",
+          arguments: z.object({ id: z.string() }),
+          render: ({ id }) => `Summarize ${id}`,
+        }),
+      ],
+    });
+    mergePluginAPIRoutes([], [plugin]);
+    const catalogs = (globalThis as Record<symbol, Map<string, any>>)[
+      Symbol.for("farm.mcp.catalogs")
+    ];
+    const { details } = catalogs.get("/api/manifest-mcp");
+    // authorize runs on every request, so the public manifest lists none of its catalog.
+    expect(details.public).toBe(false);
+    expect(Object.keys(details.schemas)).toEqual(["search_notes"]);
+    expect(details.schemas.search_notes.input).toMatchObject({
+      type: "object",
+      properties: { query: { type: "string" } },
+    });
+    // The output schema agents see: the result inside MCP's structured content.
+    expect(details.schemas.search_notes.output).toMatchObject({
+      properties: { result: { properties: { notes: { type: "array" } } } },
+    });
+    expect(details.resources).toEqual([
+      { name: "handbook", mimeType: "text/markdown", uri: "docs://handbook" },
+    ]);
+    expect(details.prompts).toEqual([
+      {
+        name: "summarize",
+        description: "Summarize a note.",
+        arguments: expect.objectContaining({ properties: { id: { type: "string" } } }),
+      },
+    ]);
+  });
+
+  it("adds no request hook without oauth", () => {
+    expect(apiMcp({ authorize: () => false }).runtime).toBeUndefined();
+  });
+
+  it("rejects oauth config that cannot be advertised", () => {
+    const authorize = () => false as const;
+    expect(() => apiMcp({ authorize, oauth: { authorizationServers: [] } })).toThrow(
+      "absolute issuer URLs",
+    );
+    expect(() =>
+      apiMcp({ authorize, oauth: { authorizationServers: ["auth.example.com"] } }),
+    ).toThrow("absolute issuer URLs");
+    expect(() =>
+      apiMcp({
+        authorize,
+        oauth: { authorizationServers: ["https://auth.example.com"], scopes: ['a" b'] },
+      }),
+    ).toThrow("OAuth scope tokens");
   });
 
   it("authorizes every tool call in a JSON-RPC batch before dispatch", async () => {
@@ -220,6 +433,116 @@ describe("apiMcp", () => {
     );
     expect(authorize).toHaveBeenCalledTimes(2);
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("refuses an oversized batch before authorizing any of it and stops at the first deny", async () => {
+    const health = route.get("/api/health", {
+      mcp: { name: "health" },
+      handler: () => ({ ok: 1 }),
+    });
+    const mount = (options: Parameters<typeof apiMcp>[0]) =>
+      mergePluginAPIRoutes(
+        [{ path: health.path, methods: [health.method], endpoints: { GET: health.endpoint } }],
+        [apiMcp(options)],
+      ).find((entry) => entry.path === "/api/mcp")!.endpoints.POST;
+    const batch = (size: number) =>
+      Array.from({ length: size }, (_, index) => ({
+        jsonrpc: "2.0",
+        id: index + 1,
+        method: "tools/list",
+        params: {},
+      }));
+
+    // An anonymous body asks for one authorize call per message.
+    const authorize = vi.fn(() => false as const);
+    const capped = await sendMCP(mount({ authorize }), batch(26));
+    expect(capped.status).toBe(400);
+    expect(await capped.json()).toEqual({
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: -32600, message: "A JSON-RPC batch may carry at most 25 messages." },
+    });
+    expect(authorize).not.toHaveBeenCalled();
+
+    // Within the cap, the first refusal ends authorization.
+    const denied = await sendMCP(mount({ authorize }), batch(25));
+    expect(denied.status).toBe(401);
+    expect(authorize).toHaveBeenCalledTimes(1);
+
+    // The cap is configurable and also bounds a public server.
+    const custom = await sendMCP(mount({ allowUnauthenticated: true, maxBatchSize: 2 }), batch(3));
+    expect(custom.status).toBe(400);
+    expect(
+      (await sendMCP(mount({ allowUnauthenticated: true, maxBatchSize: 2 }), batch(2))).status,
+    ).toBe(200);
+    expect(() => apiMcp({ allowUnauthenticated: true, maxBatchSize: 0 })).toThrow("maxBatchSize");
+  });
+
+  it("refuses tool arguments with too many elements before validation or the tool runs", async () => {
+    const importRows = vi.fn(() => ({ imported: true }));
+    const rows = route.post("/api/rows", {
+      mcp: { name: "import_rows" },
+      input: { body: z.object({ rows: z.array(z.number()) }) },
+      handler: importRows,
+    });
+    const tag = vi.fn(() => ({ tagged: true }));
+    const mount = (options: Partial<Parameters<typeof apiMcp>[0]> = {}) =>
+      mergePluginAPIRoutes(
+        [{ path: rows.path, methods: [rows.method], endpoints: { POST: rows.endpoint } }],
+        [
+          apiMcp({
+            allowUnauthenticated: true,
+            tools: [
+              rows.endpoint,
+              defineTool({
+                name: "tag",
+                inputSchema: z.object({ tags: z.array(z.string()) }),
+                execute: tag,
+              }),
+            ],
+            ...options,
+          }),
+        ],
+      ).find((entry) => entry.path === "/api/mcp")!.endpoints.POST;
+    const call = (endpoint: unknown, name: string, args: unknown) =>
+      sendMCP(endpoint, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: args },
+      }).then(readMCP);
+
+    // `body` and `rows` count, then every row: 10,002 members against the default of 10,000.
+    const oversized = await call(mount(), "import_rows", {
+      body: { rows: Array.from({ length: 10_000 }, (_, index) => index) },
+    });
+    expect(JSON.stringify(oversized)).toContain("more than the maximum of 10000 elements");
+    expect(importRows).not.toHaveBeenCalled();
+    const tags = await call(mount(), "tag", { tags: Array.from({ length: 10_000 }, () => "x") });
+    expect(JSON.stringify(tags)).toContain("more than the maximum of 10000 elements");
+    expect(tag).not.toHaveBeenCalled();
+
+    const small = mount({ maxToolInputElements: 4 });
+    expect(JSON.stringify(await call(small, "tag", { tags: ["a", "b", "c", "d"] }))).toContain(
+      "more than the maximum of 4 elements",
+    );
+    expect((await call(small, "tag", { tags: ["a", "b", "c"] })).result.isError).toBeFalsy();
+    expect(tag).toHaveBeenCalledTimes(1);
+    expect(
+      (await call(mount(), "import_rows", { body: { rows: [1, 2, 3] } })).result.isError,
+    ).toBeFalsy();
+    expect(importRows).toHaveBeenCalledTimes(1);
+    const unlimited = mount({ maxToolInputElements: Infinity });
+    expect(
+      (await call(unlimited, "tag", { tags: Array.from({ length: 10_001 }, () => "x") })).result
+        .isError,
+    ).toBeFalsy();
+
+    for (const value of [0, 1.5, -1, Number.NaN]) {
+      expect(() => apiMcp({ allowUnauthenticated: true, maxToolInputElements: value })).toThrow(
+        "maxToolInputElements",
+      );
+    }
   });
 
   it("rejects batches that resolve to different authorization identities", async () => {
@@ -383,6 +706,113 @@ describe("apiMcp", () => {
       result: { team: "farm", tags: ["one", "two"], subject: "Bearer good" },
     });
     expect(middleware).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends endpoint tool calls through the app pipeline when the runtime provides one", async () => {
+    const handler = vi.fn(() => ({ users: ["admin-only"] }));
+    const users = route.get("/api/admin/users", { mcp: { name: "list_users" }, handler });
+    const seen: Array<{ url: string; cookie: string | null; encoding: string | null }> = [];
+    const routes = mergePluginAPIRoutes(
+      [{ path: users.path, methods: [users.method], endpoints: { GET: users.endpoint } }],
+      [apiMcp({ authorize: () => ({ subject: "regular" }) })],
+      undefined,
+      {
+        // Stands in for the app's middleware guarding /api/admin/**.
+        dispatch: async (request) => {
+          seen.push({
+            url: request.url,
+            cookie: request.headers.get("cookie"),
+            encoding: request.headers.get("accept-encoding"),
+          });
+          if (!request.headers.get("cookie")?.includes("role=admin")) {
+            return new Response("admins only", { status: 403 });
+          }
+          return invokeAPIRouteEndpoint(users.endpoint, request, {});
+        },
+      },
+    );
+    const endpoint = routes.find((entry) => entry.path === "/api/mcp")!.endpoints.POST;
+    const call = (cookie: string) =>
+      sendMCP(
+        endpoint,
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "list_users", arguments: {} },
+        },
+        undefined,
+        { cookie, "accept-encoding": "gzip" },
+      ).then(readMCP);
+
+    const refused = await call("session=regular");
+    expect(refused.result.isError).toBe(true);
+    expect(JSON.parse(refused.result.content[0].text)).toEqual({
+      status: 403,
+      error: "admins only",
+    });
+    expect(handler).not.toHaveBeenCalled();
+
+    const allowed = await call("session=admin; role=admin");
+    expect(allowed.result.structuredContent).toEqual({ result: { users: ["admin-only"] } });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([
+      { url: "http://farm.test/api/admin/users", cookie: "session=regular", encoding: null },
+      {
+        url: "http://farm.test/api/admin/users",
+        cookie: "session=admin; role=admin",
+        encoding: null,
+      },
+    ]);
+  });
+
+  it("rejects route parameters that would move a tool call to another path", async () => {
+    const file = route.get("/api/files/[...path]", {
+      mcp: { name: "get_file" },
+      handler: () => ({}),
+    });
+    const team = route.get("/api/teams/[team]", { mcp: { name: "get_team" }, handler: () => ({}) });
+    const dispatched: string[] = [];
+    const routes = mergePluginAPIRoutes(
+      [
+        { path: file.path, methods: [file.method], endpoints: { GET: file.endpoint } },
+        { path: team.path, methods: [team.method], endpoints: { GET: team.endpoint } },
+      ],
+      [apiMcp({ authorize: () => ({ subject: "reader", tools: ["get_file", "get_team"] }) })],
+      undefined,
+      {
+        dispatch: (request) => {
+          dispatched.push(new URL(request.url).pathname);
+          return Response.json({ ok: true });
+        },
+      },
+    );
+    const endpoint = routes.find((entry) => entry.path === "/api/mcp")!.endpoints.POST;
+    const call = (name: string, params: Record<string, unknown>) =>
+      sendMCP(endpoint, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: { params } },
+      }).then(readMCP);
+
+    for (const [name, params] of [
+      ["get_file", { path: ["..", "..", "admin", "users"] }],
+      ["get_file", { path: ["docs", "."] }],
+      ["get_team", { team: ".." }],
+      ["get_team", { team: "." }],
+      ["get_team", { team: "" }],
+      ["get_team", { team: "a/b" }],
+    ] as const) {
+      const payload = await call(name, params);
+      expect(payload.result.isError).toBe(true);
+      expect(payload.result.content[0].text).toMatch(/Route parameter "(path|team)"/);
+    }
+    expect(dispatched).toEqual([]);
+
+    await call("get_file", { path: ["docs", "..a", "a.b"] });
+    await call("get_team", { team: "farm..js" });
+    expect(dispatched).toEqual(["/api/files/docs/..a/a.b", "/api/teams/farm..js"]);
   });
 
   it("supplies a frozen tool catalog and server identity on every authorization request", async () => {

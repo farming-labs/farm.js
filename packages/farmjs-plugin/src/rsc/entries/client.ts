@@ -67,7 +67,7 @@ import {
 
   if (ctx.actionsEnabled) {
     imports += `import { setServerCallback, encodeReply, createTemporaryReferenceSet } from '@vitejs/plugin-rsc/browser';
-import { applyFarmCacheInvalidations } from '@farm.js/core/cache';
+import { applyFarmCacheInvalidations } from '@farm.js/core/internal/client-runtime';
 import {
   beginFarmServerQueryAction,
   completeFarmServerQueryAction,

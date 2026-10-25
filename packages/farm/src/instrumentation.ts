@@ -1,7 +1,7 @@
-import { build } from "esbuild";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { bundleNodeModule } from "./build/node-module-bundle";
 import type { FarmInstrumentationModule } from "./instrumentation-runtime";
 
 export * from "./instrumentation-runtime";
@@ -38,15 +38,12 @@ export async function loadFarmInstrumentation(
   const outputDirectory = path.join(root, ".farm", ".instrumentation-loader");
   const outputFile = path.join(outputDirectory, "instrumentation.mjs");
   await fs.promises.mkdir(outputDirectory, { recursive: true });
-  await build({
-    entryPoints: [filePath],
+  await bundleNodeModule({
+    root,
+    entry: filePath,
     outfile: outputFile,
-    bundle: true,
-    format: "esm",
-    platform: "node",
     target: "node20",
-    packages: "external",
-    sourcemap: "inline",
+    externalPackages: true,
   });
 
   const url = pathToFileURL(outputFile);

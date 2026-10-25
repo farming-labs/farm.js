@@ -1,6 +1,7 @@
 import { defineDocs } from "@farming-labs/docs";
 import { pixelBorder } from "@farming-labs/theme-production/pixel-border";
 import type { FarmDocsSidebarItem, FarmDocsSocialImageConfig } from "@farm.js/core";
+import { FARM_VERSION } from "@farm.js/core/version";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
@@ -32,16 +33,17 @@ const brandPath = (path: string, viewBox = "0 0 24 24") =>
 const brandSvg = (content: string, viewBox = "0 0 24 24") =>
   `<svg viewBox="${viewBox}" focusable="false">${content}</svg>`;
 
+// The build reads this config from the docs app and embeds the fonts in the JSON copy that
+// renders social images. The production server also imports this module (for the adapter's
+// icons and components), where node_modules isn't on disk, so it goes without the fonts there
+// rather than failing every request.
 const resolveGeistFontsDirectory = () => {
   const candidates = [
     path.join(process.cwd(), "node_modules", "geist", "dist", "fonts"),
     path.join(process.cwd(), "docs", "node_modules", "geist", "dist", "fonts"),
     path.join(process.cwd(), "..", "docs", "node_modules", "geist", "dist", "fonts"),
   ];
-  const directory = candidates.find((candidate) => existsSync(candidate));
-  if (!directory)
-    throw new Error("Could not resolve Geist fonts for the Farm.js docs social image.");
-  return directory;
+  return candidates.find((candidate) => existsSync(candidate));
 };
 
 // T3 Chat has no published mark, so its menu entry uses a neutral chat glyph (Lucide).
@@ -50,8 +52,8 @@ const chatIcon = brandSvg(
 );
 
 const geistFontsDirectory = resolveGeistFontsDirectory();
-const embeddedWoff2 = (...segments: string[]) =>
-  `data:font/woff2;base64,${readFileSync(path.join(geistFontsDirectory, ...segments)).toString("base64")}`;
+const embeddedWoff2 = (directory: string, ...segments: string[]) =>
+  `data:font/woff2;base64,${readFileSync(path.join(directory, ...segments)).toString("base64")}`;
 
 const icons = {
   // Lucide paths, serialized like the other sidebar icons below.
@@ -421,15 +423,21 @@ const config = {
     description: "Farm.js framework documentation powered by @farming-labs/docs.",
   },
   favicon: "/favicon.svg",
+  // The docs MCP describes Farm.js, so it reports the Farm.js version, not this site's.
+  mcp: { version: FARM_VERSION },
+  // List the hand-written /openapi.json (public APIs only) in /.well-known/api-catalog.
+  agent: { apiCatalog: { openapi: "/openapi.json" } },
   socialImage: {
     baseUrl: "https://farmjs.dev",
     siteName: "Farm.js",
     brand: "Farm.js",
-    fonts: {
-      display: embeddedWoff2("geist-pixel", "GeistPixel-Square.woff2"),
-      sans: embeddedWoff2("geist-sans", "Geist-Variable.woff2"),
-      mono: embeddedWoff2("geist-mono", "GeistMono-Variable.woff2"),
-    },
+    fonts: geistFontsDirectory
+      ? {
+          display: embeddedWoff2(geistFontsDirectory, "geist-pixel", "GeistPixel-Square.woff2"),
+          sans: embeddedWoff2(geistFontsDirectory, "geist-sans", "Geist-Variable.woff2"),
+          mono: embeddedWoff2(geistFontsDirectory, "geist-mono", "GeistMono-Variable.woff2"),
+        }
+      : undefined,
   },
   nav: {
     title: "Farm.js",

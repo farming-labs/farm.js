@@ -67,7 +67,8 @@ plugin breaks hydration on every route with "@vitejs/plugin-react can't detect p
    merged in `farm dev` and in both `farm build` passes, except the build options Farm owns (see
    `/docs/configuration#vite-config`).
 3. Never re-add `tanstackStart()`, `@vitejs/plugin-react`, the TanStack devtools Vite plugin,
-   Nitro or hosting Vite plugins, or `@tailwindcss/vite` (Farm enables Tailwind itself).
+   Nitro or hosting Vite plugins, or `tailwindcss()` from `@tailwindcss/vite` (Farm enables Tailwind
+   itself; keep the `@tailwindcss/vite` package installed).
 4. `resolve: { tsconfigPaths: true }` is not needed for the starter: Farm aliases `@/` to the
    source directory, and the starter's `#/*` alias is a package.json `"imports"` entry that Vite and
    Node resolve natively. Keep `"imports": { "#/*": "./src/*" }` and the matching tsconfig `paths`.
@@ -236,7 +237,8 @@ with the same status and body, and every mutation works from the UI.
 Only after Phase 7 passes: delete `src/routes`, `src/router.tsx`, `src/routeTree.gen.ts`,
 `tsr.config.json`, `.tanstack`, and remove `@tanstack/react-start`, `@tanstack/react-router`,
 `@tanstack/react-router-devtools`, `@tanstack/react-devtools`, `@tanstack/devtools-vite`,
-`@tanstack/router-cli`, `@tanstack/router-plugin`, `@vitejs/plugin-react`, and `@tailwindcss/vite`.
+`@tanstack/router-cli`, `@tanstack/router-plugin`, and `@vitejs/plugin-react`. Keep
+`@tailwindcss/vite` when the app uses Tailwind: Farm loads it from the app.
 Keep `@tanstack/react-query` if the app uses it. If `tsconfig.json` lists `"vite/client"` in
 `types`, either keep `vite` as a devDependency on the same major as Farm (8.x) or remove that entry.
 Repeat Phase 7.
@@ -713,9 +715,10 @@ Never expose secrets through `VITE_` or `public`. Docs: `/docs/environment-funct
 
 ### Styling and devtools
 
-- Tailwind v4 (`different`): remove `@tailwindcss/vite`; Farm enables it in dev and build unless the
-  project has a PostCSS config. `@import "tailwindcss"`, `@theme`, and `@plugin` stay (`same`);
-  keep `tailwindcss` and plugins such as `@tailwindcss/typography` installed.
+- Tailwind v4 (`different`): remove `tailwindcss()` from the Vite config; Farm enables it in dev and
+  build unless the project has a PostCSS config. `@import "tailwindcss"`, `@theme`, and `@plugin`
+  stay (`same`); keep `tailwindcss`, `@tailwindcss/vite`, and plugins such as
+  `@tailwindcss/typography` installed.
 - `styles.css?url` plus a head link (`different`): side-effect `import "../styles.css"` in the layout.
 - `@tanstack/react-devtools`, `@tanstack/devtools-vite` (`different`): add `@farm.js/devtools@<version>`
   as a devDependency and `plugins: [devtools()]` (`devtools` from `@farm.js/devtools`).

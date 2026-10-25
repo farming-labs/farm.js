@@ -1,6 +1,6 @@
 # Farm.js
 
-Farm.js is a full-stack framework for product-integrated applications. It combines Vite-powered development with typed app-directory routing, React Server Components and streaming SSR, server actions and queries, first-party integrations, multiple renderers, and production output through Nitro-backed deployment targets.
+Farm.js is a full-stack framework for the web and agents. It combines Vite-powered development with typed app-directory routing, React Server Components and streaming SSR, server actions and queries, first-party integrations, multiple renderers, and production output through Nitro-backed deployment targets.
 
 Treat the checked-out source, package manifests, tests, and current examples as the source of truth. The framework is moving quickly; do not reconstruct an API from memory, an older beta, another framework, or a stale prose document. Read `skills/farmjs/SKILL.md` before changing public framework behavior, configuration, integrations, renderers, templates, or documentation.
 

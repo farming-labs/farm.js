@@ -15,8 +15,16 @@ import VueCompat, {
   markFunctionComponent,
   materializeVueElement,
 } from "./runtime";
+import { validateFarmVueAppSetup, type FarmVueAppSetup } from "./app-setup";
 
 export { Fragment, Suspense, ErrorBoundary, createElement, isValidElement, markFunctionComponent };
+
+let appSetup: FarmVueAppSetup | undefined;
+
+/** Install the app's `app` setup module; Farm calls this before hydrating. */
+export function configureApp(setup: unknown): void {
+  appSetup = validateFarmVueAppSetup(setup);
+}
 
 export interface FarmVueRoot {
   render(element: unknown): void;
@@ -38,6 +46,7 @@ function createManagedRoot(
       setup: () => () => materializeVueElement(current!.value),
     });
     app = hydrate ? createSSRApp(Root) : createApp(Root);
+    appSetup?.(app, { ssr: false });
     app.mount(container);
   };
 

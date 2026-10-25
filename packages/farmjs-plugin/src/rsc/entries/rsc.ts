@@ -1,4 +1,15 @@
+import { createRequire } from "node:module";
 import type { EntryContext } from "../types.js";
+
+const require_ = createRequire(import.meta.url);
+
+/** Core's production source for the \`mcp\` plugin, so both servers merge config the same way. */
+function generateMCPPluginSource(): { importSource: string; registerSource: string } {
+  const { generateNativeMCPPluginSource } = require_(
+    "@farm.js/core/internal/production-runtime",
+  ) as typeof import("@farm.js/core/internal/production-runtime");
+  return generateNativeMCPPluginSource({ enabled: true });
+}
 
 /**
  * Generates the terminal middleware-result handling shared by the RSC entry
@@ -56,6 +67,15 @@ export function generateRscEntry(ctx: EntryContext): string {
         )};`,
     )
     .join("\n");
+  const mcpConfigImports = (ctx.mcpConfigPaths ?? [])
+    .map(
+      (configPath, index) =>
+        `import * as FarmMCPConfigModule${index} from ${JSON.stringify(
+          configPath.replace(/\\/g, "/"),
+        )};`,
+    )
+    .join("\n");
+  const mcpSource = ctx.mcpConfigPaths?.length ? generateMCPPluginSource() : null;
   const middlewareConfigValues = (ctx.middlewareConfigPaths ?? []).map(
     (_configPath, index) =>
       `(FarmMiddlewareConfigModule${index}.default || FarmMiddlewareConfigModule${index})`,
@@ -64,6 +84,8 @@ export function generateRscEntry(ctx: EntryContext): string {
 import React from 'react';
 import ServerErrorFallback from '/.farm/rsc-entries/error-fallback.tsx';
 ${middlewareConfigImports}
+${mcpConfigImports}
+${mcpSource ? `${mcpSource.importSource}\nimport { mergePluginAPIRoutes } from '@farm.js/core/api/runtime';` : ""}
 import { registerAPIRouteShape } from '@farm.js/core/api/runtime';
 import {
   renderToReadableStream,
@@ -105,9 +127,32 @@ import {
   getRoutePatternSpecificity,
 } from '@farm.js/core/internal/production-runtime';
 
+import {
+  FARM_MARKDOWN_CONTENT_TYPE,
+  applyMarkdownNegotiationHeaders,
+  createFarmMarkdownErrorBody,
+  createMarkdownMirrorResponse,
+  farmRequestWantsMarkdown,
+} from '@farm.js/core/markdown';
+
 const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
 const farmApiBasePath = ${JSON.stringify(ctx.apiBasePath ?? "/api")};
+const farmMarkdownConfig = ${JSON.stringify(ctx.markdown ?? { enabled: false, expose: [], cache: false, includeMetadata: true })};
 `;
+  if (ctx.llmsTxt?.enabled) {
+    code += `import {
+  collectFarmLlmsTxtPages,
+  createFarmDefaultLlmsTxt,
+  createFarmLlmsFullRenderer,
+  createFarmLlmsMarkdownReader,
+  createFarmMetadataRouteResponse,
+  renderFarmLlmsFullTxt,
+} from '@farm.js/core/internal/production-runtime';
+
+const farmLlmsTxtConfig = ${JSON.stringify(ctx.llmsTxt)};
+const farmLlmsFullRenderer = createFarmLlmsFullRenderer({ revalidate: farmLlmsTxtConfig.revalidate });
+`;
+  }
   if (ctx.actionsEnabled) {
     code += `import {
   createServerActionRequestErrorResponse,
@@ -119,6 +164,58 @@ const farmApiBasePath = ${JSON.stringify(ctx.apiBasePath ?? "/api")};
 } from '@farm.js/core/server-action-security';
 
 const serverActionSecurity = ${JSON.stringify(ctx.serverActions)};
+`;
+  }
+
+  // In development, a page, layout, loading or error file that fails to load
+  // fails only the routes that use it. Eager globs would fail the whole entry,
+  // so every route returned the same error until the file was fixed. The
+  // modules still load once, in order, before the first request. Middleware
+  // and API routes stay eager: skipping a broken auth middleware would leave
+  // its routes unprotected. Production keeps eager globs, where a broken
+  // import already fails the build.
+  const isolateRouteModules = ctx.development === true;
+  const uiRouteGlob = (pattern: string) =>
+    isolateRouteModules
+      ? `await loadFarmDevRouteModules(import.meta.glob(${JSON.stringify(pattern)}))`
+      : `import.meta.glob(${JSON.stringify(pattern)}, { eager: true })`;
+  if (isolateRouteModules) {
+    code += `
+const farmRouteLoadErrors = new Map();
+
+async function loadFarmDevRouteModules(loaders) {
+  const modules = {};
+  for (const [filePath, load] of Object.entries(loaders)) {
+    try {
+      modules[filePath] = await load();
+    } catch (error) {
+      console.error('[Farm.js] Could not load ' + filePath + ':', error);
+      const failed = {
+        default: function FarmRouteLoadFailure() {
+          throw error;
+        },
+      };
+      farmRouteLoadErrors.set(failed, error);
+      modules[filePath] = failed;
+    }
+  }
+  return modules;
+}
+
+/** The load error of a module the matched route renders with, if any. */
+function findFarmRouteLoadError(matched) {
+  if (farmRouteLoadErrors.size === 0) return undefined;
+  const routeModules = [
+    pages[matched.pattern],
+    ...getRouteModules(matched.pattern, layouts, 'layout'),
+    ...getRouteModules(matched.pattern, loadings, 'loading'),
+    ...getRouteModules(matched.pattern, errors, 'error'),
+  ];
+  for (const module of routeModules) {
+    if (farmRouteLoadErrors.has(module)) return farmRouteLoadErrors.get(module);
+  }
+  return undefined;
+}
 `;
   }
 
@@ -151,13 +248,10 @@ function applyActionResponseHeaders(headers, request) {
 // Auto-discover all route modules. Every glob remains a literal so Vite can analyze it.
 ${routeSourceRoots
   .map(
-    (
-      root,
-      index,
-    ) => `const pages${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/page.{tsx,jsx,ts,js}`)}, { eager: true });
-const layouts${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/layout.{tsx,jsx,ts,js}`)}, { eager: true });
-const loadings${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/loading.{tsx,jsx,ts,js}`)}, { eager: true });
-const errors${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/error.{tsx,jsx,ts,js}`)}, { eager: true });
+    (root, index) => `const pages${index} = ${uiRouteGlob(`${root.glob}/**/page.{tsx,jsx,ts,js}`)};
+const layouts${index} = ${uiRouteGlob(`${root.glob}/**/layout.{tsx,jsx,ts,js}`)};
+const loadings${index} = ${uiRouteGlob(`${root.glob}/**/loading.{tsx,jsx,ts,js}`)};
+const errors${index} = ${uiRouteGlob(`${root.glob}/**/error.{tsx,jsx,ts,js}`)};
 const middlewares${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/middleware.{tsx,jsx,ts,js}`)}, { eager: true });
 const apiRouteModules${index} = import.meta.glob(${JSON.stringify(`${root.glob}/api/**/route.{tsx,jsx,ts,js}`)}, { eager: true });
 const routeDefinitionModules${index} = import.meta.glob(${JSON.stringify(
@@ -310,7 +404,44 @@ function registerApiRouteSources(fileModules, definitionModules, sourceCount) {
 }
 
 registerApiRouteSources(apiRouteModules, routeDefinitionModules, ${routeSourceRoots.length});
-
+${
+  mcpSource
+    ? `
+// mcp: the same plugin core's production server mounts, built from the mcp
+// config read from each config file, layers first.
+const farmNativeMCPPlugin = (() => {
+  const farmRuntimeConfigs = [${(ctx.mcpConfigPaths ?? [])
+    .map((_path, index) => `(FarmMCPConfigModule${index}.default || FarmMCPConfigModule${index})`)
+    .join(", ")}];
+  ${mcpSource.registerSource}
+  return farmNativeMCPPlugin;
+})();
+if (farmNativeMCPPlugin) {
+  const mountedRoutes = [...apiRouteMap.values()].map((route) => ({
+    path: route.path,
+    methods: [...route.methods],
+    endpoints: { ...route.handlers },
+  }));
+  // Rejects a plugin route that would replace an app endpoint. An MCP tool calls its
+  // endpoint through handler(), so the middleware guarding that path runs for it.
+  for (const route of mergePluginAPIRoutes(mountedRoutes, [farmNativeMCPPlugin], undefined, {
+    dispatch: (request) => handler(request),
+  })) {
+    for (const method of route.pluginMethods ?? []) {
+      let target = apiRouteMap.get(route.path);
+      if (!target) {
+        target = { path: route.path, methods: [], handlers: {}, files: {}, sources: {} };
+        apiRouteMap.set(route.path, target);
+      }
+      target.methods.push(method);
+      target.handlers[method] = route.endpoints[method];
+      target.files[method] = 'plugin:' + farmNativeMCPPlugin.name;
+    }
+  }
+}
+`
+    : ""
+}
 async function handleAPIRequest(request) {
   const url = new URL(request.url);
   const match = matchAPIRouteAtBasePath(apiRouteMap, url.pathname, farmApiBasePath);
@@ -358,9 +489,20 @@ const farmMiddlewareRunner = createProductionMiddlewareRunner({
     .filter((entry) => entry.path !== null)
     // Root first, as core runs them: a nested guard can rely on what its
     // parent middleware set, and glob order is alphabetical, not by depth.
-    .sort((left, right) => middlewareRouteDepth(left.path) - middlewareRouteDepth(right.path)),
+    // Route groups share a URL path; the shallower file runs first, so
+    // '/middleware.ts' precedes '/(app)/middleware.ts'.
+    .sort(
+      (left, right) =>
+        middlewareRouteDepth(left.path) - middlewareRouteDepth(right.path) ||
+        left.path.localeCompare(right.path) ||
+        middlewareRouteDepth(left.filePath) - middlewareRouteDepth(right.filePath) ||
+        left.filePath.localeCompare(right.filePath),
+    ),
   i18n: ${JSON.stringify(ctx.i18n) ?? "undefined"},
   server: ${JSON.stringify(ctx.server) ?? "undefined"},
+  apiBasePath: farmApiBasePath,
+  // matchRoute() reads url.pathname as received, so middleware guards that path too.
+  rawPathRouting: true,
 });
 
 debug('Discovered pages:', Object.keys(pages));
@@ -373,22 +515,37 @@ debug('Discovered API routes:', Array.from(apiRouteMap.keys()));
 /**
  * Convert an app-relative middleware file path to the route it guards, with the
  * same rules as core's middleware discovery: a route group such as
- * '(protected)' adds no URL segment, and a '_private' or dot-prefixed folder
+ * '(protected)' or a parallel route slot such as '@team' adds no URL segment,
+ * an intercepting folder guards the URL it intercepts, a '_private' folder
+ * routes its pages so its middleware guards them, and a dot-prefixed folder
  * holds no routes, so its middleware never runs (null).
  * e.g., '/middleware.ts' -> '/'
  * e.g., '/(protected)/dashboard/middleware.ts' -> '/dashboard'
+ * e.g., '/dashboard/@team/middleware.ts' -> '/dashboard'
+ * e.g., '/feed/@modal/(.)photo/middleware.ts' -> '/feed/photo'
  */
 function middlewarePathToRoute(filePath) {
   const segments = filePath
     .replace(/\\/middleware\\.[tj]sx?$/, '')
     .split('/')
     .filter(Boolean);
-  if (segments.some((segment) => segment.startsWith('_') || segment.startsWith('.'))) {
+  if (segments.some((segment) => segment.startsWith('.'))) {
     return null;
   }
-  const routeSegments = segments.filter(
-    (segment) => !(segment.startsWith('(') && segment.endsWith(')')),
-  );
+  const routeSegments = [];
+  for (const segment of segments) {
+    const marker = /^((?:\\(\\.\\.\\))+|\\(\\.\\.\\.\\)|\\(\\.\\))(.*)$/.exec(segment);
+    if (marker) {
+      if (marker[1] === '(...)') routeSegments.length = 0;
+      else if (marker[1] !== '(.)') routeSegments.splice(-(marker[1].length / 4));
+      if (marker[2]) routeSegments.push(marker[2]);
+      continue;
+    }
+    if ((segment.startsWith('(') && segment.endsWith(')')) || /^@[A-Za-z][A-Za-z0-9_-]*$/.test(segment)) {
+      continue;
+    }
+    routeSegments.push(segment);
+  }
   return routeSegments.length === 0 ? '/' : '/' + routeSegments.join('/');
 }
 
@@ -447,7 +604,12 @@ const RouteErrorBoundary = React.Component
 
 // Parse and rank once per entry initialization, not on every request. Use the
 // same validation, decoding and specificity rules as Farm's ordinary router.
-const pageRoutes = Object.entries(pages).map(([filePath, module]) => ({
+// RSC renders no parallel route slots, so a page inside '@modal/...' would otherwise
+// answer at its literal folder path ('/feed/@modal/(.)photo/1'), past the middleware
+// that guards the URL it intercepts.
+const pageRoutes = Object.entries(pages)
+  .filter(([filePath]) => !filePath.split('/').some((segment) => /^@[A-Za-z][A-Za-z0-9_-]*$/.test(segment)))
+  .map(([filePath, module]) => ({
   filePath,
   module,
   segments: parseRoutePath(filePath).segments,
@@ -605,7 +767,14 @@ async function handleFarmRequest(request, context) {
   if (apiResponse) {
     return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
   }
-  if (isFarmAPIPathname(url.pathname, farmApiBasePath) || isFarmAPIPathname(url.pathname)) {
+  ${
+    ctx.llmsTxt?.enabled
+      ? `// agent.llmsTxt: answered after middleware, so its redirects and headers apply.
+  const llmsResponse = await handleFarmLlmsTxtRequest(request, context);
+  if (llmsResponse) return applyProductionMiddlewareHeaders(llmsResponse, middlewareHeaders);
+  `
+      : ""
+  }if (isFarmAPIPathname(url.pathname, farmApiBasePath) || isFarmAPIPathname(url.pathname)) {
     return applyProductionMiddlewareHeaders(new Response(
       JSON.stringify({ error: 'API route not found', pathname: url.pathname }),
       { status: 404, headers: { 'Content-Type': 'application/json' } },
@@ -762,11 +931,28 @@ async function handleFarmRequest(request, context) {
   
   if (!matched) {
     debug('404 - No route found for:', url.pathname);
+    // Agents that read in Markdown get a Markdown 404, as in core's server.
+    if (farmMarkdownConfig.enabled && farmRequestWantsMarkdown(url.pathname, request.headers.get('accept'))) {
+      return new Response(createFarmMarkdownErrorBody(404, url.pathname), {
+        status: 404,
+        headers: {
+          'Content-Type': FARM_MARKDOWN_CONTENT_TYPE,
+          'X-Farm-Markdown-Error': '404',
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
     return new Response('Not Found', { status: 404 });
   }
   
   const { Page, pattern, params, pageMetadata } = matched;
-  const LayoutModules = getLayoutModules(pattern);
+  ${
+    isolateRouteModules
+      ? `const routeLoadError = findFarmRouteLoadError(matched);
+  if (routeLoadError) throw routeLoadError;
+  `
+      : ""
+  }const LayoutModules = getLayoutModules(pattern);
   const metadata = mergeDocumentMetadata(
     ...LayoutModules.map((layoutModule) => layoutModule.metadata),
     pageMetadata,
@@ -927,7 +1113,13 @@ async function handleFarmRequest(request, context) {
     )
   );
   } catch (err) {
-    const redirect = getFarmRedirectError(err);
+    ${
+      isolateRouteModules
+        ? `// A file that failed to load: show the dev error page, not error.tsx.
+    if ([...farmRouteLoadErrors.values()].includes(err)) throw err;
+    `
+        : ""
+    }const redirect = getFarmRedirectError(err);
     if (redirect) return new Response(null, { status: redirect.status, headers: { location: redirect.url, 'cache-control': 'no-store' } });
     if (isFarmNotFoundError(err)) return new Response('Not Found', { status: 404, headers: { 'cache-control': 'no-store' } });
     console.error('[RSC] Handler error:', err);
@@ -1013,13 +1205,118 @@ async function handleFarmRequest(request, context) {
   }
 }
 
+${
+  ctx.llmsTxt?.enabled
+    ? `/**
+ * agent.llmsTxt, built the same way as core's production server: /llms.txt
+ * lists the app's static pages and links to their Markdown mirrors, and
+ * /llms-full.txt inlines each mirror.
+ */
+function createFarmLlmsTxtContext(request, context, full) {
+  const origin = new URL(request.url).origin;
+  const pages = collectFarmLlmsTxtPages(
+    pageRoutes.map(({ module, segments }) => ({
+      // Dynamic routes have no single URL, so the collector skips them.
+      pattern: '/' + segments
+        .map((part) => (part.isDynamic ? '[' + part.segment + ']' : part.segment))
+        .join('/'),
+      metadata: module && module.metadata,
+    })),
+    {
+      origin,
+      markdown: farmMarkdownConfig,
+      include: farmLlmsTxtConfig.include,
+      exclude: farmLlmsTxtConfig.exclude,
+    },
+  );
+  const rootLayout = getRouteModules('/page.tsx', layouts, 'layout')[0];
+  return {
+    defaults: createFarmDefaultLlmsTxt({
+      origin,
+      pages,
+      config: farmLlmsTxtConfig,
+      rootMetadata: rootLayout && rootLayout.metadata,
+    }),
+    // Pages are read in-process through the full handler with a fresh request,
+    // so the caller's cookies never shape the file. HEAD reads nothing.
+    markdown: full && request.method.toUpperCase() !== 'HEAD'
+      ? createFarmLlmsMarkdownReader((page) => handler(page, context))
+      : async () => null,
+  };
+}
+
+async function handleFarmLlmsTxtRequest(request, context) {
+  const { origin, pathname } = new URL(request.url);
+  const kind = pathname === '/llms.txt'
+    ? 'llms'
+    : farmLlmsTxtConfig.full && pathname === '/llms-full.txt' ? 'llms-full' : null;
+  if (!kind) return null;
+  const method = request.method.toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') {
+    return new Response(null, { status: 405, headers: { Allow: 'GET, HEAD' } });
+  }
+  const llmsContext = createFarmLlmsTxtContext(request, context, kind === 'llms-full');
+  // A page that times out is left out, and that response is neither reused nor cached.
+  let complete = true;
+  const renderFull = (shared) =>
+    renderFarmLlmsFullTxt(llmsContext.defaults, {
+      origin,
+      readMarkdown: llmsContext.markdown,
+      onIncomplete: () => {
+        complete = false;
+        if (shared) shared.incomplete();
+      },
+    });
+  // HEAD reads no pages, so it neither waits for nor fills the shared render.
+  const body = kind === 'llms'
+    ? llmsContext.defaults
+    : method === 'HEAD'
+      ? await renderFull()
+      : await farmLlmsFullRenderer(origin, renderFull, (settled) => {
+          complete = settled;
+        });
+  const response = createFarmMetadataRouteResponse(
+    kind,
+    body,
+    { revalidate: complete ? farmLlmsTxtConfig.revalidate : 0 },
+    { method, request },
+  );
+  if (!complete) response.headers.set('cache-control', 'no-store');
+  return response;
+}
+
+`
+    : ""
+}/**
+ * Serves a page's Markdown mirror (\`/page.md\` or \`Accept: text/markdown\`) by
+ * rendering the page through the normal request path, so middleware and sign-in
+ * gates apply; every other request renders as usual, and HTML pages advertise
+ * their mirror with a Link header.
+ */
+async function handleFarmPageOrMarkdown(request, context) {
+  if (!farmMarkdownConfig.enabled) return handleFarmRequest(request, context);
+  const markdown = await createMarkdownMirrorResponse({
+    request,
+    config: farmMarkdownConfig,
+    routeExists: (pathname) => Boolean(matchRoute(pathname)),
+    renderPage: (pageRequest) => handleFarmRequest(pageRequest, context),
+    apiServerBasePath: farmApiBasePath,
+  });
+  if (markdown) return markdown;
+  const response = await handleFarmRequest(request, context);
+  return applyMarkdownNegotiationHeaders(response, {
+    config: farmMarkdownConfig,
+    pathname: new URL(request.url).pathname,
+  });
+}
+
 async function handler(request, context) {
   return _runWithAPIRequestRuntime({
     basePath: farmApiBasePath,
     dispatch: async (localRequest) =>
       (await handleAPIRequest(localRequest)) ?? Response.json({ error: 'Not Found' }, { status: 404 }),
   }, () => _runWithCurrentRequest(request, () =>
-    _runWithAfterRequest(request, () => handleFarmRequest(request, context), context)
+    _runWithAfterRequest(request, () => handleFarmPageOrMarkdown(request, context), context)
   ));
 }
 

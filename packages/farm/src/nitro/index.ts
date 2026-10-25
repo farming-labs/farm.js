@@ -524,9 +524,10 @@ export default defineEventHandler(async (event: H3Event) => {
     preset,
     // rootDir must be the project root for Nitro to correctly resolve paths
     rootDir: root,
-    // serverDir should point to where source files are (for scanning)
-    // But we're using scanDirs to point to our server directory
-    serverDir: root,
+    // Only scan the generated server directory below, never the project root:
+    // an app's own `middleware/`, `api/`, or `server.ts` is not a Nitro handler.
+    serverDir: false,
+    serverEntry: false,
     // buildDir is where Nitro builds (temporary working directory)
     buildDir: nitroBuildDir,
     // output.dir is where the final deployable output goes

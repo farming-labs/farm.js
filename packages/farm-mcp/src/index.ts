@@ -2,6 +2,7 @@ import {
   createMcpHandler,
   fromJsonSchema,
   McpServer,
+  SUPPORTED_PROTOCOL_VERSIONS,
   type AuthInfo,
   type ToolAnnotations,
 } from "@modelcontextprotocol/server";
@@ -22,8 +23,16 @@ import type {
   FarmMCPStandaloneTool,
   FarmMCPExecuteContext,
   FarmMCPServerFunction,
+  FarmMCPPrompt,
+  FarmMCPResource,
+  FarmMCPServer,
 } from "@farm.js/core";
-import { isEndpointFailure, parseRouteSchema } from "@farm.js/core/api/runtime";
+import {
+  _publishFarmMCPCatalog,
+  isEndpointFailure,
+  parseRouteSchema,
+  type FarmMCPCatalogDetails,
+} from "@farm.js/core/api/runtime";
 import {
   _describeServerFunction,
   _invokeServerFunction,
@@ -31,6 +40,12 @@ import {
   type ServerFunctionDescriptor,
 } from "@farm.js/core/server-fn";
 import { emitFarmEvent } from "@farm.js/core/observability";
+import {
+  bindPrompts,
+  registerResourcesAndPrompts,
+  validateResources,
+  type BoundPrompt,
+} from "./resources.js";
 import { toJSONSchema } from "zod";
 
 const TOOL_NAME = /^[A-Za-z0-9_.-]{1,128}$/;
@@ -74,6 +89,27 @@ type BoundTool = BoundToolBase &
 
 export type { FarmMCPStandaloneTool, FarmMCPExecuteContext } from "@farm.js/core";
 
+export type {
+  FarmMCPPrompt,
+  FarmMCPPromptMessage,
+  FarmMCPResource,
+  FarmMCPResourceContent,
+  FarmMCPResourceContext,
+  FarmMCPResourceListing,
+} from "@farm.js/core";
+
+/** Define a server-only MCP resource: read-only context at a fixed URI or a URI template. */
+export function defineResource(definition: FarmMCPResource): FarmMCPResource {
+  return definition;
+}
+
+/** Define a server-only MCP prompt with schema-inferred render arguments. */
+export function definePrompt<Schema extends RouteSchema | undefined = undefined>(
+  definition: FarmMCPPrompt<Schema>,
+): FarmMCPPrompt<Schema> {
+  return definition;
+}
+
 /** Define a server-only MCP tool with schema-inferred execute arguments. */
 export function defineTool<
   Schema extends RouteSchema,
@@ -91,12 +127,26 @@ export function defineTool<
  */
 export function apiMcp(options: APIMCPOptions): FarmPlugin {
   const normalized = validateOptions(options);
+  const resources = validateResources(normalized.resources);
+  const prompts = bindPrompts(normalized.prompts);
+  let unpublishCatalog: (() => void) | undefined;
 
   return {
     name: "farm:api-mcp",
     routes: ({ route, api }) => {
       const tools = api.available ? bindTools(api, normalized) : [];
-      const handler = createHandler(normalized, tools);
+      // Lets core name the tool behind an endpoint, such as a form in the Markdown mirror.
+      // Rebuilding the routes (a dev restart) replaces this endpoint's catalog.
+      const handler = createHandler(
+        normalized,
+        tools,
+        resources,
+        prompts,
+        (server, catalog, details) => {
+          unpublishCatalog?.();
+          unpublishCatalog = _publishFarmMCPCatalog(server, catalog, details);
+        },
+      );
       const serve = (request: Request, body: unknown) => handler(request, body);
 
       return [
@@ -111,10 +161,25 @@ export function apiMcp(options: APIMCPOptions): FarmPlugin {
         }),
       ] as const;
     },
+    // Only an oauth endpoint has metadata to serve, so others add no runtime hooks:
+    // any runtime hook makes the production build bundle the plugin runtime.
+    ...(normalized.oauth
+      ? { runtime: { before: ({ request }) => protectedResourceMetadata(request, normalized) } }
+      : {}),
   };
 }
 
-function createHandler(options: NormalizedOptions, tools: readonly BoundTool[]) {
+function createHandler(
+  options: NormalizedOptions,
+  tools: readonly BoundTool[],
+  resources: readonly FarmMCPResource[],
+  prompts: readonly BoundPrompt[],
+  publish: (
+    server: FarmMCPServer,
+    catalog: readonly FarmMCPTool[],
+    details: FarmMCPCatalogDetails,
+  ) => void,
+) {
   const catalog: readonly FarmMCPTool[] = Object.freeze(
     tools.map((tool) =>
       Object.freeze({
@@ -128,17 +193,57 @@ function createHandler(options: NormalizedOptions, tools: readonly BoundTool[]) 
       }),
     ),
   );
-  const serverIdentity = Object.freeze({
+  const serverInfo = {
     name: options.name,
     version: options.version,
-    path: options.path,
+    ...(options.title ? { title: options.title } : {}),
+    ...(options.description ? { description: options.description } : {}),
+  };
+  const serverIdentity = Object.freeze({ ...serverInfo, path: options.path });
+  // The app manifest (/.well-known/farmjs.json) lists schemas, resources and prompts too,
+  // and the server card core serves for /.well-known/ai-catalog.json uses the versions.
+  publish(serverIdentity, catalog, {
+    // Without authorize, any client lists the catalog, so the public manifest may too.
+    public: !options.authorize,
+    protocolVersions: [...SUPPORTED_PROTOCOL_VERSIONS],
+    schemas: Object.fromEntries(
+      tools.map((tool) => [
+        tool.config.name,
+        {
+          input: tool.inputSchema,
+          ...(tool.outputSchema === undefined ? {} : { output: tool.outputSchema }),
+        },
+      ]),
+    ),
+    resources: resources.map(
+      ({ name, title, description, mimeType, uri, uriTemplate }) =>
+        Object.fromEntries(
+          Object.entries({ name, title, description, mimeType, uri, uriTemplate }).filter(
+            ([, value]) => value !== undefined,
+          ),
+        ) as { name: string },
+    ),
+    prompts: prompts.map(
+      ({ definition, argsJSONSchema }) =>
+        Object.fromEntries(
+          Object.entries({
+            name: definition.name,
+            title: definition.title,
+            description: definition.description,
+            arguments: argsJSONSchema,
+          }).filter(([, value]) => value !== undefined),
+        ) as { name: string },
+    ),
   });
   const toolNames = new Set(catalog.map(({ name }) => name));
+  const resourceNames = new Set(resources.map(({ name }) => name));
+  const promptNames = new Set(prompts.map(({ definition }) => definition.name));
   const mcp = createMcpHandler(({ requestInfo, authInfo }) => {
-    const server = new McpServer(
-      { name: options.name, version: options.version },
-      { capabilities: { tools: {} } },
-    );
+    const server = new McpServer(serverInfo, {
+      capabilities: { tools: {} },
+      // Bounds the work of validating one call's arguments; the SDK sets no limit.
+      maxToolInputElements: options.maxToolInputElements,
+    });
     const allowed = authInfo?.extra?.farmAllowedTools as readonly string[] | undefined;
     const allowedNames = allowed === undefined ? undefined : new Set(allowed);
     // A fresh server is created per HTTP request. Unregistered tools are neither
@@ -196,10 +301,19 @@ function createHandler(options: NormalizedOptions, tools: readonly BoundTool[]) 
         },
       );
     }
+    registerResourcesAndPrompts(server, resources, prompts, {
+      request: requestInfo,
+      authorization: authInfo?.extra?.farmAuthorization as FarmMCPAuthorization | undefined,
+      allowedResources: toNameSet(authInfo?.extra?.farmAllowedResources),
+      allowedPrompts: toNameSet(authInfo?.extra?.farmAllowedPrompts),
+    });
     return server;
   });
 
   return async (request: Request, parsedBody: unknown): Promise<Response> => {
+    if (Array.isArray(parsedBody) && parsedBody.length > options.maxBatchSize) {
+      return batchTooLarge(options.maxBatchSize);
+    }
     let authorization: APIMCPAuthorization;
     if (options.authorize) {
       const messages =
@@ -208,15 +322,18 @@ function createHandler(options: NormalizedOptions, tools: readonly BoundTool[]) 
       let denied = false;
       let inconsistent = false;
       for (const message of messages) {
+        const target = getRequestedTarget(message);
         const result = await options.authorize({
           request,
-          tool: getCalledTool(message),
+          tool: target.tool,
+          resource: target.resource,
+          prompt: target.prompt,
           tools: catalog,
           server: serverIdentity,
         });
         if (result === false) {
           denied = true;
-          continue;
+          break;
         }
         if (!result || typeof result.subject !== "string" || result.subject.length === 0) {
           throw new TypeError(
@@ -228,7 +345,7 @@ function createHandler(options: NormalizedOptions, tools: readonly BoundTool[]) 
         }
         first ??= result;
       }
-      if (denied || inconsistent) return unauthorized();
+      if (denied || inconsistent) return unauthorized(request, options);
       authorization = first!;
     } else {
       authorization = { subject: "anonymous" };
@@ -236,7 +353,11 @@ function createHandler(options: NormalizedOptions, tools: readonly BoundTool[]) 
 
     return mcp.fetch(request, {
       parsedBody,
-      authInfo: toMCPAuthInfo(authorization, resolveAllowedTools(authorization, toolNames)),
+      authInfo: toMCPAuthInfo(authorization, {
+        tools: resolveAllowedNames(authorization.tools, toolNames, "tool"),
+        resources: resolveAllowedNames(authorization.resources, resourceNames, "resource"),
+        prompts: resolveAllowedNames(authorization.prompts, promptNames, "prompt"),
+      }),
     });
   };
 }
@@ -282,6 +403,15 @@ async function invokeTool(
   try {
     const response = await tool.route.invoke(request, routeParams);
     const mediaType = response.headers.get("content-type")?.split(";", 1)[0].trim() ?? "";
+    const isJSON = mediaType === "application/json" || mediaType.endsWith("+json");
+    if (!response.ok && !isJSON) {
+      // A guard in front of the endpoint (middleware, an integration) refused or redirected it.
+      const error = (await response.text()).slice(0, 1_000);
+      const location = response.headers.get("location");
+      return toolError(
+        JSON.stringify({ status: response.status, error, ...(location ? { location } : {}) }),
+      );
+    }
     if (
       response.status !== 204 &&
       mediaType !== "application/json" &&
@@ -559,9 +689,9 @@ function bindTools(api: PluginLocalAPI, options: NormalizedOptions): BoundTool[]
     }
   }
 
-  if (selected.length === 0) {
+  if (selected.length === 0 && !options.resources?.length && !options.prompts?.length) {
     throw new TypeError(
-      "apiMcp needs at least one endpoint or standalone tool selected in tools, or route-owned MCP metadata.",
+      "apiMcp needs at least one endpoint or standalone tool selected in tools, route-owned MCP metadata, or a resource or prompt.",
     );
   }
 
@@ -796,12 +926,27 @@ function interpolatePath(path: string, params: JSONRecord): string {
       if (optional || catchAll) {
         if (!Array.isArray(value))
           throw new TypeError(`Route parameter "${name}" must be an array.`);
-        return value.map((part) => encodeURIComponent(String(part))).join("/");
+        return value
+          .map((part) => {
+            const text = String(part);
+            // URL parsing drops dot segments, which would move the call to another route.
+            if (text === "." || text === "..") {
+              throw new TypeError(`Route parameter "${name}" cannot contain "." or ".." segments.`);
+            }
+            return encodeURIComponent(text);
+          })
+          .join("/");
       }
       if (Array.isArray(value) || (typeof value === "object" && value !== null)) {
         throw new TypeError(`Route parameter "${name}" must be a scalar value.`);
       }
-      return encodeURIComponent(String(value));
+      const text = String(value);
+      if (text === "" || text === "." || text === ".." || text.includes("/")) {
+        throw new TypeError(
+          `Route parameter "${name}" must be a single non-empty path segment other than "." or "..".`,
+        );
+      }
+      return encodeURIComponent(text);
     })
     .filter(Boolean)
     .join("/")
@@ -859,19 +1004,33 @@ function createAnnotations(
   };
 }
 
-function getCalledTool(body: unknown): string | undefined {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return undefined;
-  const request = body as { method?: unknown; params?: { name?: unknown } };
-  return request.method === "tools/call" && typeof request.params?.name === "string"
-    ? request.params.name
-    : undefined;
+/** The untrusted tool, resource, or prompt a JSON-RPC message asks for. */
+function getRequestedTarget(body: unknown): { tool?: string; resource?: string; prompt?: string } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return {};
+  const request = body as { method?: unknown; params?: { name?: unknown; uri?: unknown } };
+  if (request.method === "tools/call" && typeof request.params?.name === "string") {
+    return { tool: request.params.name };
+  }
+  if (request.method === "resources/read" && typeof request.params?.uri === "string") {
+    return { resource: request.params.uri };
+  }
+  if (request.method === "prompts/get" && typeof request.params?.name === "string") {
+    return { prompt: request.params.name };
+  }
+  return {};
+}
+
+function toNameSet(value: unknown): ReadonlySet<string> | undefined {
+  return Array.isArray(value) ? new Set(value as string[]) : undefined;
 }
 
 function sameAuthorizationIdentity(left: APIMCPAuthorization, right: APIMCPAuthorization): boolean {
   return (
     left.subject === right.subject &&
     sameAuthorizationList(left.scopes, right.scopes) &&
-    sameAuthorizationList(left.tools, right.tools)
+    sameAuthorizationList(left.tools, right.tools) &&
+    sameAuthorizationList(left.resources, right.resources) &&
+    sameAuthorizationList(left.prompts, right.prompts)
   );
 }
 
@@ -885,35 +1044,109 @@ function sameAuthorizationList(left: unknown, right: unknown): boolean {
   );
 }
 
-function resolveAllowedTools(
-  authorization: APIMCPAuthorization,
+function resolveAllowedNames(
+  allowed: unknown,
   names: ReadonlySet<string>,
+  kind: "tool" | "resource" | "prompt",
 ): string[] | undefined {
-  if (authorization.tools === undefined) return undefined;
+  if (allowed === undefined) return undefined;
   if (
-    !Array.isArray(authorization.tools) ||
-    authorization.tools.some((name) => typeof name !== "string" || !names.has(name))
+    !Array.isArray(allowed) ||
+    allowed.some((name) => typeof name !== "string" || !names.has(name))
   ) {
-    throw new TypeError("apiMcp authorize tools must be an array of configured tool names.");
+    throw new TypeError(`apiMcp authorize ${kind}s must be an array of configured ${kind} names.`);
   }
-  return [...authorization.tools];
+  return [...allowed];
 }
 
 function toMCPAuthInfo(
   authorization: APIMCPAuthorization,
-  allowedTools?: readonly string[],
+  allowed: {
+    tools?: readonly string[];
+    resources?: readonly string[];
+    prompts?: readonly string[];
+  },
 ): AuthInfo {
   return {
     token: "farm-authorized",
     clientId: authorization.subject,
     scopes: Array.isArray(authorization.scopes) ? authorization.scopes : [],
-    extra: { farmAuthorization: authorization, farmAllowedTools: allowedTools },
+    extra: {
+      farmAuthorization: authorization,
+      farmAllowedTools: allowed.tools,
+      farmAllowedResources: allowed.resources,
+      farmAllowedPrompts: allowed.prompts,
+    },
   };
 }
 
-function unauthorized(): Response {
+const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
+
+/**
+ * A 401 must say how to authenticate (RFC 9110). MCP clients use Bearer tokens,
+ * and with `oauth` configured the challenge links the endpoint's metadata so a
+ * client can find the authorization server.
+ */
+/** A JSON-RPC Invalid Request for the whole batch, sent before any message is authorized. */
+function batchTooLarge(maxBatchSize: number): Response {
+  return new Response(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: null,
+      error: {
+        code: -32600,
+        message: `A JSON-RPC batch may carry at most ${maxBatchSize} messages.`,
+      },
+    }),
+    {
+      status: 400,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    },
+  );
+}
+
+function unauthorized(request: Request, options: NormalizedOptions): Response {
+  const parameters: string[] = [];
+  if (options.oauth) {
+    const url = new URL(request.url);
+    parameters.push(
+      `resource_metadata="${url.origin}${PROTECTED_RESOURCE_METADATA_PATH}${url.pathname}"`,
+    );
+    if (options.oauth.scopes?.length) parameters.push(`scope="${options.oauth.scopes.join(" ")}"`);
+  }
   return new Response(JSON.stringify({ error: "Unauthorized" }), {
     status: 401,
+    headers: {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+      "www-authenticate": parameters.length ? `Bearer ${parameters.join(", ")}` : "Bearer",
+    },
+  });
+}
+
+/**
+ * Serves RFC 9728 metadata at the path the 401 links, built from the request so
+ * it names the endpoint URL the client used, whatever `api.baseURL` maps it to.
+ * The resource path must end with the endpoint's own path below `/api`.
+ */
+function protectedResourceMetadata(request: Request, options: NormalizedOptions): Response | void {
+  const oauth = options.oauth!;
+  const url = new URL(request.url);
+  if (!url.pathname.startsWith(`${PROTECTED_RESOURCE_METADATA_PATH}/`)) return;
+  const resourcePath = url.pathname.slice(PROTECTED_RESOURCE_METADATA_PATH.length);
+  if (!resourcePath.endsWith(options.path.slice("/api".length))) return;
+  const method = request.method.toUpperCase();
+  if (method !== "GET" && method !== "HEAD") {
+    return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+  }
+  const metadata = {
+    resource: `${url.origin}${resourcePath}`,
+    authorization_servers: oauth.authorizationServers,
+    ...(oauth.scopes?.length ? { scopes_supported: oauth.scopes } : {}),
+    bearer_methods_supported: ["header"],
+    resource_name: oauth.resourceName ?? options.name,
+  };
+  return new Response(method === "HEAD" ? null : JSON.stringify(metadata), {
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
 }
@@ -922,10 +1155,39 @@ function toolError(message: string) {
   return { isError: true, content: [{ type: "text" as const, text: message }] };
 }
 
-interface NormalizedOptions extends Omit<APIMCPOptions, "path" | "name" | "version"> {
+interface NormalizedOptions extends Omit<
+  APIMCPOptions,
+  "path" | "name" | "version" | "maxBatchSize" | "maxToolInputElements"
+> {
   path: `/api/${string}`;
   name: string;
   version: string;
+  maxBatchSize: number;
+  maxToolInputElements: number;
+}
+
+const DEFAULT_MAX_BATCH_SIZE = 25;
+const DEFAULT_MAX_TOOL_INPUT_ELEMENTS = 10_000;
+
+function validateOAuth(oauth: NonNullable<APIMCPOptions["oauth"]>): void {
+  const servers = oauth?.authorizationServers;
+  if (
+    !Array.isArray(servers) ||
+    servers.length === 0 ||
+    !servers.every((server) => typeof server === "string" && /^https?:\/\//i.test(server))
+  ) {
+    throw new TypeError("apiMcp oauth.authorizationServers must list absolute issuer URLs.");
+  }
+  // Scopes are quoted into the WWW-Authenticate header, so keep them to RFC 6749 scope tokens.
+  if (
+    oauth.scopes !== undefined &&
+    (!Array.isArray(oauth.scopes) ||
+      !oauth.scopes.every(
+        (scope) => typeof scope === "string" && /^[\x21\x23-\x5b\x5d-\x7e]+$/.test(scope),
+      ))
+  ) {
+    throw new TypeError("apiMcp oauth.scopes must be OAuth scope tokens.");
+  }
 }
 
 function validateOptions(options: APIMCPOptions): NormalizedOptions {
@@ -940,13 +1202,33 @@ function validateOptions(options: APIMCPOptions): NormalizedOptions {
       "apiMcp requires authorize; set allowUnauthenticated: true only for a deliberately public server.",
     );
   }
+  if (options.oauth !== undefined) validateOAuth(options.oauth);
+  for (const key of ["title", "description"] as const) {
+    const value = options[key];
+    if (value !== undefined && (typeof value !== "string" || !value.trim())) {
+      throw new TypeError(`apiMcp ${key} must be a non-empty string.`);
+    }
+  }
   const path = options.path ?? "/api/mcp";
   if (!/^\/api\/[^/?#]+(?:\/[^/?#]+)*$/.test(path)) {
     throw new TypeError("apiMcp path must be a canonical /api path.");
   }
+  const maxBatchSize = options.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE;
+  if (!Number.isInteger(maxBatchSize) || maxBatchSize < 1) {
+    throw new TypeError("apiMcp maxBatchSize must be a positive integer.");
+  }
+  const maxToolInputElements = options.maxToolInputElements ?? DEFAULT_MAX_TOOL_INPUT_ELEMENTS;
+  if (
+    maxToolInputElements !== Infinity &&
+    (!Number.isInteger(maxToolInputElements) || maxToolInputElements < 1)
+  ) {
+    throw new TypeError("apiMcp maxToolInputElements must be a positive integer or Infinity.");
+  }
   return {
     ...options,
     path,
+    maxBatchSize,
+    maxToolInputElements,
     name: options.name ?? "farm-api",
     version: options.version ?? "1.0.0",
   };

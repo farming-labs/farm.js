@@ -43,8 +43,11 @@ and a record of the Nuxt app's behavior before you change it: list every page UR
 - Farm has no Vue `Link` component and does not intercept plain `<a>` clicks. `<a href>` performs a
   full document navigation. SPA navigation in Vue is `useRouter().push()` from
   `@farm.js/vue/bindings`.
-- The Vue app instance is created inside the renderer. There is no hook to call `app.use()`, so
-  Vue plugins that require installation (Pinia, vue-i18n, Nuxt UI) cannot be installed globally.
+- Install Vue plugins (Pinia, vue-i18n, UI libraries) with an app setup module: `vue({ app:
+"./src/vue-app.ts" })` in `farm.config.ts`, where the module default-exports `defineVueApp((app,
+{ ssr }) => { app.use(...) })` from `@farm.js/vue`. Farm calls it for every Vue app: once per
+  server render and once per hydrated root. Requires Farm 0.1.22 or later. Server-side store state
+  is not transferred to the browser.
 
 **Done means:** every recorded URL returns the same status and content, client navigation and
 hydrated interactions work, `pnpm build` and `pnpm start` succeed, type-check passes, and no `nuxt`,
@@ -59,7 +62,7 @@ Run the phases in order. Do not start a phase until the previous phase's verific
 Pin exact versions: pnpm 11+ applies `minimumReleaseAge`, which can resolve `latest` to an older
 Farm release right after a publish. Keep `@farm.js/core` and `@farm.js/cli` on the same version.
 If pnpm refuses a version younger than the release-age window, add that exact `package@version` to
-`minimumReleaseAgeExclude` in `pnpm-workspace.yaml`. `@farm.js/vue` requires `vue@^3.5.41`.
+`minimumReleaseAgeExclude` in `pnpm-workspace.yaml`. `@farm.js/vue` requires `vue@^3.5.44`.
 
 ```bash
 FARM_VERSION=$(npm view @farm.js/core version)
@@ -464,12 +467,12 @@ plus `apiClient`. Do not import `@farm.js/core/server-query/client` in Vue code:
 
 ## State
 
-| Nuxt                            | Farm                                                                                               | Status |
-| ------------------------------- | -------------------------------------------------------------------------------------------------- | ------ |
-| `useState(key, init)`           | None. Browser-only shared state: a module-level `ref` in a composable used by hydrated routes      | `none` |
-| server-to-client state transfer | None generic; pass client-safe values through middleware `context.data` or fetch after mount       | `none` |
-| Pinia via `@pinia/nuxt`         | None (no `app.use`). Use composables with module-level `ref`s, or `provide`/`inject` from a layout | `none` |
-| `provide`/`inject` (Vue)        | `provide()` in a layout's `<script setup>`, `inject()` in descendants                              | `same` |
+| Nuxt                            | Farm                                                                                                 | Status      |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------- | ----------- |
+| `useState(key, init)`           | None. Browser-only shared state: a module-level `ref` in a composable used by hydrated routes        | `none`      |
+| server-to-client state transfer | None generic; pass client-safe values through middleware `context.data` or fetch after mount         | `none`      |
+| Pinia via `@pinia/nuxt`         | `app.use(createPinia())` in the app setup module (`vue({ app })`); stores start fresh in the browser | `different` |
+| `provide`/`inject` (Vue)        | `provide()` in a layout's `<script setup>`, `inject()` in descendants                                | `same`      |
 
 Module-level state in server-imported modules is shared by every request on the server. Only keep
 mutable module state in code that runs in the browser. Client state survives Farm SPA navigation
@@ -721,10 +724,10 @@ Canonical docs: [/docs/plugins/client](/docs/plugins/client), [/docs/project-str
 
 | Nuxt                                                    | Farm                                                                                       | Status      |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------- |
-| `defineNuxtPlugin` calling `nuxtApp.vueApp.use(plugin)` | None; no access to the Vue app instance                                                    | `none`      |
+| `defineNuxtPlugin` calling `nuxtApp.vueApp.use(plugin)` | `app.use(plugin)` in the app setup module (`vue({ app })`)                                 | `different` |
 | `provide: { helper }` / `useNuxtApp().$helper`          | Export the helper from a module and import it                                              | `different` |
-| global directives (`vueApp.directive`)                  | Register locally in `<script setup>` (`const vFocus = { mounted: (el) => el.focus() }`)    | `different` |
-| global components (`vueApp.component`)                  | Explicit imports                                                                           | `different` |
+| global directives (`vueApp.directive`)                  | `app.directive()` in the app setup module, or register locally in `<script setup>`         | `different` |
+| global components (`vueApp.component`)                  | `app.component()` in the app setup module, or explicit imports                             | `different` |
 | browser analytics / router event plugins                | `definePlugin({ client: { setup, navigation, hydration } })` in `farm.config.ts` `plugins` | `different` |
 | small DOM enhancements on every page                    | `src/client.ts` with `defineClient` from `@farm.js/core/client/lifecycle`                  | `different` |
 | `.server.ts` plugins                                    | `definePlugin` `runtime` hooks or `src/instrumentation.ts`                                 | `different` |
@@ -733,13 +736,13 @@ Canonical docs: [/docs/plugins/client](/docs/plugins/client), [/docs/project-str
 
 | Nuxt module                              | Farm replacement                                                                                                                                                                                                                                                | Status      |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `@nuxtjs/tailwindcss`                    | Built in: Farm enables Tailwind v4 through `@tailwindcss/vite` unless a project PostCSS config exists; `@import "tailwindcss";` in global CSS                                                                                                                   | `different` |
+| `@nuxtjs/tailwindcss`                    | Built in: Farm enables Tailwind v4 through the installed `@tailwindcss/vite` unless a project PostCSS config exists; `@import "tailwindcss";` in global CSS                                                                                                     | `different` |
 | `@nuxt/image` (`<NuxtImg>`)              | `<img>` with `srcset` built from `/_farm/image?url=...&w=...&q=75`; `w` must be in `images.deviceSizes`/`imageSizes`, remote hosts need `images.remotePatterns`. The `Image` component in `@farm.js/core/image` is React-only                                   | `different` |
 | `@nuxt/fonts`                            | `@fontsource-*` CSS imports in the root layout, or `localFont`/`remoteFont` from `@farm.js/core/font` declared in a `.ts` module (calls inside `.vue` files are not compiled)                                                                                   | `different` |
 | `@nuxt/content`                          | `@farm.js/content` collections in `plugins`; `getCollection`/`getEntry` from `@farm.js/content/server` in server code. `body` is raw Markdown: render it yourself; MDC components are `none`                                                                    | `different` |
 | `@nuxtjs/i18n`                           | `i18n` in `farm.config.ts`, catalogs in `src/messages/<locale>.json`, `t` from `@farm.js/core/i18n/server`, `useI18n`/`useTranslations` from `@farm.js/vue/bindings`                                                                                            | `different` |
-| `@nuxt/ui`                               | None (requires `app.use`); use headless Vue components that need no plugin install, with Tailwind                                                                                                                                                               | `none`      |
-| `@pinia/nuxt`                            | None (see State)                                                                                                                                                                                                                                                | `none`      |
+| `@nuxt/ui`                               | Install its Vue plugin with `app.use()` in the app setup module; it is a Nuxt module, so check which components work without Nuxt                                                                                                                               | `different` |
+| `@pinia/nuxt`                            | `pinia` installed with `app.use(createPinia())` in the app setup module (see State)                                                                                                                                                                             | `different` |
 | `nuxt-auth-utils`, `@sidebase/nuxt-auth` | Better Auth through `@farm.js/better-auth` (`integrations: { auth: betterAuth({ instance }) }`) with `createAuthClient` from `better-auth/vue`; or built-in `auth: true` with `@farm.js/auth` (server helpers in `@farm.js/auth/server`, client APIs are React) | `different` |
 | `@nuxt/devtools`                         | `@farm.js/devtools`                                                                                                                                                                                                                                             | `rename`    |
 | `@nuxt/eslint`                           | Plain ESLint or oxlint config                                                                                                                                                                                                                                   | `none`      |
@@ -783,5 +786,5 @@ Canonical docs: [/docs/testing](/docs/testing).
 
 When finished, report to the user: the routes and endpoints migrated, every feature you resolved
 with a `none` workaround, the output of `pnpm build`, `pnpm start` checks, and `pnpm type-check`,
-and anything you could not reproduce exactly (for example removed Pinia stores or Nuxt UI
-components).
+and anything you could not reproduce exactly (for example Pinia state that Nuxt hydrated from the
+server, or Nuxt UI components that need Nuxt).

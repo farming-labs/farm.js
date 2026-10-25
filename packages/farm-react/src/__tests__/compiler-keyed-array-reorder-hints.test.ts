@@ -30,7 +30,7 @@ describe("React AOT keyed-array reorder hints", () => {
     expect(result.compiled).toEqual(["Table"]);
     expect(result.optimizations.keyedArrayReorderHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArrayReorder");
-    expect(result.code).toContain("keyedRowsReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainReorderHintedRuntimeFeature");
     expect(result.code).toContain("reorderIndexIndependent");
   });
 
@@ -55,7 +55,7 @@ describe("React AOT keyed-array reorder hints", () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.optimizations.keyedArrayReorderHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArrayReorder");
-    expect(result.code).toContain("keyedRowsReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainReorderHintedRuntimeFeature");
     expect(result.code).toContain("reorderIndexIndependent");
     await expect(
       transformWithEsbuild(result.code, "/app/KeyedArrayReorderHints.tsx", {

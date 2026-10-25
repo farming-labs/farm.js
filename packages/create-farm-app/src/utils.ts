@@ -24,7 +24,7 @@ export function showBanner() {
   }
   console.log("");
   console.log(
-    pc.bold(pc.green("Create FARMJS App")) + pc.dim("  a framework for product-integrated apps"),
+    pc.bold(pc.green("Create FARMJS App")) + pc.dim("  the framework for the web and agents"),
   );
   console.log("");
 }

@@ -13,7 +13,11 @@ describe("devtools plugin", () => {
       {
         plugins: [plugin],
         devtools: { shortcut: false },
-        vite: { plugins: [other], base: "/lab/" },
+        vite: {
+          plugins: [other],
+          base: "/lab/",
+          optimizeDeps: { exclude: ["existing-exclusion"], include: ["existing-inclusion"] },
+        },
       } as never,
       context(true),
     );
@@ -22,7 +26,11 @@ describe("devtools plugin", () => {
       base: "/lab/",
       plugins: [{ name: "farm:devtools-ui", apply: "serve", enforce: "pre" }, other],
     });
-    expect(plugin.client?.public).toEqual({ launcher: true });
+    expect(configured?.vite?.optimizeDeps).toEqual({
+      exclude: ["existing-exclusion", "@farm.js/devtools/internal/hmr"],
+      include: ["existing-inclusion"],
+    });
+    expect(plugin.client?.public).toEqual({ launcher: true, inspect: true });
   });
   it("removes its client hooks and does not install Vite hooks in production", async () => {
     const plugin = devtools();
@@ -39,12 +47,13 @@ describe("devtools plugin", () => {
   });
   it("allows disabling the launcher without disabling inspection or shortcuts", async () => {
     const plugin = devtools({ launcher: false, inspect: false, shortcut: "mod+shift+d" });
-    expect(plugin.client?.public).toEqual({ launcher: false });
+    expect(plugin.client?.public).toEqual({ launcher: false, inspect: false });
     expect(
       await plugin.client?.setup?.({ isDev: true, public: { launcher: false } } as never),
     ).toBeUndefined();
     const configured = await plugin.configure!({ plugins: [plugin] } as never, context(true));
     expect(configured?.devtools).toMatchObject({ enabled: true, shortcut: "mod+shift+d" });
+    expect(configured?.vite?.optimizeDeps).toBeUndefined();
   });
   it("hands the resolved Farm shortcut to the embedded panel", async () => {
     const embeddedHtml = async (config: Record<string, unknown>) => {

@@ -27,7 +27,7 @@ const banner = `
 
 program
   .name("farm")
-  .description("Farm.js CLI - A framework for product-integrated apps")
+  .description("Farm.js CLI - the framework for the web and agents")
   .version(version);
 program.addHelpText("beforeAll", `${banner}\n`);
 
@@ -327,6 +327,40 @@ program
       if (report.health === "error") process.exitCode = 1;
     } catch (error) {
       console.error("Failed to inspect Farm app:", error);
+      process.exit(1);
+    }
+  });
+
+const agentCommand = program
+  .command("agent")
+  .description("Check how AI agents can read and use a Farm app");
+
+agentCommand
+  .command("check [url]")
+  .description("Probe a running app's agent surfaces: Markdown mirrors, llms.txt, APIs, and MCP")
+  .option("--path <path>", "Page to check, relative to the URL", "/")
+  .option("--mcp <path>", "Path of the MCP endpoint (default: from the API catalog, or /api/mcp)")
+  .option("--timeout <ms>", "Per-request timeout in milliseconds", "5000")
+  .option("--json", "Print machine-readable JSON")
+  .action(async (url, options) => {
+    try {
+      const { formatFarmAgentCheckReport, runFarmAgentCheck } = require("../dist/index.js");
+      const timeoutMs = Number.parseInt(options.timeout, 10);
+      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+        throw new Error("--timeout must be a positive number of milliseconds.");
+      }
+      const report = await runFarmAgentCheck({
+        url,
+        path: options.path,
+        mcpPath: options.mcp,
+        timeoutMs,
+      });
+      console.log(
+        options.json ? JSON.stringify(report, null, 2) : formatFarmAgentCheckReport(report),
+      );
+      if (report.health === "error") process.exitCode = 1;
+    } catch (error) {
+      console.error("Failed to check the app:", error?.message ?? error);
       process.exit(1);
     }
   });

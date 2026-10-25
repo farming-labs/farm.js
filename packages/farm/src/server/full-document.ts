@@ -9,10 +9,12 @@
 
 const CONTENTS_WRAPPER = /^<div\b[^>]*style="display\s*:\s*contents"[^>]*>/i;
 
-// React 19 hoists `<meta charSet>`, the viewport, preloads, and titles. When the layout's
-// `<html>` is not the render root, as when Farm's boundary divs wrap it, React writes them
-// ahead of that markup instead of inside the layout's `<head>`.
-const HOISTED_HEAD_ELEMENT = /^(?:<(?:meta|link|base)\b[^>]*>|<title\b[^>]*>[\s\S]*?<\/title>)/i;
+// React 19 hoists `<meta charSet>`, the viewport, preloads, titles, `<script async src>`, and
+// `<style precedence>` (written as `data-precedence`). When the layout's `<html>` is not the
+// render root, as when Farm's boundary divs wrap it, React writes them ahead of that markup
+// instead of inside the layout's `<head>`. The production build embeds this same pattern.
+export const HOISTED_HEAD_ELEMENT =
+  /^(?:<(?:meta|link|base)\b[^>]*>|<title\b[^>]*>[\s\S]*?<\/title>|<script\b[^>]*\basync\b[^>]*><\/script>|<style\b[^>]*\bdata-precedence\b[^>]*>[\s\S]*?<\/style>)/i;
 
 /** Peel Farm's leading `display:contents` wrapper divs (the stream root and any layout-boundary
  * divs) and the head elements React hoisted in front of them, so the layout's own markup is
@@ -117,7 +119,9 @@ export function ensureFarmDocumentHead(markup: string): string {
  * already has one. Matches the production build's helper.
  */
 export function ensureFarmDocumentRoot(markup: string): string {
-  if (/\sid=["']root["']/i.test(markup)) return markup;
+  // Only a #root that opens the body is the container; page content can have id="root" too, such
+  // as a heading titled "Root".
+  if (/<body\b[^>]*>\s*<div\b[^>]*\sid=["']root["']/i.test(markup)) return markup;
   return markup
     .replace(
       /<body\b([^>]*)>/i,
@@ -150,6 +154,32 @@ export interface FarmFullDocumentAssets {
    * the browser doesn't request a missing /favicon.ico. Matches the generated shell.
    */
   fallbackIcon?: boolean;
+  /**
+   * The route's viewport tags (renderMetadataHead's `viewport`), added at the start of the head
+   * unless the document writes its own viewport tag.
+   */
+  viewport?: string;
+}
+
+/**
+ * Start the head with `<meta charset>` and the viewport tags, as Next.js always renders both,
+ * skipping each one the layout's document already writes (a viewport, theme-color, or
+ * color-scheme tag of its own). The charset comes first because browsers only look for it in the
+ * document's first 1024 bytes. The production server uses this same function.
+ */
+export function ensureFarmDocumentMeta(markup: string, viewport = ""): string {
+  const head = /<head\b[^>]*>([\s\S]*?)<\/head>/i.exec(markup)?.[1] ?? "";
+  const hasNamedMeta = (name: string) =>
+    new RegExp(`<meta\\b[^>]*\\bname=["']?${name}(?=["'\\s/>])`, "i").test(head);
+  const tags = [
+    /<meta\b[^>]*\bcharset\s*=/i.test(head) ? "" : '<meta charset="utf-8">',
+    ...(viewport.match(/<meta\b[^>]*>/gi) ?? []).filter((tag) => {
+      const name = /\bname="([\w-]+)"/.exec(tag)?.[1];
+      return !name || !hasNamedMeta(name);
+    }),
+  ].filter(Boolean);
+  if (tags.length === 0) return markup;
+  return markup.replace(/<head\b[^>]*>/i, (open) => `${open}${tags.join("")}`);
 }
 
 /**
@@ -162,7 +192,7 @@ export function composeFarmFullDocument(
   documentHtml: string,
   assets: FarmFullDocumentAssets,
 ): string {
-  let html = ensureFarmDocumentHead(documentHtml);
+  let html = ensureFarmDocumentMeta(ensureFarmDocumentHead(documentHtml), assets.viewport);
 
   if (assets.htmlAttributes) {
     html = html.replace(/<html\b([^>]*)>/i, (_match, attrs: string) => {

@@ -55,7 +55,8 @@ Farm loads a root `vite.config.*` alongside its own Vite setup. The TanStack con
 route with `@vitejs/plugin-react can't detect preamble`. Delete `vite.config.ts`, or move it out of
 the project root while you still need the old app.
 
-Farm enables Tailwind CSS v4 on its own, so `@tailwindcss/vite` does not need to be re-added. The
+Farm enables Tailwind CSS v4 on its own, so `tailwindcss()` does not need to be re-added to a Vite
+config. Keep `tailwindcss` and `@tailwindcss/vite` installed: Farm loads the plugin from the app. The
 starter's `#/*` alias is a `package.json` `imports` entry and keeps working, and Farm also resolves
 `@/` to `src`.
 

@@ -30,52 +30,62 @@ async function writeModule(root: string, relativePath: string, source: string): 
   await fs.writeFile(filePath, source);
 }
 
-describe("development docs and app metadata routes", () => {
-  it("lets an app's own robots.ts take /robots.txt from the docs engine", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-docs-metadata-"));
-    temporaryRoots.add(root);
+async function startDocsApp(
+  docsConfig: string,
+  files: Record<string, string> = {},
+): Promise<string> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-docs-metadata-"));
+  temporaryRoots.add(root);
 
-    await fs.mkdir(path.join(root, "node_modules"), { recursive: true });
-    for (const pkg of ["react", "react-dom"]) {
-      await fs.symlink(
-        await fs.realpath(path.join(packageRoot, "node_modules", pkg)),
-        path.join(root, "node_modules", pkg),
-        "junction",
-      );
-    }
-    await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
-    await writeModule(root, "docs/guide.md", "---\ntitle: Guide\n---\n# Guide\n");
-    await fs.writeFile(
-      path.join(root, "farm.config.ts"),
-      `export default {
-  docs: { enabled: true, entry: "/docs", contentDir: "docs", adapter: false },
+  await fs.mkdir(path.join(root, "node_modules"), { recursive: true });
+  for (const pkg of ["react", "react-dom"]) {
+    await fs.symlink(
+      await fs.realpath(path.join(packageRoot, "node_modules", pkg)),
+      path.join(root, "node_modules", pkg),
+      "junction",
+    );
+  }
+  await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
+  await writeModule(root, "docs/guide.md", "---\ntitle: Guide\n---\n# Guide\n");
+  await fs.writeFile(
+    path.join(root, "farm.config.ts"),
+    `export default {
+  docs: ${docsConfig},
   images: { provider: "none" },
 };`,
-    );
-    await writeModule(
-      root,
-      "src/app/layout.tsx",
-      `import React from "react";
+  );
+  await writeModule(
+    root,
+    "src/app/layout.tsx",
+    `import React from "react";
 export default function Layout({ children }) { return <>{children}</>; }`,
-    );
-    await writeModule(
-      root,
-      "src/app/page.tsx",
-      `import React from "react";
+  );
+  await writeModule(
+    root,
+    "src/app/page.tsx",
+    `import React from "react";
 export default function Page() { return <main>home</main>; }`,
-    );
-    await writeModule(
-      root,
-      "src/app/robots.ts",
-      `export default { rules: { userAgent: "*", disallow: "/private/" } };`,
-    );
+  );
+  for (const [relativePath, source] of Object.entries(files)) {
+    await writeModule(root, relativePath, source);
+  }
 
-    const server = await createServer({ root });
-    servers.add(server);
-    await server.listen(await getAvailablePort());
-    const address = server.httpServer?.address();
-    if (!address || typeof address === "string") throw new Error("Missing dev server address");
-    const origin = `http://localhost:${address.port}`;
+  const server = await createServer({ root });
+  servers.add(server);
+  await server.listen(await getAvailablePort());
+  const address = server.httpServer?.address();
+  if (!address || typeof address === "string") throw new Error("Missing dev server address");
+  return `http://localhost:${address.port}`;
+}
+
+describe("development docs and app metadata routes", () => {
+  it("lets an app's own robots.ts take /robots.txt from the docs engine", async () => {
+    const origin = await startDocsApp(
+      `{ enabled: true, entry: "/docs", contentDir: "docs", adapter: false }`,
+      {
+        "src/app/robots.ts": `export default { rules: { userAgent: "*", disallow: "/private/" } };`,
+      },
+    );
 
     const robots = await fetch(`${origin}/robots.txt`);
     expect(robots.status).toBe(200);
@@ -88,5 +98,33 @@ export default function Page() { return <main>home</main>; }`,
     expect(sitemap.status).toBe(200);
     expect(sitemap.headers.get("content-type")).toContain("application/xml");
     expect(await sitemap.text()).toContain("/docs/guide");
+  }, 30_000);
+
+  it("serves docs config without provider credentials and diagnostics without them", async () => {
+    const secrets = ["ALGOLIA_ADMIN_SECRET", "OPENAI_SECRET"];
+    const origin = await startDocsApp(`{
+    enabled: true,
+    entry: "/docs",
+    contentDir: "docs",
+    adapter: false,
+    config: {
+      search: { provider: "algolia", appId: "APP", indexName: "docs", adminApiKey: "ALGOLIA_ADMIN_SECRET" },
+      ai: { enabled: true, apiKey: "OPENAI_SECRET" },
+    },
+  }`);
+
+    const config = await fetch(`${origin}/api/docs?format=config`);
+    expect(config.status).toBe(200);
+    const configBody = await config.text();
+    for (const secret of secrets) expect(configBody).not.toContain(secret);
+    expect(JSON.parse(configBody)).toMatchObject({
+      config: { search: { provider: "algolia", appId: "APP", adminApiKey: "[redacted]" } },
+    });
+
+    // Diagnostics stay available to the developer, still without credentials.
+    const diagnostics = await fetch(`${origin}/api/docs?format=diagnostics`);
+    expect(diagnostics.status).toBe(200);
+    const diagnosticsBody = await diagnostics.text();
+    for (const secret of secrets) expect(diagnosticsBody).not.toContain(secret);
   }, 30_000);
 });

@@ -1,4 +1,4 @@
-// @vitest-environment node
+// @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
 import { getFarmClientDataCache } from "../client-cache";
 import type { ServerQuery } from "../server-query";

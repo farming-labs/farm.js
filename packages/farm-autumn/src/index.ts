@@ -13,6 +13,9 @@ import {
   WebhookVerificationError as StandardWebhookVerificationError,
 } from "standardwebhooks";
 import {
+  describeIntegrationOriginRejection,
+  resolveIntegrationAllowedOrigins,
+  validateIntegrationRequestOrigin,
   defineIntegration,
   integrationRoute,
   type FarmIntegration,
@@ -265,6 +268,12 @@ export interface AutumnIntegrationInput extends AutumnClientPathOptions {
   secretKey?: string;
   serverURL?: string;
   appBaseUrl?: string;
+  /**
+   * Origins besides the app's own that may call the billing routes, in
+   * `serverActions.allowedOrigins` pattern syntax. The routes act for the signed-in caller from its
+   * cookies, so a request from any other origin is refused.
+   */
+  allowedOrigins?: readonly string[];
   webhooks?: AutumnWebhookConfig;
   billing: AutumnBillingOptions;
   log?: FarmIntegrationLogger;
@@ -752,12 +761,31 @@ function getOwnerExternalCustomerId(
     return billing.resolveExternalCustomerId(owner, tools);
   }
 
-  const normalizedId = owner.id
+  const normalizedId = normalizeLegacyAutumnCustomerId(owner.id);
+  // An id the normalization keeps as is maps as it always has. Any other id (`a.b`, an email, a
+  // non-ASCII handle, an empty id) used to collapse onto another owner's customer (`a.b` and `a-b`
+  // both became `user_a-b`), so it is encoded instead. A normalized id never starts with `-`, so
+  // `kind_-<base64url>` cannot collide with it.
+  if (normalizedId && normalizedId === owner.id) {
+    return `${owner.kind}_${normalizedId}`;
+  }
+  return `${owner.kind}_-${Buffer.from(owner.id, "utf8").toString("base64url")}`;
+}
+
+function normalizeLegacyAutumnCustomerId(id: string): string {
+  return id
     .trim()
     .replace(/[^a-zA-Z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
 
-  return `${owner.kind}_${normalizedId || "unknown"}`;
+/**
+ * The Autumn customer id Farm derived before ids it could not keep as is were encoded. Owners
+ * with such ids (emails, handles) share customers under it; return it from
+ * `billing.resolveExternalCustomerId` only to keep existing customers while migrating them.
+ */
+export function legacyAutumnExternalCustomerId(owner: AutumnBillingOwner): string {
+  return `${owner.kind}_${normalizeLegacyAutumnCustomerId(owner.id) || "unknown"}`;
 }
 
 function resolveAutumnPlanLimitReference(
@@ -1240,6 +1268,10 @@ export function autumn<const TInput extends AutumnIntegrationInput>(
 export function autumn<TInput extends AutumnIntegrationInput>(
   input: TInput,
 ): AutumnIntegrationResult<FarmIntegrationAPI> {
+  const allowedOrigins = resolveIntegrationAllowedOrigins(
+    input.allowedOrigins,
+    "autumn().allowedOrigins",
+  );
   const secretKey = input.secretKey ?? process.env.AUTUMN_SECRET_KEY ?? "";
   const appBaseUrl = input.appBaseUrl ?? process.env.APP_BASE_URL ?? undefined;
   const webhookSecret = process.env.AUTUMN_WEBHOOK_SECRET ?? undefined;
@@ -1714,6 +1746,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(usagePath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnBillingUsageInput;
           if (!body.key) {
             return new Response("A billing usage key is required.", { status: 400 });
@@ -1753,6 +1787,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(meterUsagePath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnBillingMeterUsageInput;
           if (!body.key) {
             return new Response("An Autumn meter key is required.", { status: 400 });
@@ -1853,6 +1889,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(reportUsagePath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnBillingReportUsageInput;
           if (!body.key) {
             return new Response("An Autumn meter key is required.", { status: 400 });
@@ -1927,23 +1965,28 @@ export function autumn<TInput extends AutumnIntegrationInput>(
               quantity: body.quantity,
             });
 
-            if (typeof hardLimit === "number" && projectedCurrentPeriodUsed > hardLimit) {
-              return Response.json({
+            const hardLimitReached = (used: number, projected: number) =>
+              Response.json({
                 key: body.key,
                 quantity: body.quantity,
                 customerId: resolved.customer.id,
                 eventName: meter.eventName ?? featureId,
                 eventIdentifier: body.idempotencyKey,
                 occurredAt: body.occurredAt ?? new Date().toISOString(),
-                currentPeriodUsed: currentUsed,
-                projectedCurrentPeriodUsed,
+                currentPeriodUsed: used,
+                projectedCurrentPeriodUsed: projected,
                 softLimit,
                 hardLimit,
                 state: "hard_limit_reached",
                 warning:
                   "The configured metered hard cap has been reached for the current billing period. Reported usage is blocked until the next cycle or a plan change.",
               } satisfies AutumnBillingReportUsageResult);
+
+            if (typeof hardLimit === "number" && projectedCurrentPeriodUsed > hardLimit) {
+              return hardLimitReached(currentUsed, projectedCurrentPeriodUsed);
             }
+
+            let nextUsed = projectedCurrentPeriodUsed;
 
             if (isPrepaidFeatureQuantity({ livePlan, product: active.product, featureId })) {
               if (!active.product?.autumnPlanId) {
@@ -1972,17 +2015,39 @@ export function autumn<TInput extends AutumnIntegrationInput>(
                 prorationBehavior: "prorate_immediately",
                 redirectMode: "never",
               });
-            } else {
-              // Autumn's current SDK/runtime track path is inconsistent across the published
-              // types/docs and the actual endpoint behavior. Update the balance usage directly so
-              // the example remains functional and type-safe for metered demos.
+            } else if (meter.aggregation === "last") {
+              // A last-value meter reports the period's absolute usage, so the write sets it.
               await sdk.balances.update({
                 customerId: resolved.customer.id ?? resolved.externalCustomerId,
                 featureId,
                 usage: projectedCurrentPeriodUsed,
               });
+            } else {
+              // Track adds to Autumn's stored usage atomically. Writing back the total read above
+              // let concurrent reports overwrite each other, so usage and the cap both lost them.
+              const customerId = resolved.customer.id ?? resolved.externalCustomerId;
+              const increment = meter.aggregation === "count" ? 1 : body.quantity;
+              const properties = { idempotencyKey: body.idempotencyKey };
+              const tracked = await sdk.track({
+                customerId,
+                featureId,
+                value: increment,
+                properties,
+              });
+              nextUsed = tracked.balance?.usage ?? projectedCurrentPeriodUsed;
+
+              // Reports that raced past the cap between the read and the increment are taken back
+              // out, so the cap holds; the accepted reports are never reversed.
+              if (typeof hardLimit === "number" && nextUsed > hardLimit) {
+                await sdk.track({
+                  customerId,
+                  featureId,
+                  value: -increment,
+                  properties: { ...properties, reversal: true },
+                });
+                return hardLimitReached(nextUsed - increment, nextUsed);
+              }
             }
-            const nextUsed = projectedCurrentPeriodUsed;
 
             setProjectedUsage({
               externalCustomerId: resolved.externalCustomerId,
@@ -2046,6 +2111,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(checkPath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnBillingCheckInput;
           if (!body.key) {
             return new Response("An Autumn meter key is required.", { status: 400 });
@@ -2096,6 +2163,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(checkoutPath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnCheckoutInput;
           if (!body.productId) {
             return new Response("A billing productId is required.", { status: 400 });
@@ -2147,6 +2216,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       integrationRoute.post(portalPath, {
         responseFormat: "json",
         async handler(request, ctx) {
+          const rejected = rejectForeignOrigin(request, allowedOrigins);
+          if (rejected) return rejected;
           const body = (await request.json().catch(() => ({}))) as AutumnPortalInput;
           const resolved = await requireOwner(ctx, billing, sdk);
           const returnPath = resolveAppPath(body.returnTo, "Autumn portal returnTo");
@@ -2167,4 +2238,21 @@ export function autumn<TInput extends AutumnIntegrationInput>(
       ...webhookRoutes,
     ],
   });
+}
+
+/**
+ * The billing routes act for the signed-in caller from its session cookie, and a page on another
+ * site can send them a simple POST (a text/plain form, a no-cors fetch) with no preflight. A browser
+ * sends such a POST with its page's Origin, so a foreign origin, or one the browser marks
+ * cross-site, is refused before the body is read. A caller with no Origin at all (a server, a
+ * script) is not a browser on another site and keeps working, as with the email routes.
+ */
+function rejectForeignOrigin(request: Request, allowedOrigins: readonly string[]): Response | null {
+  const origin = validateIntegrationRequestOrigin(request, {
+    allowedOrigins,
+    requireOriginMetadata: false,
+  });
+  return origin.ok
+    ? null
+    : Response.json({ error: describeIntegrationOriginRejection(origin.reason) }, { status: 403 });
 }

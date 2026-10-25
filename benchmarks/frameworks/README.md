@@ -87,6 +87,9 @@ Farm uses its shipped dual-Vite path: Vite 5.4.20 powers development, while Vite
 powers the measured production build. Reports disclose both versions in Farm's stack label.
 SvelteKit's static-asset precompression is disabled because this dynamic-HTML fixture does not
 measure or request precompressed assets; no framework receives a timed asset-precompression phase.
+Farm's route only declares `render: "dynamic"`. Farm sends `Cache-Control: private, no-store` for
+such pages itself, so the fixture adds no route-rule headers, which would also take the page off
+Farm's single-write Node response path.
 
 Production boot and response measurements use the normal framework server path:
 
@@ -274,6 +277,38 @@ Local results are mixed; one fewer URL parse does not by itself establish a late
 Use the CI workflow's `markdown-request-url-benchmark` input for two comparisons on an independent
 runner. The diagnostic job retains raw artifacts without publishing scores or asserting timing
 thresholds. Review all active controls before promoting this optimization.
+
+## Platform builds
+
+`platform/run.mjs` measures what the response benchmark does not: how long each framework takes to
+build for Node, Vercel and Cloudflare Workers, what each platform would deploy, and a cached CI run.
+
+```bash
+node platform/run.mjs                       # 5 build rounds, sizes, 3 CI rounds
+node platform/run.mjs --rounds 3 --only builds,sizes --frameworks farm,tanstack
+```
+
+It copies the fixtures in `apps/` into a temporary directory and installs the latest published
+version of each framework, Farm.js included (from npm, not the local packages), so the result is
+what a new project gets. The pinned fixtures and their lockfile are not used or modified. Files in
+`platform/overrides/` adapt the fixtures to current versions: SvelteKit 3 takes its config in the
+Vite plugin, and Next.js deploys to Cloudflare through `@opennextjs/cloudflare`. TypeScript stays
+at 5.9.3 because it is not under test and 7.x drops the JavaScript API Next.js uses.
+
+- **Clean build:** wall and CPU time (user plus system, child processes included) for each
+  framework and platform, after removing generated output. The framework order rotates every
+  round. Next.js builds for Vercel with `vercel build`, which needs the `vercel` CLI on `PATH`; it
+  is skipped without one. Nothing is deployed and no account is used.
+- **Deployed output:** the Node server output (Nitro output is self-contained; Next.js and
+  adapter-node output also need `node_modules`), Vercel function size and its gzip size, and
+  for Cloudflare the upload that `wrangler deploy --dry-run` reports, which is what Workers' size
+  limits apply to.
+- **Cached CI:** `node_modules` removed, `pnpm install --frozen-lockfile --prefer-offline` from a
+  warm store, then a clean Node build. These copies install only what the Node build needs.
+
+Results are written to `results/platform/` as JSON and a Markdown summary with the versions,
+machine and load average. Build times are sensitive to other work on the machine; prefer CPU time
+and repeated runs when the load average is high.
 
 ## Limitations
 

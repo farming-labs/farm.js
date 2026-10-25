@@ -165,7 +165,7 @@ FARM_AUTH_SECRET=...
 FARM_AUTH_URL=https://example.com
 ```
 
-`AUTH_SECRET` and `BETTER_AUTH_SECRET` remain accepted as secret aliases.
+`AUTH_SECRET` and `BETTER_AUTH_SECRET` remain accepted as secret aliases. Without one, development generates a random secret once per app in `.farm/auth-secret` (gitignored) and reuses it across restarts.
 
 On Vercel the auth URL is inferred when `FARM_AUTH_URL` is absent: a production
 deployment uses `VERCEL_PROJECT_PRODUCTION_URL`, the project's canonical domain, and a preview

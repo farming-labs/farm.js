@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -82,8 +82,24 @@ describe("Farm docs runtime adapters", () => {
       clientEntry: "/@farm/client.js",
       stylesheets: ["/@farm/fonts.css", "/src/app/globals.css"],
     });
+    // Development content changes while the server runs; the adapter must keep
+    // reading it.
+    expect(hostOptions).not.toHaveProperty("immutableContent");
     await expect(hostOptions.loadReactModule()).resolves.toBe(reactModule);
     await expect(handler(new Request("https://farm.test/docs"))).resolves.toBe(response);
+  });
+
+  it("tells the adapter a production build's content is immutable", async () => {
+    // The production server is generated source; its adapter handler call is
+    // the one place a build's fixed content can be declared.
+    const source = await readFile(
+      path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
+      "utf8",
+    );
+    const call = source.slice(source.indexOf("`createFarmDocsAdapterRuntimeHandler({"));
+    const options = call.slice(call.indexOf("}, {"), call.indexOf("})"));
+    expect(options).toContain("rootDir: farmDocsRuntimeRoot,");
+    expect(options).toContain("immutableContent: true,");
   });
 
   it("loads the docs config module through the app's module loader for the runtime", async () => {

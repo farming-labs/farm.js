@@ -12,7 +12,8 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 it("preserves the existing rendering bindings and configuration validation", () => {
   expect(configuration.serializeJsonLd).toBe(rendering.serializeJsonLd);
   expect(configuration.renderFarmAgentJsonLd).toBe(rendering.renderFarmAgentJsonLd);
-  expect(configuration.resolveFarmAgentConfig(undefined).jsonLd).toBe(false);
+  expect(configuration.resolveFarmAgentConfig(undefined).jsonLd).toEqual({ type: "WebSite" });
+  expect(configuration.resolveFarmAgentConfig({ jsonLd: false }).jsonLd).toBe(false);
   expect(() =>
     configuration.resolveFarmAgentConfig({ crawlers: { search: "invalid" } as any }),
   ).toThrow();

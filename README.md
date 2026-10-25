@@ -5,11 +5,11 @@
 </p>
 
 <p align="center">
-  <strong>A framework for building fast, full-stack, product-integrated applications.</strong>
+  <strong>The framework for the web and agents.</strong>
 </p>
 
 <p align="center">
-  Farm.js combines Vite's instant development experience with typed app-directory routing, secure Server Actions, streaming SSR, and production-ready deployment output. React is the default renderer, and beta Preact, Solid, Vue, and Svelte adapters use the same routing and server contracts. See <a href="https://farmjs.dev/docs/stability">Stability and Support</a> for what 0.1 covers.
+  Every Farm.js app serves its pages to people and to AI agents: server-rendered HTML, a Markdown copy of each page, and <code>llms.txt</code>, on by default. Turn on MCP and your server functions become tools agents can call. Bring any agent runtime: <a href="https://farmjs.dev/docs/integrations/eve">Eve</a> and <a href="https://farmjs.dev/docs/integrations/cf-agent">Cloudflare Agents</a> plug in through Farm's open <a href="https://farmjs.dev/docs/integrations#agent-runtimes">agent runtime contract</a>, and the <a href="https://farmjs.dev/docs/integrations/agent-frameworks">AI SDK, Mastra, LangGraph, and the OpenAI Agents SDK</a> run in a plain API route. Built on Vite and Nitro, with typed routes, Server Actions, and streaming SSR. React is the default renderer, and beta Preact, Solid, Vue, and Svelte adapters use the same routing and server contracts. See <a href="https://farmjs.dev/docs/stability">Stability and Support</a> for what 0.1 covers.
 </p>
 
 <p align="center">
@@ -106,7 +106,7 @@ export default function HomePage() {
 }
 ```
 
-> 💡 **Tailwind CSS is pre-configured!** Just use Tailwind classes - no setup needed. See [TAILWIND_SETUP.md](./TAILWIND_SETUP.md) for details.
+> 💡 **Tailwind CSS is pre-configured!** Apps from `create-app` include it, so just use Tailwind classes. In an existing app, install `tailwindcss` and `@tailwindcss/vite` and add `@import "tailwindcss";` to your stylesheet; Farm loads the Vite plugin for you.
 
 Add a root layout in `src/app/layout.tsx`:
 
@@ -187,7 +187,7 @@ export default defineConfig({
 });
 ```
 
-See [farm.config.ts documentation](./PLUGIN_SYSTEM.md) for all options.
+See the [configuration docs](https://farmjs.dev/docs/configuration) for all options.
 
 ### Route-level Boundaries
 
@@ -253,26 +253,34 @@ export default function DashboardPage() {
 
 ## 🔌 Plugin System
 
-Extend Farm.js with powerful plugins:
+Extend the framework with plugins: request hooks, HTML transforms, build and dev hooks, browser hooks, typed API routes, and their own database tables.
 
 ```typescript
 import { definePlugin } from "@farm.js/core";
 
 export const myPlugin = definePlugin({
-  name: "my-plugin",
+  name: "acme:my-plugin",
 
-  async beforeRequest(req, res, context) {
-    // Add custom logic before request processing
+  runtime: {
+    before({ request }) {
+      // Runs before Farm's route handler. Return a Response to answer early.
+    },
+    after({ response }) {
+      // Return a new Response to change headers or the body.
+      return response;
+    },
   },
 
-  async transformHTML(html, context) {
-    // Modify HTML output
-    return html;
+  render: {
+    html(html) {
+      // Rewrite a page's rendered HTML.
+      return html;
+    },
   },
 });
 ```
 
-See [Plugin System Guide](./PLUGIN_SYSTEM.md) for comprehensive documentation.
+See the [Plugin System guide](./PLUGIN_SYSTEM.md) for every plugin option and hook, and [Create a Plugin](https://farmjs.dev/docs/plugins/create-plugin) for walkthroughs.
 
 ## 🎯 Core Concepts
 

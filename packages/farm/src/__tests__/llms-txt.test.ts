@@ -1,9 +1,10 @@
 // @vitest-environment node
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
+  createFarmLlmsFullRenderer,
   createFarmLlmsMarkdownReader,
   renderFarmLlmsFullTxt,
   resolveFarmLlmsTxtConfig,
@@ -167,6 +168,20 @@ describe("collectFarmLlmsTxtPages", () => {
     { pattern: "/docs/getting-started", metadata: { title: { absolute: "Getting started" } } },
     { pattern: "/admin/users" },
   ];
+
+  it("leaves out pages whose metadata says noindex", () => {
+    const paths = collectFarmLlmsTxtPages(
+      [
+        { pattern: "/pricing", metadata: { title: "Pricing" } },
+        { pattern: "/drafts", metadata: { title: "Drafts", robots: "noindex, follow" } },
+        { pattern: "/internal", metadata: { title: "Internal", robots: "none" } },
+        { pattern: "/account", metadata: { title: "Account", robots: { index: false } } },
+        { pattern: "/changelog", metadata: { title: "Changelog", robots: { index: true } } },
+      ],
+      { origin, basePath: "" },
+    ).map((page) => page.path);
+    expect(paths).toEqual(["/changelog", "/pricing"]);
+  });
 
   it("lists static pages in path order, linking to Markdown mirrors", () => {
     expect(
@@ -462,5 +477,166 @@ describe("createFarmLlmsMarkdownReader", () => {
       expect(request.headers.get("authorization")).toBeNull();
       expect(request.headers.get("accept")).toBe("text/markdown");
     }
+  });
+});
+
+describe("createFarmLlmsFullRenderer", () => {
+  const deferred = () => {
+    let resolve!: (value: string) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<string>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+
+  it("shares an in-flight render between requests for the same origin", async () => {
+    const shared = createFarmLlmsFullRenderer();
+    const first = deferred();
+    const render = vi.fn(() => first.promise);
+    const a = shared("https://a.test", render);
+    const b = shared("https://a.test", render);
+    first.resolve("full");
+    expect(await a).toBe("full");
+    expect(await b).toBe("full");
+    expect(render).toHaveBeenCalledTimes(1);
+
+    // Without revalidate, a later request renders again.
+    await shared("https://a.test", async () => "fresh");
+    expect(await shared("https://a.test", async () => "again")).toBe("again");
+  });
+
+  it("reuses a result for revalidate seconds", async () => {
+    let time = 0;
+    const shared = createFarmLlmsFullRenderer({ revalidate: 60, now: () => time });
+    expect(await shared("https://a.test", async () => "one")).toBe("one");
+    time = 59_000;
+    expect(await shared("https://a.test", async () => "two")).toBe("one");
+    // Each origin has its own links, so it has its own entry.
+    expect(await shared("https://b.test", async () => "b")).toBe("b");
+    time = 60_001;
+    expect(await shared("https://a.test", async () => "three")).toBe("three");
+  });
+
+  it("runs renders one at a time across origins", async () => {
+    const shared = createFarmLlmsFullRenderer();
+    const first = deferred();
+    const second = vi.fn(async () => "b");
+    const a = shared("https://a.test", () => first.promise);
+    const b = shared("https://b.test", second);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(second).not.toHaveBeenCalled();
+    first.resolve("a");
+    expect(await a).toBe("a");
+    expect(await b).toBe("b");
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not keep a failed render, and keeps rendering after it", async () => {
+    const shared = createFarmLlmsFullRenderer({ revalidate: 60 });
+    await expect(
+      shared("https://a.test", async () => {
+        throw new Error("page failed");
+      }),
+    ).rejects.toThrow("page failed");
+    expect(await shared("https://a.test", async () => "ok")).toBe("ok");
+  });
+
+  it("leaves out a page that never finishes, frees the queue, and does not reuse the result", async () => {
+    vi.useFakeTimers();
+    try {
+      const shared = createFarmLlmsFullRenderer({ revalidate: 60 });
+      const index = {
+        title: "Acme",
+        sections: [
+          {
+            title: "Docs",
+            links: [
+              { title: "Stuck", url: "https://a.test/stuck.md" },
+              { title: "Pricing", url: "https://a.test/pricing.md" },
+            ],
+          },
+        ],
+      };
+      let stuck = true;
+      const readMarkdown = vi.fn((url: string) =>
+        url.endsWith("/stuck.md") && stuck
+          ? new Promise<string | null>(() => {})
+          : Promise.resolve(`# ${url.endsWith("/stuck.md") ? "Stuck" : "Pricing"}\n`),
+      );
+      const render = (shared?: { incomplete: () => void }) =>
+        renderFarmLlmsFullTxt(index, {
+          origin: "https://a.test",
+          readMarkdown,
+          onIncomplete: shared?.incomplete,
+        });
+
+      const settled: string[] = [];
+      const completeness: Array<[string, boolean]> = [];
+      const first = shared("https://a.test", render, (complete) =>
+        completeness.push(["first", complete]),
+      ).then((body) => {
+        settled.push("a");
+        return body;
+      });
+      // A request that joins the in-flight render learns it is partial too.
+      const joined = shared("https://a.test", render, (complete) =>
+        completeness.push(["joined", complete]),
+      );
+      // Another origin waits behind the stuck render.
+      const other = shared("https://b.test", async () => "b").then((body) => {
+        settled.push("b");
+        return body;
+      });
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(settled).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toEqual(["a", "b"]);
+
+      const body = await first;
+      expect(await joined).toBe(body);
+      expect(completeness).toEqual([
+        ["first", false],
+        ["joined", false],
+      ]);
+      expect(body).toContain("## Stuck\n\nURL: https://a.test/stuck.md\n\n---");
+      expect(body).toContain("# Pricing");
+      expect(await other).toBe("b");
+
+      // The timed-out render is not reused: the next request reads the page again.
+      stuck = false;
+      let secondComplete: boolean | undefined;
+      const second = await shared("https://a.test", render, (complete) => {
+        secondComplete = complete;
+      });
+      expect(secondComplete).toBe(true);
+      expect(second).toContain("URL: https://a.test/stuck.md\n\n# Stuck");
+      expect(readMarkdown.mock.calls.filter(([url]) => url.endsWith("/stuck.md"))).toHaveLength(2);
+      // A complete render is reused for revalidate seconds.
+      let cachedComplete: boolean | undefined;
+      expect(
+        await shared(
+          "https://a.test",
+          async () => "new",
+          (complete) => {
+            cachedComplete = complete;
+          },
+        ),
+      ).toBe(second);
+      expect(cachedComplete).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a bounded number of origins", async () => {
+    const shared = createFarmLlmsFullRenderer({ revalidate: 60, maxEntries: 2 });
+    await shared("https://a.test", async () => "a");
+    await shared("https://b.test", async () => "b");
+    await shared("https://c.test", async () => "c");
+    expect(await shared("https://a.test", async () => "a2")).toBe("a2");
+    expect(await shared("https://c.test", async () => "c2")).toBe("c");
   });
 });

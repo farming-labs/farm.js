@@ -12,7 +12,7 @@ import {
   Newspaper,
   Network,
   X,
-} from "lucide-react";
+} from "./icons";
 import type { LucideIcon } from "lucide-react";
 import githubIconUrl from "simple-icons/icons/github.svg?url";
 import farmingLabsLogoUrl from "../assets/farming-labs-logo-dark.svg?url";
@@ -74,6 +74,12 @@ const footerGroups = [
   },
 ] as const;
 
+const companyLinks = [
+  ["About", "/about"],
+  ["Contact", "/contact"],
+  ["Privacy", "/privacy"],
+] as const;
+
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
@@ -106,7 +112,7 @@ export function IndexedLabel({
   label: string;
 }) {
   return (
-    <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] font-normal uppercase tracking-normal text-current">
+    <span className="farm-indexed-label font-mono">
       <span aria-hidden className="text-white/26">
         {index}
       </span>
@@ -186,7 +192,7 @@ export function SiteHeader({ activePage }: { activePage?: "blog" | "agents" }) {
             <a
               key={item.label}
               aria-current={activePage && item.href === `/${activePage}` ? "page" : undefined}
-              className="aria-[current=page]:bg-white/[0.04] aria-[current=page]:text-white flex h-full min-w-0 flex-auto items-center border-r border-white/12 px-3 last:border-r-0 font-mono uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white xl:px-4"
+              className="farm-nav-link font-mono"
               href={item.href}
             >
               <IndexedLabel index={item.index} icon={item.icon} label={item.label} />
@@ -227,7 +233,7 @@ export function SiteHeader({ activePage }: { activePage?: "blog" | "agents" }) {
                 <a
                   key={item.label}
                   aria-current={activePage && item.href === `/${activePage}` ? "page" : undefined}
-                  className="flex h-12 items-center border-b border-white/10 px-4 font-mono uppercase tracking-normal text-white/58 last:border-b-0 hover:bg-white/[0.04] hover:text-white"
+                  className="farm-menu-link font-mono"
                   href={item.href}
                 >
                   <IndexedLabel index={item.index} icon={item.icon} label={item.label} />
@@ -257,10 +263,7 @@ function FooterActionLink({
   const DirectionIcon = href.startsWith("http") ? ArrowUpRight : ArrowRight;
 
   return (
-    <a
-      className="group flex h-12 items-center justify-between border-b border-white/12 px-4 font-mono text-[9px] font-normal uppercase !tracking-[0.04em] text-white/58 transition-[background-color,color] duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
-      href={href}
-    >
+    <a className="farm-footer-row group font-mono" href={href}>
       <span className="flex min-w-0 items-center gap-2">
         {brand ? (
           <BrandIcon className="size-3.5 shrink-0 opacity-72" src={brand} />
@@ -291,10 +294,7 @@ function FooterLinksGroup({ title, links }: { title: string; links: readonly Foo
 
           return (
             <li key={label}>
-              <a
-                className="group flex min-h-7 items-center justify-between gap-2 font-mono text-[9px] font-normal uppercase !tracking-[0.04em] text-white/48 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-                href={href}
-              >
+              <a className="farm-footer-link group font-mono" href={href}>
                 <span className="flex items-center gap-2">
                   {isGitHub ? <GithubIcon className="size-3.5 opacity-72" /> : null}
                   <span>{label}</span>
@@ -323,7 +323,7 @@ export function SiteFooter() {
           </div>
           <div className="px-4 py-4 md:min-h-[154px]">
             <p className="max-w-[15rem] font-mono text-[9px] font-normal uppercase leading-5 !tracking-[0.04em] text-white/42">
-              A Framework for Product integrated Apps
+              The framework for the web and agents
             </p>
           </div>
         </div>
@@ -340,7 +340,18 @@ export function SiteFooter() {
         ))}
       </div>
       <div className="farm-top-rule flex flex-col gap-2 px-4 py-3 font-mono text-[10px] font-normal uppercase !tracking-[0.04em] text-white/34 sm:flex-row sm:items-center sm:justify-between">
-        <span>&copy; {new Date().getFullYear()} Farm.js</span>
+        <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span>&copy; {new Date().getFullYear()} Farm.js</span>
+          {companyLinks.map(([label, href]) => (
+            <a
+              key={href}
+              className="transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              href={href}
+            >
+              {label}
+            </a>
+          ))}
+        </span>
         <a
           className="inline-flex items-center gap-1.5 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
           href="https://www.farming-labs.dev"

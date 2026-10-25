@@ -51,6 +51,27 @@ describe("resolveFarmNotFoundMetadata", () => {
     });
     expect(title(generated)).toBe("Lost? | Acme");
   });
+
+  it("keeps an absolute not-found title out of the layout's template", async () => {
+    const layout = { metadata: { title: { template: "%s | Acme", default: "Acme" } } };
+    const metadata = await resolveFarmNotFoundMetadata([layout], {
+      metadata: { title: { absolute: "Acme" } },
+    });
+    expect(title(metadata)).toBe("Acme");
+    const generated = await resolveFarmNotFoundMetadata([layout], {
+      generateMetadata: async () => ({ title: { absolute: "Nothing here" } }),
+    });
+    expect(title(generated)).toBe("Nothing here");
+  });
+
+  it("still applies the not-found module's own template to its generated title", async () => {
+    const layout = { metadata: { title: { template: "%s | Acme", default: "Acme" } } };
+    const metadata = await resolveFarmNotFoundMetadata([layout], {
+      metadata: { title: { template: "%s (404)", default: "Missing" } },
+      generateMetadata: async () => ({ title: "Lost?" }),
+    });
+    expect(title(metadata)).toBe("Lost? (404) | Acme");
+  });
 });
 
 async function startProject(notFound: string | null): Promise<string> {

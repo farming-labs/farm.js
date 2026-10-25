@@ -1,4 +1,10 @@
-import { agentCheckApi } from "../../../../lib/agents-check";
+import {
+  AGENT_CHECK_REPORT_COOKIE,
+  AGENT_CHECK_REPORT_COOKIE_MAX_AGE,
+  agentCheckApi,
+  agentCheckPath,
+  fetchAgentCheck,
+} from "../../../../lib/agents-check";
 
 const MAX_BODY_BYTES = 8 * 1024;
 const MAX_URL_LENGTH = 2048;
@@ -41,9 +47,10 @@ async function readCapped(request: Request): Promise<string | null> {
 }
 
 /**
- * Start an agent-ready check. The form posts here without JavaScript and gets
- * a 303 to the report (or back to the form with the error); the enhanced form
- * sends JSON and gets JSON.
+ * Start an agent-ready check. The form posts here without JavaScript and gets a 303 to
+ * /agents/check?url=<site>, with the report's id in a short-lived cookie so that page can show
+ * it (or back to the form with the error); the enhanced form sends JSON and gets the finished
+ * report as JSON. Report ids never appear in a page address.
  */
 export async function POST(request: Request) {
   const isForm = (request.headers.get("content-type") ?? "").includes(
@@ -71,7 +78,6 @@ export async function POST(request: Request) {
     return fail(400, "invalid_url");
 
   const api = agentCheckApi();
-  if (!api) return fail(503, "unavailable", url);
 
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -107,6 +113,18 @@ export async function POST(request: Request) {
       url,
     );
   }
-  if (isForm) return Response.redirect(new URL(`/agents/check/${result.id}`, request.url), 303);
-  return Response.json({ id: result.id });
+  const scan = await fetchAgentCheck(result.id).catch(() => null);
+  // The scan ran but its report can't be read, so there is nothing to show.
+  if (!scan) return fail(502, "unavailable", url);
+  if (isForm) {
+    const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+    return new Response(null, {
+      status: 303,
+      headers: {
+        location: new URL(agentCheckPath(scan.report.url), request.url).href,
+        "set-cookie": `${AGENT_CHECK_REPORT_COOKIE}=${scan.id}; Path=/agents/check; Max-Age=${AGENT_CHECK_REPORT_COOKIE_MAX_AGE}; HttpOnly; SameSite=Lax${secure}`,
+      },
+    });
+  }
+  return Response.json({ id: result.id, scan });
 }

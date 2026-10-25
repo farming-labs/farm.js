@@ -32,7 +32,7 @@ STRIPE_SECRET_KEY=sk_test_your_key_here
 ```
 
 Add `STRIPE_WEBHOOK_SECRET` as well if you want signed webhook verification.
-The example now reads its own `.env.local` from [examples/stripe-integrations/drizzle/.env.local](.env.local), even if you start it from the repo root with a workspace filter.
+The example reads its own `.env.local` from `examples/stripe-integrations/drizzle/.env.local` (copy [`.env.example`](.env.example) to create it), even if you start it from the repo root with a workspace filter.
 
 ## Generated target
 

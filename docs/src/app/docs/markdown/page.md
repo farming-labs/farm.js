@@ -75,6 +75,15 @@ Farm.js is free and open source.
 The browser still renders `page.tsx` at `/pricing`. Requests to `/pricing.md`, or requests to
 `/pricing` with `Accept: text/markdown`, receive the exact contents of `page.md`.
 
+The source is served only for a page an anonymous visitor may open. Farm checks by requesting the
+page through the same middleware and integration guards with only standard browser headers (no
+cookies, `Authorization`, custom headers such as an API key, or the caller's IP address), so a page
+behind sign-in has no `.md` version: `/account.md` answers `404` even for a signed-in caller, and
+the page is left out of `llms-full.txt`. The check drops `X-Forwarded-For`, `X-Real-IP`,
+`Forwarded`, and `Via`, and in a production build the server reports the documentation address
+`192.0.2.1` as its client, so a page behind an IP allowlist has no public `.md` version either. In
+development the check arrives from the dev server's loopback address.
+
 ## Configure MDX components
 
 **farm.config.ts**
@@ -174,6 +183,8 @@ mirrors, and `/llms-full.txt`, which inlines them. See
 ## Per-route options
 
 Routes can include a display title and cache override.
+Literal entries use exact matching without compiling a regular expression. Dynamic entries such
+as `/docs/[...slug]` retain pattern matching; the first matching entry supplies the route options.
 
 ```ts
 export default defineConfig({
@@ -193,7 +204,13 @@ export default defineConfig({
 
 ## What gets returned
 
-Markdown mirrors call the rendered page, strip scripts/styles and elements hidden by an attribute (`aria-hidden="true"`, or `hidden` except `hidden="until-found"`, which the browser can reveal), convert HTML headings, paragraphs, lists, blockquotes, and code blocks into markdown, then return `text/markdown`. The mirror is built without CSS, so text hidden only by a stylesheet (`display: none`, a collapsed menu) still appears. Mark decorative text `aria-hidden` to keep it out of the mirror as well as out of screen readers.
+Markdown mirrors call the rendered page, strip scripts/styles and elements hidden by an attribute (`aria-hidden="true"`, or `hidden` except `hidden="until-found"`, which the browser can reveal), convert HTML headings, paragraphs, lists (ordered lists keep their numbers), blockquotes, tables (as GFM tables), and code blocks (keeping a `language-*` class or `data-language` as the fence language) into markdown, then return `text/markdown`. The mirror is built without CSS, so text hidden only by a stylesheet (`display: none`, a collapsed menu) still appears. Mark decorative text `aria-hidden` to keep it out of the mirror as well as out of screen readers.
+
+Content without any `hidden` text (case-insensitive) skips hidden-element parsing. Any occurrence
+still uses the same attribute-aware parser, including quoted values, revealable content, and forms.
+
+When a layout row needs spaces between adjacent items, conversion assembles the row once rather
+than copying it for each separator. Existing prose, letter-split words, and whitespace stay unchanged.
 
 **Terminal**
 
@@ -212,6 +229,205 @@ Farm returns the same markdown representation with `Content-Type: text/markdown`
 `.md` URL through a `Link` header and a `<link rel="alternate" type="text/markdown">` tag in the
 document head, while ordinary browser requests continue to receive HTML. Set
 `metadata.alternates.types["text/markdown"]` to point the head link somewhere else.
+
+Converted mirrors preserve the page response's `Set-Cookie` headers, including on redirects, sign-in errors,
+partial views, `HEAD`, and conditional `304` responses. A mirror that sets cookies uses
+`Cache-Control: private, no-store`, even when `md.cache` is enabled, so a shared cache cannot replay
+one reader's session cookies to another. Cookie-free mirrors keep their configured cache policy.
+
+If the page returns a non-HTML response, such as a JSON error or a `429` rate limit, Farm returns
+that response and its headers (including `Retry-After`) without dispatching the page again.
+Bodyless `204`, `205`, and `304` responses also pass through, even if they declare an HTML content
+type; they are not converted or filtered by partial-view parameters. Pass-through responses keep
+the page's own content type and cache policy. `HEAD` keeps the status and
+headers but omits the body. Sign-in redirects and non-HTML `401`/`403` responses continue to use
+the Markdown explanations with the original status. Unused bodies from these explanations and
+terminal `HEAD` responses are cancelled without delaying the response.
+
+HTML `4xx` and `5xx` responses keep their original status and full converted error message.
+Partial-view parameters (`outline`, `section`, `max_tokens`, `cursor`, and `actions`) do not
+filter or replace errors, and a matching `If-None-Match` does not turn an error into `304`.
+Converted errors preserve `WWW-Authenticate`, `Proxy-Authenticate`, `Retry-After`, and `Allow`
+when present. Generated sign-in and redirect explanations also preserve these headers,
+including retry guidance. HTML-specific content lengths, encodings, and ETags are not copied
+onto the converted body. Successful-page views keep their normal selection and validation behavior.
+
+The internal HTML request omits `If-Match`, `If-Unmodified-Since`, `If-None-Match`,
+`If-Modified-Since`, `Range`, and `If-Range`.
+An HTML cache hit or byte fragment cannot be used to construct the Markdown representation.
+Farm evaluates `If-None-Match` against the selected Markdown view's own ETag after conversion;
+HTML ETags do not validate the mirror. Generated mirrors have no `Last-Modified` date and ignore
+`If-Modified-Since`. Byte ranges are not supported: a range request receives the complete selected
+view (or `304` for a matching Markdown ETag), not a slice of HTML. This does not change ordinary
+HTML requests or the page's application-level middleware checks.
+
+Mirrors and raw Markdown sources evaluate `If-Match` before `If-None-Match`, after page and
+view validation. Their ETags are weak: `If-Match: *` succeeds for an existing successful
+representation, but an entity-tag (even the current weak ETag or its strong-looking form)
+cannot satisfy strong comparison. A failed match returns an empty `412` response with
+`Cache-Control: no-store`; it does not replace page errors, redirects, or invalid-view errors.
+Use `If-None-Match` for cache revalidation. `If-Unmodified-Since` is ignored because these
+Markdown representations have no modification date; the HTML page's date is not reused.
+
+The internal page request carries the caller's abort signal. In development, disconnecting the
+Markdown client also cancels the internal HTTP page fetch, including while its body is being read.
+Rendering and server-side fetches that observe their request's signal can stop cooperatively;
+cancellation does not undo work or side effects that have already completed. Normal response
+completion does not cancel the request.
+
+Prerendered pages, such as those exporting `dynamic = "force-static"`, are served as static files in
+production, so they answer every request with HTML. They still send the `Link` header, and their
+`.md` URL works, so agents should follow the header or request the `.md` URL directly.
+
+## Read part of a page
+
+Agents can fetch less than the whole page. Every Markdown response, from a mirror or a `page.md`,
+accepts these query parameters:
+
+```bash
+curl "http://localhost:3000/pricing.md?outline"
+curl "http://localhost:3000/pricing.md?section=plans"
+curl "http://localhost:3000/pricing.md?max_tokens=2000"
+```
+
+- `?outline` returns the heading tree. Each entry links to its section and estimates its size in
+  tokens, so an agent can decide what to read. Estimates use the same four-character approximation
+  without constructing a full copy of every section.
+- `?section=<id>` returns one heading and everything under it, up to the next heading at the same
+  or a higher level. Ids follow GitHub's heading anchors (`## Team plans` is `team-plans`; a
+  repeated heading gets `-1`, `-2`). An unknown id answers `404` with the list of valid ids.
+- `?max_tokens=<n>` returns the page, or the section with `?section`, in parts of about `n` tokens
+  (at least 100). Remaining-token estimates count the unread lines without copying their text.
+  See [Read a long page in parts](#read-a-long-page-in-parts).
+
+Headings inside fenced code blocks and front matter are ignored. Every Markdown response also
+carries an `ETag`, so an agent can re-check a page with `If-None-Match` and receive `304 Not
+Modified` when it has not changed.
+
+### Read a long page in parts
+
+`?max_tokens=<n>` keeps each response within an agent's budget. A page that fits comes back whole.
+A longer one comes back in parts, each cut where a reader would pause, before a heading or after a
+paragraph, and ending with a link to the next part:
+
+```md
+## Install
+
+...
+
+---
+
+Continue: /guide.md?max_tokens=2000&cursor=48.k3j9x2a1 (about 3100 more tokens)
+```
+
+The same link is in a `Link: </guide.md?max_tokens=2000&cursor=48.k3j9x2a1>; rel="next"` header,
+and the last part has neither. A part never splits a code block unless the block alone is larger
+than the budget; then the part closes the block and the next one reopens it with the same language,
+so every part is valid Markdown. Token counts are estimates of about four characters per token.
+
+Continuation, restart, and outline links keep the page's own query, so
+`/products.md?category=shoes&max_tokens=2000` keeps reading the shoes listing. The view parameters
+(`outline`, `section`, `actions`, `max_tokens`, `cursor`) are never passed to the page itself.
+
+The cursor names where to continue and which version of the page it belongs to. If the page changes
+between requests, the next part answers `409` with a link to start again, rather than continuing
+from a position that no longer lines up. A malformed cursor or a budget under 100 answers `400`.
+
+## Describe a page's forms
+
+The mirror turns a form's labels and buttons into text, but not what the form submits. When a page
+has forms, its mirror lists one more line under `Source:`:
+
+```md
+Source: /contact
+
+Actions: /contact.md?actions
+```
+
+`?actions` answers with the page's forms as JSON, read from the same part of the page as the mirror
+and with the same hidden-element rules:
+
+```bash
+curl "http://localhost:3000/contact.md?actions"
+```
+
+```json
+{
+  "page": "/contact",
+  "markdown": "/contact.md",
+  "actions": [
+    {
+      "type": "form",
+      "method": "POST",
+      "action": "/api/contact",
+      "enctype": "application/x-www-form-urlencoded",
+      "fields": [{ "name": "email", "type": "email", "label": "Email", "required": true }],
+      "submit": [{ "label": "Send" }]
+    }
+  ]
+}
+```
+
+- `action` is resolved the way a browser resolves it: an empty or missing `action` submits to the
+  page itself. Same-origin targets are root-relative; a form that only submits through JavaScript
+  has no `action` and is marked `requiresJavaScript`.
+- `fields` carry each control's name, type, label, preset value, and constraints (`required`,
+  `pattern`, `min`, `max`, `minLength`, `maxLength`, `accept`). Radio buttons and checkboxes that
+  share a name become one field with `options`, as do a select's options. Disabled controls are left
+  out, since a browser would not submit them. Hidden fields keep their values, so a submission
+  without JavaScript can be repeated; password and file inputs never include a value.
+- `submit` lists the buttons, with a button's own `formaction` or `formmethod` when it has one.
+- A React server action form, rendered with React's hidden `$ACTION_` fields, includes
+  `serverAction.id`.
+- A form that submits to an API route exposed as an MCP tool by
+  [`@farm.js/mcp`](/docs/plugins/mcp) includes `tool`: the tool `name` and the MCP `endpoint` that
+  serves it, so an agent can call the tool instead of posting the form. The match uses the form's
+  method and resolved action against the running MCP server's tools. The caller's `authorize`
+  policy still decides whether that tool is available to it.
+
+A `page.md` source has no forms, so its `?actions` view is an empty list. The view carries an
+`ETag` like every other Markdown response. Like the mirror itself, it is rendered with the caller's
+request, so it shows the forms that caller would see. Farm still renders the page and extracts its
+forms, but skips converting its content to Markdown when only the actions JSON is needed. Error
+responses still return their full Markdown explanation. When a mirror needs both the forms and
+Markdown, they share the same prepared HTML content within that request; nothing is cached across
+callers.
+
+## React Server Components apps
+
+Apps built with `defineConfig` from `@farm.js/plugin/rsc` serve the same mirrors. Every page answers
+at its `.md` URL and to `Accept: text/markdown`, with `?outline`, `?section`, `?max_tokens`, and
+`?actions`. HTML pages send the `Link` header, a missing `.md` page answers a Markdown 404, and reads
+fire `agent.read` events. The mirror renders the page through the normal request path, so middleware
+and sign-in gates apply, and a page that must not be shared keeps its private `Cache-Control`.
+
+The RSC renderer currently sets a deployment cookie on HTML page renders. Its generated mirrors
+therefore use `private, no-store` too; setting `md.cache` does not enable shared caching while that
+cookie is present. This prevents caches from replaying response cookies to another reader.
+
+Set the same `md` options on the RSC config:
+
+```ts title="vite.config.ts"
+import { defineConfig } from "@farm.js/plugin/rsc";
+
+export default defineConfig({
+  md: { expose: ["/", "/pricing", "/docs/[...slug]"] },
+});
+```
+
+`md: false` turns mirrors off. `page.md` sources are not part of the RSC pipeline yet.
+
+RSC apps also serve `/llms.txt` by default, listing their static pages with links to these mirrors.
+It is answered after middleware, like a page. Set `agent.llmsTxt` with the same options as core;
+`full: true` adds `/llms-full.txt`, and `false` turns both off:
+
+```ts title="vite.config.ts"
+export default defineConfig({
+  agent: { llmsTxt: { full: true, exclude: ["/admin/[...rest]"] } },
+});
+```
+
+`llms.ts` and `llms-full.ts` route files are not supported in RSC apps yet.
 
 ## Production notes
 

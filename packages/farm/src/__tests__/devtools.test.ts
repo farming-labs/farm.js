@@ -1,8 +1,88 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { PluginManager } from "../plugin";
 import { createFarmDevtoolsSnapshot } from "../devtools";
 import { renderFarmDevtoolsHtml } from "../devtools-ui";
 
 describe("farm devtools", () => {
+  it("reports active plugin order and hook names without executing or exposing plugin data", async () => {
+    const hook = vi.fn();
+    const manager = new PluginManager({ config: {}, isDev: true, isProd: false });
+    manager.addPlugins([
+      { name: "last", enforce: "post", ready: hook },
+      {
+        name: "normal",
+        version: "1.2.3",
+        runtime: { before: hook },
+        routes: () => ({}),
+        client: {
+          public: { secret: "not-for-the-inspector" },
+          setup: hook,
+          navigation: { rendered: hook },
+        },
+      },
+      { name: "first", enforce: "pre", configure: hook, dev: { server: hook, update: hook } },
+      {
+        name: "normal-2",
+        get setup() {
+          throw new Error("must not invoke accessors");
+        },
+      },
+    ]);
+    const snapshot = await createFarmDevtoolsSnapshot({
+      root: "/app",
+      srcDir: "src",
+      env: {},
+      routeManager: {
+        getRoutes: () => new Map(),
+        getLayouts: () => new Map(),
+        getLoadings: () => new Map(),
+        getErrors: () => new Map(),
+      },
+      apiRouteManager: { getRoutes: () => new Map() },
+      middlewareManager: { getMiddlewares: () => [] },
+      config: { plugins: [{ name: "removed-during-configure" }] },
+      plugins: manager.getSortedPlugins(),
+    });
+    expect(snapshot.counts.plugins).toBe(4);
+    expect(snapshot.plugins).toEqual([
+      {
+        name: "first",
+        order: 1,
+        enforce: "pre",
+        serverHooks: ["configure", "dev.server", "dev.update"],
+        clientHooks: [],
+        routes: false,
+      },
+      {
+        name: "normal",
+        version: "1.2.3",
+        order: 2,
+        enforce: "normal",
+        serverHooks: ["runtime.before"],
+        clientHooks: ["client.setup", "client.navigation.rendered"],
+        routes: true,
+      },
+      {
+        name: "normal-2",
+        order: 3,
+        enforce: "normal",
+        serverHooks: [],
+        clientHooks: [],
+        routes: false,
+      },
+      {
+        name: "last",
+        order: 4,
+        enforce: "post",
+        serverHooks: ["ready"],
+        clientHooks: [],
+        routes: false,
+      },
+    ]);
+    expect(hook).not.toHaveBeenCalled();
+    expect(JSON.stringify(snapshot)).not.toContain("not-for-the-inspector");
+    expect(JSON.stringify(snapshot)).not.toContain("removed-during-configure");
+  });
   it("collects the effective application runtime", async () => {
     const snapshot = await createFarmDevtoolsSnapshot({
       root: "/repo/app",

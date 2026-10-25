@@ -382,8 +382,84 @@ describe("htmlToMarkdown", () => {
       "<main><table><tr><th>Target</th><th>Status</th></tr><tr><td>node</td><td>ready</td></tr></table></main>",
       { includeMetadata: false },
     );
+    expect(table).toBe("| Target | Status |\n| --- | --- |\n| node | ready |\n");
+  });
+
+  it("renders tables as GFM tables", () => {
+    expect(
+      htmlToMarkdown(
+        [
+          "<main><p>Plans</p><table><thead><tr><th>Plan</th><th>Price</th><th>Notes</th></tr></thead>",
+          '<tbody><tr><td><a href="/pro">Pro</a></td><td>Q&amp;A | month</td><td><code>a&lt;b</code></td></tr>',
+          '<tr><td colspan="2">Enterprise</td><td>Talk<br>to us</td></tr>',
+          "<tr><td>Free</td></tr></tbody></table></main>",
+        ].join(""),
+        { includeMetadata: false },
+      ),
+    ).toBe(
+      [
+        "Plans",
+        "",
+        "| Plan | Price | Notes |",
+        "| --- | --- | --- |",
+        "| [Pro](/pro) | Q&A \\| month | `a<b` |",
+        "| Enterprise | | Talk to us |",
+        "| Free | | |",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("keeps the plain-text fallback for tables with no GFM form", () => {
     // Rows stay separate paragraphs; a single newline would render as one line.
-    expect(table).toBe("Target Status\n\nnode ready\n");
+    expect(
+      htmlToMarkdown(
+        "<main><table><tr><td>outer</td><td><table><tr><td>inner</td></tr></table></td></tr></table></main>",
+        { includeMetadata: false },
+      ),
+    ).toBe("outer\n\ninner\n");
+    expect(
+      htmlToMarkdown(
+        "<main><table><tr><td><pre><code>run()</code></pre></td></tr></table></main>",
+        { includeMetadata: false },
+      ),
+    ).toBe("```\nrun()\n```\n");
+  });
+
+  it("quotes a table inside a blockquote", () => {
+    expect(
+      htmlToMarkdown(
+        "<main><blockquote><table><tr><th>A</th></tr><tr><td>1</td></tr></table></blockquote></main>",
+        { includeMetadata: false },
+      ),
+    ).toBe("> | A |\n> | --- |\n> | 1 |\n");
+  });
+
+  it("keeps the language of a highlighted code block", () => {
+    const convert = (html: string) =>
+      htmlToMarkdown(`<main>${html}</main>`, { includeMetadata: false });
+    expect(convert('<pre><code class="hljs language-ts">let a = 1;</code></pre>')).toBe(
+      "```ts\nlet a = 1;\n```\n",
+    );
+    expect(
+      convert('<pre class="shiki" data-language="tsx"><code><span>x</span></code></pre>'),
+    ).toBe("```tsx\nx\n```\n");
+    expect(convert('<pre class="lang-bash">pnpm dev</pre>')).toBe("```bash\npnpm dev\n```\n");
+    // An info string that could break out of the fence line is dropped.
+    expect(convert('<pre><code data-language="ts\nx">y</code></pre>')).toBe("```\ny\n```\n");
+  });
+
+  it("numbers ordered list items", () => {
+    const convert = (html: string) =>
+      htmlToMarkdown(`<main>${html}</main>`, { includeMetadata: false });
+    expect(convert("<ol><li>Install</li><li>Run <code>farm dev</code></li></ol>")).toBe(
+      "1. Install\n2. Run `farm dev`\n",
+    );
+    expect(convert('<ol start="3"><li>Deploy</li></ol><ul><li>Note</li></ul>')).toBe(
+      "3. Deploy\n\n- Note\n",
+    );
+    // A nested list keeps the bullet fallback rather than mixing up the numbering.
+    expect(convert("<ol><li>One<ul><li>a</li></ul></li></ol>")).toContain("- ");
   });
 
   it("keeps indentation inside code blocks while tidying spacing around them", () => {
@@ -612,6 +688,35 @@ describe("htmlToMarkdown", () => {
     ).toBe("Hello ex**am**ple\n");
   });
 
+  it("separates items in a layout row that has no text of its own", () => {
+    // JSX drops the line breaks between siblings, so a flex row of a label and
+    // a value renders as `<span>00</span><span>Basic starter</span>`.
+    expect(
+      htmlToMarkdown(
+        '<main><div class="eyebrow"><span>00</span><span>FARMJS / Basic starter</span></div>' +
+          '<div class="command"><span>01</span><code>npm run dev</code></div>' +
+          '<nav><span><a href="/docs"><span>Docs</span></a></span>' +
+          '<span><span aria-hidden="true">/</span><a href="/gh"><span>GitHub</span></a></span></nav></main>',
+        { includeMetadata: false },
+      ),
+    ).toBe("00 FARMJS / Basic starter\n\n01 npm run dev\n\nDocs GitHub\n");
+  });
+
+  it("keeps a letter-split word joined in a layout container", () => {
+    expect(
+      htmlToMarkdown(
+        "<main><div><span>a</span><span>g</span><span>e</span><span>n</span><span>t</span><span>s</span></div></main>",
+        { includeMetadata: false },
+      ),
+    ).toBe("agents\n");
+    // Text of the container's own means it is prose, not a row of items.
+    expect(
+      htmlToMarkdown("<main><div>ex<span>am</span><span>ple</span></div></main>", {
+        includeMetadata: false,
+      }),
+    ).toBe("example\n");
+  });
+
   it("prefers page content over layout chrome", () => {
     expect(
       htmlToMarkdown(
@@ -645,5 +750,139 @@ describe("resolveConfig markdown mirrors", () => {
       expose: [{ route: "/pricing" }],
       cache: 60,
     });
+  });
+});
+
+describe("htmlToMarkdown images", () => {
+  const convert = (body: string) =>
+    htmlToMarkdown(`<html><body><main>${body}</main></body></html>`, { includeMetadata: false });
+
+  it("keeps images whatever order alt and src come in", () => {
+    // Farm's <Image> renders alt before src.
+    expect(convert('<p><img alt="Revenue chart" src="/chart.png" width="640"></p>')).toBe(
+      "![Revenue chart](/chart.png)\n",
+    );
+    expect(convert("<p><img src='/logo.svg' alt='Farm logo' /></p>")).toBe(
+      "![Farm logo](/logo.svg)\n",
+    );
+  });
+
+  it("keeps an image without alt text and ignores srcset and data-src", () => {
+    expect(
+      convert('<p><img data-src="/lazy.png" srcset="/a.png 1x, /b.png 2x" src="/photo.jpg"></p>'),
+    ).toBe("![](/photo.jpg)\n");
+  });
+
+  it("keeps only the description of an inline data URL", () => {
+    expect(
+      convert('<p>Before <img alt="Placeholder" src="data:image/png;base64,AAAA"> after</p>'),
+    ).toBe("Before Placeholder after\n");
+  });
+});
+
+describe("Markdown mirror indexing headers", () => {
+  const mirror = (head: string, pageHeaders: Record<string, string> = {}) =>
+    createMarkdownMirrorResponse({
+      request: new Request("https://acme.test/drafts.md"),
+      config: resolveMarkdownConfig({ expose: ["/drafts"] }),
+      renderPage: async () =>
+        new Response(`<html><head>${head}</head><body><main><p>Draft</p></main></body></html>`, {
+          headers: { "Content-Type": "text/html; charset=utf-8", ...pageHeaders },
+        }),
+    });
+
+  it("keeps the page's robots rules and points at its canonical URL", async () => {
+    const response = await mirror(
+      '<meta content="noindex, nofollow" name="robots"><link href="/drafts" rel="canonical">',
+      { "X-Robots-Tag": "noarchive" },
+    );
+    expect(response?.headers.get("x-robots-tag")).toBe("noarchive, noindex, nofollow");
+    expect(response?.headers.get("link")).toBe('<https://acme.test/drafts>; rel="canonical"');
+  });
+
+  it("adds neither header for a page without robots rules or a canonical link", async () => {
+    const response = await mirror("<title>Drafts</title>");
+    expect(response?.headers.get("x-robots-tag")).toBeNull();
+    expect(response?.headers.get("link")).toBeNull();
+  });
+});
+
+describe("htmlToMarkdown page content", () => {
+  it("keeps every item of an index page that has several articles and no main", () => {
+    const markdown = htmlToMarkdown(
+      "<html><body><h1>Blog</h1><p>Latest posts.</p><article><h2>First</h2><p>One</p></article><article><h2>Second</h2><p>Two</p></article></body></html>",
+      { includeMetadata: false },
+    );
+    expect(markdown).toBe("# Blog\n\nLatest posts.\n\n## First\n\nOne\n\n## Second\n\nTwo\n");
+  });
+
+  it("still reads a single article as the page content", () => {
+    expect(
+      htmlToMarkdown(
+        "<html><body><nav><a href='/'>Home</a></nav><article><h1>Post</h1><p>Body.</p></article></body></html>",
+        { includeMetadata: false },
+      ),
+    ).toBe("# Post\n\nBody.\n");
+  });
+});
+
+describe("Markdown mirrors of protected pages", () => {
+  const mirror = (page: Response, method = "GET") =>
+    createMarkdownMirrorResponse({
+      request: new Request("https://acme.test/account.md", { method }),
+      config: resolveMarkdownConfig({ expose: ["/account"] }),
+      renderPage: async () => page,
+    });
+
+  it("answers a sign-in redirect with the same status and a Markdown link", async () => {
+    const response = await mirror(
+      new Response(null, { status: 307, headers: { Location: "/login?next=%2Faccount" } }),
+    );
+    expect(response?.status).toBe(307);
+    expect(response?.headers.get("location")).toBe("/login?next=%2Faccount");
+    expect(response?.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+    expect(response?.headers.get("cache-control")).toBe("no-store");
+    expect(await response?.text()).toBe(
+      "# Redirected\n\n`/account` redirects to [https://acme.test/login?next=%2Faccount](https://acme.test/login?next=%2Faccount). The page may require signing in.\n",
+    );
+  });
+
+  it("answers a redirect that carries an HTML body with the redirect", async () => {
+    const response = await mirror(
+      new Response("<html><body>Redirecting</body></html>", {
+        status: 307,
+        headers: { Location: "/login", "Content-Type": "text/html; charset=utf-8" },
+      }),
+    );
+    expect(response?.status).toBe(307);
+    expect(response?.headers.get("location")).toBe("/login");
+    expect(await response?.text()).toContain("redirects to [https://acme.test/login]");
+  });
+
+  it("explains 401 and 403 without a page body", async () => {
+    const unauthorized = await mirror(
+      new Response(null, { status: 401, headers: { "WWW-Authenticate": 'Bearer realm="acme"' } }),
+    );
+    expect(unauthorized?.status).toBe(401);
+    expect(unauthorized?.headers.get("www-authenticate")).toBe('Bearer realm="acme"');
+    expect(await unauthorized?.text()).toBe(
+      "# Sign-in required\n\n`/account` requires signing in.\n",
+    );
+
+    const forbidden = await mirror(new Response(null, { status: 403 }));
+    expect(forbidden?.status).toBe(403);
+    expect(await forbidden?.text()).toContain("# Access denied");
+  });
+
+  it("keeps HEAD bodiless and leaves other non-HTML responses alone", async () => {
+    const head = await mirror(
+      new Response(null, { status: 302, headers: { Location: "/login" } }),
+      "HEAD",
+    );
+    expect(head?.status).toBe(302);
+    expect(await head?.text()).toBe("");
+    const failure = new Response("oops", { status: 500 });
+    expect(await mirror(failure)).toBe(failure);
+    expect(await failure.text()).toBe("oops");
   });
 });
