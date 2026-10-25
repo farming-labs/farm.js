@@ -307,6 +307,8 @@ describe("apiMcp", () => {
       path: "/api/card-mcp",
     });
     expect(published.details.protocolVersions).toContain("2025-11-25");
+    // No authorize: anonymous clients list its tools, so the public manifest may too.
+    expect(published.details.public).toBe(true);
 
     expect(() => apiMcp({ allowUnauthenticated: true, description: " " })).toThrow(
       "apiMcp description must be a non-empty string.",
@@ -348,6 +350,8 @@ describe("apiMcp", () => {
       Symbol.for("farm.mcp.catalogs")
     ];
     const { details } = catalogs.get("/api/manifest-mcp");
+    // authorize runs on every request, so the public manifest lists none of its catalog.
+    expect(details.public).toBe(false);
     expect(Object.keys(details.schemas)).toEqual(["search_notes"]);
     expect(details.schemas.search_notes.input).toMatchObject({
       type: "object",

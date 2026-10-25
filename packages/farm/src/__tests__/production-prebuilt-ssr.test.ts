@@ -2574,6 +2574,37 @@ export const listTodos = defineWebMCPTool({
     }
   }, 120_000);
 
+  it("serves no /.well-known/farmjs.json with agent.manifest: false, signed or not", async () => {
+    const root = await createProductionFixture();
+    const key = `fti_${"o".repeat(43)}`;
+    const keyHash = createHash("sha256").update(key).digest("hex");
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          agent: { manifest: false },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.headers.get("content-type") ?? "").not.toContain("application/json");
+        },
+        "/.well-known/farmjs.json",
+        { headers: { "farmjs-infra-signature": await signFarmInfraManifestRequest(keyHash) } },
+        { FARMJS_API_KEY: key, FARMJS_API_URL: "http://127.0.0.1:9" },
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("marks Nitro's prerender worker so built-in analytics ignores build requests", async () => {
     const root = await createProductionFixture();
 
