@@ -29,6 +29,7 @@ export default defineConfig({
         "- [Agent manifest](/.well-known/agent.json): Farming Labs discovery manifest",
         "- [API catalog](/.well-known/api-catalog): RFC 9727 API catalog",
         "- [Agent Skills index](/.well-known/agent-skills/index.json): Hashed Agent Skills discovery",
+        "- [OpenAPI](/openapi.json): OpenAPI 3.1 description of the site's public APIs (docs search and Markdown, docs MCP, agent-ready check)",
         "- [Full docs text](/llms-full.txt): every docs page in one file",
       ].join("\n"),
       exclude: ["/telemetry"],
