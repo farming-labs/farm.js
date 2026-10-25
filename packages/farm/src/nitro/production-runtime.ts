@@ -1,5 +1,6 @@
 export { _runWithAfterRequest } from "../after";
 export { createFarmAppManifestResponse } from "../app-manifest";
+export { farmPathGuardCoversEndpoint } from "../middleware/may-handle";
 export { farmSecretsMatch } from "../secret-compare";
 export { createFarmLayoutSelector } from "../routing/layout-selector";
 export { isInRouteGroupScope as isInFarmRouteGroupScope } from "../routing/route-groups";

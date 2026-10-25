@@ -13,7 +13,9 @@ import {
   verifyFarmInfraManifestSignature,
 } from "../app-manifest";
 import { resolveFarmAppPackages } from "../app-manifest-packages";
+import { defineIntegration } from "../integrations";
 import { _publishFarmMCPCatalog } from "../mcp-catalog";
+import { farmPathGuardCoversEndpoint } from "../middleware/may-handle";
 import { FARM_VERSION } from "../version";
 
 const key = `fti_${"k".repeat(43)}`;
@@ -143,6 +145,54 @@ describe("app manifest", () => {
       outputSchema: { type: "object" },
     });
     expect(JSON.stringify(createFarmAppManifest(input))).not.toContain("/api/orders");
+  });
+
+  it("lists a public server behind a guard written for its path by identity only", () => {
+    publishStore();
+    const guardedBy = (
+      config: Parameters<typeof farmPathGuardCoversEndpoint>[0]["config"],
+      middlewareRoutes: { path: string }[] = [],
+      apiServerBasePath?: string,
+    ) => ({
+      ...input,
+      guardCoversPath: (path: string) =>
+        farmPathGuardCoversEndpoint({ config, middlewareRoutes }, path, apiServerBasePath),
+    });
+    for (const guarded of [
+      guardedBy({ middleware: [{ matcher: "/api/mcp" }] }),
+      // A matcher for the public api.basePath form covers the /api route too.
+      guardedBy({ middleware: [{ matcher: "/v1/:path*" }] }, [], "/v1"),
+      guardedBy({}, [{ path: "/api" }]),
+      guardedBy({
+        integrations: {
+          auth: defineIntegration({
+            category: "auth",
+            type: "acme",
+            instance: {},
+            middleware: [
+              { matcher: ["/api/mcp"], handler: () => new Response(null, { status: 401 }) },
+            ],
+          }),
+        },
+      }),
+    ]) {
+      const [store] = createFarmAppManifest(guarded).mcp.servers;
+      expect(store).toMatchObject({ name: "store", authorization: "required" });
+      expect(store).toMatchObject({ tools: [], resources: [], prompts: [] });
+      expect(JSON.stringify(createFarmAppManifest(guarded))).not.toMatch(/list_orders|handbook/);
+      // Farm Infra's signed view keeps the detail.
+      expect(createFarmAppManifest(guarded, { full: true }).mcp.servers[0]!.tools).toHaveLength(3);
+    }
+
+    // Guards that cover every path, or another path, leave a public server's tools listed.
+    for (const open of [
+      guardedBy({ middleware: [{ matcher: "/(.*)" }, { handler() {} }, { matcher: "/admin" }] }),
+      guardedBy({}, [{ path: "/" }, { path: "/api/admin" }]),
+    ]) {
+      const [store] = createFarmAppManifest(open).mcp.servers;
+      expect(store).toMatchObject({ authorization: "none" });
+      expect(store!.tools).toHaveLength(3);
+    }
   });
 
   it("lists a server that requires authorize by identity only, except in Infra's view", () => {

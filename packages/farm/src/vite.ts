@@ -85,6 +85,7 @@ import {
   isFarmAppManifestPath,
   resolveFarmAppManifestInput,
 } from "./app-manifest";
+import { farmPathGuardCoversEndpoint } from "./middleware/may-handle";
 import { resolveFarmAppPackages } from "./app-manifest-packages";
 import { collectFarmWebMCPTools } from "./app-manifest-webmcp";
 import { resolveDevGlobalStylesheetHref } from "./server/dev-styles";
@@ -2056,6 +2057,18 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     : [],
                 }),
                 defaultMCP: () => farmApp.getServerRenderer().getDefaultMCPServer(),
+                // A guard written for an MCP server's path keeps its tools out of the public view.
+                guardCoversPath: (path) =>
+                  farmPathGuardCoversEndpoint(
+                    {
+                      config: farmConfig,
+                      middlewareRoutes: middlewareManager
+                        .getMiddlewares()
+                        .filter((entry) => entry.source !== "config"),
+                    },
+                    path,
+                    apiServerBasePath,
+                  ),
               },
             );
             await sendWebResponse(res, manifest);

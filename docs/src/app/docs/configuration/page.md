@@ -703,8 +703,10 @@ Every app serves `/.well-known/farmjs.json` (and, for Farm 0.1.34's readers, `/.
 to any client: Farm's version and the installed `@farm.js/*` packages, the renderer and base path,
 the MCP tools Farm serves with their JSON Schemas, WebMCP browser tools, each integration's
 category and provider (never its configuration), and plugin names. An MCP server that requires
-`authorize` is listed without its tools, resources or prompts, and endpoint tools leave out their
-HTTP route; a request Farm Infra signed for the app's `FARMJS_API_KEY` gets the full view.
+`authorize`, or a public one whose path a path-specific guard covers (middleware or an
+integration's `protectedRoutes`, as for the [sitemap](#sitemap)), is listed as requiring
+authorization without its tools, resources or prompts, and endpoint tools leave out their HTTP
+route; a request Farm Infra signed for the app's `FARMJS_API_KEY` gets the full view.
 [Farm Infra analytics](/docs/infra-analytics) lists every field.
 `manifest: false` turns it off.
 

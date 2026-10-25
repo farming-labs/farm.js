@@ -105,6 +105,12 @@ export interface FarmAppManifestInput {
    * server at runtime, not serialized: it answers only while no other MCP server is listed.
    */
   defaultMCP?: () => { name: string; version: string; path: string } | undefined;
+  /**
+   * Whether a guard written for a path (middleware, an integration's `protectedRoutes`)
+   * covers an MCP server's endpoint. Set by the server at runtime: such a server is listed
+   * as requiring authorization, without its tools, resources or prompts, in the public view.
+   */
+  guardCoversPath?: (path: string) => boolean;
 }
 
 export function resolveFarmAppManifestInput(
@@ -178,13 +184,15 @@ export function createFarmAppManifest(
     packages: input.packages,
     mcp: {
       servers: _listFarmMCPCatalogs().map(({ server, tools, details }) => {
-        // A server that didn't say it's public (an older @farm.js/mcp) counts as protected.
-        const listed = full || details?.public === true;
+        // A server that didn't say it's public (an older @farm.js/mcp) counts as protected,
+        // as does one behind a guard written for its path: anonymous clients cannot list it.
+        const open = details?.public === true && !input.guardCoversPath?.(server.path);
+        const listed = full || open;
         return {
           name: server.name,
           version: server.version,
           path: server.path,
-          authorization: details?.public === true ? "none" : "required",
+          authorization: open ? "none" : "required",
           resources: listed ? [...(details?.resources ?? [])] : [],
           prompts: listed ? [...(details?.prompts ?? [])] : [],
           tools: (listed ? tools : []).map((tool) => {

@@ -5842,6 +5842,7 @@ function renderFarmRouteServerTree(element) { return element; }`;
   createFarmAiCatalogResponse,
   createFarmApiCatalogResponse,
   createFarmAppManifestResponse,
+  farmPathGuardCoversEndpoint,
   collectFarmLlmsTxtPages,
   createFarmDefaultLlmsTxt,
   createFarmLlmsMarkdownReader,
@@ -6545,7 +6546,16 @@ ${
               ? collectFarmWebMCPTools(config.root, config.srcDir)
               : [],
           }),
-        )};\n${servesDefaultMCP ? "farmAppManifestInput.defaultMCP = getFarmDefaultMCPServer;\n" : ""}`
+        )};\n${servesDefaultMCP ? "farmAppManifestInput.defaultMCP = getFarmDefaultMCPServer;\n" : ""}// A guard written for an MCP server's path keeps its tools out of the public view.
+farmAppManifestInput.guardCoversPath = (path) =>
+  farmPathGuardCoversEndpoint(
+    {
+      config: { middleware: farmMiddlewareConfig, integrations: serverRuntimeIntegrations },
+      middlewareRoutes: fileMiddlewareModules,
+    },
+    path,
+    farmLocalAPIBasePath,
+  );\n`
       : ""
   }
 function isFarmLocalAPIPathname(pathname) {

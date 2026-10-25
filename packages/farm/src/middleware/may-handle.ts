@@ -1,9 +1,11 @@
 /**
- * Build-time answers to "may a guard answer this path instead of the page?". They
- * reuse the runtime matchers, so the build never disagrees with the server about
- * which requests a guard sees. Unknowable cases (a function matcher, middleware
- * without a matcher) count as "may": every caller uses the answer to stay safe.
+ * Answers to "does a guard see this path?", reusing the runtime matchers so the build
+ * never disagrees with the server about which requests a guard sees. Prerendering asks
+ * whether a guard *may* run (unknowable cases count as yes); public listings and the app
+ * manifest ask whether a guard written for the path covers it (see
+ * {@link farmPathGuardCoversPage}).
  */
+import { createFarmAPIMiddlewarePathnames } from "../api/server-path";
 import type { ResolvedFarmConfig } from "../config";
 import {
   integrationMiddlewareMayHandlePath,
@@ -131,5 +133,22 @@ export function farmPathGuardCoversPage(
     ) ||
     pathSpecificConfigMiddlewareCovers(options.config.middleware, pathname) ||
     integrationMiddlewareMayHandlePath(options.config.integrations, pathname, CATCH_ALL_PROBE)
+  );
+}
+
+/**
+ * {@link farmPathGuardCoversPage} for an endpoint served under `/api`, such as an
+ * `apiMcp()` server: a guard written for either the `/api` route or its public
+ * `api.basePath` form covers it.
+ *
+ * @internal
+ */
+export function farmPathGuardCoversEndpoint(
+  options: Parameters<typeof farmPathGuardCoversPage>[0],
+  path: string,
+  apiServerBasePath?: string,
+): boolean {
+  return createFarmAPIMiddlewarePathnames(apiServerBasePath)(path).some((pathname) =>
+    farmPathGuardCoversPage(options, pathname),
   );
 }

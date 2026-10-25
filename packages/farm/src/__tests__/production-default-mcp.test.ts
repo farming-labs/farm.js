@@ -287,6 +287,55 @@ export default {
     });
   }, 240_000);
 
+  it("keeps the tools of an MCP server behind a path guard out of the public manifest", async () => {
+    await withRoot(async (root) => {
+      const handler = await buildApp(
+        root,
+        {},
+        {
+          "farm.config.ts": `import { _publishFarmMCPCatalog } from "@farm.js/core/api/runtime";
+// Stands in for apiMcp({ allowUnauthenticated: true }) servers published at startup.
+// The test unpublishes them: the registry is process-wide.
+globalThis.__farmTestUnpublish = [];
+for (const path of ["/api/guarded-mcp", "/api/open-mcp"]) {
+  globalThis.__farmTestUnpublish.push(_publishFarmMCPCatalog(
+    { name: path.slice(5), version: "1.0.0", path },
+    [{ name: "list_orders_" + path.slice(5, -4), kind: "standalone", readOnlyHint: true }],
+    { public: true, schemas: {} },
+  ));
+}
+export default {
+  middleware: [
+    { matcher: "/api/guarded-mcp", handler: () => new Response("sign in", { status: 401 }) },
+  ],
+};
+`,
+        },
+      );
+      const unpublish = () =>
+        ((globalThis as any).__farmTestUnpublish ?? [])
+          .splice(0)
+          .forEach((done: () => void) => done());
+      let manifest: any;
+      try {
+        manifest = await (
+          await handler.fetch(new Request("https://acme.test/.well-known/farmjs.json"))
+        ).json();
+      } finally {
+        unpublish();
+      }
+      const servers = Object.fromEntries(
+        manifest.mcp.servers.map((server: any) => [server.path, server]),
+      );
+      expect(servers["/api/guarded-mcp"]).toMatchObject({ authorization: "required", tools: [] });
+      expect(JSON.stringify(manifest)).not.toContain("list_orders_guarded");
+      expect(servers["/api/open-mcp"]).toMatchObject({
+        authorization: "none",
+        tools: [expect.objectContaining({ name: "list_orders_open" })],
+      });
+    });
+  }, 240_000);
+
   it("reads pages as a fresh anonymous request through the plugin runtime", async () => {
     await withRoot(async (root) => {
       const handler = await buildApp(
