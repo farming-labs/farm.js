@@ -624,8 +624,8 @@ export function auth0(input: Auth0IntegrationInput = {}) {
             );
             const issuedAt = Date.now();
             const tokenLifetime = Math.max(tokenResponse.expires_in || 3600, 60);
-            const expiresAt =
-              issuedAt + Math.min(tokenLifetime, sessionMaxAge ?? tokenLifetime) * 1000;
+            const sessionLifetime = Math.min(tokenLifetime, sessionMaxAge ?? tokenLifetime);
+            const expiresAt = issuedAt + sessionLifetime * 1000;
             const sessionId = randomBytes(16).toString("hex");
 
             const headers = new Headers();
@@ -640,7 +640,9 @@ export function auth0(input: Auth0IntegrationInput = {}) {
                 ),
                 request,
                 {
-                  maxAge: Math.max((expiresAt - Date.now()) / 1000, 60),
+                  // The lifetime itself, not expiresAt minus a later clock read, so the
+                  // cookie's Max-Age is exact and never a second short.
+                  maxAge: sessionLifetime,
                 },
               ),
             );
