@@ -502,7 +502,7 @@ export const betterAuthIntegration = betterAuth({
     description: "Auth.js route adapter",
     env: ["AUTH_SECRET", "AUTH_GITHUB_ID", "AUTH_GITHUB_SECRET"],
     dependencies: {
-      "@auth/core": "0.34.3",
+      "@auth/core": "^0.41.3",
     },
     setupFiles: [
       {

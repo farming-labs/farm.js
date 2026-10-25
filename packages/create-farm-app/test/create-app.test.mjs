@@ -1118,7 +1118,7 @@ test("generates every official integration starter", async () => {
       }
 
       if (template.name === "authjs") {
-        assert.equal(packageJson.dependencies["@auth/core"], "0.34.3");
+        assert.equal(packageJson.dependencies["@auth/core"], "^0.41.3");
         assert.match(
           await readFile(path.join(generatedDir, "src/lib/auth.ts"), "utf8"),
           /GitHub\(\{/,
