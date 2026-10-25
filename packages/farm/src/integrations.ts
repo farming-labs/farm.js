@@ -2871,6 +2871,12 @@ export async function dispatchIntegrationRequest(
      * already had the forwarded cookies appended.
      */
     onForwardedCookies?: (cookies: string[]) => void;
+    /**
+     * Middleware entries that already ran for this request, shared across dispatches. A
+     * `ctx.rewrite()` target is guarded by a second dispatch, which skips these so each guard runs
+     * at most once per request, as app middleware does.
+     */
+    ranMiddleware?: Set<object>;
   } = {},
 ): Promise<Response | null> {
   try {
@@ -2905,10 +2911,12 @@ export async function dispatchIntegrationRequest(
   const forwardedSetCookies: string[] = [];
 
   for (const entry of middleware) {
+    if (options.ranMiddleware?.has(entry)) continue;
     const params = resolveIntegrationMiddlewareParams(entry, pathname, runtime.config);
     if (!params) {
       continue;
     }
+    options.ranMiddleware?.add(entry);
 
     const handlerContext = createServerIntegrationHandlerContext({
       runtime,
@@ -3191,7 +3199,7 @@ export async function dispatchIntegrationRequests(
   integrations: FarmIntegrationsUserConfig | undefined,
   runtime: Omit<RegisteredIntegrationRuntime, "integration">,
   request: Request,
-  options: { currentRequest?: Request } = {},
+  options: { currentRequest?: Request; ranMiddleware?: Set<object> } = {},
 ): Promise<{ response: Response | null; setCookies: string[] }> {
   const setCookies: string[] = [];
   if (!integrations) {
@@ -3218,6 +3226,7 @@ export async function dispatchIntegrationRequests(
       request.clone(),
       {
         currentRequest: options.currentRequest,
+        ranMiddleware: options.ranMiddleware,
         onForwardedCookies: (cookies) => setCookies.push(...cookies),
       },
     );

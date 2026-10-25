@@ -5036,7 +5036,7 @@ function matchLocalIntegrationRequest(request) {
   }
 }
 
-async function handleIntegrationRequest(request) {
+async function handleIntegrationRequest(request, ranMiddleware) {
   ${
     options.hasServerRuntimeIntegrations
       ? `return dispatchIntegrationRequests(
@@ -5047,6 +5047,7 @@ async function handleIntegrationRequest(request) {
       isProd: true,
     },
     request,
+    { ranMiddleware },
   );`
       : `return { response: null, setCookies: [] };`
   }
@@ -8124,7 +8125,11 @@ async function handleFarmRequestInContext(
   ${
     hasServerRuntimeIntegrations
       ? `
-  const integrationDispatch = await handleIntegrationRequest(cloneFarmRequestWithContext(request));
+  const farmIntegrationRanMiddleware = new Set();
+  const integrationDispatch = await handleIntegrationRequest(
+    cloneFarmRequestWithContext(request),
+    farmIntegrationRanMiddleware,
+  );
   if (integrationDispatch.response) {
     return integrationDispatch.response;
   }
@@ -8132,7 +8137,7 @@ async function handleFarmRequestInContext(
   // its rotated Set-Cookie values back here. They belong on whatever response
   // the page or API handler produces, so they ride the same deferred-header
   // channel the file middleware runner already uses.
-  const farmIntegrationSetCookies = integrationDispatch.setCookies;
+  let farmIntegrationSetCookies = integrationDispatch.setCookies;
   `
       : ""
   }
@@ -8147,7 +8152,27 @@ async function handleFarmRequestInContext(
   if (middlewareResult.response) {
     return middlewareResult.response;
   }
-  request = middlewareResult.request;
+  request = middlewareResult.request;${
+    hasServerRuntimeIntegrations
+      ? `
+  // A ctx.rewrite() target is guarded as a direct request for it is: integration
+  // guards (protectedRoutes) and routes see the rewritten URL, as in dev. Guards
+  // that already ran for the original URL are skipped, so each runs once.
+  if (request.url !== url.href) {
+    const rewrittenDispatch = await handleIntegrationRequest(
+      cloneFarmRequestWithContext(request),
+      farmIntegrationRanMiddleware,
+    );
+    farmIntegrationSetCookies = [...farmIntegrationSetCookies, ...rewrittenDispatch.setCookies];
+    if (rewrittenDispatch.response) {
+      return applyProductionMiddlewareHeaders(
+        rewrittenDispatch.response,
+        withFarmIntegrationSetCookies(middlewareResult.headers, integrationDispatch.setCookies),
+      );
+    }
+  }`
+      : ""
+  }
   const middlewareData = middlewareResult.data;
   const middlewareContext = middlewareResult.context;
   const middlewareHeaders = ${
