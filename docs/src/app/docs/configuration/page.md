@@ -396,7 +396,8 @@ A root-relative API root is also mounted by Farm in development and production. 
 `api: { basePath: "/v2/api" }` makes a route declared at `app/api/users/route.ts` available at
 `/v2/api/users`. The route still answers at `/api/users` too, and middleware guards both paths:
 `src/app/api/**/middleware.ts` files run for either prefix, and a middleware `matcher` written for
-`/api/...` or `/v2/api/...` matches the request at both. Farm treats an absolute `baseURL` as
+`/api/...` or `/v2/api/...` matches the request at both. Integration guards, such as an auth
+integration's `protectedRoutes`, match both prefixes the same way. Farm treats an absolute `baseURL` as
 external and does not remount the current application's API routes for it. `basePath` rejects
 backslashes, control characters, and `.` or `..` segments, including encoded path separators. Root-relative `baseURL` and `basePath` values
 must begin with one slash; network-path references such as `//api.example.com` are rejected so the

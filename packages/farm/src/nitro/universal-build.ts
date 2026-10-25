@@ -110,7 +110,11 @@ import { createFarmNodeServerEntry } from "./node-server-entry";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import type { FarmI18nCatalogs } from "../i18n/types";
-import { getFarmIntegrationPluginServerRuntime, getIntegrationProviders } from "../integrations";
+import {
+  FARM_INTEGRATION_API_BASE_PATH_KEY,
+  getFarmIntegrationPluginServerRuntime,
+  getIntegrationProviders,
+} from "../integrations";
 import {
   generateFarmIntegrationProviderClientCode,
   generateFarmIntegrationProviderServerModules,
@@ -6230,6 +6234,7 @@ const serverRuntimeIntegrations = Object.fromEntries(
 );
 const integrationRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs, {
   integrations: configuredIntegrations,
+  ${JSON.stringify(FARM_INTEGRATION_API_BASE_PATH_KEY)}: ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))},
 });
 const farmInfraAnalytics = ${
     hasInfraAnalyticsRuntime

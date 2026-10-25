@@ -53,6 +53,8 @@ import type { InferFarmIntegrationOrmClient } from "./integration-orm";
 import { setFarmPluginIntegrationContext } from "./plugin-integration-context";
 import { canonicalizeRequestPathname, canonicalizeRequestPathSegments } from "./utils/decode";
 import { stripFarmBasePath } from "./base-path";
+import { createFarmAPIMiddlewarePathnames, resolveFarmAPIServerBasePath } from "./api/server-path";
+import type { ResolvedFarmAPIConfig } from "./api/config";
 import { resolveFarmLocalePath } from "./i18n/routing";
 import {
   compileMiddlewareConfig,
@@ -3436,9 +3438,13 @@ function resolveIntegrationMiddlewareParams(
   // A missing matcher already matched everything above.
   if (params || !entry.matcher) return params;
 
+  // A local API route answers at `/api/...` and at the public `api.basePath`, so a guard written
+  // for either prefix must see both, the way app middleware does.
   const routePathname = resolveIntegrationRoutePathname(pathname, config);
-  if (routePathname !== pathname) {
-    const routeParams = resolveMatcherParams(entry.matcher, routePathname);
+  const candidates = [...new Set([pathname, ...getIntegrationAPIPathnames(config)(routePathname)])];
+  for (const candidate of candidates) {
+    if (candidate === pathname) continue;
+    const routeParams = resolveMatcherParams(entry.matcher, candidate);
     if (routeParams) return routeParams;
   }
 
@@ -3449,11 +3455,40 @@ function resolveIntegrationMiddlewareParams(
     });
     compiledIntegrationGuards.set(entry, compiled);
   }
-  for (const candidate of routePathname === pathname ? [pathname] : [pathname, routePathname]) {
+  for (const candidate of candidates) {
     const result = matchesCompiledMiddlewareConfig(candidate, compiled, noMiddlewareContext);
     if (result.matched) return result.params ?? {};
   }
   return null;
+}
+
+/**
+ * @internal Runtime config key holding the app's same-origin API path. The built server keeps the
+ * user's raw `api` config, whose values may be resolver functions, so the build records the
+ * resolved path here; development configs carry the resolved `api` itself.
+ */
+export const FARM_INTEGRATION_API_BASE_PATH_KEY = "__farmAPIServerBasePath";
+
+const integrationAPIPathnames = new WeakMap<object, (pathname: string) => readonly string[]>();
+
+function getIntegrationAPIPathnames(
+  config: FarmPluginContext["config"] | undefined,
+): (pathname: string) => readonly string[] {
+  if (!config) return (pathname) => [pathname];
+  let toPathnames = integrationAPIPathnames.get(config);
+  if (!toPathnames) {
+    const recorded = (config as Record<string, unknown>)[FARM_INTEGRATION_API_BASE_PATH_KEY];
+    const api = config.api as Partial<ResolvedFarmAPIConfig> | undefined;
+    const serverBasePath =
+      typeof recorded === "string"
+        ? recorded
+        : typeof api?.baseURL === "string" && typeof api.basePath === "string"
+          ? resolveFarmAPIServerBasePath(api as ResolvedFarmAPIConfig)
+          : undefined;
+    toPathnames = createFarmAPIMiddlewarePathnames(serverBasePath);
+    integrationAPIPathnames.set(config, toPathnames);
+  }
+  return toPathnames;
 }
 
 /** The pathname the page router matches: basePath and locale prefix removed. */
