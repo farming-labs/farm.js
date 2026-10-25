@@ -545,3 +545,68 @@
     margin: 0 24px 16px;
   }
 }
+
+/* Phones and tablets: long hosts, URLs and labels wrap instead of cutting off, and every
+   control is at least 40px tall. */
+@media (max-width: 900px) {
+  .agent-check-hero h1,
+  .agent-check-meta {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+  .agent-check-meta {
+    line-height: 1.6;
+  }
+  /* A wrapped host keeps its mark beside the first line. */
+  .agent-check-host {
+    align-items: flex-start;
+  }
+  .agent-check-made-with {
+    margin-top: 2px;
+  }
+  /* Card and row titles wrap beside their status instead of truncating. */
+  .agent-check-gaps .agents-now-top {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .agent-check-gaps .agents-now-top .truncate,
+  .agent-check-rows summary .truncate {
+    overflow: visible;
+    white-space: normal;
+  }
+}
+@media (max-width: 600px) {
+  .agent-check-hero h1 {
+    font-size: clamp(28px, 9vw, 36px);
+  }
+  /* The command gets its own line under its label, and wraps inside long paths. */
+  .agent-check-command {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 12px;
+    margin-top: 0;
+  }
+  .agent-check-command > span {
+    grid-column: 1 / -1;
+  }
+  .agent-check-command code {
+    overflow-wrap: anywhere;
+  }
+}
+@media (max-width: 900px), (pointer: coarse) {
+  .agent-check-actions [data-quiet] :is(a, button),
+  .agent-check-actions .agent-check-command button,
+  .agent-check-saw summary {
+    min-height: 40px;
+  }
+  .agent-check-actions .agent-check-command button {
+    min-width: 40px;
+    justify-content: center;
+  }
+  /* The made-with mark stays small; its hit area doesn't. */
+  .agent-check-made-with::before {
+    content: "";
+    position: absolute;
+    inset: -6px;
+  }
+}
