@@ -78,18 +78,18 @@ match no route are reported as `/[unmatched]`.
 
 ## Tool discovery: `/.well-known/farmjs.json`
 
-Every Farm app serves a manifest at `/.well-known/farmjs.json` (under its `basePath`), so Farm Infra
-can list all of its MCP tools, including the ones nothing has called yet, without the app sending
-anything. It describes:
+Every Farm app serves a public manifest at `/.well-known/farmjs.json` (under its `basePath`), so
+Farm Infra, agents and other tools can see which Farm version it runs and list its MCP tools,
+including the ones nothing has called yet, without the app sending anything. It describes:
 
 - `app`: Farm's version, the renderer, the base path and the build (the deployment ID, or
   `development`).
 - `packages`: the installed versions of the app's `@farm.js/*` and `@farming-labs/*` packages.
-- `mcp.servers`: each MCP server's name, version and path, its tools (name, title, description,
-  whether it's an API endpoint, `defineTool` or a server function, the endpoint's method and route,
-  the read-only, destructive, idempotent and open-world hints, and the input and output JSON
-  Schemas), its resources (name, URI or template, MIME type) and its prompts (name, description,
-  argument schema).
+- `mcp.servers`: each MCP server's name, version, path and `authorization` (`"required"` when it
+  runs `authorize`, `"none"` for a public server), its tools (name, title, description, whether
+  it's an API endpoint, `defineTool` or a server function, the read-only, destructive, idempotent
+  and open-world hints, and the input and output JSON Schemas), its resources (name, URI or
+  template, MIME type) and its prompts (name, description, argument schema).
 - `webmcp`: whether `@farm.js/webmcp` is on, and the browser tools the app's source defines with
   `defineWebMCPTool` or `registerWebMCPTool`: name, title, description, hints, and the input schema
   when it's written out (`inputSchemaSource: "literal"`). A schema built at runtime, such as
@@ -100,12 +100,24 @@ anything. It describes:
 - `agent`: the API catalog, `llms.txt` and OpenAPI spec, when they're on.
 - `plugins`: the names of the app's plugins.
 
-It never includes environment values, keys, file paths or anything a request carries.
+It never includes environment values, keys, file paths, integration configuration or anything a
+request carries.
 
-On `farm dev` it's open, so devtools and coding agents can read it. In production it answers only
-requests Farm Infra signed for this app's `FARMJS_API_KEY`; anything else gets a plain `404`. Farm
-Infra reads it from the **Site URL** you set on the project's Settings. Without
-`FARMJS_API_KEY`, or with `analytics: false`, production serves nothing there.
+Anyone can read it, in `farm dev` and in production, with or without `FARMJS_API_KEY`. It's served
+with CORS for any origin, an `ETag`, and `Cache-Control: public, max-age=0, must-revalidate`. The
+public view lists only what an anonymous MCP client could already list:
+
+- A server that requires `authorize` keeps its name, version, path and
+  `authorization: "required"`, with empty `tools`, `resources` and `prompts`.
+- Endpoint tools leave out the endpoint's method and route, which MCP clients never see.
+
+Farm Infra reads it from the **Site URL** you set on the project's Settings, and signs the request
+for this app's `FARMJS_API_KEY`. That request gets the full view: every server's tools, resources
+and prompts, and each endpoint tool's `method` and `path`. It's sent `Cache-Control: private,
+no-store`. `analytics: false` turns off the full view only; the public manifest is still served.
+
+Turn the manifest off with `agent: { manifest: false }`. Farm Infra then can't list the app's tools
+either.
 
 Farm 0.1.34 served the manifest at `/.well-known/farmjs`. That path still answers the same way, so
 tools that read it there keep working; new readers should use `/.well-known/farmjs.json`.

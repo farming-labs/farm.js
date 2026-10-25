@@ -168,4 +168,36 @@ describe("development OpenAPI spec route", () => {
       unpublish();
     }
   }, 60_000);
+
+  it("serves /.well-known/farmjs.json as production does, beneath the basePath", async () => {
+    // A server with authorize: anonymous readers see it, not its tools.
+    const unpublish = _publishFarmMCPCatalog(
+      { name: "admin", version: "1.0.0", path: "/api/mcp" },
+      [{ name: "ban_user", kind: "endpoint", method: "POST", path: "/api/ban" }],
+      { public: false },
+    );
+    try {
+      const origin = await startApp(`basePath: "/app",`);
+      const response = await fetch(`${origin}/app/.well-known/farmjs.json`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+      const manifest = await response.json();
+      expect(manifest.app).toMatchObject({ basePath: "/app", build: "development" });
+      expect(manifest.mcp.servers).toEqual([
+        expect.objectContaining({ name: "admin", authorization: "required", tools: [] }),
+      ]);
+      const etag = response.headers.get("etag")!;
+      const cached = await fetch(`${origin}/app/.well-known/farmjs`, {
+        headers: { "if-none-match": etag },
+      });
+      expect(cached.status).toBe(304);
+
+      const optedOut = await startApp(`agent: { manifest: false },`);
+      const off = await fetch(`${optedOut}/.well-known/farmjs.json`);
+      expect(off.headers.get("content-type") ?? "").not.toContain("application/json");
+    } finally {
+      unpublish();
+    }
+  }, 60_000);
 });

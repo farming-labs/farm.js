@@ -447,14 +447,15 @@ mixed declarations, the resolved catalog, and permission checks.
 of them may use it. The ones that only describe what agents can already read are on by default:
 `jsonLd` (a schema.org `WebSite` built from your metadata), `llmsTxt` and `sitemap` (an index of
 your static pages and a `/sitemap.xml` of them, when the [docs engine](/docs/docs-engine) isn't
-serving its own), and `aiCatalog` (discovery
-for the [MCP server](/docs/plugins/mcp#discovery) you already serve, when you serve one). The rest,
+serving its own), `aiCatalog` (discovery
+for the [MCP server](/docs/plugins/mcp#discovery) you already serve, when you serve one), and
+`manifest` (the [app manifest](#app-manifest) at `/.well-known/farmjs.json`). The rest,
 which expose more or change who may crawl, are opt-in. Turn a default off with `false`, for example
 on an internal tool:
 
 ```ts title="farm.config.ts"
 export default defineConfig({
-  agent: { jsonLd: false, llmsTxt: false, sitemap: false, aiCatalog: false },
+  agent: { jsonLd: false, llmsTxt: false, sitemap: false, aiCatalog: false, manifest: false },
 });
 ```
 
@@ -645,6 +646,17 @@ the server's identity and URL, never its tools, and listing it does not skip `au
 such as the [docs engine](/docs/docs-engine)'s endpoint, join the catalog through
 [`registerFarmMCPServer`](/docs/plugins/mcp#list-an-mcp-server-farm-does-not-serve).
 `aiCatalog: false` turns all three off; an app without an MCP server serves none of them.
+
+### App manifest
+
+Every app serves `/.well-known/farmjs.json` (and, for Farm 0.1.34's readers, `/.well-known/farmjs`)
+to any client: Farm's version and the installed `@farm.js/*` packages, the renderer and base path,
+the MCP tools Farm serves with their JSON Schemas, WebMCP browser tools, each integration's
+category and provider (never its configuration), and plugin names. An MCP server that requires
+`authorize` is listed without its tools, resources or prompts, and endpoint tools leave out their
+HTTP route; a request Farm Infra signed for the app's `FARMJS_API_KEY` gets the full view.
+[Farm Infra analytics](/docs/infra-analytics) lists every field.
+`manifest: false` turns it off.
 
 ### API catalog
 
