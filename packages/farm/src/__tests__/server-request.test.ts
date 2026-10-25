@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { createServerFn } from "../server-fn";
+import { createServerQuery } from "../server-query";
 import {
+  _getRequestReadCount,
   _runWithCurrentRequest,
   createWebRequestFromFarmRequest,
   getCurrentRequest,
@@ -111,5 +114,41 @@ describe("server request store", () => {
 
   it("throws when no request context is active", () => {
     expect(() => getCurrentRequest()).toThrow("No current request is available");
+  });
+});
+
+describe("server function request reads", () => {
+  // A render that reads the request through a server function or server query is per-visitor
+  // too: PPR and ISR compare the read count across the render.
+  it("counts header reads, not the hand-over", async () => {
+    const outer = new Request("https://farm.test/page", { headers: { "x-user": "alice" } });
+    const seen: Request[] = [];
+    const quiet = createServerFn({
+      handler: ({ request }) => {
+        seen.push(request!);
+        return "hello";
+      },
+    });
+    const reader = createServerFn({ handler: ({ request }) => request?.headers.get("x-user") });
+    const query = createServerQuery({
+      key: () => ["server-request-read-test"],
+      handler: ({ request }) => request?.headers.get("x-user"),
+    });
+
+    await _runWithCurrentRequest(outer, async () => {
+      await expect(quiet(undefined)).resolves.toBe("hello");
+      await quiet(undefined);
+      expect(_getRequestReadCount(outer)).toBe(0);
+      // A real Request, the same one for every call in this request.
+      expect(seen[0]).toBeInstanceOf(Request);
+      expect(seen[1]).toBe(seen[0]);
+      expect(new Request(seen[0]!).url).toBe(outer.url);
+      expect(_getRequestReadCount(outer)).toBe(0);
+
+      await expect(reader(undefined)).resolves.toBe("alice");
+      expect(_getRequestReadCount(outer)).toBe(1);
+      await expect(query(undefined)).resolves.toBe("alice");
+      expect(_getRequestReadCount(outer)).toBe(2);
+    });
   });
 });

@@ -3,7 +3,7 @@ import {
   getServerActionSignal,
   runWithServerActionRequest,
 } from "./server-action-security";
-import { _resolveCurrentRequest } from "./server/request-bridge";
+import { _resolveCurrentRequestForApp } from "./server/request-bridge";
 import { applyFarmCacheInvalidationTargets, type FarmCacheInvalidationTarget } from "./cache";
 import { ServerActionError, ServerFnFailure, isServerFnFailure } from "./server-fn-error";
 import { getFarmRedirectError } from "./navigation-errors";
@@ -460,7 +460,7 @@ export function createServerFn(options: {
         : cause;
     }
     const executionContext = getServerActionExecutionContext();
-    const request = executionContext?.request ?? _resolveCurrentRequest();
+    const request = executionContext?.request ?? _resolveCurrentRequestForApp();
     const signal = executionContext?.signal ?? request?.signal ?? getServerActionSignal();
     const handlerContext = {
       input,

@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Readable } from "node:stream";
 import type { FarmRequest } from "../types";
-import { _setCurrentRequestResolver } from "./request-bridge";
+import { _setAppRequestView, _setCurrentRequestResolver } from "./request-bridge";
 
 const REQUEST_STORAGE_KEY = Symbol.for("@farm.js/core/request-storage");
 
@@ -32,7 +32,55 @@ function getRequestReads(): WeakMap<Request, number> {
 
 const requestReads = getRequestReads();
 
+function countRequestRead(request: Request): void {
+  requestReads.set(request, (requestReads.get(request) ?? 0) + 1);
+}
+
+// One view per request, so code keying on it (per-request dedupe) sees one value.
+const appRequestViews = new WeakMap<Request, Request>();
+
+/**
+ * The request a server function or server query gets during a render. It is a
+ * real Request (fetch() and new Request() accept it) whose header reads count
+ * against the rendered request; handing it over is not a read. The URL is not
+ * counted: shared PPR and ISR caches already key on it.
+ */
+function getAppRequestView(request: Request): Request {
+  const existing = appRequestViews.get(request);
+  if (existing) return existing;
+  let view: Request;
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    // Copying a request with a body would take it from the caller; such a
+    // request is never a shared render anyway, so count it up front.
+    countRequestRead(request);
+    view = request;
+  } else {
+    view = new Request(request);
+    Object.defineProperties(view, {
+      // The rendered request's own signal, so aborting it reaches the handler unchanged.
+      signal: { configurable: true, get: () => request.signal },
+      headers: {
+        configurable: true,
+        get() {
+          countRequestRead(request);
+          return request.headers;
+        },
+      },
+      clone: {
+        configurable: true,
+        value() {
+          countRequestRead(request);
+          return request.clone();
+        },
+      },
+    });
+  }
+  appRequestViews.set(request, view);
+  return view;
+}
+
 _setCurrentRequestResolver(() => requestStore.getStore());
+_setAppRequestView(getAppRequestView);
 
 export interface FarmRequestURLOptions {
   origin?: string | URL;
@@ -165,7 +213,7 @@ export function getCurrentRequest(): Request {
     );
   }
 
-  requestReads.set(request, (requestReads.get(request) ?? 0) + 1);
+  countRequestRead(request);
   return request;
 }
 
