@@ -142,6 +142,15 @@ describe.each([
     );
   });
 
+  it("wraps the body even when page content has id=root", () => {
+    const document =
+      '<html><head></head><body><nav>n</nav><main><h3 id="root"><a href="#root">Root</a></h3></main></body></html>';
+    const wrapped = ensureRoot(document);
+    expect(wrapped).toContain('<body><div id="root"><nav>n</nav>');
+    expect(wrapped).toContain('<h3 id="root">');
+    expect(wrapped.endsWith("</main></div></body></html>")).toBe(true);
+  });
+
   it("leaves a document that already has #root unchanged", () => {
     const document = '<html><head></head><body><div id="root"><main>m</main></div></body></html>';
     expect(ensureRoot(document)).toBe(document);

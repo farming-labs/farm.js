@@ -1,5 +1,9 @@
 import type { Plugin } from "vite";
 import type { FarmEnvironment } from "./environment";
+import {
+  findClientNodeBuiltinChain,
+  transformProgrammaticRoutesForClient,
+} from "./programmatic-routes-client";
 
 type EnvironmentFunctionKind = "createServerOnlyFn" | "createClientOnlyFn" | "createIsomorphicFn";
 
@@ -91,22 +95,54 @@ export function transformEnvironmentFunctions(
 }
 
 export function farmEnvironmentFunctionsPlugin(): Plugin {
+  // Programmatic routes modules seen by the client build, checked once the
+  // whole client graph is known.
+  const clientRouteModules = new Set<string>();
+
   return {
     name: "farm:environment-functions",
     enforce: "post",
 
     transform(code, id, transformOptions) {
-      const result = transformEnvironmentFunctions({
-        code,
-        id,
-        environment: resolveBuildEnvironment(
-          this as unknown as { environment?: { name?: string } },
-          transformOptions?.ssr,
-        ),
-        parse: (source) => this.parse(source) as unknown as AstNode,
-      });
+      const environment = resolveBuildEnvironment(
+        this as unknown as { environment?: { name?: string } },
+        transformOptions?.ssr,
+      );
+      const parse = (source: string) => this.parse(source) as unknown as AstNode;
+      const result = transformEnvironmentFunctions({ code, id, environment, parse });
+      if (environment !== "client") {
+        return result ? { code: result.code, map: null } : null;
+      }
 
-      return result ? { code: result.code, map: null } : null;
+      let routes;
+      try {
+        routes = transformProgrammaticRoutesForClient({ code: result?.code ?? code, id, parse });
+      } catch (error) {
+        this.error(error instanceof Error ? error.message : String(error));
+      }
+      if (routes) clientRouteModules.add(id);
+      const output = routes?.code ?? result?.code;
+      return output !== undefined ? { code: output, map: null } : null;
+    },
+
+    generateBundle() {
+      const context = this as unknown as { environment?: { name?: string } };
+      if (resolveBuildEnvironment(context, false) !== "client") return;
+      for (const id of clientRouteModules) {
+        const chain = findClientNodeBuiltinChain(id, (moduleId) => {
+          const info = this.getModuleInfo(moduleId);
+          // Static imports only: a dynamic import can sit behind an SSR-only branch.
+          return info?.importedIds;
+        });
+        if (chain) {
+          this.error(
+            `[Farm.js] The browser bundle reaches the server-only module "${chain.at(-1)}" ` +
+              `through the programmatic routes in ${id}: ${chain.join(" -> ")}. Import it only ` +
+              "from guard, data, staticPaths, generateMetadata, or API handlers, which Farm " +
+              "keeps out of the browser.",
+          );
+        }
+      }
     },
   };
 }

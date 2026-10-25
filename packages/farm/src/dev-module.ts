@@ -1,4 +1,4 @@
-import type { RunnableDevEnvironment } from "vite";
+import type { EnvironmentModuleNode, RunnableDevEnvironment } from "vite";
 
 /** @internal The environment registry is owned and closed by Vite. */
 export interface FarmDevModuleServer {
@@ -49,6 +49,44 @@ export async function loadFarmDevModule<T = Record<string, any>>(
     );
     throw error;
   }
+}
+
+/**
+ * @internal Invalidates `file` and the SSR modules that import it when that chain reaches one
+ * of `targets` (modules whose exports something still holds, such as API route handlers), so
+ * importing a target next runs the new code. Returns the targets reached; with none, it leaves
+ * the graph to Vite.
+ */
+export function invalidateFarmDevDependents(
+  server: FarmDevModuleServer,
+  file: string,
+  targets: ReadonlySet<string>,
+  environmentName: "ssr" | "rsc" = "ssr",
+): string[] {
+  const environment = server.environments[environmentName] as RunnableDevEnvironment | undefined;
+  const graph = environment?.moduleGraph;
+  if (!graph || targets.size === 0) return [];
+  const posix = (filePath: string) => filePath.replace(/\\/g, "/");
+  const byFile = new Map([...targets].map((target) => [posix(target), target]));
+  const reached = new Set<string>();
+  const seen = new Set<EnvironmentModuleNode>();
+  const queue = [...(graph.getModulesByFile(posix(file)) ?? [])];
+  while (queue.length > 0) {
+    const node = queue.pop()!;
+    if (seen.has(node)) continue;
+    seen.add(node);
+    const target = node.file ? byFile.get(posix(node.file)) : undefined;
+    if (target) reached.add(target);
+    queue.push(...node.importers);
+  }
+  if (reached.size === 0) return [];
+  const evaluatedModules = environment.runner?.evaluatedModules;
+  for (const node of seen) {
+    graph.invalidateModule(node);
+    const evaluated = node.id ? evaluatedModules?.getModuleById(node.id) : undefined;
+    if (evaluated) evaluatedModules!.invalidateModule(evaluated);
+  }
+  return [...reached];
 }
 
 /** @internal Retry failed imports after a file appears, preserving healthy modules. */

@@ -390,3 +390,47 @@ export function defineRendererClientConformance(options: {
     });
   });
 }
+
+export type RendererServerQueryFixture = (input: undefined) => Promise<{ email: string }>;
+
+/**
+ * Server rendering must not read or fill the browser query cache: that cache
+ * is one module-level store, so on the server it is shared by every request.
+ * `renderQuery` server renders a component that reads `query` through the
+ * renderer's server query binding and prints `account=<email>` or
+ * `account=loading`.
+ */
+export function defineRendererServerQueryConformance(options: {
+  name: string;
+  renderQuery(query: RendererServerQueryFixture): string | Promise<string>;
+}): void {
+  describe(`${options.name} server query conformance`, () => {
+    it("never shows one visitor's query result to the next server render", async () => {
+      let visitor = "alice";
+      const reads: Promise<unknown>[] = [];
+      const query: RendererServerQueryFixture = () => {
+        const read = Promise.resolve({ email: `${visitor}@example.com` });
+        reads.push(read);
+        return read;
+      };
+      // Let any read a render started finish and land in a cache before the
+      // next visitor renders.
+      const settleReads = async () => {
+        await Promise.all(reads);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      };
+
+      const alice = await options.renderQuery(query);
+      await settleReads();
+      visitor = "bob";
+      const bob = await options.renderQuery(query);
+      await settleReads();
+
+      expect(bob).not.toContain("alice@example.com");
+      // Like React's server snapshot, the browser fetch starts after hydration.
+      expect(reads).toHaveLength(0);
+      expect(alice).toContain("account=loading");
+      expect(bob).toContain("account=loading");
+    });
+  });
+}

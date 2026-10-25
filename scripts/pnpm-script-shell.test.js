@@ -27,6 +27,24 @@ test("workspace scripts use the pnpm binary installed by the caller", () => {
   }
 });
 
+test("production sites build the WebMCP runtime before the docs client", () => {
+  const { scripts } = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+  const steps = scripts["test:e2e:production:sites:run"].split("&&").map((step) => step.trim());
+  const webmcpBuild = steps.indexOf("pnpm --filter @farm.js/webmcp build:runtime");
+  const docsBuild = steps.findIndex((step) => step.includes("pnpm --dir docs exec farm build"));
+
+  assert.ok(webmcpBuild >= 0, "the clean-checkout path must build WebMCP's dist/client.js");
+  assert.ok(docsBuild > webmcpBuild, "build WebMCP before bundling the docs client");
+  for (const entry of ["test:e2e:production:sites", "test:e2e:framework"]) {
+    assert.ok(
+      scripts[entry]
+        .split("&&")
+        .some((step) => step.trim() === "pnpm test:e2e:production:sites:run"),
+      `${entry} must use the shared production-sites prerequisites`,
+    );
+  }
+});
+
 /**
  * Runs a package script through pnpm inside a throwaway package that carries
  * the repository's .npmrc, so the test exercises the same script shell the

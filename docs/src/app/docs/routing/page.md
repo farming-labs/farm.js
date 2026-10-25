@@ -75,6 +75,13 @@ export default defineRoutes(({ page, api }) => [
 Prefer a file route when the URL maps to a folder. Reach for `defineRoutes` for colocated
 features, URLs a folder can't express, and route lists generated from data or configuration.
 
+The browser loads the routes file to hydrate its pages, so the client build keeps only what that
+needs: components, `pending`/`error`/`notFound`, params and search options, and actions. It removes
+`guard`, `data`, `staticPaths`, `generateMetadata`, and `api()` handlers from inline route options,
+along with the imports and top-level helpers only they use, so database clients and credentials
+stay on the server. Write route options inline for this to apply. A client build fails if the
+routes file, or an application module it keeps, still imports a Node builtin such as `node:fs`.
+
 ## Named slots and intercepted routes
 
 An `@name` directory gives its owning layout another rendered node alongside `children`. Use slots
@@ -295,6 +302,12 @@ Imperative `push()` and `replace()` calls use SPA navigation for same-origin rou
 cross-origin URLs use normal document navigation instead of Farm's local page-data endpoint.
 Internal router paths use the configured application `basePath`, matching `Link`; already-prefixed
 paths are preserved.
+
+Router navigation only leaves the page for `http:`, `https:`, `mailto:`, and `tel:` URLs. A
+`javascript:`, `data:`, `vbscript:`, or `blob:` target is ignored and logged as a console error,
+after the browser's own URL parsing, so leading spaces, mixed case, and embedded tabs are caught
+too. This makes `router.push(searchParams.get("next"))` safe against script URLs, but you should
+still check that a redirect target from the query string points somewhere you expect.
 
 ## Navigation blocking
 
@@ -774,6 +787,10 @@ export const ProductRoute = createRoute("/products/[id]", {
 
 Redirects are not rendered through `error`; they escape so Farm can return a real redirect response.
 
+When a guard or data hook throws and Farm renders `error` or `notFound`, the route's
+`generateMetadata` does not run: the document keeps only layout and static metadata, so a refused
+request never carries the title or description of the resource it was refused.
+
 ## Nested segments
 
 Folders become URL segments. Use normal folders for visible path segments and dynamic folders when the value comes from the URL.
@@ -820,6 +837,23 @@ from the rendered React page automatically.
 ## Metadata And OG Images
 
 Export `metadata` for static head tags or `generateMetadata` when the values depend on route params, search params, middleware data, or route data. Farm merges layout metadata from root to leaf, then applies the page metadata last.
+
+Export `viewport` (or `generateViewport`) for the viewport tag, as in Next.js. Layouts and the page
+merge from root to page over the default `width=device-width, initial-scale=1`; `themeColor` and
+`colorScheme` render their own tags. Every document starts its head with `<meta charset="utf-8">` and
+the viewport tag, including one a root layout renders itself, unless that layout writes the tag.
+
+```tsx
+import type { Viewport } from "@farm.js/core";
+
+export const viewport: Viewport = {
+  maximumScale: 1,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
+};
+```
 
 During HTML-based client navigation, Farm reconciles the destination document's title, meta tags,
 canonical and alternate links, icons, manifest link, and
@@ -1001,6 +1035,8 @@ Use server-only metadata files when crawlers or browsers need an application-lev
 | `llms-full.ts` | `/llms-full.txt`        | `MetadataRoute.LlmsTxt`  |
 
 The default export can be a literal value or a sync or async function. Functions receive the matched `params`, the current `Request`, its `URLSearchParams`, and the concrete route-segment `path`.
+
+Without a root `sitemap.ts`, Farm serves a generated `/sitemap.xml` of the app's static pages; see [`agent.sitemap`](/docs/configuration#sitemap). Add `sitemap.ts` when the sitemap should list dynamic pages such as products or posts.
 
 **src/app/sitemap.ts**
 
@@ -1448,6 +1484,10 @@ src/app/
 ```
 
 The group names are organizational. The URLs are still `/`, `/pricing`, and `/dashboard`.
+
+A group can have its own `layout.tsx`, `loading.tsx`, and `error.tsx`. They apply only to the pages
+inside the group, nested inside the parent layouts, so `(marketing)/layout.tsx` wraps `/` and
+`/pricing` but not `/dashboard`. See [route group layouts](/docs/layouts#route-group-layouts).
 
 ## Pending Navigation UI
 

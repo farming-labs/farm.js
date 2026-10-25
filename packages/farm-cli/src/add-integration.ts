@@ -431,7 +431,7 @@ export const autumnIntegration = autumn({
     description: "Better Auth route adapter",
     env: ["BETTER_AUTH_SECRET", "BETTER_AUTH_URL", "BETTER_AUTH_DATABASE_PATH"],
     dependencies: {
-      "better-auth": "^1.5.5",
+      "better-auth": "^1.6.22",
       "better-sqlite3": "^12.6.2",
     },
     devDependencies: {
@@ -502,7 +502,7 @@ export const betterAuthIntegration = betterAuth({
     description: "Auth.js route adapter",
     env: ["AUTH_SECRET", "AUTH_GITHUB_ID", "AUTH_GITHUB_SECRET"],
     dependencies: {
-      "@auth/core": "0.34.3",
+      "@auth/core": "^0.41.3",
     },
     setupFiles: [
       {

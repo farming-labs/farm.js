@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/auth0",
-  "version": "0.1.31",
+  "version": "0.1.36",
   "description": "Auth0 integration for Farm.js",
   "license": "MIT",
   "repository": {

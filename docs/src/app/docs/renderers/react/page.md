@@ -1464,6 +1464,12 @@ Metadata is recorded only when the result is an ordinary native array, the execu
 native `toReversed()` method, and the reorder chain starts at the committed collection. A custom or
 unavailable method therefore keeps its normal behavior and never enters the fast path.
 
+When every compiled keyed-row plan in a component is plain and has no identity, `Set`, or `Map`
+target bindings, reverse and sort hints omit the unused target-update runtime from the bundle.
+Separate map and append updates and complete reconciliation remain available. Components that need
+target bindings, nested host blocks, row conditionals, or combined structural hints retain their
+existing runtime capabilities. No new option is required.
+
 At update time, Farm verifies the committed source token, equal lengths, every source row identity,
 and the exact reversed result before moving the DOM. The runtime leaves one row in place and moves
 the other rows through connected `insertBefore()` operations, the minimum `n - 1` moves for a
@@ -1953,6 +1959,11 @@ checkboxes and radios update `.checked`, and controlled single or multiple selec
 selected options. The runtime avoids assigning an equal value, captures the focused text control's
 selection before the compiler microtask, and restores the range after its keyed boundary commits.
 Composition handlers remain React event props, so IME event order is unchanged.
+
+Controlled input `value` updates also synchronize the native reset value, so a form reset uses
+the latest committed value. React-owned focused number inputs defer this synchronization to
+React's blur handling to preserve editing behavior. Checkbox and radio `defaultChecked` behavior
+is unchanged.
 
 React exposes `event.currentTarget` only while an event handler is running. If a functional
 compiler-state updater refers to one of its properties, the transform snapshots that property read

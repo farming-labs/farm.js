@@ -4,9 +4,12 @@ import { Writable } from "node:stream";
 import {
   defineRendererDescriptorConformance,
   defineRendererServerConformance,
+  defineRendererServerQueryConformance,
 } from "@farm.js/renderer-tests";
 import { defineComponent, h, type FunctionalComponent } from "vue";
 import { describe, expect, it } from "vitest";
+import type { ServerQuery } from "@farm.js/core/server-query";
+import { useServerQuery } from "../bindings";
 import { vue } from "../index";
 import * as serverRuntime from "../server";
 import {
@@ -35,6 +38,22 @@ defineRendererDescriptorConformance({
 });
 
 defineRendererServerConformance(serverRuntime);
+
+defineRendererServerQueryConformance({
+  name: "vue",
+  renderQuery(query) {
+    const Account = defineComponent({
+      setup() {
+        const account = useServerQuery(
+          query as unknown as ServerQuery<undefined, { email: string }>,
+          undefined,
+        );
+        return () => h("p", `account=${account.data.value?.email ?? "loading"}`);
+      },
+    });
+    return renderToString(createElement(Account, null));
+  },
+});
 
 describe("Vue renderer", () => {
   it("streams FARMJS elements through Vue's Node adapter", async () => {

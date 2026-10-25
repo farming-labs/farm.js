@@ -1,5 +1,8 @@
 // @vitest-environment node
 
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { workos } from "../../../farm-workos/src/index";
 
@@ -60,9 +63,18 @@ describe("workos cookie password resolution", () => {
 
   it("allows the development fallback password only for explicit dev/test", () => {
     setBaseWorkOSEnv();
-    for (const mode of ["development", "test"]) {
-      process.env.NODE_ENV = mode;
-      expect(() => workos()).not.toThrow();
+    // Development persists a generated password under the app root Farm is loading.
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-workos-dev-"));
+    const configRoot = Symbol.for("farm.configRoot");
+    (globalThis as Record<symbol, unknown>)[configRoot] = root;
+    try {
+      for (const mode of ["development", "test"]) {
+        process.env.NODE_ENV = mode;
+        expect(() => workos()).not.toThrow();
+      }
+    } finally {
+      delete (globalThis as Record<symbol, unknown>)[configRoot];
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

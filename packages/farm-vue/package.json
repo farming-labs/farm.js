@@ -59,7 +59,7 @@
   },
   "dependencies": {
     "@vitejs/plugin-vue": "6.0.8",
-    "@vue/server-renderer": "3.5.41"
+    "@vue/server-renderer": "3.5.44"
   },
   "devDependencies": {
     "@farm.js/core": "workspace:*",
@@ -70,11 +70,11 @@
     "typescript": "^5.3.3",
     "vite": "8.3.4",
     "vitest": "5.0.5",
-    "vue": "3.5.41"
+    "vue": "3.5.44"
   },
   "peerDependencies": {
     "@farm.js/core": ">=0.1.0 <0.2.0",
-    "vue": "^3.5.41"
+    "vue": "^3.5.44"
   },
   "engines": {
     "node": ">=22.13.0"

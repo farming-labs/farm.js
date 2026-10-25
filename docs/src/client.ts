@@ -1,5 +1,6 @@
 import { defineClient } from "@farm.js/core/client/lifecycle";
 import { mountDocsAnnouncement } from "./components/docs-announcement";
+import { mountDocsLlmsLink } from "./components/docs-llms-link";
 
 export default defineClient({
   setup() {
@@ -10,7 +11,12 @@ export default defineClient({
       if (next === docsRoot) return;
       dispose?.();
       docsRoot = next;
-      dispose = docsRoot ? mountDocsAnnouncement(docsRoot) : undefined;
+      if (!docsRoot) {
+        dispose = undefined;
+        return;
+      }
+      const disposers = [mountDocsAnnouncement(docsRoot), mountDocsLlmsLink(docsRoot)];
+      dispose = () => disposers.forEach((remove) => remove());
     }
     // Setup covers initial HTML; rendered covers route entry and history.
     refresh();

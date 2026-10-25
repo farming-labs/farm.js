@@ -399,7 +399,7 @@ test("scaffolds a working Better Auth starter with its UI dependencies", async (
     const env = await readFile(path.join(root, ".env.example"), "utf8");
     const gitignore = await readFile(path.join(root, ".gitignore"), "utf8");
 
-    assert.equal(packageJson.dependencies["better-auth"], "^1.5.5");
+    assert.equal(packageJson.dependencies["better-auth"], "^1.6.22");
     assert.equal(packageJson.dependencies["better-sqlite3"], "^12.6.2");
     assert.equal(packageJson.devDependencies["@types/better-sqlite3"], "^7.6.13");
     assert.match(auth, /emailAndPassword:/);
@@ -445,7 +445,7 @@ test("scaffolds a complete Auth.js instance with matching dependencies", async (
     const auth = await readFile(path.join(root, "src/lib/auth.ts"), "utf8");
 
     assert.equal(packageJson.dependencies["@farm.js/authjs"], "0.1.0-beta.23");
-    assert.equal(packageJson.dependencies["@auth/core"], "0.34.3");
+    assert.equal(packageJson.dependencies["@auth/core"], "^0.41.3");
     assert.match(auth, /import \{ Auth \} from "@auth\/core"/);
     assert.match(auth, /GitHub\(\{/);
     assert.match(auth, /handlers:\s*\{\s*GET: handler,\s*POST: handler/s);

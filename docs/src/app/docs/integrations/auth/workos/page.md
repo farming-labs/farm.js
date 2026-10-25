@@ -49,7 +49,7 @@ Farm builds the absolute redirect URI from the incoming request origin and `call
 | `WORKOS_COOKIE_PASSWORD`      | Production  | Encrypts and seals the AuthKit session cookie. |
 | `FARM_WORKOS_COOKIE_PASSWORD` | Alternative | Backward-compatible cookie password name.      |
 
-Development has a local fallback cookie password. Production startup fails without an explicit password.
+Without a cookie password, development generates a random one once per app in `.farm/workos-secret` (gitignored) and reuses it across restarts. Production startup fails without an explicit password.
 
 ## Choose SDK ownership
 
@@ -175,20 +175,30 @@ Signed-out requests receive a `307` redirect to `/login` with the original root-
 
 ## Options
 
-| Option            | Default            | Use                                          |
-| ----------------- | ------------------ | -------------------------------------------- |
-| `instance`        | None               | Existing WorkOS SDK instance.                |
-| `clientId`        | `WORKOS_CLIENT_ID` | AuthKit client ID.                           |
-| `apiKey`          | `WORKOS_API_KEY`   | Server API key when no instance is supplied. |
-| `cookiePassword`  | WorkOS cookie env  | Sealed-session password.                     |
-| `cookieName`      | `wos-session`      | Session cookie name.                         |
-| `loginPath`       | `/login`           | Sign-in route.                               |
-| `signUpPath`      | `/signup`          | Sign-up route.                               |
-| `callbackPath`    | `/callback`        | AuthKit callback route.                      |
-| `logoutPath`      | `/logout`          | Logout route.                                |
-| `sessionPath`     | `/auth/session`    | Session JSON route.                          |
-| `protectedRoutes` | None               | One matcher or a list of matchers.           |
-| `allowedOrigins`  | App origin only    | Extra origins allowed to post sign-out.      |
+| Option            | Default             | Use                                          |
+| ----------------- | ------------------- | -------------------------------------------- |
+| `instance`        | None                | Existing WorkOS SDK instance.                |
+| `clientId`        | `WORKOS_CLIENT_ID`  | AuthKit client ID.                           |
+| `apiKey`          | `WORKOS_API_KEY`    | Server API key when no instance is supplied. |
+| `cookiePassword`  | WorkOS cookie env   | Sealed-session password.                     |
+| `cookieName`      | `wos-session`       | Session cookie name.                         |
+| `stateCookieName` | `farm_workos_state` | Login state cookie name.                     |
+| `loginPath`       | `/login`            | Sign-in route.                               |
+| `signUpPath`      | `/signup`           | Sign-up route.                               |
+| `callbackPath`    | `/callback`         | AuthKit callback route.                      |
+| `logoutPath`      | `/logout`           | Logout route.                                |
+| `sessionPath`     | `/auth/session`     | Session JSON route.                          |
+| `protectedRoutes` | None                | One matcher or a list of matchers.           |
+| `allowedOrigins`  | App origin only     | Extra origins allowed to post sign-out.      |
+
+## Cookie names
+
+A sibling subdomain can set a cookie for the parent domain with a longer `Path`, and browsers send
+it first, so it would pick the session the app reads. A `__Host-` name cannot be set from another
+host, so use them in production:
+`workos({ cookieName: "__Host-wos-session", stateCookieName: "__Host-farm_workos_state" })`. Farm adds the
+`Secure`, `Path=/`, and no-`Domain` attributes the prefix requires; browsers accept them over https
+and from `http://localhost`. Renaming the cookie signs existing users out once.
 
 ## Cross-site request protection
 

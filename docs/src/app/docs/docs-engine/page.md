@@ -99,6 +99,12 @@ automatically. Route wrappers are only needed when you want to override the defa
 - /api/docs?format=sitemap-xml
 - /api/docs/agent/spec
 
+`/api/docs?format=config` is public, so it returns only the documented docs config fields with
+credentials replaced by `"[redacted]"`: values under `apiKey`, `token`, `secret`, `password`,
+`authorization`, or `credential` keys, and every `headers` value. The server keeps the real values
+for search, Ask AI, and Docs Cloud. `/api/docs?format=diagnostics` reports filesystem paths, so
+only `farm dev` serves it; production answers 404.
+
 ## Configure the docs experience
 
 Keep docs configuration alongside the rest of the application in `farm.config.ts`:

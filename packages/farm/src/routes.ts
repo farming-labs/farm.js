@@ -984,7 +984,7 @@ export function createRouteModuleFromProgrammaticPage(
     ...normalizeFarmRouteRuntimeConfig(route, `Route "${route.path}"`),
   };
 
-  if (route.params || route.search || route.guard || route.data) {
+  if (route.params || route.search || hasProgrammaticServerProps(route)) {
     (mod as any).__farmRouteSchemas = {
       params: route.params,
       search: getProgrammaticRouteSearchSchema(route.search),
@@ -1071,8 +1071,7 @@ function createProgrammaticPageComponent(
   if (
     !route.params &&
     !route.search &&
-    !route.guard &&
-    !route.data &&
+    !hasProgrammaticServerProps(route) &&
     !route.pending &&
     !route.error &&
     !route.notFound
@@ -1130,7 +1129,25 @@ function createProgrammaticPageComponent(
       );
     };
 
-    return markFunctionComponent(FarmProgrammaticPage) as unknown as ComponentType<PageProps>;
+    return markClientStrippedPage(
+      route,
+      markFunctionComponent(FarmProgrammaticPage),
+    ) as unknown as ComponentType<PageProps>;
+  }
+
+  if (getClientStrippedServerHooks(route)) {
+    // The browser copy renders only from props the server resolved, so it can
+    // render synchronously and hydrate like the page the server streamed.
+    const FarmProgrammaticClientPage = function FarmProgrammaticClientPage(props: PageProps) {
+      if (!isProgrammaticRoutePropsResolved(props)) {
+        throw createClientStrippedRouteError(route);
+      }
+      return createElement(Component, stripProgrammaticRoutePropsMarker(props));
+    };
+    return markClientStrippedPage(
+      route,
+      markFunctionComponent(FarmProgrammaticClientPage),
+    ) as unknown as ComponentType<PageProps>;
   }
 
   const FarmProgrammaticPageContent = async function FarmProgrammaticPageContent(props: PageProps) {
@@ -1157,7 +1174,38 @@ function createProgrammaticPageComponent(
     }
   };
 
-  return markFunctionComponent(FarmProgrammaticPageContent) as unknown as ComponentType<PageProps>;
+  return markClientStrippedPage(
+    route,
+    markFunctionComponent(FarmProgrammaticPageContent),
+  ) as unknown as ComponentType<PageProps>;
+}
+
+/**
+ * The client build removes a page's guard and data hooks and records them in
+ * `__farmServerHooks`. The route keeps its server-props shape, and its page
+ * component tells hydration that only server-resolved props can render it.
+ */
+function getClientStrippedServerHooks(route: ProgrammaticPageRoute): readonly string[] | undefined {
+  const hooks = (route as { __farmServerHooks?: unknown }).__farmServerHooks;
+  return Array.isArray(hooks) && hooks.length > 0 ? hooks : undefined;
+}
+
+function createClientStrippedRouteError(route: ProgrammaticPageRoute): Error {
+  return new Error(
+    `Route "${route.path}" resolves its ${getClientStrippedServerHooks(route)!.join(" and ")} ` +
+      "on the server; the browser can only render it with server-resolved props.",
+  );
+}
+
+function hasProgrammaticServerProps(route: ProgrammaticPageRoute): boolean {
+  return Boolean(route.guard || route.data || getClientStrippedServerHooks(route));
+}
+
+function markClientStrippedPage<T>(route: ProgrammaticPageRoute, component: T): T {
+  if (getClientStrippedServerHooks(route) && typeof component === "function") {
+    Object.defineProperty(component, "__farmServerProps", { value: true });
+  }
+  return component;
 }
 
 type ProgrammaticRoutePropsResource =
@@ -1249,6 +1297,9 @@ async function resolveProgrammaticRouteProps(
     props.path,
     route.path,
   );
+  if (getClientStrippedServerHooks(route)) {
+    throw createClientStrippedRouteError(route);
+  }
   const routeContextValue = getFarmRouteContext(props);
   const pluginContext = props.context;
   const baseProps = {

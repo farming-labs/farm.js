@@ -97,6 +97,16 @@ export interface ResolvedFarmServerConfig {
 
 export type FarmRequestBodyErrorCode = "BODY_TOO_LARGE" | "INVALID_CONTENT_LENGTH";
 
+/** A weak ETag for a body: FNV-1a, since an ETag is opaque and need not be cryptographic. */
+export function createFarmWeakETag(body: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < body.length; index++) {
+    hash ^= body.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `W/"${(hash >>> 0).toString(16).padStart(8, "0")}"`;
+}
+
 /** Apply the weak entity-tag comparison required by If-None-Match. */
 export function matchesFarmIfNoneMatch(
   value: string | readonly string[] | null | undefined,
@@ -452,6 +462,36 @@ export async function readNodeRequestBody(
     request.on("end", onEnd);
     request.on("error", onError);
   });
+}
+
+/**
+ * A Web body over a Node request that reads nothing until it is pulled, so a handler that
+ * declines the request without reading its body leaves the stream to the next handler.
+ */
+export function createFarmNodeRequestBodyStream(
+  request: AsyncIterable<unknown>,
+): ReadableStream<Uint8Array> {
+  let iterator: AsyncIterator<unknown> | undefined;
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        iterator ??= request[Symbol.asyncIterator]();
+        const { value, done } = await iterator.next();
+        if (done) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(
+          value instanceof Uint8Array ? value : new TextEncoder().encode(String(value)),
+        );
+      },
+      async cancel(reason) {
+        await iterator?.return?.(reason);
+      },
+    },
+    // No eager pull: the request stays untouched until the handler reads it.
+    { highWaterMark: 0 },
+  );
 }
 
 export function createFarmRequestBodyErrorResponse(error: unknown): Response | null {

@@ -89,6 +89,7 @@ const testSource = String.raw`
     keyedRowsFilterHintedRuntimeFeature,
     keyedRowsFilterOnlyRuntimeFeature,
     keyedRowsPrependOnlyRuntimeFeature,
+    keyedRowsPlainReorderHintedRuntimeFeature,
     keyedRowsHintedRuntimeFeature,
     keyedRowsStructuralAppendMapHintedRuntimeFeature,
     keyedRowsIdentityRuntimeFeature,
@@ -380,6 +381,131 @@ const testSource = String.raw`
     await Promise.resolve();
     assert.equal(originalRows[1].getAttribute("data-selected"), "yes");
     flushSync(() => targetRoot.unmount());
+  }
+
+  // React 19 replaces javascript: URLs in host URL props with a throwing URL;
+  // React 18 writes them and warns. Compiled updates, both single-value
+  // bindings and keyed rows added after mount, must write what React writes.
+  {
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      const reactWrites = (tag, name, value) => {
+        const container = document.createElement("div");
+        const root = createRoot(container);
+        flushSync(() => root.render(React.createElement(tag, { [name]: "https://ok.example/" })));
+        flushSync(() => root.render(React.createElement(tag, { [name]: value })));
+        const written = container.firstChild.getAttribute(name === "formAction" ? "formaction" : name);
+        flushSync(() => root.unmount());
+        return written;
+      };
+      for (const payload of ["javascript:alert(1)", " JaVaScRiPt:alert(1)", "java\tscript:alert(1)"]) {
+        let setUrl;
+        let addRow;
+        const UrlBindings = createCompiledComponent({
+          displayName: "CompatibilityUrlBindings",
+          initialize: () => ["https://ok.example/", [{ id: "a", url: "https://ok.example/" }]],
+          render(_props, state, blocks) {
+            setUrl = (next) => state[0].set(next);
+            addRow = (row) => state[1].set((rows) => [...rows, row]);
+            const rows = () => state[1].get();
+            return React.createElement("main", null,
+              React.createElement("a", { href: state[0].get() }, "single"),
+              React.createElement("form", { action: state[0].get() },
+                React.createElement("button", { formAction: state[0].get() }, "send")),
+              React.createElement(blocks.KeyedRows, {
+                id: 0, items: rows, rowKey: (row) => row.id,
+                bindings: [{ kind: "attribute", name: "href", path: [0], read: (row) => row.url }],
+                create: (row) => ({ kind: "element", tag: "li", attributes: [], styles: [], children: [
+                  { kind: "element", tag: "a", attributes: [{ name: "href", value: row.url }], styles: [], children: [row.id] },
+                ] }),
+                render: () => React.createElement("ul", null, rows().map((row) =>
+                  React.createElement("li", { key: row.id }, React.createElement("a", { href: row.url }, row.id)))),
+              }),
+            );
+          },
+          bindings: [
+            { kind: "attribute", path: [0], dependencies: [0], name: "href", read: (_props, state) => state[0].get() },
+            { kind: "attribute", path: [1], dependencies: [0], name: "action", read: (_props, state) => state[0].get() },
+            { kind: "attribute", path: [1, 0], dependencies: [0], name: "formAction", read: (_props, state) => state[0].get() },
+            { kind: "block", id: 0, dependencies: [1] },
+          ],
+        });
+        const container = document.createElement("div");
+        document.body.append(container);
+        const root = createRoot(container);
+        flushSync(() => root.render(React.createElement(React.StrictMode, null, React.createElement(UrlBindings))));
+        const single = container.querySelector("a");
+        setUrl(payload);
+        addRow({ id: "b", url: payload });
+        await Promise.resolve(); await Promise.resolve();
+        assert.equal(container.querySelector("a"), single);
+        assert.equal(single.getAttribute("href"), reactWrites("a", "href", payload), "single href " + JSON.stringify(payload));
+        assert.equal(container.querySelector("form").getAttribute("action"), reactWrites("form", "action", payload));
+        assert.equal(container.querySelector("button").getAttribute("formaction"), reactWrites("button", "formAction", payload));
+        const rowLinks = [...container.querySelectorAll("li a")];
+        assert.equal(rowLinks.length, 2);
+        assert.equal(rowLinks[1].getAttribute("href"), reactWrites("a", "href", payload), "added row href " + JSON.stringify(payload));
+        if (Number.parseInt(React.version, 10) > 18) assert.match(single.getAttribute("href"), /^javascript:throw new Error\('React has blocked/);
+        flushSync(() => root.unmount());
+        container.remove();
+      }
+    } finally {
+      console.error = originalError;
+    }
+  }
+
+  // Controlled input updates must advance the native reset baseline, but
+  // focused number inputs still synchronize on React's blur path.
+  for (const reactivity of ["hybrid", "static"]) {
+    for (const hydrate of [false, true]) {
+      for (const type of ["text", "number"]) {
+        const initial = type === "number" ? "1" : "before";
+        const next = type === "number" ? "2" : "after";
+        let setValue;
+        const InputReset = createCompiledComponent({
+          displayName: "CompatibilityInputReset", reactivity,
+          initialize: () => [initial],
+          render(_props, state) {
+            setValue = (value) => state[0].set(value);
+            return React.createElement("form", null,
+              React.createElement("input", { type, value: state[0].get(), readOnly: true }));
+          },
+          bindings: [{ kind: "attribute", name: "value", path: [0], dependencies: [0],
+            read: (_props, state) => state[0].get() }],
+        });
+        const container = document.createElement("div");
+        document.body.append(container);
+        const tree = React.createElement(React.StrictMode, null, React.createElement(InputReset));
+        if (hydrate) container.innerHTML = renderToString(tree);
+        let root;
+        flushSync(() => {
+          root = hydrate ? hydrateRoot(container, tree) : createRoot(container);
+          if (!hydrate) root.render(tree);
+        });
+        await Promise.resolve(); await Promise.resolve();
+        const input = container.querySelector("input");
+        if (type === "number") input.focus();
+        setValue(next);
+        await Promise.resolve(); await Promise.resolve();
+        assert.equal(input.value, next);
+        if (type === "number") {
+          assert.equal(input.defaultValue, initial);
+          input.blur();
+        }
+        assert.equal(input.defaultValue, next);
+        container.querySelector("form").reset();
+        assert.equal(input.value, next);
+        setValue("");
+        await Promise.resolve(); await Promise.resolve();
+        container.querySelector("form").reset();
+        assert.equal(input.value, "");
+        assert.equal(input.defaultValue, "");
+        assert.equal(container.querySelector("input"), input);
+        flushSync(() => root.unmount());
+        container.remove();
+      }
+    }
   }
 
   const Counter = createCompiledComponentWithFeatures({
@@ -951,6 +1077,59 @@ const testSource = String.raw`
   }
   assert.deepEqual(nestedRecoveryFailures, []);
   delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+
+  assert.equal(createRequire(import.meta.url)("@farm.js/react/compiler-runtime").keyedRowsPlainReorderHintedRuntimeFeature.name, "keyed-rows:plain-reorder-hinted");
+  for (const reactivity of ["hybrid", "static"]) {
+    for (const hydrate of [false, true]) {
+      let update;
+      const PlainReorder = createCompiledComponentWithFeatures({
+        displayName: "CompatibilityPlainReorder", reactivity,
+        initialize: () => [["b", "a", "c"]],
+        render(_props, state, blocks) {
+          const items = () => state[0].get();
+          update = (next) => state[0].set(next);
+          return React.createElement("main", null, React.createElement(blocks.KeyedRows, {
+            id: 0, collectionDependency: 0, dependencies: [0], structureDependencies: [0],
+            reorderIndexIndependent: true, items, rowKey: (item) => item, bindings: [],
+            create: (item) => ({ kind: "element", tag: "input", attributes: [
+              {name: "value", value: item}, {name: "readOnly", value: true},
+            ], styles: [], children: [] }),
+            render: () => React.createElement("div", null, items().map(item => React.createElement("input", {key: item, value: item, readOnly: true}))),
+          }));
+        },
+        bindings: [{kind: "block", id: 0, dependencies: [0]}],
+      }, [keyedRowsPlainReorderHintedRuntimeFeature]);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const tree = React.createElement(React.StrictMode, null, React.createElement(PlainReorder));
+      const errors = [];
+      if (hydrate) container.innerHTML = renderToString(tree);
+      let root;
+      flushSync(() => {
+        root = hydrate ? hydrateRoot(container, tree, {onRecoverableError: error => errors.push(error)}) : createRoot(container);
+        if (!hydrate) root.render(tree);
+      });
+      const nodes = [...container.querySelectorAll("input")];
+      nodes[1].focus(); nodes[1].setSelectionRange(0, 1);
+      try {
+        for (const [next, expected] of [
+          [previous => createCompilerKeyedArrayReorder(previous, previous.toReversed), [nodes[2], nodes[1], nodes[0]]],
+          [previous => createCompilerKeyedArraySort(previous, previous.toSorted), [nodes[1], nodes[0], nodes[2]]],
+          [previous => [previous[2], previous[0], previous[1]], [nodes[2], nodes[1], nodes[0]]],
+        ]) {
+          flushSync(() => update(next));
+          await Promise.resolve(); await Promise.resolve();
+          assert.deepEqual([...container.querySelectorAll("input")], expected);
+          assert.equal(document.activeElement, nodes[1]);
+          assert.deepEqual([nodes[1].selectionStart, nodes[1].selectionEnd], [0, 1]);
+        }
+        assert.deepEqual(errors, []);
+      } finally {
+        flushSync(() => root.unmount());
+        container.remove();
+      }
+    }
+  }
 
   let reverseCompatibilityRows = () => undefined;
   let mapReverseParityCompatibilityRows = () => undefined;

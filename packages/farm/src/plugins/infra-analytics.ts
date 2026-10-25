@@ -9,6 +9,7 @@
  * status, duration, registered MCP tool outcomes and a self-reported agent
  * category. No URLs, query strings, headers, cookies, bodies, IPs or errors.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { FarmPlugin, FarmPluginRuntimeAfterEvent } from "../plugin";
 import { classifyFarmAgent, type FarmAgentIdentity } from "../agent-identity";
 import { onFarmEvent } from "../observability";
@@ -368,6 +369,23 @@ function requestEvent(
   };
 }
 
+function toolEvent(
+  metadata: RequestMetadata,
+  event: { tool: string; outcome: "success" | "error"; durationMs: number },
+): FarmInfraAnalyticsEvent {
+  return {
+    id: uuid(),
+    requestId: metadata.id,
+    timestamp: new Date().toISOString(),
+    route: metadata.route,
+    agent: metadata.agent,
+    kind: "mcp.tool",
+    tool: event.tool,
+    outcome: event.outcome,
+    durationMs: duration(event.durationMs),
+  };
+}
+
 /** The runtime plugin for already-resolved options, for servers with a plugin runtime. */
 export function farmInfraAnalyticsPlugin(
   options: FarmInfraAnalyticsExporterOptions,
@@ -397,17 +415,7 @@ export function farmInfraAnalyticsPlugin(
             const metadata = context.requestContext.get<RequestMetadata>(request, contextKey);
             // Streaming MCP transports can return their HTTP Response before the tool finishes.
             if (!metadata) return;
-            exporter.enqueue({
-              id: uuid(),
-              requestId: metadata.id,
-              timestamp: new Date().toISOString(),
-              route: metadata.route,
-              agent: metadata.agent,
-              kind: "mcp.tool",
-              tool: event.tool,
-              outcome: event.outcome,
-              durationMs: duration(event.durationMs),
-            });
+            exporter.enqueue(toolEvent(metadata, event));
             metadata.waitUntil(exporter.flush());
           },
           { unfiltered: true },
@@ -452,14 +460,27 @@ export interface FarmInfraAnalyticsRecorder {
 }
 
 /**
- * The same request reporting without a plugin runtime, so a production server that has
- * no plugins doesn't import one. MCP is a plugin, so there are no tool calls to correlate.
+ * The same reporting without a plugin runtime, so a production server whose plugins only add
+ * routes (`@farm.js/mcp` without OAuth among them) doesn't import one. Tool calls happen inside
+ * the request, which an API route may have rewritten by then, so each request's metadata
+ * travels in an async scope of its own rather than keyed by its Request.
  */
 export function farmInfraAnalyticsRecorder(
   options: FarmInfraAnalyticsExporterOptions,
   send?: typeof fetch,
 ): FarmInfraAnalyticsRecorder {
   const exporter = createFarmInfraAnalyticsExporter(options, send);
+  const requests = new AsyncLocalStorage<RequestMetadata>();
+  const unsubscribe = onFarmEvent(
+    (event: unknown) => {
+      if (!isToolEvent(event)) return;
+      const metadata = requests.getStore();
+      if (!metadata) return;
+      exporter.enqueue(toolEvent(metadata, event));
+      metadata.waitUntil(exporter.flush());
+    },
+    { unfiltered: true },
+  );
   return {
     async record(request, runtime, waitUntil, handler) {
       if (runtime.kind === "asset") return handler();
@@ -469,7 +490,7 @@ export function farmInfraAnalyticsRecorder(
       const startedAt = performance.now();
       let response: Response;
       try {
-        response = await handler();
+        response = await requests.run(metadata, handler);
       } catch (error) {
         background(exporter.flush());
         throw error;
@@ -482,7 +503,10 @@ export function farmInfraAnalyticsRecorder(
       background(exporter.flush());
       return response;
     },
-    close: () => exporter.close(),
+    close() {
+      unsubscribe();
+      return exporter.close();
+    },
   };
 }
 

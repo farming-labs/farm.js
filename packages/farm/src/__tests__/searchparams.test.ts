@@ -245,8 +245,8 @@ describe("SearchParams in the production runtime", () => {
   it("hydrates and client-navigates with array-aware search params", () => {
     const source = readSource("nitro", "universal-build.ts");
 
-    expect(source).toContain(
-      'import { createClientCancellation, createClientPluginManager, getHashTargetElement, installChunkErrorRecovery, isFarmExternalNavigationURL, reconcileFarmDocumentHead, scheduleFarmIslandHydration, searchParamsToObject, setFarmBasePath, setFarmTrailingSlashPreference, stripFarmBasePath } from "@farm.js/core/internal/client-runtime";',
+    expect(source).toMatch(
+      /import \{[^}]*\bsearchParamsToObject\b[^}]*\} from "@farm\.js\/core\/internal\/client-runtime";/,
     );
     expect(source).toContain(
       "const searchParams = searchParamsToObject(new URLSearchParams(window.location.search));",

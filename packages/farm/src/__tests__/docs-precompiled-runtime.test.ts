@@ -146,6 +146,46 @@ describe("precompiled docs runtime", () => {
     }
   });
 
+  it("precompiles config without provider credentials and never precompiles diagnostics", async () => {
+    const { root, docs } = await createFixture();
+    docs.config = {
+      ...docs.config,
+      search: {
+        provider: "algolia",
+        appId: "APP",
+        indexName: "docs",
+        searchApiKey: "ALGOLIA_SEARCH_KEY",
+        adminApiKey: "ALGOLIA_ADMIN_SECRET",
+      },
+      ai: { enabled: true, apiKey: "OPENAI_SECRET" },
+    } as FarmDocsResolvedConfig["config"];
+    const manifest = await compileFarmDocsManifest(docs, {
+      root,
+      srcDir: "src",
+      clientEntry: "/farm-client.js",
+      fontAssets: [],
+    });
+    const compiled = createFarmDocsPrecompiledRuntime(manifest);
+
+    const config = await compiled.handleAPIRequest(
+      new Request("https://edge.example/api/docs?format=config"),
+    );
+    expect(config?.status).toBe(200);
+    const configBody = await config!.text();
+    for (const secret of ["ALGOLIA_SEARCH_KEY", "ALGOLIA_ADMIN_SECRET", "OPENAI_SECRET"]) {
+      expect(configBody).not.toContain(secret);
+    }
+    expect(JSON.parse(configBody)).toMatchObject({
+      config: { search: { provider: "algolia", adminApiKey: "[redacted]" } },
+    });
+
+    const diagnostics = await compiled.handleAPIRequest(
+      new Request("https://edge.example/api/docs?format=diagnostics"),
+    );
+    expect(diagnostics?.status).toBe(404);
+    expect(await diagnostics!.text()).not.toContain("OPENAI_SECRET");
+  });
+
   it("serves adapter navigation payloads and a custom API route", async () => {
     const { root, docs } = await createFixture();
     const manifest = await compileFarmDocsManifest(docs, {

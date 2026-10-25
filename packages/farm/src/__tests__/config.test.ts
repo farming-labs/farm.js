@@ -410,6 +410,26 @@ describe("resolveConfig", () => {
     ).rejects.toThrow("agent.apiCatalog must be a boolean.");
   });
 
+  it("serves a sitemap by default unless the docs engine serves its own", async () => {
+    expect((await resolveConfig({}, "production")).agent.sitemap).toEqual({
+      enabled: true,
+      include: [],
+      exclude: [],
+    });
+    expect(resolveFarmAgentConfig(undefined, { docs: true }).sitemap.enabled).toBe(false);
+    expect(resolveFarmAgentConfig({ sitemap: true }, { docs: true }).sitemap.enabled).toBe(true);
+    expect(
+      (await resolveConfig({ agent: { sitemap: false } }, "production")).agent.sitemap.enabled,
+    ).toBe(false);
+    expect(
+      (await resolveConfig({ agent: { sitemap: { exclude: ["/admin/[...path]"] } } }, "production"))
+        .agent.sitemap,
+    ).toEqual({ enabled: true, include: [], exclude: ["/admin/[...path]"] });
+    await expect(
+      resolveConfig({ agent: { sitemap: { exclude: ["admin"] } } }, "production"),
+    ).rejects.toThrow('agent.sitemap.exclude[0] must be a route pattern starting with "/"');
+  });
+
   it("describes the site to agents by default: a WebSite in JSON-LD and an llms.txt", async () => {
     const defaults = await resolveConfig({}, "production");
     expect(defaults.agent.jsonLd).toEqual({ type: "WebSite" });

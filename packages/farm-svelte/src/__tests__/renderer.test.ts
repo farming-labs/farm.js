@@ -3,8 +3,12 @@
 import {
   defineRendererDescriptorConformance,
   defineRendererServerConformance,
+  defineRendererServerQueryConformance,
 } from "@farm.js/renderer-tests";
 import { describe, expect, it } from "vitest";
+import { get } from "svelte/store";
+import type { ServerQuery } from "@farm.js/core/server-query";
+import { createServerQuery } from "../bindings";
 import { svelte } from "../index";
 import * as serverRuntime from "../server";
 import {
@@ -30,6 +34,21 @@ defineRendererDescriptorConformance({
 });
 
 defineRendererServerConformance(serverRuntime);
+
+defineRendererServerQueryConformance({
+  name: "svelte",
+  renderQuery(query) {
+    // `$account` in a server-rendered component subscribes and reads the
+    // store the same way `get` does.
+    const Account = markFunctionComponent(() => {
+      const account = get(
+        createServerQuery(query as unknown as ServerQuery<undefined, { email: string }>, undefined),
+      );
+      return createElement("p", null, `account=${account.data?.email ?? "loading"}`);
+    });
+    return renderToString(createElement(Account, null));
+  },
+});
 
 describe("Svelte renderer", () => {
   it("renders FARMJS elements with Svelte's server runtime", async () => {

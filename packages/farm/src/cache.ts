@@ -108,6 +108,12 @@ export interface FarmCacheEntry<T = unknown> {
   createdAt: number;
   createdVersion?: number;
   revalidate?: number | false;
+  /**
+   * Epoch milliseconds after which no reader can use the entry, so shared
+   * storage may drop it. Set only for entries with a finite `revalidate`.
+   * Adapters with native expiry (Redis PX, unstorage `ttl`) should honor it.
+   */
+  expiresAt?: number;
 }
 
 interface InternalFarmCacheEntry<T = unknown> {
@@ -177,7 +183,8 @@ export interface FarmCacheUserConfig {
 
 export interface FarmCacheStorage {
   getItem<T = unknown>(key: string): Promise<T | null>;
-  setItem<T = unknown>(key: string, value: T): Promise<unknown>;
+  /** `options.ttl` is in seconds, matching unstorage drivers that support expiry. */
+  setItem<T = unknown>(key: string, value: T, options?: { ttl?: number }): Promise<unknown>;
   removeItem(key: string): Promise<unknown>;
   clear?(base?: string): Promise<unknown>;
 }
@@ -202,17 +209,22 @@ export function storageCacheAdapter(
   }
 
   const base = normalizeCacheNamespace(options.base || "farm-cache");
-  const entryKey = (key: string) => `${base}:entry:${key}`;
-  const tagKey = (tag: string) => `${base}:tag:${tag}`;
+  const entryKey = async (key: string) => `${base}:entry:${await encodeStorageKeySegment(key)}`;
+  const tagKey = async (tag: string) => `${base}:tag:${await encodeStorageKeySegment(tag)}`;
 
   return {
     name: "storage",
-    get: <T>(key: string) => storage.getItem<FarmCacheEntry<T>>(entryKey(key)),
+    get: async <T>(key: string) => storage.getItem<FarmCacheEntry<T>>(await entryKey(key)),
     set: async <T>(key: string, entry: FarmCacheEntry<T>) => {
-      await storage.setItem(entryKey(key), entry);
+      const ttlMs = getFarmCacheEntryTtlMs(entry);
+      if (ttlMs === undefined) {
+        await storage.setItem(await entryKey(key), entry);
+      } else {
+        await storage.setItem(await entryKey(key), entry, { ttl: Math.ceil(ttlMs / 1000) });
+      }
     },
     delete: async (key: string) => {
-      await storage.removeItem(entryKey(key));
+      await storage.removeItem(await entryKey(key));
     },
     clear: storage.clear
       ? async () => {
@@ -222,7 +234,7 @@ export function storageCacheAdapter(
     getTagVersions: async (tags) => {
       const versions = await Promise.all(
         tags.map(async (tag) => {
-          const value = await storage.getItem<number>(tagKey(tag));
+          const value = await storage.getItem<number>(await tagKey(tag));
           return [tag, normalizeAdapterVersion(value)] as const;
         }),
       );
@@ -231,13 +243,75 @@ export function storageCacheAdapter(
     invalidateTags: async (tags) => {
       await Promise.all(
         tags.map(async (tag) => {
-          const key = tagKey(tag);
+          const key = await tagKey(tag);
           const current = normalizeAdapterVersion(await storage.getItem<number>(key));
           await storage.setItem(key, Math.max(Date.now(), current + 1));
         }),
       );
     },
   };
+}
+
+/**
+ * Longest encoded key segment written as-is. Longer keys are hashed so they stay
+ * under driver limits such as 255-byte file names and 512-byte Cloudflare KV keys.
+ */
+const MAX_STORAGE_KEY_SEGMENT_LENGTH = 200;
+
+/**
+ * Turn a cache key or tag into one storage-safe key segment.
+ *
+ * unstorage drops everything after `?` and folds `/`, `\` and repeated `:` into
+ * one separator, so raw keys for `/a?x=1` and `/a?x=2` (or `/a/b` and `/a:b`)
+ * would share one stored value. Percent-encoding removes every one of those
+ * characters, and the hashed form carries a `:` that an encoded key cannot
+ * contain, so distinct keys never map to the same storage key.
+ */
+async function encodeStorageKeySegment(value: string): Promise<string> {
+  let encoded: string | undefined;
+  try {
+    encoded = encodeURIComponent(value);
+  } catch {
+    // Lone surrogates cannot be percent-encoded; the hash below still keeps them distinct.
+  }
+  if (encoded !== undefined && encoded.length <= MAX_STORAGE_KEY_SEGMENT_LENGTH) return encoded;
+  // JSON.stringify escapes lone surrogates, so TextEncoder never folds two keys together.
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(JSON.stringify(value)),
+  );
+  let hex = "";
+  for (const byte of new Uint8Array(digest)) hex += byte.toString(16).padStart(2, "0");
+  return `sha256:${hex}`;
+}
+
+/**
+ * How long a stale entry stays readable in shared storage: one more revalidate
+ * window, and never less than this, so stale-while-revalidate readers and an
+ * entry written already stale (an ISR page seeded from an old file) still find it.
+ */
+const MIN_STALE_RETENTION_MS = 60_000;
+
+function getFarmCacheEntryExpiresAt(
+  createdAt: number,
+  revalidate: number | false | undefined,
+  now = Date.now(),
+): number | undefined {
+  if (typeof revalidate !== "number") return undefined;
+  const revalidateMs = revalidate * 1000;
+  return Math.max(createdAt + revalidateMs, now) + Math.max(revalidateMs, MIN_STALE_RETENTION_MS);
+}
+
+/**
+ * Remaining lifetime of an entry in shared storage, or undefined when it never
+ * expires on its own. Always at least 1ms so an expiry is never sent as "no expiry".
+ */
+function getFarmCacheEntryTtlMs(
+  entry: Pick<FarmCacheEntry, "expiresAt">,
+  now = Date.now(),
+): number | undefined {
+  if (typeof entry.expiresAt !== "number" || !Number.isFinite(entry.expiresAt)) return undefined;
+  return Math.max(1, Math.ceil(entry.expiresAt - now));
 }
 
 export interface GetFarmCacheEntryOptions {
@@ -382,12 +456,22 @@ export class FarmDataCache {
     const namespace = this.namespace;
     const entry = await adapter.get<T>(`${namespace}:entry:${key}`);
     if (generation !== this.generation) return undefined;
-    if (!entry) {
-      emitFarmEvent({ type: "cache.miss", key });
+    if (!entry || isForeignAdapterEntry(entry, key)) {
+      emitFarmEvent({ type: "cache.miss", key, ...(entry ? { reason: "key-mismatch" } : {}) });
       return undefined;
     }
 
     assertFarmCacheEntry(entry, key);
+    if (typeof entry.expiresAt === "number" && entry.expiresAt <= (options.now ?? Date.now())) {
+      // Adapters without native expiry keep expired entries until something removes them.
+      emitFarmEvent({ type: "cache.miss", key, reason: "expired" });
+      try {
+        await adapter.delete(`${namespace}:entry:${key}`);
+      } catch (error) {
+        emitFarmEvent({ type: "cache.error", key, operation: "delete", error });
+      }
+      return undefined;
+    }
     const stale = await this.isAdapterEntryStale(entry, options.now, adapter, namespace);
     if (generation !== this.generation) return undefined;
     if (stale) {
@@ -467,14 +551,17 @@ export class FarmDataCache {
     const tags = normalizeCacheOptionsTags(options);
     const capturedVersions =
       tagVersions ?? (await this.getAdapterTagVersions(Array.from(tags.values())));
+    const createdAt = options.createdAt ?? Date.now();
+    const expiresAt = getFarmCacheEntryExpiresAt(createdAt, revalidate);
     const entry: FarmCacheEntry<T> = {
       key,
       value,
       tags: Array.from(tags),
       tagVersions: capturedVersions,
-      createdAt: options.createdAt ?? Date.now(),
+      createdAt,
       createdVersion: createdVersion ?? ++this.version,
       revalidate,
+      ...(expiresAt === undefined ? {} : { expiresAt }),
     };
 
     if (this.local) {
@@ -740,8 +827,8 @@ export class FarmDataCache {
       if (generation !== this.generation) return undefined;
       const entry = await adapter.get<T>(`${namespace}:entry:${key}`);
       if (generation !== this.generation) return undefined;
-      if (!entry) {
-        emitFarmEvent({ type: "cache.miss", key });
+      if (!entry || isForeignAdapterEntry(entry, key)) {
+        emitFarmEvent({ type: "cache.miss", key, ...(entry ? { reason: "key-mismatch" } : {}) });
         continue;
       }
       assertFarmCacheEntry(entry, key);
@@ -1199,6 +1286,21 @@ function normalizeCacheOptionsTags(options: FarmCacheOptions): Set<string> {
     tags.add(createPathCacheTag(routePath));
   }
   return tags;
+}
+
+/**
+ * A well-formed entry stored under another logical key, for example one written
+ * through a storage client that folded two keys together. It answers a
+ * different request, so the read is a miss rather than an error that would
+ * fail every request mapping to that storage key until the entry is replaced.
+ */
+function isForeignAdapterEntry(entry: FarmCacheEntry, expectedKey: string): boolean {
+  return (
+    typeof entry === "object" &&
+    entry !== null &&
+    typeof entry.key === "string" &&
+    entry.key !== expectedKey
+  );
 }
 
 function assertFarmCacheEntry(

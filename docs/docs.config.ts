@@ -1,6 +1,7 @@
 import { defineDocs } from "@farming-labs/docs";
 import { pixelBorder } from "@farming-labs/theme-production/pixel-border";
 import type { FarmDocsSidebarItem, FarmDocsSocialImageConfig } from "@farm.js/core";
+import { FARM_VERSION } from "@farm.js/core/version";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
@@ -422,6 +423,10 @@ const config = {
     description: "Farm.js framework documentation powered by @farming-labs/docs.",
   },
   favicon: "/favicon.svg",
+  // The docs MCP describes Farm.js, so it reports the Farm.js version, not this site's.
+  mcp: { version: FARM_VERSION },
+  // List the hand-written /openapi.json (public APIs only) in /.well-known/api-catalog.
+  agent: { apiCatalog: { openapi: "/openapi.json" } },
   socialImage: {
     baseUrl: "https://farmjs.dev",
     siteName: "Farm.js",

@@ -61,6 +61,7 @@ for (const [index, renderer] of ["html", "react"].entries()) {
         "createFarmDeploymentMismatchError",
         `
           const isFarmExternalNavigationURL = () => false;
+          const isFarmBlockedNavigationURL = () => false;
           const isFarmDocsPath = () => false;
           const matchRoute = () => null;
           const cancelPendingPageHydration = () => {};

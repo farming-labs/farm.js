@@ -234,16 +234,22 @@ farm agent check --mcp /api/tools --json
 same against `farm dev`, `farm start`, or a deployed site. It defaults to `http://localhost:3000`;
 a URL with a path is treated as the app's `basePath`, and `--path` picks the page to check.
 
-| Check               | Passes when                                                                                           |
-| ------------------- | ----------------------------------------------------------------------------------------------------- |
-| Page metadata       | The page has a title, description, canonical link, and `lang`; JSON-LD is reported separately.        |
-| Markdown mirror     | The page advertises its `.md` mirror, the mirror answers, and a missing `.md` answers a Markdown 404. |
-| Content negotiation | `Accept: text/markdown` on the page URL returns Markdown. Prerendered pages report this as info.      |
-| Partial reads       | The mirror serves `?outline`, `?section`, `?max_tokens`, and ETags.                                   |
-| llms.txt            | `/llms.txt` lists pages, and `/llms-full.txt` answers.                                                |
-| Crawlers            | `/robots.txt` exists and does not block every agent; `/sitemap.xml` answers.                          |
-| API catalog         | `/.well-known/api-catalog` is an RFC 9727 Linkset, and the OpenAPI spec it lists answers.             |
-| MCP                 | The MCP endpoint (from the catalog, `--mcp`, or `/api/mcp`) answers a 401 with `WWW-Authenticate`.    |
+| Check                   | Passes when                                                                                                                 |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Page metadata           | The page has a title, description, canonical link, and `lang`; JSON-LD is reported separately.                              |
+| Readable HTML           | The server HTML carries at least 500 characters of text, so agents that skip JavaScript read the page.                      |
+| Headings and markup     | The page has an H1, heading levels don't skip, and text is at least 5% of the HTML.                                         |
+| Markdown mirror         | The page advertises its `.md` mirror, the mirror answers, and a missing `.md` answers a Markdown 404.                       |
+| Content negotiation     | `Accept: text/markdown` on the page URL returns Markdown. Prerendered pages report this as info.                            |
+| Partial reads           | The mirror serves `?outline`, `?section`, `?max_tokens`, and ETags.                                                         |
+| Missing pages           | An unknown page answers 404, and Markdown for `Accept: text/markdown`. A 200 fails.                                         |
+| llms.txt                | `/llms.txt` lists pages, and `/llms-full.txt` answers.                                                                      |
+| Crawlers                | `/robots.txt` exists and does not block every agent; the sitemap it names (or `/sitemap.xml`) lists pages with `<lastmod>`. |
+| Organization            | The JSON-LD Organization has a `contactPoint` and an `address`. Reported as info.                                           |
+| About, contact, privacy | Each has a page with at least 500 characters, or a link to one on another site. Reported as info.                           |
+| API catalog             | `/.well-known/api-catalog` is an RFC 9727 Linkset, and the OpenAPI spec it lists answers.                                   |
+| MCP                     | The MCP endpoint (from the catalog, `--mcp`, or `/api/mcp`) answers a 401 with `WWW-Authenticate`.                          |
+| MCP discovery           | `/.well-known/ai-catalog.json`, `<endpoint>/server-card`, or `llms.txt` points clients to the endpoint. Info.               |
 
 A surface that is off is reported as info or a warning with the config that turns it on, such as
 `agent: { llmsTxt: true }`. A surface that is advertised but broken, such as an OpenAPI spec listed in

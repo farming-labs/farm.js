@@ -7,12 +7,23 @@ export interface FarmNodeServerEntryOptions {
   websocketAdapterModule: string;
 }
 
+/** Written next to the Node entry and imported first, so it runs before any app module. */
+export const FARM_NODE_ENV_MODULE_FILE = "farm-node-env.mjs";
+
+/**
+ * The production server's NODE_ENV, as `next start` sets it: "production" unless the deployment
+ * set its own. Packages read it at runtime (a dev-only devtools panel, say) where the build left
+ * `process.env.NODE_ENV` in place, and must agree with the browser bundle's inlined value.
+ */
+export const FARM_NODE_ENV_MODULE_SOURCE = `if (!process.env.NODE_ENV) process.env.NODE_ENV = "production";\n`;
+
 /** Generate the long-running Node adapter entry while retaining Nitro's routing runtime. */
 export function createFarmNodeServerEntry(options: FarmNodeServerEntryOptions): string {
   const serverConfig = JSON.stringify(options.server);
   const nitroEntryImport = `./${options.nitroEntryFile.replace(/^\.\//, "")}`;
 
   return `
+import "./${FARM_NODE_ENV_MODULE_FILE}";
 import "#nitro/virtual/polyfills";
 import { NodeRequest, serve } from ${JSON.stringify(options.nodeAdapterModule)};
 import wsAdapter from ${JSON.stringify(options.websocketAdapterModule)};

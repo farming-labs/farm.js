@@ -42,6 +42,7 @@ import {
   resolveFarmServerConfig,
 } from "../server-http";
 import { createCliColors } from "../cli-colors";
+import { createFarmDevServerDispatch } from "./dev-dispatch";
 import {
   AmbiguousRouteError,
   assertUniqueRouteParameters,
@@ -90,6 +91,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
   let apiRoutesCache: Map<string, ApiRoute> = new Map();
   let apiRouterHandler: ((req: Request) => Promise<Response>) | null = null;
   let projectRoot = process.cwd();
+  let devServer: ViteDevServer | undefined;
   // File routes plus plugin routes, when plugins add any. Without plugins,
   // requests match the discovery cache directly, as before.
   let pluginMergedRoutes: Map<string, ApiRoute> | null = null;
@@ -236,6 +238,12 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
       ? new Map(
           mergePluginAPIRoutes([...apiRoutesCache.values()], plugins, undefined, {
             bodySizeLimit,
+            // A plugin calling an app endpoint (an MCP tool, say) goes back through this server,
+            // so the middleware that guards the endpoint's path runs for it.
+            dispatch: (request) => {
+              if (!devServer) throw new Error("The Farm API dev server is not running.");
+              return createFarmDevServerDispatch(devServer)(request);
+            },
           }).map((route) => [route.path, route]),
         )
       : null;
@@ -292,6 +300,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
     configureServer(server: ViteDevServer) {
       projectRoot = server.config.root;
+      devServer = server;
       // Discover API routes in /api directory
       const discoverFileRoutes = async (apiDir: string): Promise<void> => {
         const fs = await import("fs");

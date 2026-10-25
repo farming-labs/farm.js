@@ -32,6 +32,7 @@ import {
   type APIRouteParams,
   type APIRouteMatch,
 } from "./route-pattern";
+import { validateIntegrationRequestOrigin } from "../integration-request-security";
 /**
  * Every method an API route module can export. Route discovery in core and in
  * the plain-Vite plugin reads this list, so a handler exported under any of
@@ -382,7 +383,9 @@ async function readRequestBody(request: Request): Promise<RequestBodyParseResult
 
   // A body is only parsed as JSON when the request says it is JSON, or when it
   // declares no type at all (the permissive path kept for non-browser callers
-  // that omit the header).
+  // that omit the header). A browser omits it too, for a Blob or byte body, and
+  // will send that cross-site in a no-cors fetch with the visitor's cookies, so
+  // a typeless body from another origin is not read as JSON either.
   //
   // Parsing a *declared* non-JSON type as JSON removed the barrier that keeps
   // browsers from reaching this surface cross-origin: `text/plain`,
@@ -391,6 +394,9 @@ async function readRequestBody(request: Request): Promise<RequestBodyParseResult
   // without a preflight. Honouring the declared type means such a request no
   // longer arrives as a parsed JSON object.
   if (contentType === undefined) {
+    if (!validateIntegrationRequestOrigin(request, { requireOriginMetadata: false }).ok) {
+      return { body: undefined };
+    }
     try {
       return { body: JSON.parse(text) };
     } catch {
@@ -467,6 +473,13 @@ async function validateInput(
   }
 }
 
-// The MCP tool registry, published by @farm.js/mcp. It lives behind this
-// edge-safe entry so the plugin never pulls core's main index into a worker.
-export { _findFarmMCPEndpointTool, _publishFarmMCPCatalog } from "../mcp-catalog";
+// The MCP tool registry, published by @farm.js/mcp, and the AI catalog's list of MCP
+// servers Farm does not serve. They live behind this edge-safe entry so a plugin or
+// docs runtime never pulls core's main index into a worker.
+export {
+  _findFarmMCPEndpointTool,
+  _publishFarmMCPCatalog,
+  registerFarmMCPServer,
+  type FarmMCPCatalogDetails,
+  type FarmMCPServerRegistration,
+} from "../mcp-catalog";

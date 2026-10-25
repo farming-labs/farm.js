@@ -1,10 +1,11 @@
 // @vitest-environment node
 
-import { createServer } from "node:http";
+import { createServer, request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { mkdtemp, mkdir, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync, zstdCompressSync } from "node:zlib";
+import { createServer as createViteServer } from "vite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   applyAgentRuntimeViteProxy,
@@ -85,11 +86,13 @@ describe("agent runtime integration", () => {
       target: managed.origin,
       changeOrigin: true,
       ws: true,
+      bypass: expect.any(Function),
     });
     expect(config.vite?.server.proxy["/.well-known/agent"]).toEqual({
       target: managed.origin,
       changeOrigin: true,
       ws: true,
+      bypass: expect.any(Function),
     });
 
     await Promise.all(lifecycleCleanups.map((cleanup) => cleanup()));
@@ -113,6 +116,153 @@ describe("agent runtime integration", () => {
         routePrefix: "/agents",
       }),
     ).toThrow("already defines it");
+  });
+});
+
+describe("agent runtime dev proxy", () => {
+  async function startDevProxy() {
+    const seen: string[] = [];
+    const upstream = createServer((request, response) => {
+      seen.push(`${request.method} ${request.url}`);
+      response.end("agent reply");
+    });
+    upstream.on("upgrade", (request, socket) => {
+      seen.push(`WS ${request.url}`);
+      socket.end(
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+      );
+    });
+    const origin = await listen(upstream);
+    cleanups.push(() => close(upstream));
+
+    const config: { vite?: Record<string, any> } = {};
+    applyAgentRuntimeViteProxy(config, { origin, routePrefix: "/agents", webSockets: true });
+    const port = await findAvailableAgentRuntimePort();
+    const vite = await createViteServer({
+      configFile: false,
+      root: await mkdtemp(join(tmpdir(), "farm-agent-dev-proxy-")),
+      logLevel: "silent",
+      ...config.vite,
+      server: { ...config.vite?.server, host: "127.0.0.1", port, strictPort: true, hmr: false },
+    });
+    await vite.listen();
+    cleanups.push(() => vite.close());
+    return { seen, host: `127.0.0.1:${port}`, port };
+  }
+
+  function send(
+    port: number,
+    input: { method?: string; path?: string; headers?: Record<string, string>; upgrade?: boolean },
+  ): Promise<{ status: number; body: string }> {
+    const headers: Record<string, string> = { ...input.headers };
+    if (input.upgrade) {
+      Object.assign(headers, {
+        connection: "Upgrade",
+        upgrade: "websocket",
+        "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+        "sec-websocket-version": "13",
+      });
+    }
+    return new Promise((resolveSend, reject) => {
+      const request = httpRequest({
+        host: "127.0.0.1",
+        port,
+        method: input.method || "GET",
+        path: input.path || "/agents/chat/default",
+        headers,
+      });
+      request.on("upgrade", (response, socket) => {
+        socket.destroy();
+        resolveSend({ status: response.statusCode || 0, body: "" });
+      });
+      request.on("response", (response) => {
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string) => (body += chunk));
+        response.on("end", () => resolveSend({ status: response.statusCode || 0, body }));
+      });
+      request.on("error", reject);
+      request.end();
+    });
+  }
+
+  it("refuses cross-site WebSocket upgrades before they reach the agent", async () => {
+    const proxy = await startDevProxy();
+
+    const evil = await send(proxy.port, {
+      upgrade: true,
+      headers: { origin: "https://evil.test" },
+    });
+    expect(evil.status).toBe(403);
+    const otherLocalApp = await send(proxy.port, {
+      upgrade: true,
+      headers: { origin: "http://localhost:3000", "sec-fetch-site": "same-site" },
+    });
+    expect(otherLocalApp.status).toBe(403);
+    const opaque = await send(proxy.port, { upgrade: true, headers: { origin: "null" } });
+    expect(opaque.status).toBe(403);
+    expect(proxy.seen).toEqual([]);
+
+    const sameOrigin = await send(proxy.port, {
+      upgrade: true,
+      headers: { origin: `http://${proxy.host}`, "sec-fetch-site": "same-origin" },
+    });
+    expect(sameOrigin.status).toBe(101);
+    const nonBrowser = await send(proxy.port, { upgrade: true });
+    expect(nonBrowser.status).toBe(101);
+    const preview = await send(proxy.port, {
+      upgrade: true,
+      headers: { origin: "https://demo.preview.test", "x-forwarded-host": "demo.preview.test" },
+    });
+    expect(preview.status).toBe(101);
+    expect(proxy.seen).toEqual([
+      "WS /agents/chat/default",
+      "WS /agents/chat/default",
+      "WS /agents/chat/default",
+    ]);
+  });
+
+  it("refuses cross-site HTTP requests but keeps same-origin calls and navigations", async () => {
+    const proxy = await startDevProxy();
+
+    const forgedPost = await send(proxy.port, {
+      method: "POST",
+      headers: { origin: "https://evil.test", "sec-fetch-site": "cross-site" },
+    });
+    expect(forgedPost.status).toBe(403);
+    expect(forgedPost.body).toContain("blocked");
+    const noCorsRead = await send(proxy.port, {
+      headers: { "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors" },
+    });
+    expect(noCorsRead.status).toBe(403);
+    const crossSiteFormNavigation = await send(proxy.port, {
+      method: "POST",
+      headers: {
+        origin: "https://evil.test",
+        "sec-fetch-site": "cross-site",
+        "sec-fetch-mode": "navigate",
+      },
+    });
+    expect(crossSiteFormNavigation.status).toBe(403);
+    expect(proxy.seen).toEqual([]);
+
+    const sameOrigin = await send(proxy.port, {
+      method: "POST",
+      headers: { origin: `http://${proxy.host}`, "sec-fetch-site": "same-origin" },
+    });
+    expect(sameOrigin).toEqual({ status: 200, body: "agent reply" });
+    const callbackNavigation = await send(proxy.port, {
+      path: "/agents/oauth/callback?code=1",
+      headers: { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate" },
+    });
+    expect(callbackNavigation.status).toBe(200);
+    const curl = await send(proxy.port, { method: "POST" });
+    expect(curl.status).toBe(200);
+    expect(proxy.seen).toEqual([
+      "POST /agents/chat/default",
+      "GET /agents/oauth/callback?code=1",
+      "POST /agents/chat/default",
+    ]);
   });
 });
 
@@ -212,6 +362,48 @@ describe("agent runtime proxy", () => {
 
     expect(response.headers.get("x-upstream-forwarded-host")).toBe("farm.test");
     expect(response.headers.get("x-upstream-forwarded-proto")).toBe("http");
+  });
+
+  it("drops every client-supplied forwarding header, not only host and proto", async () => {
+    let upstreamHeaders: IncomingHttpHeaders | undefined;
+    const server = createServer((request, response) => {
+      upstreamHeaders = request.headers;
+      response.end("ok");
+    });
+    const origin = await listen(server);
+    cleanups.push(() => close(server));
+
+    await proxyAgentRuntimeRequest(
+      new Request("https://app.example/agents/chat?x=1", {
+        headers: {
+          forwarded: "for=10.0.0.1;host=evil.test;proto=http",
+          "x-forwarded-for": "127.0.0.1",
+          "x-forwarded-port": "1",
+          "x-forwarded-prefix": "/evil",
+          "x-forwarded-host": "evil.test",
+          "x-real-ip": "127.0.0.1",
+          "true-client-ip": "127.0.0.1",
+          cookie: "session=abc",
+        },
+      }),
+      origin,
+    );
+
+    expect(upstreamHeaders).toMatchObject({
+      "x-forwarded-host": "app.example",
+      "x-forwarded-proto": "https",
+      cookie: "session=abc",
+    });
+    for (const name of [
+      "forwarded",
+      "x-forwarded-for",
+      "x-forwarded-port",
+      "x-forwarded-prefix",
+      "x-real-ip",
+      "true-client-ip",
+    ]) {
+      expect(upstreamHeaders?.[name]).toBeUndefined();
+    }
   });
 
   it("does not forward stale compression metadata after fetch decodes the body", async () => {

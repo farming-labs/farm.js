@@ -27,6 +27,8 @@ const schemaValidator = new CfWorkerJsonSchemaValidator();
 export interface BoundPrompt {
   definition: FarmMCPPrompt<any>;
   argsSchema?: StandardSchemaWithJSON;
+  /** The arguments' JSON Schema, for the app manifest. */
+  argsJSONSchema?: Record<string, unknown>;
 }
 
 /** Validates resource definitions once, when the plugin is created. */
@@ -89,6 +91,7 @@ export function bindPrompts(prompts: readonly FarmMCPPrompt<any>[] | undefined):
     return {
       definition,
       argsSchema: fromJsonSchema(json, schemaValidator) as StandardSchemaWithJSON,
+      argsJSONSchema: json,
     };
   });
 }

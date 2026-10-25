@@ -1,14 +1,27 @@
 // @vitest-environment node
+import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
-import { describe, expect, it } from "vitest";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import { matchAPIRoute } from "../api/route-pattern";
+import { stripFarmBasePath } from "../base-path";
+import { resolveFarmI18nConfig } from "../i18n/config";
+import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import { defineIntegration, dispatchIntegrationRequest } from "../integrations";
 import { MiddlewareManager } from "../middleware/manager";
 import { createProductionMiddlewareRunner } from "../middleware/production-runtime";
 import type { MiddlewareMatcher } from "../middleware/types";
-import { generateRuntimePathMatcherSource } from "../nitro/universal-build";
+import {
+  appMiddlewareMayHandlePath,
+  configMiddlewareMayHandlePath,
+  discoverMiddlewareRoutes,
+  generateRuntimePathMatcherSource,
+} from "../nitro/universal-build";
 import { resolveFarmRequestURL } from "../server/request";
+import { RouteManager } from "../routing/route-manager";
 import type { RouteSegment } from "../types";
 import { matchRoute } from "../utils";
 
@@ -100,7 +113,11 @@ async function runProductionGuard(matcher: MiddlewareMatcher, pathname: string):
 }
 
 /** An integration `protectedRoutes` entry, which becomes `middleware[].matcher`. */
-async function runIntegrationGuard(matcher: string, pathname: string): Promise<GuardRun> {
+async function runIntegrationGuard(
+  matcher: string,
+  pathname: string,
+  config: Record<string, unknown> = {},
+): Promise<GuardRun> {
   const result: GuardRun = { ran: false, params: {} };
   const integration = defineIntegration({
     category: "custom",
@@ -117,7 +134,7 @@ async function runIntegrationGuard(matcher: string, pathname: string): Promise<G
     ],
   });
   await dispatchIntegrationRequest(
-    { integration, config: {}, isDev: false, isProd: true },
+    { integration, config: config as never, isDev: false, isProd: true },
     new Request(`https://farm.test${pathname}`),
   );
   return result;
@@ -358,5 +375,399 @@ describe("route guards match the canonical request pathname", () => {
     });
     await runner(new Request("https://farm.test/api/health/"));
     expect(result.ran).toBe(true);
+  });
+});
+
+describe("integration guards take the middleware matcher syntax", () => {
+  // `protectedRoutes` is documented to use the same matcher syntax as Farm
+  // middleware. The integration pattern language only knew `(.*)` and
+  // `[param]`, so these compared as literal text and guarded nothing.
+  it.each([
+    ["/dashboard/:path*", "/dashboard"],
+    ["/dashboard/:path*", "/dashboard/settings"],
+    ["/dashboard/:path+", "/dashboard/settings/billing"],
+    ["/api/**", "/api/admin"],
+    ["/api/**", "/api/admin/users"],
+    ["/api/*", "/api/admin"],
+    ["/team/:id", "/team/42"],
+  ])("%s guards %s like middleware does", async (matcher, pathname) => {
+    expect(await collectGuards(matcher, pathname)).toEqual({
+      devMiddleware: true,
+      productionMiddleware: true,
+      integration: true,
+    });
+  });
+
+  it.each([
+    ["/dashboard/:path*", "/dashboards"],
+    ["/api/*", "/api/admin/users"],
+    ["/team/:id", "/team"],
+  ])("%s still does not guard %s", async (matcher, pathname) => {
+    expect(await collectGuards(matcher, pathname)).toEqual({
+      devMiddleware: false,
+      productionMiddleware: false,
+      integration: false,
+    });
+  });
+
+  it("keeps catch-all params as arrays for integration patterns", async () => {
+    const run = await runIntegrationGuard("/docs/[...slug]", "/docs/a/b");
+    expect(run).toEqual({ ran: true, params: { slug: ["a", "b"] } });
+  });
+
+  // The page router strips the basePath and the locale prefix before it
+  // matches, so a guard written for the page path has to see that path too.
+  it("guards a localized page path", async () => {
+    const i18n = { locales: ["en", "fr"], defaultLocale: "en" };
+    for (const pathname of [
+      "/dashboard",
+      "/fr/dashboard",
+      "/fr/dashboard/settings",
+      "/en/dashboard",
+    ]) {
+      expect({
+        pathname,
+        ...(await runIntegrationGuard("/dashboard(.*)", pathname, { i18n })),
+      }).toMatchObject({ pathname, ran: true });
+    }
+    expect((await runIntegrationGuard("/dashboard(.*)", "/fr/other", { i18n })).ran).toBe(false);
+    expect((await runIntegrationGuard("/dashboard/:path*", "/fr/dashboard/x", { i18n })).ran).toBe(
+      true,
+    );
+    // Without i18n a first segment is not a locale.
+    expect((await runIntegrationGuard("/dashboard(.*)", "/fr/dashboard")).ran).toBe(false);
+  });
+
+  it("guards a page path under basePath", async () => {
+    const config = { basePath: "/console" };
+    expect((await runIntegrationGuard("/dashboard(.*)", "/console/dashboard", config)).ran).toBe(
+      true,
+    );
+    expect(
+      (await runIntegrationGuard("/dashboard/:path*", "/console/dashboard/a", config)).ran,
+    ).toBe(true);
+    expect((await runIntegrationGuard("/dashboard(.*)", "/console/other", config)).ran).toBe(false);
+    const both = { basePath: "/console", i18n: { locales: ["en", "fr"], defaultLocale: "en" } };
+    expect((await runIntegrationGuard("/dashboard(.*)", "/console/fr/dashboard", both)).ran).toBe(
+      true,
+    );
+  });
+});
+
+describe("integration guards cover both local API prefixes", () => {
+  // A local API route answers at `/api/...` and at the public `api.basePath`. App middleware
+  // guards both, but integration guards only saw the request path, so a matcher naming one
+  // prefix left the other serving the route anonymously.
+  const configs = {
+    // The built server records the resolved path; its `api` stays the raw user config.
+    production: { api: { basePath: "/v2/api" }, __farmAPIServerBasePath: "/v2/api" },
+    // Development dispatch receives the resolved config.
+    development: { api: { baseURL: "/v2/api", basePath: "/v2/api" } },
+  };
+
+  it.each(Object.entries(configs))("guards both prefixes in %s", async (_mode, config) => {
+    for (const matcher of [
+      "/api/private/[...path]",
+      "/v2/api/private/[...path]",
+      "/api/private(.*)",
+      "/api/**",
+    ]) {
+      for (const pathname of ["/api/private/doc", "/v2/api/private/doc"]) {
+        expect({
+          matcher,
+          pathname,
+          ...(await runIntegrationGuard(matcher, pathname, config)),
+        }).toMatchObject({ matcher, pathname, ran: true });
+      }
+    }
+    expect(
+      await runIntegrationGuard("/api/private/[...path]", "/v2/api/private/a/b", config),
+    ).toEqual({ ran: true, params: { path: ["a", "b"] } });
+  });
+
+  it("maps only the API prefix", async () => {
+    const config = configs.production;
+    for (const pathname of ["/v2/apix/private/doc", "/v2/private/doc", "/private/doc"]) {
+      expect((await runIntegrationGuard("/api/private(.*)", pathname, config)).ran).toBe(false);
+    }
+    // No API base path: nothing maps.
+    expect((await runIntegrationGuard("/api/private(.*)", "/v2/api/private/doc")).ran).toBe(false);
+    // An absolute baseURL is another origin; local routes stay at `/api`.
+    const remote = { api: { baseURL: "https://api.example.com/v2", basePath: "/v2" } };
+    expect((await runIntegrationGuard("/api/private(.*)", "/v2/private/doc", remote)).ran).toBe(
+      false,
+    );
+  });
+
+  it("guards a root API base path and one under the app basePath", async () => {
+    const root = { __farmAPIServerBasePath: "/" };
+    expect((await runIntegrationGuard("/api/private(.*)", "/private/doc", root)).ran).toBe(true);
+    const nested = { basePath: "/console", __farmAPIServerBasePath: "/v2/api" };
+    expect(
+      (await runIntegrationGuard("/api/private(.*)", "/console/v2/api/private/doc", nested)).ran,
+    ).toBe(true);
+  });
+});
+
+describe("optional catch-all and wildcard matchers", () => {
+  // `[[...slug]]` compiled as one required segment, so a guard on it skipped
+  // the bare `/docs` page the optional catch-all serves.
+  it.each([
+    ["/docs/[[...slug]]", "/docs"],
+    ["/docs/[[...slug]]", "/docs/a"],
+    ["/docs/[[...slug]]", "/docs/a/b"],
+    ["/admin*", "/admin"],
+    ["/admin*", "/admin-panel"],
+    ["/files/*.pdf", "/files/report.pdf"],
+    ["/team/:id?", "/team"],
+    ["/team/:id?", "/team/42"],
+  ])("%s guards %s", async (matcher, pathname) => {
+    expect(await collectGuards(matcher, pathname)).toEqual({
+      devMiddleware: true,
+      productionMiddleware: true,
+      integration: true,
+    });
+  });
+
+  it.each([
+    ["/docs/[[...slug]]", "/docsx"],
+    ["/admin*", "/admin/users"],
+    ["/admin*", "/xadmin"],
+    ["/files/*.pdf", "/files/report.txt"],
+    ["/team/:id?", "/team/42/edit"],
+  ])("%s still does not guard %s", async (matcher, pathname) => {
+    expect(await collectGuards(matcher, pathname)).toEqual({
+      devMiddleware: false,
+      productionMiddleware: false,
+      integration: false,
+    });
+  });
+
+  it("captures the optional catch-all under its own name", async () => {
+    expect((await runProductionGuard("/docs/[[...slug]]", "/docs/a/b")).params).toEqual({
+      slug: "a/b",
+    });
+    expect((await runDevGuard("/docs/[[...slug]]", "/docs")).params).toEqual({ slug: "" });
+  });
+
+  it("runs docs/[[...slug]]/middleware.ts for every path its page serves", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-optional-catch-all-"));
+    const appDir = path.join(root, "src", "app");
+    await fs.mkdir(path.join(appDir, "docs", "[[...slug]]"), { recursive: true });
+    await fs.writeFile(path.join(appDir, "docs", "[[...slug]]", "middleware.ts"), "export {};\n");
+
+    try {
+      const ran: string[] = [];
+      const handler = async (ctx: { pathname: string }, next: () => Promise<void>) => {
+        ran.push(ctx.pathname);
+        await next();
+      };
+      const manager = new MiddlewareManager(appDir, {
+        environments: {
+          ssr: { runner: { import: vi.fn().mockResolvedValue({ default: handler }) } },
+        },
+      } as never);
+      await manager.discover();
+      const production = createProductionMiddlewareRunner({
+        modules: (await discoverMiddlewareRoutes(appDir)).map((entry) => ({
+          path: entry.path,
+          module: { default: handler },
+        })),
+      });
+
+      for (const [pathname, guarded] of [
+        ["/docs", true],
+        ["/docs/", true],
+        ["/docs/intro", true],
+        ["/docs/a/b", true],
+        ["/docsx", false],
+      ] as const) {
+        expect(prodPageMatches("/docs/[[...slug]]", pathname)).toBe(guarded);
+        ran.length = 0;
+        const req = createRequest(pathname);
+        await manager.execute(req, new ServerResponse(req));
+        const devRan = ran.length > 0;
+        ran.length = 0;
+        await production(new Request(`https://farm.test${pathname}`));
+        expect({ pathname, dev: devRan, production: ran.length > 0 }).toEqual({
+          pathname,
+          dev: guarded,
+          production: guarded,
+        });
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("basePath with i18n strips the base path once", () => {
+  // The built page router stripped basePath and then let the locale step strip
+  // it again, while every guard stripped it once. `/console/console/secret`
+  // rendered the `/secret` page and its guards, seeing `/console/secret`,
+  // never ran.
+  const i18n = resolveFarmI18nConfig(
+    { locales: ["en", "de"], defaultLocale: "en", routing: "prefix-except-default" },
+    { basePath: "/console" },
+  );
+  const source = fsSync.readFileSync(
+    new URL("../nitro/universal-build.ts", import.meta.url),
+    "utf8",
+  );
+  const start = source.indexOf(
+    "function getFarmRoutePathname(pathname) {\n  return farmI18nRuntime",
+  );
+  const productionRoutePathname = new Function(
+    "farmI18nRuntime",
+    "farmI18nConfig",
+    "stripFarmLocaleFromPathname",
+    "stripFarmBasePath",
+    `${source.slice(start, source.indexOf("\n}\n", start) + 3)}return getFarmRoutePathname;`,
+  )({}, i18n, stripFarmLocaleFromPathname, (pathname: string) =>
+    stripFarmBasePath(pathname, "/console"),
+  ) as (pathname: string) => string;
+
+  it.each([
+    ["/console/secret", "/secret"],
+    ["/console/de/secret", "/secret"],
+    ["/console/console/secret", "/console/secret"],
+    ["/console/console/de/secret", "/console/de/secret"],
+    ["/console/de/console/secret", "/console/secret"],
+  ])("%s routes to %s, and every guard sees the same path", async (pathname, routePath) => {
+    expect(start).toBeGreaterThan(-1);
+    expect(productionRoutePathname(pathname)).toBe(routePath);
+    // The dev page router already strips once.
+    expect(
+      (
+        RouteManager.prototype as unknown as { toRoutePathname(pathname: string): string }
+      ).toRoutePathname.call(
+        { config: { basePath: "/console" }, getI18nConfig: () => i18n },
+        pathname,
+      ),
+    ).toBe(routePath);
+    const servesSecret = routePath === "/secret";
+
+    const ran = { dev: false, production: false };
+    const fileGuard = (key: keyof typeof ran) => ({
+      default: async (_ctx: unknown, next: () => Promise<void>) => {
+        ran[key] = true;
+        await next();
+      },
+    });
+    await createProductionMiddlewareRunner({
+      modules: [{ path: "/secret", module: fileGuard("production") }],
+      i18n,
+    })(new Request(`https://farm.test${pathname}`));
+    const appDir = fsSync.mkdtempSync(path.join(os.tmpdir(), "farm-base-path-i18n-"));
+    try {
+      fsSync.mkdirSync(path.join(appDir, "secret"));
+      fsSync.writeFileSync(path.join(appDir, "secret", "middleware.ts"), "export {};\n");
+      const vite = {
+        environments: {
+          ssr: { runner: { import: vi.fn().mockResolvedValue(fileGuard("dev")) } },
+        },
+      };
+      const manager = new MiddlewareManager(appDir, vite as never, undefined, i18n);
+      await manager.discover();
+      const req = createRequest(pathname);
+      await manager.execute(req, new ServerResponse(req));
+    } finally {
+      fsSync.rmSync(appDir, { recursive: true, force: true });
+    }
+    const integration = await runIntegrationGuard("/secret(.*)", pathname, {
+      basePath: "/console",
+      i18n,
+    });
+
+    expect({ pathname, ...ran, integration: integration.ran }).toEqual({
+      pathname,
+      dev: servesSecret,
+      production: servesSecret,
+      integration: servesSecret,
+    });
+  });
+});
+
+describe("prerendering agrees with the runtime middleware matcher", () => {
+  // A prerendered page becomes a public file that middleware never sees, so
+  // the build may only prerender a path when runtime middleware would skip it.
+  // The build used its own matcher copy: `/members/(.*)` kept the trailing
+  // slash and never met `/members/secret`, so a guarded page shipped as a
+  // static file served to everyone.
+  const cases: Array<{ matcher: string; exclude?: string[]; pathname: string }> = [
+    { matcher: "/members/(.*)", pathname: "/members/secret" },
+    { matcher: "/members/(.*)", pathname: "/members" },
+    { matcher: "/members(.*)", pathname: "/members/secret" },
+    { matcher: "/members/:path*", pathname: "/members/a/b" },
+    { matcher: "/(.*)", exclude: ["/docs/[[...slug]]"], pathname: "/docs" },
+    { matcher: "/(.*)", exclude: ["/docs/[[...slug]]"], pathname: "/docs/a" },
+    { matcher: "/(.*)", exclude: ["/a/:p?"], pathname: "/a" },
+    { matcher: "/(.*)", exclude: ["/a/:p?"], pathname: "/a/b" },
+    { matcher: "/(.*)", exclude: ["/public(.*)"], pathname: "/public/page" },
+    { matcher: "/members/(.*)", pathname: "/other" },
+    { matcher: "/members/(.*)", pathname: "/membership" },
+  ];
+
+  it.each(cases)(
+    "$matcher (exclude $exclude) at $pathname",
+    async ({ matcher, exclude, pathname }) => {
+      let ran = false;
+      const runner = createProductionMiddlewareRunner({
+        config: [
+          {
+            matcher: [matcher],
+            exclude,
+            handler() {
+              ran = true;
+            },
+          },
+        ],
+      });
+      await runner(new Request(`https://farm.test${pathname}`));
+      const buildKeepsServerHandled = configMiddlewareMayHandlePath(
+        [{ matcher: [matcher], exclude, handler() {} }] as never,
+        pathname,
+      );
+      expect({ pathname, buildKeepsServerHandled }).toEqual({
+        pathname,
+        buildKeepsServerHandled: ran,
+      });
+    },
+  );
+
+  it("keeps a request-aware matcher server-handled", () => {
+    expect(
+      configMiddlewareMayHandlePath([{ matcher: [() => false], handler() {} }] as never, "/x"),
+    ).toBe(true);
+  });
+
+  it("matches file middleware routes like the production runner", async () => {
+    for (const [routePath, pathname] of [
+      ["/members", "/members/secret"],
+      ["/members", "/members"],
+      ["/docs/[[...slug]]", "/docs/a/b"],
+      ["/members", "/membership"],
+    ] as const) {
+      let ran = false;
+      const runner = createProductionMiddlewareRunner({
+        modules: [
+          {
+            path: routePath,
+            module: {
+              default: async (_ctx: unknown, next: () => Promise<void>) => {
+                ran = true;
+                await next();
+              },
+            },
+          },
+        ],
+      });
+      await runner(new Request(`https://farm.test${pathname}`));
+      expect({
+        routePath,
+        pathname,
+        build: appMiddlewareMayHandlePath([{ path: routePath } as never], pathname),
+      }).toEqual({ routePath, pathname, build: ran });
+    }
   });
 });

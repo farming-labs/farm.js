@@ -34,6 +34,11 @@
   outline-offset: 3px;
 }
 .agent-waitlist button {
+  /* Center the label (and the loader beside it while busy) as a box. Left to the line box, the
+     loader's grid moves the baseline and pushes the busy content a few pixels down. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 166px;
   min-height: 44px;
   padding: 12px 16px;

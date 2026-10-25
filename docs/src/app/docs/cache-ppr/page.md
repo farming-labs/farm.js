@@ -275,8 +275,27 @@ Provider-specific adapters should use atomic increments or transactions when the
 supports them. Lease-capable adapters return an ownership token from `acquireLease` and only
 release the lease when `releaseLease(key, token)` still matches that owner.
 
+Adapter keys are opaque strings that can contain `/`, `:`, `?` and other URL characters, for example
+a PPR shell key carries the request path and query string. A custom adapter must store each key
+distinctly. If `get` returns an entry whose `key` belongs to another lookup, Farm treats the read as
+a miss and regenerates the value.
+
+Entries with a finite `revalidate` carry an `expiresAt` timestamp. It covers the fresh window plus
+one more `revalidate` window as stale (never less than 60 seconds), so stale-while-revalidate readers
+can still serve the previous value. Adapters with native expiry should pass it to their backend so
+one-off keys, such as one PPR shell per query string or one server query entry per input, do not
+accumulate forever. Farm also deletes an entry it reads after `expiresAt`. Entries with
+`revalidate: false` or no `revalidate` never expire on their own and stay until they are replaced or
+invalidated.
+
 For any Farm/unstorage-compatible client, `storageCacheAdapter(storage)` provides a portable
-baseline. `@farm.js/cache-redis` adds Redis-native atomic tag increments and regeneration leases.
+baseline. It percent-encodes keys and tags before handing them to the storage client, because
+unstorage drops everything after `?` and folds `/`, `\` and `:` into one separator, and it stores
+keys longer than 200 encoded characters under their SHA-256 hash so they stay within driver key
+limits. It passes the remaining lifetime as the unstorage `ttl` option, in seconds. Drivers that
+support `ttl` (memory, Redis, Upstash, Cloudflare KV, and others) drop expired entries; drivers that
+ignore it rely on the delete-on-read cleanup. `@farm.js/cache-redis` adds Redis-native atomic tag
+increments, regeneration leases, and `PX` expiry.
 
 **src/app/api/products/route.ts**
 
@@ -301,6 +320,13 @@ PPR works best when the stable page shell is outside Suspense and request-specif
 When a production render actually suspends, Farm currently buffers that response for late status
 errors and bypasses the shared PPR shell cache. This preserves fresh request-specific content
 instead of caching a completed response as though it were a reusable partial shell.
+
+A render that reads the request with `headers()`, `cookies()`, or `getCurrentRequest()` is one
+visitor's HTML, wherever the read happens: the page, a layout, `generateMetadata`, or a helper they
+import. Farm never stores that render as a PPR shell, in development or production. Production
+sends it with `X-Farm-PPR: bypass` and `Cache-Control: private, no-store`. The same applies to a `revalidate` route whose layout reads the
+request: it renders per request instead of advertising a shared `s-maxage`. Reads in middleware do
+not count, since they run before the page renders.
 
 ```tsx
 import { Suspense } from "react";

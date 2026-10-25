@@ -19,6 +19,7 @@ import { REACT_RENDERER } from "../renderer";
 import { Link } from "../client/link";
 import { setFarmBasePath } from "../base-path";
 import { createFarmIsolatedClientBoundary } from "../client/isolated-boundary";
+import { headers } from "../headers";
 
 type MockResponse = FarmResponse & {
   body: string;
@@ -104,6 +105,58 @@ describe("file route loading.tsx and error.tsx", () => {
 
     expect(response.headers.get("x-farm-ppr")).toBe("bypass");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  it("never caches a PPR shell whose layout read the request", async () => {
+    const visit = async (renderer: any, user: string, url: string) => {
+      const response = createMockResponse();
+      const request = createMockRequest(url);
+      request.headers["x-user"] = user;
+      await renderer.renderPage(request, response);
+      return response;
+    };
+    const createPPRRenderer = (readsRequest: boolean) => {
+      const renderer = createRenderer(
+        {
+          [routeModulePath]: {
+            ppr: true,
+            default: function DashboardPage() {
+              return React.createElement("main", null, "PPR page");
+            },
+          },
+          [dashboardLayoutModulePath]: {
+            default: function DashboardLayout({ children }: { children: React.ReactNode }) {
+              const visitor = readsRequest ? (headers().get("x-user") ?? "anon") : "shared";
+              return React.createElement("article", null, `visitor=${visitor}`, children);
+            },
+          },
+        },
+        { dashboardLayoutMetadata: { shouldHydrate: false } },
+      ) as any;
+      renderer.config.experimental.ppr = true;
+      return renderer;
+    };
+
+    // The shell cache is process-wide, so each case uses its own search key.
+    const reading = createPPRRenderer(true);
+    const readingWrites = vi.spyOn(reading, "cachePPRShell");
+    expect((await visit(reading, "alice", "/dashboard?ppr=reads")).body).toContain("visitor=alice");
+    await Promise.all(readingWrites.mock.results.map((result) => result.value));
+    const bob = await visit(reading, "bob", "/dashboard?ppr=reads");
+    expect(bob.body).not.toContain("alice");
+    expect(bob.body).toContain("visitor=bob");
+    expect(bob.headers.get("x-farm-ppr")).not.toBe("hit");
+    expect(readingWrites).not.toHaveBeenCalled();
+
+    // A layout that does not read the request still produces a reusable shell.
+    const shared = createPPRRenderer(false);
+    const sharedWrites = vi.spyOn(shared, "cachePPRShell");
+    await visit(shared, "alice", "/dashboard?ppr=shared");
+    expect(sharedWrites).toHaveBeenCalledTimes(1);
+    await Promise.all(sharedWrites.mock.results.map((result) => result.value));
+    expect((await visit(shared, "bob", "/dashboard?ppr=shared")).headers.get("x-farm-ppr")).toBe(
+      "hit",
+    );
   });
 
   it("renders the nearest loading.tsx while a file route suspends", async () => {

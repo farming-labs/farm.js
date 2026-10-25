@@ -422,8 +422,11 @@ if (farmNativeMCPPlugin) {
     methods: [...route.methods],
     endpoints: { ...route.handlers },
   }));
-  // Rejects a plugin route that would replace an app endpoint.
-  for (const route of mergePluginAPIRoutes(mountedRoutes, [farmNativeMCPPlugin])) {
+  // Rejects a plugin route that would replace an app endpoint. An MCP tool calls its
+  // endpoint through handler(), so the middleware guarding that path runs for it.
+  for (const route of mergePluginAPIRoutes(mountedRoutes, [farmNativeMCPPlugin], undefined, {
+    dispatch: (request) => handler(request),
+  })) {
     for (const method of route.pluginMethods ?? []) {
       let target = apiRouteMap.get(route.path);
       if (!target) {
@@ -486,9 +489,20 @@ const farmMiddlewareRunner = createProductionMiddlewareRunner({
     .filter((entry) => entry.path !== null)
     // Root first, as core runs them: a nested guard can rely on what its
     // parent middleware set, and glob order is alphabetical, not by depth.
-    .sort((left, right) => middlewareRouteDepth(left.path) - middlewareRouteDepth(right.path)),
+    // Route groups share a URL path; the shallower file runs first, so
+    // '/middleware.ts' precedes '/(app)/middleware.ts'.
+    .sort(
+      (left, right) =>
+        middlewareRouteDepth(left.path) - middlewareRouteDepth(right.path) ||
+        left.path.localeCompare(right.path) ||
+        middlewareRouteDepth(left.filePath) - middlewareRouteDepth(right.filePath) ||
+        left.filePath.localeCompare(right.filePath),
+    ),
   i18n: ${JSON.stringify(ctx.i18n) ?? "undefined"},
   server: ${JSON.stringify(ctx.server) ?? "undefined"},
+  apiBasePath: farmApiBasePath,
+  // matchRoute() reads url.pathname as received, so middleware guards that path too.
+  rawPathRouting: true,
 });
 
 debug('Discovered pages:', Object.keys(pages));
@@ -501,22 +515,37 @@ debug('Discovered API routes:', Array.from(apiRouteMap.keys()));
 /**
  * Convert an app-relative middleware file path to the route it guards, with the
  * same rules as core's middleware discovery: a route group such as
- * '(protected)' adds no URL segment, and a '_private' or dot-prefixed folder
+ * '(protected)' or a parallel route slot such as '@team' adds no URL segment,
+ * an intercepting folder guards the URL it intercepts, a '_private' folder
+ * routes its pages so its middleware guards them, and a dot-prefixed folder
  * holds no routes, so its middleware never runs (null).
  * e.g., '/middleware.ts' -> '/'
  * e.g., '/(protected)/dashboard/middleware.ts' -> '/dashboard'
+ * e.g., '/dashboard/@team/middleware.ts' -> '/dashboard'
+ * e.g., '/feed/@modal/(.)photo/middleware.ts' -> '/feed/photo'
  */
 function middlewarePathToRoute(filePath) {
   const segments = filePath
     .replace(/\\/middleware\\.[tj]sx?$/, '')
     .split('/')
     .filter(Boolean);
-  if (segments.some((segment) => segment.startsWith('_') || segment.startsWith('.'))) {
+  if (segments.some((segment) => segment.startsWith('.'))) {
     return null;
   }
-  const routeSegments = segments.filter(
-    (segment) => !(segment.startsWith('(') && segment.endsWith(')')),
-  );
+  const routeSegments = [];
+  for (const segment of segments) {
+    const marker = /^((?:\\(\\.\\.\\))+|\\(\\.\\.\\.\\)|\\(\\.\\))(.*)$/.exec(segment);
+    if (marker) {
+      if (marker[1] === '(...)') routeSegments.length = 0;
+      else if (marker[1] !== '(.)') routeSegments.splice(-(marker[1].length / 4));
+      if (marker[2]) routeSegments.push(marker[2]);
+      continue;
+    }
+    if ((segment.startsWith('(') && segment.endsWith(')')) || /^@[A-Za-z][A-Za-z0-9_-]*$/.test(segment)) {
+      continue;
+    }
+    routeSegments.push(segment);
+  }
   return routeSegments.length === 0 ? '/' : '/' + routeSegments.join('/');
 }
 
@@ -575,7 +604,12 @@ const RouteErrorBoundary = React.Component
 
 // Parse and rank once per entry initialization, not on every request. Use the
 // same validation, decoding and specificity rules as Farm's ordinary router.
-const pageRoutes = Object.entries(pages).map(([filePath, module]) => ({
+// RSC renders no parallel route slots, so a page inside '@modal/...' would otherwise
+// answer at its literal folder path ('/feed/@modal/(.)photo/1'), past the middleware
+// that guards the URL it intercepts.
+const pageRoutes = Object.entries(pages)
+  .filter(([filePath]) => !filePath.split('/').some((segment) => /^@[A-Za-z][A-Za-z0-9_-]*$/.test(segment)))
+  .map(([filePath, module]) => ({
   filePath,
   module,
   segments: parseRoutePath(filePath).segments,

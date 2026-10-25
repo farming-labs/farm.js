@@ -11,7 +11,7 @@ import {
   type TunnelRequestMessage,
   type TunnelResponseMessage,
 } from "./protocol.js";
-import { getHopByHopHeaderNames, getRecordHeader } from "./headers.js";
+import { getHopByHopHeaderNames, getRecordHeader, PREVIEW_REQUEST_HEADER } from "./headers.js";
 import { closeWebSocket } from "./websocket.js";
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -21,6 +21,11 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
  * timing. `node:crypto`'s timingSafeEqual needs equal-length buffers, so the
  * length is folded in instead of being an early return.
  */
+function withoutCookieDomain(setCookie: string): string {
+  const [pair, ...attributes] = setCookie.split(";");
+  return [pair, ...attributes.filter((part) => !/^\s*domain\s*(=|$)/i.test(part))].join(";");
+}
+
 function secretsMatch(presented: string, expected: string): boolean {
   if (!expected) return false;
   let mismatch = presented.length === expected.length ? 0 : 1;
@@ -943,9 +948,16 @@ function getEncodedBodySize(body: string | undefined) {
 function writeTunnelResponse(response: ServerResponse, message: TunnelResponseMessage) {
   const hopByHopHeaders = getHopByHopHeaderNames(getRecordHeader(message.headers, "connection"));
   for (const [name, value] of Object.entries(message.headers)) {
-    if (!hopByHopHeaders.has(name.toLowerCase())) {
-      response.setHeader(name, value);
-    }
+    if (hopByHopHeaders.has(name.toLowerCase())) continue;
+    // Every preview is a sibling host under the relay's domain. A tenant cookie
+    // with `Domain=<domain>` would reach every other preview, so a proxied
+    // cookie stays host-only.
+    response.setHeader(
+      name,
+      name.toLowerCase() === "set-cookie"
+        ? (Array.isArray(value) ? value : [value]).map(withoutCookieDomain)
+        : value,
+    );
   }
   response.setHeader("cache-control", "no-store");
   response.setHeader("x-farm-preview-transport", "websocket");
@@ -1035,12 +1047,17 @@ function normalizeIncomingHeaders(
       value === undefined ||
       hopByHopHeaders.has(lowerName) ||
       lowerName === "forwarded" ||
-      lowerName.startsWith("x-forwarded-")
+      lowerName.startsWith("x-forwarded-") ||
+      lowerName === PREVIEW_REQUEST_HEADER
     ) {
       continue;
     }
     normalized[name] = Array.isArray(value) ? value.join(", ") : value;
   }
+
+  // Marks the request as tunnelled so the dev server can keep developer-only files and tools off
+  // the public URL. Set here, not trusted from the visitor, so it can be neither forged nor removed.
+  normalized[PREVIEW_REQUEST_HEADER] = "1";
 
   const publicUrl = new URL(publicBaseUrl);
   normalized["x-forwarded-host"] = publicDomain

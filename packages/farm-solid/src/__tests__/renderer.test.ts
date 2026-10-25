@@ -4,10 +4,13 @@ import { Writable } from "node:stream";
 import {
   defineRendererDescriptorConformance,
   defineRendererServerConformance,
+  defineRendererServerQueryConformance,
 } from "@farm.js/renderer-tests";
 import { createSignal, createUniqueId } from "solid-js";
 import { escape, ssr, ssrAttribute, ssrHydrationKey } from "solid-js/web";
 import { describe, expect, it } from "vitest";
+import type { ServerQuery } from "@farm.js/core/server-query";
+import { useServerQuery } from "../bindings";
 import { solid } from "../index";
 import * as serverRuntime from "../server";
 import {
@@ -35,6 +38,20 @@ defineRendererDescriptorConformance({
 });
 
 defineRendererServerConformance(serverRuntime);
+
+defineRendererServerQueryConformance({
+  name: "solid",
+  renderQuery(query) {
+    const Account = () => {
+      const account = useServerQuery(
+        query as unknown as ServerQuery<undefined, { email: string }>,
+        undefined,
+      );
+      return ssr(["<p>", "</p>"], escape(`account=${account.data?.email ?? "loading"}`));
+    };
+    return renderToString(createElement(Account, null));
+  },
+});
 
 describe("Solid renderer", () => {
   it("streams FARMJS elements through Solid's Node adapter", async () => {
