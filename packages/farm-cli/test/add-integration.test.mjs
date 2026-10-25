@@ -399,7 +399,7 @@ test("scaffolds a working Better Auth starter with its UI dependencies", async (
     const env = await readFile(path.join(root, ".env.example"), "utf8");
     const gitignore = await readFile(path.join(root, ".gitignore"), "utf8");
 
-    assert.equal(packageJson.dependencies["better-auth"], "^1.5.5");
+    assert.equal(packageJson.dependencies["better-auth"], "^1.6.22");
     assert.equal(packageJson.dependencies["better-sqlite3"], "^12.6.2");
     assert.equal(packageJson.devDependencies["@types/better-sqlite3"], "^7.6.13");
     assert.match(auth, /emailAndPassword:/);

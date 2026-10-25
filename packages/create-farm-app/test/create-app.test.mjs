@@ -30,6 +30,12 @@ async function assertRendererNeutralStarter(generatedDir, packageJson) {
   assert.equal(packageJson.dependencies["@farming-labs/theme"], undefined);
   assert.equal(packageJson.dependencies.react, undefined);
   assert.equal(packageJson.dependencies["react-dom"], undefined);
+  // GHSA-mrhx-c7xc-m3w5 is fixed in zod 4.6.6.
+  const zod = packageJson.dependencies.zod
+    .replace(/^[\^~]/, "")
+    .split(".")
+    .map(Number);
+  assert.ok(zod[0] > 4 || (zod[0] === 4 && (zod[1] > 6 || (zod[1] === 6 && zod[2] >= 6))));
   await assert.rejects(readFile(path.join(generatedDir, "docs.config.ts"), "utf8"));
   await assert.rejects(readFile(path.join(generatedDir, "docs.json"), "utf8"));
   await assert.rejects(readFile(path.join(generatedDir, "src/app/docs/page.md"), "utf8"));
