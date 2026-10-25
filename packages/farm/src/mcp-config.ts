@@ -203,6 +203,11 @@ export interface FarmMCPConfig {
   /** Deliberate escape hatch for public servers. Authentication is required by default. */
   allowUnauthenticated?: boolean;
   /**
+   * Most JSON-RPC messages one batched POST may carry. `authorize` runs once per message, so a
+   * larger batch is refused before any of them is authorized. @default 25
+   */
+  maxBatchSize?: number;
+  /**
    * OAuth discovery for MCP clients. When set, a rejected request's 401 points at
    * RFC 9728 Protected Resource Metadata naming these authorization servers, which
    * Farm serves at `/.well-known/oauth-protected-resource/<endpoint path>`.

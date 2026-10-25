@@ -305,6 +305,9 @@ function createHandler(
   });
 
   return async (request: Request, parsedBody: unknown): Promise<Response> => {
+    if (Array.isArray(parsedBody) && parsedBody.length > options.maxBatchSize) {
+      return batchTooLarge(options.maxBatchSize);
+    }
     let authorization: APIMCPAuthorization;
     if (options.authorize) {
       const messages =
@@ -324,7 +327,7 @@ function createHandler(
         });
         if (result === false) {
           denied = true;
-          continue;
+          break;
         }
         if (!result || typeof result.subject !== "string" || result.subject.length === 0) {
           throw new TypeError(
@@ -1054,6 +1057,24 @@ const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource"
  * and with `oauth` configured the challenge links the endpoint's metadata so a
  * client can find the authorization server.
  */
+/** A JSON-RPC Invalid Request for the whole batch, sent before any message is authorized. */
+function batchTooLarge(maxBatchSize: number): Response {
+  return new Response(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: null,
+      error: {
+        code: -32600,
+        message: `A JSON-RPC batch may carry at most ${maxBatchSize} messages.`,
+      },
+    }),
+    {
+      status: 400,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    },
+  );
+}
+
 function unauthorized(request: Request, options: NormalizedOptions): Response {
   const parameters: string[] = [];
   if (options.oauth) {
@@ -1104,11 +1125,17 @@ function toolError(message: string) {
   return { isError: true, content: [{ type: "text" as const, text: message }] };
 }
 
-interface NormalizedOptions extends Omit<APIMCPOptions, "path" | "name" | "version"> {
+interface NormalizedOptions extends Omit<
+  APIMCPOptions,
+  "path" | "name" | "version" | "maxBatchSize"
+> {
   path: `/api/${string}`;
   name: string;
   version: string;
+  maxBatchSize: number;
 }
+
+const DEFAULT_MAX_BATCH_SIZE = 25;
 
 function validateOAuth(oauth: NonNullable<APIMCPOptions["oauth"]>): void {
   const servers = oauth?.authorizationServers;
@@ -1154,9 +1181,14 @@ function validateOptions(options: APIMCPOptions): NormalizedOptions {
   if (!/^\/api\/[^/?#]+(?:\/[^/?#]+)*$/.test(path)) {
     throw new TypeError("apiMcp path must be a canonical /api path.");
   }
+  const maxBatchSize = options.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE;
+  if (!Number.isInteger(maxBatchSize) || maxBatchSize < 1) {
+    throw new TypeError("apiMcp maxBatchSize must be a positive integer.");
+  }
   return {
     ...options,
     path,
+    maxBatchSize,
     name: options.name ?? "farm-api",
     version: options.version ?? "1.0.0",
   };

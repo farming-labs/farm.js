@@ -431,6 +431,49 @@ describe("apiMcp", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it("refuses an oversized batch before authorizing any of it and stops at the first deny", async () => {
+    const health = route.get("/api/health", {
+      mcp: { name: "health" },
+      handler: () => ({ ok: 1 }),
+    });
+    const mount = (options: Parameters<typeof apiMcp>[0]) =>
+      mergePluginAPIRoutes(
+        [{ path: health.path, methods: [health.method], endpoints: { GET: health.endpoint } }],
+        [apiMcp(options)],
+      ).find((entry) => entry.path === "/api/mcp")!.endpoints.POST;
+    const batch = (size: number) =>
+      Array.from({ length: size }, (_, index) => ({
+        jsonrpc: "2.0",
+        id: index + 1,
+        method: "tools/list",
+        params: {},
+      }));
+
+    // An anonymous body asks for one authorize call per message.
+    const authorize = vi.fn(() => false as const);
+    const capped = await sendMCP(mount({ authorize }), batch(26));
+    expect(capped.status).toBe(400);
+    expect(await capped.json()).toEqual({
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: -32600, message: "A JSON-RPC batch may carry at most 25 messages." },
+    });
+    expect(authorize).not.toHaveBeenCalled();
+
+    // Within the cap, the first refusal ends authorization.
+    const denied = await sendMCP(mount({ authorize }), batch(25));
+    expect(denied.status).toBe(401);
+    expect(authorize).toHaveBeenCalledTimes(1);
+
+    // The cap is configurable and also bounds a public server.
+    const custom = await sendMCP(mount({ allowUnauthenticated: true, maxBatchSize: 2 }), batch(3));
+    expect(custom.status).toBe(400);
+    expect(
+      (await sendMCP(mount({ allowUnauthenticated: true, maxBatchSize: 2 }), batch(2))).status,
+    ).toBe(200);
+    expect(() => apiMcp({ allowUnauthenticated: true, maxBatchSize: 0 })).toThrow("maxBatchSize");
+  });
+
   it("rejects batches that resolve to different authorization identities", async () => {
     const handler = vi.fn(() => ({ deleted: true }));
     const destructive = route.delete("/api/projects", {
