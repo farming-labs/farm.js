@@ -136,6 +136,48 @@ describe("app markdown pages", () => {
     await expect(response?.text()).resolves.toBe("# Curated home");
   });
 
+  it("checks the page as an outsider for a caller with a client address", async () => {
+    const seen: Array<{ headers: string[] }> = [];
+    const source = { filePath: "/app/office/page.md", source: "# Office" };
+    const respond = (request: Request, clientAddress?: string) =>
+      appMarkdownRuntime.createFarmMarkdownSourceResponse({
+        request,
+        config: resolveMdxConfig(undefined),
+        clientAddress,
+        resolveSource: () => source,
+        renderPage(pageRequest) {
+          seen.push({ headers: [...pageRequest.headers.keys()].sort() });
+          // Stands in for an office IP allowlist: the anonymous check is refused.
+          return new Response("office network only", { status: 403 });
+        },
+      });
+    const negotiated = (headers: Record<string, string> = {}) =>
+      new Request("https://farm.test/office", { headers: { accept: "text/markdown", ...headers } });
+
+    for (const [request, clientAddress] of [
+      [negotiated({ "x-real-ip": "10.0.0.5" }), undefined],
+      [negotiated({ "x-forwarded-for": "10.0.0.5", forwarded: "for=10.0.0.5" }), undefined],
+      [negotiated({ via: "1.1 office-proxy" }), undefined],
+      [negotiated(), "10.0.0.5"],
+    ] as const) {
+      expect(await respond(request, clientAddress)).toBeNull();
+    }
+    expect(
+      await (await respond(new Request("https://farm.test/office.md"), "10.0.0.5"))!.status,
+    ).toBe(404);
+    // Only the anonymous visitor's own headers reach the check.
+    expect(seen.map((entry) => entry.headers)).toEqual(Array(5).fill(["accept"]));
+
+    // The check's own request is already the anonymous visitor's, so it is served.
+    seen.length = 0;
+    const inner = await respond(
+      negotiated(),
+      appMarkdownRuntime.FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS,
+    );
+    expect(inner?.headers.get("cache-control")).toContain("public");
+    expect(seen).toEqual([]);
+  });
+
   it("ignores content negotiation when markdown has zero preference", async () => {
     const response = await createFarmMarkdownSourceResponse({
       request: new Request("https://farm.test/about", {

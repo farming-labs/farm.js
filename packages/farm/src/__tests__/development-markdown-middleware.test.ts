@@ -582,6 +582,13 @@ export default function Page() { return <main>must not render</main>; }`,
       },
     },
     {
+      matcher: "/office",
+      handler(ctx, next) {
+        if (ctx.request.headers["x-real-ip"] === "10.0.0.5") return next();
+        return new Response("office network only", { status: 403 });
+      },
+    },
+    {
       matcher: "/partners",
       handler(ctx, next) {
         if (ctx.request.headers["x-api-key"] === "partner-key") return next();
@@ -607,6 +614,7 @@ export default function Layout({ children }) {
     await writeModule(root, "src/app/open/page.md", `# Open notes\n\nopen-notes-source\n`);
     await writeModule(root, "src/app/members/page.md", `# Members\n\nmembers-only-source\n`);
     await writeModule(root, "src/app/partners/page.md", `# Partners\n\npartners-only-source\n`);
+    await writeModule(root, "src/app/office/page.md", `# Office\n\noffice-only-source\n`);
 
     const server = await createServer({ root, images: { provider: "none" } });
     servers.add(server);
@@ -645,6 +653,26 @@ export default function Layout({ children }) {
     // The key holder may read the page; whatever represents it stays out of shared caches.
     expect(partnersNegotiated.headers.get("cache-control")).toBe("private, no-store");
     await partnersNegotiated.body?.cancel();
+
+    // An IP allowlist sees the anonymous check without the caller's client IP headers.
+    for (const officeHeaders of [
+      { "x-real-ip": "10.0.0.5" },
+      { "x-forwarded-for": "10.0.0.5", "x-real-ip": "10.0.0.5" },
+    ]) {
+      const officeMarkdown = await fetch(`${origin}/office.md`, { headers: officeHeaders });
+      expect(officeMarkdown.status).toBe(404);
+      expect(officeMarkdown.headers.get("cache-control")).toBe("private, no-store");
+      await expect(officeMarkdown.text()).resolves.not.toContain("office-only-source");
+      const officeNegotiated = await fetch(`${origin}/office`, {
+        headers: { ...officeHeaders, accept: "text/markdown" },
+      });
+      expect(officeNegotiated.headers.get("cache-control") ?? "").not.toContain("public");
+      await officeNegotiated.body?.cancel();
+    }
+    const officeIpOpen = await fetch(`${origin}/open.md`, { headers: { "x-real-ip": "10.0.0.5" } });
+    expect(officeIpOpen.status).toBe(200);
+    expect(officeIpOpen.headers.get("cache-control")).toContain("public");
+    await officeIpOpen.body?.cancel();
 
     // Routes outside every matcher keep serving their markdown source.
     const openResponse = await fetch(`${origin}/open.md`);

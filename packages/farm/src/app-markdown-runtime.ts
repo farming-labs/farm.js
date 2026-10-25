@@ -163,7 +163,8 @@ export function isFarmMarkdownPublicSourceResponse(response: Response): boolean 
 /**
  * Request headers that carry no caller identity: what browsers send on their own, conditional
  * request validators, and the proxy's description of the transport. `Cookie`, `Authorization`,
- * and every custom header are left out.
+ * the client address a proxy reports (`Forwarded`, `Via`, `X-Forwarded-For`, `X-Real-IP` and
+ * the like), and every custom header are left out: an IP allowlist is a guard too.
  */
 const ANONYMOUS_REQUEST_HEADERS = new Set([
   "accept",
@@ -172,7 +173,6 @@ const ANONYMOUS_REQUEST_HEADERS = new Set([
   "cache-control",
   "connection",
   "dnt",
-  "forwarded",
   "host",
   "if-match",
   "if-modified-since",
@@ -194,12 +194,9 @@ const ANONYMOUS_REQUEST_HEADERS = new Set([
   "tracestate",
   "upgrade-insecure-requests",
   "user-agent",
-  "via",
-  "x-forwarded-for",
   "x-forwarded-host",
   "x-forwarded-port",
   "x-forwarded-proto",
-  "x-real-ip",
   "x-request-id",
 ]);
 
@@ -219,6 +216,12 @@ function hasOnlyAnonymousHeaders(headers: Headers): boolean {
   return true;
 }
 
+/**
+ * Internal: the client address an adapter reports for the anonymous page check, in place of the
+ * caller's. It is a documentation address (RFC 5737), so no IP allowlist admits it.
+ */
+export const FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS = "192.0.2.1";
+
 export async function createFarmMarkdownSourceResponse(options: {
   request: Request;
   config?: FarmMdxResolvedConfig;
@@ -228,8 +231,16 @@ export async function createFarmMarkdownSourceResponse(options: {
   /**
    * Runs a request through the app's full pipeline, guards included. With it, a
    * page's source is only served when an anonymous visitor may open the page.
+   * The request is that visitor's, so its client address must not be the caller's
+   * (see FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS).
    */
   renderPage?: (request: Request) => Response | Promise<Response>;
+  /**
+   * The caller's client address as the server adapter reports it. A known address
+   * other than the anonymous one is part of the caller's identity, so the page is
+   * checked as an anonymous visitor even for a request with only standard headers.
+   */
+  clientAddress?: string;
 }): Promise<Response | null> {
   if (options.request.method !== "GET" && options.request.method !== "HEAD") {
     return null;
@@ -258,7 +269,9 @@ export async function createFarmMarkdownSourceResponse(options: {
   // Any header a browser does not send on its own (an API key, a custom session
   // header, a client certificate from the proxy) may be what a guard trusts, so
   // only the standard request headers come along.
-  const anonymous = hasOnlyAnonymousHeaders(options.request.headers);
+  const anonymous =
+    hasOnlyAnonymousHeaders(options.request.headers) &&
+    (!options.clientAddress || options.clientAddress === FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS);
   if (options.renderPage && (hasMarkdownExtension || !anonymous)) {
     const publicUrl = new URL(url);
     publicUrl.pathname = targetPathname;

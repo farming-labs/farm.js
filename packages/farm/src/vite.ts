@@ -2159,14 +2159,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   };
                 },
                 // The anonymous check goes through this server, so its guards and
-                // middleware see the page's own path, as in production.
+                // middleware see the page's own path, as in production. It connects to
+                // this server's own listener, never the host the caller's Host names.
                 renderPage: async (request) =>
-                  fetch(request, {
-                    redirect: "manual",
-                    signal: res.destroyed
-                      ? AbortSignal.abort()
-                      : createFarmNodeRequestAbortSignal(req, res),
-                  }),
+                  createFarmDevServerDispatch(server)(
+                    new Request(request, {
+                      signal: res.destroyed
+                        ? AbortSignal.abort()
+                        : createFarmNodeRequestAbortSignal(req, res),
+                    }),
+                  ),
               });
           if (markdownSourceResponse) {
             if (await runAppMiddlewareForContentRoute()) return;

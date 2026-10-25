@@ -5959,7 +5959,7 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
     ? `import { applyMarkdownNegotiationHeaders, createMarkdownMirrorResponse, getFarmMarkdownAlternatePath } from "@farm.js/core/markdown";`
     : "";
   const appMarkdownImport = hasMarkdownPages
-    ? `import { createFarmMarkdownRouteModule, createFarmMarkdownSourceResponse, isFarmMarkdownPublicSourceResponse } from "@farm.js/core/internal/app-markdown-runtime";`
+    ? `import { FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS, createFarmMarkdownRouteModule, createFarmMarkdownSourceResponse, isFarmMarkdownPublicSourceResponse } from "@farm.js/core/internal/app-markdown-runtime";`
     : "const createFarmMarkdownSourceResponse = null;\nconst isFarmMarkdownPublicSourceResponse = null;";
   // Always available: agents can request Markdown on any route, so the
   // Markdown error body is not gated on the app having Markdown page files.
@@ -8422,7 +8422,13 @@ async function handleFarmRequestInContext(
       const match = matchPageRoute(getFarmRoutePathname(targetPathname));
       return match?.route?.markdownSource || null;
     },
-    renderPage: (targetRequest) => handleFarmRequest(targetRequest, adapterContext),
+    clientAddress: adapterContext?.clientAddress,
+    // An anonymous visitor's request: guards never see the caller's address.
+    renderPage: (targetRequest) =>
+      handleFarmRequest(targetRequest, {
+        ...adapterContext,
+        clientAddress: FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS,
+      }),
   });
   if (markdownSourceResponse) {
     return isFarmMarkdownPublicSourceResponse(markdownSourceResponse)
