@@ -192,7 +192,7 @@ export function SiteHeader({ activePage }: { activePage?: "blog" | "agents" }) {
             <a
               key={item.label}
               aria-current={activePage && item.href === `/${activePage}` ? "page" : undefined}
-              className="aria-[current=page]:bg-white/[0.04] aria-[current=page]:text-white flex h-full min-w-0 flex-auto items-center border-r border-white/12 px-3 last:border-r-0 font-mono uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white xl:px-4"
+              className="farm-nav-link font-mono"
               href={item.href}
             >
               <IndexedLabel index={item.index} icon={item.icon} label={item.label} />
@@ -233,7 +233,7 @@ export function SiteHeader({ activePage }: { activePage?: "blog" | "agents" }) {
                 <a
                   key={item.label}
                   aria-current={activePage && item.href === `/${activePage}` ? "page" : undefined}
-                  className="flex h-12 items-center border-b border-white/10 px-4 font-mono uppercase tracking-normal text-white/58 last:border-b-0 hover:bg-white/[0.04] hover:text-white"
+                  className="farm-menu-link font-mono"
                   href={item.href}
                 >
                   <IndexedLabel index={item.index} icon={item.icon} label={item.label} />
@@ -263,10 +263,7 @@ function FooterActionLink({
   const DirectionIcon = href.startsWith("http") ? ArrowUpRight : ArrowRight;
 
   return (
-    <a
-      className="group flex h-12 items-center justify-between border-b border-white/12 px-4 font-mono text-[9px] font-normal uppercase !tracking-[0.04em] text-white/58 transition-[background-color,color] duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
-      href={href}
-    >
+    <a className="farm-footer-row group font-mono" href={href}>
       <span className="flex min-w-0 items-center gap-2">
         {brand ? (
           <BrandIcon className="size-3.5 shrink-0 opacity-72" src={brand} />
@@ -297,10 +294,7 @@ function FooterLinksGroup({ title, links }: { title: string; links: readonly Foo
 
           return (
             <li key={label}>
-              <a
-                className="group flex min-h-7 items-center justify-between gap-2 font-mono text-[9px] font-normal uppercase !tracking-[0.04em] text-white/48 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-                href={href}
-              >
+              <a className="farm-footer-link group font-mono" href={href}>
                 <span className="flex items-center gap-2">
                   {isGitHub ? <GithubIcon className="size-3.5 opacity-72" /> : null}
                   <span>{label}</span>

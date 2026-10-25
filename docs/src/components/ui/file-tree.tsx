@@ -106,7 +106,7 @@ function FileTreeItem({ node, path, depth, activePath, onSelect }: FileTreeItemP
           isFolder ? `${node.name} folder` : `${path}${node.meta ? `, ${node.meta}` : ""}`
         }
         className={cn(
-          "group/file relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded-[3px] px-2 text-left font-mono text-[9px] font-normal tracking-normal transition-[background-color,color] duration-150 focus-visible:z-10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-1px] focus-visible:outline-white/60 sm:text-[10px]",
+          "farm-file-tree-item group/file font-mono",
           isFolder && !isSelected && "text-white/62 hover:bg-white/[0.035] hover:text-white/88",
           !isFolder && !isSelected && "text-white/40 hover:bg-white/[0.035] hover:text-white/72",
           isSelected && "bg-white/[0.055] text-white/92",

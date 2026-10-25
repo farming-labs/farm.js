@@ -619,7 +619,6 @@ function BrandIcon({ src, className }: { src: string; className?: string }) {
   return (
     <img
       alt=""
-      aria-hidden
       className={cx("brightness-0 invert", className)}
       decoding="async"
       fetchPriority="low"
@@ -647,7 +646,7 @@ function ButtonLink({
   return (
     <a
       className={cx(
-        "inline-flex min-w-0 items-center justify-center border font-mono font-normal uppercase tracking-normal transition-[background-color,border-color,color,transform] duration-150 active:translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
+        "farm-action-link font-mono",
         size === "default" && "h-11 gap-2 px-5 text-[11px]",
         size === "compact" && "h-9 gap-1.5 px-4 text-[10px]",
         variant === "primary" && "border-white bg-white text-black hover:bg-white/88",
@@ -740,14 +739,11 @@ function ProductStackTile({
   duplicate: boolean;
 }) {
   const Icon = item.icon;
-  const className = cx(
-    "farm-stack-tile bg-black font-mono hover:bg-white/[0.07] focus-visible:bg-white/[0.07]",
-    itemIndex % 2 === 0 && "bg-white/[0.045]",
-  );
+  const className = cx("farm-stack-tile font-mono", itemIndex % 2 === 0 && "bg-white/[0.045]");
 
   return (
     <a
-      aria-label={`${item.label} website (opens in a new tab)`}
+      aria-label={duplicate ? undefined : `${item.label} website (opens in a new tab)`}
       aria-hidden={duplicate ? true : undefined}
       className={className}
       href={item.href}
@@ -757,13 +753,13 @@ function ProductStackTile({
     >
       {item.brand ? (
         <BrandIcon
-          className={cx("shrink-0 opacity-72", item.wordmark ? "h-[11px] w-[35px]" : "size-[18px]")}
+          className={item.wordmark ? "h-[11px] w-[35px]" : "size-[18px]"}
           src={item.brand}
         />
       ) : Icon ? (
-        <Icon aria-hidden className="size-[18px] shrink-0 opacity-72" strokeWidth={1.5} />
+        <Icon aria-hidden className="size-[18px]" strokeWidth={1.5} />
       ) : null}
-      {item.wordmark ? null : <span className="whitespace-nowrap">{item.label}</span>}
+      {item.wordmark ? null : <span>{item.label}</span>}
     </a>
   );
 }
@@ -1121,12 +1117,8 @@ function FeatureCell({
         <div className="text-white/52">
           <IndexedLabel icon={Icon} index={index} label={label} />
         </div>
-        <h3 className="mt-6 max-w-[31rem] text-balance font-geist-pixel text-xl font-medium leading-[1.2] tracking-normal text-white/92 sm:text-2xl">
-          {title}
-        </h3>
-        <p className="mt-3 max-w-[31rem] text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
-          {body}
-        </p>
+        <h3 className="farm-feature-title font-geist-pixel">{title}</h3>
+        <p className="farm-feature-body text-sm leading-6 sm:text-base sm:leading-7">{body}</p>
       </div>
       {children}
     </article>
@@ -1365,9 +1357,7 @@ function DeploymentVisual() {
               key={`${tile.row}_${tile.col}`}
               className={cx(
                 "farm-deploy-tile group/tile",
-                tile.brand
-                  ? "bg-white/[0.055] group-hover/deployment:border-white/[0.14] group-hover/deployment:bg-white/[0.075]"
-                  : "bg-white/[0.012]",
+                tile.brand ? "farm-deploy-tile-brand" : "bg-white/[0.012]",
               )}
               style={{
                 left: `${tile.col * 20}%`,

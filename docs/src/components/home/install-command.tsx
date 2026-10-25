@@ -167,7 +167,7 @@ export function InstallCommand() {
               key={item.label}
               aria-controls="install-command-panel"
               aria-selected={activeIndex === index}
-              className="group relative flex h-7 min-w-0 items-center justify-center gap-1 border-r border-white/10 px-1 font-mono text-[8px] font-normal uppercase tracking-normal text-white/42 transition-[background-color,color] duration-150 last:border-r-0 hover:bg-white/[0.055] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white aria-selected:bg-white aria-selected:text-black sm:h-8 sm:text-[9px]"
+              className="farm-install-tab group font-mono"
               id={`install-tab-${item.label.toLowerCase()}`}
               onClick={() => selectCommand(index)}
               onKeyDown={(event) => handleTabKeyDown(event, index)}

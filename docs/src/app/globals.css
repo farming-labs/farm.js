@@ -568,7 +568,9 @@
     counter-reset: farm-code-line;
   }
 
+  /* Punctuation carries no token span (see renderHighlightedCode), so it takes the line's color. */
   .farm-highlighted-code .sh__line {
+    color: var(--sh-sign);
     display: block;
     min-width: max-content;
     min-height: 1.5rem;
@@ -693,7 +695,15 @@
   }
 
   .farm-stack-tile {
-    @apply flex h-16 w-40 shrink-0 items-center justify-center gap-3 border-r border-white/12 px-4 text-[10px] font-normal uppercase tracking-normal text-white/48 transition-colors duration-150 hover:text-white/82 focus-visible:z-10 focus-visible:text-white focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-white/36 sm:w-44 sm:text-[11px];
+    @apply flex h-16 w-40 shrink-0 items-center justify-center gap-3 border-r border-white/12 bg-black px-4 text-[10px] font-normal uppercase tracking-normal text-white/48 transition-colors duration-150 hover:text-white/82 focus-visible:z-10 focus-visible:text-white focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-white/36 hover:bg-white/[0.07] focus-visible:bg-white/[0.07] sm:w-44 sm:text-[11px];
+  }
+
+  .farm-stack-tile > :is(img, svg) {
+    @apply shrink-0 opacity-72;
+  }
+
+  .farm-stack-tile > span {
+    @apply whitespace-nowrap;
   }
 
   .farm-integration-tile {
@@ -716,12 +726,56 @@
     @apply absolute flex size-[20%] items-center justify-center overflow-hidden rounded-none border border-white/[0.08] transition-[background-color,border-color] duration-150;
   }
 
+  .farm-deploy-tile-brand {
+    @apply bg-white/[0.055] group-hover/deployment:border-white/[0.14] group-hover/deployment:bg-white/[0.075];
+  }
+
   .farm-deploy-tile-icon {
     @apply size-7 opacity-72 transition-[opacity,transform] duration-150 group-hover/tile:-translate-y-1 group-hover/tile:opacity-90;
   }
 
   .farm-deploy-tile-label {
     @apply pointer-events-none absolute inset-x-1 bottom-1 translate-y-1 truncate text-center text-[7px] font-normal uppercase tracking-normal text-white/68 opacity-0 transition-[opacity,transform] duration-150 group-hover/tile:translate-y-0 group-hover/tile:opacity-100;
+  }
+
+  .farm-code-tab {
+    @apply relative flex h-full min-w-0 flex-1 items-center justify-center border-r border-white/8 px-2 text-white/34 transition-[background-color,color,box-shadow] duration-150 hover:bg-white/[0.035] hover:text-white/68 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white aria-selected:bg-white/[0.045] aria-selected:text-white/82 aria-selected:shadow-[inset_0_-1px_0_rgba(255,255,255,0.85)];
+  }
+
+  .farm-footer-link {
+    @apply flex min-h-7 items-center justify-between gap-2 text-[9px] font-normal uppercase !tracking-[0.04em] text-white/48 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white;
+  }
+
+  .farm-nav-link {
+    @apply aria-[current=page]:bg-white/[0.04] aria-[current=page]:text-white flex h-full min-w-0 flex-auto items-center border-r border-white/12 px-3 last:border-r-0 uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white xl:px-4;
+  }
+
+  .farm-footer-row {
+    @apply flex h-12 items-center justify-between border-b border-white/12 px-4 text-[9px] font-normal uppercase !tracking-[0.04em] text-white/58 transition-[background-color,color] duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white;
+  }
+
+  .farm-menu-link {
+    @apply flex h-12 items-center border-b border-white/10 px-4 uppercase tracking-normal text-white/58 last:border-b-0 hover:bg-white/[0.04] hover:text-white;
+  }
+
+  .farm-file-tree-item {
+    @apply relative flex h-7 w-full min-w-0 items-center gap-1.5 rounded-[3px] px-2 text-left text-[9px] font-normal tracking-normal transition-[background-color,color] duration-150 focus-visible:z-10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-[-1px] focus-visible:outline-white/60 sm:text-[10px];
+  }
+
+  .farm-install-tab {
+    @apply relative flex h-7 min-w-0 items-center justify-center gap-1 border-r border-white/10 px-1 text-[8px] font-normal uppercase tracking-normal text-white/42 transition-[background-color,color] duration-150 last:border-r-0 hover:bg-white/[0.055] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white aria-selected:bg-white aria-selected:text-black sm:h-8 sm:text-[9px];
+  }
+
+  .farm-feature-title {
+    @apply mt-6 max-w-[31rem] text-balance text-xl font-medium leading-[1.2] tracking-normal sm:text-2xl;
+  }
+
+  .farm-feature-body {
+    @apply mt-3 max-w-[31rem] text-white/48;
+  }
+
+  .farm-action-link {
+    @apply inline-flex min-w-0 items-center justify-center border font-normal uppercase tracking-normal transition-[background-color,border-color,color,transform] duration-150 active:translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white;
   }
 
   @media (min-width: 768px) {
@@ -1132,6 +1186,7 @@
 }
 
 .benchmark-comparison-item {
+  display: block;
   position: absolute;
   inset: 0;
   opacity: 0;
