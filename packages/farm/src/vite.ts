@@ -75,7 +75,7 @@ import {
 } from "./api-catalog";
 import {
   createFarmAppManifestResponse,
-  FARM_APP_MANIFEST_PATH,
+  isFarmAppManifestPath,
   resolveFarmAppManifestInput,
 } from "./app-manifest";
 import { resolveFarmAppPackages } from "./app-manifest-packages";
@@ -1999,8 +1999,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             return docsHandler(req, res);
           }
 
-          // /.well-known/farmjs: the app's manifest, open on the dev server.
-          if (stripFarmBasePath(requestPathname, farmConfig.basePath) === FARM_APP_MANIFEST_PATH) {
+          // /.well-known/farmjs.json: the app's manifest, open on the dev server.
+          if (isFarmAppManifestPath(stripFarmBasePath(requestPathname, farmConfig.basePath))) {
             farmAppPackages ??= resolveFarmAppPackages(farmConfig.root ?? process.cwd());
             const manifest = await createFarmAppManifestResponse(
               new Request(parsedRequestUrl, { method: requestMethod }),

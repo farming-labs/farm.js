@@ -2,7 +2,11 @@ import { createBundledEnv } from "../env";
 import { generateNativeMCPPluginSource } from "./native-mcp-source";
 import { getFarmMarkdownAlternatePath } from "../markdown";
 import { FARM_API_CATALOG_PATH, resolveFarmApiCatalogInput } from "../api-catalog";
-import { FARM_APP_MANIFEST_PATH, resolveFarmAppManifestInput } from "../app-manifest";
+import {
+  FARM_APP_MANIFEST_LEGACY_PATH,
+  FARM_APP_MANIFEST_PATH,
+  resolveFarmAppManifestInput,
+} from "../app-manifest";
 import { resolveFarmAppPackages } from "../app-manifest-packages";
 import { collectFarmWebMCPTools } from "../app-manifest-webmcp";
 import type { RedirectConfig, ResolvedFarmConfig, RewriteConfig } from "../config";
@@ -8370,8 +8374,13 @@ async function handleFarmRequestInContext(
   ${
     config.analytics !== false
       ? `
-  // /.well-known/farmjs: the app's manifest, only for a request Farm Infra signed.
-  if (normalizeRuntimePath(routePathname) === ${JSON.stringify(FARM_APP_MANIFEST_PATH)}) {
+  // /.well-known/farmjs.json (and 0.1.34's /.well-known/farmjs): the app's manifest, only for
+  // a request Farm Infra signed.
+  if (
+    [${JSON.stringify(FARM_APP_MANIFEST_PATH)}, ${JSON.stringify(FARM_APP_MANIFEST_LEGACY_PATH)}].includes(
+      normalizeRuntimePath(routePathname),
+    )
+  ) {
     const farmAppManifest = await createFarmAppManifestResponse(request, farmAppManifestInput, {
       development: false,
     });

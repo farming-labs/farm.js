@@ -86,7 +86,7 @@ interface FarmMCPServerRegistrationBase {
 /**
  * An MCP server that Farm lists in `/.well-known/ai-catalog.json`, `/.well-known/ard.json`,
  * and the generated `/llms.txt`, but does not serve: a docs runtime's endpoint, an agent
- * runtime, or a server on another host. It is not part of the `/.well-known/farmjs`
+ * runtime, or a server on another host. It is not part of the `/.well-known/farmjs.json`
  * manifest, which lists the tools Farm itself serves.
  */
 export type FarmMCPServerRegistration = FarmMCPServerRegistrationBase &

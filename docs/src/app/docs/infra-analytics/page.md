@@ -76,9 +76,9 @@ Farm never sends URLs, query strings, route parameters, headers, cookies, IP add
 user-agents, request or response bodies, tool arguments or results, or error messages. Requests that
 match no route are reported as `/[unmatched]`.
 
-## Tool discovery: `/.well-known/farmjs`
+## Tool discovery: `/.well-known/farmjs.json`
 
-Every Farm app serves a manifest at `/.well-known/farmjs` (under its `basePath`), so Farm Infra
+Every Farm app serves a manifest at `/.well-known/farmjs.json` (under its `basePath`), so Farm Infra
 can list all of its MCP tools, including the ones nothing has called yet, without the app sending
 anything. It describes:
 
@@ -106,6 +106,9 @@ On `farm dev` it's open, so devtools and coding agents can read it. In productio
 requests Farm Infra signed for this app's `FARMJS_API_KEY`; anything else gets a plain `404`. Farm
 Infra reads it from the **Site URL** you set on the project's Settings. Without
 `FARMJS_API_KEY`, or with `analytics: false`, production serves nothing there.
+
+Farm 0.1.34 served the manifest at `/.well-known/farmjs`. That path still answers the same way, so
+tools that read it there keep working; new readers should use `/.well-known/farmjs.json`.
 
 ## Delivery
 
