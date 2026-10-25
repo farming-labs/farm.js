@@ -237,6 +237,7 @@ a URL with a path is treated as the app's `basePath`, and `--path` picks the pag
 | Check                   | Passes when                                                                                                                 |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | Page metadata           | The page has a title, description, canonical link, and `lang`; JSON-LD is reported separately.                              |
+| Readable HTML           | The server HTML carries at least 500 characters of text, so agents that skip JavaScript read the page.                      |
 | Headings and markup     | The page has an H1, heading levels don't skip, and text is at least 5% of the HTML.                                         |
 | Markdown mirror         | The page advertises its `.md` mirror, the mirror answers, and a missing `.md` answers a Markdown 404.                       |
 | Content negotiation     | `Accept: text/markdown` on the page URL returns Markdown. Prerendered pages report this as info.                            |

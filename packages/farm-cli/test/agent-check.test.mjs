@@ -134,6 +134,7 @@ test("passes every check for an app with all agent surfaces on", async () => {
     [
       "pass AGENT_METADATA",
       "pass AGENT_JSON_LD",
+      "pass AGENT_READABLE",
       "pass AGENT_STRUCTURE",
       "pass AGENT_MARKDOWN_ADVERTISED",
       "pass AGENT_MARKDOWN_MIRROR",
@@ -180,6 +181,8 @@ test("points each missing surface at the config that turns it on", async () => {
   assert.equal(byCode.AGENT_MCP.title, "No MCP endpoint");
   assert.equal(byCode.AGENT_STRUCTURE.status, "warn");
   assert.match(byCode.AGENT_STRUCTURE.message, /^No H1/);
+  assert.equal(byCode.AGENT_READABLE.status, "warn");
+  assert.equal(byCode.AGENT_READABLE.title, "The page is an empty shell without JavaScript");
   assert.equal(byCode.AGENT_NOT_FOUND.status, "warn");
   assert.equal(byCode.AGENT_NOT_FOUND.title, "Missing pages answer 404 only in HTML");
   assert.equal(byCode.AGENT_SITEMAP.status, "warn");
@@ -190,6 +193,23 @@ test("points each missing surface at the config that turns it on", async () => {
   assert.equal(byCode.AGENT_MCP_DISCOVERY, undefined);
   assert.equal(byCode.AGENT_MARKDOWN_VIEWS, undefined);
   assert.equal(byCode.AGENT_LLMS_FULL, undefined);
+});
+
+test("warns when the server HTML has too little text for an agent", async () => {
+  const shortPage = page.replace(prose, "Acme bills small teams by usage. ".repeat(6));
+  const fetch = completeApp();
+  const report = await runFarmAgentCheck({
+    url: "https://acme.test",
+    fetch: (input, init) =>
+      new URL(String(input)).pathname === "/" &&
+      !new Headers(init?.headers).get("accept")?.includes("text/markdown")
+        ? html(shortPage)
+        : fetch(input, init),
+  });
+  const readable = report.checks.find((check) => check.code === "AGENT_READABLE");
+  assert.equal(readable.status, "warn");
+  assert.equal(readable.title, "Little server text");
+  assert.match(readable.message, /at least 500/);
 });
 
 test("probes beneath the URL's basePath", async () => {
@@ -367,7 +387,7 @@ test("farm agent check probes a real server and exits by health", async () => {
     ]);
     const report = JSON.parse(stdout);
     assert.equal(report.health, "ready");
-    assert.equal(report.checks.length, 19);
+    assert.equal(report.checks.length, 20);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
