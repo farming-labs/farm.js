@@ -13,6 +13,32 @@ const SECRET = "FEDERATION_RUNNER_SECRET_VALUE";
 let root: string;
 let server: ViteDevServer;
 let base: string;
+let holdOptimizerWrite = false;
+const optimizerStarted = Promise.withResolvers<void>();
+const releaseOptimizer = Promise.withResolvers<void>();
+const optimizerFinished = Promise.withResolvers<void>();
+const closeEvents: string[] = [];
+
+async function drainFixtureOptimizer() {
+  // Match Farm's dev-lifecycle ordering: Vite 8 can cancel an optimizer without
+  // awaiting its active Rolldown write. The scan can discover more dependencies.
+  await Promise.all(
+    Object.values(server?.environments ?? {}).map(async ({ depsOptimizer }) => {
+      await depsOptimizer?.scanProcessing;
+      await Promise.all(
+        Object.values(depsOptimizer?.metadata.discovered ?? {}).map((dep) => dep.processing),
+      );
+    }),
+  );
+}
+
+async function closeFixtureServer() {
+  try {
+    await drainFixtureOptimizer();
+  } finally {
+    await server?.close();
+  }
+}
 
 beforeAll(async () => {
   // Upstream returns no plugins under a test runner unless told otherwise.
@@ -25,6 +51,8 @@ beforeAll(async () => {
     '<html><body><script type="module" src="/main.js"></script></body></html>',
   );
   await writeFile(path.join(root, "main.js"), "export {};\n");
+  // Register this later, without racing a fixture file change against the watcher.
+  await writeFile(path.join(root, "late-dependency.js"), "export const value = 1;\n");
   const options = resolveFederationOptions(
     { name: "host", types: false, remotes: { shop: "http://localhost:9/remoteEntry.js" } },
     { name: "react", dedupe: ["react"] },
@@ -34,6 +62,28 @@ beforeAll(async () => {
     configFile: false,
     logLevel: "silent",
     plugins: createFarmFederationVitePlugins(options) as never,
+    optimizeDeps: {
+      rolldownOptions: {
+        plugins: [
+          {
+            name: "hold-fixture-optimizer-write",
+            async generateBundle(options) {
+              if (!holdOptimizerWrite || !options.dir?.includes("deps_temp_")) return;
+              optimizerStarted.resolve();
+              await releaseOptimizer.promise;
+            },
+            writeBundle(options) {
+              if (holdOptimizerWrite && options.dir?.includes("deps_temp_")) {
+                closeEvents.push("written");
+              }
+            },
+            closeBundle() {
+              if (holdOptimizerWrite) optimizerFinished.resolve();
+            },
+          },
+        ],
+      },
+    },
     server: { port: 0, host: "127.0.0.1" },
   });
   await server.listen();
@@ -43,11 +93,14 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
-  await server?.close();
-  vi.unstubAllEnvs();
-  // The dep optimizer can still be writing node_modules/.vite after close(); retry
-  // instead of failing on ENOTEMPTY.
-  await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  releaseOptimizer.resolve();
+  try {
+    await closeFixtureServer();
+  } finally {
+    vi.unstubAllEnvs();
+    // Keep the bounded Windows filesystem retries after optimizer work is drained.
+    if (root) await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
 });
 
 describe("federation dev server", () => {
@@ -74,5 +127,27 @@ describe("federation dev server", () => {
   it("still serves the browser app", async () => {
     const response = await fetch(`${base}/main.js`);
     expect(response.status).toBe(200);
+  });
+
+  it("finishes an optimizer write before closing the fixture server", async () => {
+    // Isolate the held write from initial discovery and the preceding requests.
+    await drainFixtureOptimizer();
+    const optimizer = server.environments.client.depsOptimizer!;
+    const dependency = path.join(root, "late-dependency.js");
+    holdOptimizerWrite = true;
+    optimizer.registerMissingImport("fixture-late-dependency", dependency);
+    optimizer.run();
+    await optimizerStarted.promise;
+
+    const closeServer = server.close.bind(server);
+    server.close = async () => {
+      closeEvents.push("server-close");
+      await closeServer();
+    };
+    const closing = closeFixtureServer();
+    releaseOptimizer.resolve();
+    await closing;
+    await optimizerFinished.promise;
+    expect(closeEvents).toEqual(["written", "server-close"]);
   });
 });
