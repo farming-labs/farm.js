@@ -203,6 +203,8 @@ function createHandler(
   // The app manifest (/.well-known/farmjs.json) lists schemas, resources and prompts too,
   // and the server card core serves for /.well-known/ai-catalog.json uses the versions.
   publish(serverIdentity, catalog, {
+    // Without authorize, any client lists the catalog, so the public manifest may too.
+    public: !options.authorize,
     protocolVersions: [...SUPPORTED_PROTOCOL_VERSIONS],
     schemas: Object.fromEntries(
       tools.map((tool) => [

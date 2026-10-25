@@ -116,6 +116,15 @@ export interface FarmAgentUserConfig {
    * @default true
    */
   aiCatalog?: boolean;
+  /**
+   * Serve `/.well-known/farmjs.json`: Farm's version and packages, the app's MCP tools and
+   * their schemas, WebMCP browser tools, integration providers and plugin names, to any
+   * client. An MCP server that requires `authorize` is listed without its tools. `false`
+   * turns it off; Farm Infra then can't discover the app's tools either.
+   *
+   * @default true
+   */
+  manifest?: boolean;
 }
 
 export interface ResolvedFarmAgentConfig {
@@ -126,6 +135,7 @@ export interface ResolvedFarmAgentConfig {
   crawlers: ResolvedFarmAgentCrawlers;
   apiCatalog: boolean;
   aiCatalog: boolean;
+  manifest: boolean;
 }
 
 /** What an app gets without an `agent` block: the site described, nothing more exposed. */
@@ -154,6 +164,7 @@ export function resolveFarmAgentConfig(
     crawlers: resolveFarmAgentCrawlers(input?.crawlers),
     apiCatalog: resolveFarmAgentBoolean(input?.apiCatalog, "apiCatalog", false),
     aiCatalog: resolveFarmAgentBoolean(input?.aiCatalog, "aiCatalog", true),
+    manifest: resolveFarmAgentBoolean(input?.manifest, "manifest", true),
   };
 }
 

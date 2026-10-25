@@ -76,6 +76,7 @@ import {
 } from "./api-catalog";
 import {
   createFarmAppManifestResponse,
+  FARM_INFRA_SIGNATURE_HEADER,
   isFarmAppManifestPath,
   resolveFarmAppManifestInput,
 } from "./app-manifest";
@@ -2012,11 +2013,22 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             return docsHandler(req, res);
           }
 
-          // /.well-known/farmjs.json: the app's manifest, open on the dev server.
-          if (isFarmAppManifestPath(stripFarmBasePath(requestPathname, farmConfig.basePath))) {
+          // agent.manifest: /.well-known/farmjs.json, the app's public manifest, as in production.
+          if (
+            options.agent?.manifest !== false &&
+            isFarmAppManifestPath(stripFarmBasePath(requestPathname, farmConfig.basePath))
+          ) {
+            if (await runAppMiddlewareForContentRoute()) return;
             farmAppPackages ??= resolveFarmAppPackages(farmConfig.root ?? process.cwd());
+            const header = (name: string) => String(req.headers[name] ?? "");
             const manifest = await createFarmAppManifestResponse(
-              new Request(parsedRequestUrl, { method: requestMethod }),
+              new Request(parsedRequestUrl, {
+                method: requestMethod,
+                headers: {
+                  "if-none-match": header("if-none-match"),
+                  [FARM_INFRA_SIGNATURE_HEADER]: header(FARM_INFRA_SIGNATURE_HEADER),
+                },
+              }),
               resolveFarmAppManifestInput(farmConfig, {
                 build: "development",
                 packages: farmAppPackages,
@@ -2025,12 +2037,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   ? collectFarmWebMCPTools(farmConfig.root ?? process.cwd(), farmConfig.srcDir)
                   : [],
               }),
-              { development: true },
             );
-            if (manifest) {
-              await sendWebResponse(res, manifest);
-              return;
-            }
+            await sendWebResponse(res, manifest);
+            return;
           }
 
           // agent.apiCatalog: list the OpenAPI and MCP surfaces at the RFC 9727 path.

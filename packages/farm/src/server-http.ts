@@ -97,6 +97,16 @@ export interface ResolvedFarmServerConfig {
 
 export type FarmRequestBodyErrorCode = "BODY_TOO_LARGE" | "INVALID_CONTENT_LENGTH";
 
+/** A weak ETag for a body: FNV-1a, since an ETag is opaque and need not be cryptographic. */
+export function createFarmWeakETag(body: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < body.length; index++) {
+    hash ^= body.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `W/"${(hash >>> 0).toString(16).padStart(8, "0")}"`;
+}
+
 /** Apply the weak entity-tag comparison required by If-None-Match. */
 export function matchesFarmIfNoneMatch(
   value: string | readonly string[] | null | undefined,

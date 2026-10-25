@@ -51,7 +51,7 @@ const inputSchema = { type: "object", properties: { query: { type: "string" } } 
 const unpublish: (() => void)[] = [];
 afterEach(() => unpublish.splice(0).forEach((remove) => remove()));
 
-function publishStore() {
+function publishStore({ isPublic = true } = {}) {
   unpublish.push(
     _publishFarmMCPCatalog(
       { name: "store", version: "1.0.0", path: "/api/mcp" },
@@ -61,6 +61,7 @@ function publishStore() {
         { name: "archive", kind: "serverFunction" },
       ],
       {
+        public: isPublic,
         schemas: {
           list_orders: { input: inputSchema, output: { type: "object" } },
           search: { input: inputSchema },
@@ -75,7 +76,7 @@ function publishStore() {
 describe("app manifest", () => {
   it("describes the app and every tool however it was defined, with its schemas", () => {
     publishStore();
-    expect(createFarmAppManifest(input)).toEqual({
+    expect(createFarmAppManifest(input, { full: true })).toEqual({
       schemaVersion: 1,
       app: { farm: FARM_VERSION, renderer: "react", basePath: "/", build: "abc123" },
       packages: { "@farm.js/core": "0.1.31", "@farm.js/mcp": "0.1.31" },
@@ -85,6 +86,7 @@ describe("app manifest", () => {
             name: "store",
             version: "1.0.0",
             path: "/api/mcp",
+            authorization: "none",
             resources: [{ name: "handbook", uri: "docs://handbook", mimeType: "text/markdown" }],
             prompts: [{ name: "summarize", arguments: { type: "object", properties: {} } }],
             tools: [
@@ -124,6 +126,44 @@ describe("app manifest", () => {
     });
   });
 
+  it("lists what an anonymous MCP client could list, and never an endpoint tool's route", () => {
+    publishStore();
+    const [store] = createFarmAppManifest(input).mcp.servers;
+    expect(store!.authorization).toBe("none");
+    expect(store!.resources).toHaveLength(1);
+    expect(store!.prompts).toHaveLength(1);
+    expect(store!.tools[0]).toEqual({
+      name: "list_orders",
+      title: "List orders",
+      description: "Orders from the last 30 days.",
+      source: "endpoint",
+      readOnlyHint: true,
+      destructiveHint: false,
+      inputSchema,
+      outputSchema: { type: "object" },
+    });
+    expect(JSON.stringify(createFarmAppManifest(input))).not.toContain("/api/orders");
+  });
+
+  it("lists a server that requires authorize by identity only, except in Infra's view", () => {
+    publishStore({ isPublic: false });
+    expect(createFarmAppManifest(input).mcp.servers).toEqual([
+      {
+        name: "store",
+        version: "1.0.0",
+        path: "/api/mcp",
+        authorization: "required",
+        resources: [],
+        prompts: [],
+        tools: [],
+      },
+    ]);
+    const [full] = createFarmAppManifest(input, { full: true }).mcp.servers;
+    expect(full!.authorization).toBe("required");
+    expect(full!.tools).toHaveLength(3);
+    expect(full!.resources).toHaveLength(1);
+  });
+
   it("lists WebMCP tools only when the webmcp plugin is on, and integrations by name only", () => {
     const off = resolveFarmAppManifestInput(
       {
@@ -157,10 +197,13 @@ describe("app manifest", () => {
         { name: "ping", kind: "standalone" },
       ]),
     );
-    expect(createFarmAppManifest(input).mcp.servers[0]).toEqual({
+    // An older @farm.js/mcp doesn't say whether it's public, so the public view assumes not.
+    expect(createFarmAppManifest(input).mcp.servers[0]!.tools).toEqual([]);
+    expect(createFarmAppManifest(input, { full: true }).mcp.servers[0]).toEqual({
       name: "old",
       version: "1",
       path: "/api/old",
+      authorization: "required",
       resources: [],
       prompts: [],
       tools: [{ name: "ping", source: "defineTool" }],
@@ -210,62 +253,74 @@ describe("/.well-known/farmjs.json", () => {
     }
   });
 
-  it("is open on the dev server", async () => {
-    publishStore();
-    const response = await createFarmAppManifestResponse(request(), input, { development: true });
-    expect(response!.status).toBe(200);
-    expect(response!.headers.get("content-type")).toBe("application/json");
-    expect(response!.headers.get("cache-control")).toBe("private, no-store");
-    expect((await response!.json()).mcp.servers[0].tools).toHaveLength(3);
+  const signed = async (method = "GET") =>
+    request({ [FARM_INFRA_SIGNATURE_HEADER]: await signFarmInfraManifestRequest(keyHash) }, method);
+  const env = { FARMJS_API_KEY: key };
+
+  it("answers anyone, with CORS and a revalidated ETag, and never contains the key", async () => {
+    publishStore({ isPublic: false });
+    for (const options of [{ env }, { env: {} }]) {
+      const response = await createFarmAppManifestResponse(request(), input, options);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+      expect(response.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+      expect(response.headers.get("vary")).toBe(FARM_INFRA_SIGNATURE_HEADER);
+      const body = await response.text();
+      expect(JSON.parse(body).mcp.servers[0].tools).toEqual([]);
+      expect(body).not.toContain(key);
+      expect(body).not.toContain(keyHash);
+    }
+    const etag = (await createFarmAppManifestResponse(request(), input, { env })).headers.get(
+      "etag",
+    )!;
+    expect(etag).toMatch(/^W\/"[0-9a-f]{8}"$/);
+    const cached = await createFarmAppManifestResponse(request({ "if-none-match": etag }), input);
+    expect(cached.status).toBe(304);
+    expect(await cached.text()).toBe("");
+    const head = await createFarmAppManifestResponse(request({}, "HEAD"), input);
+    expect(head.status).toBe(200);
+    expect(head.headers.get("etag")).toBe(etag);
+    expect(await head.text()).toBe("");
+    const preflight = await createFarmAppManifestResponse(request({}, "OPTIONS"), input);
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-methods")).toBe("GET, HEAD, OPTIONS");
+    const post = await createFarmAppManifestResponse(request({}, "POST"), input);
+    expect(post.status).toBe(405);
+    expect(post.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
   });
 
-  it("answers production only for Farm Infra's signature, and never contains the key", async () => {
-    const env = { FARMJS_API_KEY: key };
-    const unsigned = await createFarmAppManifestResponse(request(), input, {
-      development: false,
-      env,
-    });
-    expect(unsigned!.status).toBe(404);
-    expect(await unsigned!.text()).toBe("");
-    const signed = await createFarmAppManifestResponse(
-      request({ [FARM_INFRA_SIGNATURE_HEADER]: await signFarmInfraManifestRequest(keyHash) }),
-      input,
-      { development: false, env },
-    );
-    expect(signed!.status).toBe(200);
-    const body = await signed!.text();
-    expect(JSON.parse(body).app.build).toBe("abc123");
+  it("gives Farm Infra's signed request the full view, kept out of shared caches", async () => {
+    publishStore({ isPublic: false });
+    const response = await createFarmAppManifestResponse(await signed(), input, { env });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    const body = await response.text();
+    const manifest = JSON.parse(body);
+    expect(manifest.app.build).toBe("abc123");
+    expect(manifest.mcp.servers[0].tools[0]).toMatchObject({ method: "GET", path: "/api/orders" });
     expect(body).not.toContain(key);
     expect(body).not.toContain(keyHash);
-    const head = await createFarmAppManifestResponse(
-      request(
-        { [FARM_INFRA_SIGNATURE_HEADER]: await signFarmInfraManifestRequest(keyHash) },
-        "HEAD",
-      ),
-      input,
-      { development: false, env },
-    );
-    expect(head!.status).toBe(200);
-    expect(await head!.text()).toBe("");
+    const head = await createFarmAppManifestResponse(await signed("HEAD"), input, { env });
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
   });
 
-  it("stays out of the way when production isn't linked, analytics is off, or it isn't a read", async () => {
-    expect(
-      await createFarmAppManifestResponse(request(), input, { development: false, env: {} }),
-    ).toBeNull();
-    expect(
-      await createFarmAppManifestResponse(
-        request(),
-        { ...input, analytics: false },
-        {
-          development: false,
-          env: { FARMJS_API_KEY: key },
-        },
-      ),
-    ).toBeNull();
-    expect(
-      await createFarmAppManifestResponse(request({}, "POST"), input, { development: true }),
-    ).toBeNull();
+  it("serves a signed request the public view without the key, a valid signature, or analytics", async () => {
+    publishStore({ isPublic: false });
+    const forged = request({
+      [FARM_INFRA_SIGNATURE_HEADER]: await signFarmInfraManifestRequest("0".repeat(64)),
+    });
+    for (const [req, options, manifestInput] of [
+      [await signed(), { env: {} }, input],
+      [forged, { env }, input],
+      [await signed(), { env }, { ...input, analytics: false }],
+    ] as const) {
+      const response = await createFarmAppManifestResponse(req, manifestInput, options);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+      expect((await response.json()).mcp.servers[0].tools).toEqual([]);
+    }
   });
 });
 

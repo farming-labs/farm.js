@@ -19,7 +19,7 @@ import { resolveFarmAPIServerRoutePath } from "./api/server-path";
 import { applyFarmBasePath } from "./base-path";
 import type { FarmLlmsTxtLink } from "./llms-txt";
 import { _listFarmMCPCatalogs, _listFarmRegisteredMCPServers } from "./mcp-catalog";
-import { matchesFarmIfNoneMatch } from "./server-http";
+import { createFarmWeakETag, matchesFarmIfNoneMatch } from "./server-http";
 
 export const FARM_AI_CATALOG_PATH = "/.well-known/ai-catalog.json";
 export const FARM_ARD_PATH = "/.well-known/ard.json";
@@ -215,7 +215,7 @@ export function createFarmAiCatalogResponse(
   const body = JSON.stringify(
     card ? card.card : { specVersion: "1.0", entries: servers.map(({ entry }) => entry) },
   );
-  const etag = `W/"${fnv1a(body)}"`;
+  const etag = createFarmWeakETag(body);
   const headers = {
     ...corsHeaders(),
     "Content-Type": card
@@ -265,14 +265,4 @@ function truncate(text: string): string {
   return text.length <= CARD_DESCRIPTION_MAX
     ? text
     : `${text.slice(0, CARD_DESCRIPTION_MAX - 1).trimEnd()}…`;
-}
-
-/** A short, stable validator for the body; ETags are opaque, so this need not be cryptographic. */
-function fnv1a(value: string): string {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < value.length; index++) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
 }

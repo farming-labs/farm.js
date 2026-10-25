@@ -18,6 +18,11 @@ type JSONSchema = Readonly<Record<string, unknown>>;
 
 /** What a server can say beyond its tool list, for the app manifest. All optional. */
 export interface FarmMCPCatalogDetails {
+  /**
+   * True when the endpoint answers anonymous clients: it has no `authorize`. The public
+   * `/.well-known/farmjs.json` lists tools, resources and prompts only for such a server.
+   */
+  public?: boolean;
   /** MCP protocol versions the endpoint accepts, for its server card. */
   protocolVersions?: readonly string[];
   /** Each tool's input and output JSON Schemas, by tool name. */

@@ -6498,7 +6498,7 @@ ${
     ? `const farmApiCatalogInput = ${JSON.stringify(resolveFarmApiCatalogInput(config))};\n`
     : ""
 }${
-    config.analytics !== false
+    config.agent?.manifest !== false
       ? `const farmAppManifestInput = ${JSON.stringify(
           resolveFarmAppManifestInput(config, {
             build: config.deploymentId,
@@ -8465,21 +8465,19 @@ async function handleFarmRequestInContext(
       : ""
   }
   ${
-    config.analytics !== false
+    config.agent?.manifest !== false
       ? `
-  // /.well-known/farmjs.json (and 0.1.34's /.well-known/farmjs): the app's manifest, only for
-  // a request Farm Infra signed.
+  // agent.manifest: /.well-known/farmjs.json (and 0.1.34's /.well-known/farmjs), the app's
+  // public manifest; Farm Infra's signed request gets the full view.
   if (
     [${JSON.stringify(FARM_APP_MANIFEST_PATH)}, ${JSON.stringify(FARM_APP_MANIFEST_LEGACY_PATH)}].includes(
       normalizeRuntimePath(routePathname),
     )
   ) {
-    const farmAppManifest = await createFarmAppManifestResponse(request, farmAppManifestInput, {
-      development: false,
-    });
-    if (farmAppManifest) {
-      return applyProductionMiddlewareHeaders(farmAppManifest, middlewareHeaders);
-    }
+    return applyProductionMiddlewareHeaders(
+      await createFarmAppManifestResponse(request, farmAppManifestInput),
+      middlewareHeaders,
+    );
   }
   `
       : ""

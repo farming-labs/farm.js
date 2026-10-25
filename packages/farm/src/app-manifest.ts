@@ -5,12 +5,15 @@
  * prompts, its WebMCP browser tools, its integrations, its agent surfaces and its plugins.
  * Never environment values, settings or secrets.
  *
- * Development serves it to anyone on the dev server. Production answers only a request
- * signed for the app's Farm Infra key, so the public never reads the app's internals; any
- * other request gets a 404. Kept free of Node built-ins: Web Crypto only.
+ * Anyone may read it, in development and production alike (`agent.manifest: false` turns it
+ * off). The public view lists only what an anonymous client could already find: an MCP
+ * server that requires `authorize` shows its identity but not its tools, resources or
+ * prompts, and endpoint tools leave out their HTTP route. A request Farm Infra signed for
+ * the app's `FARMJS_API_KEY` gets the full view. Kept free of Node built-ins: Web Crypto only.
  */
 import type { FarmAppManifestWebMCPTool } from "./app-manifest-webmcp";
 import { _listFarmMCPCatalogs, type FarmMCPCatalogDetails } from "./mcp-catalog";
+import { createFarmWeakETag, matchesFarmIfNoneMatch } from "./server-http";
 import { FARM_VERSION } from "./version";
 
 export const FARM_APP_MANIFEST_PATH = "/.well-known/farmjs.json";
@@ -38,7 +41,7 @@ export interface FarmAppManifestTool {
   description?: string;
   /** How the app defined it: an API endpoint, `defineTool`, or a server function. */
   source: FarmAppManifestToolSource;
-  /** The endpoint's method and route, for `source: "endpoint"`. */
+  /** The endpoint's method and route, for `source: "endpoint"`. Only in Farm Infra's view. */
   method?: string;
   path?: string;
   readOnlyHint?: boolean;
@@ -62,6 +65,11 @@ export interface FarmAppManifest {
       name: string;
       version: string;
       path: string;
+      /**
+       * `"required"` when the server runs `authorize`: an anonymous client lists nothing,
+       * so the public view leaves `tools`, `resources` and `prompts` empty.
+       */
+      authorization: "none" | "required";
       tools: FarmAppManifestTool[];
       resources: NonNullable<ServerDetails["resources"]>;
       prompts: NonNullable<ServerDetails["prompts"]>;
@@ -86,7 +94,10 @@ export interface FarmAppManifestInput {
   integrations: FarmAppManifest["integrations"];
   agent: FarmAppManifest["agent"];
   plugins: string[];
-  /** `analytics: false` keeps the production manifest off: the app talks to no Farm Infra. */
+  /**
+   * `analytics: false` turns off Farm Infra's signed view: the app talks to no Farm Infra.
+   * The public manifest is still served; `agent.manifest: false` turns that off.
+   */
   analytics: boolean;
 }
 
@@ -142,8 +153,14 @@ const SOURCES = {
   serverFunction: "serverFunction",
 } as const;
 
-/** The manifest now: the static input plus the MCP tools the running servers published. */
-export function createFarmAppManifest(input: FarmAppManifestInput): FarmAppManifest {
+/**
+ * The manifest now: the static input plus the MCP tools the running servers published.
+ * `full` is Farm Infra's view, with every server's catalog and each endpoint tool's route.
+ */
+export function createFarmAppManifest(
+  input: FarmAppManifestInput,
+  { full = false }: { full?: boolean } = {},
+): FarmAppManifest {
   return {
     schemaVersion: 1,
     app: {
@@ -154,31 +171,37 @@ export function createFarmAppManifest(input: FarmAppManifestInput): FarmAppManif
     },
     packages: input.packages,
     mcp: {
-      servers: _listFarmMCPCatalogs().map(({ server, tools, details }) => ({
-        name: server.name,
-        version: server.version,
-        path: server.path,
-        resources: [...(details?.resources ?? [])],
-        prompts: [...(details?.prompts ?? [])],
-        tools: tools.map((tool) => {
-          const schemas = details?.schemas?.[tool.name];
-          const hints = Object.fromEntries(
-            (["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"] as const)
-              .filter((hint) => typeof tool[hint] === "boolean")
-              .map((hint) => [hint, tool[hint]]),
-          );
-          return {
-            name: tool.name,
-            ...(tool.title ? { title: tool.title } : {}),
-            ...(tool.description ? { description: tool.description } : {}),
-            source: SOURCES[tool.kind],
-            ...(tool.kind === "endpoint" ? { method: tool.method, path: tool.path } : {}),
-            ...hints,
-            ...(schemas ? { inputSchema: schemas.input } : {}),
-            ...(schemas?.output ? { outputSchema: schemas.output } : {}),
-          };
-        }),
-      })),
+      servers: _listFarmMCPCatalogs().map(({ server, tools, details }) => {
+        // A server that didn't say it's public (an older @farm.js/mcp) counts as protected.
+        const listed = full || details?.public === true;
+        return {
+          name: server.name,
+          version: server.version,
+          path: server.path,
+          authorization: details?.public === true ? "none" : "required",
+          resources: listed ? [...(details?.resources ?? [])] : [],
+          prompts: listed ? [...(details?.prompts ?? [])] : [],
+          tools: (listed ? tools : []).map((tool) => {
+            const schemas = details?.schemas?.[tool.name];
+            const hints = Object.fromEntries(
+              (["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"] as const)
+                .filter((hint) => typeof tool[hint] === "boolean")
+                .map((hint) => [hint, tool[hint]]),
+            );
+            return {
+              name: tool.name,
+              ...(tool.title ? { title: tool.title } : {}),
+              ...(tool.description ? { description: tool.description } : {}),
+              source: SOURCES[tool.kind],
+              // MCP clients never see the route behind a tool; only Infra's view names it.
+              ...(full && tool.kind === "endpoint" ? { method: tool.method, path: tool.path } : {}),
+              ...hints,
+              ...(schemas ? { inputSchema: schemas.input } : {}),
+              ...(schemas?.output ? { outputSchema: schemas.output } : {}),
+            };
+          }),
+        };
+      }),
     },
     webmcp: input.webmcp,
     integrations: input.integrations,
@@ -251,28 +274,50 @@ function processEnv(): Env {
   return (globalThis as { process?: { env?: Env } }).process?.env ?? {};
 }
 
+/** Public, read-only metadata, like the AI catalog: any origin may read it. */
+const CORS_HEADERS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, HEAD, OPTIONS",
+  "access-control-allow-headers": `If-None-Match, ${FARM_INFRA_SIGNATURE_HEADER}`,
+  "access-control-expose-headers": "ETag",
+};
+
 /**
- * Answers `/.well-known/farmjs.json`, or `null` to let the request go on as if Farm served nothing
- * there: methods other than GET and HEAD, and production apps not linked to Farm Infra.
+ * Answers `/.well-known/farmjs.json` for anyone. A request Farm Infra signed for the app's
+ * `FARMJS_API_KEY` gets the full view, unless `analytics` is off; any other read gets the
+ * public one.
  */
 export async function createFarmAppManifestResponse(
   request: Request,
   input: FarmAppManifestInput,
-  options: { development: boolean; env?: Env },
-): Promise<Response | null> {
-  if (request.method !== "GET" && request.method !== "HEAD") return null;
-  if (!options.development) {
-    const key = (options.env ?? processEnv()).FARMJS_API_KEY?.trim();
-    if (!input.analytics || !key) return null;
-    const signed = await verifyFarmInfraManifestSignature(
-      request.headers.get(FARM_INFRA_SIGNATURE_HEADER),
-      key,
-    );
-    if (!signed)
-      return new Response(null, { status: 404, headers: { "cache-control": "no-store" } });
+  options: { env?: Env } = {},
+): Promise<Response> {
+  const method = request.method.toUpperCase();
+  if (method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
+  if (method !== "GET" && method !== "HEAD") {
+    return new Response("Method Not Allowed", {
+      status: 405,
+      headers: { ...CORS_HEADERS, allow: "GET, HEAD, OPTIONS", "content-type": "text/plain" },
+    });
   }
-  const body = JSON.stringify(createFarmAppManifest(input));
-  return new Response(request.method === "HEAD" ? null : body, {
-    headers: { "content-type": "application/json", "cache-control": "private, no-store" },
-  });
+  const signature = request.headers.get(FARM_INFRA_SIGNATURE_HEADER);
+  const key = input.analytics ? (options.env ?? processEnv()).FARMJS_API_KEY?.trim() : undefined;
+  const full = Boolean(
+    signature && key && (await verifyFarmInfraManifestSignature(signature, key)),
+  );
+  const body = JSON.stringify(createFarmAppManifest(input, { full }));
+  const etag = createFarmWeakETag(body);
+  const headers = {
+    ...CORS_HEADERS,
+    "content-type": "application/json; charset=utf-8",
+    // The full view is for Infra alone; shared caches keep the two views apart.
+    "cache-control": full ? "private, no-store" : "public, max-age=0, must-revalidate",
+    vary: FARM_INFRA_SIGNATURE_HEADER,
+    etag,
+    "x-content-type-options": "nosniff",
+  };
+  if (!full && matchesFarmIfNoneMatch(request.headers.get("if-none-match"), etag)) {
+    return new Response(null, { status: 304, headers });
+  }
+  return new Response(method === "HEAD" ? null : body, { status: 200, headers });
 }
