@@ -577,6 +577,55 @@ describe("programmatic routes", () => {
     expect(main).toHaveBeenCalledTimes(3);
   });
 
+  it.each([0, "0ms", "0s"] as const)(
+    "never shares route data with staleTime %j between visitors",
+    async (staleTime) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-route-data-zero-"));
+      tempDirs.push(root);
+      const routesFile = path.join(root, "src", "farm.route.tsx");
+      fs.mkdirSync(path.dirname(routesFile), { recursive: true });
+      fs.writeFileSync(routesFile, "export {};\n");
+
+      // Stands in for cookies(): the visitor this request belongs to.
+      let visitor = "alice";
+      const main = vi.fn(async () => ({ user: visitor }));
+      const MeRoute = createRoute("/me", {
+        data: { key: () => ["me", String(staleTime)], staleTime, main },
+        component: (() => null) as any,
+      });
+      const manager = new RouteManager(createConfig(root), {
+        environments: { ssr: { runner: { import: async () => ({ Route: MeRoute }) } } },
+      } as any);
+      await manager.discoverRoutes();
+      const match = manager.matchRoute("/me");
+      const routeModule = await manager.loadRouteModule(match.route!.modulePath);
+      const resolveProps = () =>
+        (routeModule as any).__farmResolveRouteProps({
+          params: {},
+          searchParams: Promise.resolve({}),
+          path: "/me",
+        });
+
+      for (const user of ["alice", "bob", "carol"]) {
+        visitor = user;
+        await expect(resolveProps()).resolves.toMatchObject({ data: { user } });
+      }
+      expect(main).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, "5 minutes", "30", "-5s", ""])(
+    "rejects an unreadable route data staleTime %j",
+    (staleTime) => {
+      expect(() =>
+        createRoute("/me", {
+          data: { key: () => ["me"], staleTime: staleTime as any, main: async () => null },
+          component: (() => null) as any,
+        }),
+      ).toThrow(/Route "\/me" data\.staleTime/);
+    },
+  );
+
   it("normalizes typed search params with defaults and temporary keys", async () => {
     function ProductPage() {
       return null;

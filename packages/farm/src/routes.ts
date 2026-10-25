@@ -1358,6 +1358,12 @@ async function resolveProgrammaticRouteData(
     return dataHooks.main(context);
   }
 
+  const revalidate = normalizeProgrammaticRouteStaleTime(dataHooks.staleTime, route.path);
+  // Always revalidate: the result belongs to this request alone, as with createServerQuery.
+  if (revalidate === 0) {
+    return dataHooks.main(context);
+  }
+
   const cacheKey = createFarmCacheKey(["route-data", routeDataKey]);
   const cacheOptions: FarmCacheOptions = {
     tags: [
@@ -1368,7 +1374,7 @@ async function resolveProgrammaticRouteData(
       ...(typeof context.path === "string" ? [context.path] : []),
       ...(await resolveProgrammaticRouteDataKeys(dataHooks.paths, context)),
     ],
-    revalidate: normalizeProgrammaticRouteStaleTime(dataHooks.staleTime),
+    revalidate,
   };
 
   return getFarmDataCache().getOrSet(cacheKey, () => dataHooks.main(context), cacheOptions);
@@ -1383,34 +1389,37 @@ async function resolveProgrammaticRouteDataKeys(
   return value.filter((item) => typeof item === "string" && item.trim().length > 0);
 }
 
+/**
+ * `staleTime` as cache seconds: `0` means "always revalidate", so the result is
+ * never shared through the cache; `undefined` and `false` keep it until
+ * invalidated. An unreadable value throws, instead of silently caching forever.
+ */
 function normalizeProgrammaticRouteStaleTime(
   staleTime: ProgrammaticRouteDataStaleTime | undefined,
+  routePath: string,
 ): number | false | undefined {
   if (staleTime === undefined) return undefined;
   if (staleTime === false) return false;
 
+  let milliseconds: number;
   if (typeof staleTime === "number") {
-    if (!Number.isFinite(staleTime) || staleTime <= 0) return undefined;
-    return Math.max(1, Math.ceil(staleTime / 1000));
+    milliseconds = staleTime;
+  } else {
+    const match = typeof staleTime === "string" && staleTime.match(/^(\d+(?:\.\d+)?)(ms|s|m|h)$/);
+    if (!match) {
+      throw new TypeError(
+        `Route "${routePath}" data.staleTime must be milliseconds or a duration like "250ms", "30s", "5m", or "1h".`,
+      );
+    }
+    const unit = match[2];
+    milliseconds =
+      Number(match[1]) *
+      (unit === "ms" ? 1 : unit === "s" ? 1000 : unit === "m" ? 60_000 : 3_600_000);
   }
-
-  const match = staleTime.match(/^(\d+(?:\.\d+)?)(ms|s|m|h)$/);
-  if (!match) return undefined;
-
-  const value = Number(match[1]);
-  if (!Number.isFinite(value) || value <= 0) return undefined;
-
-  const unit = match[2];
-  const milliseconds =
-    unit === "ms"
-      ? value
-      : unit === "s"
-        ? value * 1000
-        : unit === "m"
-          ? value * 60000
-          : value * 3600000;
-
-  return Math.max(1, Math.ceil(milliseconds / 1000));
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) {
+    throw new TypeError(`Route "${routePath}" data.staleTime must be a non-negative duration.`);
+  }
+  return milliseconds === 0 ? 0 : Math.max(1, Math.ceil(milliseconds / 1000));
 }
 
 function isProgrammaticRoutePropsResolved(value: unknown): boolean {
@@ -1485,6 +1494,8 @@ function normalizeProgrammaticRoute(
   }
 
   const routeActions = route.kind === "page" ? normalizeProgrammaticRouteActions(route) : undefined;
+  // Reject an unreadable staleTime when the route is defined, not on its first request.
+  normalizeProgrammaticRouteStaleTime((route as ProgrammaticPageRoute).data?.staleTime, route.path);
 
   return {
     ...route,
