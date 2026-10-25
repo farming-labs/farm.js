@@ -344,6 +344,16 @@ export interface FarmServerRendererRuntime {
       onShellReady(): void;
       onShellError(error: unknown): void;
       onError(error: unknown): void;
+      /**
+       * React DOM option, passed only for React: called once every Suspense
+       * boundary has finished. Buffered renders start piping here.
+       */
+      onAllReady?(): void;
+      /**
+       * React DOM option, passed only for React: completed boundaries larger than
+       * this stream behind their fallback. Buffered renders raise it to stay inline.
+       */
+      progressiveChunkSize?: number;
       /** CSP nonce forwarded to renderer-owned inline streaming scripts. */
       nonce?: string;
     },

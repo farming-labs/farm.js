@@ -39,6 +39,8 @@ export type RoutePath =
   | "/feature-lab/static-metadata"
   | `/feature-lab/static/${string}`
   | "/markdown"
+  | "/navigation-loading/first"
+  | "/navigation-loading/second"
   | "/optional-catchall"
   | `/optional-catchall/${string}`
   | "/ppr-demo"
@@ -80,6 +82,8 @@ export type RoutePattern =
   | "/feature-lab/static-metadata"
   | "/feature-lab/static/[slug]"
   | "/markdown"
+  | "/navigation-loading/first"
+  | "/navigation-loading/second"
   | "/optional-catchall/[[...slug]]"
   | "/ppr-demo"
   | "/prefetch-e2e"
@@ -120,6 +124,8 @@ export type RouteModulePattern =
   | "/feature-lab/static-metadata"
   | "/feature-lab/static/[slug]"
   | "/markdown"
+  | "/navigation-loading/first"
+  | "/navigation-loading/second"
   | "/optional-catchall/[[...slug]]"
   | "/ppr-demo"
   | "/prefetch-e2e"
