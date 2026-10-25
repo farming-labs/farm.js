@@ -52,3 +52,33 @@ export function createFarmLayoutSelector<T extends { pattern: string }>(
     return applicable;
   };
 }
+
+/**
+ * Internal: whether two layout directory patterns can both cover one page, so a
+ * client tree that renders one of them also renders the other. A dynamic segment
+ * matches any segment and a catch-all matches the rest, like URL matching does.
+ */
+export function layoutsCanCoverSamePage(a: string, b: string): boolean {
+  const scopeA = getRouteGroupScope(a);
+  const scopeB = getRouteGroupScope(b);
+  if (
+    scopeA !== null &&
+    scopeB !== null &&
+    !isInRouteGroupScope(scopeA, scopeB) &&
+    !isInRouteGroupScope(scopeB, scopeA)
+  ) {
+    return false;
+  }
+  const segmentsA = a === "/" ? [] : parseRoutePattern(a);
+  const segmentsB = b === "/" ? [] : parseRoutePattern(b);
+  const length = Math.min(segmentsA.length, segmentsB.length);
+  for (let index = 0; index < length; index++) {
+    const segmentA = segmentsA[index]!;
+    const segmentB = segmentsB[index]!;
+    if (segmentA.type === "dynamic" && segmentA.catchAll) return true;
+    if (segmentB.type === "dynamic" && segmentB.catchAll) return true;
+    if (segmentA.type === "dynamic" || segmentB.type === "dynamic") continue;
+    if (segmentA.value !== segmentB.value) return false;
+  }
+  return true;
+}
