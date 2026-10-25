@@ -7043,7 +7043,8 @@ function ensureFarmDocumentHead(markup) {
 }
 
 function ensureFarmDocumentRoot(markup) {
-  if (/\\sid=["']root["']/i.test(markup)) return markup;
+  // Only a #root that opens the body is the container; page content can have id="root" too.
+  if (/<body\\b[^>]*>\\s*<div\\b[^>]*\\sid=["']root["']/i.test(markup)) return markup;
   return markup
     .replace(/<body\\b([^>]*)>/i, function(_match, attributes) {
       return "<body" + attributes + '><div id="root">';

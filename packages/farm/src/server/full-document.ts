@@ -119,7 +119,9 @@ export function ensureFarmDocumentHead(markup: string): string {
  * already has one. Matches the production build's helper.
  */
 export function ensureFarmDocumentRoot(markup: string): string {
-  if (/\sid=["']root["']/i.test(markup)) return markup;
+  // Only a #root that opens the body is the container; page content can have id="root" too, such
+  // as a heading titled "Root".
+  if (/<body\b[^>]*>\s*<div\b[^>]*\sid=["']root["']/i.test(markup)) return markup;
   return markup
     .replace(
       /<body\b([^>]*)>/i,
