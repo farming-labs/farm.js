@@ -794,7 +794,8 @@ for (const template of [
     dependency: "@farm.js/auth",
     homePagePattern: /auth\.session\(\)/,
     brandPattern: /FARMJS \/ Auth starter/,
-    instructionPattern: /FARMJS Auth uses local SQLite automatically/,
+    instructionPattern:
+      /FARMJS Auth uses local SQLite automatically and generates a random \.farm\/auth-secret/,
     betterCall: "1.3.2",
   },
   {
@@ -1523,7 +1524,7 @@ test("basic starters ship what agents read: server-rendered copy and an Open Gra
         .replace(/\{[^}]*\}/g, " ")
         .replace(/\s+/g, " ")
         .trim();
-      assert.ok(text.length > 400, `${renderer}: ${text.length} characters of text`);
+      assert.ok(text.length > 500, `${renderer}: ${text.length} characters of text`);
       assert.match(source, /class(?:Name)?="feature-list"/, renderer);
     }
   } finally {

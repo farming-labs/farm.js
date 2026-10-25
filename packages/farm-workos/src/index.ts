@@ -16,6 +16,7 @@ import {
   integrationConfig,
   normalizeMatchers,
 } from "@farm.js/integration-utils";
+import { resolveDevelopmentSecret } from "@farm.js/integration-utils/dev-secret";
 import type { WorkOSRedirectQuery, WorkOSRedirectResult, WorkOSSessionResult } from "./client.js";
 import { workosClient } from "./client.js";
 
@@ -58,13 +59,11 @@ export interface WorkOSIntegrationInput {
 
 export type WorkOSIntegrationInstance = WorkOS;
 
-const DEV_COOKIE_PASSWORD = "farmjs-workos-cookie-password-development-2026";
-
 // The built server re-evaluates farm.config.ts at runtime to instantiate
 // integrations, and Farm does not force NODE_ENV=production into that process.
 // Treating an absent NODE_ENV as "development" would silently seal production
-// sessions with the public DEV_COOKIE_PASSWORD, so only an explicit dev/test
-// value may use it. `farm dev` runs through Vite, which sets
+// sessions with a development password, so only an explicit dev/test value
+// may use one. `farm dev` runs through Vite, which sets
 // NODE_ENV="development".
 function isExplicitDevelopmentEnv(): boolean {
   return process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
@@ -109,7 +108,7 @@ function resolveEnv(input: WorkOSIntegrationInput): ResolvedWorkOSConfig {
     input.cookiePassword ??
     process.env.WORKOS_COOKIE_PASSWORD ??
     process.env.FARM_WORKOS_COOKIE_PASSWORD ??
-    (isExplicitDevelopmentEnv() ? DEV_COOKIE_PASSWORD : "");
+    (isExplicitDevelopmentEnv() ? resolveDevelopmentSecret("workos") : "");
 
   if (!clientId || (!input.instance && !apiKey)) {
     throw new Error(

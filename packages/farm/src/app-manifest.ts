@@ -1,5 +1,5 @@
 /**
- * `/.well-known/farmjs`: one document describing a Farm app, so tools can discover it
+ * `/.well-known/farmjs.json`: one document describing a Farm app, so tools can discover it
  * instead of each rebuilding the picture: Farm's version, renderer and packages, the app's
  * MCP servers with every tool (however it was defined) and its schemas, their resources and
  * prompts, its WebMCP browser tools, its integrations, its agent surfaces and its plugins.
@@ -13,7 +13,17 @@ import type { FarmAppManifestWebMCPTool } from "./app-manifest-webmcp";
 import { _listFarmMCPCatalogs, type FarmMCPCatalogDetails } from "./mcp-catalog";
 import { FARM_VERSION } from "./version";
 
-export const FARM_APP_MANIFEST_PATH = "/.well-known/farmjs";
+export const FARM_APP_MANIFEST_PATH = "/.well-known/farmjs.json";
+/**
+ * @deprecated Where Farm 0.1.34 served the manifest. Still answered the same way, so Farm Infra
+ * and tools that read it there keep working; use {@link FARM_APP_MANIFEST_PATH}.
+ */
+export const FARM_APP_MANIFEST_LEGACY_PATH = "/.well-known/farmjs";
+
+/** Whether `pathname` (without the app's basePath) is where the manifest is served. */
+export function isFarmAppManifestPath(pathname: string): boolean {
+  return pathname === FARM_APP_MANIFEST_PATH || pathname === FARM_APP_MANIFEST_LEGACY_PATH;
+}
 /** Farm Infra signs manifest requests in this header: `t=<unix seconds>, v1=<hex>`. */
 export const FARM_INFRA_SIGNATURE_HEADER = "farmjs-infra-signature";
 
@@ -242,7 +252,7 @@ function processEnv(): Env {
 }
 
 /**
- * Answers `/.well-known/farmjs`, or `null` to let the request go on as if Farm served nothing
+ * Answers `/.well-known/farmjs.json`, or `null` to let the request go on as if Farm served nothing
  * there: methods other than GET and HEAD, and production apps not linked to Farm Infra.
  */
 export async function createFarmAppManifestResponse(

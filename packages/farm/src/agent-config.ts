@@ -1,8 +1,8 @@
 /**
  * Agent-readiness configuration: primitives that make a Farm site easier for AI agents and
  * crawlers to discover, resolve, and use. The ones that only describe the site agents can
- * already read (JSON-LD, llms.txt, and the AI catalog of MCP servers the app already
- * serves) are on by default; the ones that expose more (crawler rules, an API catalog)
+ * already read (JSON-LD, llms.txt, the sitemap, and the AI catalog of MCP servers the app
+ * already serves) are on by default; the ones that expose more (crawler rules, an API catalog)
  * are opt-in. Each one turns off with `false`.
  */
 import {
@@ -10,6 +10,11 @@ import {
   type FarmAgentCrawlers,
   type ResolvedFarmAgentCrawlers,
 } from "./agent-crawlers";
+import {
+  resolveFarmAgentSitemap,
+  type FarmAgentSitemapUserConfig,
+  type ResolvedFarmAgentSitemap,
+} from "./agent-sitemap";
 import {
   resolveFarmLlmsTxtConfig,
   type FarmLlmsTxtUserConfig,
@@ -71,6 +76,18 @@ export interface FarmAgentUserConfig {
    */
   llmsTxt?: boolean | FarmLlmsTxtUserConfig;
   /**
+   * Serve `/sitemap.xml` listing the app's static pages, the same pages the generated
+   * llms.txt lists, each with the time its page file last changed. Dynamic routes,
+   * pages whose metadata says noindex, and pages behind a route `guard` are left out.
+   * URLs use the root layout's `metadataBase`, or the request's origin without one. An
+   * object sets which routes to list. A `src/app/sitemap.ts` or `public/sitemap.xml`
+   * replaces the generated file. Left unset, it is served unless the docs engine is
+   * enabled, which serves its own.
+   *
+   * @default true without docs, false with docs
+   */
+  sitemap?: boolean | FarmAgentSitemapUserConfig;
+  /**
    * Serve a generated `/robots.txt` that allows or blocks AI search agents
    * (`search`) and AI training crawlers (`training`), plus your own `rules`.
    * `true` serves only `User-agent: *` / `Allow: /` and the sitemap. A
@@ -105,6 +122,7 @@ export interface ResolvedFarmAgentConfig {
   jsonLd: FarmAgentJsonLd | false;
   noindexPreviews: boolean;
   llmsTxt: ResolvedFarmLlmsTxtConfig;
+  sitemap: ResolvedFarmAgentSitemap;
   crawlers: ResolvedFarmAgentCrawlers;
   apiCatalog: boolean;
   aiCatalog: boolean;
@@ -131,6 +149,8 @@ export function resolveFarmAgentConfig(
     // The docs engine answers /llms.txt with its own pages; a default here would replace it.
     // llms-full.txt renders every listed page, so it stays opt-in.
     llmsTxt: resolveFarmLlmsTxtConfig(input?.llmsTxt ?? (context.docs ? false : { full: false })),
+    // Same rule as llms.txt: the docs engine answers /sitemap.xml with its own pages.
+    sitemap: resolveFarmAgentSitemap(input?.sitemap ?? !context.docs),
     crawlers: resolveFarmAgentCrawlers(input?.crawlers),
     apiCatalog: resolveFarmAgentBoolean(input?.apiCatalog, "apiCatalog", false),
     aiCatalog: resolveFarmAgentBoolean(input?.aiCatalog, "aiCatalog", true),

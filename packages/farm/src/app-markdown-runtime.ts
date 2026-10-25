@@ -160,6 +160,65 @@ export function isFarmMarkdownPublicSourceResponse(response: Response): boolean 
   return publicSourceResponses.has(response);
 }
 
+/**
+ * Request headers that carry no caller identity: what browsers send on their own, conditional
+ * request validators, and the proxy's description of the transport. `Cookie`, `Authorization`,
+ * and every custom header are left out.
+ */
+const ANONYMOUS_REQUEST_HEADERS = new Set([
+  "accept",
+  "accept-encoding",
+  "accept-language",
+  "cache-control",
+  "connection",
+  "dnt",
+  "forwarded",
+  "host",
+  "if-match",
+  "if-modified-since",
+  "if-none-match",
+  "if-range",
+  "if-unmodified-since",
+  "keep-alive",
+  "origin",
+  "pragma",
+  "priority",
+  "purpose",
+  "range",
+  "referer",
+  "save-data",
+  "sec-gpc",
+  "sec-purpose",
+  "te",
+  "traceparent",
+  "tracestate",
+  "upgrade-insecure-requests",
+  "user-agent",
+  "via",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-port",
+  "x-forwarded-proto",
+  "x-real-ip",
+  "x-request-id",
+]);
+
+function isAnonymousRequestHeader(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    ANONYMOUS_REQUEST_HEADERS.has(lower) ||
+    lower.startsWith("sec-fetch-") ||
+    lower.startsWith("sec-ch-")
+  );
+}
+
+function hasOnlyAnonymousHeaders(headers: Headers): boolean {
+  for (const name of headers.keys()) {
+    if (!isAnonymousRequestHeader(name)) return false;
+  }
+  return true;
+}
+
 export async function createFarmMarkdownSourceResponse(options: {
   request: Request;
   config?: FarmMdxResolvedConfig;
@@ -196,14 +255,17 @@ export async function createFarmMarkdownSourceResponse(options: {
   // page's protection, under a public cache. A page has a Markdown source only
   // when an anonymous visitor may open it, so ask the app as one: its
   // middleware, integration guards and route rules see the page's own path.
-  const anonymous =
-    !options.request.headers.has("cookie") && !options.request.headers.has("authorization");
+  // Any header a browser does not send on its own (an API key, a custom session
+  // header, a client certificate from the proxy) may be what a guard trusts, so
+  // only the standard request headers come along.
+  const anonymous = hasOnlyAnonymousHeaders(options.request.headers);
   if (options.renderPage && (hasMarkdownExtension || !anonymous)) {
     const publicUrl = new URL(url);
     publicUrl.pathname = targetPathname;
-    const publicHeaders = new Headers(options.request.headers);
-    publicHeaders.delete("cookie");
-    publicHeaders.delete("authorization");
+    const publicHeaders = new Headers();
+    for (const [name, value] of options.request.headers) {
+      if (isAnonymousRequestHeader(name)) publicHeaders.append(name, value);
+    }
     publicHeaders.set("accept", "text/markdown");
     const publicResponse = await options.renderPage(
       new Request(publicUrl, {

@@ -631,7 +631,7 @@ moved by `api.basePath`, and Farm serves its card at `<path>/server-card`. Use `
 endpoint on another origin; the catalog then points at `<url>/server-card`, which that host serves.
 Pass `protocolVersions` to list the versions the endpoint accepts in its card. Registering the same
 endpoint again replaces the entry. Registered servers appear in the AI catalog, `ard.json`, and
-`llms.txt`, but not in the `/.well-known/farmjs` manifest, which lists the tools Farm serves itself.
+`llms.txt`, but not in the `/.well-known/farmjs.json` manifest, which lists the tools Farm serves itself.
 The [docs engine](/docs/docs-engine)'s MCP endpoint is listed this way when its adapter registers it.
 
 ## Observe tool executions

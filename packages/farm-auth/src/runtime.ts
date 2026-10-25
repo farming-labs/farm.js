@@ -1,4 +1,5 @@
-import { mkdir } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import type { ResolvedFarmAuthConfig } from "./types.js";
@@ -193,7 +194,7 @@ async function createBetterAuthOptions(
     baseURL: resolveFarmAuthBaseURL(options.mode),
     trustedOrigins: resolveFarmAuthTrustedOrigins(),
     basePath: config.basePath,
-    secret: secret || "farm-auth-development-or-migration-secret",
+    secret: secret || (await resolveFallbackSecret(options)),
     database: await createDatabase(config, options),
     emailAndPassword: {
       enabled: config.emailAndPassword.enabled,
@@ -206,6 +207,61 @@ async function createBetterAuthOptions(
       updateAge: config.session.updateAge,
     },
   };
+}
+
+/** Random secrets used when a project directory cannot hold one, kept for the process. */
+const ephemeralSecrets = new Map<string, string>();
+
+/**
+ * The secret used when no secret env is set: development or a migration, which never signs.
+ *
+ * A fixed fallback would let anyone who reaches a dev server (a `farm preview` URL, `--host`) forge
+ * Better Auth's signed tokens, such as email verification links. Development instead generates a
+ * random secret once per project in `.farm/auth-secret`, next to the local database, so sessions
+ * survive restarts. A production migration gets a throwaway one and writes nothing.
+ */
+async function resolveFallbackSecret(options: FarmAuthRuntimeOptions): Promise<string> {
+  const file = path.resolve(options.root, ".farm", "auth-secret");
+  if (options.mode !== "development") return getEphemeralSecret(file);
+
+  const existing = await readSecretFile(file);
+  if (existing) return existing;
+
+  const generated = randomBytes(32).toString("hex");
+  try {
+    await mkdir(path.dirname(file), { recursive: true });
+    // `wx` keeps a secret another process wrote first; that one is read back below.
+    await writeFile(file, `${generated}\n`, { flag: "wx", mode: 0o600 });
+    return generated;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") return getEphemeralSecret(file);
+  }
+
+  // Another process won the race, or the file holds no usable secret.
+  const raced = await readSecretFile(file);
+  if (raced) return raced;
+  return writeFile(file, `${generated}\n`, { mode: 0o600 }).then(
+    () => generated,
+    () => getEphemeralSecret(file),
+  );
+}
+
+async function readSecretFile(file: string): Promise<string | undefined> {
+  try {
+    const value = (await readFile(file, "utf8")).trim();
+    return value.length >= 32 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getEphemeralSecret(key: string): string {
+  let secret = ephemeralSecrets.get(key);
+  if (!secret) {
+    secret = randomBytes(32).toString("hex");
+    ephemeralSecrets.set(key, secret);
+  }
+  return secret;
 }
 
 /**

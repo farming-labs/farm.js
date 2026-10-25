@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createFarmAppManifest,
   createFarmAppManifestResponse,
+  isFarmAppManifestPath,
   FARM_INFRA_SIGNATURE_HEADER,
   resolveFarmAppManifestInput,
   signFarmInfraManifestRequest,
@@ -197,9 +198,17 @@ describe("Farm Infra signature", () => {
   });
 });
 
-describe("/.well-known/farmjs", () => {
+describe("/.well-known/farmjs.json", () => {
   const request = (headers: Record<string, string> = {}, method = "GET") =>
-    new Request("https://app.example/.well-known/farmjs", { method, headers });
+    new Request("https://app.example/.well-known/farmjs.json", { method, headers });
+
+  it("is served at /.well-known/farmjs.json, and at 0.1.34's /.well-known/farmjs", () => {
+    expect(isFarmAppManifestPath("/.well-known/farmjs.json")).toBe(true);
+    expect(isFarmAppManifestPath("/.well-known/farmjs")).toBe(true);
+    for (const other of ["/.well-known/farmjs/", "/.well-known/farmjs.jsonx", "/farmjs.json"]) {
+      expect(isFarmAppManifestPath(other)).toBe(false);
+    }
+  });
 
   it("is open on the dev server", async () => {
     publishStore();

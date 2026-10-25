@@ -2,7 +2,11 @@ import { createBundledEnv } from "../env";
 import { generateNativeMCPPluginSource } from "./native-mcp-source";
 import { getFarmMarkdownAlternatePath } from "../markdown";
 import { FARM_API_CATALOG_PATH, resolveFarmApiCatalogInput } from "../api-catalog";
-import { FARM_APP_MANIFEST_PATH, resolveFarmAppManifestInput } from "../app-manifest";
+import {
+  FARM_APP_MANIFEST_LEGACY_PATH,
+  FARM_APP_MANIFEST_PATH,
+  resolveFarmAppManifestInput,
+} from "../app-manifest";
 import { resolveFarmAppPackages } from "../app-manifest-packages";
 import { collectFarmWebMCPTools } from "../app-manifest-webmcp";
 import type { RedirectConfig, ResolvedFarmConfig, RewriteConfig } from "../config";
@@ -38,7 +42,7 @@ import {
 import type { Rollup, UserConfig as ViteUserConfig } from "vite";
 import os from "os";
 import path from "path";
-import { constants as fsConstants, existsSync, readFileSync, realpathSync } from "fs";
+import { constants as fsConstants, existsSync, readFileSync, realpathSync, statSync } from "fs";
 import { findRequestBoundSourceBlockers, parseRouteRenderingDirective } from "../ssg";
 import { FARM_LAYOUT_ELEMENT_CLIENT_SOURCE } from "../document-layout-client";
 import { fileURLToPath } from "url";
@@ -110,7 +114,11 @@ import { createFarmNodeServerEntry } from "./node-server-entry";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import type { FarmI18nCatalogs } from "../i18n/types";
-import { getFarmIntegrationPluginServerRuntime, getIntegrationProviders } from "../integrations";
+import {
+  FARM_INTEGRATION_API_BASE_PATH_KEY,
+  getFarmIntegrationPluginServerRuntime,
+  getIntegrationProviders,
+} from "../integrations";
 import {
   generateFarmIntegrationProviderClientCode,
   generateFarmIntegrationProviderServerModules,
@@ -4892,17 +4900,33 @@ async function buildSSRInMemory(
   };
 }
 
+/** When each static page's file last changed, for the generated sitemap's lastmod. */
+function readFarmPageLastModified(pageRoutes: UniversalPageRoute[]): Record<string, string> {
+  const lastModified: Record<string, string> = {};
+  for (const route of pageRoutes) {
+    if (route.pattern.includes("[")) continue;
+    try {
+      lastModified[route.pattern] = statSync(
+        route.markdownSourcePath ?? route.modulePath,
+      ).mtime.toISOString();
+    } catch {
+      // A page without a readable file is listed without a lastmod.
+    }
+  }
+  return lastModified;
+}
+
 /**
  * Root paths the docs engine answers that the app serves itself, so the
  * production server leaves them to the app: /llms.txt and /llms-full.txt
- * (agent.llmsTxt, llms.ts, llms-full.ts), /sitemap.xml (sitemap.ts), and
+ * (agent.llmsTxt, llms.ts, llms-full.ts), /sitemap.xml (agent.sitemap, sitemap.ts), and
  * /robots.txt (agent.crawlers, robots.ts). A public file needs no entry, since
  * the platform serves it before any route.
  */
 export function getFarmAppOwnedDocsEnginePaths(
   agent:
     | (Pick<ResolvedFarmConfig["agent"], "llmsTxt"> &
-        Partial<Pick<ResolvedFarmConfig["agent"], "crawlers">>)
+        Partial<Pick<ResolvedFarmConfig["agent"], "crawlers" | "sitemap">>)
     | undefined,
   applicationMetadataRoutes: ReadonlyArray<
     Pick<UniversalApplicationMetadataRoute, "kind" | "pattern">
@@ -4916,7 +4940,7 @@ export function getFarmAppOwnedDocsEnginePaths(
   return [
     ...(llmsTxt?.enabled || ownedByFile("llms") ? ["/llms.txt"] : []),
     ...((llmsTxt?.enabled && llmsTxt.full) || ownedByFile("llms-full") ? ["/llms-full.txt"] : []),
-    ...(ownedByFile("sitemap") ? ["/sitemap.xml"] : []),
+    ...(agent?.sitemap?.enabled || ownedByFile("sitemap") ? ["/sitemap.xml"] : []),
     ...(agent?.crawlers?.enabled || ownedByFile("robots") ? ["/robots.txt"] : []),
   ];
 }
@@ -5032,7 +5056,7 @@ function matchLocalIntegrationRequest(request) {
   }
 }
 
-async function handleIntegrationRequest(request) {
+async function handleIntegrationRequest(request, ranMiddleware) {
   ${
     options.hasServerRuntimeIntegrations
       ? `return dispatchIntegrationRequests(
@@ -5043,6 +5067,7 @@ async function handleIntegrationRequest(request) {
       isProd: true,
     },
     request,
+    { ranMiddleware },
   );`
       : `return { response: null, setCookies: [] };`
   }
@@ -5359,6 +5384,12 @@ function generateVirtualEntryCode(
     Boolean(config.agent?.crawlers?.enabled) &&
     !applicationMetadataRoutes.some(
       (metadata) => metadata.kind === "robots" && metadata.pattern === "/",
+    );
+  // agent.sitemap serves /sitemap.xml unless a root sitemap.ts owns it.
+  const servesAgentSitemap =
+    Boolean(config.agent?.sitemap?.enabled) &&
+    !applicationMetadataRoutes.some(
+      (metadata) => metadata.kind === "sitemap" && metadata.pattern === "/",
     );
   // agent.aiCatalog lists the MCP servers @farm.js/mcp mounts and those registered with
   // registerFarmMCPServer, which a docs runtime or app code does when the server starts,
@@ -5780,6 +5811,7 @@ function renderFarmRouteServerTree(element) { return element; }`;
   createFarmCacheKey,
   createFarmMetadataRouteResponse,
   createFarmAgentRobots,
+  createFarmDefaultSitemap,
   createFarmAiCatalogResponse,
   createFarmApiCatalogResponse,
   createFarmAppManifestResponse,
@@ -6230,6 +6262,7 @@ const serverRuntimeIntegrations = Object.fromEntries(
 );
 const integrationRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs, {
   integrations: configuredIntegrations,
+  ${JSON.stringify(FARM_INTEGRATION_API_BASE_PATH_KEY)}: ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))},
 });
 const farmInfraAnalytics = ${
     hasInfraAnalyticsRuntime
@@ -7364,6 +7397,7 @@ function createFarmAgentRobotsResponse(request) {
     createFarmAgentRobots({
       crawlers: farmAgentCrawlers,
       sitemapPath: ${
+        servesAgentSitemap ||
         applicationMetadataRoutes.some(
           (metadata) => metadata.kind === "sitemap" && metadata.pattern === "/",
         )
@@ -7375,6 +7409,38 @@ function createFarmAgentRobotsResponse(request) {
         : undefined,
       basePath: ${JSON.stringify(config.basePath)},
     }),
+    {},
+    { method: request.method },
+  );
+}
+`
+    : ""
+}
+${
+  servesAgentSitemap
+    ? `// sitemap.xml from agent.sitemap, built the same way as in development. Each page's
+// lastmod is its file's modification time, read at build time.
+const farmAgentSitemapConfig = ${JSON.stringify(config.agent.sitemap)};
+const farmAgentSitemapLastModified = ${JSON.stringify(readFarmPageLastModified(pageRoutes))};
+function createFarmAgentSitemapResponse(request) {
+  const rootLayout = layoutRoutes.find((layout) => layout.pattern === "/");
+  return createFarmMetadataRouteResponse(
+    "sitemap",
+    createFarmDefaultSitemap(
+      pageRoutes.map((route) => ({
+        pattern: route.pattern,
+        module: route.module,
+        lastModified: farmAgentSitemapLastModified[route.pattern],
+      })),
+      {
+        origin: new URL(request.url).origin,
+        config: farmAgentSitemapConfig,
+        metadataBase: rootLayout && rootLayout.module && rootLayout.module.metadata
+          ? rootLayout.module.metadata.metadataBase
+          : undefined,
+        basePath: ${JSON.stringify(config.basePath)},
+      },
+    ),
     {},
     { method: request.method },
   );
@@ -8119,7 +8185,11 @@ async function handleFarmRequestInContext(
   ${
     hasServerRuntimeIntegrations
       ? `
-  const integrationDispatch = await handleIntegrationRequest(cloneFarmRequestWithContext(request));
+  const farmIntegrationRanMiddleware = new Set();
+  const integrationDispatch = await handleIntegrationRequest(
+    cloneFarmRequestWithContext(request),
+    farmIntegrationRanMiddleware,
+  );
   if (integrationDispatch.response) {
     return integrationDispatch.response;
   }
@@ -8127,7 +8197,7 @@ async function handleFarmRequestInContext(
   // its rotated Set-Cookie values back here. They belong on whatever response
   // the page or API handler produces, so they ride the same deferred-header
   // channel the file middleware runner already uses.
-  const farmIntegrationSetCookies = integrationDispatch.setCookies;
+  let farmIntegrationSetCookies = integrationDispatch.setCookies;
   `
       : ""
   }
@@ -8142,7 +8212,27 @@ async function handleFarmRequestInContext(
   if (middlewareResult.response) {
     return middlewareResult.response;
   }
-  request = middlewareResult.request;
+  request = middlewareResult.request;${
+    hasServerRuntimeIntegrations
+      ? `
+  // A ctx.rewrite() target is guarded as a direct request for it is: integration
+  // guards (protectedRoutes) and routes see the rewritten URL, as in dev. Guards
+  // that already ran for the original URL are skipped, so each runs once.
+  if (request.url !== url.href) {
+    const rewrittenDispatch = await handleIntegrationRequest(
+      cloneFarmRequestWithContext(request),
+      farmIntegrationRanMiddleware,
+    );
+    farmIntegrationSetCookies = [...farmIntegrationSetCookies, ...rewrittenDispatch.setCookies];
+    if (rewrittenDispatch.response) {
+      return applyProductionMiddlewareHeaders(
+        rewrittenDispatch.response,
+        withFarmIntegrationSetCookies(middlewareResult.headers, integrationDispatch.setCookies),
+      );
+    }
+  }`
+      : ""
+  }
   const middlewareData = middlewareResult.data;
   const middlewareContext = middlewareResult.context;
   const middlewareHeaders = ${
@@ -8370,8 +8460,13 @@ async function handleFarmRequestInContext(
   ${
     config.analytics !== false
       ? `
-  // /.well-known/farmjs: the app's manifest, only for a request Farm Infra signed.
-  if (normalizeRuntimePath(routePathname) === ${JSON.stringify(FARM_APP_MANIFEST_PATH)}) {
+  // /.well-known/farmjs.json (and 0.1.34's /.well-known/farmjs): the app's manifest, only for
+  // a request Farm Infra signed.
+  if (
+    [${JSON.stringify(FARM_APP_MANIFEST_PATH)}, ${JSON.stringify(FARM_APP_MANIFEST_LEGACY_PATH)}].includes(
+      normalizeRuntimePath(routePathname),
+    )
+  ) {
     const farmAppManifest = await createFarmAppManifestResponse(request, farmAppManifestInput, {
       development: false,
     });
@@ -8402,6 +8497,19 @@ async function handleFarmRequestInContext(
   if (normalizeRuntimePath(routePathname) === "/robots.txt") {
     return applyProductionMiddlewareHeaders(
       createFarmAgentRobotsResponse(request),
+      middlewareHeaders,
+    );
+  }
+  `
+      : ""
+  }
+  ${
+    servesAgentSitemap
+      ? `
+  // agent.sitemap with no sitemap.ts: serve the generated file.
+  if (normalizeRuntimePath(routePathname) === "/sitemap.xml") {
+    return applyProductionMiddlewareHeaders(
+      createFarmAgentSitemapResponse(request),
       middlewareHeaders,
     );
   }

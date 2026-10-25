@@ -2365,7 +2365,7 @@ export default {
     }
   }, 120_000);
 
-  it("serves /.well-known/farmjs only to a request Farm Infra signed for the app's key", async () => {
+  it("serves /.well-known/farmjs.json only to a request Farm Infra signed for the app's key", async () => {
     const root = await createProductionFixture();
     const key = `fti_${"m".repeat(43)}`;
     const keyHash = createHash("sha256").update(key).digest("hex");
@@ -2450,7 +2450,7 @@ export const listTodos = defineWebMCPTool({
         async (response) => {
           expect(response.headers.get("content-type") ?? "").not.toContain("application/json");
         },
-        "/.well-known/farmjs",
+        "/.well-known/farmjs.json",
       );
       // Linked, but not signed: a plain 404 that says nothing about the app.
       await runProductionRequest(
@@ -2459,7 +2459,7 @@ export const listTodos = defineWebMCPTool({
           expect(response.status).toBe(404);
           expect(await response.text()).toBe("");
         },
-        "/.well-known/farmjs",
+        "/.well-known/farmjs.json",
         undefined,
         linked,
       );
@@ -2512,6 +2512,17 @@ export const listTodos = defineWebMCPTool({
           });
           expect(manifest.plugins).toEqual(expect.arrayContaining(["farm:webmcp", "fixture-mcp"]));
           expect(JSON.stringify(manifest)).not.toContain(key);
+        },
+        "/.well-known/farmjs.json",
+        { headers: { "farmjs-infra-signature": await signFarmInfraManifestRequest(keyHash) } },
+        linked,
+      );
+      // Farm 0.1.34 served it at /.well-known/farmjs: that path still answers a signed request.
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(await response.json()).toMatchObject({ schemaVersion: 1 });
         },
         "/.well-known/farmjs",
         { headers: { "farmjs-infra-signature": await signFarmInfraManifestRequest(keyHash) } },

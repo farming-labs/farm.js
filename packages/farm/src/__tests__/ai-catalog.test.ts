@@ -325,7 +325,7 @@ describe("ai catalog", () => {
     expect(entries).toEqual([expect.objectContaining({ displayName: "Projects" })]);
   });
 
-  it("leaves registered servers out of the /.well-known/farmjs manifest", () => {
+  it("leaves registered servers out of the /.well-known/farmjs.json manifest", () => {
     register({ name: "docs", version: "1.0.0", path: "/api/docs/mcp" });
     const manifest = createFarmAppManifest(
       resolveFarmAppManifestInput({ basePath: "/" }, { build: "test", packages: {} }),

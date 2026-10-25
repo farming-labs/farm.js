@@ -57,6 +57,7 @@ import {
 import { stripFarmBasePath } from "./base-path";
 import { resolveFarmLlmsTxtConfig } from "./llms-txt";
 import { resolveFarmAgentCrawlers } from "./agent-crawlers";
+import { resolveFarmAgentSitemap } from "./agent-sitemap";
 import {
   FARM_MARKDOWN_CONTENT_TYPE,
   createFarmMarkdownErrorBody,
@@ -75,7 +76,7 @@ import {
 } from "./api-catalog";
 import {
   createFarmAppManifestResponse,
-  FARM_APP_MANIFEST_PATH,
+  isFarmAppManifestPath,
   resolveFarmAppManifestInput,
 } from "./app-manifest";
 import { resolveFarmAppPackages } from "./app-manifest-packages";
@@ -202,12 +203,17 @@ function farmLlmsTxtGeneratedPaths(config: { agent?: { llmsTxt?: unknown } }): s
   return llms.full ? ["/llms.txt", "/llms-full.txt"] : ["/llms.txt"];
 }
 
-/** Paths `agent.llmsTxt` and `agent.crawlers` serve without a route file. */
+/** Paths `agent.llmsTxt`, `agent.sitemap`, and `agent.crawlers` serve without a route file. */
 function farmAgentGeneratedPaths(config: {
-  agent?: { llmsTxt?: unknown; crawlers?: unknown };
+  agent?: { llmsTxt?: unknown; sitemap?: unknown; crawlers?: unknown };
 }): string[] {
   const crawlers = resolveFarmAgentCrawlers(config.agent?.crawlers as never);
-  return [...farmLlmsTxtGeneratedPaths(config), ...(crawlers.enabled ? ["/robots.txt"] : [])];
+  const sitemap = resolveFarmAgentSitemap(config.agent?.sitemap as never);
+  return [
+    ...farmLlmsTxtGeneratedPaths(config),
+    ...(sitemap.enabled ? ["/sitemap.xml"] : []),
+    ...(crawlers.enabled ? ["/robots.txt"] : []),
+  ];
 }
 
 interface FarmVitePluginOptions extends FarmConfig {
@@ -1999,8 +2005,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             return docsHandler(req, res);
           }
 
-          // /.well-known/farmjs: the app's manifest, open on the dev server.
-          if (stripFarmBasePath(requestPathname, farmConfig.basePath) === FARM_APP_MANIFEST_PATH) {
+          // /.well-known/farmjs.json: the app's manifest, open on the dev server.
+          if (isFarmAppManifestPath(stripFarmBasePath(requestPathname, farmConfig.basePath))) {
             farmAppPackages ??= resolveFarmAppPackages(farmConfig.root ?? process.cwd());
             const manifest = await createFarmAppManifestResponse(
               new Request(parsedRequestUrl, { method: requestMethod }),

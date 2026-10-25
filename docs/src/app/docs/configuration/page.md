@@ -396,7 +396,8 @@ A root-relative API root is also mounted by Farm in development and production. 
 `api: { basePath: "/v2/api" }` makes a route declared at `app/api/users/route.ts` available at
 `/v2/api/users`. The route still answers at `/api/users` too, and middleware guards both paths:
 `src/app/api/**/middleware.ts` files run for either prefix, and a middleware `matcher` written for
-`/api/...` or `/v2/api/...` matches the request at both. Farm treats an absolute `baseURL` as
+`/api/...` or `/v2/api/...` matches the request at both. Integration guards, such as an auth
+integration's `protectedRoutes`, match both prefixes the same way. Farm treats an absolute `baseURL` as
 external and does not remount the current application's API routes for it. `basePath` rejects
 backslashes, control characters, and `.` or `..` segments, including encoded path separators. Root-relative `baseURL` and `basePath` values
 must begin with one slash; network-path references such as `//api.example.com` are rejected so the
@@ -444,15 +445,16 @@ mixed declarations, the resolved catalog, and permission checks.
 
 `agent` holds features that help AI agents and crawlers understand a public site, and decide which
 of them may use it. The ones that only describe what agents can already read are on by default:
-`jsonLd` (a schema.org `WebSite` built from your metadata), `llmsTxt` (an index of your static
-pages, when the [docs engine](/docs/docs-engine) isn't serving its own), and `aiCatalog` (discovery
+`jsonLd` (a schema.org `WebSite` built from your metadata), `llmsTxt` and `sitemap` (an index of
+your static pages and a `/sitemap.xml` of them, when the [docs engine](/docs/docs-engine) isn't
+serving its own), and `aiCatalog` (discovery
 for the [MCP server](/docs/plugins/mcp#discovery) you already serve, when you serve one). The rest,
 which expose more or change who may crawl, are opt-in. Turn a default off with `false`, for example
 on an internal tool:
 
 ```ts title="farm.config.ts"
 export default defineConfig({
-  agent: { jsonLd: false, llmsTxt: false, aiCatalog: false },
+  agent: { jsonLd: false, llmsTxt: false, sitemap: false, aiCatalog: false },
 });
 ```
 
@@ -564,6 +566,29 @@ export const metadata: Metadata = {
 Values are passed through as written, so use absolute URLs. Spread a result to add schema.org
 properties the builder does not model, for example `{ ...jsonLd.product(input), gtin13: "..." }`.
 
+### Sitemap
+
+Left unset, `sitemap` serves `/sitemap.xml` listing every static page with a `<lastmod>`: the time
+the page's file last changed, read when the server builds. Dynamic routes, pages whose metadata
+says `robots: { index: false }`, and pages behind a route [`guard`](/docs/routing#route-guards) are
+left out. URLs use the root layout's `metadataBase`, or the request's origin when it has none, the
+same origin the generated `llms.txt` links to; set `metadataBase` so crawlers and caches always see
+your canonical host. With the docs engine enabled it stays off, since the docs engine answers
+`/sitemap.xml` itself. A page that middleware keeps private is still listed, so leave it out with
+`exclude`:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  agent: {
+    sitemap: { exclude: ["/admin/[...path]", "/settings"] },
+  },
+});
+```
+
+`include` narrows the list the same way, and `sitemap: false` turns it off. A `public/sitemap.xml`
+or a root [`sitemap.ts`](/docs/routing#application-metadata-routes), which can list dynamic pages,
+replaces the generated file.
+
 ### AI crawlers
 
 `crawlers` serves a generated `/robots.txt` with a group per category you set:
@@ -579,8 +604,8 @@ fetch pages to cite or link them in answers, including ones acting on a user's r
 vendors say may not follow robots.txt. `training` covers crawlers and tokens that decide whether
 content trains models; blocking them does not affect search engines such as Googlebot.
 
-The file ends with `User-agent: *` / `Allow: /`, then a `Sitemap:` line when the app has a
-`sitemap.ts` and the root layout sets `metadataBase`. Farm does not build that URL from the request's
+The file ends with `User-agent: *` / `Allow: /`, then a `Sitemap:` line when the app serves a
+sitemap (`sitemap.ts` or the generated one) and the root layout sets `metadataBase`. Farm does not build that URL from the request's
 `Host` header, since CDNs cache robots.txt. `crawlers: true` serves only those default lines.
 
 ```ts title="farm.config.ts"

@@ -93,6 +93,7 @@ export async function runFarmAgentCheck(
   }
 
   checkMetadata(html, add);
+  checkReadable(html, add);
   checkStructure(html, add);
   const mirrorUrl = await checkMarkdown(page, html, probe, at, add);
   if (mirrorUrl) await checkMarkdownViews(mirrorUrl, probe, add);
@@ -159,6 +160,31 @@ function visibleText(html: string): string {
     .replace(/&[a-z#0-9]+;/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** Characters of server-rendered text under which a page reads as a client-rendered shell. */
+const READABLE_TEXT = 500;
+
+function checkReadable(html: Probe, add: (check: FarmDoctorCheck) => void): void {
+  const length = visibleText(html.body).length;
+  add(
+    length >= READABLE_TEXT
+      ? {
+          status: "pass",
+          code: "AGENT_READABLE",
+          title: "Readable without JavaScript",
+          message: `The server HTML carries ${length} characters of text.`,
+        }
+      : {
+          status: "warn",
+          code: "AGENT_READABLE",
+          title:
+            length < 80 ? "The page is an empty shell without JavaScript" : "Little server text",
+          message: `The server HTML carries ${length} characters of text; agents rarely run JavaScript, and checks expect at least ${READABLE_TEXT}.`,
+          action:
+            "Render the page's content on the server, and say what the page is in its markup instead of only after hydration.",
+        },
+  );
 }
 
 function checkStructure(html: Probe, add: (check: FarmDoctorCheck) => void): void {

@@ -200,7 +200,7 @@ function createHandler(
     ...(options.description ? { description: options.description } : {}),
   };
   const serverIdentity = Object.freeze({ ...serverInfo, path: options.path });
-  // The app manifest (/.well-known/farmjs) lists schemas, resources and prompts too,
+  // The app manifest (/.well-known/farmjs.json) lists schemas, resources and prompts too,
   // and the server card core serves for /.well-known/ai-catalog.json uses the versions.
   publish(serverIdentity, catalog, {
     protocolVersions: [...SUPPORTED_PROTOCOL_VERSIONS],

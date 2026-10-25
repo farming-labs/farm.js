@@ -53,6 +53,8 @@ import type { InferFarmIntegrationOrmClient } from "./integration-orm";
 import { setFarmPluginIntegrationContext } from "./plugin-integration-context";
 import { canonicalizeRequestPathname, canonicalizeRequestPathSegments } from "./utils/decode";
 import { stripFarmBasePath } from "./base-path";
+import { createFarmAPIMiddlewarePathnames, resolveFarmAPIServerBasePath } from "./api/server-path";
+import type { ResolvedFarmAPIConfig } from "./api/config";
 import { resolveFarmLocalePath } from "./i18n/routing";
 import {
   compileMiddlewareConfig,
@@ -2869,6 +2871,12 @@ export async function dispatchIntegrationRequest(
      * already had the forwarded cookies appended.
      */
     onForwardedCookies?: (cookies: string[]) => void;
+    /**
+     * Middleware entries that already ran for this request, shared across dispatches. A
+     * `ctx.rewrite()` target is guarded by a second dispatch, which skips these so each guard runs
+     * at most once per request, as app middleware does.
+     */
+    ranMiddleware?: Set<object>;
   } = {},
 ): Promise<Response | null> {
   try {
@@ -2903,10 +2911,12 @@ export async function dispatchIntegrationRequest(
   const forwardedSetCookies: string[] = [];
 
   for (const entry of middleware) {
+    if (options.ranMiddleware?.has(entry)) continue;
     const params = resolveIntegrationMiddlewareParams(entry, pathname, runtime.config);
     if (!params) {
       continue;
     }
+    options.ranMiddleware?.add(entry);
 
     const handlerContext = createServerIntegrationHandlerContext({
       runtime,
@@ -3189,7 +3199,7 @@ export async function dispatchIntegrationRequests(
   integrations: FarmIntegrationsUserConfig | undefined,
   runtime: Omit<RegisteredIntegrationRuntime, "integration">,
   request: Request,
-  options: { currentRequest?: Request } = {},
+  options: { currentRequest?: Request; ranMiddleware?: Set<object> } = {},
 ): Promise<{ response: Response | null; setCookies: string[] }> {
   const setCookies: string[] = [];
   if (!integrations) {
@@ -3216,6 +3226,7 @@ export async function dispatchIntegrationRequests(
       request.clone(),
       {
         currentRequest: options.currentRequest,
+        ranMiddleware: options.ranMiddleware,
         onForwardedCookies: (cookies) => setCookies.push(...cookies),
       },
     );
@@ -3436,9 +3447,13 @@ function resolveIntegrationMiddlewareParams(
   // A missing matcher already matched everything above.
   if (params || !entry.matcher) return params;
 
+  // A local API route answers at `/api/...` and at the public `api.basePath`, so a guard written
+  // for either prefix must see both, the way app middleware does.
   const routePathname = resolveIntegrationRoutePathname(pathname, config);
-  if (routePathname !== pathname) {
-    const routeParams = resolveMatcherParams(entry.matcher, routePathname);
+  const candidates = [...new Set([pathname, ...getIntegrationAPIPathnames(config)(routePathname)])];
+  for (const candidate of candidates) {
+    if (candidate === pathname) continue;
+    const routeParams = resolveMatcherParams(entry.matcher, candidate);
     if (routeParams) return routeParams;
   }
 
@@ -3449,11 +3464,40 @@ function resolveIntegrationMiddlewareParams(
     });
     compiledIntegrationGuards.set(entry, compiled);
   }
-  for (const candidate of routePathname === pathname ? [pathname] : [pathname, routePathname]) {
+  for (const candidate of candidates) {
     const result = matchesCompiledMiddlewareConfig(candidate, compiled, noMiddlewareContext);
     if (result.matched) return result.params ?? {};
   }
   return null;
+}
+
+/**
+ * @internal Runtime config key holding the app's same-origin API path. The built server keeps the
+ * user's raw `api` config, whose values may be resolver functions, so the build records the
+ * resolved path here; development configs carry the resolved `api` itself.
+ */
+export const FARM_INTEGRATION_API_BASE_PATH_KEY = "__farmAPIServerBasePath";
+
+const integrationAPIPathnames = new WeakMap<object, (pathname: string) => readonly string[]>();
+
+function getIntegrationAPIPathnames(
+  config: FarmPluginContext["config"] | undefined,
+): (pathname: string) => readonly string[] {
+  if (!config) return (pathname) => [pathname];
+  let toPathnames = integrationAPIPathnames.get(config);
+  if (!toPathnames) {
+    const recorded = (config as Record<string, unknown>)[FARM_INTEGRATION_API_BASE_PATH_KEY];
+    const api = config.api as Partial<ResolvedFarmAPIConfig> | undefined;
+    const serverBasePath =
+      typeof recorded === "string"
+        ? recorded
+        : typeof api?.baseURL === "string" && typeof api.basePath === "string"
+          ? resolveFarmAPIServerBasePath(api as ResolvedFarmAPIConfig)
+          : undefined;
+    toPathnames = createFarmAPIMiddlewarePathnames(serverBasePath);
+    integrationAPIPathnames.set(config, toPathnames);
+  }
+  return toPathnames;
 }
 
 /** The pathname the page router matches: basePath and locale prefix removed. */

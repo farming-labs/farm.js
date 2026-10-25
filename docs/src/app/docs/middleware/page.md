@@ -189,7 +189,8 @@ Multiple config middleware entries can match the same request. They run in array
 
 `ctx.rewrite(url)` does not skip the target's guards. After the middleware matching the requested
 path has run, the config and file middleware matching the rewritten path runs too, as it would for a
-direct request. Each middleware runs at most once per request, so repeated rewrites cannot loop.
+direct request. Integration guards, such as an auth integration's `protectedRoutes`, run for the
+rewritten path too. Each middleware runs at most once per request, so repeated rewrites cannot loop.
 
 ```ts
 import { defineConfig } from "@farm.js/core";
