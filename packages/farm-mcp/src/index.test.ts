@@ -478,6 +478,73 @@ describe("apiMcp", () => {
     expect(() => apiMcp({ allowUnauthenticated: true, maxBatchSize: 0 })).toThrow("maxBatchSize");
   });
 
+  it("refuses tool arguments with too many elements before validation or the tool runs", async () => {
+    const importRows = vi.fn(() => ({ imported: true }));
+    const rows = route.post("/api/rows", {
+      mcp: { name: "import_rows" },
+      input: { body: z.object({ rows: z.array(z.number()) }) },
+      handler: importRows,
+    });
+    const tag = vi.fn(() => ({ tagged: true }));
+    const mount = (options: Partial<Parameters<typeof apiMcp>[0]> = {}) =>
+      mergePluginAPIRoutes(
+        [{ path: rows.path, methods: [rows.method], endpoints: { POST: rows.endpoint } }],
+        [
+          apiMcp({
+            allowUnauthenticated: true,
+            tools: [
+              rows.endpoint,
+              defineTool({
+                name: "tag",
+                inputSchema: z.object({ tags: z.array(z.string()) }),
+                execute: tag,
+              }),
+            ],
+            ...options,
+          }),
+        ],
+      ).find((entry) => entry.path === "/api/mcp")!.endpoints.POST;
+    const call = (endpoint: unknown, name: string, args: unknown) =>
+      sendMCP(endpoint, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: args },
+      }).then(readMCP);
+
+    // `body` and `rows` count, then every row: 10,002 members against the default of 10,000.
+    const oversized = await call(mount(), "import_rows", {
+      body: { rows: Array.from({ length: 10_000 }, (_, index) => index) },
+    });
+    expect(JSON.stringify(oversized)).toContain("more than the maximum of 10000 elements");
+    expect(importRows).not.toHaveBeenCalled();
+    const tags = await call(mount(), "tag", { tags: Array.from({ length: 10_000 }, () => "x") });
+    expect(JSON.stringify(tags)).toContain("more than the maximum of 10000 elements");
+    expect(tag).not.toHaveBeenCalled();
+
+    const small = mount({ maxToolInputElements: 4 });
+    expect(JSON.stringify(await call(small, "tag", { tags: ["a", "b", "c", "d"] }))).toContain(
+      "more than the maximum of 4 elements",
+    );
+    expect((await call(small, "tag", { tags: ["a", "b", "c"] })).result.isError).toBeFalsy();
+    expect(tag).toHaveBeenCalledTimes(1);
+    expect(
+      (await call(mount(), "import_rows", { body: { rows: [1, 2, 3] } })).result.isError,
+    ).toBeFalsy();
+    expect(importRows).toHaveBeenCalledTimes(1);
+    const unlimited = mount({ maxToolInputElements: Infinity });
+    expect(
+      (await call(unlimited, "tag", { tags: Array.from({ length: 10_001 }, () => "x") })).result
+        .isError,
+    ).toBeFalsy();
+
+    for (const value of [0, 1.5, -1, Number.NaN]) {
+      expect(() => apiMcp({ allowUnauthenticated: true, maxToolInputElements: value })).toThrow(
+        "maxToolInputElements",
+      );
+    }
+  });
+
   it("rejects batches that resolve to different authorization identities", async () => {
     const handler = vi.fn(() => ({ deleted: true }));
     const destructive = route.delete("/api/projects", {
@@ -697,6 +764,55 @@ describe("apiMcp", () => {
         encoding: null,
       },
     ]);
+  });
+
+  it("rejects route parameters that would move a tool call to another path", async () => {
+    const file = route.get("/api/files/[...path]", {
+      mcp: { name: "get_file" },
+      handler: () => ({}),
+    });
+    const team = route.get("/api/teams/[team]", { mcp: { name: "get_team" }, handler: () => ({}) });
+    const dispatched: string[] = [];
+    const routes = mergePluginAPIRoutes(
+      [
+        { path: file.path, methods: [file.method], endpoints: { GET: file.endpoint } },
+        { path: team.path, methods: [team.method], endpoints: { GET: team.endpoint } },
+      ],
+      [apiMcp({ authorize: () => ({ subject: "reader", tools: ["get_file", "get_team"] }) })],
+      undefined,
+      {
+        dispatch: (request) => {
+          dispatched.push(new URL(request.url).pathname);
+          return Response.json({ ok: true });
+        },
+      },
+    );
+    const endpoint = routes.find((entry) => entry.path === "/api/mcp")!.endpoints.POST;
+    const call = (name: string, params: Record<string, unknown>) =>
+      sendMCP(endpoint, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: { params } },
+      }).then(readMCP);
+
+    for (const [name, params] of [
+      ["get_file", { path: ["..", "..", "admin", "users"] }],
+      ["get_file", { path: ["docs", "."] }],
+      ["get_team", { team: ".." }],
+      ["get_team", { team: "." }],
+      ["get_team", { team: "" }],
+      ["get_team", { team: "a/b" }],
+    ] as const) {
+      const payload = await call(name, params);
+      expect(payload.result.isError).toBe(true);
+      expect(payload.result.content[0].text).toMatch(/Route parameter "(path|team)"/);
+    }
+    expect(dispatched).toEqual([]);
+
+    await call("get_file", { path: ["docs", "..a", "a.b"] });
+    await call("get_team", { team: "farm..js" });
+    expect(dispatched).toEqual(["/api/files/docs/..a/a.b", "/api/teams/farm..js"]);
   });
 
   it("supplies a frozen tool catalog and server identity on every authorization request", async () => {

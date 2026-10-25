@@ -1085,6 +1085,17 @@ function keyedMapLookupTarget(
 
 function collectReferencedLocals(expression: t.Expression, names: ReadonlySet<string>): string[] {
   if (names.size === 0) return [];
+  // Only proven misses bypass cloning and scope construction. Matching binding,
+  // property, and JSX names still require the full reference analysis below.
+  let possible = false;
+  t.traverseFast(expression, (node) => {
+    if ((t.isIdentifier(node) || t.isJSXIdentifier(node)) && names.has(node.name)) {
+      possible = true;
+      return t.traverseFast.stop;
+    }
+  });
+  if (!possible) return [];
+
   const references = new Set<string>();
   traverse(expressionFile(cloneExpression(expression)), {
     ReferencedIdentifier(path) {
@@ -7360,6 +7371,59 @@ function canCloneKeyedRows(plan: KeyedRowsPlan): boolean {
   return cloneable(plan.row);
 }
 
+function keyedRowBindingTargets(plan: KeyedRowsPlan): t.ArrowFunctionExpression | undefined {
+  if (!canCloneKeyedRows(plan)) return undefined;
+  const root = t.identifier("row");
+  const targets = new Map<string, t.Identifier>([["", root]]);
+  const statements: t.Statement[] = [];
+  let independentReads = 0;
+  for (const binding of plan.bindings) {
+    const path: number[] = [];
+    for (const index of binding.path) {
+      independentReads += index + 1;
+      for (let sibling = 0; sibling <= index; sibling += 1) {
+        const key = [...path, sibling].join(".");
+        if (targets.has(key)) continue;
+        // Keep wide/deep rows on the compact generic walker.
+        if (statements.length === 32) return undefined;
+        const parent = targets.get(
+          sibling === 0 ? path.join(".") : [...path, sibling - 1].join("."),
+        )!;
+        const target = t.identifier(`target${statements.length}`);
+        statements.push(
+          t.variableDeclaration("const", [
+            t.variableDeclarator(
+              target,
+              t.optionalMemberExpression(
+                parent,
+                t.identifier(sibling === 0 ? "firstElementChild" : "nextElementSibling"),
+                false,
+                true,
+              ),
+            ),
+          ]),
+        );
+        targets.set(key, target);
+      }
+      path.push(index);
+    }
+  }
+  if (statements.length >= independentReads) return undefined;
+  return t.arrowFunctionExpression(
+    [root],
+    t.blockStatement([
+      ...statements,
+      t.returnStatement(
+        t.arrayExpression(
+          plan.bindings.map((binding) =>
+            t.logicalExpression("??", targets.get(binding.path.join("."))!, t.nullLiteral()),
+          ),
+        ),
+      ),
+    ]),
+  );
+}
+
 function keyedRowsBoundary(
   blockRuntime: t.Identifier,
   plan: KeyedRowsPlan,
@@ -7385,6 +7449,7 @@ function keyedRowsBoundary(
     ...plan.conditionals.map((conditional) => conditional.test),
   ]);
   const delegatedEvents = canDelegateKeyedRowEvents(plan);
+  const bindingTargets = keyedRowBindingTargets(plan);
   const renderSource = keyedRowsRenderSource(plan, eventFactory, conditionalFactory);
   const renderFactoryParameters =
     plan.conditionals.length > 0
@@ -7533,6 +7598,9 @@ function keyedRowsBoundary(
                 t.jsxExpressionContainer(t.booleanLiteral(true)),
               ),
             ]
+          : []),
+        ...(bindingTargets
+          ? [t.jsxAttribute(t.jsxIdentifier("targets"), t.jsxExpressionContainer(bindingTargets))]
           : []),
         ...(canCloneKeyedRows(plan)
           ? [

@@ -172,6 +172,58 @@ describe("development default MCP server", () => {
     ]);
   }, 120_000);
 
+  it("reads pages as a fresh anonymous request through the plugin runtime", async () => {
+    const origin = await startApp(
+      `plugins: [{
+        name: "acme:internal-auth",
+        runtime: {
+          before({ request }) {
+            if (new URL(request.url).pathname.startsWith("/internal")) {
+              return new Response("staff only", { status: 401 });
+            }
+          },
+        },
+      }]`,
+      {
+        "src/app/internal/handbook/page.tsx": `import React from "react";
+export const metadata = { title: "Handbook" };
+export default function Page() { return <main>INTERNAL-HANDBOOK</main>; }`,
+        "src/app/whoami/page.tsx": `import React from "react";
+import { cookies } from "@farm.js/core/headers";
+export const metadata = { title: "Who am I" };
+export default async function Page() {
+  const session = (await cookies()).get("session")?.value ?? "none";
+  return <main>session={session}</main>;
+}`,
+      },
+    );
+    const read = async (path: string) => {
+      const response = await fetch(`${origin}/mcp`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          cookie: "session=CALLER",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "read_page", arguments: { path } },
+        }),
+      });
+      return ((await response.json()) as { result: any }).result;
+    };
+
+    expect((await fetch(`${origin}/internal/handbook`)).status).toBe(401);
+    const handbook = await read("/internal/handbook");
+    expect(handbook.isError).toBe(true);
+    expect(JSON.stringify(handbook)).not.toContain("INTERNAL-HANDBOOK");
+    const whoami = await read("/whoami");
+    expect(whoami.content[0].text).toContain("session=none");
+    expect(whoami.content[0].text).not.toContain("CALLER");
+  }, 120_000);
+
   it("serves and reads pages below the base path", async () => {
     const origin = await startApp(`basePath: "/base"`);
     const response = await fetch(`${origin}/base/mcp`, {

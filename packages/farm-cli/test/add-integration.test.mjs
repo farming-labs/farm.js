@@ -445,7 +445,7 @@ test("scaffolds a complete Auth.js instance with matching dependencies", async (
     const auth = await readFile(path.join(root, "src/lib/auth.ts"), "utf8");
 
     assert.equal(packageJson.dependencies["@farm.js/authjs"], "0.1.0-beta.23");
-    assert.equal(packageJson.dependencies["@auth/core"], "0.34.3");
+    assert.equal(packageJson.dependencies["@auth/core"], "^0.41.3");
     assert.match(auth, /import \{ Auth \} from "@auth\/core"/);
     assert.match(auth, /GitHub\(\{/);
     assert.match(auth, /handlers:\s*\{\s*GET: handler,\s*POST: handler/s);

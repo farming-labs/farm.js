@@ -695,6 +695,40 @@ describe("production middleware runtime", () => {
       // The key holder may read the page; whatever represents it stays out of shared caches.
       expect(partnersNegotiated.headers.get("cache-control") ?? "").not.toContain("public");
       await partnersNegotiated.body?.cancel();
+      // An IP allowlist sees the anonymous check from an outside address, so an allowed
+      // caller cannot put the page's source under a public cache either. On Vercel the
+      // adapter's client address is X-Real-IP too, so the check must not reuse it.
+      for (const headers of [
+        { "x-real-ip": "10.0.0.5" },
+        { "x-forwarded-for": "10.0.0.5", "x-real-ip": "10.0.0.5" },
+      ]) {
+        const officeMarkdown = await serverModule.default.fetch(
+          new Request("https://example.test/office.md", { headers }),
+        );
+        expect(officeMarkdown.status).toBe(404);
+        expect(officeMarkdown.headers.get("cache-control")).toBe("private, no-store");
+        expect(await officeMarkdown.text()).not.toContain("office-only-source");
+        const officeNegotiated = await serverModule.default.fetch(
+          new Request("https://example.test/office", {
+            headers: { ...headers, accept: "text/markdown" },
+          }),
+        );
+        expect(officeNegotiated.headers.get("cache-control") ?? "").not.toContain("public");
+        await officeNegotiated.body?.cancel();
+      }
+      const officeHtml = await serverModule.default.fetch(
+        new Request("https://example.test/office", { headers: { "x-real-ip": "10.0.0.5" } }),
+      );
+      expect(officeHtml.status).toBe(200);
+      await officeHtml.body?.cancel();
+      const officeIpPublicMarkdown = await serverModule.default.fetch(
+        new Request("https://example.test/public-notes.md", {
+          headers: { "x-real-ip": "10.0.0.5" },
+        }),
+      );
+      expect(officeIpPublicMarkdown.status).toBe(200);
+      expect(officeIpPublicMarkdown.headers.get("cache-control")).toContain("public");
+      await officeIpPublicMarkdown.body?.cancel();
       const keyedPublicMarkdown = await serverModule.default.fetch(
         new Request("https://example.test/public-notes.md", { headers: keyed }),
       );

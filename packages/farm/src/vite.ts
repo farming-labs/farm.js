@@ -39,6 +39,7 @@ export {
 } from "./client-cache-persistence-build";
 export type { ClientCachePersistenceEntryCode } from "./client-cache-persistence-build";
 import { APIRouteManager } from "./api/route-manager";
+import { createFarmDevServerDispatch } from "./api/dev-dispatch";
 import { DEFAULT_FARM_API_BASE_PATH } from "./api/config";
 import { resolveFarmAPIServerBasePath } from "./api/server-path";
 import { isFarmAPIPathname } from "./api/runtime";
@@ -1499,6 +1500,7 @@ export function farmPlugin(
         });
       }
 
+      const dispatchToDevServer = createFarmDevServerDispatch(server);
       apiRouteManager = new APIRouteManager(appDirs, server, {
         plugins: farmConfig.plugins,
         i18n: farmApp.getI18nRuntime(),
@@ -1509,7 +1511,7 @@ export function farmPlugin(
         dispatch: (request) => {
           const url = new URL(request.url);
           url.pathname = applyFarmBasePath(url.pathname, farmConfig.basePath);
-          return fetch(new Request(url, request), { redirect: "manual" });
+          return dispatchToDevServer(new Request(url, request));
         },
       });
       await apiRouteManager.discoverRoutes();
@@ -2157,14 +2159,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   };
                 },
                 // The anonymous check goes through this server, so its guards and
-                // middleware see the page's own path, as in production.
+                // middleware see the page's own path, as in production. It connects to
+                // this server's own listener, never the host the caller's Host names.
                 renderPage: async (request) =>
-                  fetch(request, {
-                    redirect: "manual",
-                    signal: res.destroyed
-                      ? AbortSignal.abort()
-                      : createFarmNodeRequestAbortSignal(req, res),
-                  }),
+                  createFarmDevServerDispatch(server)(
+                    new Request(request, {
+                      signal: res.destroyed
+                        ? AbortSignal.abort()
+                        : createFarmNodeRequestAbortSignal(req, res),
+                    }),
+                  ),
               });
           if (markdownSourceResponse) {
             if (await runAppMiddlewareForContentRoute()) return;

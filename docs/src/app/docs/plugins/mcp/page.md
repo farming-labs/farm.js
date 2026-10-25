@@ -508,7 +508,7 @@ Farm maps route inputs into one MCP argument object:
 
 | Route input | Tool argument | Notes                                                                 |
 | ----------- | ------------- | --------------------------------------------------------------------- |
-| Params      | `params`      | Includes dynamic, catch-all, and optional catch-all segments.         |
+| Params      | `params`      | Dynamic, catch-all, and optional catch-all segments; see below.       |
 | Query       | `query`       | Preserves repeated query values as arrays.                            |
 | JSON body   | `body`        | Available for methods that accept a request body.                     |
 | Headers     | `headers`     | Credential and request-provenance headers are never agent-controlled. |
@@ -521,6 +521,11 @@ For example, a tool call for `GET /api/projects/[team]` can send:
   "query": { "status": ["active", "planned"] }
 }
 ```
+
+A param value always stays inside the tool's own route. A dynamic segment such as `[team]` takes
+one non-empty value without `/`, and a catch-all such as `[...path]` takes an array of segments.
+`.` and `..` are rejected as tool errors in either, because the URL would resolve them into
+another route.
 
 The route's Standard Schema implementation must be convertible to JSON Schema. Zod 4 routes work
 without additional configuration. Selected routes currently need JSON responses; binary,
@@ -691,6 +696,7 @@ bounded post-response work where the host requires it.
 | `allowUnauthenticated` | `false`       | Deliberately permit a public MCP endpoint instead of `authorize`.                               |
 | `oauth`                | none          | Advertise OAuth authorization servers and scopes through RFC 9728 metadata and the 401.         |
 | `maxBatchSize`         | `25`          | Most JSON-RPC messages in one batched POST; larger batches get `400` before `authorize` runs.   |
+| `maxToolInputElements` | `10000`       | Most array elements and object members in one call's arguments; more is refused before it runs. |
 | `resources`            | none          | Read-only context from `defineResource()`, at a fixed URI or a URI template.                    |
 | `prompts`              | none          | Reusable prompt templates from `definePrompt()`.                                                |
 | `path`                 | `/api/mcp`    | Canonical Farm API path for the Streamable HTTP endpoint.                                       |

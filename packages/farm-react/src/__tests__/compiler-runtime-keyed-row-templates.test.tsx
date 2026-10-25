@@ -153,7 +153,11 @@ function rowBindings(shape: Shape, selected: () => number): CompilerKeyedRowBind
   return bindings;
 }
 
-function mountRows(shape: Shape, cloneRows: boolean) {
+function mountRows(
+  shape: Shape,
+  cloneRows: boolean,
+  targets?: (root: Element) => (Element | null)[],
+) {
   const counters = { creates: 0 };
   const clicks: string[] = [];
   let setRows: (next: (current: Row[]) => Row[]) => void = () => undefined;
@@ -190,6 +194,7 @@ function mountRows(shape: Shape, cloneRows: boolean) {
             ]}
             delegateEvents
             cloneRows={cloneRows}
+            targets={targets}
             render={(event) => (
               <tbody>
                 {items().map((row, index) => (
@@ -236,8 +241,12 @@ function mountRows(shape: Shape, cloneRows: boolean) {
   };
 }
 
-async function runScenario(shape: Shape, cloneRows: boolean) {
-  const view = mountRows(shape, cloneRows);
+async function runScenario(
+  shape: Shape,
+  cloneRows: boolean,
+  targets?: (root: Element) => (Element | null)[],
+) {
+  const view = mountRows(shape, cloneRows, targets);
   const snapshots: string[] = [];
   await view.render();
   await view.rows(() => rows(1, 40));
@@ -334,6 +343,47 @@ describe("cloned keyed rows", () => {
       write.mockRestore();
       read.mockRestore();
     }
+  });
+
+  it.each([
+    ["incomplete", () => []],
+    ["missing", () => Array.from({ length: 7 }, () => null)],
+    [
+      "sparse",
+      () => {
+        const targets: (Element | null)[] = [];
+        targets.length = 7;
+        return targets;
+      },
+    ],
+  ])("uses the existing walker when generated targets are %s", async (_name, targets) => {
+    let calls = 0;
+    const lookup = (row: Element) => {
+      if (calls++ > 0) return targets();
+      // Seed a valid template before the lookup becomes incomplete.
+      const first = row.firstElementChild;
+      const second = first?.nextElementSibling;
+      const label = second?.firstElementChild ?? null;
+      return [row, row, row, first, label, label, second?.nextElementSibling ?? null];
+    };
+    const built = await runScenario("table", false);
+    const generated = await runScenario("table", true, lookup);
+    expect(generated.snapshots).toEqual(built.snapshots);
+    expect(generated.clicks).toEqual(built.clicks);
+  });
+
+  it("uses generated target lookups without changing row behavior", async () => {
+    const targets = vi.fn((row: Element) => {
+      const first = row.firstElementChild;
+      const second = first?.nextElementSibling;
+      const label = second?.firstElementChild ?? null;
+      return [row, row, row, first, label, label, second?.nextElementSibling ?? null];
+    });
+    const built = await runScenario("table", false);
+    const generated = await runScenario("table", true, targets);
+    expect(generated.snapshots).toEqual(built.snapshots);
+    expect(generated.clicks).toEqual(built.clicks);
+    expect(targets).toHaveBeenCalled();
   });
 
   it("produces the same DOM as building every row from its descriptor", async () => {

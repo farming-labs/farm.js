@@ -40,6 +40,8 @@ A layout file wraps every page below its folder. Use this for dashboards, docs, 
 
 With experimental React Server Components enabled, layouts compose in the same order: the root layout wraps the nested layout, which wraps the page. Adding a dashboard layout does not remove the root navigation or its Client Component providers. Layouts receive `children` and the matched `params`, following `LayoutProps`; server-only layouts do not require client hydration just because they wrap interactive children.
 
+A layout without `"use client"` or `export const hydrate = true` stays on the server: its module and everything it imports are left out of the browser bundle, even when pages below it hydrate. A hydrating layout is the exception, because the browser renders the whole layout chain of the pages it wraps. The layouts above and below a hydrating layout ship to the browser with it, so keep secrets and server-only imports out of them.
+
 **src/app/dashboard/layout.tsx**
 
 ```tsx

@@ -42,7 +42,7 @@
   },
   "dependencies": {
     "@farm.js/core": "workspace:*",
-    "@modelcontextprotocol/server": "2.0.0",
+    "@modelcontextprotocol/server": "^2.3.0",
     "zod": "^4.1.12"
   },
   "devDependencies": {
