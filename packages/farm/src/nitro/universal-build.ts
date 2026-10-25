@@ -6528,7 +6528,18 @@ const apiRoutes = ${apiRoutes.length > 0 ? "mergePluginAPIRoutes(" : ""}[${apiRe
 function dispatchFarmPluginAPIRequest(request) {
   const url = new URL(request.url);
   url.pathname = applyFarmBasePath(url.pathname);
-  return handleFarmRequest(url.href === request.url ? request : new Request(url, request));
+  return fetchFarmInnerRequest(url.href === request.url ? request : new Request(url, request));
+}
+// A request the app makes to itself (a Markdown page check, a plugin's endpoint call) enters
+// through this module's outer \`fetch\`, as a direct request does: plugin runtime hooks run and
+// it gets its own request context, so \`cookies()\` and \`headers()\` are its own, never the
+// caller's. It asks for an identity body: the caller reads it, and the outer response is
+// compressed once.
+function fetchFarmInnerRequest(request, context) {
+  if (!request.headers.has("accept-encoding")) return fetch(request, context);
+  const headers = new Headers(request.headers);
+  headers.delete("accept-encoding");
+  return fetch(new Request(request, { headers }), context);
 }
 const farmLocalAPIBasePath = ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))};
 const farmOpenAPIReference = ${JSON.stringify(openAPIReference)};
@@ -8425,7 +8436,7 @@ async function handleFarmRequestInContext(
     clientAddress: adapterContext?.clientAddress,
     // An anonymous visitor's request: guards never see the caller's address.
     renderPage: (targetRequest) =>
-      handleFarmRequest(targetRequest, {
+      fetchFarmInnerRequest(targetRequest, {
         ...adapterContext,
         clientAddress: FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS,
       }),
@@ -8452,7 +8463,7 @@ async function handleFarmRequestInContext(
       config: farmMarkdownConfig,
       routeExists: (targetPathname) =>
         Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
-      renderPage: (targetRequest) => handleFarmRequest(targetRequest, adapterContext),
+      renderPage: (targetRequest) => fetchFarmInnerRequest(targetRequest, adapterContext),
       apiServerBasePath: farmLocalAPIBasePath,
     });
     if (markdownResponse) {
