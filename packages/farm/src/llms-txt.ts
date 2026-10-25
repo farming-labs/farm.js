@@ -173,7 +173,7 @@ export function collectFarmLlmsTxtPages(
     }
     if (exclude.some((pattern) => matchesFarmMarkdownRoutePattern(pattern, path))) continue;
     // A page its author keeps out of search stays out of the agent index too.
-    if (isMetadataNoIndex(source.metadata)) continue;
+    if (isFarmMetadataNoIndex(source.metadata)) continue;
 
     // llmstxt.org prefers links to Markdown; use the page's mirror when it has one.
     const target = isFarmMarkdownMirrorExposed(options.markdown, path)
@@ -192,7 +192,7 @@ export function collectFarmLlmsTxtPages(
 }
 
 /** True when page metadata asks search engines not to index the page. */
-function isMetadataNoIndex(metadata: unknown): boolean {
+export function isFarmMetadataNoIndex(metadata: unknown): boolean {
   if (!metadata || typeof metadata !== "object") return false;
   const robots = (metadata as { robots?: unknown }).robots;
   if (typeof robots === "string") {

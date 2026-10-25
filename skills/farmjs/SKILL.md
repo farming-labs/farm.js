@@ -115,8 +115,8 @@ Common config fields:
 - `integrations`: provider integrations object
 - `auth`: built-in email/password auth and sessions
 - `mcp`: authenticated MCP transport for opted-in typed API routes
-- `agent`: opt-in agent readiness: an `llmsTxt` index of static pages, schema.org `jsonLd`,
-  and AI `crawlers` robots.txt rules
+- `agent`: agent readiness: an `llmsTxt` index and `sitemap` of static pages and schema.org
+  `jsonLd` (on by default), AI `crawlers` robots.txt rules (opt-in)
 - `theme`: light, dark, and system behavior
 - `storage.mounts`: named storage instances
 - `migrations`: one-shot schema and provider commands
@@ -459,6 +459,8 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
   second). A static `public/llms.txt` or `public/llms-full.txt` overrides each, and so do
   `src/app/llms.ts` and `src/app/llms-full.ts`, which return the whole file as a string or the
   structured format and receive the generated `pages` and `defaults`.
+- Apps without docs serve a generated `/sitemap.xml` of static pages (`agent.sitemap`, with
+  `include`/`exclude`; `false` turns it off). `public/sitemap.xml` or `src/app/sitemap.ts` wins.
 - Use `agent.crawlers: { search, training }` (`"allow"` or `"block"`, plus `rules` and `sitemap`)
   for a generated `/robots.txt` naming AI search and training crawlers. `public/robots.txt`, then
   `src/app/robots.ts`, win over it; it wins over the docs engine's robots.txt.

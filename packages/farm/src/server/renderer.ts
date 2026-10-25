@@ -110,6 +110,7 @@ import { listFarmMCPLlmsTxtLinks } from "../ai-catalog";
 import { normalizeFarmAPIConfig } from "../api/config";
 import { resolveFarmAPIServerBasePath } from "../api/server-path";
 import { createFarmAgentRobots, resolveFarmAgentCrawlers } from "../agent-crawlers";
+import { createFarmDefaultSitemap, resolveFarmAgentSitemap } from "../agent-sitemap";
 import {
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
@@ -1309,6 +1310,12 @@ export class ServerRenderer {
         return;
       }
 
+      if (pathname === "/sitemap.xml" && this.getAgentSitemap().enabled) {
+        await this.renderGeneratedSitemap(req, res);
+        completeRender(res.statusCode || 200, pathname);
+        return;
+      }
+
       const metadataImageMatch = this.routeManager.matchMetadataImage(pathname);
       if (metadataImageMatch) {
         await this.renderMetadataImage(req, res, {
@@ -2365,7 +2372,8 @@ export class ServerRenderer {
   private async renderGeneratedRobotsTxt(req: FarmRequest, res: FarmResponse): Promise<void> {
     try {
       const sitemapPath =
-        this.routeManager.matchMetadataRoute("/sitemap.xml")?.metadata.kind === "sitemap"
+        this.routeManager.matchMetadataRoute("/sitemap.xml")?.metadata.kind === "sitemap" ||
+        this.getAgentSitemap().enabled
           ? "/sitemap.xml"
           : undefined;
       const rootLayout = this.routeManager.getLayouts().get("/");
@@ -2385,6 +2393,57 @@ export class ServerRenderer {
       );
     } catch (error) {
       logger.error(`Generated robots.txt failed: ${error}`);
+      await sendWebResponse(
+        res as any,
+        new Response("Internal Server Error", {
+          status: 500,
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        }),
+      );
+    }
+  }
+
+  private getAgentSitemap() {
+    return resolveFarmAgentSitemap(this.config.agent?.sitemap);
+  }
+
+  /** `/sitemap.xml` from `agent.sitemap` when no sitemap.ts owns it. */
+  private async renderGeneratedSitemap(req: FarmRequest, res: FarmResponse): Promise<void> {
+    try {
+      const request = createWebRequestFromFarmRequest(req, {
+        trustProxy: this.config.server?.trustProxy,
+      });
+      const sources = await Promise.all(
+        [...this.routeManager.getRoutes()]
+          .filter(([pattern]) => !pattern.includes("["))
+          .map(async ([pattern, route]) => {
+            const [module, stat] = await Promise.all([
+              this.routeManager.loadRouteModule(route.modulePath).catch((error: unknown) => {
+                // The page itself will surface this error; list it without its metadata.
+                logger.warn(`Could not read metadata for ${pattern} in sitemap.xml: ${error}`);
+                return undefined;
+              }),
+              fs.promises.stat(route.modulePath).catch(() => undefined),
+            ]);
+            return { pattern, module, lastModified: stat?.mtime.toISOString() };
+          }),
+      );
+      const rootLayout = this.routeManager.getLayouts().get("/");
+      const rootMetadata = rootLayout
+        ? (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).metadata
+        : undefined;
+      const sitemap = createFarmDefaultSitemap(sources, {
+        origin: new URL(request.url).origin,
+        config: this.getAgentSitemap(),
+        metadataBase: (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
+        basePath: this.config.basePath,
+      });
+      await sendWebResponse(
+        res as any,
+        createFarmMetadataRouteResponse("sitemap", sitemap, {}, { method: req.method }),
+      );
+    } catch (error) {
+      logger.error(`Generated sitemap.xml failed: ${error}`);
       await sendWebResponse(
         res as any,
         new Response("Internal Server Error", {

@@ -38,7 +38,7 @@ import {
 import type { Rollup, UserConfig as ViteUserConfig } from "vite";
 import os from "os";
 import path from "path";
-import { constants as fsConstants, existsSync, readFileSync, realpathSync } from "fs";
+import { constants as fsConstants, existsSync, readFileSync, realpathSync, statSync } from "fs";
 import { findRequestBoundSourceBlockers, parseRouteRenderingDirective } from "../ssg";
 import { FARM_LAYOUT_ELEMENT_CLIENT_SOURCE } from "../document-layout-client";
 import { fileURLToPath } from "url";
@@ -4896,17 +4896,33 @@ async function buildSSRInMemory(
   };
 }
 
+/** When each static page's file last changed, for the generated sitemap's lastmod. */
+function readFarmPageLastModified(pageRoutes: UniversalPageRoute[]): Record<string, string> {
+  const lastModified: Record<string, string> = {};
+  for (const route of pageRoutes) {
+    if (route.pattern.includes("[")) continue;
+    try {
+      lastModified[route.pattern] = statSync(
+        route.markdownSourcePath ?? route.modulePath,
+      ).mtime.toISOString();
+    } catch {
+      // A page without a readable file is listed without a lastmod.
+    }
+  }
+  return lastModified;
+}
+
 /**
  * Root paths the docs engine answers that the app serves itself, so the
  * production server leaves them to the app: /llms.txt and /llms-full.txt
- * (agent.llmsTxt, llms.ts, llms-full.ts), /sitemap.xml (sitemap.ts), and
+ * (agent.llmsTxt, llms.ts, llms-full.ts), /sitemap.xml (agent.sitemap, sitemap.ts), and
  * /robots.txt (agent.crawlers, robots.ts). A public file needs no entry, since
  * the platform serves it before any route.
  */
 export function getFarmAppOwnedDocsEnginePaths(
   agent:
     | (Pick<ResolvedFarmConfig["agent"], "llmsTxt"> &
-        Partial<Pick<ResolvedFarmConfig["agent"], "crawlers">>)
+        Partial<Pick<ResolvedFarmConfig["agent"], "crawlers" | "sitemap">>)
     | undefined,
   applicationMetadataRoutes: ReadonlyArray<
     Pick<UniversalApplicationMetadataRoute, "kind" | "pattern">
@@ -4920,7 +4936,7 @@ export function getFarmAppOwnedDocsEnginePaths(
   return [
     ...(llmsTxt?.enabled || ownedByFile("llms") ? ["/llms.txt"] : []),
     ...((llmsTxt?.enabled && llmsTxt.full) || ownedByFile("llms-full") ? ["/llms-full.txt"] : []),
-    ...(ownedByFile("sitemap") ? ["/sitemap.xml"] : []),
+    ...(agent?.sitemap?.enabled || ownedByFile("sitemap") ? ["/sitemap.xml"] : []),
     ...(agent?.crawlers?.enabled || ownedByFile("robots") ? ["/robots.txt"] : []),
   ];
 }
@@ -5364,6 +5380,12 @@ function generateVirtualEntryCode(
     !applicationMetadataRoutes.some(
       (metadata) => metadata.kind === "robots" && metadata.pattern === "/",
     );
+  // agent.sitemap serves /sitemap.xml unless a root sitemap.ts owns it.
+  const servesAgentSitemap =
+    Boolean(config.agent?.sitemap?.enabled) &&
+    !applicationMetadataRoutes.some(
+      (metadata) => metadata.kind === "sitemap" && metadata.pattern === "/",
+    );
   // agent.aiCatalog lists the MCP servers @farm.js/mcp mounts and those registered with
   // registerFarmMCPServer, which a docs runtime or app code does when the server starts,
   // so the build cannot tell whether any will be. With none, it answers nothing.
@@ -5784,6 +5806,7 @@ function renderFarmRouteServerTree(element) { return element; }`;
   createFarmCacheKey,
   createFarmMetadataRouteResponse,
   createFarmAgentRobots,
+  createFarmDefaultSitemap,
   createFarmAiCatalogResponse,
   createFarmApiCatalogResponse,
   createFarmAppManifestResponse,
@@ -7369,6 +7392,7 @@ function createFarmAgentRobotsResponse(request) {
     createFarmAgentRobots({
       crawlers: farmAgentCrawlers,
       sitemapPath: ${
+        servesAgentSitemap ||
         applicationMetadataRoutes.some(
           (metadata) => metadata.kind === "sitemap" && metadata.pattern === "/",
         )
@@ -7380,6 +7404,38 @@ function createFarmAgentRobotsResponse(request) {
         : undefined,
       basePath: ${JSON.stringify(config.basePath)},
     }),
+    {},
+    { method: request.method },
+  );
+}
+`
+    : ""
+}
+${
+  servesAgentSitemap
+    ? `// sitemap.xml from agent.sitemap, built the same way as in development. Each page's
+// lastmod is its file's modification time, read at build time.
+const farmAgentSitemapConfig = ${JSON.stringify(config.agent.sitemap)};
+const farmAgentSitemapLastModified = ${JSON.stringify(readFarmPageLastModified(pageRoutes))};
+function createFarmAgentSitemapResponse(request) {
+  const rootLayout = layoutRoutes.find((layout) => layout.pattern === "/");
+  return createFarmMetadataRouteResponse(
+    "sitemap",
+    createFarmDefaultSitemap(
+      pageRoutes.map((route) => ({
+        pattern: route.pattern,
+        module: route.module,
+        lastModified: farmAgentSitemapLastModified[route.pattern],
+      })),
+      {
+        origin: new URL(request.url).origin,
+        config: farmAgentSitemapConfig,
+        metadataBase: rootLayout && rootLayout.module && rootLayout.module.metadata
+          ? rootLayout.module.metadata.metadataBase
+          : undefined,
+        basePath: ${JSON.stringify(config.basePath)},
+      },
+    ),
     {},
     { method: request.method },
   );
@@ -8407,6 +8463,19 @@ async function handleFarmRequestInContext(
   if (normalizeRuntimePath(routePathname) === "/robots.txt") {
     return applyProductionMiddlewareHeaders(
       createFarmAgentRobotsResponse(request),
+      middlewareHeaders,
+    );
+  }
+  `
+      : ""
+  }
+  ${
+    servesAgentSitemap
+      ? `
+  // agent.sitemap with no sitemap.ts: serve the generated file.
+  if (normalizeRuntimePath(routePathname) === "/sitemap.xml") {
+    return applyProductionMiddlewareHeaders(
+      createFarmAgentSitemapResponse(request),
       middlewareHeaders,
     );
   }

@@ -1036,6 +1036,8 @@ Use server-only metadata files when crawlers or browsers need an application-lev
 
 The default export can be a literal value or a sync or async function. Functions receive the matched `params`, the current `Request`, its `URLSearchParams`, and the concrete route-segment `path`.
 
+Without a root `sitemap.ts`, Farm serves a generated `/sitemap.xml` of the app's static pages; see [`agent.sitemap`](/docs/configuration#sitemap). Add `sitemap.ts` when the sitemap should list dynamic pages such as products or posts.
+
 **src/app/sitemap.ts**
 
 ```ts
