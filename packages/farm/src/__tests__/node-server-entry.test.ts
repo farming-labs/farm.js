@@ -2,10 +2,7 @@
 
 import { transform } from "esbuild";
 import { describe, expect, it } from "vitest";
-import {
-  createFarmNodeServerEntry,
-  FARM_NODE_ENV_MODULE_SOURCE,
-} from "../nitro/node-server-entry";
+import { createFarmNodeServerEntry, FARM_NODE_ENV_MODULE_SOURCE } from "../nitro/node-server-entry";
 import { resolveFarmServerConfig } from "../server-http";
 
 describe("Farm production Node entry", () => {
