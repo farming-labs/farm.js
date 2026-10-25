@@ -1524,7 +1524,7 @@ test("basic starters ship what agents read: server-rendered copy and an Open Gra
         .replace(/\{[^}]*\}/g, " ")
         .replace(/\s+/g, " ")
         .trim();
-      assert.ok(text.length > 400, `${renderer}: ${text.length} characters of text`);
+      assert.ok(text.length > 500, `${renderer}: ${text.length} characters of text`);
       assert.match(source, /class(?:Name)?="feature-list"/, renderer);
     }
   } finally {
