@@ -66,6 +66,8 @@ afterEach(() => {
 
 describe("auth0 session lifetime and revocation", () => {
   it("keeps the token lifetime by default", async () => {
+    // Max-Age is floored to whole seconds, so even 1 ms of real time changes this assertion.
+    vi.useFakeTimers({ toFake: ["Date"] });
     const rt = runtime();
     expect(await signIn(rt)).toContain("Max-Age=86400");
   });
