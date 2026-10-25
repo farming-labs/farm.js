@@ -45,7 +45,9 @@ beforeAll(async () => {
 afterAll(async () => {
   await server?.close();
   vi.unstubAllEnvs();
-  await rm(root, { recursive: true, force: true });
+  // The dep optimizer can still be writing node_modules/.vite after close(); retry
+  // instead of failing on ENOTEMPTY.
+  await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 describe("federation dev server", () => {
