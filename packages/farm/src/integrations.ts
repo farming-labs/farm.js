@@ -3472,6 +3472,35 @@ function resolveIntegrationMiddlewareParams(
 }
 
 /**
+ * @internal Whether an integration's middleware matcher (a `protectedRoutes` guard, say)
+ * covers `pathname`, a route path without the base path. With `catchAllProbe`, a path no
+ * route uses, only matchers naming particular paths count: middleware without a matcher,
+ * or one that also meets the probe, covers every path and is left out.
+ */
+export function integrationMiddlewareMayHandlePath(
+  integrations: FarmIntegrationsUserConfig | undefined,
+  pathname: string,
+  catchAllProbe?: string,
+): boolean {
+  if (!integrations) return false;
+  const covers = (entry: { matcher?: string | readonly string[] }) =>
+    resolveIntegrationMiddlewareParams(entry, pathname, undefined) !== null;
+  return Object.values(integrations).some(
+    (integration) =>
+      isFarmIntegration(integration) &&
+      (integration.middleware || []).some((entry) => {
+        if (catchAllProbe === undefined) return covers(entry);
+        if (!entry.matcher) return false;
+        const specific = (Array.isArray(entry.matcher) ? entry.matcher : [entry.matcher]).filter(
+          (matcher: string) =>
+            resolveIntegrationMiddlewareParams({ matcher }, catchAllProbe, undefined) === null,
+        );
+        return specific.length > 0 && covers({ matcher: specific });
+      }),
+  );
+}
+
+/**
  * @internal Runtime config key holding the app's same-origin API path. The built server keeps the
  * user's raw `api` config, whose values may be resolver functions, so the build records the
  * resolved path here; development configs carry the resolved `api` itself.

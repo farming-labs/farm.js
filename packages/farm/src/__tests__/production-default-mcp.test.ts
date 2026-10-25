@@ -208,6 +208,85 @@ describe("production default MCP server", () => {
     });
   }, 240_000);
 
+  it("leaves pages a path-specific guard covers out of every public listing", async () => {
+    await withRoot(async (root) => {
+      const handler = await buildApp(
+        root,
+        {},
+        {
+          "farm.config.ts": `import { defineIntegration } from "@farm.js/core/integrations";
+export default {
+  agent: { llmsTxt: true },
+  // Guards covering every path name no page, so they hide nothing.
+  plugins: [{ name: "acme:observer", runtime: { before() {} } }],
+  middleware: [
+    { matcher: "/private/:path*", handler: () => new Response("sign in", { status: 401 }) },
+    { matcher: "/(.*)", handler: (_ctx, next) => next() },
+    { handler: (_ctx, next) => next() },
+  ],
+  integrations: {
+    auth: defineIntegration({
+      category: "auth",
+      type: "acme-auth",
+      instance: {},
+      middleware: [
+        { matcher: ["/members(.*)"], handler: () => new Response("members", { status: 401 }) },
+      ],
+    }),
+  },
+};
+`,
+          "src/app/private/notes/page.tsx": [
+            'export const metadata = { title: "Private notes" };',
+            "export default function Page() { return <p>notes</p>; }",
+          ].join("\n"),
+          "src/app/middleware.ts":
+            "export default async function middleware(_ctx, next) { await next(); }",
+          "src/app/staff/middleware.ts":
+            'export default async function middleware() { return new Response("staff", { status: 401 }); }',
+          "src/app/staff/page.tsx": [
+            'export const metadata = { title: "Staff roster" };',
+            "export default function Page() { return <p>staff</p>; }",
+          ].join("\n"),
+          "src/app/members/page.tsx": [
+            'export const metadata = { title: "Members area" };',
+            "export default function Page() { return <p>members</p>; }",
+          ].join("\n"),
+        },
+      );
+      const call = async (name: string, args: Record<string, unknown> = {}) =>
+        ((await (await handler.fetch(mcp("tools/call", { name, arguments: args }))).json()) as any)
+          .result;
+      const hidden = ["/private/notes", "/staff", "/members"];
+      const titles = ["Private notes", "Staff roster", "Members area"];
+
+      const listed = await call("list_pages");
+      expect(listed.structuredContent.pages.map((page: { path: string }) => page.path)).toEqual([
+        "/",
+        "/about",
+      ]);
+      for (const query of ["private", "staff", "members"]) {
+        expect(JSON.stringify(await call("search_pages", { query }))).not.toMatch(
+          /Private notes|Staff roster|Members area/,
+        );
+      }
+      expect(JSON.stringify(await call("search_pages", { query: "about" }))).toContain("/about");
+
+      for (const pathname of ["/sitemap.xml", "/llms.txt", "/llms-full.txt"]) {
+        const body = await (
+          await handler.fetch(new Request(`https://acme.test${pathname}`))
+        ).text();
+        for (const value of [...hidden.map((path) => `acme.test${path}`), ...titles]) {
+          expect({ pathname, leaks: body.includes(value) ? value : null }).toEqual({
+            pathname,
+            leaks: null,
+          });
+        }
+        expect(body).toContain("acme.test/about");
+      }
+    });
+  }, 240_000);
+
   it("reads pages as a fresh anonymous request through the plugin runtime", async () => {
     await withRoot(async (root) => {
       const handler = await buildApp(

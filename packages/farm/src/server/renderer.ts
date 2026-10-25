@@ -33,6 +33,7 @@ import {
   _runWithMiddlewareContext,
   _runWithMiddlewareData,
 } from "../middleware/server";
+import { farmPathGuardCoversPage } from "../middleware/may-handle";
 import { getRequestContextSnapshot } from "../request-context";
 import { matchSSGPage, resolveRouteRenderingConfigFromFile } from "../ssg";
 import {
@@ -597,6 +598,7 @@ export class ServerRenderer {
   private appliedAppSetupModule: unknown;
   private security: ResolvedFarmSecurityConfig;
   private apiRouteExists?: (path: string) => boolean;
+  private middlewareRoutes?: () => readonly { path: string }[];
   private defaultMCPServer?: ReturnType<typeof createFarmDefaultMCPServer>;
 
   constructor(
@@ -2442,19 +2444,17 @@ export class ServerRenderer {
         trustProxy: this.config.server?.trustProxy,
       });
       const sources = await Promise.all(
-        [...this.routeManager.getRoutes()]
-          .filter(([pattern]) => !pattern.includes("["))
-          .map(async ([pattern, route]) => {
-            const [module, stat] = await Promise.all([
-              this.routeManager.loadRouteModule(route.modulePath).catch((error: unknown) => {
-                // The page itself will surface this error; list it without its metadata.
-                logger.warn(`Could not read metadata for ${pattern} in sitemap.xml: ${error}`);
-                return undefined;
-              }),
-              fs.promises.stat(route.modulePath).catch(() => undefined),
-            ]);
-            return { pattern, module, lastModified: stat?.mtime.toISOString() };
-          }),
+        this.getAgentListedRoutes().map(async ([pattern, route]) => {
+          const [module, stat] = await Promise.all([
+            this.routeManager.loadRouteModule(route.modulePath).catch((error: unknown) => {
+              // The page itself will surface this error; list it without its metadata.
+              logger.warn(`Could not read metadata for ${pattern} in sitemap.xml: ${error}`);
+              return undefined;
+            }),
+            fs.promises.stat(route.modulePath).catch(() => undefined),
+          ]);
+          return { pattern, module, lastModified: stat?.mtime.toISOString() };
+        }),
       );
       const rootLayout = this.routeManager.getLayouts().get("/");
       const rootMetadata = rootLayout
@@ -2487,6 +2487,23 @@ export class ServerRenderer {
     this.apiRouteExists = exists;
   }
 
+  /** The dev server's file middleware, so public page listings can leave guarded pages out. */
+  setMiddlewareRouteLookup(routes: () => readonly { path: string }[]): void {
+    this.middlewareRoutes = routes;
+  }
+
+  /**
+   * The static pages sitemap.xml, llms.txt and the default MCP server may list: not one a
+   * path-specific guard (non-root middleware.ts, a config or integration middleware
+   * matcher) covers, as the production build decides.
+   */
+  private getAgentListedRoutes() {
+    const guards = { config: this.config, middlewareRoutes: this.middlewareRoutes?.() ?? [] };
+    return [...this.routeManager.getRoutes()].filter(
+      ([pattern]) => !pattern.includes("[") && !farmPathGuardCoversPage(guards, pattern),
+    );
+  }
+
   /**
    * The default read-only MCP server (`agent.mcp`), or undefined when the app has an MCP
    * server of its own: a route that answers /mcp, an API route at /api/mcp, `@farm.js/mcp`,
@@ -2517,16 +2534,14 @@ export class ServerRenderer {
         basePath: this.config.basePath,
         listPages: async () => {
           const sources = await Promise.all(
-            [...this.routeManager.getRoutes()]
-              .filter(([pattern]) => !pattern.includes("["))
-              .map(async ([pattern, route]) => ({
-                pattern,
-                // The page itself surfaces a load error. Without its module a guard cannot
-                // be ruled out, so the page is left out.
-                module: await this.routeManager
-                  .loadRouteModule(route.modulePath)
-                  .catch(() => ({ __farmRouteGuard: true })),
-              })),
+            this.getAgentListedRoutes().map(async ([pattern, route]) => ({
+              pattern,
+              // The page itself surfaces a load error. Without its module a guard cannot
+              // be ruled out, so the page is left out.
+              module: await this.routeManager
+                .loadRouteModule(route.modulePath)
+                .catch(() => ({ __farmRouteGuard: true })),
+            })),
           );
           return collectFarmDefaultMCPPages(sources, {
             origin,
@@ -2565,14 +2580,13 @@ export class ServerRenderer {
   }> {
     const config = resolveFarmLlmsTxtConfig(this.config.agent?.llmsTxt);
     const origin = new URL(request.url).origin;
-    const staticRoutes = [...this.routeManager.getRoutes()].filter(
-      ([pattern]) => !pattern.includes("["),
-    );
     const sources = await Promise.all(
-      staticRoutes.map(async ([pattern, route]) => {
+      this.getAgentListedRoutes().map(async ([pattern, route]) => {
         try {
-          const metadata = (await this.routeManager.loadRouteModule(route.modulePath)).metadata;
-          return { pattern, metadata: metadata as unknown };
+          const module = await this.routeManager.loadRouteModule(route.modulePath);
+          // A route guard decides per request who may see the page, as for the sitemap.
+          if ((module as { __farmRouteGuard?: unknown }).__farmRouteGuard) return null;
+          return { pattern, metadata: module.metadata as unknown };
         } catch (error) {
           // The page itself will surface this error; list it with its fallback title.
           logger.warn(`Could not read metadata for ${pattern} in llms.txt: ${error}`);
@@ -2585,13 +2599,16 @@ export class ServerRenderer {
     const rootMetadata = rootLayout
       ? (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).metadata
       : undefined;
-    const pages = collectFarmLlmsTxtPages(sources, {
-      origin,
-      basePath: this.config.basePath,
-      markdown: resolveMarkdownConfig(this.config.md as any),
-      include: config.include,
-      exclude: config.exclude,
-    });
+    const pages = collectFarmLlmsTxtPages(
+      sources.filter((source) => source !== null),
+      {
+        origin,
+        basePath: this.config.basePath,
+        markdown: resolveMarkdownConfig(this.config.md as any),
+        include: config.include,
+        exclude: config.exclude,
+      },
+    );
     return {
       pages,
       defaults: createFarmDefaultLlmsTxt({

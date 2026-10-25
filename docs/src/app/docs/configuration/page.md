@@ -499,7 +499,7 @@ with each page's metadata title and description, linking to its [Markdown mirror
 when one is exposed. An options object sets the `title` and `summary` (the root layout's metadata by
 default), adds `details` Markdown, and narrows the list with `include` and `exclude` route patterns,
 which use the same syntax as `md.expose`. Dynamic routes are left out because they have no single
-URL.
+URL, and so are pages a path-specific guard covers, as for the [sitemap](#sitemap).
 
 It also serves `/llms-full.txt`: the same header, then a block per listed page with its title, URL,
 and description, separated by `---`. Pages with an exposed Markdown mirror get it inlined; a page
@@ -579,12 +579,16 @@ properties the builder does not model, for example `{ ...jsonLd.product(input), 
 
 Left unset, `sitemap` serves `/sitemap.xml` listing every static page with a `<lastmod>`: the time
 the page's file last changed, read when the server builds. Dynamic routes, pages whose metadata
-says `robots: { index: false }`, and pages behind a route [`guard`](/docs/routing#route-guards) are
-left out. URLs use the root layout's `metadataBase`, or the request's origin when it has none, the
-same origin the generated `llms.txt` links to; set `metadataBase` so crawlers and caches always see
-your canonical host. With the docs engine enabled it stays off, since the docs engine answers
-`/sitemap.xml` itself. A page that middleware keeps private is still listed, so leave it out with
-`exclude`:
+says `robots: { index: false }`, pages behind a route [`guard`](/docs/routing#route-guards), and
+pages a guard written for their path covers are left out: a `middleware.ts` in the page's folder or
+a parent below the root, a config middleware `matcher` that names the path, or an integration's
+`protectedRoutes`. Guards that cover every path (a root `middleware.ts`, middleware without a
+matcher or with a catch-all or function matcher, a plugin's `runtime.before` hook) hide nothing,
+since they name no page; the content behind them stays private, because pages are read as a
+signed-out visitor. URLs use the root layout's `metadataBase`, or the request's origin when it has
+none, the same origin the generated `llms.txt` links to; set `metadataBase` so crawlers and caches
+always see your canonical host. With the docs engine enabled it stays off, since the docs engine
+answers `/sitemap.xml` itself. Leave out other pages with `exclude`:
 
 ```ts title="farm.config.ts"
 export default defineConfig({
@@ -594,7 +598,8 @@ export default defineConfig({
 });
 ```
 
-`include` narrows the list the same way, and `sitemap: false` turns it off. A `public/sitemap.xml`
+`include` narrows the list the same way, and `sitemap: false` turns it off. `llmsTxt` takes the
+same `include` and `exclude`. A `public/sitemap.xml`
 or a root [`sitemap.ts`](/docs/routing#application-metadata-routes), which can list dynamic pages,
 replaces the generated file.
 
@@ -610,11 +615,11 @@ Left unset, `mcp` serves a read-only [MCP](https://modelcontextprotocol.io) serv
 | `read_page`    | One page as Markdown, from its [Markdown mirror](/docs/markdown), by path or URL. |
 
 The pages are the static pages `llms.txt` and the sitemap list that have a Markdown mirror: dynamic
-routes, pages whose metadata says `robots: { index: false }`, and pages behind a route
-[`guard`](/docs/routing#route-guards) are left out, and `read_page` answers only for a listed page.
-Pages are read the way `llms-full.txt` reads them, as a fresh request without the caller's cookies
-or credentials, so a page middleware or plugin `runtime.before` hook keeps private answers as signed
-out. The server has no write tools and never reaches API routes, server functions, sessions, or
+routes, pages whose metadata says `robots: { index: false }`, and pages a path-specific guard
+covers (see [Sitemap](#sitemap)) are left out, and `read_page` answers only for a listed page; `md.expose`
+leaves out more. Pages are read the way `llms-full.txt` reads them, as a fresh request without the
+caller's cookies or credentials, so a page a root middleware or plugin `runtime.before` hook keeps
+private answers as signed out. The server has no write tools and never reaches API routes, server functions, sessions, or
 environment values.
 
 It names itself after the app's `package.json` (`name` and `version`, or Farm's version without

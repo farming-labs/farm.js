@@ -172,6 +172,51 @@ describe("development default MCP server", () => {
     ]);
   }, 120_000);
 
+  it("leaves pages a path-specific guard covers out of every public listing", async () => {
+    const origin = await startApp(
+      `agent: { llmsTxt: true },
+      // Guards covering every path name no page, so they hide nothing.
+      plugins: [{ name: "acme:observer", runtime: { before() {} } }],
+      middleware: [
+        { matcher: "/private/:path*", handler: () => new Response("sign in", { status: 401 }) },
+        { matcher: "/(.*)", handler: (_ctx, next) => next() },
+        { handler: (_ctx, next) => next() },
+      ]`,
+      {
+        "src/app/middleware.ts": `export default async function middleware(_ctx, next) {
+  await next();
+}`,
+        "src/app/private/notes/page.tsx": `import React from "react";
+export const metadata = { title: "Private notes" };
+export default function Page() { return <main>notes</main>; }`,
+        "src/app/staff/middleware.ts": `export default async function middleware() {
+  return new Response("staff", { status: 401 });
+}`,
+        "src/app/staff/page.tsx": `import React from "react";
+export const metadata = { title: "Staff roster" };
+export default function Page() { return <main>staff</main>; }`,
+      },
+    );
+    const listed = await call(origin, "list_pages");
+    expect(listed.structuredContent.pages.map((page: { path: string }) => page.path)).toEqual([
+      "/",
+      "/about",
+    ]);
+    for (const query of ["private", "staff"]) {
+      expect(JSON.stringify(await call(origin, "search_pages", { query }))).not.toMatch(
+        /Private notes|Staff roster/,
+      );
+    }
+    for (const pathname of ["/sitemap.xml", "/llms.txt", "/llms-full.txt"]) {
+      const body = await (await fetch(`${origin}${pathname}`)).text();
+      expect({
+        pathname,
+        leaks: /\/private\/notes|\/staff|Private notes|Staff roster/.test(body),
+      }).toEqual({ pathname, leaks: false });
+      expect(body).toContain(`${origin}/about`);
+    }
+  }, 120_000);
+
   it("reads pages as a fresh anonymous request through the plugin runtime", async () => {
     const origin = await startApp(
       `plugins: [{

@@ -78,7 +78,9 @@ export interface FarmAgentUserConfig {
   /**
    * Serve `/sitemap.xml` listing the app's static pages, the same pages the generated
    * llms.txt lists, each with the time its page file last changed. Dynamic routes,
-   * pages whose metadata says noindex, and pages behind a route `guard` are left out.
+   * pages whose metadata says noindex, pages behind a route `guard`, and pages a
+   * path-specific guard covers (non-root middleware.ts, a config or integration
+   * middleware matcher naming the path) are left out.
    * URLs use the root layout's `metadataBase`, or the request's origin without one. An
    * object sets which routes to list. A `src/app/sitemap.ts` or `public/sitemap.xml`
    * replaces the generated file. Left unset, it is served unless the docs engine is
@@ -128,8 +130,8 @@ export interface FarmAgentUserConfig {
   /**
    * Serve a read-only MCP server (Streamable HTTP) at `/mcp` with tools that list,
    * search, and read the app's public pages as Markdown: the static pages llms.txt and
-   * the sitemap list, without pages whose metadata says noindex or pages behind a route
-   * `guard`. Pages are read like an anonymous visitor, never with the caller's cookies.
+   * the sitemap list, without pages whose metadata says noindex or pages a route `guard`
+   * or path-specific guard covers. Pages are read like an anonymous visitor, never with the caller's cookies.
    * It steps aside when the app has an MCP server of its own: a route that answers
    * `/mcp`, an API route at `/api/mcp`, the top-level `mcp` config or `apiMcp()`, or a
    * server listed with `registerFarmMCPServer` (the docs engine's MCP). Left unset, it

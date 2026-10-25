@@ -157,19 +157,21 @@ import {
   resolveFarmRendererAppSetup,
 } from "../renderer";
 import {
-  compileMiddlewareConfig,
-  matchesCompiledMiddlewareConfig,
-  matchesMiddlewareRoute,
-} from "../middleware/matcher";
+  appMiddlewareMayHandlePath,
+  configMiddlewareMayHandlePath,
+  farmPathGuardCoversPage,
+  hasFarmMiddlewareConfig,
+} from "../middleware/may-handle";
 import {
   appendMiddlewareDirectory,
   appendMiddlewareRoutePath,
   compareMiddlewareRouteLocations,
   type MiddlewareRouteLocation,
 } from "../middleware/path";
-import type { MiddlewareContext, MiddlewareMatcher } from "../middleware/types";
 import type { FarmRenderer } from "../renderer";
 import { farmPluginMayAffectRuntimePath } from "../plugin-runtime-endpoint";
+
+export { appMiddlewareMayHandlePath, configMiddlewareMayHandlePath };
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -967,20 +969,6 @@ async function findFarmConfigPath(root: string): Promise<string | null> {
   }
 
   return null;
-}
-
-function hasFarmMiddlewareConfig(config: ResolvedFarmConfig["middleware"]): boolean {
-  if (!config) return false;
-  if (Array.isArray(config)) return config.length > 0;
-
-  const configRecord = config as Record<string, unknown>;
-  return Boolean(
-    configRecord.matcher ||
-    configRecord.exclude ||
-    configRecord.runtime ||
-    configRecord.handler ||
-    (Array.isArray(configRecord.handlers) && configRecord.handlers.length > 0),
-  );
 }
 
 function hasFarmServerRuntimePlugins(config: ResolvedFarmConfig): boolean {
@@ -7474,6 +7462,31 @@ function createFarmAgentRobotsResponse(request) {
 `
     : ""
 }
+// Static pages a path-specific guard covers (non-root middleware.ts, a config or
+// integration middleware matcher naming the path), decided at build time.
+// sitemap.xml, llms.txt and the default MCP server never list them, nor a page behind
+// a route guard.
+const farmAgentGuardedPages = new Set(${JSON.stringify(
+    pageRoutes
+      .map((route) => route.pattern)
+      .filter(
+        (pattern) =>
+          !pattern.includes("[") &&
+          farmPathGuardCoversPage(
+            {
+              config: { middleware: config.middleware, integrations: config.integrations },
+              middlewareRoutes,
+            },
+            pattern,
+          ),
+      ),
+  )});
+function getFarmAgentListedPageRoutes() {
+  return pageRoutes.filter(
+    (route) =>
+      !farmAgentGuardedPages.has(route.pattern) && !(route.module && route.module.__farmRouteGuard),
+  );
+}
 ${
   servesAgentSitemap
     ? `// sitemap.xml from agent.sitemap, built the same way as in development. Each page's
@@ -7485,7 +7498,7 @@ function createFarmAgentSitemapResponse(request) {
   return createFarmMetadataRouteResponse(
     "sitemap",
     createFarmDefaultSitemap(
-      pageRoutes.map((route) => ({
+      getFarmAgentListedPageRoutes().map((route) => ({
         pattern: route.pattern,
         module: route.module,
         lastModified: farmAgentSitemapLastModified[route.pattern],
@@ -7528,7 +7541,7 @@ async function handleFarmDefaultMCP(request) {
     basePath: ${JSON.stringify(config.basePath)},
     listPages: () =>
       collectFarmDefaultMCPPages(
-        pageRoutes.map((route) => ({ pattern: route.pattern, module: route.module })),
+        getFarmAgentListedPageRoutes().map((route) => ({ pattern: route.pattern, module: route.module })),
         { origin, basePath: ${JSON.stringify(config.basePath)}, markdown: farmMarkdownConfig },
       ),
     // A fresh request through this handler, so the caller's cookies never shape a page.
@@ -7550,7 +7563,7 @@ const farmDefaultMCPReadMarkdown = createFarmLlmsMarkdownReader((page) => fetch(
 function createFarmLlmsTxtContext(request, full) {
   const origin = new URL(request.url).origin;
   const pages = collectFarmLlmsTxtPages(
-    pageRoutes.map((route) => ({ pattern: route.pattern, metadata: route.module && route.module.metadata })),
+    getFarmAgentListedPageRoutes().map((route) => ({ pattern: route.pattern, metadata: route.module && route.module.metadata })),
     {
       origin,
       markdown: farmMarkdownConfig,
@@ -9967,45 +9980,6 @@ function middlewarePatternMatches(pattern: string | RegExp, pathname: string): b
     })
     .join("");
   return new RegExp(`^${expression}/?$`).test(pathname);
-}
-
-/**
- * Whether config middleware may run for a prerender candidate. This reuses the
- * runtime matcher: a separate copy drifted (`/members/(.*)` kept its trailing
- * slash and never met `/members/secret`), and the page was frozen into a
- * public file that middleware never sees again.
- *
- * @internal
- */
-export function configMiddlewareMayHandlePath(
-  config: ResolvedFarmConfig["middleware"],
-  pathname: string,
-): boolean {
-  if (!hasFarmMiddlewareConfig(config)) return false;
-
-  const entries = (Array.isArray(config) ? config : [config]) as Array<{
-    matcher?: MiddlewareMatcher | MiddlewareMatcher[];
-    exclude?: Array<string | RegExp>;
-  }>;
-  return entries.some((entry) => {
-    if (!entry.matcher && !entry.exclude) return true;
-    const matchers = entry.matcher
-      ? (Array.isArray(entry.matcher) ? entry.matcher : [entry.matcher]).map((matcher) =>
-          // A request-aware matcher cannot be proven safe at build time.
-          typeof matcher === "function" ? () => true : matcher,
-        )
-      : undefined;
-    const compiled = compileMiddlewareConfig({ matcher: matchers, exclude: entry.exclude });
-    return matchesCompiledMiddlewareConfig(pathname, compiled, {} as MiddlewareContext).matched;
-  });
-}
-
-/** @internal File middleware counterpart of `configMiddlewareMayHandlePath`. */
-export function appMiddlewareMayHandlePath(
-  middlewareRoutes: readonly UniversalMiddlewareRoute[],
-  pathname: string,
-): boolean {
-  return middlewareRoutes.some((route) => matchesMiddlewareRoute(pathname, route).matched);
 }
 
 /**

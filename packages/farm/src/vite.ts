@@ -1565,6 +1565,13 @@ export function farmPlugin(
         apiServerBasePath,
       );
       await middlewareManager.discover();
+      // sitemap.xml, llms.txt and the default MCP server leave pages middleware guards out.
+      farmApp
+        .getServerRenderer()
+        // Config middleware is matched from the config itself; these are the files.
+        .setMiddlewareRouteLookup(() =>
+          middlewareManager.getMiddlewares().filter((entry) => entry.source !== "config"),
+        );
       if (pm) {
         for (const middleware of middlewareManager.getMiddlewares()) {
           await pm.runHookParallel("middlewareDiscovered", {
