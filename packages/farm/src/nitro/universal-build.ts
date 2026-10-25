@@ -6458,9 +6458,16 @@ const farmDocsAPIHandler = ${
 const apiRoutes = ${apiRoutes.length > 0 ? "mergePluginAPIRoutes(" : ""}[${apiRegistrations.join(",")}
 ]${
     apiRoutes.length > 0
-      ? `, configuredPlugins, ${JSON.stringify(apiRoutes.map(({ path, methods }) => ({ path, methods })))}, { bodySizeLimit: ${JSON.stringify(config.server.bodySizeLimit)} })`
+      ? `, configuredPlugins, ${JSON.stringify(apiRoutes.map(({ path, methods }) => ({ path, methods })))}, { bodySizeLimit: ${JSON.stringify(config.server.bodySizeLimit)}, dispatch: dispatchFarmPluginAPIRequest })`
       : ""
   };
+// A plugin calling an app endpoint (an MCP tool, say) goes through the whole
+// pipeline, so the endpoint's middleware and integration guards run for it.
+function dispatchFarmPluginAPIRequest(request) {
+  const url = new URL(request.url);
+  url.pathname = applyFarmBasePath(url.pathname);
+  return handleFarmRequest(url.href === request.url ? request : new Request(url, request));
+}
 const farmLocalAPIBasePath = ${JSON.stringify(resolveFarmAPIServerBasePath(config.api))};
 const farmOpenAPIReference = ${JSON.stringify(openAPIReference)};
 ${

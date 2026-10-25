@@ -594,6 +594,64 @@ describe("apiMcp", () => {
     expect(middleware).toHaveBeenCalledTimes(1);
   });
 
+  it("sends endpoint tool calls through the app pipeline when the runtime provides one", async () => {
+    const handler = vi.fn(() => ({ users: ["admin-only"] }));
+    const users = route.get("/api/admin/users", { mcp: { name: "list_users" }, handler });
+    const seen: Array<{ url: string; cookie: string | null; encoding: string | null }> = [];
+    const routes = mergePluginAPIRoutes(
+      [{ path: users.path, methods: [users.method], endpoints: { GET: users.endpoint } }],
+      [apiMcp({ authorize: () => ({ subject: "regular" }) })],
+      undefined,
+      {
+        // Stands in for the app's middleware guarding /api/admin/**.
+        dispatch: async (request) => {
+          seen.push({
+            url: request.url,
+            cookie: request.headers.get("cookie"),
+            encoding: request.headers.get("accept-encoding"),
+          });
+          if (!request.headers.get("cookie")?.includes("role=admin")) {
+            return new Response("admins only", { status: 403 });
+          }
+          return invokeAPIRouteEndpoint(users.endpoint, request, {});
+        },
+      },
+    );
+    const endpoint = routes.find((entry) => entry.path === "/api/mcp")!.endpoints.POST;
+    const call = (cookie: string) =>
+      sendMCP(
+        endpoint,
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "list_users", arguments: {} },
+        },
+        undefined,
+        { cookie, "accept-encoding": "gzip" },
+      ).then(readMCP);
+
+    const refused = await call("session=regular");
+    expect(refused.result.isError).toBe(true);
+    expect(JSON.parse(refused.result.content[0].text)).toEqual({
+      status: 403,
+      error: "admins only",
+    });
+    expect(handler).not.toHaveBeenCalled();
+
+    const allowed = await call("session=admin; role=admin");
+    expect(allowed.result.structuredContent).toEqual({ result: { users: ["admin-only"] } });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([
+      { url: "http://farm.test/api/admin/users", cookie: "session=regular", encoding: null },
+      {
+        url: "http://farm.test/api/admin/users",
+        cookie: "session=admin; role=admin",
+        encoding: null,
+      },
+    ]);
+  });
+
   it("supplies a frozen tool catalog and server identity on every authorization request", async () => {
     const authorize = vi.fn<NonNullable<FarmMCPConfig["authorize"]>>(() => ({ subject: "reader" }));
     const { endpoint } = createFixture({ config: { authorize, name: "projects", version: "2" } });

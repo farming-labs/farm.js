@@ -54,7 +54,7 @@ import {
   getFarmMarkdownMirrorPath,
   resolveMarkdownMirrorTarget,
 } from "./markdown";
-import { stripFarmBasePath } from "./base-path";
+import { applyFarmBasePath, stripFarmBasePath } from "./base-path";
 import { resolveFarmLlmsTxtConfig } from "./llms-txt";
 import { resolveFarmAgentCrawlers } from "./agent-crawlers";
 import {
@@ -1493,6 +1493,13 @@ export function farmPlugin(
         i18n: farmApp.getI18nRuntime(),
         bodySizeLimit: serverConfig.bodySizeLimit,
         basePath: apiServerBasePath,
+        // A plugin calling an app endpoint (an MCP tool, say) goes back through this server,
+        // so the endpoint's middleware and integration guards run for it, as in production.
+        dispatch: (request) => {
+          const url = new URL(request.url);
+          url.pathname = applyFarmBasePath(url.pathname, farmConfig.basePath);
+          return fetch(new Request(url, request), { redirect: "manual" });
+        },
       });
       await apiRouteManager.discoverRoutes();
       let discoveredWorkflows: FarmDiscoveredWorkflow[] = [];

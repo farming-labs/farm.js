@@ -394,6 +394,15 @@ async function invokeTool(
   try {
     const response = await tool.route.invoke(request, routeParams);
     const mediaType = response.headers.get("content-type")?.split(";", 1)[0].trim() ?? "";
+    const isJSON = mediaType === "application/json" || mediaType.endsWith("+json");
+    if (!response.ok && !isJSON) {
+      // A guard in front of the endpoint (middleware, an integration) refused or redirected it.
+      const error = (await response.text()).slice(0, 1_000);
+      const location = response.headers.get("location");
+      return toolError(
+        JSON.stringify({ status: response.status, error, ...(location ? { location } : {}) }),
+      );
+    }
     if (
       response.status !== 204 &&
       mediaType !== "application/json" &&

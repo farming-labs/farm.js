@@ -42,7 +42,10 @@ unless that endpoint opts in or is explicitly selected in `mcp.tools`.
 ## Declare tools in config
 
 You can keep MCP declarations in `farm.config.ts` and reference existing endpoint instances.
-The endpoint still owns its validation, middleware, and handler:
+The endpoint still owns its validation, middleware, and handler. A tool call is a request for the
+endpoint's own path, with the agent's headers and cookies, so the app middleware and integration
+guards that protect that path run first, as they do for a direct request; a refusal comes back as
+a tool error with its status.
 
 ```ts title="src/app/api/projects/route.ts"
 import { createEndpoint } from "@farm.js/core/api";

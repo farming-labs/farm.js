@@ -236,6 +236,9 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
       ? new Map(
           mergePluginAPIRoutes([...apiRoutesCache.values()], plugins, undefined, {
             bodySizeLimit,
+            // A plugin calling an app endpoint (an MCP tool, say) goes back through this server,
+            // so the middleware that guards the endpoint's path runs for it.
+            dispatch: (request) => fetch(request, { redirect: "manual" }),
           }).map((route) => [route.path, route]),
         )
       : null;

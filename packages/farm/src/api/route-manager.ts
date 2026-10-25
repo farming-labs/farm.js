@@ -1,5 +1,5 @@
 import { loadFarmDevModule } from "../dev-module";
-import { mergePluginAPIRoutes } from "./plugin-route-runtime";
+import { mergePluginAPIRoutes, type PluginAPIDispatch } from "./plugin-route-runtime";
 import type { FarmPlugin } from "../plugin";
 import * as fs from "fs";
 import * as path from "path";
@@ -45,6 +45,8 @@ export interface APIRouteManagerOptions {
   bodySizeLimit?: number;
   /** Same-origin path where canonical `/api` routes are served. */
   basePath?: string;
+  /** Runs a plugin's call to an app endpoint through the app's request pipeline. */
+  dispatch?: PluginAPIDispatch;
 }
 
 export interface APIRouteHandlerOptions {
@@ -75,6 +77,7 @@ export class APIRouteManager {
   private i18n?: FarmI18nRuntime;
   private bodySizeLimit?: number;
   private basePath?: string;
+  private dispatch?: PluginAPIDispatch;
 
   constructor(
     appDir: string | readonly string[],
@@ -88,6 +91,7 @@ export class APIRouteManager {
     this.i18n = options.i18n;
     this.bodySizeLimit = options.bodySizeLimit;
     this.basePath = options.basePath;
+    this.dispatch = options.dispatch;
   }
 
   /**
@@ -120,6 +124,7 @@ export class APIRouteManager {
       this.routes = new Map(
         mergePluginAPIRoutes([...this.routes.values()], this.plugins, undefined, {
           bodySizeLimit: this.bodySizeLimit,
+          dispatch: this.dispatch,
         }).map((route) => [route.path, route]),
       );
     } catch (error) {

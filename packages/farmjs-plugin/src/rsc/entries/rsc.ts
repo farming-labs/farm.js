@@ -422,8 +422,11 @@ if (farmNativeMCPPlugin) {
     methods: [...route.methods],
     endpoints: { ...route.handlers },
   }));
-  // Rejects a plugin route that would replace an app endpoint.
-  for (const route of mergePluginAPIRoutes(mountedRoutes, [farmNativeMCPPlugin])) {
+  // Rejects a plugin route that would replace an app endpoint. An MCP tool calls its
+  // endpoint through handler(), so the middleware guarding that path runs for it.
+  for (const route of mergePluginAPIRoutes(mountedRoutes, [farmNativeMCPPlugin], undefined, {
+    dispatch: (request) => handler(request),
+  })) {
     for (const method of route.pluginMethods ?? []) {
       let target = apiRouteMap.get(route.path);
       if (!target) {
