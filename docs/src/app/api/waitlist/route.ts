@@ -29,7 +29,9 @@ type WaitlistResult =
 
 export const POST = createEndpoint(
   "/api/waitlist",
-  { method: "POST", body: waitlistSchema },
+  // The /agents form posts here. It stores an email address, so it is not
+  // advertised to agents in /openapi.json.
+  { method: "POST", body: waitlistSchema, openapi: { hidden: true } },
   async (ctx): Promise<WaitlistResult | Response> => {
     const email = ctx.body.email.toLowerCase();
     const description = ctx.body.description;

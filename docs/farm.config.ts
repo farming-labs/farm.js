@@ -1,6 +1,7 @@
 import { defineConfig } from "@farm.js/core";
 import { devtools } from "@farm.js/devtools";
 import { farmDocsRuntimeAdapter } from "@farming-labs/farmjs/runtime";
+import { farmjsAPIPaths } from "./src/lib/openapi";
 
 const siteDescription =
   "Farm.js is the full-stack framework for the web and agents: apps are agent-ready by default and run any agent runtime you bring. Built on Vite and Nitro.";
@@ -15,6 +16,18 @@ export default defineConfig({
   docs: {
     enabled: true,
     adapter: farmDocsRuntimeAdapter,
+  },
+  // /openapi.json describes the public API. The reference page lives at /openapi: the
+  // default /docs/reference is a docs page, and the docs engine keeps /api-reference
+  // for its own API reference. Internal routes opt out in their route files.
+  openapi: {
+    enabled: true,
+    route: "/openapi",
+    title: "Farm.js API",
+    description:
+      "The public HTTP API of farmjs.dev: the docs API with its MCP server and agent feedback, and the agent-ready check.",
+    version: "1.0.0",
+    paths: farmjsAPIPaths,
   },
   agent: {
     // The app's /llms.txt lists the site pages and every docs page, where the docs
