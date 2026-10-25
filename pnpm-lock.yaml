@@ -75,20 +75,20 @@ importers:
         specifier: workspace:*
         version: link:../packages/farm-webmcp
       '@farming-labs/docs':
-        specifier: 0.2.129
-        version: 0.2.129(react@19.2.8)(supports-color@10.2.2)
+        specifier: 0.2.130
+        version: 0.2.130(react@19.2.8)(supports-color@10.2.2)
       '@farming-labs/farmjs':
-        specifier: 0.2.129
-        version: 0.2.129(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.129)(@farming-labs/theme@0.2.129)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(rollup@4.52.4)(supports-color@10.2.2)
+        specifier: 0.2.130
+        version: 0.2.130(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.130)(@farming-labs/theme@0.2.130)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(rollup@4.52.4)(supports-color@10.2.2)
       '@farming-labs/theme':
-        specifier: 0.2.129
-        version: 0.2.129(@farming-labs/docs@0.2.129)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
+        specifier: 0.2.130
+        version: 0.2.130(@farming-labs/docs@0.2.130)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
       '@farming-labs/theme-production':
         specifier: npm:@farming-labs/theme@0.2.99
-        version: /@farming-labs/theme@0.2.99(@farming-labs/docs@0.2.129)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
+        version: /@farming-labs/theme@0.2.99(@farming-labs/docs@0.2.130)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
       '@farming-labs/theme-runtime':
-        specifier: npm:@farming-labs/theme@0.2.129
-        version: /@farming-labs/theme@0.2.129(@farming-labs/docs@0.2.129)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
+        specifier: npm:@farming-labs/theme@0.2.130
+        version: /@farming-labs/theme@0.2.130(@farming-labs/docs@0.2.130)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
       '@prisma/client':
         specifier: 6.7.0
         version: 6.7.0(prisma@6.7.0)(typescript@5.9.3)
@@ -358,7 +358,7 @@ importers:
         version: link:../../packages/farm
       agents:
         specifier: 0.17.4
-        version: 0.17.4(@babel/core@8.0.1)(@cloudflare/workers-types@5.20260716.1)(react@19.2.8)(rolldown@1.2.14)(supports-color@10.2.2)(vite@8.3.4)(zod@4.6.5)
+        version: 0.17.4(@babel/core@8.0.1)(@cloudflare/workers-types@5.20260716.1)(react@19.2.8)(rolldown@1.2.15)(supports-color@10.2.2)(vite@8.3.4)(zod@4.6.5)
       react:
         specifier: 19.2.8
         version: 19.2.8
@@ -2250,7 +2250,7 @@ importers:
         version: 22.20.5
       agents:
         specifier: 0.17.4
-        version: 0.17.4(@babel/core@8.0.1)(@cloudflare/workers-types@4.20260702.1)(react@19.2.8)(rolldown@1.2.14)(supports-color@10.2.2)(vite@8.3.4)(zod@4.6.5)
+        version: 0.17.4(@babel/core@8.0.1)(@cloudflare/workers-types@4.20260702.1)(react@19.2.8)(rolldown@1.2.15)(supports-color@10.2.2)(vite@8.3.4)(zod@4.6.5)
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(postcss@8.5.30)(supports-color@10.2.2)(typescript@5.9.3)
@@ -5510,8 +5510,8 @@ packages:
       - supports-color
     dev: false
 
-  /@farming-labs/docs@0.2.129(react@19.2.8)(supports-color@10.2.2):
-    resolution: {integrity: sha512-hgRg3E7Y4KduBJSJvstrxphN+FEmxEYV91MmYaqspOCsmCDmFH4o/tQSDZoIFtdo1a0YzoYIyqstifXYpvLA7A==}
+  /@farming-labs/docs@0.2.130(react@19.2.8)(supports-color@10.2.2):
+    resolution: {integrity: sha512-qhRrTgR1bBC1+6+ysHO2DDqRjZQOujQZt1Cy6fS5IjhV5MqAAoKUDjAsa4HIUyJ3yXzN8TFzUcagKLC6a50dXA==}
     engines: {node: '>=20'}
     hasBin: true
     peerDependencies:
@@ -5587,8 +5587,8 @@ packages:
       - waku
     dev: false
 
-  /@farming-labs/farmjs@0.2.129(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.129)(@farming-labs/theme@0.2.129)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(rollup@4.52.4)(supports-color@10.2.2):
-    resolution: {integrity: sha512-jaPa9R4PzWqrmPSilEprB/ZJx/0iSVmVBoHtT8+w/fZM0i+P2o1imlb2+uKpRe4+Env5EmFwOqeE/Wli5+4GMw==}
+  /@farming-labs/farmjs@0.2.130(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.130)(@farming-labs/theme@0.2.130)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(rollup@4.52.4)(supports-color@10.2.2):
+    resolution: {integrity: sha512-lIhPcHYiLk0YytVrSzriS12Z6zzI4B4dvSyOkEYCrcaFotpIw+kTreEjSNgoMJpj1TffLuDZlG7yJn3/zRd0Bw==}
     peerDependencies:
       '@farm.js/core': ^0.1.0-beta.106
       '@farming-labs/docs': '*'
@@ -5597,8 +5597,8 @@ packages:
       react-dom: ^18.2.0 || ^19.0.0
     dependencies:
       '@farm.js/core': link:packages/farm
-      '@farming-labs/docs': 0.2.129(react@19.2.8)(supports-color@10.2.2)
-      '@farming-labs/theme': 0.2.129(@farming-labs/docs@0.2.129)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
+      '@farming-labs/docs': 0.2.130(react@19.2.8)(supports-color@10.2.2)
+      '@farming-labs/theme': 0.2.130(@farming-labs/docs@0.2.130)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
       '@mdx-js/mdx': 3.1.1(supports-color@10.2.2)
       '@mdx-js/rollup': 3.1.1(rollup@4.52.4)(supports-color@10.2.2)
       '@scalar/core': 0.4.6
@@ -6116,8 +6116,8 @@ packages:
       - waku
     dev: false
 
-  /@farming-labs/theme@0.2.129(@farming-labs/docs@0.2.129)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18):
-    resolution: {integrity: sha512-dth+XN9MbJYFe98T6OkITHWb6AaVb+pCovGlu/9R4iSFjSDLEVo9+Pw1uMlM2dgCgPtNLyOopxalOKilSQ2WTg==}
+  /@farming-labs/theme@0.2.130(@farming-labs/docs@0.2.130)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18):
+    resolution: {integrity: sha512-8YDiRJ0VgpB4cE8AbV/jKK5ZLvnWhe+azrhQdFyx1hJKQBsCGNkLf9r1nXglL0MoyeHBNzUVEPMtq+eEetjOaA==}
     peerDependencies:
       '@farming-labs/docs': '>=0.0.1'
       next: '>=16.0.0'
@@ -6131,7 +6131,7 @@ packages:
       react-dom:
         optional: true
     dependencies:
-      '@farming-labs/docs': 0.2.129(react@19.2.8)(supports-color@10.2.2)
+      '@farming-labs/docs': 0.2.130(react@19.2.8)(supports-color@10.2.2)
       fumadocs-core: 16.17.1(@mdx-js/mdx@3.1.1)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.6.5)
       fumadocs-ui: 16.17.1(@types/react-dom@18.3.7)(@types/react@18.3.26)(fumadocs-core@16.17.1)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
       gray-matter: 4.0.3
@@ -6164,7 +6164,7 @@ packages:
       - waku
     dev: false
 
-  /@farming-labs/theme@0.2.99(@farming-labs/docs@0.2.129)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18):
+  /@farming-labs/theme@0.2.99(@farming-labs/docs@0.2.130)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18):
     resolution: {integrity: sha512-WZ150Ji5sdj5ECOPbasycKwbe9Af26PPnVLmpiBLXvEXoyJIYZqbiCL+08yjg4NeXzgpOD2tfVcDqW3r58vOcw==}
     peerDependencies:
       '@farming-labs/docs': '>=0.0.1'
@@ -6179,7 +6179,7 @@ packages:
       react-dom:
         optional: true
     dependencies:
-      '@farming-labs/docs': 0.2.129(react@19.2.8)(supports-color@10.2.2)
+      '@farming-labs/docs': 0.2.130(react@19.2.8)(supports-color@10.2.2)
       fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.3.6)
       fumadocs-ui: 16.7.16(@types/react-dom@18.3.7)(@types/react@18.3.26)(fumadocs-core@16.7.16)(next@16.2.4)(react-dom@19.2.8)(react@19.2.8)(tailwindcss@3.4.18)
       gray-matter: 4.0.3
@@ -7721,7 +7721,7 @@ packages:
     dependencies:
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/core': 2.10.0(@opentelemetry/api@1.9.1)
-      yaml: 2.9.0
+      yaml: 2.9.1
 
   /@opentelemetry/context-async-hooks@2.10.0(@opentelemetry/api@1.9.1):
     resolution: {integrity: sha512-bvyMcgLEkozzSzpEEEo1OMoeQ97bxj6Qs2uN3mPrSdDvObMI1myffD/BPqcLlzZO9//d1SqQA/WPw7Cz2AiqhA==}
@@ -8707,7 +8707,6 @@ packages:
 
   /@oxc-project/types@0.155.0:
     resolution: {integrity: sha512-SeE8JPwW1xs1tHeNycjUtUBdhorRa8o4jlvjwk49R7/Z291i+4DQa7JJIgOm/TaYQZx+QrPQbVJ/9c8dMIZN8Q==}
-    dev: true
 
   /@oxfmt/darwin-arm64@0.27.0:
     resolution: {integrity: sha512-3vwqyzNlVTVFVzHMlrqxb4tgVgHp6FYS0uIxsIZ/SeEDG0azaqiOw/2t8LlJ9f72PKRLWSey+Ak99tiKgpbsnQ==}
@@ -10828,7 +10827,6 @@ packages:
     cpu: [arm]
     os: [android]
     requiresBuild: true
-    dev: true
     optional: true
 
   /@rolldown/binding-android-arm64@1.2.14:
@@ -10845,7 +10843,6 @@ packages:
     cpu: [arm64]
     os: [android]
     requiresBuild: true
-    dev: true
     optional: true
 
   /@rolldown/binding-darwin-arm64@1.2.14:
@@ -10862,7 +10859,6 @@ packages:
     cpu: [arm64]
     os: [darwin]
     requiresBuild: true
-    dev: true
     optional: true
 
   /@rolldown/binding-darwin-x64@1.2.14:
@@ -10879,7 +10875,6 @@ packages:
     cpu: [x64]
     os: [darwin]
     requiresBuild: true
-    dev: true
     optional: true
 
   /@rolldown/binding-freebsd-x64@1.2.14:
@@ -10896,7 +10891,6 @@ packages:
     cpu: [x64]
     os: [freebsd]
     requiresBuild: true
-    dev: true
     optional: true
 
   /@rolldown/binding-linux-arm-gnueabihf@1.2.14:
@@ -10913,7 +10907,6 @@ packages:
     cpu: [arm]
     os: [linux]
     requiresBuild: true
-    dev: true
     optional: true
 
   /@rolldown/binding-linux-arm64-gnu@1.2.14:
@@ -10930,7 +10923,6 @@ packages:
     cpu: [arm64]
     os: [linux]
     requiresBuild: true
-    dev: true
     optional: true
 
   /@rolldown/binding-linux-arm64-musl@1.2.14:
@@ -10947,7 +10939,6 @@ packages:
     cpu: [arm64]
     os: [linux]
     requiresBuild: true
-    dev: true
     optional: true
 
   /@rolldown/binding-linux-ppc64-gnu@1.2.14:
@@ -10964,7 +10955,6 @@ packages:
     cpu: [ppc64]
     os: [linux]
     requiresBuild: true
-    dev: true
     optional: true
 
   /@rolldown/binding-linux-s390x-gnu@1.2.14:
@@ -10981,7 +10971,6 @@ packages:
     cpu: [s390x]
     os: [linux]
     requiresBuild: true
-    dev: true
     optional: true
 
   /@rolldown/binding-linux-x64-gnu@1.2.14:
@@ -10998,7 +10987,6 @@ packages:
     cpu: [x64]
     os: [linux]
     requiresBuild: true
-    dev: true
     optional: true
 
   /@rolldown/binding-linux-x64-musl@1.2.14:
@@ -11015,7 +11003,6 @@ packages:
     cpu: [x64]
     os: [linux]
     requiresBuild: true
-    dev: true
     optional: true
 
   /@rolldown/binding-openharmony-arm64@1.2.14:
@@ -11032,7 +11019,6 @@ packages:
     cpu: [arm64]
     os: [openharmony]
     requiresBuild: true
-    dev: true
     optional: true
 
   /@rolldown/binding-win32-arm64-msvc@1.2.14:
@@ -11049,7 +11035,6 @@ packages:
     cpu: [arm64]
     os: [win32]
     requiresBuild: true
-    dev: true
     optional: true
 
   /@rolldown/binding-win32-x64-msvc@1.2.14:
@@ -11066,10 +11051,9 @@ packages:
     cpu: [x64]
     os: [win32]
     requiresBuild: true
-    dev: true
     optional: true
 
-  /@rolldown/plugin-babel@0.2.3(@babel/core@8.0.1)(rolldown@1.2.14)(vite@8.3.4):
+  /@rolldown/plugin-babel@0.2.3(@babel/core@8.0.1)(rolldown@1.2.15)(vite@8.3.4):
     resolution: {integrity: sha512-+zEk16yGlz1F9STiRr6uG9hmIXb6nprjLczV/htGptYuLoCuxb+itZ03RKCEeOhBpDDd1NU7qF6x1VLMUp62bw==}
     engines: {node: '>=22.12.0 || ^24.0.0'}
     peerDependencies:
@@ -11088,7 +11072,7 @@ packages:
     dependencies:
       '@babel/core': 8.0.1
       picomatch: 4.0.7
-      rolldown: 1.2.14
+      rolldown: 1.2.15
       vite: 8.3.4(@types/node@20.19.21)
 
   /@rolldown/pluginutils@1.0.0-rc.3:
@@ -12816,7 +12800,7 @@ packages:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
 
-  /agents@0.17.4(@babel/core@8.0.1)(@cloudflare/workers-types@4.20260702.1)(react@19.2.8)(rolldown@1.2.14)(supports-color@10.2.2)(vite@8.3.4)(zod@4.6.5):
+  /agents@0.17.4(@babel/core@8.0.1)(@cloudflare/workers-types@4.20260702.1)(react@19.2.8)(rolldown@1.2.15)(supports-color@10.2.2)(vite@8.3.4)(zod@4.6.5):
     resolution: {integrity: sha512-K6YRbpD3VcwdTOPBlDgI4dILAwkhXo5cdxTlVF0IvUwQEKfMPawmH8E/QMXTN8CPGHqVYgYFACxTyk6nKlK+vg==}
     hasBin: true
     peerDependencies:
@@ -12852,7 +12836,7 @@ packages:
       '@cfworker/json-schema': 4.1.1
       '@cloudflare/codemode': 0.4.3(@modelcontextprotocol/sdk@1.29.0)(zod@4.6.5)
       '@modelcontextprotocol/sdk': 1.29.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.5)
-      '@rolldown/plugin-babel': 0.2.3(@babel/core@8.0.1)(rolldown@1.2.14)(vite@8.3.4)
+      '@rolldown/plugin-babel': 0.2.3(@babel/core@8.0.1)(rolldown@1.2.15)(vite@8.3.4)
       cron-schedule: 6.0.0
       esbuild: 0.28.1
       mimetext: 3.0.28
@@ -12873,7 +12857,7 @@ packages:
       - supports-color
     dev: true
 
-  /agents@0.17.4(@babel/core@8.0.1)(@cloudflare/workers-types@5.20260716.1)(react@19.2.8)(rolldown@1.2.14)(supports-color@10.2.2)(vite@8.3.4)(zod@4.6.5):
+  /agents@0.17.4(@babel/core@8.0.1)(@cloudflare/workers-types@5.20260716.1)(react@19.2.8)(rolldown@1.2.15)(supports-color@10.2.2)(vite@8.3.4)(zod@4.6.5):
     resolution: {integrity: sha512-K6YRbpD3VcwdTOPBlDgI4dILAwkhXo5cdxTlVF0IvUwQEKfMPawmH8E/QMXTN8CPGHqVYgYFACxTyk6nKlK+vg==}
     hasBin: true
     peerDependencies:
@@ -12909,7 +12893,7 @@ packages:
       '@cfworker/json-schema': 4.1.1
       '@cloudflare/codemode': 0.4.3(@modelcontextprotocol/sdk@1.29.0)(zod@4.6.5)
       '@modelcontextprotocol/sdk': 1.29.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.5)
-      '@rolldown/plugin-babel': 0.2.3(@babel/core@8.0.1)(rolldown@1.2.14)(vite@8.3.4)
+      '@rolldown/plugin-babel': 0.2.3(@babel/core@8.0.1)(rolldown@1.2.15)(vite@8.3.4)
       cron-schedule: 6.0.0
       esbuild: 0.28.1
       mimetext: 3.0.28
@@ -16542,7 +16526,7 @@ packages:
   /hast-util-from-dom@5.0.1:
     resolution: {integrity: sha512-N+LqofjR2zuzTjCPzyDUdSshy4Ma6li7p/c3pA78uTwzFgENbgbUrm2ugwsOdcjI1muO+o6Dgzp9p8WHtn/39Q==}
     dependencies:
-      '@types/hast': 3.0.4
+      '@types/hast': 3.0.5
       hastscript: 9.0.1
       web-namespaces: 2.0.1
     dev: false
@@ -20639,7 +20623,6 @@ packages:
       '@rolldown/binding-openharmony-arm64': 1.2.15
       '@rolldown/binding-win32-arm64-msvc': 1.2.15
       '@rolldown/binding-win32-x64-msvc': 1.2.15
-    dev: true
 
   /rollup@4.52.4:
     resolution: {integrity: sha512-CLEVl+MnPAiKh5pl4dEWSyMTpuflgNQiLGhMv8ezD5W/qP8AKvmYpCOKRRNOh7oRKnauBZ4SyeYkMS+1VSyKwQ==}
@@ -22231,7 +22214,7 @@ packages:
     resolution: {integrity: sha512-9ncH7i7TN5Xn7/tzX5bE3rXgz1X/u877gYVAUB3mLeTKYJmQHmqKTDBi6BTGXV7AeolBCI9ErcVsOt2qryoD0g==}
     dependencies:
       '@types/estree': 1.0.8
-      '@types/hast': 3.0.4
+      '@types/hast': 3.0.5
       '@types/mdast': 4.0.4
       estree-util-is-identifier-name: 3.0.0
       estree-util-scope: 1.0.0
