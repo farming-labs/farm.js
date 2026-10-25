@@ -425,6 +425,8 @@ const config = {
   favicon: "/favicon.svg",
   // The docs MCP describes Farm.js, so it reports the Farm.js version, not this site's.
   mcp: { version: FARM_VERSION },
+  // List the hand-written /openapi.json (public APIs only) in /.well-known/api-catalog.
+  agent: { apiCatalog: { openapi: "/openapi.json" } },
   socialImage: {
     baseUrl: "https://farmjs.dev",
     siteName: "Farm.js",
