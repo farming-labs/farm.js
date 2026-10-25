@@ -68,25 +68,22 @@ function onBlack(hex: string) {
 
 /**
  * What a checked site is made with, as a small mark beside its name that says so on hover.
- * Farm.js gets the Farming Labs mark and links home; a framework the check recognizes gets
- * its own mark; anything else shows nothing.
+ * Farm.js gets the Farming Labs mark and links home, with its version when the site's manifest
+ * names one; a framework the check recognizes gets its own mark; anything else shows nothing.
  */
 export function AgentCheckMadeWith({
   report,
 }: {
-  report: Pick<AgentCheckReport, "farm" | "framework">;
+  report: Pick<AgentCheckReport, "farm" | "framework" | "farmVersion">;
 }) {
-  if (report.farm || report.framework === "Farm.js")
+  if (report.farm || report.framework === "Farm.js") {
+    const label = `Made with Farm.js${report.farmVersion ? ` ${report.farmVersion}` : ""}`;
     return (
-      <a
-        className="agent-check-made-with"
-        href="/"
-        aria-label="Made with Farm.js"
-        data-tip="Made with Farm.js"
-      >
+      <a className="agent-check-made-with" href="/" aria-label={label} data-tip={label}>
         <img alt="" aria-hidden src={farmingLabsLogoUrl} />
       </a>
     );
+  }
   const mark = report.framework ? MARKS[report.framework] : undefined;
   if (!mark) return null;
   const label = `Made with ${report.framework}`;

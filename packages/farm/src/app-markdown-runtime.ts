@@ -160,6 +160,68 @@ export function isFarmMarkdownPublicSourceResponse(response: Response): boolean 
   return publicSourceResponses.has(response);
 }
 
+/**
+ * Request headers that carry no caller identity: what browsers send on their own, conditional
+ * request validators, and the proxy's description of the transport. `Cookie`, `Authorization`,
+ * the client address a proxy reports (`Forwarded`, `Via`, `X-Forwarded-For`, `X-Real-IP` and
+ * the like), and every custom header are left out: an IP allowlist is a guard too.
+ */
+const ANONYMOUS_REQUEST_HEADERS = new Set([
+  "accept",
+  "accept-encoding",
+  "accept-language",
+  "cache-control",
+  "connection",
+  "dnt",
+  "host",
+  "if-match",
+  "if-modified-since",
+  "if-none-match",
+  "if-range",
+  "if-unmodified-since",
+  "keep-alive",
+  "origin",
+  "pragma",
+  "priority",
+  "purpose",
+  "range",
+  "referer",
+  "save-data",
+  "sec-gpc",
+  "sec-purpose",
+  "te",
+  "traceparent",
+  "tracestate",
+  "upgrade-insecure-requests",
+  "user-agent",
+  "x-forwarded-host",
+  "x-forwarded-port",
+  "x-forwarded-proto",
+  "x-request-id",
+]);
+
+function isAnonymousRequestHeader(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    ANONYMOUS_REQUEST_HEADERS.has(lower) ||
+    lower.startsWith("sec-fetch-") ||
+    lower.startsWith("sec-ch-")
+  );
+}
+
+function hasOnlyAnonymousHeaders(headers: Headers): boolean {
+  for (const name of headers.keys()) {
+    if (!isAnonymousRequestHeader(name)) return false;
+  }
+  return true;
+}
+
+/**
+ * Internal: the client address an adapter reports for the anonymous page check, in place of the
+ * caller's. It is a documentation address (RFC 5737), so no IP allowlist admits it.
+ */
+export const FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS = "192.0.2.1";
+
 export async function createFarmMarkdownSourceResponse(options: {
   request: Request;
   config?: FarmMdxResolvedConfig;
@@ -169,8 +231,16 @@ export async function createFarmMarkdownSourceResponse(options: {
   /**
    * Runs a request through the app's full pipeline, guards included. With it, a
    * page's source is only served when an anonymous visitor may open the page.
+   * The request is that visitor's, so its client address must not be the caller's
+   * (see FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS).
    */
   renderPage?: (request: Request) => Response | Promise<Response>;
+  /**
+   * The caller's client address as the server adapter reports it. A known address
+   * other than the anonymous one is part of the caller's identity, so the page is
+   * checked as an anonymous visitor even for a request with only standard headers.
+   */
+  clientAddress?: string;
 }): Promise<Response | null> {
   if (options.request.method !== "GET" && options.request.method !== "HEAD") {
     return null;
@@ -196,14 +266,19 @@ export async function createFarmMarkdownSourceResponse(options: {
   // page's protection, under a public cache. A page has a Markdown source only
   // when an anonymous visitor may open it, so ask the app as one: its
   // middleware, integration guards and route rules see the page's own path.
+  // Any header a browser does not send on its own (an API key, a custom session
+  // header, a client certificate from the proxy) may be what a guard trusts, so
+  // only the standard request headers come along.
   const anonymous =
-    !options.request.headers.has("cookie") && !options.request.headers.has("authorization");
+    hasOnlyAnonymousHeaders(options.request.headers) &&
+    (!options.clientAddress || options.clientAddress === FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS);
   if (options.renderPage && (hasMarkdownExtension || !anonymous)) {
     const publicUrl = new URL(url);
     publicUrl.pathname = targetPathname;
-    const publicHeaders = new Headers(options.request.headers);
-    publicHeaders.delete("cookie");
-    publicHeaders.delete("authorization");
+    const publicHeaders = new Headers();
+    for (const [name, value] of options.request.headers) {
+      if (isAnonymousRequestHeader(name)) publicHeaders.append(name, value);
+    }
     publicHeaders.set("accept", "text/markdown");
     const publicResponse = await options.renderPage(
       new Request(publicUrl, {

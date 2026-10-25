@@ -59,7 +59,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     title: "Auth starter",
     description: "Farm.js-native auth with local SQLite, secure sessions, and protected routes",
     instructions: [
-      "FARMJS Auth uses local SQLite automatically; no auth environment variables are needed locally.",
+      "FARMJS Auth uses local SQLite automatically and generates a random .farm/auth-secret; no auth environment variables are needed locally.",
       "For production, set FARM_AUTH_URL, FARM_AUTH_SECRET, and DATABASE_URL, then run the auth:migrate script.",
     ],
   },

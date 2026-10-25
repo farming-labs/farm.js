@@ -500,6 +500,37 @@ export async function middleware(request: Request) {
     path.join(root, "src", "app", "members", "page.md"),
     `# Members\n\nmembers-only-source\n`,
   );
+  // Guarded on a custom header rather than a cookie or Authorization.
+  await fs.mkdir(path.join(root, "src", "app", "partners"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "src", "app", "partners", "middleware.ts"),
+    `
+export async function middleware(request: Request) {
+  if (request.headers.get("x-api-key") !== "partner-key") {
+    return new Response("partners require a key", { status: 401 });
+  }
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "partners", "page.md"),
+    `# Partners\n\npartners-only-source\n`,
+  );
+  // An office network allowlist: the proxy's client IP header or the adapter's address.
+  await fs.mkdir(path.join(root, "src", "app", "office"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, "src", "app", "office", "middleware.ts"),
+    `
+export async function middleware(request: Request & { socket?: { remoteAddress?: string } }) {
+  const ip = request.headers.get("x-real-ip") ?? request.socket?.remoteAddress;
+  if (ip !== "10.0.0.5") return new Response("office network only", { status: 403 });
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "office", "page.md"),
+    `# Office\n\noffice-only-source\n`,
+  );
   await fs.mkdir(path.join(root, "src", "app", "public-notes"), { recursive: true });
   await fs.writeFile(
     path.join(root, "src", "app", "public-notes", "page.md"),

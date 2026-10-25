@@ -89,6 +89,18 @@ export function matchesMiddlewareRoute(
   return { matched: true, params: Object.keys(params).length > 0 ? params : undefined };
 }
 
+/** Match a file middleware route against every pathname the request is served at. */
+export function matchesMiddlewareRouteAt(
+  pathnames: readonly string[],
+  entry: FileMiddlewareRoute,
+): { matched: boolean; params?: Record<string, string> } {
+  for (const pathname of pathnames) {
+    const match = matchesMiddlewareRoute(pathname, entry);
+    if (match.matched) return match;
+  }
+  return { matched: false };
+}
+
 function sameEntries<T>(
   current: readonly T[] | undefined,
   previous: readonly T[] | undefined,
@@ -323,4 +335,17 @@ export function matchesMiddlewareConfig(
     sameEntries(config.exclude, cached.excludeEntries);
   const compiled = unchanged ? cached.compiled : compileMiddlewareConfig(config);
   return matchesCompiledMiddlewareConfig(pathname, compiled, ctx);
+}
+
+/** Match a middleware config against every pathname the request is served at. */
+export function matchesMiddlewareConfigAt(
+  pathnames: readonly string[],
+  config: MiddlewareConfig,
+  ctx: MiddlewareContext,
+): { matched: boolean; params?: Record<string, string> } {
+  for (const pathname of pathnames) {
+    const match = matchesMiddlewareConfig(pathname, config, ctx);
+    if (match.matched) return match;
+  }
+  return { matched: false };
 }

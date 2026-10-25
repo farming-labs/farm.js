@@ -1,6 +1,6 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadCompiledAndOriginal, removeCompiledModules } from "./compiled-module-harness";
 
 declare global {
@@ -17,6 +17,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await act(async () => {
     for (const root of roots.splice(0)) root.unmount();
   });
@@ -57,9 +58,41 @@ const PAYLOADS = [
   ` JaVaScRiPt:${RUN}`,
   `java\\tscript:${RUN}`,
   `\\u0001javascript:${RUN}`,
+  `java\\r\\nscript:${RUN}`,
+  `j\\ta\\nv\\rascript:${RUN}`,
 ];
 
 describe("compiled updates block javascript: URLs like React", () => {
+  it("does not read the tag name when updating non-URL attributes", async () => {
+    const source = `
+      import { useState } from "react";
+      export function Attributes() {
+        const [value, setValue] = useState("before");
+        return <main>
+          <button id="set" onClick={() => setValue("after")}>set</button>
+          <label id="target" className={value} title={value} htmlFor={value}
+            aria-label={value} data-state={value}>Label</label>
+        </main>;
+      }
+    `;
+    const { compiled, original, names, reasons } = await loadCompiledAndOriginal(source);
+    expect(reasons).toEqual([]);
+    expect(names).toContain("Attributes");
+    const control = await mount(original.Attributes);
+    const container = await mount(compiled.Attributes);
+    const target = container.querySelector("#target")!;
+    const tagReads = vi.spyOn(target, "localName", "get");
+    await act(async () => container.querySelector<HTMLElement>("#set")!.click());
+    expect(tagReads).not.toHaveBeenCalled();
+    tagReads.mockRestore();
+    await act(async () => control.querySelector<HTMLElement>("#set")!.click());
+    expect(container.innerHTML).toBe(control.innerHTML);
+    expect(container.querySelector("#target")).toBe(target);
+    for (const name of ["class", "title", "for", "aria-label", "data-state"]) {
+      expect(target.getAttribute(name)).toBe("after");
+    }
+  });
+
   it.each(PAYLOADS)("single-value bindings: %j", async (payload) => {
     const source = `
       import { useState } from "react";

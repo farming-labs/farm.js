@@ -149,6 +149,13 @@ describe("development server file exposure", () => {
       expect({ rawPath, status: response.status }).toEqual({ rawPath, status: 403 });
       expect(response.body).not.toMatch(/sk_config_secret|sk_root_secret|hunter2|session-rows/);
     }
+    // A federation module runner, when one is mounted, evaluates any id under the root on POST.
+    const runner = await send(port, "/__mf_runner__", {
+      preview: true,
+      method: "POST",
+      body: "{}",
+    });
+    expect(runner.status).toBe(403);
   }, 60_000);
 
   it("still serves what the preview's browser needs", async () => {

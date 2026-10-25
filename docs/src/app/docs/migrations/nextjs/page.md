@@ -218,7 +218,6 @@ Returning nothing continues the request, like `NextResponse.next()`. See
 - Page catch-all params such as `[...slug]` arrive as a single string joined with `/`.
 - Public environment values are declared under `env` in `farm.config.ts` instead of relying on
   the `NEXT_PUBLIC_` prefix. See [Configuration](/docs/configuration).
-- A root layout that renders its own `<html>` should include the viewport meta tag.
 - Tailwind CSS v4: run `pnpm add -D @tailwindcss/vite`, keep `tailwindcss` and
   `@import "tailwindcss";`, then delete `postcss.config.*`, `@tailwindcss/postcss`, and any Tailwind
   loader in `next.config`. Farm loads `@tailwindcss/vite` from the app; without it the build still

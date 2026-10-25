@@ -207,6 +207,8 @@ Internal `Link` hrefs stay app-relative: when `basePath: "/console"` is configur
 renders and navigates to `/console/about`. Do not add the base path to route hrefs yourself.
 For a reusable custom-scheme type, use ``ExternalHref<`customapp:${string}`>`` (or declaration-merge
 `LinkExternalUriSchemes` when the scheme should belong to the default `ExternalHref` union).
+A `Link` whose href is a `javascript:` URL renders without an `href`, and a click on it is ignored and
+logged, under React 18, React 19, and Preact alike, so an untrusted URL passed to `Link` cannot run script.
 
 **Client navigation**
 
@@ -838,6 +840,23 @@ from the rendered React page automatically.
 
 Export `metadata` for static head tags or `generateMetadata` when the values depend on route params, search params, middleware data, or route data. Farm merges layout metadata from root to leaf, then applies the page metadata last.
 
+Export `viewport` (or `generateViewport`) for the viewport tag, as in Next.js. Layouts and the page
+merge from root to page over the default `width=device-width, initial-scale=1`; `themeColor` and
+`colorScheme` render their own tags. Every document starts its head with `<meta charset="utf-8">` and
+the viewport tag, including one a root layout renders itself, unless that layout writes the tag.
+
+```tsx
+import type { Viewport } from "@farm.js/core";
+
+export const viewport: Viewport = {
+  maximumScale: 1,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
+};
+```
+
 During HTML-based client navigation, Farm reconciles the destination document's title, meta tags,
 canonical and alternate links, icons, manifest link, and
 [page JSON-LD](/docs/configuration#agent-readiness). Tags omitted by the destination are removed,
@@ -1018,6 +1037,8 @@ Use server-only metadata files when crawlers or browsers need an application-lev
 | `llms-full.ts` | `/llms-full.txt`        | `MetadataRoute.LlmsTxt`  |
 
 The default export can be a literal value or a sync or async function. Functions receive the matched `params`, the current `Request`, its `URLSearchParams`, and the concrete route-segment `path`.
+
+Without a root `sitemap.ts`, Farm serves a generated `/sitemap.xml` of the app's static pages; see [`agent.sitemap`](/docs/configuration#sitemap). Add `sitemap.ts` when the sitemap should list dynamic pages such as products or posts.
 
 **src/app/sitemap.ts**
 
@@ -1465,6 +1486,10 @@ src/app/
 ```
 
 The group names are organizational. The URLs are still `/`, `/pricing`, and `/dashboard`.
+
+A group can have its own `layout.tsx`, `loading.tsx`, and `error.tsx`. They apply only to the pages
+inside the group, nested inside the parent layouts, so `(marketing)/layout.tsx` wraps `/` and
+`/pricing` but not `/dashboard`. See [route group layouts](/docs/layouts#route-group-layouts).
 
 ## Pending Navigation UI
 

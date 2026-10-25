@@ -2,6 +2,7 @@ import {
   createMcpHandler,
   fromJsonSchema,
   McpServer,
+  SUPPORTED_PROTOCOL_VERSIONS,
   type AuthInfo,
   type ToolAnnotations,
 } from "@modelcontextprotocol/server";
@@ -192,13 +193,19 @@ function createHandler(
       }),
     ),
   );
-  const serverIdentity = Object.freeze({
+  const serverInfo = {
     name: options.name,
     version: options.version,
-    path: options.path,
-  });
-  // The app manifest (/.well-known/farmjs) lists schemas, resources and prompts too.
+    ...(options.title ? { title: options.title } : {}),
+    ...(options.description ? { description: options.description } : {}),
+  };
+  const serverIdentity = Object.freeze({ ...serverInfo, path: options.path });
+  // The app manifest (/.well-known/farmjs.json) lists schemas, resources and prompts too,
+  // and the server card core serves for /.well-known/ai-catalog.json uses the versions.
   publish(serverIdentity, catalog, {
+    // Without authorize, any client lists the catalog, so the public manifest may too.
+    public: !options.authorize,
+    protocolVersions: [...SUPPORTED_PROTOCOL_VERSIONS],
     schemas: Object.fromEntries(
       tools.map((tool) => [
         tool.config.name,
@@ -232,10 +239,11 @@ function createHandler(
   const resourceNames = new Set(resources.map(({ name }) => name));
   const promptNames = new Set(prompts.map(({ definition }) => definition.name));
   const mcp = createMcpHandler(({ requestInfo, authInfo }) => {
-    const server = new McpServer(
-      { name: options.name, version: options.version },
-      { capabilities: { tools: {} } },
-    );
+    const server = new McpServer(serverInfo, {
+      capabilities: { tools: {} },
+      // Bounds the work of validating one call's arguments; the SDK sets no limit.
+      maxToolInputElements: options.maxToolInputElements,
+    });
     const allowed = authInfo?.extra?.farmAllowedTools as readonly string[] | undefined;
     const allowedNames = allowed === undefined ? undefined : new Set(allowed);
     // A fresh server is created per HTTP request. Unregistered tools are neither
@@ -303,6 +311,9 @@ function createHandler(
   });
 
   return async (request: Request, parsedBody: unknown): Promise<Response> => {
+    if (Array.isArray(parsedBody) && parsedBody.length > options.maxBatchSize) {
+      return batchTooLarge(options.maxBatchSize);
+    }
     let authorization: APIMCPAuthorization;
     if (options.authorize) {
       const messages =
@@ -322,7 +333,7 @@ function createHandler(
         });
         if (result === false) {
           denied = true;
-          continue;
+          break;
         }
         if (!result || typeof result.subject !== "string" || result.subject.length === 0) {
           throw new TypeError(
@@ -392,6 +403,15 @@ async function invokeTool(
   try {
     const response = await tool.route.invoke(request, routeParams);
     const mediaType = response.headers.get("content-type")?.split(";", 1)[0].trim() ?? "";
+    const isJSON = mediaType === "application/json" || mediaType.endsWith("+json");
+    if (!response.ok && !isJSON) {
+      // A guard in front of the endpoint (middleware, an integration) refused or redirected it.
+      const error = (await response.text()).slice(0, 1_000);
+      const location = response.headers.get("location");
+      return toolError(
+        JSON.stringify({ status: response.status, error, ...(location ? { location } : {}) }),
+      );
+    }
     if (
       response.status !== 204 &&
       mediaType !== "application/json" &&
@@ -906,12 +926,27 @@ function interpolatePath(path: string, params: JSONRecord): string {
       if (optional || catchAll) {
         if (!Array.isArray(value))
           throw new TypeError(`Route parameter "${name}" must be an array.`);
-        return value.map((part) => encodeURIComponent(String(part))).join("/");
+        return value
+          .map((part) => {
+            const text = String(part);
+            // URL parsing drops dot segments, which would move the call to another route.
+            if (text === "." || text === "..") {
+              throw new TypeError(`Route parameter "${name}" cannot contain "." or ".." segments.`);
+            }
+            return encodeURIComponent(text);
+          })
+          .join("/");
       }
       if (Array.isArray(value) || (typeof value === "object" && value !== null)) {
         throw new TypeError(`Route parameter "${name}" must be a scalar value.`);
       }
-      return encodeURIComponent(String(value));
+      const text = String(value);
+      if (text === "" || text === "." || text === ".." || text.includes("/")) {
+        throw new TypeError(
+          `Route parameter "${name}" must be a single non-empty path segment other than "." or "..".`,
+        );
+      }
+      return encodeURIComponent(text);
     })
     .filter(Boolean)
     .join("/")
@@ -1052,6 +1087,24 @@ const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource"
  * and with `oauth` configured the challenge links the endpoint's metadata so a
  * client can find the authorization server.
  */
+/** A JSON-RPC Invalid Request for the whole batch, sent before any message is authorized. */
+function batchTooLarge(maxBatchSize: number): Response {
+  return new Response(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: null,
+      error: {
+        code: -32600,
+        message: `A JSON-RPC batch may carry at most ${maxBatchSize} messages.`,
+      },
+    }),
+    {
+      status: 400,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    },
+  );
+}
+
 function unauthorized(request: Request, options: NormalizedOptions): Response {
   const parameters: string[] = [];
   if (options.oauth) {
@@ -1102,11 +1155,19 @@ function toolError(message: string) {
   return { isError: true, content: [{ type: "text" as const, text: message }] };
 }
 
-interface NormalizedOptions extends Omit<APIMCPOptions, "path" | "name" | "version"> {
+interface NormalizedOptions extends Omit<
+  APIMCPOptions,
+  "path" | "name" | "version" | "maxBatchSize" | "maxToolInputElements"
+> {
   path: `/api/${string}`;
   name: string;
   version: string;
+  maxBatchSize: number;
+  maxToolInputElements: number;
 }
+
+const DEFAULT_MAX_BATCH_SIZE = 25;
+const DEFAULT_MAX_TOOL_INPUT_ELEMENTS = 10_000;
 
 function validateOAuth(oauth: NonNullable<APIMCPOptions["oauth"]>): void {
   const servers = oauth?.authorizationServers;
@@ -1142,13 +1203,32 @@ function validateOptions(options: APIMCPOptions): NormalizedOptions {
     );
   }
   if (options.oauth !== undefined) validateOAuth(options.oauth);
+  for (const key of ["title", "description"] as const) {
+    const value = options[key];
+    if (value !== undefined && (typeof value !== "string" || !value.trim())) {
+      throw new TypeError(`apiMcp ${key} must be a non-empty string.`);
+    }
+  }
   const path = options.path ?? "/api/mcp";
   if (!/^\/api\/[^/?#]+(?:\/[^/?#]+)*$/.test(path)) {
     throw new TypeError("apiMcp path must be a canonical /api path.");
   }
+  const maxBatchSize = options.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE;
+  if (!Number.isInteger(maxBatchSize) || maxBatchSize < 1) {
+    throw new TypeError("apiMcp maxBatchSize must be a positive integer.");
+  }
+  const maxToolInputElements = options.maxToolInputElements ?? DEFAULT_MAX_TOOL_INPUT_ELEMENTS;
+  if (
+    maxToolInputElements !== Infinity &&
+    (!Number.isInteger(maxToolInputElements) || maxToolInputElements < 1)
+  ) {
+    throw new TypeError("apiMcp maxToolInputElements must be a positive integer or Infinity.");
+  }
   return {
     ...options,
     path,
+    maxBatchSize,
+    maxToolInputElements,
     name: options.name ?? "farm-api",
     version: options.version ?? "1.0.0",
   };

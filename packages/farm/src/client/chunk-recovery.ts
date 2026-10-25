@@ -172,7 +172,14 @@ function getEventTargetAssetUrl(value: unknown): string | undefined {
   }
 
   const target = (value as Event).target as
-    | (EventTarget & { src?: string; href?: string; tagName?: string })
+    | (EventTarget & {
+        src?: string;
+        href?: string;
+        tagName?: string;
+        type?: string;
+        noModule?: boolean;
+        rel?: string;
+      })
     | null
     | undefined;
   if (!target || typeof target !== "object") {
@@ -180,7 +187,18 @@ function getEventTargetAssetUrl(value: unknown): string | undefined {
   }
 
   const tagName = typeof target.tagName === "string" ? target.tagName.toLowerCase() : "";
-  if (tagName !== "script" && tagName !== "link") {
+  // Farm's client code loads as module scripts (or `nomodule` legacy builds) and its CSS and
+  // chunks as stylesheet and preload links. A classic script on the same origin, such as the
+  // `/_vercel/insights/script.js` Vercel Analytics injects, is not a Farm chunk: reloading
+  // cannot fix it, and it 404s on every visit off Vercel.
+  if (tagName === "script") {
+    if (target.type !== "module" && target.noModule !== true) return undefined;
+  } else if (tagName === "link") {
+    const rel = typeof target.rel === "string" ? target.rel.toLowerCase().split(/\s+/) : [];
+    if (!rel.some((value) => ["stylesheet", "modulepreload", "preload"].includes(value))) {
+      return undefined;
+    }
+  } else {
     return undefined;
   }
 

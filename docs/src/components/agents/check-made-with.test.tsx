@@ -4,8 +4,11 @@ import { describe, expect, it } from "vitest";
 import farmingLabsLogoUrl from "../../assets/farming-labs-logo-dark.svg?url";
 import { AgentCheckMadeWith } from "./check-made-with";
 
-const render = (report: { farm: boolean; framework?: string | null }) =>
-  renderToStaticMarkup(createElement(AgentCheckMadeWith, { report }));
+const render = (report: {
+  farm: boolean;
+  framework?: string | null;
+  farmVersion?: string | null;
+}) => renderToStaticMarkup(createElement(AgentCheckMadeWith, { report }));
 
 describe("what a checked site is made with", () => {
   it("gives a Farm.js site the Farming Labs mark, linking home", () => {
@@ -17,6 +20,12 @@ describe("what a checked site is made with", () => {
       const src = farmingLabsLogoUrl.replaceAll("&", "&amp;").replaceAll("'", "&#x27;");
       expect(html).toContain(`<img alt="" aria-hidden="true" src="${src}"/>`);
     }
+  });
+  it("names the Farm.js version when the site's manifest does", () => {
+    const html = render({ farm: true, framework: "Farm.js", farmVersion: "0.1.35" });
+    expect(html).toContain('aria-label="Made with Farm.js 0.1.35"');
+    expect(html).toContain('data-tip="Made with Farm.js 0.1.35"');
+    expect(render({ farm: true, farmVersion: null })).toContain('data-tip="Made with Farm.js"');
   });
   it("gives a framework the check recognizes its own mark, readable on black", () => {
     const next = render({ farm: false, framework: "Next.js" });

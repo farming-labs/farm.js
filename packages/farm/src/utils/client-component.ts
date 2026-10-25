@@ -558,6 +558,36 @@ function parseClientModuleMetadata(
   };
 }
 
+// `export { default } from "./page"`: the module renders another module's default export.
+const DEFAULT_REEXPORT = /export\s*\{\s*default(?:\s+as\s+default)?\s*\}\s*from\s*(["'])([^"']+)\1/;
+
+/**
+ * A page or layout whose default export is re-exported from a local module renders that module's
+ * component, so its hydration is analyzed in that module: its async default and client imports.
+ */
+function resolveDefaultReexport(
+  ownerPath: string,
+  content: string | null,
+  root?: string,
+): string | null {
+  const match = content ? DEFAULT_REEXPORT.exec(content) : null;
+  if (!match) return null;
+  const imported = resolveImportedModule(ownerPath, match[2]!, root);
+  return imported.local ? imported.path : null;
+}
+
+function resolveOwnerSourcePath(resolvedPath: string | null, root?: string): string | null {
+  const seen = new Set<string>();
+  let current = resolvedPath;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const target = resolveDefaultReexport(current, readIfExists(current), root);
+    if (!target) return current;
+    current = target;
+  }
+  return current;
+}
+
 export function getClientModuleMetadata(modulePath: string, root?: string): ClientModuleMetadata {
   const resolvedPath = resolveModuleSourcePath(modulePath, root);
   return inspectClientModuleMetadata(resolvedPath, root, new Set(), true);
@@ -602,7 +632,7 @@ export function getClientModuleHydrationPlan(
 
   // Legacy metadata already inspected the owner. Only reread it when isolation
   // analysis is needed, including async-owner islands with the experiment off.
-  const resolvedPath = resolveModuleSourcePath(modulePath, root);
+  const resolvedPath = resolveOwnerSourcePath(resolveModuleSourcePath(modulePath, root), root);
   const content = readIfExists(resolvedPath ?? "");
   const parsed = parseClientModuleMetadata(content, true);
   if (!resolvedPath) return emptyPlan("the owner source could not be resolved");
@@ -617,6 +647,7 @@ export function getClientModuleHydrationPlan(
   // library, say) stays static HTML instead of keeping every local island static too.
   const inspection = collectIsolatedClientBoundaries(resolvedPath, root, {
     allowDynamicCardinality: asyncOwner,
+    allowElementProps: asyncOwner,
     staticPackageBoundaries: asyncOwner,
   });
   if (inspection.boundaries.length === 0) {
@@ -658,6 +689,21 @@ export function getClientModuleHydrationPlan(
       plan.staticPackageBoundaries = inspection.staticPackages;
   }
   return plan;
+}
+
+/**
+ * An async page's client components hydrate inside its hydrating layout's React tree from a
+ * serialized server tree, so they read the layout's context. Islands that declare a deferred
+ * strategy keep hydrating as roots of their own on that schedule.
+ */
+export function usesFarmServerTree(
+  plan: Pick<ClientModuleHydrationPlan, "asyncOwnerIslands" | "isolatedBoundaries"> | undefined,
+): boolean {
+  return (
+    plan?.asyncOwnerIslands === true &&
+    plan.isolatedBoundaries.length > 0 &&
+    plan.isolatedBoundaries.every((boundary) => boundary.islandStrategy === "load")
+  );
 }
 
 /**
@@ -1245,6 +1291,12 @@ function collectIsolatedClientBoundaries(
     /** Accept boundaries rendered a data-dependent number of times. */
     allowDynamicCardinality?: boolean;
     /**
+     * Accept boundaries that receive React elements (`children` or element props). Only for async
+     * owners: below a hydrating layout the server tree carries the elements, and elsewhere a
+     * boundary whose props do not serialize keeps its server HTML at runtime.
+     */
+    allowElementProps?: boolean;
+    /**
      * Render package client components as static server HTML instead of rejecting the owner.
      * Only for owners with no route-wide fallback, where rejecting leaves everything static.
      */
@@ -1325,7 +1377,7 @@ function collectIsolatedClientBoundaries(
           fallbackReason = `the client boundary imported from ${specifier} renders inside <${container}>, where the HTML parser relocates its hydration marker`;
           return 0;
         }
-        if (passesElementValuedProps(content, localBindings)) {
+        if (!options.allowElementProps && passesElementValuedProps(content, localBindings)) {
           fallbackReason = `the client boundary imported from ${specifier} receives React elements, which cannot cross the boundary as serialized props`;
           return 0;
         }
@@ -1374,6 +1426,11 @@ function inspectClientModuleMetadata(
   visited.add(resolvedPath);
 
   const content = readIfExists(resolvedPath);
+  // An owner (the page or layout itself) that re-exports another module's default is that module.
+  if (inspectIslandExport) {
+    const target = resolveDefaultReexport(resolvedPath, content, root);
+    if (target) return inspectClientModuleMetadata(target, root, visited, true);
+  }
   const parsed = parseClientModuleMetadata(content, inspectIslandExport);
   if (parsed.isClientComponent) {
     return {
@@ -1384,12 +1441,14 @@ function inspectClientModuleMetadata(
   }
 
   let importsClientBoundary = false;
+  let importsAsyncOwner = false;
   let importedIslandStrategy: FarmIslandStrategy | null = null;
   for (const specifier of getImportSpecifiers(content)) {
     const imported = resolveImportedModule(resolvedPath, specifier, root);
     const importedMetadata = imported.local
       ? inspectClientModuleMetadata(imported.path, root, visited, false)
       : inspectPackageClientBoundary(imported.path, root, visited);
+    if (importedMetadata.suppressedAsyncHydration) importsAsyncOwner = true;
     if (importedMetadata.isClientComponent || importedMetadata.shouldHydrate) {
       importsClientBoundary = true;
       if (importedIslandStrategy === null) {
@@ -1408,7 +1467,9 @@ function inspectClientModuleMetadata(
   // module would throw, blank the server-rendered HTML, and re-run the page's
   // data fetching in a loop. Keep async server pages server-only even when
   // they import client components.
-  if (shouldHydrate && hasAsyncDefaultExport(content)) {
+  // An async server component it renders (one that renders client components) cannot run in a
+  // client root either, so the module's client components hydrate as islands, as an async page's do.
+  if ((shouldHydrate && hasAsyncDefaultExport(content)) || importsAsyncOwner) {
     return {
       isClientComponent: false,
       shouldHydrate: false,

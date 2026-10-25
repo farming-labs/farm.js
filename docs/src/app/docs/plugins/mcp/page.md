@@ -15,6 +15,13 @@ The endpoint defaults to `/api/mcp` and implements MCP Streamable HTTP. It is a 
 unlike [WebMCP](/docs/plugins/webmcp), which registers tools in a supporting browser while a page is
 open.
 
+Without `@farm.js/mcp`, every app already serves a
+[read-only MCP server](/docs/configuration#default-mcp-server) at `/mcp` that lists, searches, and
+reads its public pages as Markdown. Configuring `@farm.js/mcp` replaces it: the default steps aside
+as soon as the top-level `mcp` config or `apiMcp()` is set, an API route answers `/api/mcp`, an app
+route answers `/mcp`, or a server is listed with `registerFarmMCPServer`. Turn the default off
+without adding a server with `agent: { mcp: false }`.
+
 ## Install and configure
 
 ```bash
@@ -42,7 +49,10 @@ unless that endpoint opts in or is explicitly selected in `mcp.tools`.
 ## Declare tools in config
 
 You can keep MCP declarations in `farm.config.ts` and reference existing endpoint instances.
-The endpoint still owns its validation, middleware, and handler:
+The endpoint still owns its validation, middleware, and handler. A tool call is a request for the
+endpoint's own path, with the agent's headers and cookies, so the app middleware and integration
+guards that protect that path run first, as they do for a direct request; a refusal comes back as
+a tool error with its status.
 
 ```ts title="src/app/api/projects/route.ts"
 import { createEndpoint } from "@farm.js/core/api";
@@ -498,7 +508,7 @@ Farm maps route inputs into one MCP argument object:
 
 | Route input | Tool argument | Notes                                                                 |
 | ----------- | ------------- | --------------------------------------------------------------------- |
-| Params      | `params`      | Includes dynamic, catch-all, and optional catch-all segments.         |
+| Params      | `params`      | Dynamic, catch-all, and optional catch-all segments; see below.       |
 | Query       | `query`       | Preserves repeated query values as arrays.                            |
 | JSON body   | `body`        | Available for methods that accept a request body.                     |
 | Headers     | `headers`     | Credential and request-provenance headers are never agent-controlled. |
@@ -511,6 +521,11 @@ For example, a tool call for `GET /api/projects/[team]` can send:
   "query": { "status": ["active", "planned"] }
 }
 ```
+
+A param value always stays inside the tool's own route. A dynamic segment such as `[team]` takes
+one non-empty value without `/`, and a catch-all such as `[...path]` takes an array of segments.
+`.` and `..` are rejected as tool errors in either, because the URL would resolve them into
+another route.
 
 The route's Standard Schema implementation must be convertible to JSON Schema. Zod 4 routes work
 without additional configuration. Selected routes currently need JSON responses; binary,
@@ -551,6 +566,90 @@ curl http://localhost:3000/api/mcp \
 
 Do not put production tokens in source, browser code, an MCP tool description, or a checked-in
 client configuration.
+
+## Discovery
+
+Clients find the server from your origin alone. Farm serves an
+[AI Catalog](https://github.com/Agent-Card/ai-catalog) at `/.well-known/ai-catalog.json` that lists
+an [MCP server card](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/seps/2127-mcp-server-cards.md)
+for each mounted MCP server, and serves each card at `<endpoint>/server-card`, the location the
+server card extension reserves:
+
+```json title="/.well-known/ai-catalog.json"
+{
+  "specVersion": "1.0",
+  "entries": [
+    {
+      "identifier": "urn:air:app.example.com:mcp:project-tools",
+      "type": "application/mcp-server-card+json",
+      "url": "https://app.example.com/api/mcp/server-card",
+      "displayName": "Project tools",
+      "description": "Create and search projects.",
+      "version": "1.0.0"
+    }
+  ]
+}
+```
+
+```json title="/api/mcp/server-card"
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
+  "name": "com.example.app/project-tools",
+  "version": "1.0.0",
+  "title": "Project tools",
+  "description": "Create and search projects.",
+  "websiteUrl": "https://app.example.com",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://app.example.com/api/mcp",
+      "supportedProtocolVersions": ["2026-07-28", "2025-11-25", "2025-06-18"]
+    }
+  ]
+}
+```
+
+The same entries answer at `/.well-known/ard.json` for
+[Agentic Resource Discovery](https://agenticresourcediscovery.org/spec/) crawlers, and the generated
+[`llms.txt`](/docs/configuration#agent-readiness) gets an `MCP` section naming each endpoint and the
+catalog. The card carries the `name`, `version`, `title`, and `description` the server reports during
+initialization, so the two agree. A `name` without a slash is namespaced by the request host in the
+card (`project-tools` on `app.example.com` becomes `com.example.app/project-tools`), and a missing
+`description` reads `MCP server for <host>`.
+
+Cards hold identity and the endpoint only, never tools, resources, or credentials, so listing a
+server does not open it: `authorize` still runs on every request. Both documents are public,
+send `Access-Control-Allow-Origin: *` and an `ETag`, and answer `If-None-Match` with `304`.
+The catalog follows the app `basePath`; cards live below the endpoint, which follows `api.basePath`.
+Turn discovery off with `agent: { aiCatalog: false }`. The
+[default read-only server](/docs/configuration#default-mcp-server) at `/mcp` is listed the same way
+while it serves; an app with neither serves none of it.
+
+### List an MCP server Farm does not serve
+
+An endpoint another runtime serves, such as an agent server mounted beside the app or a server on
+another host, joins the same catalog with `registerFarmMCPServer`. Call it when the server starts;
+it returns a function that removes the entry:
+
+```ts title="src/lib/agent-mcp.ts"
+import { registerFarmMCPServer } from "@farm.js/core/api/runtime";
+
+export const unregister = registerFarmMCPServer({
+  name: "com.example.app/agent",
+  version: "1.0.0",
+  title: "Support agent",
+  description: "Answer support questions with the help center.",
+  path: "/agent/mcp",
+});
+```
+
+`path` is the endpoint's path in this app, below the app `basePath`. It is taken literally, never
+moved by `api.basePath`, and Farm serves its card at `<path>/server-card`. Use `url` instead for an
+endpoint on another origin; the catalog then points at `<url>/server-card`, which that host serves.
+Pass `protocolVersions` to list the versions the endpoint accepts in its card. Registering the same
+endpoint again replaces the entry. Registered servers appear in the AI catalog, `ard.json`, and
+`llms.txt`, but not in the `/.well-known/farmjs.json` manifest, which lists the tools Farm serves itself.
+The [docs engine](/docs/docs-engine)'s MCP endpoint is listed this way when its adapter registers it.
 
 ## Observe tool executions
 
@@ -596,11 +695,15 @@ bounded post-response work where the host requires it.
 | `tools`                | route opt-ins | Compose endpoint references, server functions, and standalone `defineTool()` definitions.       |
 | `allowUnauthenticated` | `false`       | Deliberately permit a public MCP endpoint instead of `authorize`.                               |
 | `oauth`                | none          | Advertise OAuth authorization servers and scopes through RFC 9728 metadata and the 401.         |
+| `maxBatchSize`         | `25`          | Most JSON-RPC messages in one batched POST; larger batches get `400` before `authorize` runs.   |
+| `maxToolInputElements` | `10000`       | Most array elements and object members in one call's arguments; more is refused before it runs. |
 | `resources`            | none          | Read-only context from `defineResource()`, at a fixed URI or a URI template.                    |
 | `prompts`              | none          | Reusable prompt templates from `definePrompt()`.                                                |
 | `path`                 | `/api/mcp`    | Canonical Farm API path for the Streamable HTTP endpoint.                                       |
 | `name`                 | `farm-api`    | MCP server name returned during initialization.                                                 |
 | `version`              | `1.0.0`       | Application server version returned during initialization.                                      |
+| `title`                | none          | Display name returned during initialization and in the server card.                             |
+| `description`          | none          | What the server does, returned during initialization and in the server card (100 characters).   |
 
 Tool metadata supports `name`, `title`, `description`, `readOnlyHint`, `destructiveHint`,
 `idempotentHint`, and `openWorldHint`. Annotations describe intent to the client; they do not enforce

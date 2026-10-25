@@ -3042,6 +3042,8 @@ export interface CompilerKeyedRowsBlockProps {
    * row can be cloned from one already built with its bindings reapplied.
    */
   cloneRows?: boolean;
+  /** Compiler-emitted lookup sharing plain-row binding path prefixes. */
+  targets?: (root: Element) => (Element | null)[];
 }
 
 export interface CompilerKeyedRange {
@@ -3318,6 +3320,16 @@ function updateAttribute(element: Element, name: string, value: unknown): void {
   if (name === "value" && (isInputElement(element) || isTextAreaElement(element))) {
     const nextValue = value === null || value === undefined ? "" : String(value);
     if (element.value !== nextValue) element.value = nextValue;
+    // React synchronizes controlled input values with the native reset baseline.
+    // Focused number inputs defer this to blur to preserve in-progress editing.
+    if (
+      value != null &&
+      isInputElement(element) &&
+      (element.type !== "number" || element.ownerDocument.activeElement !== element) &&
+      element.defaultValue !== nextValue
+    ) {
+      element.defaultValue = nextValue;
+    }
     return;
   }
 
@@ -3363,15 +3375,18 @@ const BLOCKS_JAVASCRIPT_URLS = Number.parseInt(React.version, 10) > 18;
  * through sanitizeURL (custom elements are left alone, as React does).
  */
 function compilerAttributeValue(element: Element, name: string, value: string): string {
+  if (
+    !BLOCKS_JAVASCRIPT_URLS ||
+    (name !== "href" &&
+      name !== "src" &&
+      name !== "action" &&
+      name !== "formAction" &&
+      name !== "data")
+  ) {
+    return value;
+  }
   const tag = element.localName;
-  return BLOCKS_JAVASCRIPT_URLS &&
-    (name === "href" ||
-      name === "src" ||
-      name === "action" ||
-      name === "formAction" ||
-      (name === "data" && tag === "object")) &&
-    !tag.includes("-") &&
-    JAVASCRIPT_URL.test(value)
+  return (name !== "data" || tag === "object") && !tag.includes("-") && JAVASCRIPT_URL.test(value)
     ? "javascript:throw new Error('React has blocked a javascript: URL as a security precaution.')"
     : value;
 }
@@ -4508,7 +4523,7 @@ function readKeyedRowBindingValues(
 }
 
 type CompilerKeyedRowSource = Pick<CompilerKeyedRowsBlockProps, "bindings" | "create"> &
-  Partial<Pick<CompilerKeyedRowsBlockProps, "cloneRows">>;
+  Partial<Pick<CompilerKeyedRowsBlockProps, "cloneRows" | "targets">>;
 
 // With cloneRows, everything outside the bindings is identical for every row.
 // Once one row is built from its descriptor, the rest clone it and reapply
@@ -4536,12 +4551,21 @@ function createKeyedRowInstance(
     conditionalValues: EMPTY_KEYED_ROW_CONDITIONAL_VALUES,
   };
   if (props.cloneRows) {
-    const targets: (Element | null)[] = [];
+    let targets = props.targets?.(element);
     let found = true;
-    for (const binding of props.bindings) {
-      const target = findCompilerHostTarget(element, binding.path);
-      found &&= target !== null;
-      targets.push(target);
+    if (
+      !targets ||
+      targets.length !== props.bindings.length ||
+      !props.bindings.every((_, index) => targets![index] != null)
+    ) {
+      // Validate every binding, including sparse lookup results, before using
+      // generated targets. Incomplete lookups retain the full existing walk.
+      targets = [];
+      for (const binding of props.bindings) {
+        const target = findCompilerHostTarget(element, binding.path);
+        found &&= target !== null;
+        targets.push(target);
+      }
     }
     if (found) instance.targets = targets as Element[];
     if (template) {
@@ -9552,22 +9576,24 @@ function createKeyedRowsBlockComponentCore(
       const eventTarget = event.target as Node | null;
       if (!instance || !eventTarget) return;
       const capture = name.endsWith("Capture");
-      const matches = (this.currentProps.events || [])
-        .filter((descriptor) => descriptor.name === name && descriptor.path !== undefined)
-        .map((descriptor) => ({
-          descriptor,
-          target: findCompilerHostTarget(instance.element, descriptor.path || []),
-        }))
-        .filter((match): match is { descriptor: CompilerKeyedRowEvent; target: Element } =>
-          Boolean(
-            match.target && (match.target === eventTarget || match.target.contains(eventTarget)),
-          ),
-        )
-        .sort((left, right) =>
-          capture
-            ? (left.descriptor.path?.length || 0) - (right.descriptor.path?.length || 0)
-            : (right.descriptor.path?.length || 0) - (left.descriptor.path?.length || 0),
-        );
+      const descriptors = this.currentProps.events || [];
+      const matches: { descriptor: CompilerKeyedRowEvent; target: Element }[] = [];
+      // Snapshot all matching targets before invoking a handler: a handler can
+      // replace the DOM or update the descriptors for the next event.
+      for (let index = 0, length = descriptors.length; index < length; index += 1) {
+        if (!(index in descriptors)) continue;
+        const descriptor = descriptors[index];
+        if (descriptor.name !== name || descriptor.path === undefined) continue;
+        const target = findCompilerHostTarget(instance.element, descriptor.path || []);
+        if (target && (target === eventTarget || target.contains(eventTarget))) {
+          matches.push({ descriptor, target });
+        }
+      }
+      matches.sort((left, right) =>
+        capture
+          ? (left.descriptor.path?.length || 0) - (right.descriptor.path?.length || 0)
+          : (right.descriptor.path?.length || 0) - (left.descriptor.path?.length || 0),
+      );
 
       for (const match of matches) {
         this.invokeDelegatedEvent(match.descriptor, instance, event, match.target);
@@ -10208,10 +10234,14 @@ function createKeyedRowsBlockComponentCore(
         let oldIndex = 0;
         for (const key of this.instances.keys()) oldIndices.set(key, oldIndex++);
       }
-      for (const [key, instance] of this.instances) {
-        if (!nextKeys.has(key)) {
-          instance.scope?.cleanup();
-          if (hasSurvivingRows) instance.element.remove();
+      // A complete replacement removes scope-free rows in bulk below. Retain
+      // cleanup for host-capable runtimes even if the current props changed.
+      if (hasSurvivingRows || options.hostBlocks) {
+        for (const [key, instance] of this.instances) {
+          if (!nextKeys.has(key)) {
+            instance.scope?.cleanup();
+            if (hasSurvivingRows) instance.element.remove();
+          }
         }
       }
 

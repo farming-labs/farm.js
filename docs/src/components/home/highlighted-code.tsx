@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Code2, Copy, RefreshCw } from "lucide-react";
+import { Check, Code2, Copy, RefreshCw } from "../icons";
 import type { KeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { highlight } from "sugar-high";
@@ -146,7 +146,22 @@ function CopyCodeButton({ code, label }: { code: string; label: string }) {
 function renderHighlightedCode(code: string, highlightLines: readonly number[] = []) {
   const highlightedLineNumbers = new Set(highlightLines);
 
-  return highlight(code)
+  // sugar-high repeats each token's color as an inline style. The token classes carry it in
+  // globals.css instead, whitespace needs no span, punctuation takes the line's color (see
+  // `.farm-highlighted-code .sh__line`), and neighbouring tokens of one kind share a span, which
+  // keeps the homepage HTML light.
+  let html = highlight(code)
+    .replace(/<span class="sh__token--(?:space|sign)"[^>]*>([^<]*)<\/span>/g, "$1")
+    .replace(/ style="color:var\(--sh-[a-z]+\)"/g, "");
+  for (let merged = ""; merged !== html; ) {
+    merged = html;
+    html = html.replace(
+      /<span class="(sh__token--[a-z]+)">([^<]*)<\/span>(\s*)<span class="\1">/g,
+      '<span class="$1">$2$3',
+    );
+  }
+
+  return html
     .split("\n")
     .map((line, index) =>
       highlightedLineNumbers.has(index + 1)
@@ -338,7 +353,9 @@ function HighlightedCodeBody({
         compact
           ? "py-2 text-[10px] leading-5 sm:text-[10.5px]"
           : "py-4 text-[10.5px] leading-6 sm:text-[11px]",
-      ].join(" ")}
+      ]
+        .filter(Boolean)
+        .join(" ")}
       id={id}
       role={role}
       tabIndex={0}
@@ -502,7 +519,7 @@ export function HighlightedCodeTabs({
                 key={tab.id}
                 aria-controls={panelId}
                 aria-selected={activeIndex === index}
-                className="relative flex h-full min-w-0 flex-1 items-center justify-center border-r border-white/8 px-2 text-white/34 transition-[background-color,color,box-shadow] duration-150 hover:bg-white/[0.035] hover:text-white/68 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white aria-selected:bg-white/[0.045] aria-selected:text-white/82 aria-selected:shadow-[inset_0_-1px_0_rgba(255,255,255,0.85)]"
+                className="farm-code-tab"
                 id={tabId}
                 onClick={() => selectTab(index)}
                 onKeyDown={(event) => handleTabKeyDown(event, index)}

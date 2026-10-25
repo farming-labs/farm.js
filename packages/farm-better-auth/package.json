@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/better-auth",
-  "version": "0.1.32",
+  "version": "0.1.36",
   "description": "Better Auth integration for Farm.js",
   "license": "MIT",
   "repository": {

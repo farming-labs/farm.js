@@ -49,6 +49,7 @@ import {
   _getRequestReadCount,
   _runWithCurrentRequest,
   createWebRequestFromFarmRequest,
+  getCurrentRequestOrNull,
   resolveFarmRequestURL,
 } from "./request";
 import { _resolveCurrentRequest } from "./request-bridge";
@@ -65,7 +66,9 @@ import {
   addMetadataImageReference,
   addMetadataMarkdownAlternate,
   mergeMetadata,
+  mergeModuleViewport,
   renderMetadataHead,
+  renderViewportHead,
   resolveFarmNotFoundMetadata,
   type FarmMetadataImageReference,
   type MetadataImageKind,
@@ -104,7 +107,19 @@ import {
   resolveFarmLlmsTxtConfig,
 } from "../llms-txt";
 import { getFarmMarkdownAlternatePath, resolveMarkdownConfig } from "../markdown";
+import { listFarmMCPLlmsTxtLinks } from "../ai-catalog";
+import { normalizeFarmAPIConfig } from "../api/config";
+import { resolveFarmAPIServerBasePath } from "../api/server-path";
 import { createFarmAgentRobots, resolveFarmAgentCrawlers } from "../agent-crawlers";
+import { createFarmDefaultSitemap, resolveFarmAgentSitemap } from "../agent-sitemap";
+import {
+  collectFarmDefaultMCPPages,
+  createFarmDefaultMCPServer,
+  farmConfigMountsMCP,
+  FARM_DEFAULT_MCP_PATH,
+  isFarmDefaultMCPPathname,
+  resolveFarmDefaultMCPServer,
+} from "../agent-mcp";
 import {
   resolveFarmTrailingSlashRedirect,
   setFarmTrailingSlashPreference,
@@ -253,6 +268,8 @@ export interface FarmNavigationFragmentLayout {
 export interface FarmNavigationFragmentSlot {
   name: string;
   ownerPattern: string;
+  /** The owning layout's pattern when route groups make it differ from `ownerPattern`. */
+  ownerDirectory?: string;
   containerId: string;
   module: { default?: any };
   props: Record<string, unknown>;
@@ -270,6 +287,8 @@ export interface FarmNavigationFragmentInput {
   pageShouldHydrate: boolean;
   layoutShouldHydrate: boolean;
   islandStrategy?: FarmIslandStrategy | null;
+  /** The page renders as a server tree inside its hydrating layout's root. */
+  serverTree?: boolean;
 }
 
 const warnedSuppressedAsyncHydrationModules = new Set<string>();
@@ -556,6 +575,17 @@ function createRouteStateProps(input: {
   };
 }
 
+/** The app's package name and version, which name the default MCP server. */
+function readAppPackageIdentity(root: string | undefined): { name?: unknown; version?: unknown } {
+  try {
+    return JSON.parse(
+      fs.readFileSync(path.join(root || process.cwd(), "package.json"), "utf8"),
+    ) as { name?: unknown; version?: unknown };
+  } catch {
+    return {};
+  }
+}
+
 export class ServerRenderer {
   private config: Required<FarmConfig>;
   private routeManager: RouteManager;
@@ -566,6 +596,8 @@ export class ServerRenderer {
   private rendererRuntime!: FarmServerRendererRuntime;
   private appliedAppSetupModule: unknown;
   private security: ResolvedFarmSecurityConfig;
+  private apiRouteExists?: (path: string) => boolean;
+  private defaultMCPServer?: ReturnType<typeof createFarmDefaultMCPServer>;
 
   constructor(
     config: Required<FarmConfig>,
@@ -819,8 +851,12 @@ export class ServerRenderer {
       !input.pageShouldHydrate &&
       this.rendererRuntime.isolateServerPageGraph
     ) {
-      // As in renderPage: the layout keeps this page as server HTML, so its islands stay islands.
-      element = this.rendererRuntime.isolateServerPageGraph(element);
+      // As in renderPage: the layout keeps this page as server HTML, so its islands stay islands,
+      // unless the page renders as a server tree the layout's root rebuilds.
+      element =
+        input.serverTree && this.rendererRuntime.renderServerTreePage
+          ? await this.rendererRuntime.renderServerTreePage(element)
+          : this.rendererRuntime.isolateServerPageGraph(element);
     }
     element = this.createPageBoundary(element, {
       pageShouldHydrate: input.pageShouldHydrate,
@@ -838,7 +874,9 @@ export class ServerRenderer {
       if (!LayoutComponent) continue;
       const slotProps: Record<string, unknown> = {};
       for (const slot of input.slots || []) {
-        if (slot.ownerPattern !== layout.pattern || !slot.module.default) continue;
+        if ((slot.ownerDirectory ?? slot.ownerPattern) !== layout.pattern || !slot.module.default) {
+          continue;
+        }
         let slotElement = this.rendererRuntime.createElement(slot.module.default, slot.props);
         slotElement = this.wrapClientGraph(slotElement);
         slotProps[slot.name] = this.rendererRuntime.createElement(
@@ -1294,6 +1332,12 @@ export class ServerRenderer {
         return;
       }
 
+      if (pathname === "/sitemap.xml" && this.getAgentSitemap().enabled) {
+        await this.renderGeneratedSitemap(req, res);
+        completeRender(res.statusCode || 200, pathname);
+        return;
+      }
+
       const metadataImageMatch = this.routeManager.matchMetadataImage(pathname);
       if (metadataImageMatch) {
         await this.renderMetadataImage(req, res, {
@@ -1342,6 +1386,12 @@ export class ServerRenderer {
       routeSlots = match.slots ?? [];
 
       if (!route) {
+        // agent.mcp: no app route answered /mcp, so the default read-only server may.
+        if (isFarmDefaultMCPPathname(pathname) && this.getDefaultMCPServer()) {
+          await this.renderDefaultMCP(req, res);
+          completeRender(res.statusCode || 200, pathname);
+          return;
+        }
         emitFarmEvent({ type: "route.notFound", pathname });
         await this.render404(req, res);
         completeRender(404);
@@ -1355,8 +1405,8 @@ export class ServerRenderer {
         params,
       });
 
-      const loadingBoundaryEntry = this.routeManager.getMatchingLoading(pathname);
-      errorBoundaryEntry = this.routeManager.getMatchingError(pathname);
+      const loadingBoundaryEntry = this.routeManager.getMatchingLoading(pathname, route);
+      errorBoundaryEntry = this.routeManager.getMatchingError(pathname, route);
 
       middlewareMap = toMiddlewareMap((req as any).__FARM_MIDDLEWARE_DATA__);
       middlewareContext = toMiddlewareMap((req as any).__FARM_MIDDLEWARE_CONTEXT__);
@@ -1784,8 +1834,12 @@ export class ServerRenderer {
               this.rendererRuntime.isolateServerPageGraph
             ) {
               // The hydrating layout keeps this page as server HTML, so its client components
-              // render as their own islands instead of joining the layout's React tree.
-              pageElement = this.rendererRuntime.isolateServerPageGraph(pageElement);
+              // render as their own islands instead of joining the layout's React tree. A
+              // server-tree page instead joins it: the browser rebuilds the resolved tree there.
+              pageElement =
+                routeManifestEntry?.serverTree === true && this.rendererRuntime.renderServerTreePage
+                  ? await this.rendererRuntime.renderServerTreePage(pageElement)
+                  : this.rendererRuntime.isolateServerPageGraph(pageElement);
             }
 
             // Every route gets a stable HTML boundary. Server-only pages keep
@@ -1804,7 +1858,7 @@ export class ServerRenderer {
               const LayoutComponent = layoutModule.default;
               const slotProps: Record<string, any> = {};
               for (const slot of renderedRouteSlots) {
-                if (slot.ownerPattern !== layoutEntry.pattern) continue;
+                if ((slot.ownerDirectory ?? slot.ownerPattern) !== layoutEntry.pattern) continue;
 
                 let slotElement = this.rendererRuntime.createElement(
                   slot.module.default,
@@ -2115,6 +2169,9 @@ export class ServerRenderer {
           }),
         );
       }
+      metadata = await mergeModuleViewport(metadata, layoutModule, {
+        params: options.pageProps.params,
+      });
     }
 
     metadata = mergeMetadata(metadata, (options.routeModule as any).metadata);
@@ -2127,6 +2184,13 @@ export class ServerRenderer {
         await (options.routeModule as any).generateMetadata(options.pageProps),
       );
     }
+    metadata = await mergeModuleViewport(
+      metadata,
+      options.skipGeneratedRouteMetadata
+        ? { viewport: (options.routeModule as any).viewport }
+        : (options.routeModule as any),
+      options.pageProps,
+    );
 
     if (!metadata.manifest) {
       const manifestMatch = this.routeManager.getMatchingMetadataRoute(
@@ -2336,7 +2400,8 @@ export class ServerRenderer {
   private async renderGeneratedRobotsTxt(req: FarmRequest, res: FarmResponse): Promise<void> {
     try {
       const sitemapPath =
-        this.routeManager.matchMetadataRoute("/sitemap.xml")?.metadata.kind === "sitemap"
+        this.routeManager.matchMetadataRoute("/sitemap.xml")?.metadata.kind === "sitemap" ||
+        this.getAgentSitemap().enabled
           ? "/sitemap.xml"
           : undefined;
       const rootLayout = this.routeManager.getLayouts().get("/");
@@ -2362,6 +2427,129 @@ export class ServerRenderer {
           status: 500,
           headers: { "Content-Type": "text/plain; charset=utf-8" },
         }),
+      );
+    }
+  }
+
+  private getAgentSitemap() {
+    return resolveFarmAgentSitemap(this.config.agent?.sitemap);
+  }
+
+  /** `/sitemap.xml` from `agent.sitemap` when no sitemap.ts owns it. */
+  private async renderGeneratedSitemap(req: FarmRequest, res: FarmResponse): Promise<void> {
+    try {
+      const request = createWebRequestFromFarmRequest(req, {
+        trustProxy: this.config.server?.trustProxy,
+      });
+      const sources = await Promise.all(
+        [...this.routeManager.getRoutes()]
+          .filter(([pattern]) => !pattern.includes("["))
+          .map(async ([pattern, route]) => {
+            const [module, stat] = await Promise.all([
+              this.routeManager.loadRouteModule(route.modulePath).catch((error: unknown) => {
+                // The page itself will surface this error; list it without its metadata.
+                logger.warn(`Could not read metadata for ${pattern} in sitemap.xml: ${error}`);
+                return undefined;
+              }),
+              fs.promises.stat(route.modulePath).catch(() => undefined),
+            ]);
+            return { pattern, module, lastModified: stat?.mtime.toISOString() };
+          }),
+      );
+      const rootLayout = this.routeManager.getLayouts().get("/");
+      const rootMetadata = rootLayout
+        ? (await this.routeManager.loadLayoutModule(rootLayout.modulePath)).metadata
+        : undefined;
+      const sitemap = createFarmDefaultSitemap(sources, {
+        origin: new URL(request.url).origin,
+        config: this.getAgentSitemap(),
+        metadataBase: (rootMetadata as { metadataBase?: unknown } | undefined)?.metadataBase,
+        basePath: this.config.basePath,
+      });
+      await sendWebResponse(
+        res as any,
+        createFarmMetadataRouteResponse("sitemap", sitemap, {}, { method: req.method }),
+      );
+    } catch (error) {
+      logger.error(`Generated sitemap.xml failed: ${error}`);
+      await sendWebResponse(
+        res as any,
+        new Response("Internal Server Error", {
+          status: 500,
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        }),
+      );
+    }
+  }
+
+  /** Lets the default MCP server see the app's API routes, which the dev server owns. */
+  setAPIRouteLookup(exists: (path: string) => boolean): void {
+    this.apiRouteExists = exists;
+  }
+
+  /**
+   * The default read-only MCP server (`agent.mcp`), or undefined when the app has an MCP
+   * server of its own: a route that answers /mcp, an API route at /api/mcp, `@farm.js/mcp`,
+   * or a registered server such as the docs engine's. Production applies the same rules.
+   */
+  getDefaultMCPServer(): ReturnType<typeof createFarmDefaultMCPServer> | undefined {
+    if (this.config.agent?.mcp !== true || farmConfigMountsMCP(this.config)) return undefined;
+    if (this.apiRouteExists?.("/api/mcp")) return undefined;
+    if (this.routeManager.matchRoute(FARM_DEFAULT_MCP_PATH).route) return undefined;
+    this.defaultMCPServer ??= createFarmDefaultMCPServer(
+      readAppPackageIdentity(this.config.root),
+      FARM_VERSION,
+    );
+    return resolveFarmDefaultMCPServer(this.defaultMCPServer);
+  }
+
+  private async renderDefaultMCP(req: FarmRequest, res: FarmResponse): Promise<void> {
+    const server = this.getDefaultMCPServer()!;
+    // renderPage already wrapped the body in the current request; read it from there.
+    const request =
+      getCurrentRequestOrNull() ??
+      createWebRequestFromFarmRequest(req, { trustProxy: this.config.server?.trustProxy });
+    try {
+      const { handleFarmDefaultMCPRequest } = await import("../agent-mcp-handler");
+      const origin = new URL(request.url).origin;
+      const response = await handleFarmDefaultMCPRequest(request, {
+        server,
+        basePath: this.config.basePath,
+        listPages: async () => {
+          const sources = await Promise.all(
+            [...this.routeManager.getRoutes()]
+              .filter(([pattern]) => !pattern.includes("["))
+              .map(async ([pattern, route]) => ({
+                pattern,
+                // The page itself surfaces a load error. Without its module a guard cannot
+                // be ruled out, so the page is left out.
+                module: await this.routeManager
+                  .loadRouteModule(route.modulePath)
+                  .catch(() => ({ __farmRouteGuard: true })),
+              })),
+          );
+          return collectFarmDefaultMCPPages(sources, {
+            origin,
+            basePath: this.config.basePath,
+            markdown: resolveMarkdownConfig(this.config.md as any),
+          });
+        },
+        // Pages are read through this server's own socket, with no cookies, as llms-full.txt does.
+        readMarkdown: this.createDevMarkdownReader(req),
+      });
+      await sendWebResponse(res as any, response);
+    } catch (error) {
+      logger.error(`Default MCP server failed: ${error}`);
+      await sendWebResponse(
+        res as any,
+        new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: null,
+            error: { code: -32603, message: "Internal error." },
+          }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        ),
       );
     }
   }
@@ -2406,7 +2594,24 @@ export class ServerRenderer {
     });
     return {
       pages,
-      defaults: createFarmDefaultLlmsTxt({ origin, pages, config, rootMetadata }),
+      defaults: createFarmDefaultLlmsTxt({
+        origin,
+        pages,
+        config,
+        rootMetadata,
+        mcp:
+          this.config.agent?.aiCatalog === false
+            ? []
+            : listFarmMCPLlmsTxtLinks(origin, {
+                basePath: this.config.basePath,
+                apiServerBasePath: resolveFarmAPIServerBasePath(
+                  normalizeFarmAPIConfig(
+                    this.config.api as { baseURL?: string; basePath?: string },
+                  ),
+                ),
+                defaultMCP: () => this.getDefaultMCPServer(),
+              }),
+      }),
       ...(options.full ? { markdown: this.createDevMarkdownReader(options.req) } : {}),
     };
   }
@@ -2758,6 +2963,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         tags: metaTags,
         hasFavicon,
         hasExplicitTitle,
+        viewport: viewportTags,
       } = renderMetadataHead((req as any).__FARM_METADATA__, {
         pathname: getFarmMetadataPathname(req),
         jsonLd: this.config.agent?.jsonLd,
@@ -2798,6 +3004,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           : rendererHead;
         html = composeFarmFullDocument(documentHtml, {
           fallbackIcon: !hasFavicon,
+          viewport: viewportTags,
           htmlAttributes: `${
             i18nSnapshot
               ? ` lang="${escapeHtmlAttribute(i18nSnapshot.locale)}" dir="${escapeHtmlAttribute(i18nSnapshot.direction)}"`
@@ -2835,7 +3042,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
 <head>
   ${themeDocument.head}
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${viewportTags}
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">
   ${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   ${documentTitleTag}${metaTags}${alternateTags}${rendererHead ? `\n  ${rendererHead}` : ""}
@@ -3093,6 +3300,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         title,
         tags: metaTags,
         hasFavicon,
+        viewport: viewportTags,
       } = renderMetadataHead((req as any).__FARM_METADATA__, {
         pathname: getFarmMetadataPathname(req),
         jsonLd: this.config.agent?.jsonLd,
@@ -3154,7 +3362,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
 <head>
   ${themeDocument.head}
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${viewportTags}
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">
   ${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   <title>${title}</title>${metaTags}${i18nAlternateTags}
@@ -3631,6 +3839,8 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
       getFarmTheme(),
     );
     const rendererHydrationScript = this.rendererRuntime.generateHydrationScript?.() || "";
+    // The route metadata, when the caller has it, also carries the merged `viewport` exports.
+    const viewportTags = renderViewportHead((alternates.metadata as Record<string, any>)?.viewport);
 
     // A layout that returns its own full `<html>` document must not be nested
     // inside this shell (that yields invalid nested `<html>`/`<head>`/`<body>`).
@@ -3642,6 +3852,7 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
         metadataHead ? removeFarmDocumentTitles(fullDocument) : fullDocument,
         {
           fallbackIcon: !metadataHead,
+          viewport: viewportTags,
           htmlAttributes: `${
             i18nSnapshot
               ? ` lang="${escapeHtmlAttribute(i18nSnapshot.locale)}" dir="${escapeHtmlAttribute(i18nSnapshot.direction)}"`
@@ -3677,7 +3888,7 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
 <head>
   ${themeDocument.head}
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${viewportTags}
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(this.getDeploymentId())}">
   ${metadataHead ?? '<link rel="icon" href="data:,">\n  <title>Farm.js App</title>'}${alternateLinks}
   ${fontHead}

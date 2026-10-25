@@ -12,8 +12,8 @@ import { AGENT_CHECK_ICONS } from "./check-icons";
 
 /**
  * A finished agent-ready check: score, gaps, passing and unscored checks. Rendered by the
- * check page once a scan comes back, and by /agents/check/[id] for saved links. `actions`
- * fills the button row under the score.
+ * check page in place of its intro once a scan comes back. `actions` fills the button row
+ * under the score.
  */
 export function hostOf(report: AgentCheckReport): string {
   return new URL(report.finalUrl).host;

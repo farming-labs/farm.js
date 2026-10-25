@@ -76,8 +76,11 @@ const ASSET_EXTENSION =
 /** Vite's own client and Farm's virtual entries are always needed for the page to run. */
 const INTERNAL_PREFIXES = ["/@vite/", "/@farm/", "/@react-refresh", "/__vite_ping"];
 
-/** Development tools that act on, or describe, the developer's machine. */
-const DEVELOPER_ONLY_PREFIXES = ["/__farm/devtools", "/__open-in-editor"];
+/**
+ * Development tools that act on, or describe, the developer's machine. `/__mf_runner__` is Module
+ * Federation's server module runner, which evaluates any module id under the root on POST.
+ */
+const DEVELOPER_ONLY_PREFIXES = ["/__farm/devtools", "/__open-in-editor", "/__mf_runner__"];
 
 /**
  * Keep a `farm preview` URL to what the app's browser code actually needs.

@@ -25,7 +25,7 @@ import {
   parseFarmLayoutChainHeader,
 } from "../navigation/render-plan";
 import { resolveFarmPageDataFailure } from "../navigation/page-data-error";
-import { mergeMetadata } from "../metadata";
+import { mergeMetadata, mergeModuleViewport } from "../metadata";
 
 // Managers will be available via globalThis.__FARM_REGISTRY__
 // They are injected via Nitro hooks (ready hook) or set during build
@@ -167,7 +167,7 @@ async function defaultHandler({
 
       // Load route module to get metadata
       const routeModule = await rm.loadRouteModule(route.modulePath);
-      const loadingBoundary = rm.getMatchingLoading(targetPathname);
+      const loadingBoundary = rm.getMatchingLoading(targetPathname, route);
       const loadingModule = loadingBoundary
         ? await rm.loadRouteModule(loadingBoundary.modulePath)
         : null;
@@ -252,6 +252,9 @@ async function defaultHandler({
             await (layoutModule as any).generateMetadata({ params: routeProps.params }),
           );
         }
+        mergedMetadata = await mergeModuleViewport(mergedMetadata, layoutModule, {
+          params: routeProps.params,
+        });
       }
       mergedMetadata = mergeMetadata(mergedMetadata, routeModule.metadata);
       if (typeof (routeModule as any).generateMetadata === "function") {
@@ -260,6 +263,7 @@ async function defaultHandler({
           await (routeModule as any).generateMetadata(routeProps),
         );
       }
+      mergedMetadata = await mergeModuleViewport(mergedMetadata, routeModule, routeProps);
 
       const renderPlan = createFarmRouteRenderPlan({
         pageShouldHydrate: shouldHydrate,

@@ -26,9 +26,11 @@ export const ease = (value: number) =>
 export const lerp = (from: number, to: number, amount: number) => from + (to - from) * amount;
 // Server and browser can disagree in the last bit of a sine, which is enough
 // to flip a rounded coordinate and break hydration. Snap trigonometry to a
-// fixed precision first, and never print a negative zero.
+// fixed precision first, and never print a negative zero. A tenth of a unit is
+// well under a pixel at every figure size, and the shorter numbers keep the
+// figures' server-rendered markup small.
 export const snap = (value: number) => Math.round(value * 1e9) / 1e9;
-export const fixed = (value: number) => (Math.abs(value) < 0.005 ? 0 : value).toFixed(2);
+export const fixed = (value: number) => String(Number(value.toFixed(1)) || 0);
 export const format = ([sx, sy]: Point2) => `${fixed(sx)},${fixed(sy)}`;
 export const center = ([from, to]: Point2) => (from + to) / 2;
 

@@ -155,11 +155,26 @@ autumn({
 });
 ```
 
+Farm names the owner's Autumn customer `<kind>_<id>` when the id only uses letters, digits, `_`,
+and `-` (and does not start or end with `-`), such as the random ids auth providers issue. Any other
+id, such as an email or a non-ASCII handle, is encoded as `<kind>_-<base64url of the id>` so no two
+owners share a customer. Return your own id from `billing.resolveExternalCustomerId(owner)` to
+choose it yourself.
+
+Before this, such ids were lossy: `a.b` and `a-b` both became `user_a-b`, and ids with no ASCII
+letters became `user_unknown`. If your owner ids are emails or handles, their owners now get new
+Autumn customers. To keep the existing ones while you move them, return
+`legacyAutumnExternalCustomerId(owner)` (from `@farm.js/autumn`) from
+`resolveExternalCustomerId`; owners that collided under it still share one customer.
+
 ## Production notes
 
 - Set `AUTUMN_SECRET_KEY`, `AUTUMN_WEBHOOK_SECRET`, and `APP_BASE_URL`.
 - Keep Farm product IDs separate from provider IDs when you want a stable app contract.
 - Use `check` before expensive operations and `reportUsage` after successful work.
+- `reportUsage` adds to Autumn's stored usage with `track`, so parallel reports all count. When a
+  meter `guard` sets a hard cap, a report that pushes usage past it is taken back out and answered
+  with `state: "hard_limit_reached"`. `last` meters set the reported value instead.
 - The billing POST routes act for the signed-in caller from its session cookie, so a request a
   browser sends from another origin is refused with `403`: a page on another site cannot report
   usage, start a checkout or open the portal for your visitor. Calls with no `Origin` (your own

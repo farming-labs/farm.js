@@ -213,6 +213,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
     md: config.md,
     agent: config.agent,
     mcp: config.mcp,
+    middleware: config.middleware,
 
     // Vite server configuration
     server: {
@@ -228,6 +229,8 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
       farmMiddlewarePlugin({
         srcDir: config.srcDir ?? "src",
         basePath: config.basePath ?? "/",
+        // API routes in development run through this plugin's middleware, not the RSC entry's.
+        middleware: config.middleware,
         debug,
       }),
       farmApiPlugin({
@@ -394,6 +397,28 @@ async function resolveMiddlewareConfigPaths(
   const projectConfigPath = await findFarmConfigPath(root);
   if (projectConfigPath) paths.push(projectConfigPath);
   return [...new Set(paths)];
+}
+
+// Vite's default config names: `defineConfig` from this package is written in one of them.
+const VITE_CONFIG_FILENAMES = [
+  "vite.config.js",
+  "vite.config.mjs",
+  "vite.config.ts",
+  "vite.config.cjs",
+  "vite.config.mts",
+  "vite.config.cts",
+] as const;
+
+async function findViteConfigPath(root: string): Promise<string | null> {
+  for (const fileName of VITE_CONFIG_FILENAMES) {
+    const candidate = path.join(root, fileName);
+    try {
+      if ((await fs.stat(candidate)).isFile()) return candidate;
+    } catch {
+      // Continue checking supported config names.
+    }
+  }
+  return null;
 }
 
 function isOptimizedBoundaryModule(id: string): boolean {
@@ -937,9 +962,11 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         const middlewareConfigPaths: string[] = [];
         if (hasFarmMiddlewareConfig(c.middleware)) {
           const configPaths = await resolveMiddlewareConfigPaths(root, c.layers);
+          const viteConfigPath = await findViteConfigPath(root);
+          if (viteConfigPath) configPaths.push(viteConfigPath);
           if (configPaths.length === 0) {
             throw new Error(
-              "[Farm.js] RSC config middleware requires an importable farm.config file. " +
+              "[Farm.js] RSC config middleware requires an importable farm.config or vite.config file. " +
                 "Move the middleware to farm.config.ts or src/app/middleware.ts.",
             );
           }

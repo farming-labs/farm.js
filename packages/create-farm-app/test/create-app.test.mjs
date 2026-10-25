@@ -30,6 +30,12 @@ async function assertRendererNeutralStarter(generatedDir, packageJson) {
   assert.equal(packageJson.dependencies["@farming-labs/theme"], undefined);
   assert.equal(packageJson.dependencies.react, undefined);
   assert.equal(packageJson.dependencies["react-dom"], undefined);
+  // GHSA-mrhx-c7xc-m3w5 is fixed in zod 4.6.6.
+  const zod = packageJson.dependencies.zod
+    .replace(/^[\^~]/, "")
+    .split(".")
+    .map(Number);
+  assert.ok(zod[0] > 4 || (zod[0] === 4 && (zod[1] > 6 || (zod[1] === 6 && zod[2] >= 6))));
   await assert.rejects(readFile(path.join(generatedDir, "docs.config.ts"), "utf8"));
   await assert.rejects(readFile(path.join(generatedDir, "docs.json"), "utf8"));
   await assert.rejects(readFile(path.join(generatedDir, "src/app/docs/page.md"), "utf8"));
@@ -608,7 +614,7 @@ test("generates a Vue SFC starter with typed server interaction", async () => {
       packageJson.dependencies["@farm.js/vue"],
       await workspaceRendererVersion("farm-vue"),
     );
-    assert.equal(packageJson.dependencies.vue, "3.5.41");
+    assert.equal(packageJson.dependencies.vue, "3.5.44");
     await assertRendererNeutralStarter(generatedDir, packageJson);
     assert.equal(packageJson.scripts["type-check"], "vue-tsc --noEmit");
     assert.ok(packageJson.devDependencies["@farm.js/devtools"]);
@@ -794,7 +800,8 @@ for (const template of [
     dependency: "@farm.js/auth",
     homePagePattern: /auth\.session\(\)/,
     brandPattern: /FARMJS \/ Auth starter/,
-    instructionPattern: /FARMJS Auth uses local SQLite automatically/,
+    instructionPattern:
+      /FARMJS Auth uses local SQLite automatically and generates a random \.farm\/auth-secret/,
     betterCall: "1.3.2",
   },
   {
@@ -1117,7 +1124,7 @@ test("generates every official integration starter", async () => {
       }
 
       if (template.name === "authjs") {
-        assert.equal(packageJson.dependencies["@auth/core"], "0.34.3");
+        assert.equal(packageJson.dependencies["@auth/core"], "^0.41.3");
         assert.match(
           await readFile(path.join(generatedDir, "src/lib/auth.ts"), "utf8"),
           /GitHub\(\{/,
@@ -1523,7 +1530,7 @@ test("basic starters ship what agents read: server-rendered copy and an Open Gra
         .replace(/\{[^}]*\}/g, " ")
         .replace(/\s+/g, " ")
         .trim();
-      assert.ok(text.length > 400, `${renderer}: ${text.length} characters of text`);
+      assert.ok(text.length > 500, `${renderer}: ${text.length} characters of text`);
       assert.match(source, /class(?:Name)?="feature-list"/, renderer);
     }
   } finally {

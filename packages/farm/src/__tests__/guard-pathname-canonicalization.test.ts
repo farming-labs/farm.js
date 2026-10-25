@@ -454,6 +454,61 @@ describe("integration guards take the middleware matcher syntax", () => {
   });
 });
 
+describe("integration guards cover both local API prefixes", () => {
+  // A local API route answers at `/api/...` and at the public `api.basePath`. App middleware
+  // guards both, but integration guards only saw the request path, so a matcher naming one
+  // prefix left the other serving the route anonymously.
+  const configs = {
+    // The built server records the resolved path; its `api` stays the raw user config.
+    production: { api: { basePath: "/v2/api" }, __farmAPIServerBasePath: "/v2/api" },
+    // Development dispatch receives the resolved config.
+    development: { api: { baseURL: "/v2/api", basePath: "/v2/api" } },
+  };
+
+  it.each(Object.entries(configs))("guards both prefixes in %s", async (_mode, config) => {
+    for (const matcher of [
+      "/api/private/[...path]",
+      "/v2/api/private/[...path]",
+      "/api/private(.*)",
+      "/api/**",
+    ]) {
+      for (const pathname of ["/api/private/doc", "/v2/api/private/doc"]) {
+        expect({
+          matcher,
+          pathname,
+          ...(await runIntegrationGuard(matcher, pathname, config)),
+        }).toMatchObject({ matcher, pathname, ran: true });
+      }
+    }
+    expect(
+      await runIntegrationGuard("/api/private/[...path]", "/v2/api/private/a/b", config),
+    ).toEqual({ ran: true, params: { path: ["a", "b"] } });
+  });
+
+  it("maps only the API prefix", async () => {
+    const config = configs.production;
+    for (const pathname of ["/v2/apix/private/doc", "/v2/private/doc", "/private/doc"]) {
+      expect((await runIntegrationGuard("/api/private(.*)", pathname, config)).ran).toBe(false);
+    }
+    // No API base path: nothing maps.
+    expect((await runIntegrationGuard("/api/private(.*)", "/v2/api/private/doc")).ran).toBe(false);
+    // An absolute baseURL is another origin; local routes stay at `/api`.
+    const remote = { api: { baseURL: "https://api.example.com/v2", basePath: "/v2" } };
+    expect((await runIntegrationGuard("/api/private(.*)", "/v2/private/doc", remote)).ran).toBe(
+      false,
+    );
+  });
+
+  it("guards a root API base path and one under the app basePath", async () => {
+    const root = { __farmAPIServerBasePath: "/" };
+    expect((await runIntegrationGuard("/api/private(.*)", "/private/doc", root)).ran).toBe(true);
+    const nested = { basePath: "/console", __farmAPIServerBasePath: "/v2/api" };
+    expect(
+      (await runIntegrationGuard("/api/private(.*)", "/console/v2/api/private/doc", nested)).ran,
+    ).toBe(true);
+  });
+});
+
 describe("optional catch-all and wildcard matchers", () => {
   // `[[...slug]]` compiled as one required segment, so a guard on it skipped
   // the bare `/docs` page the optional catch-all serves.

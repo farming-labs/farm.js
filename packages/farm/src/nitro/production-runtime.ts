@@ -2,6 +2,7 @@ export { _runWithAfterRequest } from "../after";
 export { createFarmAppManifestResponse } from "../app-manifest";
 export { farmSecretsMatch } from "../secret-compare";
 export { createFarmLayoutSelector } from "../routing/layout-selector";
+export { isInRouteGroupScope as isInFarmRouteGroupScope } from "../routing/route-groups";
 export { mergeRouteRenderingDirectiveConfig } from "../route-rendering";
 export type { FarmServerConfig } from "../server-http";
 export {
@@ -48,9 +49,12 @@ export {
   addMetadataImageReference,
   addMetadataMarkdownAlternate,
   mergeMetadata,
+  mergeModuleViewport,
   renderMetadataHead,
+  renderViewportHead,
   resolveFarmNotFoundMetadata,
 } from "../metadata";
+export { ensureFarmDocumentMeta } from "../server/full-document";
 export { createFarmMetadataRouteResponse } from "../metadata-route";
 export { generateNativeMCPPluginSource } from "./native-mcp-source";
 export {
@@ -59,6 +63,11 @@ export {
   _withFarmResponseHeaders,
 } from "../owned-response";
 export { createFarmAgentRobots } from "../agent-crawlers";
+export { createFarmDefaultSitemap } from "../agent-sitemap";
+export { collectFarmDefaultMCPPages, resolveFarmDefaultMCPServer } from "../agent-mcp";
+export { handleFarmDefaultMCPRequest } from "../agent-mcp-handler";
+export { createFarmAiCatalogResponse, listFarmMCPLlmsTxtLinks } from "../ai-catalog";
+export { registerFarmMCPServer } from "../mcp-catalog";
 export { createFarmApiCatalogResponse } from "../api-catalog";
 export {
   collectFarmLlmsTxtPages,

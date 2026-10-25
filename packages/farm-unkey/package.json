@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/unkey",
-  "version": "0.1.32",
+  "version": "0.1.36",
   "description": "Unkey integration for Farm.js",
   "license": "MIT",
   "repository": {

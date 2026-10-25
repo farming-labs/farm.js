@@ -1178,6 +1178,203 @@ export default function Page() {
     }
   }, 120_000);
 
+  it("lists the MCP server in /.well-known/ai-catalog.json, its card, and llms.txt", async () => {
+    const root = await createProductionFixture();
+    // What @farm.js/mcp does when it mounts its endpoint.
+    const plugin = `{
+    name: "farm:api-mcp",
+    routes: ({ route }) => {
+      _publishFarmMCPCatalog(
+        { name: "fixture", version: "2.0.0", path: "/api/mcp", title: "Fixture" },
+        [],
+        { protocolVersions: ["2025-11-25"] },
+      );
+      return [route.post("/api/mcp", { handler: () => Response.json({ ok: true }) })];
+    },
+  }`;
+
+    try {
+      await fs.writeFile(
+        path.join(root, "farm.config.ts"),
+        `import { _publishFarmMCPCatalog } from "@farm.js/core/api/runtime";
+export default { basePath: "/workspace", plugins: [${plugin}] };`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          basePath: "/workspace",
+          images: { provider: "none" },
+          telemetry: false,
+          plugins: [
+            definePlugin({
+              name: "farm:api-mcp",
+              routes: ({ route }) => [
+                route.post("/api/mcp", { handler: () => Response.json({ ok: true }) }),
+              ],
+            }),
+          ],
+          generateBuildId: () => "production-ai-catalog-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(response.headers.get("content-type")).toBe(
+            "application/ai-catalog+json; charset=utf-8",
+          );
+          const origin = new URL(response.url).origin;
+          const { entries } = await response.json();
+          expect(entries).toEqual([
+            expect.objectContaining({
+              identifier: "urn:air:127.0.0.1:mcp:fixture",
+              type: "application/mcp-server-card+json",
+              url: `${origin}/api/mcp/server-card`,
+              displayName: "Fixture",
+            }),
+          ]);
+
+          const ard = await fetch(`${origin}/workspace/.well-known/ard.json`);
+          expect((await ard.json()).entries).toEqual(entries);
+
+          // The card is served below the endpoint, before the API routes answer.
+          const card = await fetch(entries[0].url);
+          expect(card.status).toBe(200);
+          expect(card.headers.get("access-control-allow-origin")).toBe("*");
+          expect(await card.json()).toMatchObject({
+            version: "2.0.0",
+            title: "Fixture",
+            remotes: [
+              {
+                type: "streamable-http",
+                url: `${origin}/api/mcp`,
+                supportedProtocolVersions: ["2025-11-25"],
+              },
+            ],
+          });
+          const etag = card.headers.get("etag")!;
+          expect((await fetch(entries[0].url, { headers: { "if-none-match": etag } })).status).toBe(
+            304,
+          );
+          expect((await fetch(`${origin}/api/mcp`, { method: "POST" })).status).toBe(200);
+
+          const llms = await (await fetch(`${origin}/workspace/llms.txt`)).text();
+          expect(llms).toContain("## MCP");
+          expect(llms).toContain(`- [Fixture](${origin}/api/mcp)`);
+          expect(llms).toContain(`(${origin}/workspace/.well-known/ai-catalog.json)`);
+        },
+        "/workspace/.well-known/ai-catalog.json",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("lists the MCP endpoint a docs runtime registers, without @farm.js/mcp", async () => {
+    const root = await createProductionFixture();
+    // A docs runtime like @farming-labs/farmjs: it knows its MCP route, name, and version.
+    await fs.mkdir(path.join(root, "node_modules", "fake-docs-adapter"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "node_modules", "fake-docs-adapter", "package.json"),
+      JSON.stringify({
+        name: "fake-docs-adapter",
+        type: "module",
+        exports: { "./server": "./server.js", "./react": "./react.js" },
+      }),
+    );
+    await fs.writeFile(
+      path.join(root, "node_modules", "fake-docs-adapter", "server.js"),
+      `export function createFarmDocsRuntimeHandler(_config, options) {
+  options.registerMCPServer?.({
+    name: "dev.farmjs/docs",
+    version: "0.2.121",
+    title: "Fixture Docs",
+    path: "/api/docs/mcp",
+  });
+  return async (request) => {
+    const { pathname } = new URL(request.url);
+    if (pathname === "/api/docs/mcp/server-card") return new Response("adapter card");
+    return pathname === "/api/docs/mcp" ? Response.json({ mcp: true }) : null;
+  };
+}`,
+    );
+    await fs.writeFile(
+      path.join(root, "node_modules", "fake-docs-adapter", "react.js"),
+      "export function hydrateFarmDocs() {}",
+    );
+    await fs.mkdir(path.join(root, "docs"), { recursive: true });
+    await fs.writeFile(path.join(root, "docs", "guide.md"), "# Guide\n");
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          // The docs MCP is not an API route, so the API's public path never moves it.
+          api: { basePath: "/v1" },
+          agent: { llmsTxt: { full: false } },
+          docs: {
+            enabled: true,
+            entry: "/docs",
+            contentDir: "docs",
+            adapter: {
+              id: "fake",
+              protocol: 1,
+              server: "fake-docs-adapter/server",
+              react: "fake-docs-adapter/react",
+            },
+          },
+          generateBuildId: () => "production-docs-mcp-catalog-test",
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const origin = new URL(response.url).origin;
+          const { entries } = await response.json();
+          expect(entries).toEqual([
+            expect.objectContaining({
+              identifier: "urn:air:127.0.0.1:mcp:docs",
+              url: `${origin}/api/docs/mcp/server-card`,
+              displayName: "Fixture Docs",
+              version: "0.2.121",
+            }),
+          ]);
+
+          // Core answers the card before the docs runtime, as in dev.
+          const card = await fetch(entries[0].url);
+          expect(card.headers.get("content-type")).toBe(
+            "application/mcp-server-card+json; charset=utf-8",
+          );
+          expect(await card.json()).toMatchObject({
+            name: "dev.farmjs/docs",
+            remotes: [{ type: "streamable-http", url: `${origin}/api/docs/mcp` }],
+          });
+          expect(await (await fetch(`${origin}/api/docs/mcp`)).json()).toEqual({ mcp: true });
+
+          const llms = await (await fetch(`${origin}/llms.txt`)).text();
+          expect(llms).toContain("## MCP");
+          expect(llms).toContain(`- [Fixture Docs](${origin}/api/docs/mcp)`);
+        },
+        "/.well-known/ai-catalog.json",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("reads server env where the server runs instead of storing it in the build output", async () => {
     const root = await createProductionFixture();
     const previous = process.env.FARM_TEST_DATABASE_URL;
@@ -2168,11 +2365,12 @@ export default {
     }
   }, 120_000);
 
-  it("serves /.well-known/farmjs only to a request Farm Infra signed for the app's key", async () => {
+  it("serves /.well-known/farmjs.json to anyone, and the full view to Farm Infra's signed request", async () => {
     const root = await createProductionFixture();
     const key = `fti_${"m".repeat(43)}`;
     const keyHash = createHash("sha256").update(key).digest("hex");
     // What @farm.js/mcp does when it mounts its endpoint: publish the tools and their schemas.
+    // "fixture" is public; "admin" requires authorize.
     const publish = `_publishFarmMCPCatalog(
       { name: "fixture", version: "1.0.0", path: "/api/mcp" },
       [
@@ -2180,10 +2378,16 @@ export default {
         { name: "remove_user", kind: "endpoint", method: "DELETE", path: "/api/users/[id]", destructiveHint: true },
       ],
       {
+        public: true,
         schemas: { list_users: { input: { type: "object", properties: { q: { type: "string" } } } } },
         resources: [{ name: "handbook", uri: "docs://handbook" }],
         prompts: [],
       },
+    );
+    _publishFarmMCPCatalog(
+      { name: "admin", version: "1.0.0", path: "/api/admin/mcp" },
+      [{ name: "ban_user", kind: "standalone" }],
+      { public: false, resources: [{ name: "audit", uri: "admin://audit" }] },
     );`;
 
     try {
@@ -2247,25 +2451,53 @@ export const listTodos = defineWebMCPTool({
       await expect(fs.stat(path.join(serverDir, "node_modules", "rolldown"))).rejects.toThrow();
       const linked = { FARMJS_API_KEY: key, FARMJS_API_URL: "http://127.0.0.1:9" };
 
-      // Not linked to Farm Infra: Farm serves nothing there.
-      await runProductionRequest(
-        serverDir,
-        async (response) => {
-          expect(response.headers.get("content-type") ?? "").not.toContain("application/json");
-        },
-        "/.well-known/farmjs",
-      );
-      // Linked, but not signed: a plain 404 that says nothing about the app.
-      await runProductionRequest(
-        serverDir,
-        async (response) => {
-          expect(response.status).toBe(404);
-          expect(await response.text()).toBe("");
-        },
-        "/.well-known/farmjs",
-        undefined,
-        linked,
-      );
+      // Anyone, linked to Farm Infra or not: the public view.
+      for (const env of [undefined, linked]) {
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+            expect(response.headers.get("cache-control")).toBe(
+              "public, max-age=0, must-revalidate",
+            );
+            expect(response.headers.get("access-control-allow-origin")).toBe("*");
+            const manifest = await response.json();
+            expect(manifest).toMatchObject({
+              schemaVersion: 1,
+              app: { basePath: "/", build: "manifest-test" },
+              integrations: [{ key: "errors", category: "monitoring", type: "fixture-errors" }],
+            });
+            expect(manifest.mcp.servers).toEqual([
+              expect.objectContaining({
+                name: "fixture",
+                authorization: "none",
+                resources: [{ name: "handbook", uri: "docs://handbook" }],
+                tools: [
+                  expect.objectContaining({ name: "list_users", source: "defineTool" }),
+                  { name: "remove_user", source: "endpoint", destructiveHint: true },
+                ],
+              }),
+              {
+                name: "admin",
+                version: "1.0.0",
+                path: "/api/admin/mcp",
+                authorization: "required",
+                resources: [],
+                prompts: [],
+                tools: [],
+              },
+            ]);
+            const body = JSON.stringify(manifest);
+            for (const hidden of [key, "/api/users/[id]", "ban_user", "admin://audit"]) {
+              expect(body).not.toContain(hidden);
+            }
+          },
+          "/.well-known/farmjs.json",
+          undefined,
+          env,
+        );
+      }
       await runProductionRequest(
         serverDir,
         async (response) => {
@@ -2280,6 +2512,7 @@ export const listTodos = defineWebMCPTool({
                 {
                   name: "fixture",
                   path: "/api/mcp",
+                  authorization: "none",
                   resources: [{ name: "handbook", uri: "docs://handbook" }],
                   tools: [
                     {
@@ -2296,6 +2529,13 @@ export const listTodos = defineWebMCPTool({
                       destructiveHint: true,
                     },
                   ],
+                },
+                // Infra's view lists the tools of a server that requires authorize.
+                {
+                  name: "admin",
+                  authorization: "required",
+                  tools: [{ name: "ban_user" }],
+                  resources: [{ name: "audit" }],
                 },
               ],
             },
@@ -2316,9 +2556,49 @@ export const listTodos = defineWebMCPTool({
           expect(manifest.plugins).toEqual(expect.arrayContaining(["farm:webmcp", "fixture-mcp"]));
           expect(JSON.stringify(manifest)).not.toContain(key);
         },
-        "/.well-known/farmjs",
+        "/.well-known/farmjs.json",
         { headers: { "farmjs-infra-signature": await signFarmInfraManifestRequest(keyHash) } },
         linked,
+      );
+      // Farm 0.1.34 served it at /.well-known/farmjs: that path still answers, signed or not.
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(200);
+          expect(await response.json()).toMatchObject({ schemaVersion: 1 });
+        },
+        "/.well-known/farmjs",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("serves no /.well-known/farmjs.json with agent.manifest: false, signed or not", async () => {
+    const root = await createProductionFixture();
+    const key = `fti_${"o".repeat(43)}`;
+    const keyHash = createHash("sha256").update(key).digest("hex");
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          agent: { manifest: false },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.headers.get("content-type") ?? "").not.toContain("application/json");
+        },
+        "/.well-known/farmjs.json",
+        { headers: { "farmjs-infra-signature": await signFarmInfraManifestRequest(keyHash) } },
+        { FARMJS_API_KEY: key, FARMJS_API_URL: "http://127.0.0.1:9" },
       );
     } finally {
       await fs.rm(root, { recursive: true, force: true });
