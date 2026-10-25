@@ -608,7 +608,7 @@ test("generates a Vue SFC starter with typed server interaction", async () => {
       packageJson.dependencies["@farm.js/vue"],
       await workspaceRendererVersion("farm-vue"),
     );
-    assert.equal(packageJson.dependencies.vue, "3.5.41");
+    assert.equal(packageJson.dependencies.vue, "3.5.44");
     await assertRendererNeutralStarter(generatedDir, packageJson);
     assert.equal(packageJson.scripts["type-check"], "vue-tsc --noEmit");
     assert.ok(packageJson.devDependencies["@farm.js/devtools"]);
