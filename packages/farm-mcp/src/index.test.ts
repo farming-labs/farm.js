@@ -699,6 +699,55 @@ describe("apiMcp", () => {
     ]);
   });
 
+  it("rejects route parameters that would move a tool call to another path", async () => {
+    const file = route.get("/api/files/[...path]", {
+      mcp: { name: "get_file" },
+      handler: () => ({}),
+    });
+    const team = route.get("/api/teams/[team]", { mcp: { name: "get_team" }, handler: () => ({}) });
+    const dispatched: string[] = [];
+    const routes = mergePluginAPIRoutes(
+      [
+        { path: file.path, methods: [file.method], endpoints: { GET: file.endpoint } },
+        { path: team.path, methods: [team.method], endpoints: { GET: team.endpoint } },
+      ],
+      [apiMcp({ authorize: () => ({ subject: "reader", tools: ["get_file", "get_team"] }) })],
+      undefined,
+      {
+        dispatch: (request) => {
+          dispatched.push(new URL(request.url).pathname);
+          return Response.json({ ok: true });
+        },
+      },
+    );
+    const endpoint = routes.find((entry) => entry.path === "/api/mcp")!.endpoints.POST;
+    const call = (name: string, params: Record<string, unknown>) =>
+      sendMCP(endpoint, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: { params } },
+      }).then(readMCP);
+
+    for (const [name, params] of [
+      ["get_file", { path: ["..", "..", "admin", "users"] }],
+      ["get_file", { path: ["docs", "."] }],
+      ["get_team", { team: ".." }],
+      ["get_team", { team: "." }],
+      ["get_team", { team: "" }],
+      ["get_team", { team: "a/b" }],
+    ] as const) {
+      const payload = await call(name, params);
+      expect(payload.result.isError).toBe(true);
+      expect(payload.result.content[0].text).toMatch(/Route parameter "(path|team)"/);
+    }
+    expect(dispatched).toEqual([]);
+
+    await call("get_file", { path: ["docs", "..a", "a.b"] });
+    await call("get_team", { team: "farm..js" });
+    expect(dispatched).toEqual(["/api/files/docs/..a/a.b", "/api/teams/farm..js"]);
+  });
+
   it("supplies a frozen tool catalog and server identity on every authorization request", async () => {
     const authorize = vi.fn<NonNullable<FarmMCPConfig["authorize"]>>(() => ({ subject: "reader" }));
     const { endpoint } = createFixture({ config: { authorize, name: "projects", version: "2" } });

@@ -922,12 +922,27 @@ function interpolatePath(path: string, params: JSONRecord): string {
       if (optional || catchAll) {
         if (!Array.isArray(value))
           throw new TypeError(`Route parameter "${name}" must be an array.`);
-        return value.map((part) => encodeURIComponent(String(part))).join("/");
+        return value
+          .map((part) => {
+            const text = String(part);
+            // URL parsing drops dot segments, which would move the call to another route.
+            if (text === "." || text === "..") {
+              throw new TypeError(`Route parameter "${name}" cannot contain "." or ".." segments.`);
+            }
+            return encodeURIComponent(text);
+          })
+          .join("/");
       }
       if (Array.isArray(value) || (typeof value === "object" && value !== null)) {
         throw new TypeError(`Route parameter "${name}" must be a scalar value.`);
       }
-      return encodeURIComponent(String(value));
+      const text = String(value);
+      if (text === "" || text === "." || text === ".." || text.includes("/")) {
+        throw new TypeError(
+          `Route parameter "${name}" must be a single non-empty path segment other than "." or "..".`,
+        );
+      }
+      return encodeURIComponent(text);
     })
     .filter(Boolean)
     .join("/")

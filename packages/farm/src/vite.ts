@@ -39,6 +39,7 @@ export {
 } from "./client-cache-persistence-build";
 export type { ClientCachePersistenceEntryCode } from "./client-cache-persistence-build";
 import { APIRouteManager } from "./api/route-manager";
+import { createFarmDevServerDispatch } from "./api/dev-dispatch";
 import { DEFAULT_FARM_API_BASE_PATH } from "./api/config";
 import { resolveFarmAPIServerBasePath } from "./api/server-path";
 import { isFarmAPIPathname } from "./api/runtime";
@@ -1499,6 +1500,7 @@ export function farmPlugin(
         });
       }
 
+      const dispatchToDevServer = createFarmDevServerDispatch(server);
       apiRouteManager = new APIRouteManager(appDirs, server, {
         plugins: farmConfig.plugins,
         i18n: farmApp.getI18nRuntime(),
@@ -1509,7 +1511,7 @@ export function farmPlugin(
         dispatch: (request) => {
           const url = new URL(request.url);
           url.pathname = applyFarmBasePath(url.pathname, farmConfig.basePath);
-          return fetch(new Request(url, request), { redirect: "manual" });
+          return dispatchToDevServer(new Request(url, request));
         },
       });
       await apiRouteManager.discoverRoutes();

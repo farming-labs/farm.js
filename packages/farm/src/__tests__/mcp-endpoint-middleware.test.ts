@@ -1,5 +1,6 @@
 // @vitest-environment node
 import fs from "node:fs/promises";
+import http from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -18,6 +19,7 @@ import { defineConfig, defineIntegration } from "@farm.js/core";
 import { GET as listUsers } from "./src/app/api/admin/users/route";
 import { GET as listReports } from "./src/app/api/reports/route";
 import { GET as listPartners } from "./src/app/api/partners/route";
+import { GET as getFile } from "./src/app/api/files/[...path]/route";
 
 // The shape an auth integration's protectedRoutes compiles into.
 const partnerGuard = defineIntegration({
@@ -57,6 +59,7 @@ export default defineConfig({
       { endpoint: listUsers, name: "admin_list_users" },
       { endpoint: listReports, name: "list_reports" },
       { endpoint: listPartners, name: "list_partners" },
+      { endpoint: getFile, name: "get_file" },
     ],
     // The documented policy: any signed-in session may use MCP.
     authorize: ({ request }) =>
@@ -105,6 +108,12 @@ export const GET = createEndpoint("/api/reports", { method: "GET" }, () => ({ re
     "src/app/api/partners/route.ts",
     `import { createEndpoint } from "@farm.js/core/api";
 export const GET = createEndpoint("/api/partners", { method: "GET" }, () => ({ partners: ["ADMIN-ONLY-PARTNER"] }));
+`,
+  );
+  await write(
+    "src/app/api/files/[...path]/route.ts",
+    `import { createEndpoint } from "@farm.js/core/api";
+export const GET = createEndpoint("/api/files/[...path]", { method: "GET" }, () => ({ file: "PUBLIC-FILE" }));
 `,
   );
   await write(
@@ -221,6 +230,125 @@ describe("MCP endpoint tools run the endpoint's middleware", () => {
         ["admin_list_users", "list_reports", "list_partners"],
       );
     } finally {
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 180_000);
+});
+
+/** A tools/call sent over raw HTTP, so the Host header is the caller's choice. */
+function callToolWithHost(
+  port: number,
+  host: string,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const body = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name, arguments: args },
+  });
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        path: "/api/mcp",
+        method: "POST",
+        headers: {
+          host,
+          cookie: "session=user",
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "mcp-protocol-version": "2025-11-25",
+          "content-length": Buffer.byteLength(body),
+        },
+      },
+      (response) => {
+        let text = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => (text += chunk));
+        response.on("end", () => resolve(text));
+      },
+    );
+    request.on("error", reject);
+    request.end(body);
+  });
+}
+
+describe("MCP endpoint tool dispatch", () => {
+  it("never follows the caller's Host header or dot segments to another server or route", async () => {
+    const root = await createFixture();
+    // Stands in for an internal-only service on the developer's machine.
+    const contacted: string[] = [];
+    const internal = http.createServer((request, response) => {
+      contacted.push(`${request.method} ${request.url}`);
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ internal: "INTERNAL-SERVICE-SECRET" }));
+    });
+    await new Promise<void>((resolve) => internal.listen(0, "127.0.0.1", resolve));
+    const internalAddress = internal.address();
+    if (!internalAddress || typeof internalAddress === "string") throw new Error("No address");
+    try {
+      const dev = await startDevServer({ root }, await getAvailablePort());
+      try {
+        const address = dev.httpServer!.address();
+        if (!address || typeof address === "string") throw new Error("Dev server did not bind");
+        for (const host of [
+          `127.0.0.1:${internalAddress.port}`,
+          `localhost:${internalAddress.port}`,
+        ]) {
+          const result = await callToolWithHost(address.port, host, "get_file", {
+            params: { path: ["docs", "intro"] },
+          });
+          expect(result).toContain("PUBLIC-FILE");
+          expect(result).not.toContain("INTERNAL-SERVICE-SECRET");
+        }
+        const traversal = await callToolWithHost(
+          address.port,
+          `127.0.0.1:${address.port}`,
+          "get_file",
+          { params: { path: ["..", "admin", "users"] } },
+        );
+        expect(traversal).toContain("cannot contain");
+        expect(traversal).not.toContain("ADMIN-ONLY-USER");
+      } finally {
+        await dev.close();
+      }
+      expect(contacted).toEqual([]);
+
+      const config = await resolveConfig(
+        { ...(await loadConfig(root, undefined, "production")), root },
+        "production",
+      );
+      await build(config, { root, preset: "vercel" });
+      const entry = path.join(root, ".vercel", "output", "functions", "__nitro.func", "index.mjs");
+      const server = await import(/* @vite-ignore */ pathToFileURL(entry).href);
+      const response = await server.default.fetch(
+        new Request("http://farm.test/api/mcp", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "mcp-protocol-version": "2025-11-25",
+            cookie: "session=admin; role=admin",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: {
+              name: "get_file",
+              arguments: { params: { path: ["..", "admin", "users"] } },
+            },
+          }),
+        }),
+      );
+      const text = await response.text();
+      expect(text).toContain("cannot contain");
+      expect(text).not.toContain("ADMIN-ONLY-USER");
+    } finally {
+      await new Promise((resolve) => internal.close(resolve));
       await fs.rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   }, 180_000);
