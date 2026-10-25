@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ViteDevServer } from "vite";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
+import { GUARDED_SOURCE_FILES } from "./fixtures/markdown-guarded-sources";
 import {
   literalRouteExposure,
   literalRouteFiles,
@@ -782,4 +783,77 @@ export default function Page() { return <main>Rendered doc page</main>; }`,
       await new Promise((resolve) => internal.close(resolve));
     }
   }, 30_000);
+
+  it("serves a page's source only when an anonymous render of the page succeeds", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-development-md-guards-"));
+    temporaryRoots.add(root);
+    await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+    await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
+    for (const pkg of ["react", "react-dom"]) {
+      await fs.symlink(
+        await fs.realpath(path.join(packageRoot, "node_modules", pkg)),
+        path.join(root, "node_modules", pkg),
+        "junction",
+      );
+    }
+    await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
+    for (const [file, source] of Object.entries(GUARDED_SOURCE_FILES)) {
+      await writeModule(
+        root,
+        file,
+        file.endsWith(".tsx") ? `import React from "react";\n${source}` : source,
+      );
+    }
+    const server = await createServer({ root, images: { provider: "none" } });
+    servers.add(server);
+    await server.listen(await getAvailablePort());
+    const address = server.httpServer?.address();
+    if (!address || typeof address === "string") throw new Error("Missing dev server address");
+    const origin = `http://localhost:${address.port}`;
+    const get = async (pathname: string, headers: Record<string, string> = {}) => {
+      const response = await fetch(`${origin}${pathname}`, { headers, redirect: "manual" });
+      return {
+        status: response.status,
+        cacheControl: response.headers.get("cache-control") ?? "",
+        contentType: response.headers.get("content-type") ?? "",
+        body: await response.text(),
+      };
+    };
+    const signedIn = { cookie: "session=1" };
+    const markdown = { accept: "text/markdown" };
+
+    for (const [page, secret] of [
+      ["/staff", "STAFF-ONLY-SOURCE"],
+      ["/ledger", "LEDGER-ONLY-SOURCE"],
+    ]) {
+      expect((await get(page)).status).toBe(307);
+      expect((await get(page, signedIn)).status).toBe(200);
+      for (const headers of [{}, signedIn]) {
+        const source = await get(`${page}.md`, headers);
+        expect({ page, headers, status: source.status }).toEqual({ page, headers, status: 404 });
+        expect(source.body).not.toContain(secret);
+        expect(source.cacheControl).not.toContain("public");
+        const negotiated = await get(page, { ...headers, ...markdown });
+        if (headers !== signedIn) expect(negotiated.body).not.toContain(secret);
+        expect(negotiated.cacheControl).not.toContain("public");
+      }
+    }
+
+    for (const [pathname, headers] of [
+      ["/open.md", {}],
+      ["/open.md", signedIn],
+      ["/open", markdown],
+      ["/open", { ...signedIn, ...markdown }],
+    ] as const) {
+      const open = await get(pathname, headers);
+      expect({ pathname, headers, status: open.status }).toEqual({
+        pathname,
+        headers,
+        status: 200,
+      });
+      expect(open.contentType).toContain("text/markdown");
+      expect(open.cacheControl).toContain("public");
+      expect(open.body).toContain("OPEN-SOURCE");
+    }
+  }, 60_000);
 });

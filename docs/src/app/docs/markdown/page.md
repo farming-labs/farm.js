@@ -78,10 +78,12 @@ The browser still renders `page.tsx` at `/pricing`. Requests to `/pricing.md`, o
 The source is served only for a page an anonymous visitor may open. Farm checks by requesting the
 page as a new request through the same plugin `runtime.before` hooks, middleware, and integration
 guards, with its own `cookies()` and `headers()` and only standard browser headers (no
-cookies, `Authorization`, custom headers such as an API key, or the caller's IP address), so a page
-behind sign-in has no `.md` version: `/account.md` answers `404` even for a signed-in caller, and
-the page is left out of `llms-full.txt`. The check drops `X-Forwarded-For`, `X-Real-IP`,
-`Forwarded`, and `Via`, and in a production build the server reports the documentation address
+cookies, `Authorization`, custom headers such as an API key, or the caller's IP address). The check
+renders the page's HTML as that visitor without following redirects, so a guard in `page.tsx` or
+`layout.tsx` counts too. The page has a `.md` version only when it answers with its HTML; a redirect
+to sign-in, a `401`, a `403`, or an error means it has none. `/account.md` answers `404` even for a
+signed-in caller, and the page is left out of `llms-full.txt`. The check drops `X-Forwarded-For`,
+`X-Real-IP`, `Forwarded`, and `Via`, and in a production build the server reports the documentation address
 `192.0.2.1` as its client, so a page behind an IP allowlist has no public `.md` version either. In
 development the check arrives from the dev server's loopback address.
 

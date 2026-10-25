@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
+import { GUARDED_SOURCE_FILES } from "./fixtures/markdown-guarded-sources";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -71,7 +72,10 @@ export async function GET() {
 `,
 };
 
-async function buildApp(root: string): Promise<{ fetch(request: Request): Promise<Response> }> {
+async function buildApp(
+  root: string,
+  files: Record<string, string> = FILES,
+): Promise<{ fetch(request: Request): Promise<Response> }> {
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
   await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
   for (const name of ["react", "react-dom"]) {
@@ -82,13 +86,13 @@ async function buildApp(root: string): Promise<{ fetch(request: Request): Promis
     );
   }
   await fs.writeFile(path.join(root, "package.json"), '{"type":"module","private":true}');
-  for (const [relativePath, source] of Object.entries(FILES)) {
+  for (const [relativePath, source] of Object.entries(files)) {
     await fs.mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
     await fs.writeFile(path.join(root, relativePath), source);
   }
   const resolved = await resolveConfig(
     {
-      ...(await loadConfig(root, undefined, "production")),
+      ...(files["farm.config.ts"] ? await loadConfig(root, undefined, "production") : {}),
       root,
       srcDir: "src",
       images: { provider: "none" },
@@ -161,6 +165,67 @@ describe("production requests an app makes to itself", () => {
       const bridged = await get("/api/bridge", signedIn);
       expect(bridged.body).not.toContain("STAFF-DATA");
       expect(bridged.status).toBe(302);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 240_000);
+});
+
+describe("production Markdown sources", () => {
+  it("are public only when an anonymous visitor's page render succeeds", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-production-md-guards-"));
+    try {
+      const app = await buildApp(root, GUARDED_SOURCE_FILES);
+      const get = async (pathname: string, headers: Record<string, string> = {}) => {
+        const response = await app.fetch(
+          new Request(`https://acme.test${pathname}`, { headers, redirect: "manual" }),
+        );
+        return {
+          status: response.status,
+          cacheControl: response.headers.get("cache-control") ?? "",
+          contentType: response.headers.get("content-type") ?? "",
+          body: await response.text(),
+        };
+      };
+      const signedIn = { cookie: "session=1" };
+      const markdown = { accept: "text/markdown" };
+
+      for (const [page, secret] of [
+        ["/staff", "STAFF-ONLY-SOURCE"],
+        ["/ledger", "LEDGER-ONLY-SOURCE"],
+      ]) {
+        expect((await get(page)).status).toBe(307);
+        expect((await get(page, signedIn)).status).toBe(200);
+        for (const headers of [{}, signedIn]) {
+          const source = await get(`${page}.md`, headers);
+          expect({ page, headers, status: source.status }).toEqual({ page, headers, status: 404 });
+          expect(source.body).not.toContain(secret);
+          expect(source.cacheControl).not.toContain("public");
+          const negotiated = await get(page, { ...headers, ...markdown });
+          // The signed-in caller may read the page (its Markdown mirror); nobody gets the
+          // source under a shared cache.
+          if (headers !== signedIn) expect(negotiated.body).not.toContain(secret);
+          expect(negotiated.status).toBe(headers === signedIn ? 200 : 307);
+          expect(negotiated.cacheControl).not.toContain("public");
+        }
+      }
+
+      for (const [pathname, headers] of [
+        ["/open.md", {}],
+        ["/open.md", signedIn],
+        ["/open", markdown],
+        ["/open", { ...signedIn, ...markdown }],
+      ] as const) {
+        const open = await get(pathname, headers);
+        expect({ pathname, headers, status: open.status }).toEqual({
+          pathname,
+          headers,
+          status: 200,
+        });
+        expect(open.contentType).toContain("text/markdown");
+        expect(open.cacheControl).toContain("public");
+        expect(open.body).toContain("OPEN-SOURCE");
+      }
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
