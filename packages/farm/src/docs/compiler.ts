@@ -3,6 +3,7 @@ import type { FarmDocsResolvedConfig } from "./types";
 import {
   createFarmDocsHandler,
   discoverFarmDocsPages,
+  getFarmDocsMarkdownPath,
   loadFarmDocsPage,
   resolveFarmDocsContentDir,
   toFarmDocsMarkdownPage,
@@ -21,6 +22,8 @@ export interface CompileFarmDocsManifestOptions {
   fontAssets: readonly FarmDocsPublicFontAsset[];
   fontStylesheetHref?: string;
   globalStylesheetHref?: string;
+  /** Docs URLs a path-specific guard covers: compiled as pages, never listed or searched. */
+  isPathGuarded?: (pathname: string) => boolean;
 }
 
 function normalizePathname(pathname: string): string {
@@ -109,18 +112,22 @@ export async function compileFarmDocsManifest(
     fontAssets: options.fontAssets,
     fontStylesheetHref: options.fontStylesheetHref,
     globalStylesheetHref: options.globalStylesheetHref,
+    isPathGuarded: options.isPathGuarded,
   });
   const apiHandler = createFarmDocsAPIHandler({
     rootDir: options.root,
     srcDir: options.srcDir,
     docs,
+    isPathGuarded: options.isPathGuarded,
   });
+  // The API answers anyone, so a guarded page has no API Markdown and no search entry.
+  const publicPages = pages.filter((page) => !options.isPathGuarded?.(page.href));
   const routes: Record<string, FarmDocsCompiledResponse> = {};
   const apiMarkdown: Record<string, FarmDocsCompiledResponse> = {};
 
   for (const page of pages) {
     const htmlResponse = await addHandlerRoute(routes, page.href, handler, absolutePaths);
-    const markdownPath = page.href === "/" ? "/.md" : `${page.href}.md`;
+    const markdownPath = getFarmDocsMarkdownPath(page.href);
     await addHandlerRoute(routes, markdownPath, handler, absolutePaths);
 
     if (htmlResponse) {
@@ -130,6 +137,7 @@ export async function compileFarmDocsManifest(
       }
     }
 
+    if (options.isPathGuarded?.(page.href)) continue;
     const apiResponse = await apiHandler(
       new Request(
         `${FARM_DOCS_COMPILED_ORIGIN}/api/docs?format=markdown&path=${encodeURIComponent(page.slug)}`,
@@ -218,7 +226,7 @@ export async function compileFarmDocsManifest(
       empty: await compileResponse(emptyResponse, absolutePaths),
       post: await compileResponse(postResponse, absolutePaths),
       search: {
-        pages: pages.map((page) => ({
+        pages: publicPages.map((page) => ({
           ...toFarmDocsMarkdownPage(page),
           sourcePath: `farm-docs:${page.slug || "index"}`,
         })),

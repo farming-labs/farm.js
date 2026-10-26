@@ -106,6 +106,11 @@ import {
 import { farmDocsClientConfigPlugin } from "../docs/client-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "../docs/fonts";
 import { compileFarmDocsManifest } from "../docs/compiler";
+import {
+  discoverFarmDocsPages,
+  getFarmDocsMarkdownPath,
+  resolveFarmDocsContentDir,
+} from "../docs/handler";
 import { compileFarmDocsAdapterEdgeManifest } from "../docs/adapter";
 import type { FarmDocsCompiledManifest } from "../docs/precompiled-runtime";
 import {
@@ -4665,14 +4670,18 @@ async function buildSSRInMemory(
             fontStylesheetHref: "/farm-fonts.css",
             globalStylesheetHref: "/assets/globals.css",
           })
-        : await compileFarmDocsManifest(config.docs, {
-            root,
-            srcDir: config.srcDir,
-            clientEntry: FARM_CLIENT_JS_SRC_PLACEHOLDER,
-            fontAssets: toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(root)),
-            fontStylesheetHref: "/farm-fonts.css",
-            globalStylesheetHref: "/assets/globals.css",
-          })
+        : await (async () => {
+            const guardedPaths = new Set(getFarmDocsGuardedPaths(config, middlewareRoutes));
+            return compileFarmDocsManifest(config.docs, {
+              root,
+              srcDir: config.srcDir,
+              clientEntry: FARM_CLIENT_JS_SRC_PLACEHOLDER,
+              fontAssets: toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(root)),
+              fontStylesheetHref: "/farm-fonts.css",
+              globalStylesheetHref: "/assets/globals.css",
+              isPathGuarded: (pathname) => guardedPaths.has(pathname),
+            });
+          })()
       : null;
 
   // Generate virtual entry code that imports and bundles all routes
@@ -4931,6 +4940,34 @@ function readFarmPageLastModified(pageRoutes: UniversalPageRoute[]): Record<stri
     }
   }
   return lastModified;
+}
+
+/**
+ * Docs page URLs, and their `.md` URLs, that a path-specific guard covers (non-root
+ * middleware.ts, a config or integration middleware matcher naming the path), decided
+ * at build time like the page listings. The docs API, llms.txt, llms-full.txt, and the
+ * sitemaps answer anyone, so they leave these pages out; the pages themselves still
+ * answer after their guard. Guards that cover every path hide nothing, as for the page
+ * listings.
+ *
+ * @internal
+ */
+export function getFarmDocsGuardedPaths(
+  config: ResolvedFarmConfig,
+  middlewareRoutes: readonly { path: string }[],
+): string[] {
+  if (!config.docs?.enabled) return [];
+  const contentDir = resolveFarmDocsContentDir(config.docs, {
+    root: config.root,
+    srcDir: config.srcDir,
+  });
+  const guards = {
+    config: { middleware: config.middleware, integrations: config.integrations },
+    middlewareRoutes,
+  };
+  return discoverFarmDocsPages(contentDir, config.docs)
+    .flatMap((page) => [page.href, getFarmDocsMarkdownPath(page.href)])
+    .filter((pathname) => farmPathGuardCoversPage(guards, pathname));
 }
 
 /**
@@ -6440,10 +6477,18 @@ const farmDocsBundledContentDir = ${
   };
 const farmDocsResolvedConfig = ${generateFarmDocsRuntimeConfigExpression(config.docs, hasPrecompiledDocs)};
 const farmDocsRuntimeRoot = ${hasPrecompiledDocs ? '"."' : `farmDocsBundledContentDir || ${JSON.stringify(config.root)}`};
+// Docs pages a path-specific guard covers, decided at build time. The docs API and the
+// root llms/sitemap files answer anyone, so they leave these pages out.
+const farmDocsGuardedPaths = ${JSON.stringify(
+    hasPrecompiledDocs ? [] : getFarmDocsGuardedPaths(config, middlewareRoutes),
+  )};
+const farmDocsGuardedPathSet = new Set(farmDocsGuardedPaths);
+const isFarmDocsPathGuarded = (pathname) => farmDocsGuardedPathSet.has(pathname);
 globalThis.__FARM_DOCS_RUNTIME_CONFIG__ = {
   root: farmDocsRuntimeRoot,
   srcDir: ${JSON.stringify(config.srcDir)},
   docs: farmDocsResolvedConfig,
+  guardedPaths: farmDocsGuardedPaths,
 };
 const farmDocsPrecompiledRuntime = ${
     hasPrecompiledDocs
@@ -6492,6 +6537,7 @@ const farmDocsHandler = ${
     ),
   fontStylesheetHref: "/farm-fonts.css",
   globalStylesheetHref: "/assets/globals.css",
+  isPathGuarded: isFarmDocsPathGuarded,
 })`
       : "null"
   };
@@ -6501,7 +6547,7 @@ const farmDocsAPIHandler = ${
         ? "farmDocsPrecompiledRuntime.handleAPIRequest"
         : adapterOwnsDocsRuntime
           ? "null"
-          : `createFarmDocsAPIHandler({ rootDir: farmDocsRuntimeRoot, srcDir: ${JSON.stringify(config.srcDir)}, docs: farmDocsResolvedConfig })`
+          : `createFarmDocsAPIHandler({ rootDir: farmDocsRuntimeRoot, srcDir: ${JSON.stringify(config.srcDir)}, docs: farmDocsResolvedConfig, isPathGuarded: isFarmDocsPathGuarded })`
       : "null"
   };
 
@@ -7227,6 +7273,26 @@ function hasPrivateFarmRequestHeaders(request, farmLocaleResolution) {
     farmLocaleResolution?.source === "url" &&
     hasOnlyValidFarmLocaleCookie(cookieHeader)
   );
+}
+
+// A docs response a guard let this visitor read is theirs, as for pages: one for a
+// request with credentials, or with middleware request data, never fills a shared cache.
+// Middleware headers cannot do this, since they never replace a response's own.
+function withFarmDocsRequestCache(response, request, farmLocaleResolution, middlewareData, middlewareContext) {
+  if (
+    !hasPrivateFarmRequestHeaders(request, farmLocaleResolution) &&
+    !middlewareData?.size &&
+    !middlewareContext?.size
+  ) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  headers.set("Cache-Control", "private, no-store");
+  return farmOwnedResponse(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 ${generateRuntimePathMatcherSource()}
@@ -8424,11 +8490,17 @@ async function handleFarmRequestInContext(
     const docsResponse = await farmDocsHandler(cloneFarmRequestWithContext(request));
     if (docsResponse) {
       if (!docsResponse.headers.get("content-type")?.toLowerCase().includes("text/html")) {
-        return applyProductionMiddlewareHeaders(docsResponse, middlewareHeaders);
+        return applyProductionMiddlewareHeaders(
+          withFarmDocsRequestCache(docsResponse, request, farmLocaleResolution, middlewareData, middlewareContext),
+          middlewareHeaders,
+        );
       }
-      const wrappedDocsResponse = await wrapFarmDocsResponseWithLayouts(
+      const wrappedDocsResponse = withFarmDocsRequestCache(
+        await wrapFarmDocsResponseWithLayouts(request, docsResponse),
         request,
-        docsResponse,
+        farmLocaleResolution,
+        middlewareData,
+        middlewareContext,
       );
       const docsHeaders = new Headers(wrappedDocsResponse.headers);
       docsHeaders.set("x-farm-preload-buffered", "1");
@@ -8693,7 +8765,10 @@ async function handleFarmRequestInContext(
       ? `if (farmDocsAPIHandler && isFarmDocsAPIRequest(pathname)) {
     const docsAPIResponse = await farmDocsAPIHandler(cloneFarmRequestWithContext(request));
     if (docsAPIResponse) {
-      return applyProductionMiddlewareHeaders(docsAPIResponse, middlewareHeaders);
+      return applyProductionMiddlewareHeaders(
+        withFarmDocsRequestCache(docsAPIResponse, request, farmLocaleResolution, middlewareData, middlewareContext),
+        middlewareHeaders,
+      );
     }
   }`
       : ""

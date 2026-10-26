@@ -85,7 +85,7 @@ import {
   isFarmAppManifestPath,
   resolveFarmAppManifestInput,
 } from "./app-manifest";
-import { farmPathGuardCoversEndpoint } from "./middleware/may-handle";
+import { farmPathGuardCoversEndpoint, farmPathGuardCoversPage } from "./middleware/may-handle";
 import { resolveFarmAppPackages } from "./app-manifest-packages";
 import { collectFarmWebMCPTools } from "./app-manifest-webmcp";
 import { resolveDevGlobalStylesheetHref } from "./server/dev-styles";
@@ -1621,6 +1621,18 @@ export function farmPlugin(
       };
       // A restarted server's docs runtime registers its MCP endpoint again.
       releaseDocsMCPServers();
+      // Docs pages a path-specific guard covers stay out of the docs API, llms, and
+      // sitemaps, as the production build decides.
+      const isFarmDocsPathGuarded = (href: string) =>
+        farmPathGuardCoversPage(
+          {
+            config: farmConfig,
+            middlewareRoutes: middlewareManager
+              .getMiddlewares()
+              .filter((entry) => entry.source !== "config"),
+          },
+          href,
+        );
       const farmDocsHandler = farmDocsDevRuntime
         ? farmDocsDevRuntime.hasFarmDocsRuntimeAdapter(farmConfig.docs)
           ? await farmDocsDevRuntime.createFarmDocsAdapterHandler(farmConfig.docs, {
@@ -1660,6 +1672,7 @@ export function farmPlugin(
                 farmConfig.root,
                 farmConfig.srcDir,
               ),
+              isPathGuarded: isFarmDocsPathGuarded,
             })
         : null;
       const wrapFarmDocsResponseWithLayouts = async (
@@ -1798,6 +1811,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               srcDir: farmConfig.srcDir,
               docs: farmConfig.docs,
               diagnostics: true,
+              isPathGuarded: isFarmDocsPathGuarded,
             })
           : null;
       const farmDocsFontAssets = new Map(

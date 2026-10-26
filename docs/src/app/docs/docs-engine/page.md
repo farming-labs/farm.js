@@ -105,6 +105,24 @@ credentials replaced by `"[redacted]"`: values under `apiKey`, `token`, `secret`
 for search, Ask AI, and Docs Cloud. `/api/docs?format=diagnostics` reports filesystem paths, so
 only `farm dev` serves it; production answers 404.
 
+### Private docs pages
+
+Guard docs pages the way you guard app pages: a `middleware.ts` in the docs folder, a config
+middleware `matcher` such as `["/docs/internal", "/docs/internal/:path*"]`, or an integration's
+`protectedRoutes`. The guard decides who reads the page. The `/api/docs` endpoints, `llms.txt`,
+`llms-full.txt`, and the sitemaps answer anyone, so they leave out every docs page a guard written
+for its path covers: search skips it, its titles stay unlisted, and `/api/docs/<slug>.md` answers
+not found. Guards that cover every path (a root `middleware.ts`, or middleware without a matcher,
+with a catch-all matcher, or with a function matcher) name no page and hide nothing, the same rule
+as the [sitemap](/docs/configuration#sitemap). A function matcher cannot be read at build time, so
+give private docs a path matcher, or guard `/api/docs` and the llms files as well.
+
+A page's `.md` URL is served only when its guard covers that URL too. `/docs/internal/:path*` never
+meets `/docs/internal.md`, so that file answers 404; name it in the matcher to serve it to signed-in
+readers. A docs response to a request with cookies or an `Authorization` header, or one middleware
+attached request data to, is sent as `Cache-Control: private, no-store`, as app pages are, so a CDN
+never hands a signed-in reader's copy to someone else.
+
 ## Configure the docs experience
 
 Keep docs configuration alongside the rest of the application in `farm.config.ts`:

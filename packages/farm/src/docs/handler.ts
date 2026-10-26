@@ -42,6 +42,13 @@ export interface FarmDocsHandlerOptions {
   fontStylesheetHref?: string;
   /** Application-owned global stylesheet, including the selected docs theme CSS import. */
   globalStylesheetHref?: string;
+  /**
+   * @internal Whether a path-specific guard (non-root middleware.ts, a config or
+   * integration middleware matcher) covers a docs URL such as `/docs/secret`. Such pages
+   * stay out of llms.txt, llms-full.txt, and the sitemaps, and their `.md` URL answers
+   * only when the guard covers it too.
+   */
+  isPathGuarded?: (pathname: string) => boolean;
 }
 
 export interface FarmDocsPage {
@@ -324,6 +331,11 @@ export function loadFarmDocsPage(
   };
 }
 
+/** @internal The `.md` URL serving a docs page's Markdown. */
+export function getFarmDocsMarkdownPath(href: string): string {
+  return href === "/" ? "/.md" : `${href}.md`;
+}
+
 function createDocsHref(entry: string, slug: string): string {
   const normalizedEntry = normalizeEntry(entry);
   const normalizedSlug = trimSlashes(slug);
@@ -421,8 +433,10 @@ function getDocsDescription(docs: FarmDocsResolvedConfig): string | undefined {
 function getLoadedDocsPages(
   contentDir: string,
   docs: FarmDocsResolvedConfig,
+  isPathGuarded?: (pathname: string) => boolean,
 ): LoadedFarmDocsPage[] {
   return discoverFarmDocsPages(contentDir, docs)
+    .filter((page) => !isPathGuarded?.(page.href))
     .map((page) => loadFarmDocsPage(contentDir, docs, page.slug))
     .filter((page): page is LoadedFarmDocsPage => Boolean(page));
 }
@@ -681,10 +695,12 @@ function createFarmDocsPublicResponse(
   contentDir: string,
   docs: FarmDocsResolvedConfig,
   request: Request,
+  isPathGuarded: ((pathname: string) => boolean) | undefined,
 ): Response | null {
   const url = new URL(request.url);
   let loadedPages: LoadedFarmDocsPage[] | undefined;
-  const getPages = () => (loadedPages ??= getLoadedDocsPages(contentDir, docs));
+  // These files are public at the site root, so a page a guard covers is left out.
+  const getPages = () => (loadedPages ??= getLoadedDocsPages(contentDir, docs, isPathGuarded));
   const sitemapManifest = () =>
     docsEngine().buildDocsSitemapManifest({
       pages: getPages().map(toDocsSitemapPage),
@@ -1774,6 +1790,9 @@ export function createFarmDocsHandler(
       const socialImagePage = loadFarmDocsPage(contentDir, docs, socialImageSlug);
       if (
         !socialImagePage ||
+        // The image sits outside the page's URL, where its guard does not reach, and
+        // draws the page's title.
+        options.isPathGuarded?.(socialImagePage.href) ||
         !isFarmDocsSocialImageEnabled(socialImagePage, docs) ||
         getFarmDocsCustomSocialImage(socialImagePage)
       ) {
@@ -1801,7 +1820,12 @@ export function createFarmDocsHandler(
       return new Response(renderFarmDocsSocialImageSvg(descriptor), { status: 200, headers });
     }
 
-    const publicResponse = createFarmDocsPublicResponse(contentDir, docs, request);
+    const publicResponse = createFarmDocsPublicResponse(
+      contentDir,
+      docs,
+      request,
+      options.isPathGuarded,
+    );
     if (publicResponse) return omitFarmDocsHeadBody(request, publicResponse);
 
     if (!isFarmDocsRequest(docs, request)) return null;
@@ -1812,6 +1836,15 @@ export function createFarmDocsHandler(
     // A docs page URL serves Markdown or HTML depending on Accept, so shared caches
     // must key it on Accept. An explicit .md URL always returns Markdown.
     const negotiatesAccept = !requestUrl.pathname.endsWith(".md");
+    // The `.md` URL is the page's content at another path. A guard written for the page
+    // alone (`/docs/secret/:path*` never meets `/docs/secret.md`) did not run for it.
+    if (
+      !negotiatesAccept &&
+      options.isPathGuarded?.(page.href) &&
+      !options.isPathGuarded(getFarmDocsMarkdownPath(page.href))
+    ) {
+      return null;
+    }
     if (shouldReturnMarkdown(request)) {
       const origin = new URL(request.url).origin;
       return omitFarmDocsHeadBody(
