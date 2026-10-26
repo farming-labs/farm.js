@@ -63,13 +63,15 @@ describe("RSC Nitro production build", () => {
       const entryPath = path.join(entryDir, "rsc-entry.mjs");
       writeFileSync(
         entryPath,
-        `import rsc from "/project/.nitro/vite/dist/rsc/index.js";
+        `import "/project/.nitro/vite/dist/rsc/farm-node-env.mjs";
+import rsc from "/project/.nitro/vite/dist/rsc/index.js";
 globalThis.__VITE_RSC_LOAD_SSR__ = () => import("/project/.nitro/vite/dist/ssr/index.js");`,
       );
 
       rewriteRscEntryImports(serverDir, serverDistDir);
 
       const entry = readFileSync(entryPath, "utf-8");
+      expect(entry).toContain('import "../dist/rsc/farm-node-env.mjs"');
       expect(entry).toContain('from "../dist/rsc/index.js"');
       expect(entry).toContain('import("../dist/ssr/index.js")');
       expect(entry).not.toContain(".nitro/vite");
@@ -192,6 +194,106 @@ export function render() {
       if (child) await stopProcess(child);
       rmSync(fixtureRoot, { recursive: true, force: true });
       rmSync(isolatedRoot, { recursive: true, force: true });
+    }
+  }, 60_000);
+  it("runs the bundles in production mode when the deployment leaves NODE_ENV unset", async () => {
+    const fixtureRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-node-env-"));
+    const children: ChildProcess[] = [];
+
+    try {
+      const rscDir = path.join(fixtureRoot, "dist", "rsc");
+      const ssrDir = path.join(fixtureRoot, "dist", "ssr");
+      const clientDir = path.join(fixtureRoot, "dist", "client");
+      mkdirSync(rscDir, { recursive: true });
+      mkdirSync(ssrDir, { recursive: true });
+      mkdirSync(clientDir, { recursive: true });
+
+      // Both bundles read NODE_ENV while they load, as React's entry files do. The SSR bundle
+      // also loads React from node_modules and reports which build that picked.
+      writeFileSync(
+        path.join(rscDir, "index.js"),
+        `const rscMode = process.env.NODE_ENV;
+export default {
+  async fetch() {
+    const ssr = await globalThis.__VITE_RSC_LOAD_SSR__();
+    return Response.json({ rsc: rscMode, ssr: ssr.mode, react: ssr.reactBuilds() });
+  },
+};`,
+      );
+      writeFileSync(
+        path.join(ssrDir, "index.js"),
+        `import { createRequire } from "node:module";
+import "react";
+export const mode = process.env.NODE_ENV;
+export function reactBuilds() {
+  // Node lists both builds once React's exports are scanned; only the chosen one loads.
+  return Object.entries(createRequire(import.meta.url).cache)
+    .filter(([, module]) => module.loaded)
+    .map(([file]) => file.split(/[\\\\/]/).pop())
+    .filter((file) => /^react\\.(development|production)\\.js$/.test(file));
+}`,
+      );
+
+      const fixtureModules = path.join(fixtureRoot, "node_modules");
+      mkdirSync(fixtureModules, { recursive: true });
+      symlinkSync(
+        realpathSync(path.resolve("node_modules", "react")),
+        path.join(fixtureModules, "react"),
+        process.platform === "win32" ? "junction" : "dir",
+      );
+
+      const outputDir = path.join(fixtureRoot, ".output");
+      await buildRscNitro({
+        root: fixtureRoot,
+        rendererPath: path.join(rscDir, "index.js"),
+        ssrPath: path.join(ssrDir, "index.js"),
+        publicDir: clientDir,
+        outputDir,
+        preset: "node-server",
+      });
+
+      const request = async (nodeEnv: string | undefined) => {
+        const env = { ...process.env, HOST: "127.0.0.1" };
+        delete env.NODE_ENV;
+        if (nodeEnv !== undefined) env.NODE_ENV = nodeEnv;
+        const port = await availablePort();
+        const child = spawn(process.execPath, [path.join(outputDir, "server", "index.mjs")], {
+          cwd: fixtureRoot,
+          env: { ...env, PORT: String(port) },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        children.push(child);
+        let logs = "";
+        child.stdout?.on("data", (chunk) => {
+          logs += chunk.toString();
+        });
+        child.stderr?.on("data", (chunk) => {
+          logs += chunk.toString();
+        });
+        const deadline = Date.now() + 10_000;
+        while (Date.now() < deadline && child.exitCode === null) {
+          try {
+            const response = await fetch(`http://127.0.0.1:${port}/`);
+            expect(response.status, logs).toBe(200);
+            return await response.json();
+          } catch (error) {
+            if (!(error instanceof TypeError)) throw error;
+            await delay(50);
+          }
+        }
+        throw new Error(`RSC server did not respond: ${logs}`);
+      };
+
+      await expect(request(undefined)).resolves.toEqual({
+        rsc: "production",
+        ssr: "production",
+        react: ["react.production.js"],
+      });
+      // A value the deployment chose is kept.
+      await expect(request("staging")).resolves.toMatchObject({ rsc: "staging", ssr: "staging" });
+    } finally {
+      for (const child of children) await stopProcess(child);
+      rmSync(fixtureRoot, { recursive: true, force: true });
     }
   }, 60_000);
 });

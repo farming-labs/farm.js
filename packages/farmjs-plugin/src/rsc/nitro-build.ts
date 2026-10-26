@@ -16,6 +16,10 @@ import {
   statSync,
 } from "fs";
 import type { NitroConfig } from "nitro/types";
+import {
+  FARM_NODE_ENV_MODULE_FILE,
+  FARM_NODE_ENV_MODULE_SOURCE,
+} from "@farm.js/core/internal/production-node-env";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
 
 const MANIFEST_FILENAME = "__vite_rsc_assets_manifest.js";
@@ -73,15 +77,22 @@ export function rewriteRscEntryImports(serverDir: string, serverDistDir: string)
       const relative = path.relative(path.dirname(entryChunkPath), target).replace(/\\/g, "/");
       return relative.startsWith(".") ? relative : `./${relative}`;
     };
-    // Match any path that ends with dist/rsc/index.js or dist/ssr/index.js (minified, no spaces)
-    code = code.replace(
-      /(["'`])[^"'`]*?dist\/rsc\/index\.js\1/g,
-      JSON.stringify(relativeImport(path.join(serverDistDir, "rsc", "index.js"))),
-    );
-    code = code.replace(
-      /(["'`])[^"'`]*?dist\/ssr\/index\.js\1/g,
-      JSON.stringify(relativeImport(path.join(serverDistDir, "ssr", "index.js"))),
-    );
+    // Match any path that ends with dist/rsc/index.js, dist/ssr/index.js or the NODE_ENV module
+    // (minified, no spaces)
+    for (const [environment, file] of [
+      ["rsc", "index.js"],
+      ["rsc", FARM_NODE_ENV_MODULE_FILE],
+      ["ssr", "index.js"],
+    ] as const) {
+      const pattern = new RegExp(
+        `(["'\`])[^"'\`]*?dist/${environment}/${file.replace(/\./g, "\\.")}\\1`,
+        "g",
+      );
+      code = code.replace(
+        pattern,
+        JSON.stringify(relativeImport(path.join(serverDistDir, environment, file))),
+      );
+    }
     writeFileSync(entryChunkPath, code, "utf-8");
   }
 }
@@ -247,7 +258,13 @@ function writeRscEntryFile(buildDir: string, rendererPath: string, ssrPath?: str
   const setSsLoader = relSsr
     ? `globalThis.__VITE_RSC_LOAD_SSR__ = () => import("./${relSsr}");`
     : "";
+  // Imported first and kept external like the bundles, so it runs before React picks its
+  // development or production build from NODE_ENV. Inlined, it would run after them.
+  const relNodeEnv = path
+    .relative(buildDir, path.join(path.dirname(resolvedRenderer), FARM_NODE_ENV_MODULE_FILE))
+    .replace(/\\/g, "/");
   const code = `
+import "./${relNodeEnv}";
 ${setSsLoader}
 import * as entryExports from "./${relRenderer}";
 import { defineEventHandler } from "h3";
@@ -352,6 +369,14 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
   const serverDir = path.join(outputDir, "server");
   const publicOutDir = path.join(outputDir, "public");
 
+  // The server sets NODE_ENV to "production" unless the deployment chose one, as the core
+  // node-server output does. The RSC and SSR bundles read it at runtime: left unset, React loads
+  // its development builds and Flight responses carry server component props, stacks and paths.
+  writeFileSync(
+    path.join(path.dirname(path.resolve(rendererPath)), FARM_NODE_ENV_MODULE_FILE),
+    FARM_NODE_ENV_MODULE_SOURCE,
+    "utf-8",
+  );
   const entryPath = writeRscEntryFile(buildDir, rendererPath, ssrPath);
   const registeredRuntimePackages = new Map(runtimePackagesByRoot.get(path.resolve(root)) ?? []);
   for (const [packageName, packageRoot] of detectBundledRscRuntimes(rendererPath)) {
