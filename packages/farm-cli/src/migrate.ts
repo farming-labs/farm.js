@@ -774,6 +774,7 @@ const FARM_NEXT_MODULE_EXPORTS: Record<string, { target: string; names: Readonly
       "ReadonlyRequestCookies",
       "RequestCookie",
       "cookies",
+      "getCspNonce",
       "headers",
     ]),
   },
