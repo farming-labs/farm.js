@@ -49,11 +49,12 @@ import {
 import {
   _getRequestReadCount,
   _runWithCurrentRequest,
+  _runWithFarmCspNonce,
   createWebRequestFromFarmRequest,
   getCurrentRequestOrNull,
   resolveFarmRequestURL,
 } from "./request";
-import { _resolveCurrentRequest } from "./request-bridge";
+import { _resolveCurrentCspNonce, _resolveCurrentRequest } from "./request-bridge";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { getFarmAppDirectories } from "../layers";
@@ -150,6 +151,7 @@ import {
   readFarmRendererWebStream,
   resolveFarmRendererAppSetup,
   resolveFarmRendererModule,
+  type FarmRendererRenderOptions,
   type FarmServerRendererRuntime,
   resolveFarmComponentExtensions,
 } from "../renderer";
@@ -159,9 +161,10 @@ import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
 import type { FarmIslandStrategy } from "../island";
 import { createDefaultErrorDiagnostics } from "./error-diagnostics";
 import {
-  addFarmCspNonceToScriptTags,
   createFarmCspNonceRewriter,
   createFarmCspNonce,
+  filterFarmCspNonces,
+  stampFarmCspNonce,
   getFarmSecurityHeader,
   resolveFarmSecurityConfig,
   type ResolvedFarmSecurityConfig,
@@ -412,6 +415,12 @@ export function createPreHydrationClickQueueScript(): string {
   // goes native ahead of the replay.
   const selector = JSON.stringify(FARM_ISLAND_REPLAYABLE_SELECTOR);
   return `<script>(function(){if(window.__FARM_PREHYDRATION_CLICK_QUEUE__)return;var queue=[];window.__FARM_PREHYDRATION_CLICK_QUEUE__=queue;window.__FARM_HYDRATED__=false;document.documentElement.dataset.farmHydrated="false";function isModified(event){return !!(event.metaKey||event.altKey||event.ctrlKey||event.shiftKey)}function inHydrated(node){return !!(node&&node.closest&&node.closest('[data-farm-island-hydrated="true"]'))}function closestQueuedTarget(target){while(target&&target!==document.documentElement){if(target.matches&&target.matches(${selector}))return target;target=target.parentElement}return null}function announce(target,kind){document.dispatchEvent(new CustomEvent("farm:island-interaction",{detail:{target:target,kind:kind||null}}))}function hold(event,target,kind){if(!queue.some(function(item){return item.target===target})){queue.push({target:target,kind:kind,createdAt:Date.now()});announce(target,kind)}event.preventDefault();event.stopImmediatePropagation()}document.addEventListener("click",function(event){if(window.__FARM_HYDRATED__)return;if(event.defaultPrevented||event.button!==0||isModified(event))return;var target=closestQueuedTarget(event.target);if(!target||target.closest&&target.closest("a[href]")||inHydrated(target))return;hold(event,target,"click")},true);document.addEventListener("submit",function(event){if(window.__FARM_HYDRATED__)return;if(event.defaultPrevented)return;var form=event.target;if(!form||form.nodeName!=="FORM"||inHydrated(form))return;hold(event,form,"submit")},true);function observe(event){if(window.__FARM_HYDRATED__)return;var target=event.target;if(!(target&&target.closest)||inHydrated(target))return;announce(target,null)}document.addEventListener("pointerdown",observe,true);document.addEventListener("focusin",observe,true);})();</script>`;
+}
+
+/** Options for renderer calls made while rendering a response (its CSP nonce). */
+function rendererRenderOptions(): FarmRendererRenderOptions | undefined {
+  const nonce = _resolveCurrentCspNonce();
+  return nonce ? { nonce } : undefined;
 }
 
 function createDocumentFooter(options: {
@@ -797,6 +806,7 @@ export class ServerRenderer {
         writable.once("error", reject);
 
         const stream = renderToPipeableStream(element, {
+          nonce: _resolveCurrentCspNonce(),
           onShellReady() {
             started = true;
             stream.pipe(writable);
@@ -821,11 +831,14 @@ export class ServerRenderer {
     }
 
     if (streaming.web && this.rendererRuntime.renderToReadableStream) {
-      const stream = await this.rendererRuntime.renderToReadableStream(element);
+      const stream = await this.rendererRuntime.renderToReadableStream(
+        element,
+        rendererRenderOptions(),
+      );
       return await readFarmRendererWebStream(stream);
     }
 
-    return await this.rendererRuntime.renderToString(element);
+    return await this.rendererRuntime.renderToString(element, rendererRenderOptions());
   }
 
   /**
@@ -837,7 +850,10 @@ export class ServerRenderer {
     options: { rejectLateNavigation?: boolean } = {},
   ): Promise<{ html: string; head: string }> {
     if (this.rendererRuntime.renderToStringWithHead) {
-      const rendered = await this.rendererRuntime.renderToStringWithHead(element);
+      const rendered = await this.rendererRuntime.renderToStringWithHead(
+        element,
+        rendererRenderOptions(),
+      );
       return { html: rendered.html, head: rendered.head || "" };
     }
     // Render to completion through the streaming renderer where there is one, so a
@@ -1305,7 +1321,9 @@ export class ServerRenderer {
       }
     }
 
-    return this.runWithRequestContext(request, () => this.renderPageInContext(req, res));
+    return _runWithFarmCspNonce(cspNonce, () =>
+      this.runWithRequestContext(request, () => this.renderPageInContext(req, res)),
+    );
   }
 
   private async renderPageInContext(req: FarmRequest, res: FarmResponse): Promise<void> {
@@ -2858,7 +2876,7 @@ export class ServerRenderer {
 
       const html = await _runWithMiddlewareData(options.middlewareMap, () =>
         _runWithMiddlewareContext(options.middlewareContext, () =>
-          this.rendererRuntime.renderToString(wrapped),
+          this.rendererRuntime.renderToString(wrapped, rendererRenderOptions()),
         ),
       );
       res.statusCode = options.statusCode;
@@ -2974,7 +2992,8 @@ export class ServerRenderer {
         ? toViteModuleId(pagePath, this.config.root)
         : "/src/app/page.tsx";
       const deploymentId = this.getDeploymentId();
-      const bootstrapScript = `<script data-farm-refresh-state>
+      const farmScripts = (markup: string) => this.stampFarmScripts(req, markup);
+      const bootstrapScript = farmScripts(`<script data-farm-refresh-state>
 window.__FARM_PROPS__ = ${serializeInlineValue((deferredProps.data as any).page)};
 window.__FARM_ROUTE_SLOTS__ = ${serializeInlineValue((deferredProps.data as any).slots)};
 window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(deploymentId)};
@@ -2993,9 +3012,15 @@ window.__FARM_LOADING_MODULE__ = ${JSON.stringify((req as any).__FARM_LOADING_MO
 window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
 window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getFarmI18nClientSnapshot()) : "null"};
-</script>`;
-      const deferredScript = createDeferredHydrationScript(deferredProps.records);
-      const rendererHydrationScript = this.rendererRuntime.generateHydrationScript?.() || "";
+</script>`);
+      const deferredScript = farmScripts(createDeferredHydrationScript(deferredProps.records));
+      const rendererHydrationScript = farmScripts(
+        this.rendererRuntime.generateHydrationScript?.() || "",
+      );
+      const viteClientScript = farmScripts(`<script type="module" src="/@vite/client"></script>`);
+      const farmClientScript = farmScripts(
+        `<script type="module" src="/@farm/client.js"></script>`,
+      );
       const { html: content, head: rendererHead } = await this.renderElementToDocumentParts(
         element,
         {
@@ -3034,6 +3059,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         this.config.basePath,
         getFarmTheme(),
       );
+      themeDocument.head = farmScripts(themeDocument.head);
 
       // A layout that returns its own full `<html>` document is composed as the
       // document (Farm assets merged in) rather than nested inside the shell,
@@ -3070,15 +3096,13 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
             renderFarmFontDevHead(this.config.root || process.cwd()),
             this.devGlobalStylesheetLink(),
             ...this.collectDevStyleLinks(),
-            `<script type="module" src="/@vite/client"></script>`,
+            viteClientScript,
             rendererHydrationScript,
             bootstrapScript,
           ]
             .filter(Boolean)
             .join("\n  "),
-          bodyFooter: [deferredScript, `<script type="module" src="/@farm/client.js"></script>`]
-            .filter(Boolean)
-            .join("\n  "),
+          bodyFooter: [deferredScript, farmClientScript].filter(Boolean).join("\n  "),
         });
       } else {
         html = `<!DOCTYPE html>
@@ -3096,14 +3120,14 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
   ${this.devGlobalStylesheetLink()}${this.collectDevStyleLinks()
     .map((l) => `\n  ${l}`)
     .join("")}
-  <script type="module" src="/@vite/client"></script>
+  ${viteClientScript}
   ${rendererHydrationScript}
   ${bootstrapScript}
 </head>
 <body class="">
   <div id="root">${content}</div>
   ${deferredScript}
-  <script type="module" src="/@farm/client.js"></script>
+  ${farmClientScript}
 </body>
 </html>`;
       }
@@ -3378,8 +3402,12 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       const devStyleLinks = this.collectDevStyleLinks();
       const globalStylesheetLink = this.devGlobalStylesheetLink(true);
       const cspNonce = this.getCspNonce(req);
-      const secureDocumentHTML = (html: string) =>
-        cspNonce ? addFarmCspNonceToScriptTags(html, cspNonce) : html;
+      // The shell and footer are Farm's own markup. Renderer chunks and the
+      // late not-found recovery hold app output, so they only keep nonces
+      // the renderer or the app was given.
+      const stampDocumentHTML = (html: string) => stampFarmCspNonce(html, cspNonce || "");
+      const filterDocumentHTML = (html: string) =>
+        cspNonce ? filterFarmCspNonces(html, cspNonce) : html;
       const createLateNavigationRecovery = (navigationError: unknown) =>
         this.createLateNavigationRecoveryHTML(req, navigationError);
       const { pipe, abort } = renderToPipeableStream(streamRoot, {
@@ -3422,7 +3450,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
 </head>
 <body class="">
   <div id="root">`;
-          const securedShell = secureDocumentHTML(shell);
+          const securedShell = stampDocumentHTML(shell);
           htmlParts.push(securedShell);
           staticShellParts?.push(securedShell);
 
@@ -3492,7 +3520,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
                 lateNavigationError = null;
                 createLateNavigationRecovery(navigationError).then(
                   (recovery: string) => {
-                    const secured = secureDocumentHTML(recovery);
+                    const secured = filterDocumentHTML(recovery);
                     htmlParts.push(secured);
                     res.write(secured);
                     finishStream(callback);
@@ -3514,7 +3542,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
               if (tail) res.write(tail);
             }
             const suspenseRevealFallback = `<script>(function(){function moveFragment(srcId,placeholderId){var src=document.getElementById(srcId),ph=document.getElementById(placeholderId);if(!src||!ph||!ph.parentNode)return false;while(src.firstChild)ph.parentNode.insertBefore(src.firstChild,ph);ph.parentNode.removeChild(ph);if(src.parentNode)src.parentNode.removeChild(src);return true}function revealBoundary(boundaryId,sectionId){var boundary=document.getElementById(boundaryId),section=document.getElementById(sectionId);if(!boundary||!section||!boundary.parentNode)return false;var start=boundary.previousSibling;if(!start||start.nodeType!==8)return false;var parent=boundary.parentNode;var node=boundary;var depth=0;while(node){if(node.nodeType===8){var data=node.data;if(data==="/$"||data==="/&"){if(depth===0)break;depth--;}else if(data==="$"||data==="$?"||data==="$~"||data==="$!"||data==="&"){depth++;}}var next=node.nextSibling;parent.removeChild(node);node=next;}while(section.firstChild)parent.insertBefore(section.firstChild,node);if(section.parentNode)section.parentNode.removeChild(section);start.data="$";return true}var tries=0;var timer=setInterval(function(){var changed=false;document.querySelectorAll('div[id^="S:"]').forEach(function(section){var suffix=section.id.slice(2);changed=moveFragment('S:'+suffix,'P:'+suffix)||changed;});document.querySelectorAll('template[id^="B:"]').forEach(function(boundary){var suffix=boundary.id.slice(2);changed=revealBoundary('B:'+suffix,'S:'+suffix)||changed;});tries++;if(tries>80||(!document.querySelector('template[id^="B:"]')&&!document.querySelector('template[id^="P:"]'))){clearInterval(timer);}},50);})();</script>`;
-            const footer = secureDocumentHTML(
+            const footer = stampDocumentHTML(
               createDocumentFooter({
                 suspenseRevealFallback,
                 deferredHydrationScript: createDeferredHydrationScript(deferredProps.records),
@@ -3679,7 +3707,10 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     error: unknown,
   ): Promise<string> {
     if (isFarmRedirectError(error)) {
-      return createLateRedirectRecovery(this.localizeRedirectUrl(getFarmRedirectError(error)!.url));
+      return createLateRedirectRecovery(
+        this.localizeRedirectUrl(getFarmRedirectError(error)!.url),
+        this.getCspNonce(req) || "",
+      );
     }
     const pathname = resolveFarmRequestURL(req, {
       trustProxy: this.config.server?.trustProxy,
@@ -3695,12 +3726,13 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           await this.wrapWithIntegrationProviders(
             this.rendererRuntime.createElement(NotFoundComponent, { pathname }),
           ),
+          rendererRenderOptions(),
         );
       } catch (error) {
         logger.warn(`not-found page could not render outside its layout, using Farm's: ${error}`);
       }
     }
-    return createLateNotFoundRecovery(content);
+    return createLateNotFoundRecovery(content, this.getCspNonce(req) || "");
   }
 
   private async render404(req: FarmRequest, res: FarmResponse): Promise<void> {
@@ -3764,7 +3796,10 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           element = await this.wrapWithIntegrationProviders(element);
 
           // Render to string
-          const content = await this.rendererRuntime.renderToString(element);
+          const content = await this.rendererRuntime.renderToString(
+            element,
+            rendererRenderOptions(),
+          );
 
           const { head, metadata } = await this.notFoundMetadataHead(layoutModule, notFoundModule);
           const html = this.createFullHTML(content, false, pathname, head, { req, metadata });
@@ -3810,20 +3845,23 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       ? createDefaultErrorDiagnostics(error, this.config.root || process.cwd())
       : undefined;
     const statusText = getDefaultErrorStatusText(statusCode);
-    const content = createDefaultErrorMarkup({
-      statusCode,
-      statusText,
-      requestPath: requestUrl.pathname,
-      method: req.method || "GET",
-      message: diagnostics?.message,
-      errorName: diagnostics?.name,
-      stack: diagnostics?.stack,
-      sourceFrame: diagnostics?.sourceFrame,
-      development: isDev,
-      farmVersion: FARM_VERSION,
-      nodeVersion: process.version,
-      mode: isDev ? "development" : "production",
-    });
+    const content = this.stampFarmScripts(
+      req,
+      createDefaultErrorMarkup({
+        statusCode,
+        statusText,
+        requestPath: requestUrl.pathname,
+        method: req.method || "GET",
+        message: diagnostics?.message,
+        errorName: diagnostics?.name,
+        stack: diagnostics?.stack,
+        sourceFrame: diagnostics?.sourceFrame,
+        development: isDev,
+        farmVersion: FARM_VERSION,
+        nodeVersion: process.version,
+        mode: isDev ? "development" : "production",
+      }),
+    );
 
     const html = this.createFullHTML(
       content,
@@ -3865,14 +3903,16 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
     alternates: { req?: FarmRequest; metadata?: unknown } = {},
   ): string {
     const i18nSnapshot = getFarmI18nClientSnapshot();
+    const farmScripts = (html: string) => this.stampFarmScripts(alternates.req, html);
     const clientScript = isClientComponent
-      ? `  <script type="module" src="/@farm/client.js"></script>`
+      ? `  ${farmScripts(`<script type="module" src="/@farm/client.js"></script>`)}`
       : "";
-    const integrationManifestScript = `<script>
+    const viteClientScript = farmScripts(`<script type="module" src="/@vite/client"></script>`);
+    const integrationManifestScript = farmScripts(`<script>
 window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(this.getDeploymentId())};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
 ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};` : ""}
-</script>`;
+</script>`);
     const alternateLinks = i18nSnapshot
       ? renderI18nAlternateLinks(
           requestPath,
@@ -3886,7 +3926,10 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
       this.config.basePath,
       getFarmTheme(),
     );
-    const rendererHydrationScript = this.rendererRuntime.generateHydrationScript?.() || "";
+    themeDocument.head = farmScripts(themeDocument.head);
+    const rendererHydrationScript = farmScripts(
+      this.rendererRuntime.generateHydrationScript?.() || "",
+    );
     // The route metadata, when the caller has it, also carries the merged `viewport` exports.
     const viewportTags = renderViewportHead((alternates.metadata as Record<string, any>)?.viewport);
 
@@ -3918,7 +3961,7 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
             fontHead,
             this.devGlobalStylesheetLink(true),
             ...this.collectDevStyleLinks(),
-            `<script type="module" src="/@vite/client"></script>`,
+            viteClientScript,
             rendererHydrationScript,
             integrationManifestScript,
           ]
@@ -3943,7 +3986,7 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
   ${this.devGlobalStylesheetLink(true)}${this.collectDevStyleLinks()
     .map((l) => `\n  ${l}`)
     .join("")}
-  <script type="module" src="/@vite/client"></script>
+  ${viteClientScript}
   ${rendererHydrationScript}
   ${integrationManifestScript}
 </head>
@@ -3959,9 +4002,21 @@ ${clientScript}
     return typeof value === "string" ? value : undefined;
   }
 
+  /** Stamp the response nonce on markup Farm generates (never on rendered app output). */
+  private stampFarmScripts(req: FarmRequest | undefined, html: string): string {
+    // Explicit: a background render (ISR regeneration) must not pick up the
+    // nonce of the request that scheduled it.
+    return stampFarmCspNonce(html, (req && this.getCspNonce(req)) || "");
+  }
+
+  /**
+   * The last pass over a document that holds rendered app output: scripts
+   * keep the response nonce only when Farm or the app (through getCspNonce())
+   * gave it to them.
+   */
   private secureDocumentHTML(req: FarmRequest, html: string): string {
     const nonce = this.getCspNonce(req);
-    return nonce ? addFarmCspNonceToScriptTags(html, nonce) : html;
+    return nonce ? filterFarmCspNonces(html, nonce) : html;
   }
 
   private applyDeploymentHeaders(req: FarmRequest, res: FarmResponse): void {

@@ -257,7 +257,7 @@ export {
   useSearchParams,
 } from "./navigation";
 export type { FarmRedirectSignal, FarmRedirectStatus } from "./navigation";
-export { cookies, headers } from "./headers";
+export { cookies, getCspNonce, headers } from "./headers";
 export type { ReadonlyHeaders, ReadonlyRequestCookies, RequestCookie } from "./headers";
 export type {
   PluginRequestContext,

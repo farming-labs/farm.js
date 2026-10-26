@@ -962,18 +962,49 @@ security: {
 }
 ```
 
-For dynamic HTML, Farm generates a fresh nonce for every response, adds it to the directive that
-governs script elements (`script-src-elem`, then `script-src`, then `default-src`), and stamps every
-script element in the streamed document. Any existing script `nonce` attribute is normalized to the
-fresh response nonce so application-authored inline scripts follow the same policy.
-Script contents, including Unicode text, are preserved across streamed response chunks.
+For dynamic HTML, Farm generates a fresh nonce for every response before rendering it and adds it to
+the directive that governs script elements (`script-src-elem`, then `script-src`, then
+`default-src`). Only scripts that are given the nonce carry it: Farm's own bootstrap, hydration,
+theme, and client entry scripts, the renderer's streaming scripts (React, Preact, Solid, and Svelte
+receive the nonce), and scripts your app opts in. Every other script element in the response loses
+its `nonce` attribute, so markup injected into the page through `dangerouslySetInnerHTML`, CMS
+content, or a reflected value cannot run, even when it brings its own `nonce`. Script contents,
+including Unicode text, are preserved across streamed response chunks.
 
-For fully prerendered HTML, the same option keeps the page static. Farm removes the build-time nonce,
-hashes the exact contents of every inline script with SHA-256, and emits a route-specific policy with
-those hashes. External scripts still need their origin in `script-src` or `script-src-elem`. Dynamic
-responses and PPR shells continue to use fresh nonces, so a nonce is never cached or reused. Keep
-`reportOnly` on while auditing and verify every third-party script and connection before enforcing the
-policy.
+To let an inline script of your own run, give it the response nonce with `getCspNonce()` from
+`@farm.js/core` in a server-rendered page or layout. It returns `undefined` when `nonce` is off, so
+the same code works without a policy:
+
+```tsx
+import { getCspNonce } from "@farm.js/core";
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html>
+      <body>
+        {children}
+        <script
+          nonce={getCspNonce()}
+          dangerouslySetInnerHTML={{ __html: "window.appReady = true" }}
+        />
+      </body>
+    </html>
+  );
+}
+```
+
+For fully prerendered HTML, the same option keeps the page static. Farm hashes the exact contents of
+the inline scripts that carry the nonce (its own and the ones you opted in) with SHA-256, removes the
+build-time nonce, and emits a route-specific policy with those hashes. Inline scripts that were not
+opted in get no hash and do not run. External scripts still need their origin in `script-src` or
+`script-src-elem`. A nonce is never cached or reused: in nonce mode Farm renders PPR routes per
+request instead of serving a shared shell. Keep `reportOnly` on while auditing and verify every
+third-party script and connection before enforcing the policy.
+
+Before this release, nonce mode gave the response nonce to every script element in the document,
+including app-authored ones, and prerendered pages hashed every inline script. If your app renders
+inline scripts of its own under `nonce: true`, add `nonce={getCspNonce()}` to each one; until then
+the policy blocks them, which `reportOnly` shows without breaking the page.
 
 Without `nonce: true`, Farm warns when a configured policy would block its inline framework scripts.
 

@@ -6,8 +6,8 @@ import {
   defineRendererServerConformance,
   defineRendererServerQueryConformance,
 } from "@farm.js/renderer-tests";
-import { createSignal, createUniqueId } from "solid-js";
-import { escape, ssr, ssrAttribute, ssrHydrationKey } from "solid-js/web";
+import { Suspense, createResource, createSignal, createUniqueId } from "solid-js";
+import { createComponent, escape, ssr, ssrAttribute, ssrHydrationKey } from "solid-js/web";
 import { describe, expect, it } from "vitest";
 import type { ServerQuery } from "@farm.js/core/server-query";
 import { useServerQuery } from "../bindings";
@@ -83,6 +83,31 @@ describe("Solid renderer", () => {
 
     await expect(new Response(stream).text()).resolves.toContain("Solid Web stream");
   });
+  it("puts Farm's CSP nonce on the hydration data scripts it emits", async () => {
+    function Data() {
+      const [data] = createResource(async () => "value");
+      return createComponent(Suspense, {
+        get children() {
+          return ssr(["<p>", "</p>"] as unknown as TemplateStringsArray, escape(data()) as string);
+        },
+      });
+    }
+    const scriptTags = (html: string) => html.match(/<script\b[^>]*>/g) ?? [];
+
+    const html = await renderToString(createElement(Data, null), { nonce: "abc123" });
+    expect(scriptTags(html).length).toBeGreaterThan(0);
+    expect(scriptTags(html).every((tag) => tag.includes('nonce="abc123"'))).toBe(true);
+
+    const streamed = await new Response(
+      renderToReadableStream(createElement(Data, null), { nonce: "abc123" }),
+    ).text();
+    expect(scriptTags(streamed).length).toBeGreaterThan(0);
+    expect(scriptTags(streamed).every((tag) => tag.includes('nonce="abc123"'))).toBe(true);
+
+    const unsecured = await renderToString(createElement(Data, null));
+    expect(unsecured).not.toContain("nonce=");
+  });
+
   it("provides Solid's hydration bootstrap for server documents", () => {
     expect(generateHydrationScript()).toContain("window._$HY");
   });

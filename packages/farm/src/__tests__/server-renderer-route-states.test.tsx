@@ -19,7 +19,7 @@ import { REACT_RENDERER } from "../renderer";
 import { Link } from "../client/link";
 import { setFarmBasePath } from "../base-path";
 import { createFarmIsolatedClientBoundary } from "../client/isolated-boundary";
-import { headers } from "../headers";
+import { getCspNonce, headers } from "../headers";
 
 type MockResponse = FarmResponse & {
   body: string;
@@ -46,41 +46,70 @@ afterEach(async () => {
 });
 
 describe("file route loading.tsx and error.tsx", () => {
-  it("uses one fresh CSP nonce for the response header and every framework script", async () => {
-    const response = createMockResponse();
-    const renderer = createRenderer(
-      {
-        [routeModulePath]: {
-          default: function DashboardPage() {
-            return React.createElement(
-              "main",
-              null,
-              "Nonce protected",
-              React.createElement("script", { nonce: "stale-app-nonce" }, "window.appReady=true"),
-            );
+  it.each(["streamed", "buffered"])(
+    "gives the response nonce to framework scripts and opted-in app scripts only (%s)",
+    async (mode) => {
+      const response = createMockResponse();
+      const renderer = createRenderer(
+        {
+          [routeModulePath]: {
+            default: function DashboardPage() {
+              return React.createElement(
+                "main",
+                null,
+                "Nonce protected",
+                React.createElement("script", {
+                  "data-app": "stale",
+                  nonce: "stale-app-nonce",
+                  dangerouslySetInnerHTML: { __html: "window.stale=true" },
+                }),
+                React.createElement("div", {
+                  dangerouslySetInnerHTML: {
+                    __html:
+                      '<script data-app="injected">window.injected=true</script>' +
+                      '<script data-app="guessed" nonce="guessed">window.guessed=true</script>',
+                  },
+                }),
+                React.createElement("script", {
+                  "data-app": "opted-in",
+                  nonce: getCspNonce(),
+                  dangerouslySetInnerHTML: { __html: "window.appReady=true" },
+                }),
+              );
+            },
           },
         },
-      },
-      {
-        clientMetadata: { isClientComponent: true, shouldHydrate: true },
-        security: {
-          csp: { nonce: true, policy: "default-src 'self'; script-src 'self'" },
+        {
+          clientMetadata: { isClientComponent: true, shouldHydrate: true },
+          security: {
+            csp: { nonce: true, policy: "default-src 'self'; script-src 'self'" },
+          },
         },
-      },
-    );
+      );
 
-    await renderer.renderPage(createMockRequest("/dashboard"), response);
+      if (mode === "buffered") {
+        vi.spyOn(renderer as any, "rootLayoutRendersDocument").mockResolvedValue(true);
+      }
+      await renderer.renderPage(createMockRequest("/dashboard"), response);
 
-    const policy = String(response.headers.get("content-security-policy"));
-    const nonce = policy.match(/'nonce-([^']+)'/)?.[1];
-    const document = new JSDOM(response.body).window.document;
-    expect(nonce).toBeTruthy();
-    expect(document.querySelectorAll("script").length).toBeGreaterThan(0);
-    expect(
-      Array.from(document.querySelectorAll("script")).every((script) => script.nonce === nonce),
-    ).toBe(true);
-    expect(policy).not.toContain("unsafe-inline");
-  });
+      const policy = String(response.headers.get("content-security-policy"));
+      const nonce = policy.match(/'nonce-([^']+)'/)?.[1];
+      const document = new JSDOM(response.body).window.document;
+      const scripts = Array.from(document.querySelectorAll("script"));
+      const nonceOf = (selector: string) => document.querySelector(selector)?.getAttribute("nonce");
+      expect(nonce).toBeTruthy();
+      expect(policy).not.toContain("unsafe-inline");
+      // Farm's own document scripts: bootstrap data, Vite and Farm client entries.
+      const frameworkScripts = scripts.filter((script) => !script.hasAttribute("data-app"));
+      expect(frameworkScripts.length).toBeGreaterThan(2);
+      expect(frameworkScripts.every((script) => script.getAttribute("nonce") === nonce)).toBe(true);
+      expect(nonceOf('script[src="/@farm/client.js"]')).toBe(nonce);
+      expect(nonceOf('script[data-app="opted-in"]')).toBe(nonce);
+      expect(nonceOf('script[data-app="stale"]')).toBeNull();
+      expect(nonceOf('script[data-app="injected"]')).toBeNull();
+      expect(nonceOf('script[data-app="guessed"]')).toBeNull();
+    },
+  );
 
   it("bypasses reusable PPR shells when CSP nonces are enabled", async () => {
     const response = createMockResponse();

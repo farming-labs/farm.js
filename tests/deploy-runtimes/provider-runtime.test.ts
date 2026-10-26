@@ -365,6 +365,8 @@ async function expectProviderRuntime(
   expect(policy).not.toContain("'nonce-");
   for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
     if (/(?:^|\s)src\s*=/i.test(match[1]!)) continue;
+    // JSON data blocks never run, so they carry no nonce and need no hash.
+    if (/type="application\/(?:ld\+)?json"/i.test(match[1]!)) continue;
     const hash = createHash("sha256").update(match[2]!).digest("base64");
     expect(policy).toContain(`'sha256-${hash}'`);
   }

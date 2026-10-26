@@ -26,9 +26,11 @@ export {
 export {
   _getRequestReadCount,
   _runWithCurrentRequest,
+  _runWithFarmCspNonce,
   getCurrentRequest,
   resolveFarmWebRequestOrigin,
 } from "../server/request";
+export { _resolveCurrentCspNonce } from "../server/request-bridge";
 export { _runWithAPIRequestRuntime } from "../api/server-context";
 export {
   configureFarmCache,
@@ -128,7 +130,12 @@ export {
 } from "../trailing-slash";
 export { applyFarmBasePath, setFarmBasePath, stripFarmBasePath } from "../base-path";
 export { appendFarmRedirectQuery } from "../redirect-query";
-export { applyFarmCspNonceToResponse, resolveFarmSecurityConfig } from "../security";
+export {
+  applyFarmCspNonceToResponse,
+  createFarmCspNonce,
+  resolveFarmSecurityConfig,
+  stampFarmCspNonce,
+} from "../security";
 
 export function appendFarmLinkHeader(headers: Headers, value: string): void {
   const current = headers.get("Link");

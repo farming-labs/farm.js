@@ -36,3 +36,19 @@ export function _resolveCurrentRequestForApp(): Request | undefined {
   const view = getGlobalState()[APP_REQUEST_VIEW_KEY];
   return request && view ? view(request) : request;
 }
+
+type CspNonceResolver = () => string | undefined;
+
+const CSP_NONCE_RESOLVER_KEY = Symbol.for("farm.cspNonceResolver");
+
+export function _setCspNonceResolver(resolver: CspNonceResolver | undefined): void {
+  (globalThis as typeof globalThis & Record<symbol, unknown>)[CSP_NONCE_RESOLVER_KEY] = resolver;
+}
+
+/** The CSP nonce of the response being rendered, when `security.csp.nonce` is on. */
+export function _resolveCurrentCspNonce(): string | undefined {
+  const resolver = (globalThis as typeof globalThis & Record<symbol, unknown>)[
+    CSP_NONCE_RESOLVER_KEY
+  ] as CspNonceResolver | undefined;
+  return resolver?.();
+}

@@ -5880,7 +5880,9 @@ function renderFarmRouteServerTree(element) { return element; }`;
   const productionRuntimeImport = `import {
   _getRequestReadCount,
   _runWithAfterRequest,
+  _resolveCurrentCspNonce,
   _runWithCurrentRequest,
+  _runWithFarmCspNonce,
   _runWithAPIRequestRuntime,
   _runWithMiddlewareContext,
   _runWithMiddlewareData,
@@ -5890,6 +5892,8 @@ function renderFarmRouteServerTree(element) { return element; }`;
   appendFarmRedirectQuery,
   applyFarmBasePath,
   applyFarmCspNonceToResponse,
+  createFarmCspNonce,
+  stampFarmCspNonce,
   applyFarmPreviewRobotsTag,
   applyFarmThemeDocument,
   appendFarmLinkHeader,
@@ -6761,13 +6765,24 @@ function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, page
   }
   return '<script id="__farm_route_slots_data__" type="application/json">' +
     serializedRouteSlots +
-    '</script><script>' + source + '</script>';
+    '</script>' + stampFarmCspNonce('<script>' + source + '</script>');
 }
 
 function renderFarmRendererHydrationScript() {
   return typeof ReactDOMServer.generateHydrationScript === "function"
-    ? ReactDOMServer.generateHydrationScript()
+    ? stampFarmCspNonce(ReactDOMServer.generateHydrationScript())
     : "";
+}
+
+function renderFarmClientEntryScript() {
+  return stampFarmCspNonce('<script type="module" src="/__farm_client_js_src__"></script>');
+}
+
+// Renderer options for the response being rendered: its CSP nonce, which the
+// renderer puts on the inline scripts it emits.
+function getFarmRendererRenderOptions() {
+  const nonce = _resolveCurrentCspNonce();
+  return nonce ? { nonce } : undefined;
 }
 
 function escapeFarmHtmlAttribute(value) {
@@ -6811,6 +6826,7 @@ async function renderFarmElement(ReactDOMServer, element, routeKey) {
   if (farmRendererStreamingCapabilities.web &&
       typeof ReactDOMServer.renderToReadableStream === "function") {
     const stream = await ReactDOMServer.renderToReadableStream(element, {
+      nonce: _resolveCurrentCspNonce(),
       onError(error) {
         // redirect()/notFound() are control flow, not render failures: the
         // request handler must still receive them to map the response status,
@@ -6943,6 +6959,7 @@ async function renderFarmElement(ReactDOMServer, element, routeKey) {
       },
     };
     pipeableStream = ReactDOMServer.renderToPipeableStream(element, {
+      nonce: _resolveCurrentCspNonce(),
       onShellReady() {
         try {
           pipeableStream.pipe(destination);
@@ -7005,7 +7022,10 @@ async function renderFarmElement(ReactDOMServer, element, routeKey) {
   }
 
   if (ReactDOMServer.renderToStringWithHead) {
-    const rendered = await ReactDOMServer.renderToStringWithHead(element);
+    const rendered = await ReactDOMServer.renderToStringWithHead(
+      element,
+      getFarmRendererRenderOptions(),
+    );
     return {
       html: rendered.html,
       head: rendered.head || "",
@@ -7013,7 +7033,7 @@ async function renderFarmElement(ReactDOMServer, element, routeKey) {
       streamErrors,
     };
   }
-  const html = await ReactDOMServer.renderToString(element);
+  const html = await ReactDOMServer.renderToString(element, getFarmRendererRenderOptions());
   return { html, head: "", shellHtml: html, streamErrors };
 }
 
@@ -7052,7 +7072,7 @@ function renderFarmElementSync(ReactDOMServer, element, routeKey) {
   if (typeof ReactDOMServer.renderToString !== "function") return undefined;
   let html;
   try {
-    html = ReactDOMServer.renderToString(element);
+    html = ReactDOMServer.renderToString(element, getFarmRendererRenderOptions());
   } catch {
     html = undefined;
   }
@@ -7067,6 +7087,8 @@ function renderFarmElementSync(ReactDOMServer, element, routeKey) {
 function createFarmDocumentStream(contentStream, prefix, suffix, onComplete) {
   const encoder = new TextEncoder();
   const reader = contentStream.getReader();
+  // The suffix renders after the handler returned, outside its async scope.
+  const cspNonce = _resolveCurrentCspNonce();
   return new ReadableStream({
     start(controller) {
       controller.enqueue(encoder.encode(prefix));
@@ -7075,7 +7097,9 @@ function createFarmDocumentStream(contentStream, prefix, suffix, onComplete) {
       try {
         const result = await reader.read();
         if (result.done) {
-          const tail = typeof suffix === "function" ? await suffix() : suffix;
+          const tail = typeof suffix === "function"
+            ? await _runWithFarmCspNonce(cspNonce, suffix)
+            : suffix;
           controller.enqueue(encoder.encode(tail));
           if (onComplete) onComplete();
           controller.close();
@@ -7202,7 +7226,7 @@ function createFarmErrorDocument(html, title) {
       '</head>\\n<body>\\n' +
       '  <div id="root">' + html + '</div>\\n' +
       '  ' + renderFarmClientBootstrapScript() + '\\n' +
-      '  <script type="module" src="/__farm_client_js_src__"></script>\\n' +
+      '  ' + renderFarmClientEntryScript() + '\\n' +
       '</body>\\n</html>';
   }
 
@@ -7221,7 +7245,7 @@ function createFarmErrorDocument(html, title) {
       /<\\/body>/i,
       function() {
         return '  ' + renderFarmClientBootstrapScript() + '\\n' +
-          '  <script type="module" src="/__farm_client_js_src__"></script>\\n</body>';
+          '  ' + renderFarmClientEntryScript() + '\\n</body>';
       },
     );
   return fullHtml.trim().startsWith("<!DOCTYPE")
@@ -7261,7 +7285,7 @@ function applyFarmI18nDocument(html, requestPath, snapshot, request, metadata) {
   });
   const runtimeMarkup =
     renderFarmI18nAlternateLinks(requestPath, snapshot, request, metadata) +
-    '<script>window.__FARM_I18N__ = ' + serializeFarmInlineValue(snapshot) + ';</script>';
+    stampFarmCspNonce('<script>window.__FARM_I18N__ = ' + serializeFarmInlineValue(snapshot) + ';</script>');
   nextHtml = nextHtml.replace(/<head([^>]*)>/i, function(_match, attributes) {
     // Function replacement: runtimeMarkup may contain $-sequences ($&, $', $$).
     return '<head' + attributes + '>' + runtimeMarkup;
@@ -8194,7 +8218,7 @@ ${
   if (!html.includes('src="/__farm_client_js_src__"')) {
     html = html.replace(
       /<[/]body>/i,
-      '  <script type="module" src="/__farm_client_js_src__"></script>\\n</body>',
+      function() { return '  ' + renderFarmClientEntryScript() + '\\n</body>'; },
     );
   }
   if (!html.includes('window._$HY')) {
@@ -8233,6 +8257,9 @@ function resolvePPRConfig(route) {
 }
 
 function getPPRShellBypassReason(request, middlewareData, middlewareContext) {
+  // A shared shell would carry one response's nonce to every visitor, where
+  // the nonce filter strips it and Farm's scripts stop running.
+  if (farmSecurityConfig.csp && farmSecurityConfig.csp.nonce) return "csp-nonce";
   const method = request.method.toUpperCase();
   if (method !== "GET" && method !== "HEAD") return "method";
   if (request.headers.get("cookie")) return "cookie";
@@ -8671,7 +8698,7 @@ async function handleFarmRequestInContext(
   ) {
     const method = request.method.toUpperCase();
     const response = method === "GET" || method === "HEAD"
-      ? farmOwnedResponse(method === "HEAD" ? null : farmOpenAPIReference.html, {
+      ? farmOwnedResponse(method === "HEAD" ? null : stampFarmCspNonce(farmOpenAPIReference.html), {
           status: 200,
           headers: {
             "Content-Type": "text/html; charset=utf-8",
@@ -9380,7 +9407,7 @@ async function handleFarmRequestInContext(
               routeSlotPayload,
               clientPageProps
             ) + '\\n' +
-            '  <script type="module" src="/__farm_client_js_src__"></script>\\n' +
+            '  ' + renderFarmClientEntryScript() + '\\n' +
             '</body>\\n</html>';
           const themedStreamPrefix = streamPrefix.replace(
             '<html lang="en">',
@@ -9404,7 +9431,8 @@ async function handleFarmRequestInContext(
               try {
                 return createLateNotFoundRecovery(
                   await ReactDOMServer.renderToString(
-                    wrapWithFarmIntegrationProviders(createFarmNotFoundElement(pathname))
+                    wrapWithFarmIntegrationProviders(createFarmNotFoundElement(pathname)),
+                    getFarmRendererRenderOptions()
                   )
                 ) + streamSuffix;
               } catch (error) {
@@ -9412,7 +9440,10 @@ async function handleFarmRequestInContext(
                 // needs their context cannot render alone, so use Farm's.
                 console.warn("not-found page could not render outside its layout, using Farm's:", error);
                 return createLateNotFoundRecovery(
-                  await ReactDOMServer.renderToString(React.createElement(FarmDefault404Page))
+                  await ReactDOMServer.renderToString(
+                    React.createElement(FarmDefault404Page),
+                    getFarmRendererRenderOptions()
+                  )
                 ) + streamSuffix;
               }
             },
@@ -9495,7 +9526,7 @@ async function handleFarmRequestInContext(
                 routeSlotPayload,
                 clientPageProps
               ) + '\\n' +
-                '  <script type="module" src="/__farm_client_js_src__"></script>\\n</body>',
+                '  ' + renderFarmClientEntryScript() + '\\n</body>',
             );
           
           // Last, so the charset (and the viewport, unless the layout wrote one) open the head.
@@ -9520,7 +9551,7 @@ async function handleFarmRequestInContext(
 <body>
   <div id="root">\${html}</div>
   \${renderFarmClientBootstrapScript(pageProps.__farmCanonicalPath, routeSlotPayload, clientPageProps)}
-  <script type="module" src="/__farm_client_js_src__"></script>
+  \${renderFarmClientEntryScript()}
 </body>
 </html>\`;
         }
@@ -9696,14 +9727,14 @@ async function handleFarmRequestInContext(
         }
       }
 
-      const fallbackHtml = createDefaultErrorMarkup({
+      const fallbackHtml = stampFarmCspNonce(createDefaultErrorMarkup({
         statusCode: errorStatus,
         statusText: errorStatusText,
         requestPath: pathname,
         method: request.method,
         development: false,
         mode: "production",
-      });
+      }));
       const fallbackDocument = applyFarmThemeDocument(
         applyFarmI18nDocument(
           createFarmErrorDocument(
@@ -9794,7 +9825,7 @@ ${
     }
     notFoundElement = wrapWithFarmIntegrationProviders(notFoundElement);
     
-    const html = await ReactDOMServer.renderToString(notFoundElement);
+    const html = await ReactDOMServer.renderToString(notFoundElement, getFarmRendererRenderOptions());
     // The layouts' and the not-found page's metadata, as the development renderer uses it.
     const notFoundMetadata = renderMetadataHead(
       await resolveFarmNotFoundMetadata(
@@ -9824,7 +9855,7 @@ ${
         .replace(
           /<\\/body>/i,
           () => '  ' + renderFarmClientBootstrapScript() + '\\n' +
-            '  <script type="module" src="/__farm_client_js_src__"></script>\\n</body>',
+            '  ' + renderFarmClientEntryScript() + '\\n</body>',
         );
       fullHtml = ensureFarmDocumentMeta(fullHtml, notFoundMetadata.viewport);
       if (!fullHtml.trim().startsWith('<!DOCTYPE')) {
@@ -9844,7 +9875,7 @@ ${
 <body>
   <div id="root">\${html}</div>
   \${renderFarmClientBootstrapScript()}
-  <script type="module" src="/__farm_client_js_src__"></script>
+  \${renderFarmClientEntryScript()}
 </body>
 </html>\`;
     }
@@ -9986,6 +10017,9 @@ async function handleFarmFetch(request, context) {
     () =>
       runWithFarmRequestSpan(request, async () => {
         const runtimeOptions = farmPluginRuntime ? getFarmPluginRequestOptions(request) : null;
+        // Created before rendering so only scripts Farm, the renderer, or the
+        // app (through getCspNonce()) give it carry the response nonce.
+        const cspNonce = createFarmCspNonce(farmSecurityConfig);
         const prepareResponse = async (runtimeRequest, responsePromise) => {
           const response = await responsePromise;
           // Headers need the path eagerly; preload reporting needs it only for
@@ -9997,6 +10031,7 @@ async function handleFarmFetch(request, context) {
             applyFarmCspNonceToResponse(
               applyConfiguredResponseHeaders(response, routePathname),
               farmSecurityConfig,
+              cspNonce,
             ),
             routePathname,
             runtimeRequest,
@@ -10033,7 +10068,7 @@ async function handleFarmFetch(request, context) {
           }prepareResponse(request, handleFarmRequest(request, context));
 
         const response = await _runWithCurrentRequest(request, () =>
-          _runWithAfterRequest(request, runRequest, context),
+          _runWithFarmCspNonce(cspNonce, () => _runWithAfterRequest(request, runRequest, context)),
         );
         return ${hasCompressionRuntime && !hasPluginRuntime ? "compressFarmResponse(request, response, getFarmOwnedBufferedHtml(response), farmLazyBufferedHtml.has(response))" : "response"};
       }),

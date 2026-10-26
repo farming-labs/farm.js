@@ -1,4 +1,5 @@
 import { _markFarmOwnedResponse, _withFarmResponseHeaders } from "./owned-response";
+import { _resolveCurrentCspNonce } from "./server/request-bridge";
 
 export type FarmCspDirectiveValue = string | readonly string[] | boolean | null | undefined;
 
@@ -14,8 +15,9 @@ export interface FarmCspOptions {
   /**
    * Generate a fresh nonce for every dynamic HTML response and per-page
    * script hashes for prerendered HTML. Farm adds the matching sources to the
-   * governing script directive and stamps dynamic script elements with the
-   * response nonce.
+   * governing script directive. Only Farm's own scripts, the renderer's
+   * streaming scripts, and scripts the app gives `getCspNonce()` carry the
+   * nonce (or get a hash); every other script element loses its nonce.
    */
   nonce?: boolean;
 }
@@ -205,8 +207,29 @@ function applyFarmCspScriptSourcesToPolicy(policy: string, sources: readonly str
     .join("; ");
 }
 
+/**
+ * Stamp `nonce` on every script element in `html`. Only for markup Farm
+ * generates itself: app and renderer output must never pass through here,
+ * or an injected script would receive the nonce.
+ */
 export function addFarmCspNonceToScriptTags(html: string, nonce: string): string {
   validateCspNonce(nonce);
+  return createFarmScriptTagRewriter((tag) => stampScriptTag(tag, nonce)).write(html, true);
+}
+
+/**
+ * Stamp the nonce of the response being rendered on Farm-generated `html`.
+ * Returns `html` unchanged outside nonce mode.
+ */
+export function stampFarmCspNonce(
+  html: string,
+  nonce: string | undefined = _resolveCurrentCspNonce(),
+): string {
+  return nonce && html ? addFarmCspNonceToScriptTags(html, nonce) : html;
+}
+
+/** Keep `nonce` only on script elements that already carry it; strip every other nonce. */
+export function filterFarmCspNonces(html: string, nonce: string): string {
   return createFarmCspNonceRewriter(nonce).write(html, true);
 }
 
@@ -214,6 +237,11 @@ export function removeFarmCspNoncesFromScriptTags(html: string): string {
   return createFarmScriptTagRewriter(stripScriptNonceAttribute).write(html, true);
 }
 
+/**
+ * Hashes of the inline scripts in `html` that carry a nonce attribute: the
+ * scripts the response nonce filter kept, which are Farm's own and the ones
+ * the app opted in with `getCspNonce()`.
+ */
 export async function createFarmCspScriptHashes(html: string): Promise<string[]> {
   const hashes: string[] = [];
   const seen = new Set<string>();
@@ -238,8 +266,8 @@ export async function applyFarmCspHashesToHtml(
   security: ResolvedFarmSecurityConfig,
 ): Promise<{ html: string; header: { key: string; value: string } } | undefined> {
   if (!security.csp || !security.csp.nonce) return undefined;
+  const hashes = await createFarmCspScriptHashes(html);
   const staticHtml = removeFarmCspNoncesFromScriptTags(html);
-  const hashes = await createFarmCspScriptHashes(staticHtml);
   return {
     html: staticHtml,
     header: {
@@ -251,14 +279,20 @@ export async function applyFarmCspHashesToHtml(
   };
 }
 
+/**
+ * Send `response` with the nonce policy. `nonce` is the one the response was
+ * rendered with: script elements that carry it keep it, and every other
+ * script element loses its nonce attribute, so markup injected into the page
+ * can never run under the policy.
+ */
 export function applyFarmCspNonceToResponse(
   response: Response,
   security: ResolvedFarmSecurityConfig,
+  nonce: string | undefined = createFarmCspNonce(security),
 ): Response {
-  if (!security.csp || !security.csp.nonce) return response;
+  if (!security.csp || !security.csp.nonce || !nonce) return response;
   if (!response.headers.get("content-type")?.toLowerCase().includes("text/html")) return response;
 
-  const nonce = createFarmCspNonce(security)!;
   const securityHeader = getFarmSecurityHeader(security, nonce)!;
 
   if (!response.body) {
@@ -400,9 +434,14 @@ function validateCspNonce(value: string): void {
   }
 }
 
+/**
+ * A streaming rewriter for a response rendered with `nonce`. A script element
+ * keeps the nonce only when its own (first) nonce attribute is exactly
+ * `nonce`; every other nonce attribute is removed. It never adds a nonce.
+ */
 export function createFarmCspNonceRewriter(nonce: string) {
   validateCspNonce(nonce);
-  return createFarmScriptTagRewriter((tag) => stampScriptTag(tag, nonce));
+  return createFarmScriptTagRewriter((tag) => keepOwnScriptNonce(tag, nonce));
 }
 
 function createFarmScriptTagRewriter(transformScriptTag: (tag: string) => string) {
@@ -526,6 +565,31 @@ function stampScriptTag(tag: string, nonce: string): string {
   return `<script nonce="${nonce}"${attributes}>`;
 }
 
+function keepOwnScriptNonce(tag: string, nonce: string): string {
+  const opening = tag.match(/^<script\b/i)?.[0];
+  if (!opening) return tag;
+  const range = findScriptTagAttributeRange(tag, "nonce");
+  if (!range) return tag;
+  const stripped = stripScriptNonceAttribute(tag);
+  const attributes = stripped.slice(opening.length, -1);
+  // Browsers refuse a nonce on an element whose attributes contain "<script"
+  // or "<style" (dangling markup that swallowed a real script tag).
+  if (/<(?:script|style)/i.test(attributes)) return stripped;
+  if (readAttributeValue(tag.slice(range.start, range.end)) !== nonce) return stripped;
+  return `<script nonce="${nonce}"${attributes}>`;
+}
+
+function readAttributeValue(attribute: string): string | undefined {
+  const equals = attribute.indexOf("=");
+  if (equals === -1) return undefined;
+  const value = attribute.slice(equals + 1).trim();
+  const quote = value[0];
+  if (quote === '"' || quote === "'") {
+    return value.length > 1 && value.endsWith(quote) ? value.slice(1, -1) : undefined;
+  }
+  return value;
+}
+
 function stripScriptNonceAttribute(tag: string): string {
   let normalized = tag;
   let range = findScriptTagAttributeRange(normalized, "nonce");
@@ -567,7 +631,11 @@ function collectFarmInlineScriptContents(html: string): string[] {
     if (tagName === "plaintext") break;
     const closingStart = findRawTextEnd(html, tagName, offset);
     const contentEnd = closingStart === -1 ? html.length : closingStart;
-    if (tagName === "script" && !findScriptTagAttributeRange(tag, "src")) {
+    if (
+      tagName === "script" &&
+      findScriptTagAttributeRange(tag, "nonce") &&
+      !findScriptTagAttributeRange(tag, "src")
+    ) {
       contents.push(html.slice(offset, contentEnd));
     }
     if (closingStart === -1) break;

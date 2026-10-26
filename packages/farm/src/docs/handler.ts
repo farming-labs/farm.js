@@ -19,6 +19,7 @@ import { FARM_NAVIGATION_HEAD_SELECTOR } from "../client/document-head";
 import { farmAcceptQuality } from "../markdown";
 import type { FarmLayoutFonts } from "../font";
 import { matchesFarmIfNoneMatch } from "../server-http";
+import { stampFarmCspNonce } from "../security";
 import {
   resolveFarmDocsFontAssets,
   toFarmDocsPublicFontAssets,
@@ -1652,11 +1653,11 @@ function renderDocsSearchTrigger(showIcon = true, className = ""): string {
 
 function renderDocsSearchMount(clientEntry: string): string {
   return `<div id="farm-docs-search-root" data-farm-docs-search-root data-api="/api/docs"></div>
-  <script type="module" src="${escapeAttribute(clientEntry)}"></script>`;
+  ${stampFarmCspNonce(`<script type="module" src="${escapeAttribute(clientEntry)}"></script>`)}`;
 }
 
 function renderDocsSearchBootstrapScript(): string {
-  return `<script>${generateFarmDocsSearchBootstrapRuntime()}</script>`;
+  return stampFarmCspNonce(`<script>${generateFarmDocsSearchBootstrapRuntime()}</script>`);
 }
 
 function renderPixelToc(items: TocItem[]): string {
@@ -1689,9 +1690,9 @@ function renderDocsHashRuntimeScript(): string {
 }
 
 function renderDocsRuntimeScripts(docs: FarmDocsResolvedConfig): string {
-  return `${renderDocsRuntimeScript(docs)}
+  return stampFarmCspNonce(`${renderDocsRuntimeScript(docs)}
 ${renderDocsHashRuntimeScript()}
-${renderDocsPageActionsRuntimeScript()}`;
+${renderDocsPageActionsRuntimeScript()}`);
 }
 
 function renderFarmDocsFontPreloads(fontAssets: readonly FarmDocsPublicFontAsset[]): string {

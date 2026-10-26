@@ -19,11 +19,8 @@ import {
   FARM_DOCS_LAST_MODIFIED_MANIFEST,
 } from "../docs/last-modified";
 import { resolveFarmDocsFontAssets } from "../docs/fonts";
-import {
-  addFarmCspNonceToScriptTags,
-  applyFarmCspHashesToPolicy,
-  createFarmCspScriptHashes,
-} from "../security";
+import { applyFarmCspHashesToPolicy, createFarmCspScriptHashes } from "../security";
+import { _runWithFarmCspNonce } from "../server/request";
 describe("getFarmDocsDocumentNavigationMatchers", () => {
   it("routes enabled docs trees through document navigation", () => {
     expect(
@@ -764,18 +761,20 @@ describe("createFarmDocsHandler", () => {
   it("keeps code-copy controls compatible with nonce and static-hash CSP", async () => {
     const { root, docs } = await createDocsFixture();
     const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
-    const response = await handler(
-      new Request("http://farm.test/docs/guide", { headers: { accept: "text/html" } }),
-    );
-    const html = (await response?.text()) || "";
+    // Rendered for a nonce-mode response: the docs runtime scripts are Farm's own.
+    const html = await _runWithFarmCspNonce("docs-nonce", async () => {
+      const response = await handler(
+        new Request("http://farm.test/docs/guide", { headers: { accept: "text/html" } }),
+      );
+      return (await response?.text()) || "";
+    });
 
     expect(html).toContain("data-code-copy");
     expect((html.match(/<[a-z][^>]*>/gi) || []).some((tag) => /\son[a-z]+\s*=/i.test(tag))).toBe(
       false,
     );
 
-    const nonceHtml = addFarmCspNonceToScriptTags(html, "docs-nonce");
-    const scriptTags = nonceHtml.match(/<script\b[^>]*>/gi) || [];
+    const scriptTags = html.match(/<script\b[^>]*>/gi) || [];
     expect(scriptTags.length).toBeGreaterThan(0);
     expect(scriptTags.every((tag) => tag.includes('nonce="docs-nonce"'))).toBe(true);
 

@@ -41,6 +41,10 @@ function renderFarmClientBootstrapScript(
   );
 }
 
+function renderFarmClientEntryScript(): string {
+  return '<script type="module" src="/__farm_client_js_src__"></script>';
+}
+
 function createInjector(viewportTags = renderViewportHead(undefined)) {
   const inject = new Function(
     "html",
@@ -56,9 +60,11 @@ function createInjector(viewportTags = renderViewportHead(undefined)) {
     "renderFarmRendererHydrationScript",
     "ensureFarmDocumentMeta",
     "viewportTags",
+    "renderFarmClientEntryScript",
     "let fullHtml;\n" + extractEmittedFullDocumentInjection() + "\nreturn fullHtml;",
   );
-  return ((...args: unknown[]) => inject(...args, ensureFarmDocumentMeta, viewportTags)) as (
+  return ((...args: unknown[]) =>
+    inject(...args, ensureFarmDocumentMeta, viewportTags, renderFarmClientEntryScript)) as (
     html: string,
     title: string,
     metaTags: string,

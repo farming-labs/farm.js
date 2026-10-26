@@ -764,19 +764,23 @@ export default function Page() {
     }
   }, 120_000);
 
-  it("adds a fresh CSP nonce to production HTML and every script tag", async () => {
+  it("gives a fresh CSP nonce to Farm's scripts and opted-in app scripts only", async () => {
     const root = await createProductionFixture();
 
     try {
       await fs.writeFile(
         path.join(root, "src", "app", "page.tsx"),
         `
-export default function Page() {
+import { getCspNonce } from "@farm.js/core";
+export const dynamic = "force-dynamic";
+export default async function Page({ searchParams }) {
+  const { bio = "" } = await searchParams;
   return (
     <main data-csp-nonce-page>
       Nonce-protected production output
-      <script nonce="stale-build-nonce" dangerouslySetInnerHTML={{ __html: "window.city='İİİİİİİİ 🌱';" }} />
-      <script>window.appReady=true</script>
+      <script data-app="stale" nonce="stale-build-nonce" dangerouslySetInnerHTML={{ __html: "window.city='İİİİİİİİ 🌱';" }} />
+      <script data-app="opted-in" nonce={getCspNonce()} dangerouslySetInnerHTML={{ __html: "window.appReady=true" }} />
+      <div dangerouslySetInnerHTML={{ __html: bio }} />
     </main>
   );
 }
@@ -801,20 +805,40 @@ export default function Page() {
 
       await build(config, { root, preset: "node-server" });
 
+      const injected = encodeURIComponent(
+        '<script data-app="injected">window.pwned=1</script>' +
+          '<script data-app="guessed" nonce="guessed">window.pwned=2</script>',
+      );
       await runProductionRequest(
         path.join(root, ".farm", ".output", "server"),
         async (response) => {
           expect(response.status).toBe(200);
-          const firstPolicy = response.headers.get("content-security-policy") ?? "";
+          const firstResponse = await fetch(new URL(`/?bio=${injected}`, response.url));
+          const firstPolicy = firstResponse.headers.get("content-security-policy") ?? "";
           const firstNonce = firstPolicy.match(/'nonce-([^']+)'/)?.[1];
-          const firstHtml = await response.text();
+          const firstHtml = await firstResponse.text();
           const firstScripts = Array.from(firstHtml.matchAll(/<script\b[^>]*>/gi), ([tag]) => tag);
+          const appScripts = firstScripts.filter((tag) => tag.includes("data-app="));
+          // Data blocks never run, so they need no nonce.
+          const frameworkScripts = firstScripts.filter(
+            (tag) => !tag.includes("data-app=") && !tag.includes('type="application/json"'),
+          );
+          const appScript = (name: string) =>
+            appScripts.find((tag) => tag.includes(`data-app="${name}"`));
 
           expect(firstNonce).toBeTruthy();
           expect(firstPolicy).not.toContain("'unsafe-inline'");
           expect(firstHtml).toContain("window.city='İİİİİİİİ 🌱';");
-          expect(firstScripts.length).toBeGreaterThan(0);
-          expect(firstScripts.every((tag) => tag.includes(`nonce="${firstNonce}"`))).toBe(true);
+          expect(firstHtml).toContain("window.pwned=1");
+          // The inline bootstrap and the client entry.
+          expect(frameworkScripts.length).toBeGreaterThanOrEqual(2);
+          expect(frameworkScripts.every((tag) => tag.includes(`nonce="${firstNonce}"`))).toBe(true);
+          expect(frameworkScripts.some((tag) => /type="module"[^>]*src=/.test(tag))).toBe(true);
+          expect(appScript("opted-in")).toContain(`nonce="${firstNonce}"`);
+          for (const name of ["stale", "injected", "guessed"]) {
+            expect(appScript(name)).toBeDefined();
+            expect(appScript(name)).not.toMatch(/\bnonce\s*=/i);
+          }
 
           const secondResponse = await fetch(response.url);
           const secondPolicy = secondResponse.headers.get("content-security-policy") ?? "";
@@ -827,8 +851,101 @@ export default function Page() {
 
           expect(secondNonce).toBeTruthy();
           expect(secondNonce).not.toBe(firstNonce);
-          expect(secondScripts.length).toBeGreaterThan(0);
-          expect(secondScripts.every((tag) => tag.includes(`nonce="${secondNonce}"`))).toBe(true);
+          expect(secondHtml).not.toContain(firstNonce!);
+          expect(secondScripts.find((tag) => tag.includes('data-app="opted-in"'))).toContain(
+            `nonce="${secondNonce}"`,
+          );
+          expect(
+            secondScripts
+              .filter(
+                (tag) => !tag.includes("data-app=") && !tag.includes('type="application/json"'),
+              )
+              .every((tag) => tag.includes(`nonce="${secondNonce}"`)),
+          ).toBe(true);
+        },
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("runs Farm's scripts and blocks injected ones in the browser under a nonce CSP", async () => {
+    const executablePath = await resolveInstalledChromiumExecutable();
+    if (!executablePath) return;
+    const root = await createProductionFixture();
+    try {
+      await fs.mkdir(path.join(root, "src", "components"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "components", "counter.tsx"),
+        `
+"use client";
+import { useState } from "react";
+export default function Counter() {
+  const [count, setCount] = useState(0);
+  return <button data-counter onClick={() => setCount((value) => value + 1)}>count:{count}</button>;
+}`,
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "content.tsx"),
+        `export default function Content() { return <p id="nonce-reveal">revealed</p>; }`,
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+import React, { lazy, Suspense } from "react";
+import { getCspNonce } from "@farm.js/core";
+import Counter from "../components/counter";
+export const dynamic = "force-dynamic";
+const Content = lazy(() => import("./content"));
+export default async function Page({ searchParams }) {
+  const { bio = "" } = await searchParams;
+  return (
+    <main>
+      <script nonce={getCspNonce()} dangerouslySetInnerHTML={{ __html: "window.appReady=true" }} />
+      <div dangerouslySetInnerHTML={{ __html: bio }} />
+      <Counter />
+      <Suspense fallback={<p id="nonce-loading">loading</p>}><Content /></Suspense>
+    </main>
+  );
+}`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "production-csp-nonce-browser-test",
+          security: { csp: { nonce: true, policy: "default-src 'self'; script-src 'self'" } },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const browser = await chromium.launch({ headless: true, executablePath });
+          try {
+            const page = await browser.newPage();
+            const violations: string[] = [];
+            page.on("console", (message) => {
+              if (/Content Security Policy/.test(message.text())) violations.push(message.text());
+            });
+            const bio = encodeURIComponent(
+              '<script>window.pwned="script"</script>' +
+                '<script nonce="guess">window.pwned="guessed"</script>',
+            );
+            await page.goto(new URL(`/?bio=${bio}`, response.url).toString());
+            await page.locator("#nonce-reveal").waitFor({ state: "visible" });
+            await page.locator("[data-counter]").click();
+            await expect.poll(() => page.locator("[data-counter]").textContent()).toBe("count:1");
+            expect(await page.evaluate(() => (window as any).appReady)).toBe(true);
+            expect(await page.evaluate(() => (window as any).pwned)).toBeUndefined();
+            expect(violations.length).toBeGreaterThanOrEqual(2);
+          } finally {
+            await browser.close();
+          }
         },
       );
     } finally {
@@ -924,17 +1041,19 @@ export default function Page() {
     120_000,
   );
 
-  it("hashes Unicode inline scripts exactly in prerendered production HTML", async () => {
+  it("hashes only Farm's and opted-in inline scripts in prerendered production HTML", async () => {
     const root = await createProductionFixture();
     try {
       await fs.writeFile(
         path.join(root, "src", "app", "page.tsx"),
         `
+import { getCspNonce } from "@farm.js/core";
 export const ssg = true;
 export default function Page() {
   return <main>İstanbul
-    <script nonce="old" dangerouslySetInnerHTML={{ __html: "window.city='İİİİİİİİ 🌱';" }} />
-    <script>window.appReady=true</script>
+    <script data-app="opted-in" nonce={getCspNonce()} dangerouslySetInnerHTML={{ __html: "window.city='İİİİİİİİ 🌱';" }} />
+    <script data-app="stale" nonce="old" dangerouslySetInnerHTML={{ __html: "window.stale=true" }} />
+    <script data-app="cms" dangerouslySetInnerHTML={{ __html: "window.cms=true" }} />
   </main>;
 }`,
       );
@@ -959,15 +1078,18 @@ export default function Page() {
           expect(html).toContain("window.city='İİİİİİİİ 🌱';");
           expect(html).not.toMatch(/<script\b[^>]*\bnonce\s*=/i);
           expect(policy).not.toContain("'nonce-");
-          const contents = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
-            .filter(([, attributes]) => !/(?:^|\s)src\s*=/i.test(attributes!))
-            .map(([, , content]) => content!);
-          expect(contents.length).toBeGreaterThanOrEqual(2);
-          for (const content of contents) {
-            expect(policy).toContain(
-              `'sha256-${createHash("sha256").update(content).digest("base64")}'`,
-            );
-          }
+          const hashOf = (content: string) =>
+            `'sha256-${createHash("sha256").update(content).digest("base64")}'`;
+          const inline = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].filter(
+            ([, attributes]) =>
+              !/(?:^|\s)src\s*=/i.test(attributes!) && !attributes!.includes("application/json"),
+          );
+          const framework = inline.filter(([, attributes]) => !attributes!.includes("data-app="));
+          expect(framework.length).toBeGreaterThanOrEqual(1);
+          for (const [, , content] of framework) expect(policy).toContain(hashOf(content!));
+          expect(policy).toContain(hashOf("window.city='İİİİİİİİ 🌱';"));
+          expect(policy).not.toContain(hashOf("window.stale=true"));
+          expect(policy).not.toContain(hashOf("window.cms=true"));
         },
       );
     } finally {

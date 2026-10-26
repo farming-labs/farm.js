@@ -9,6 +9,7 @@ import { resolveFarmI18nConfig } from "../i18n/config";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import { FarmI18nRuntime } from "../i18n/runtime";
 import { REACT_RENDERER } from "../renderer";
+import { stampFarmCspNonce } from "../security";
 import { ServerRenderer } from "../server/renderer";
 import { resolveFarmWebRequestOrigin } from "../server/request";
 import type { FarmRequest, FarmResponse } from "../types";
@@ -169,6 +170,7 @@ function createProductionI18nDocument(trustProxy: boolean) {
     "renderFarmLocaleAlternateLinks",
     "escapeFarmHtmlAttribute",
     "serializeFarmInlineValue",
+    "stampFarmCspNonce",
     `${emitted}\nreturn applyFarmI18nDocument;`,
   )(
     { trustProxy },
@@ -177,6 +179,7 @@ function createProductionI18nDocument(trustProxy: boolean) {
     renderFarmLocaleAlternateLinks,
     (value: string) => value.replace(/&/g, "&amp;").replace(/"/g, "&quot;"),
     (value: unknown) => JSON.stringify(value),
+    stampFarmCspNonce,
   ) as (
     html: string,
     requestPath: string,

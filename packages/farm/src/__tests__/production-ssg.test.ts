@@ -339,12 +339,13 @@ export default {
   await fs.writeFile(
     path.join(root, "src", "app", "layout.tsx"),
     `
+import { getCspNonce } from "@farm.js/core";
 export default function Layout({ children }) {
   return (
     <html>
       <body>
         {children}
-        <script dangerouslySetInnerHTML={{ __html: "globalThis.__farmStaticCsp = true;" }} />
+        <script nonce={getCspNonce()} dangerouslySetInnerHTML={{ __html: "globalThis.__farmStaticCsp = true;" }} />
       </body>
     </html>
   );
@@ -530,9 +531,11 @@ function renderedAt(html: string): string {
   return match[1];
 }
 
+// Inline scripts the browser executes; JSON data blocks never run and need no hash.
 function inlineScriptHashes(html: string): string[] {
   return [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
     .filter((match) => !/(?:^|\s)src\s*=/i.test(match[1]!))
+    .filter((match) => !/type="application\/(?:ld\+)?json"/i.test(match[1]!))
     .map((match) => `sha256-${createHash("sha256").update(match[2]!).digest("base64")}`);
 }
 

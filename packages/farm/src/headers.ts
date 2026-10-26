@@ -1,4 +1,5 @@
 import { getCurrentRequest } from "./server/request";
+import { _resolveCurrentCspNonce } from "./server/request-bridge";
 import { parseRequestCookieHeader } from "./request-cookies";
 
 export interface RequestCookie {
@@ -47,4 +48,17 @@ export function cookies(): ReadonlyRequestCookies {
       return parsed[Symbol.iterator]();
     },
   };
+}
+
+/**
+ * The CSP nonce of the response being rendered, or `undefined` when
+ * `security.csp.nonce` is off or nothing is being rendered.
+ *
+ * In nonce mode Farm keeps the nonce only on scripts that carry it: its own
+ * bootstraps and the renderer's streaming scripts. Pass it to an inline
+ * script the app writes itself, `<script nonce={getCspNonce()}>`, to let that
+ * script run. Every other script loses its nonce attribute.
+ */
+export function getCspNonce(): string | undefined {
+  return _resolveCurrentCspNonce();
 }

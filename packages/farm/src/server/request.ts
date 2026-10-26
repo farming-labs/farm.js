@@ -1,7 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Readable } from "node:stream";
 import type { FarmRequest } from "../types";
-import { _setAppRequestView, _setCurrentRequestResolver } from "./request-bridge";
+import {
+  _setAppRequestView,
+  _setCspNonceResolver,
+  _setCurrentRequestResolver,
+} from "./request-bridge";
 
 const REQUEST_STORAGE_KEY = Symbol.for("@farm.js/core/request-storage");
 
@@ -80,6 +84,28 @@ function getAppRequestView(request: Request): Request {
 }
 
 _setCurrentRequestResolver(() => requestStore.getStore());
+
+// The CSP nonce of the response being rendered. It is scoped apart from the
+// request because rewrites and middleware replace the Request object while
+// the response (and its nonce) stays the same.
+const CSP_NONCE_STORAGE_KEY = Symbol.for("@farm.js/core/csp-nonce-storage");
+
+function getCspNonceStore(): AsyncLocalStorage<string> {
+  const runtime = globalThis as typeof globalThis & Record<PropertyKey, unknown>;
+  const existing = runtime[CSP_NONCE_STORAGE_KEY];
+  if (existing instanceof AsyncLocalStorage) return existing as AsyncLocalStorage<string>;
+  const storage = new AsyncLocalStorage<string>();
+  runtime[CSP_NONCE_STORAGE_KEY] = storage;
+  return storage;
+}
+
+const cspNonceStore = getCspNonceStore();
+_setCspNonceResolver(() => cspNonceStore.getStore());
+
+/** @internal Run `fn` while rendering a response that carries `nonce`. */
+export function _runWithFarmCspNonce<T>(nonce: string | undefined, fn: () => T): T {
+  return nonce ? cspNonceStore.run(nonce, fn) : fn();
+}
 _setAppRequestView(getAppRequestView);
 
 export interface FarmRequestURLOptions {
