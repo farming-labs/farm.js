@@ -74,7 +74,8 @@ import { isFarmMarkdownPageFile } from "../app-markdown";
 import { resolveFarmMdxComponentsModulePath, resolveMdxConfig } from "../app-markdown-config";
 import type { ProgrammaticRedirectRoute } from "../routes";
 import type { NitroConfig } from "nitro/types";
-import { applyFarmCspHashesToHtml } from "../security";
+import { applyFarmCspHashesToHtml, createFarmCspNonce } from "../security";
+import { _runWithFarmCspNonce } from "../server/request";
 import {
   applyFarmWorkflowVercelCrons,
   prepareFarmWorkflowsForNitro,
@@ -4692,29 +4693,38 @@ async function buildSSRInMemory(
       (pathname) => adapterGuardedPaths.has(pathname),
     );
   }
+  // Precompiled docs pages are served again on every request, so in nonce mode
+  // Farm's scripts in them carry a build-time marker each response swaps for
+  // its own nonce, instead of a nonce that a later response would strip.
+  const farmDocsCspNonceMarker = createFarmCspNonce(config.security);
   const farmDocsPrecompiledManifest =
     config.docs?.enabled && getFarmPresetRuntime(preset) === "edge"
-      ? config.docs.adapter?.server
-        ? await compileFarmDocsAdapterEdgeManifest(config.docs, {
-            root,
-            srcDir: config.srcDir,
-            clientEntry: FARM_CLIENT_JS_SRC_PLACEHOLDER,
-            fontStylesheetHref: "/farm-fonts.css",
-            globalStylesheetHref: "/assets/globals.css",
-          })
-        : await (async () => {
-            const guardedPaths = new Set(getFarmDocsGuardedPaths(config, middlewareRoutes));
-            return compileFarmDocsManifest(config.docs, {
-              root,
-              srcDir: config.srcDir,
-              clientEntry: FARM_CLIENT_JS_SRC_PLACEHOLDER,
-              fontAssets: toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(root)),
-              fontStylesheetHref: "/farm-fonts.css",
-              globalStylesheetHref: "/assets/globals.css",
-              isPathGuarded: (pathname) => guardedPaths.has(pathname),
-            });
-          })()
+      ? await _runWithFarmCspNonce(farmDocsCspNonceMarker, async () =>
+          config.docs!.adapter?.server
+            ? await compileFarmDocsAdapterEdgeManifest(config.docs!, {
+                root,
+                srcDir: config.srcDir,
+                clientEntry: FARM_CLIENT_JS_SRC_PLACEHOLDER,
+                fontStylesheetHref: "/farm-fonts.css",
+                globalStylesheetHref: "/assets/globals.css",
+              })
+            : await (async () => {
+                const guardedPaths = new Set(getFarmDocsGuardedPaths(config, middlewareRoutes));
+                return compileFarmDocsManifest(config.docs!, {
+                  root,
+                  srcDir: config.srcDir,
+                  clientEntry: FARM_CLIENT_JS_SRC_PLACEHOLDER,
+                  fontAssets: toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(root)),
+                  fontStylesheetHref: "/farm-fonts.css",
+                  globalStylesheetHref: "/assets/globals.css",
+                  isPathGuarded: (pathname) => guardedPaths.has(pathname),
+                });
+              })(),
+        )
       : null;
+  if (farmDocsPrecompiledManifest && farmDocsCspNonceMarker) {
+    farmDocsPrecompiledManifest.cspNonceMarker = farmDocsCspNonceMarker;
+  }
 
   // Generate virtual entry code that imports and bundles all routes
   // This ensures all route handlers are captured in the bundle closure

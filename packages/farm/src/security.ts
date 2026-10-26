@@ -228,6 +228,27 @@ export function stampFarmCspNonce(
   return nonce && html ? addFarmCspNonceToScriptTags(html, nonce) : html;
 }
 
+/**
+ * Swap a build-time `marker` nonce for the nonce of the response being sent.
+ * Farm renders HTML it stores and serves again (precompiled docs) with a
+ * secret marker in place of a nonce; only script elements carrying exactly
+ * that marker get the response nonce, and every other nonce is left for the
+ * response filter to strip.
+ */
+export function replaceFarmCspNonceMarker(
+  html: string,
+  marker: string,
+  nonce: string | undefined = _resolveCurrentCspNonce(),
+): string {
+  validateCspNonce(marker);
+  if (nonce) validateCspNonce(nonce);
+  return createFarmScriptTagRewriter((tag) => {
+    const range = findScriptTagAttributeRange(tag, "nonce");
+    if (!range || readAttributeValue(tag.slice(range.start, range.end)) !== marker) return tag;
+    return nonce ? stampScriptTag(tag, nonce) : stripScriptNonceAttribute(tag);
+  }).write(html, true);
+}
+
 /** Keep `nonce` only on script elements that already carry it; strip every other nonce. */
 export function filterFarmCspNonces(html: string, nonce: string): string {
   return createFarmCspNonceRewriter(nonce).write(html, true);

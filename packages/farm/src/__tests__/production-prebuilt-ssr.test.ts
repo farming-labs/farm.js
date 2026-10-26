@@ -889,6 +889,23 @@ export default function Counter() {
         path.join(root, "src", "app", "content.tsx"),
         `export default function Content() { return <p id="nonce-reveal">revealed</p>; }`,
       );
+      // A revalidated page: shared caches may keep it, so every response must
+      // still carry its own nonce on Farm's scripts.
+      await fs.mkdir(path.join(root, "src", "app", "isr"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "isr", "page.tsx"),
+        `
+import Counter from "../../components/counter";
+export const revalidate = 60;
+export default function Page() {
+  return (
+    <main>
+      <div dangerouslySetInnerHTML={{ __html: '<script>window.pwned="isr"</script>' }} />
+      <Counter />
+    </main>
+  );
+}`,
+      );
       await fs.writeFile(
         path.join(root, "src", "app", "page.tsx"),
         `
@@ -943,6 +960,32 @@ export default async function Page({ searchParams }) {
             expect(await page.evaluate(() => (window as any).appReady)).toBe(true);
             expect(await page.evaluate(() => (window as any).pwned)).toBeUndefined();
             expect(violations.length).toBeGreaterThanOrEqual(2);
+
+            const isrNonces: string[] = [];
+            for (let visit = 0; visit < 2; visit++) {
+              const isr = await page.goto(new URL("/isr", response.url).toString());
+              const policy = isr!.headers()["content-security-policy"] ?? "";
+              const nonce = policy.match(/'nonce-([^']+)'/)?.[1];
+              const isrHtml = await isr!.text();
+              // Farm's executable scripts; the injected one is checked below.
+              const tags = Array.from(
+                isrHtml.matchAll(/<script\b[^>]*>(?!window\.pwned)/gi),
+                ([tag]) => tag,
+              );
+              expect(nonce).toBeTruthy();
+              expect(isr!.headers()["cache-control"]).toContain("s-maxage=60");
+              isrNonces.push(nonce!);
+              for (const tag of tags) {
+                if (tag.includes("application/json")) continue;
+                expect(tag).toContain(`nonce="${nonce}"`);
+              }
+              expect(tags.length).toBeGreaterThanOrEqual(2);
+              expect(isrHtml).toContain('<script>window.pwned="isr"</script>');
+              await page.locator("[data-counter]").click();
+              await expect.poll(() => page.locator("[data-counter]").textContent()).toBe("count:1");
+              expect(await page.evaluate(() => (window as any).pwned)).toBeUndefined();
+            }
+            expect(isrNonces[1]).not.toBe(isrNonces[0]);
           } finally {
             await browser.close();
           }

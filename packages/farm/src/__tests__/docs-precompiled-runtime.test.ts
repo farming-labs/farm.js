@@ -8,6 +8,8 @@ import { createFarmDocsAPIHandler, createFarmDocsHandler } from "../docs";
 import { compileFarmDocsManifest } from "../docs/compiler";
 import { createFarmDocsPrecompiledRuntime } from "../docs/precompiled-runtime";
 import type { FarmDocsResolvedConfig } from "../docs/types";
+import { applyFarmCspNonceToResponse, resolveFarmSecurityConfig } from "../security";
+import { _runWithFarmCspNonce } from "../server/request";
 
 const roots: string[] = [];
 
@@ -252,5 +254,52 @@ describe("precompiled docs runtime", () => {
         fontAssets: [],
       }),
     ).rejects.toThrow("cannot serialize a custom docs search adapter");
+  });
+
+  it("gives every response its own nonce on Farm's scripts in precompiled pages", async () => {
+    const { root, docs } = await createFixture();
+    await fs.appendFile(
+      path.join(docs.contentDir!, "guide", "page.md"),
+      '\n<script nonce="guess">window.pwned = true</script>\n',
+    );
+    // As the build compiles edge docs in nonce mode: under a marker nonce.
+    const marker = "0123456789abcdef0123456789abcdef";
+    const manifest = await _runWithFarmCspNonce(marker, () =>
+      compileFarmDocsManifest(docs, {
+        root,
+        srcDir: "src",
+        clientEntry: "/farm-client.js",
+        fontAssets: [],
+        fontStylesheetHref: "/farm-fonts.css",
+        globalStylesheetHref: "/assets/globals.css",
+      }),
+    );
+    manifest.cspNonceMarker = marker;
+    const compiled = createFarmDocsPrecompiledRuntime(manifest);
+    const security = resolveFarmSecurityConfig({
+      csp: { policy: "script-src 'self'", nonce: true },
+    });
+
+    for (const nonce of ["firstresponse", "secondresponse"]) {
+      const html = await _runWithFarmCspNonce(nonce, async () => {
+        const response = await compiled.handleDocsRequest(
+          new Request("https://docs.example/docs/guide", { headers: { accept: "text/html" } }),
+        );
+        return applyFarmCspNonceToResponse(response!, security, nonce).text();
+      });
+      const scripts = html.match(/<script\b[^>]*>/gi) ?? [];
+      const farmScripts = scripts.filter((tag) => !/application\/(?:ld\+)?json/.test(tag));
+      expect(html).not.toContain(marker);
+      expect(farmScripts.length).toBeGreaterThan(1);
+      const injected = html.match(/<script\b[^>]*>window\.pwned/);
+      expect(injected).not.toBeNull();
+      for (const tag of farmScripts) {
+        if (injected && injected[0].startsWith(tag)) {
+          expect(tag).not.toMatch(/\bnonce\s*=/);
+        } else {
+          expect(tag).toContain(`nonce="${nonce}"`);
+        }
+      }
+    }
   });
 });
