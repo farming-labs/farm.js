@@ -116,6 +116,24 @@ export async function POST(request: Request) {
 
 `abortSignal: request.signal` stops the model when the visitor closes the page. For a chat route without tools, [`@farm.js/ai`](/docs/integrations) provides `aiChatRoute()`.
 
+`aiChatRoute()` accepts file attachments only as `data:` URLs, which is what `useChat` sends for
+attached files. A `file` or `reasoning-file` part with any other URL answers 400, and the server
+fetches no file URL that model messages carry, so a visitor cannot make it request an internal
+address. To accept files you host, allow their URLs:
+
+```ts
+import { aiChatRoute } from "@farm.js/ai";
+
+export const POST = aiChatRoute({
+  model: "openai/gpt-4o-mini",
+  allowFileUrls: (url) => url.origin === "https://files.example.com",
+});
+```
+
+`allowFileUrls: true` accepts every URL, as the AI SDK does by default. The function sees the
+requested URL only, so allow an origin that does not redirect elsewhere. An
+`experimental_download` you pass in `options` or `prepare` replaces this check.
+
 ## Mastra
 
 ```bash

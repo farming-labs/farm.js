@@ -1,6 +1,7 @@
 import { createEndpoint } from "@farm.js/core";
 import {
   convertToModelMessages,
+  createDownload,
   streamText,
   type LanguageModel,
   type UIMessage,
@@ -11,6 +12,7 @@ type AIStreamTextFunction = typeof streamText;
 type AIConvertToModelMessagesFunction = typeof convertToModelMessages;
 type AIStreamTextInput = Parameters<AIStreamTextFunction>[0];
 type AIConvertToModelMessagesOptions = NonNullable<Parameters<AIConvertToModelMessagesFunction>[1]>;
+type AIDownloadFunction = NonNullable<AIStreamTextInput["experimental_download"]>;
 
 export interface AIChatRequestBody<TMessage = Omit<UIMessage, "id">> {
   messages: TMessage[];
@@ -53,6 +55,13 @@ export interface AIChatRouteOptions<TBody extends AIChatRequestBody = AIChatRequ
         context: AIChatPrepareContext<TBody>,
       ) => AIChatResponseOptions | Promise<AIChatResponseOptions>);
   selectMessages?: (body: TBody, request: Request) => unknown[];
+  /**
+   * Hosted file URLs the route may fetch. By default a client's `file` and
+   * `reasoning-file` parts must carry a `data:` URL, and the server downloads no file URL,
+   * so a visitor cannot make it fetch an internal address. `true` restores the AI SDK's
+   * download behavior; a function accepts only the URLs it returns `true` for.
+   */
+  allowFileUrls?: boolean | ((url: URL) => boolean);
   prepare?: (
     context: AIChatPrepareContext<TBody>,
   ) => AIChatStreamTextOptions | Promise<AIChatStreamTextOptions>;
@@ -142,6 +151,11 @@ async function createAIChatResponse<TBody extends AIChatRequestBody>(
     ]);
   }
 
+  const fileUrlIssues = findDisallowedFileUrls(messages, input.allowFileUrls);
+  if (fileUrlIssues.length > 0) {
+    return createAIChatValidationResponse(fileUrlIssues);
+  }
+
   const convertMessages = input.convertToModelMessages ?? convertToModelMessages;
   const modelMessages = await convertMessages(
     messages as Parameters<AIConvertToModelMessagesFunction>[0],
@@ -158,6 +172,9 @@ async function createAIChatResponse<TBody extends AIChatRequestBody>(
   };
   const preparedOptions = await input.prepare?.(prepareContext);
   const streamInput = {
+    ...(input.allowFileUrls === true
+      ? {}
+      : { experimental_download: createFileUrlDownload(input.allowFileUrls) }),
     ...input.options,
     system: input.system ?? input.options?.system,
     instructions: input.instructions ?? input.options?.instructions,
@@ -281,6 +298,71 @@ function validateAIChatRequestBody(value: unknown):
     success: true,
     data: value as AIChatRequestBody,
   };
+}
+
+function isDataUrl(url: URL) {
+  return url.protocol === "data:";
+}
+
+/** Client file parts whose URL the server would fetch or hand on, unless the app allows it. */
+function findDisallowedFileUrls(
+  messages: unknown[],
+  allowFileUrls: AIChatRouteOptions["allowFileUrls"],
+): AIChatValidationIssue[] {
+  if (allowFileUrls === true) return [];
+  const issues: AIChatValidationIssue[] = [];
+  for (const [messageIndex, message] of messages.entries()) {
+    if (!isRecord(message) || !Array.isArray(message.parts)) continue;
+    for (const [partIndex, part] of message.parts.entries()) {
+      if (!isRecord(part) || (part.type !== "file" && part.type !== "reasoning-file")) continue;
+      // The AI SDK sends a provider file reference instead of the URL.
+      if (part.type === "file" && part.providerReference != null) continue;
+      const path = ["messages", messageIndex, "parts", partIndex, "url"];
+      let url: URL | undefined;
+      try {
+        url = typeof part.url === "string" ? new URL(part.url) : undefined;
+      } catch {
+        // Reported below: the AI SDK would throw on it.
+      }
+      if (!url) {
+        issues.push({
+          path,
+          code: "invalid_string",
+          message: "Expected file part url to be a URL.",
+        });
+      } else if (!isDataUrl(url) && !(typeof allowFileUrls === "function" && allowFileUrls(url))) {
+        issues.push({
+          path,
+          code: "unsupported_file_url",
+          message:
+            "Expected file part url to be a data: URL. Set allowFileUrls on aiChatRoute to accept hosted files.",
+        });
+      }
+    }
+  }
+  return issues;
+}
+
+/**
+ * The server fetches only the file URLs the app allows, wherever the model messages got
+ * them (a tool's toModelOutput, convertDataPart), instead of every URL the model cannot
+ * read itself.
+ */
+function createFileUrlDownload(
+  allowFileUrls: AIChatRouteOptions["allowFileUrls"],
+): AIDownloadFunction {
+  const download = createDownload();
+  return (requests) =>
+    Promise.all(
+      requests.map(async ({ url, isUrlSupportedByModel }) => {
+        if (typeof allowFileUrls !== "function" || !allowFileUrls(url)) {
+          throw new Error(
+            `Refusing to fetch file URL ${url.protocol}//${url.host}: set allowFileUrls on aiChatRoute to allow it.`,
+          );
+        }
+        return isUrlSupportedByModel ? null : download({ url });
+      }),
+    );
 }
 
 function createAIChatValidationResponse(issues: AIChatValidationIssue[]) {
