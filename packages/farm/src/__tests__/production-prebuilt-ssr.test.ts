@@ -764,6 +764,150 @@ export default function Page() {
     }
   }, 120_000);
 
+  it("lists a page's client modules as modulepreload links in the document head", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        `
+export default function RootLayout({ children }) {
+  return <html><head><title>Preloads</title></head><body>{children}</body></html>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "counter.tsx"),
+        `
+"use client";
+import { useState } from "react";
+
+export function Counter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(count + 1)}>count {count}</button>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+import { Counter } from "./counter";
+
+export default function Page() {
+  return <main><Counter /></main>;
+}
+`.trim(),
+      );
+      await fs.mkdir(path.join(root, "src", "app", "islands"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "islands", "page.tsx"),
+        `
+import { Counter } from "../counter";
+
+export default async function IslandsPage() {
+  return <main><h1>islands</h1><Counter /></main>;
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "client-module-preloads-test",
+          // A vendor chunk the entry imports statically, as the shared chunks of a larger app are.
+          vite: {
+            plugins: [
+              {
+                name: "react-vendor-chunk",
+                applyToEnvironment: (environment: { name: string }) =>
+                  environment.name === "client",
+                outputOptions: (options: Record<string, unknown>) => ({
+                  ...options,
+                  codeSplitting: {
+                    groups: [
+                      {
+                        name: "react-vendor",
+                        test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+                      },
+                    ],
+                  },
+                }),
+              },
+            ],
+          },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const publicDir = path.join(root, ".farm", ".output", "public");
+      const entry = (await fs.readdir(publicDir)).find((name) =>
+        /^farm-client-h[0-9a-f]+\.js$/.test(name),
+      );
+      expect(entry).toBeDefined();
+      const entryCode = await fs.readFile(path.join(publicDir, entry!), "utf8");
+      const manifest = JSON.parse(
+        await fs.readFile(path.join(root, ".farm", "client-module-preloads.json"), "utf8"),
+      ) as { files: string[]; entry: number[]; modules: Record<string, number[]> };
+      const entryImports = manifest.entry.map((index) => manifest.files[index]!);
+      const moduleChunk = (moduleId: string) => manifest.files[manifest.modules[moduleId]![0]!]!;
+      expect(entryImports.length).toBeGreaterThan(0);
+      // The entry imports the first one statically.
+      expect(entryCode).toMatch(
+        new RegExp(
+          `(?:import|from)\\s*["'\`]\\./${entryImports[0]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'\`]`,
+        ),
+      );
+
+      const preloadsIn = async (html: string) => {
+        const head = html.slice(0, html.indexOf("</head>"));
+        const files = [
+          ...head.matchAll(/<link rel="modulepreload" href="\/([^"]+)" fetchpriority="low">/g),
+        ].map(([, file]) => file!);
+        expect(new Set(files).size).toBe(files.length);
+        expect(files).not.toContain(entry);
+        await Promise.all(files.map((file) => fs.access(path.join(publicDir, file))));
+        // After the stylesheet, so the first paint's CSS is requested first.
+        expect(head.indexOf('rel="stylesheet"')).toBeLessThan(head.indexOf('rel="modulepreload"'));
+        return files;
+      };
+
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      // A hydrating page: the entry's imports, then the page module the entry imports on start.
+      await runProductionRequest(serverDir, async (response) => {
+        expect(response.status).toBe(200);
+        const files = await preloadsIn(await response.text());
+        expect(files.slice(0, entryImports.length)).toEqual(entryImports);
+        expect(files).toContain(moduleChunk("/src/app/page.tsx"));
+      });
+      // An async page: the client component its island loads.
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          expect(html).toContain('data-farm-client-boundary="/src/app/counter.tsx"');
+          const files = await preloadsIn(html);
+          expect(files).toContain(moduleChunk("/src/app/counter.tsx"));
+          expect(files).not.toContain(moduleChunk("/src/app/page.tsx"));
+        },
+        "/islands",
+      );
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(404);
+          expect(await preloadsIn(await response.text())).toEqual(entryImports);
+        },
+        "/missing",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("gives a fresh CSP nonce to Farm's scripts and opted-in app scripts only", async () => {
     const root = await createProductionFixture();
 

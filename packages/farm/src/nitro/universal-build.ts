@@ -118,6 +118,12 @@ import {
   hasFarmDocsRuntimeAdapter,
 } from "../docs/adapter";
 import {
+  createFarmClientModulePreloadPlugin,
+  encodeFarmClientModulePreloads,
+  FARM_CLIENT_MODULE_PRELOADS_PLACEHOLDER,
+  readFarmClientModulePreloads,
+} from "./client-module-preloads";
+import {
   createFarmDocsModulePreloadPlugin,
   encodeFarmDocsModulePreloads,
   FARM_DOCS_MODULE_PRELOADS_PLACEHOLDER,
@@ -1969,6 +1975,11 @@ async function buildClient(
       },
       plugins: [
         createFarmThemeCssPlugin(config.theme, config.basePath),
+        createFarmClientModulePreloadPlugin({
+          root,
+          buildDir: path.dirname(outputDir),
+          entryName: "farm-client",
+        }),
         ...(adapterOwnsDocsRuntime
           ? [
               createFarmDocsModulePreloadPlugin({
@@ -5733,7 +5744,11 @@ function renderFarmRouteServerTree(element) { return element; }`;
       route.directory ? `\n    directory: ${JSON.stringify(route.directory)},` : ""
     }
     module: ${varName},
-    shouldHydrate: ${JSON.stringify(clientMetadata.shouldHydrate)},
+    shouldHydrate: ${JSON.stringify(clientMetadata.shouldHydrate)},${
+      clientMetadata.shouldHydrate
+        ? `\n    clientModule: ${JSON.stringify(toViteModuleId(route.modulePath, config.root))},`
+        : ""
+    }
     islandStrategy: ${JSON.stringify(clientMetadata.islandStrategy)},${
       usesFarmServerTree(clientMetadata) ? "\n    serverTree: true," : ""
     }${renderingDirective ? `\n    rendering: ${JSON.stringify(renderingDirective)},` : ""}
@@ -7231,7 +7246,7 @@ function createFarmErrorDocument(html, title) {
       '  <meta name="viewport" content="width=device-width, initial-scale=1">\\n' +
       '  <link rel="icon" href="data:,">\\n' +
       '  <title>' + escapedTitle + '</title>\\n' +
-      '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n' +
+      '  <link rel="stylesheet" href="/__farm_client_css_href__">' + renderFarmClientModulePreloads(html) + '\\n' +
       renderFarmRendererHydrationScript() + '\\n' +
       '</head>\\n<body>\\n' +
       '  <div id="root">' + html + '</div>\\n' +
@@ -7242,7 +7257,7 @@ function createFarmErrorDocument(html, title) {
 
   let fullHtml = ensureFarmDocumentRoot(ensureFarmDocumentHead(fullDocument));
   fullHtml = fullHtml
-    .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
+    .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + renderFarmClientModulePreloads(fullDocument); })
     // Function replacements: dynamic markup may contain $-sequences ($&, $', $$)
     // that a string replacement would expand, corrupting the document.
     .replace(/<\\/head>/i, function() { return renderFarmRendererHydrationScript() + '\\n</head>'; })
@@ -7261,6 +7276,50 @@ function createFarmErrorDocument(html, title) {
   return fullHtml.trim().startsWith("<!DOCTYPE")
     ? fullHtml
     : "<!DOCTYPE html>\\n" + fullHtml;
+}
+
+// The client modules a page needs before it hydrates, filled in from the client
+// build once it has finished (see buildNitroUniversal).
+const farmClientModulePreloads = (() => {
+  try {
+    return JSON.parse("${FARM_CLIENT_MODULE_PRELOADS_PLACEHOLDER}");
+  } catch {
+    return null;
+  }
+})();
+const farmClientEntryPreloadTags = farmClientModulePreloads
+  ? farmClientModulePreloads.entry.map(renderFarmClientModulePreload).join("")
+  : "";
+// The client modules a document's markup loads: its islands' boundaries and the
+// client references of its server tree.
+const FARM_CLIENT_MODULE_REFERENCE_PATTERN = /data-farm-client-boundary="([^"]+)"|"r":"(\\/[^"]+)"/g;
+
+function renderFarmClientModulePreload(index) {
+  return '\\n  <link rel="modulepreload" href="/' +
+    escapeFarmHtmlAttribute(farmClientModulePreloads.files[index]) +
+    '" fetchpriority="low">';
+}
+
+// The modulepreload links for a document: the entry's static imports, then the
+// modules its hydrating page and its markup load.
+function renderFarmClientModulePreloads(markup, pageModule) {
+  if (!farmClientModulePreloads) return "";
+  const modules = farmClientModulePreloads.modules;
+  const listed = new Set();
+  let tags = farmClientEntryPreloadTags;
+  const add = (moduleId) => {
+    if (!moduleId || !Object.prototype.hasOwnProperty.call(modules, moduleId)) return;
+    for (const index of modules[moduleId]) {
+      if (listed.has(index)) continue;
+      listed.add(index);
+      tags += renderFarmClientModulePreload(index);
+    }
+  };
+  add(pageModule);
+  if (typeof markup === "string") {
+    for (const match of markup.matchAll(FARM_CLIENT_MODULE_REFERENCE_PATTERN)) add(match[1] || match[2]);
+  }
+  return tags;
 }
 
 // The origin hreflang alternates resolve against when the route sets no
@@ -9408,7 +9467,7 @@ async function handleFarmRequestInContext(
             (hasFavicon ? '' : '  <link rel="icon" href="data:,">\\n') +
             '  <title>' + title + '</title>' + metaTags + '\\n' +
             '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n' +
-            '  <link rel="modulepreload" href="/__farm_client_js_src__">\\n' +
+            '  <link rel="modulepreload" href="/__farm_client_js_src__">' + renderFarmClientModulePreloads(null, route.clientModule) + '\\n' +
             renderFarmRendererHydrationScript() + '\\n' +
             '</head>\\n<body>\\n  <div id="root">';
           const streamSuffix = '</div>\\n' +
@@ -9502,7 +9561,7 @@ async function handleFarmRequestInContext(
           );
           fullHtml = html
             // Inject CSS link after opening head tag or first meta tag
-            .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
+            .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + renderFarmClientModulePreloads(html, route.clientModule); })
             .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
             // Explicit metadata wins over renderer and layout titles. Without
             // explicit metadata, a renderer title wins over the layout title.
@@ -9555,7 +9614,7 @@ async function handleFarmRequestInContext(
   \${viewportTags}
   \${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   \${suppressDefaultTitle ? "" : "<title>" + title + "</title>"}\${metaTags}\${rendererHead ? "\\n  " + rendererHead : ""}
-  <link rel="stylesheet" href="/__farm_client_css_href__">
+  <link rel="stylesheet" href="/__farm_client_css_href__">\${renderFarmClientModulePreloads(html, route.clientModule)}
   \${renderFarmRendererHydrationScript()}
 </head>
 <body>
@@ -9860,7 +9919,7 @@ ${
           "<head" + attrs + ">" +
           headContent.replace(/<title\\b[^>]*>[\\s\\S]*?<\\/title>\\s*/gi, "") +
           "\\n  <title>" + notFoundMetadata.title + "</title>" + notFoundMetadata.tags + "\\n</head>")
-        .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
+        .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + renderFarmClientModulePreloads(fullDocument); })
         .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
         .replace(
           /<\\/body>/i,
@@ -9878,7 +9937,7 @@ ${
   <meta charset="UTF-8">
   \${notFoundMetadata.viewport}
   \${notFoundMetadata.hasFavicon ? "" : '<link rel="icon" href="data:,">'}
-  <link rel="stylesheet" href="/__farm_client_css_href__">
+  <link rel="stylesheet" href="/__farm_client_css_href__">\${renderFarmClientModulePreloads(html)}
   <title>\${notFoundMetadata.title}</title>\${notFoundMetadata.tags}
   \${renderFarmRendererHydrationScript()}
 </head>
@@ -10386,18 +10445,25 @@ async function buildNitroUniversal(
   // content hash of the bytes browsers will actually receive. Substituting in
   // memory, before any consumer, covers the disk write below as well as the
   // prebuilt-SSR copies and prerendering that reuse this bundle directly.
-  const [clientCssHref, clientJsSrc, docsModulePreloads] = await Promise.all([
+  const [clientCssHref, clientJsSrc, docsModulePreloads, clientModulePreloads] = await Promise.all([
     resolveHashedClientCssHref(clientOutputDir),
     resolveHashedClientJsSrc(clientOutputDir),
     readFarmDocsModulePreloads(path.join(root, distDir)),
+    readFarmClientModulePreloads(path.join(root, distDir)),
   ]);
   const encodedDocsModulePreloads = encodeFarmDocsModulePreloads(docsModulePreloads);
+  const encodedClientModulePreloads = encodeFarmClientModulePreloads(clientModulePreloads);
   for (const output of Object.values(ssrBundle)) {
     if (output.type !== "chunk") continue;
     if (output.code.includes(FARM_DOCS_MODULE_PRELOADS_PLACEHOLDER)) {
       output.code = output.code
         .split(FARM_DOCS_MODULE_PRELOADS_PLACEHOLDER)
         .join(encodedDocsModulePreloads);
+    }
+    if (output.code.includes(FARM_CLIENT_MODULE_PRELOADS_PLACEHOLDER)) {
+      output.code = output.code
+        .split(FARM_CLIENT_MODULE_PRELOADS_PLACEHOLDER)
+        .join(encodedClientModulePreloads);
     }
     // split/join rather than replaceAll: the package's lib target predates
     // ES2021, and a fixed token needs no regex escaping either way.
