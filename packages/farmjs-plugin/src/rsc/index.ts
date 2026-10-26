@@ -51,7 +51,11 @@ import { generateSsrEntry } from "./entries/ssr.js";
 import { generateErrorFallbackEntry } from "./entries/error-fallback.js";
 import { generateClientEntry, serverFnTransportErrorClientRuntime } from "./entries/client.js";
 import { transformFarmRouteActionClients } from "./route-action-transform.js";
-import { transformFarmServerFns } from "./server-fn-transform.js";
+import {
+  createFarmServerFnBoundaryModule,
+  isFarmServerFnBoundaryId,
+  transformFarmServerFns,
+} from "./server-fn-transform.js";
 import { transformAutomaticOptimizedBoundaries } from "./automatic-optimized-boundary.js";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
 import { assertRscPackageCompatibility } from "./compatibility.js";
@@ -1321,10 +1325,22 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
       name: "@farm.js/plugin/rsc:server-fn-actions",
       enforce: "pre",
 
-      transform(code, id) {
-        if (!rscEnabled || !actionsEnabled) return null;
+      // The "use server" boundary for a module whose server functions were
+      // found without an explicit directive. Its exports come from the source
+      // file on disk, never from the request, so nothing else can be named.
+      async load(id) {
+        if (!rscEnabled || !actionsEnabled || !isFarmServerFnBoundaryId(id)) return null;
+        const file = id.split("?", 1)[0]!;
+        this.addWatchFile(file);
+        const source = await fs.readFile(file, "utf8");
+        return createFarmServerFnBoundaryModule(source, file) ?? "export {};\n";
+      },
 
-        const result = transformFarmServerFns(code, id);
+      transform(code, id) {
+        if (!rscEnabled || !actionsEnabled || isFarmServerFnBoundaryId(id)) return null;
+
+        const environment = (this as { environment?: { name?: string } }).environment?.name;
+        const result = transformFarmServerFns(code, id, { environment: environment ?? "rsc" });
         if (!result) return null;
 
         return {
