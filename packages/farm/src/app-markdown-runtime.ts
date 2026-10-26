@@ -1,7 +1,11 @@
 import { pathToFileURL } from "url";
 import type { ComponentType } from "react";
 import type { Metadata, RouteModule } from "./types";
-import { requestAcceptsMarkdown } from "./markdown";
+import {
+  FARM_MARKDOWN_PAGE_CHECK_HEADER,
+  _getFarmMarkdownPageCheckToken,
+  requestAcceptsMarkdown,
+} from "./markdown";
 import { createFarmMarkdownViewResponse } from "./markdown-view";
 import type { FarmMdxComponents, FarmMdxResolvedConfig } from "./app-markdown-config";
 
@@ -220,7 +224,17 @@ const PAGE_CHECK_DROPPED_HEADERS = new Set([
   "range",
 ]);
 
-/** Whether this anonymous request for the page's HTML is answered with the page, unredirected. */
+/**
+ * The page segment Farm wraps around the page component, inside every layout. A layout
+ * that renders a sign-in prompt instead of its children never renders it.
+ */
+const PAGE_SEGMENT_MARKER = /<div\s[^>]*\bid=["']?__farm_page__["'\s>]/i;
+
+/**
+ * Whether this anonymous request for the page's HTML is answered with the page itself:
+ * a 2xx HTML document, unredirected, rendered to the end (so a `redirect()` under a
+ * loading boundary still sets the status), with the page segment in it.
+ */
 async function anonymousVisitorOpensPage(
   options: {
     request: Request;
@@ -236,6 +250,7 @@ async function anonymousVisitorOpensPage(
     if (!PAGE_CHECK_DROPPED_HEADERS.has(name.toLowerCase())) headers.append(name, value);
   }
   headers.set("accept", "text/html");
+  headers.set(FARM_MARKDOWN_PAGE_CHECK_HEADER, _getFarmMarkdownPageCheckToken());
   const response = await options.renderPage!(
     new Request(pageUrl, {
       method: "GET",
@@ -244,12 +259,15 @@ async function anonymousVisitorOpensPage(
       signal: options.request.signal,
     }),
   );
-  void response.body?.cancel().catch(() => {});
-  return (
-    response.status >= 200 &&
-    response.status < 300 &&
-    Boolean(response.headers.get("content-type")?.toLowerCase().includes("text/html"))
-  );
+  if (
+    response.status < 200 ||
+    response.status >= 300 ||
+    !response.headers.get("content-type")?.toLowerCase().includes("text/html")
+  ) {
+    void response.body?.cancel().catch(() => {});
+    return false;
+  }
+  return PAGE_SEGMENT_MARKER.test(await response.text());
 }
 
 function hasOnlyAnonymousHeaders(headers: Headers): boolean {
@@ -337,8 +355,21 @@ export async function createFarmMarkdownSourceResponse(options: {
       publicResponse.headers.get("X-Farm-Markdown-Route") === targetPathname &&
       publicResponse.headers.has("X-Farm-Markdown-Source")
     ) {
-      publicSourceResponses.add(publicResponse);
-      return publicResponse;
+      // The body is the anonymous visitor's, but a shared cache never learns from a
+      // request with credentials. A client address or proxy header is not one: proxies
+      // add those to every request.
+      let response = publicResponse;
+      if (options.request.headers.has("cookie") || options.request.headers.has("authorization")) {
+        const headers = new Headers(publicResponse.headers);
+        headers.set("Cache-Control", "private, no-store");
+        response = new Response(publicResponse.body, {
+          status: publicResponse.status,
+          statusText: publicResponse.statusText,
+          headers,
+        });
+      }
+      publicSourceResponses.add(response);
+      return response;
     }
     await publicResponse.body?.cancel();
     // The page is behind a guard. A credentialed caller asking for the page

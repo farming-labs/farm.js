@@ -5953,7 +5953,7 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
   // Always available: agents can request Markdown on any route, so the
   // Markdown error body is not gated on the app having Markdown page files.
   // Use the response-only module so TSX apps do not bundle the MDX compiler.
-  const markdownErrorImport = `import { FARM_MARKDOWN_CONTENT_TYPE, createFarmMarkdownErrorBody, farmRequestWantsMarkdown } from "@farm.js/core/markdown";`;
+  const markdownErrorImport = `import { FARM_MARKDOWN_CONTENT_TYPE, FARM_MARKDOWN_PAGE_CHECK_HEADER, _isFarmMarkdownPageCheck, createFarmMarkdownErrorBody, farmRequestWantsMarkdown } from "@farm.js/core/markdown";`;
   const mdxComponentsPath =
     typeof config.mdx?.components === "string"
       ? path.isAbsolute(config.mdx.components)
@@ -9217,13 +9217,16 @@ async function handleFarmRequestInContext(
 
         // Stream a suspended body as soon as React's shell is ready. Full-document
         // layouts, localized documents, and cacheable PPR shells still use the
-        // buffered path because they require whole-document transformation.
+        // buffered path because they require whole-document transformation, and so
+        // does the anonymous check behind a page's Markdown source: there, a
+        // redirect() under a loading boundary must still decide the status.
         if (
           pageStatus === 200 &&
           renderedPage.stream &&
           !hasFullDocument &&
           !farmI18nSnapshot &&
-          !pprCacheKey
+          !pprCacheKey &&
+          !_isFarmMarkdownPageCheck(request.headers.get(FARM_MARKDOWN_PAGE_CHECK_HEADER))
         ) {
           const farmThemeDocument = createFarmThemeDocumentParts(
             farmThemeConfig,

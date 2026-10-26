@@ -107,7 +107,12 @@ import {
   renderFarmLlmsFullTxt,
   resolveFarmLlmsTxtConfig,
 } from "../llms-txt";
-import { getFarmMarkdownAlternatePath, resolveMarkdownConfig } from "../markdown";
+import {
+  FARM_MARKDOWN_PAGE_CHECK_HEADER,
+  _isFarmMarkdownPageCheck,
+  getFarmMarkdownAlternatePath,
+  resolveMarkdownConfig,
+} from "../markdown";
 import { listFarmMCPLlmsTxtLinks } from "../ai-catalog";
 import { normalizeFarmAPIConfig } from "../api/config";
 import { resolveFarmAPIServerBasePath } from "../api/server-path";
@@ -764,7 +769,10 @@ export class ServerRenderer {
     return this.rendererRuntime.wrapClientGraph(element);
   }
 
-  private async renderElementToCompleteHTML(element: unknown): Promise<string> {
+  private async renderElementToCompleteHTML(
+    element: unknown,
+    options: { rejectLateNavigation?: boolean } = {},
+  ): Promise<string> {
     const streaming = getFarmRendererStreamingCapabilitiesForRuntime(this.config.renderer, "node");
     const renderToPipeableStream = streaming.node
       ? this.rendererRuntime.renderToPipeableStream
@@ -774,13 +782,18 @@ export class ServerRenderer {
       return await new Promise<string>((resolve, reject) => {
         const chunks: Buffer[] = [];
         let started = false;
+        let lateNavigation: unknown;
         const writable = new Writable({
           write(chunk, _encoding, callback) {
             chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
             callback();
           },
         });
-        writable.once("finish", () => resolve(Buffer.concat(chunks).toString("utf8")));
+        writable.once("finish", () =>
+          lateNavigation === undefined
+            ? resolve(Buffer.concat(chunks).toString("utf8"))
+            : reject(lateNavigation),
+        );
         writable.once("error", reject);
 
         const stream = renderToPipeableStream(element, {
@@ -793,6 +806,15 @@ export class ServerRenderer {
           },
           onError(error) {
             if (!started) reject(error);
+            // A redirect() or notFound() under a loading boundary decides the status
+            // when the caller needs one, as production's buffered render does.
+            else if (
+              options.rejectLateNavigation &&
+              lateNavigation === undefined &&
+              (isFarmRedirectError(error) || isFarmNotFoundError(error))
+            ) {
+              lateNavigation = error;
+            }
           },
         });
       });
@@ -812,6 +834,7 @@ export class ServerRenderer {
    */
   private async renderElementToDocumentParts(
     element: unknown,
+    options: { rejectLateNavigation?: boolean } = {},
   ): Promise<{ html: string; head: string }> {
     if (this.rendererRuntime.renderToStringWithHead) {
       const rendered = await this.rendererRuntime.renderToStringWithHead(element);
@@ -820,7 +843,7 @@ export class ServerRenderer {
     // Render to completion through the streaming renderer where there is one, so a
     // component that suspends (data hooks, lazy imports) resolves instead of failing
     // React's synchronous renderToString. Production buffers the same stream.
-    return { html: await this.renderElementToCompleteHTML(element), head: "" };
+    return { html: await this.renderElementToCompleteHTML(element, options), head: "" };
   }
 
   /**
@@ -2973,8 +2996,14 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
 </script>`;
       const deferredScript = createDeferredHydrationScript(deferredProps.records);
       const rendererHydrationScript = this.rendererRuntime.generateHydrationScript?.() || "";
-      const { html: content, head: rendererHead } =
-        await this.renderElementToDocumentParts(element);
+      const { html: content, head: rendererHead } = await this.renderElementToDocumentParts(
+        element,
+        {
+          rejectLateNavigation: _isFarmMarkdownPageCheck(
+            req.headers?.[FARM_MARKDOWN_PAGE_CHECK_HEADER],
+          ),
+        },
+      );
       const {
         title,
         tags: metaTags,
@@ -3163,9 +3192,11 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
       options.observabilityRoute || (req as any).__FARM_ROUTE__ || req.url || "/";
     // A full-document layout can't be composed once the stream's shell is
     // flushed, so a route known to render one is served through the buffered
-    // path, which produces a valid single document.
+    // path, which produces a valid single document. So is the anonymous check behind
+    // a page's Markdown source, where a late redirect() must still set the status.
     if (
       !renderToPipeableStream ||
+      _isFarmMarkdownPageCheck(req.headers?.[FARM_MARKDOWN_PAGE_CHECK_HEADER]) ||
       fullDocumentRoutes.has(fullDocumentRouteKey) ||
       (await this.rootLayoutRendersDocument())
     ) {

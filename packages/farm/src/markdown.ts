@@ -6,6 +6,30 @@ import { createFarmMarkdownViewResponse, FARM_MARKDOWN_VIEW_PARAMS } from "./mar
 /** Content type for Markdown responses, including agent-facing error bodies. */
 export const FARM_MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8";
 
+/**
+ * @internal Header on the anonymous page render that decides whether a page's Markdown
+ * source is public. Its value is a per-process secret, so a client cannot set it: the
+ * render it selects is buffered to the end, where a late `redirect()` or `notFound()`
+ * still sets the status instead of a script in an already-sent 200 document.
+ */
+export const FARM_MARKDOWN_PAGE_CHECK_HEADER = "x-farm-markdown-page-check";
+const MARKDOWN_PAGE_CHECK_TOKEN = Symbol.for("farm.markdownPageCheckToken");
+
+/** @internal The value of {@link FARM_MARKDOWN_PAGE_CHECK_HEADER} for this process. */
+export function _getFarmMarkdownPageCheckToken(): string {
+  const state = globalThis as unknown as Record<PropertyKey, string | undefined>;
+  return (state[MARKDOWN_PAGE_CHECK_TOKEN] ??= globalThis.crypto.randomUUID());
+}
+
+/** @internal Whether a request is Farm's own anonymous page check. */
+export function _isFarmMarkdownPageCheck(
+  value: string | readonly string[] | null | undefined,
+): boolean {
+  const state = globalThis as unknown as Record<PropertyKey, string | undefined>;
+  const token = state[MARKDOWN_PAGE_CHECK_TOKEN];
+  return Boolean(token) && typeof value === "string" && value === token;
+}
+
 export function farmRequestWantsMarkdown(
   pathname: string,
   accept: string | null | undefined,
@@ -280,14 +304,18 @@ export async function createMarkdownMirrorResponse(
     const name = token.trim();
     if (name && name.toLowerCase() !== "accept") appendHeaderToken(headersOut, "Vary", name);
   }
-  // A page that must not be shared keeps that policy for its Markdown mirror.
+  // A page that must not be shared keeps that policy for its Markdown mirror. A page
+  // rendered with the caller's credentials is theirs even when it sets no policy, as RSC
+  // pages do not: `md.cache` must not make a signed-in reader's copy public.
   const pageCacheControl = pageResponse.headers.get("cache-control");
   const cache = target.route?.cache ?? options.config?.cache ?? false;
   headersOut.set(
     "Cache-Control",
     pageCacheControl && isPrivateCacheControl(pageCacheControl)
       ? pageCacheControl
-      : createMarkdownCacheHeader(cache),
+      : headers.has("cookie") || headers.has("authorization")
+        ? "private, no-store"
+        : createMarkdownCacheHeader(cache),
   );
   preserveMarkdownResponseCookies(pageResponse.headers, headersOut);
   if (pageResponse.status >= 400) {

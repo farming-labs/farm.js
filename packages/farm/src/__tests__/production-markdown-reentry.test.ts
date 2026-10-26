@@ -8,7 +8,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
-import { GUARDED_SOURCE_FILES } from "./fixtures/markdown-guarded-sources";
+import {
+  GUARDED_SOURCE_FILES,
+  LATE_GUARDED_PAGES,
+  LATE_GUARDED_SOURCE_FILES,
+} from "./fixtures/markdown-guarded-sources";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -175,7 +179,7 @@ describe("production Markdown sources", () => {
   it("are public only when an anonymous visitor's page render succeeds", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-production-md-guards-"));
     try {
-      const app = await buildApp(root, GUARDED_SOURCE_FILES);
+      const app = await buildApp(root, { ...GUARDED_SOURCE_FILES, ...LATE_GUARDED_SOURCE_FILES });
       const get = async (pathname: string, headers: Record<string, string> = {}) => {
         const response = await app.fetch(
           new Request(`https://acme.test${pathname}`, { headers, redirect: "manual" }),
@@ -210,6 +214,38 @@ describe("production Markdown sources", () => {
         }
       }
 
+      // An anonymous render that answers 200 is not enough: the check renders the page
+      // to the end and needs the page itself in it.
+      for (const [page, secret] of LATE_GUARDED_PAGES) {
+        expect({ page, status: (await get(page)).status }).toEqual({ page, status: 200 });
+        for (const headers of [{}, signedIn]) {
+          const source = await get(`${page}.md`, headers);
+          expect({ page, headers, status: source.status }).toEqual({ page, headers, status: 404 });
+          expect(source.body).not.toContain(secret);
+          expect(source.cacheControl).not.toContain("public");
+        }
+        const negotiated = await get(page, markdown);
+        expect(negotiated.body).not.toContain(secret);
+        expect(negotiated.cacheControl).not.toContain("public");
+        const read = await app.fetch(
+          new Request("https://acme.test/mcp", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              accept: "application/json, text/event-stream",
+              "mcp-protocol-version": "2025-06-18",
+            },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "tools/call",
+              params: { name: "read_page", arguments: { path: page } },
+            }),
+          }),
+        );
+        expect({ page, mcp: (await read.text()).includes(secret) }).toEqual({ page, mcp: false });
+      }
+
       for (const [pathname, headers] of [
         ["/open.md", {}],
         ["/open.md", signedIn],
@@ -223,7 +259,13 @@ describe("production Markdown sources", () => {
           status: 200,
         });
         expect(open.contentType).toContain("text/markdown");
-        expect(open.cacheControl).toContain("public");
+        // Only an anonymous request may fill a shared cache.
+        expect({ pathname, headers, cacheControl: open.cacheControl }).toEqual({
+          pathname,
+          headers,
+          cacheControl:
+            "cookie" in headers ? "private, no-store" : expect.stringContaining("public"),
+        });
         expect(open.body).toContain("OPEN-SOURCE");
       }
     } finally {

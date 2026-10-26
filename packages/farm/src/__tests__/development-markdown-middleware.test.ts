@@ -9,7 +9,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ViteDevServer } from "vite";
 import { createServer } from "../server/create-server";
 import { getAvailablePort } from "./dev-server-port";
-import { GUARDED_SOURCE_FILES } from "./fixtures/markdown-guarded-sources";
+import {
+  GUARDED_SOURCE_FILES,
+  LATE_GUARDED_PAGES,
+  LATE_GUARDED_SOURCE_FILES,
+} from "./fixtures/markdown-guarded-sources";
 import {
   literalRouteExposure,
   literalRouteFiles,
@@ -797,7 +801,10 @@ export default function Page() { return <main>Rendered doc page</main>; }`,
       );
     }
     await fs.writeFile(path.join(root, "package.json"), '{"private":true,"type":"module"}');
-    for (const [file, source] of Object.entries(GUARDED_SOURCE_FILES)) {
+    for (const [file, source] of Object.entries({
+      ...GUARDED_SOURCE_FILES,
+      ...LATE_GUARDED_SOURCE_FILES,
+    })) {
       await writeModule(
         root,
         file,
@@ -839,6 +846,21 @@ export default function Page() { return <main>Rendered doc page</main>; }`,
       }
     }
 
+    // An anonymous render that answers 200 is not enough: the check renders the page
+    // to the end and needs the page itself in it.
+    for (const [page, secret] of LATE_GUARDED_PAGES) {
+      expect({ page, status: (await get(page)).status }).toEqual({ page, status: 200 });
+      for (const headers of [{}, signedIn]) {
+        const source = await get(`${page}.md`, headers);
+        expect({ page, headers, status: source.status }).toEqual({ page, headers, status: 404 });
+        expect(source.body).not.toContain(secret);
+        expect(source.cacheControl).not.toContain("public");
+      }
+      const negotiated = await get(page, markdown);
+      expect(negotiated.body).not.toContain(secret);
+      expect(negotiated.cacheControl).not.toContain("public");
+    }
+
     for (const [pathname, headers] of [
       ["/open.md", {}],
       ["/open.md", signedIn],
@@ -852,7 +874,12 @@ export default function Page() { return <main>Rendered doc page</main>; }`,
         status: 200,
       });
       expect(open.contentType).toContain("text/markdown");
-      expect(open.cacheControl).toContain("public");
+      // Only an anonymous request may fill a shared cache.
+      expect({ pathname, headers, cacheControl: open.cacheControl }).toEqual({
+        pathname,
+        headers,
+        cacheControl: "cookie" in headers ? "private, no-store" : expect.stringContaining("public"),
+      });
       expect(open.body).toContain("OPEN-SOURCE");
     }
   }, 60_000);

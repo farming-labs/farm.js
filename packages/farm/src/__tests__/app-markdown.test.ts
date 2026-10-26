@@ -11,6 +11,11 @@ import {
   resolveMdxConfig,
 } from "../app-markdown";
 import * as markdown from "../markdown";
+import {
+  FARM_MARKDOWN_PAGE_CHECK_HEADER,
+  _getFarmMarkdownPageCheckToken,
+  _isFarmMarkdownPageCheck,
+} from "../markdown";
 import * as appMarkdownRuntime from "../app-markdown-runtime";
 
 describe("markdown request negotiation and errors", () => {
@@ -176,7 +181,7 @@ describe("app markdown pages", () => {
       appMarkdownRuntime.FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS,
     );
     expect(inner).toBeNull();
-    expect(seen).toEqual([{ headers: ["accept"] }]);
+    expect(seen).toEqual([{ headers: ["accept", "x-farm-markdown-page-check"] }]);
   });
 
   it("serves an anonymous visitor the source only when the page itself renders", async () => {
@@ -205,12 +210,22 @@ describe("app markdown pages", () => {
       new Response("denied", { status: 403 }),
       new Response("<h1>Error</h1>", { status: 500, headers: { "content-type": "text/html" } }),
       new Response("{}", { headers: { "content-type": "application/json" } }),
+      // A layout that shows a sign-in prompt instead of its children answers 200, but
+      // the page segment never renders.
+      new Response("<main><p>Please sign in</p></main>", {
+        headers: { "content-type": "text/html" },
+      }),
     ]) {
       expect(await respond(negotiated(), page)).toBeNull();
     }
     const served = await respond(
       negotiated(),
-      new Response("<h1>Staff</h1>", { headers: { "content-type": "text/html" } }),
+      new Response(
+        '<main><div id="__farm_page__" data-farm-segment="page"><h1>Staff</h1></div></main>',
+        {
+          headers: { "content-type": "text/html" },
+        },
+      ),
     );
     expect(served?.headers.get("cache-control")).toContain("public");
     await expect(served!.text()).resolves.toBe("# Staff");
@@ -219,8 +234,22 @@ describe("app markdown pages", () => {
       expect(new URL(request.url).pathname).toBe("/staff");
       expect(request.method).toBe("GET");
       expect(request.redirect).toBe("manual");
-      expect([...request.headers]).toEqual([["accept", "text/html"]]);
+      // Rendered to the end: only Farm's own check carries this process's token.
+      expect([...request.headers]).toEqual([
+        ["accept", "text/html"],
+        [FARM_MARKDOWN_PAGE_CHECK_HEADER, _getFarmMarkdownPageCheckToken()],
+      ]);
+      expect(_isFarmMarkdownPageCheck(request.headers.get(FARM_MARKDOWN_PAGE_CHECK_HEADER))).toBe(
+        true,
+      );
     }
+  });
+
+  it("ignores a page-check header a client sends", () => {
+    for (const value of [undefined, null, "", "1", "true", ["a", "b"]]) {
+      expect(_isFarmMarkdownPageCheck(value as never)).toBe(false);
+    }
+    expect(_isFarmMarkdownPageCheck(`${_getFarmMarkdownPageCheckToken()}x`)).toBe(false);
   });
 
   it("ignores content negotiation when markdown has zero preference", async () => {
