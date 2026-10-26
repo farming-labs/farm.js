@@ -111,7 +111,11 @@ import {
   getFarmDocsMarkdownPath,
   resolveFarmDocsContentDir,
 } from "../docs/handler";
-import { compileFarmDocsAdapterEdgeManifest } from "../docs/adapter";
+import {
+  assertFarmDocsAdapterServesNoGuardedPages,
+  compileFarmDocsAdapterEdgeManifest,
+  hasFarmDocsRuntimeAdapter,
+} from "../docs/adapter";
 import {
   createFarmDocsModulePreloadPlugin,
   encodeFarmDocsModulePreloads,
@@ -4680,6 +4684,14 @@ async function buildSSRInMemory(
   const hasConfiguredRuntimePlugins = Boolean(
     hasRuntimeConfigModule && (config.plugins || []).length > 0,
   );
+  if (hasFarmDocsRuntimeAdapter(config.docs)) {
+    const adapterGuardedPaths = new Set(getFarmDocsGuardedPaths(config, middlewareRoutes));
+    assertFarmDocsAdapterServesNoGuardedPages(
+      config.docs,
+      { root, srcDir: config.srcDir },
+      (pathname) => adapterGuardedPaths.has(pathname),
+    );
+  }
   const farmDocsPrecompiledManifest =
     config.docs?.enabled && getFarmPresetRuntime(preset) === "edge"
       ? config.docs.adapter?.server

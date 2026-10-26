@@ -5,7 +5,11 @@ import type { DocsConfig } from "@farming-labs/docs";
 import type { FarmLayoutFonts } from "../font";
 import type { FarmMCPServerRegistration } from "../mcp-catalog";
 import { getFarmDocsAdapterConfigModule } from "./adapter-client";
-import { resolveFarmDocsContentDir } from "./handler";
+import {
+  discoverFarmDocsPages,
+  getFarmDocsMarkdownPath,
+  resolveFarmDocsContentDir,
+} from "./handler";
 import type { FarmDocsCompiledManifest } from "./precompiled-runtime";
 import type { FarmDocsResolvedConfig } from "./types";
 
@@ -51,6 +55,8 @@ export interface FarmDocsAdapterHandlerOptions {
    * route, name, and version; older adapters ignore it and older hosts do not pass it.
    */
   registerMCPServer?: (server: FarmMCPServerRegistration) => () => void;
+  /** The app's path guards; a guarded docs page refuses the adapter. */
+  isPathGuarded?: (pathname: string) => boolean;
 }
 
 export interface FarmDocsAdapterEdgeCompileOptions {
@@ -65,6 +71,30 @@ export function hasFarmDocsRuntimeAdapter(
   docs: FarmDocsResolvedConfig | undefined,
 ): docs is FarmDocsResolvedConfig & { adapter: NonNullable<FarmDocsResolvedConfig["adapter"]> } {
   return Boolean(docs?.enabled && docs.adapter?.server && docs.adapter.react);
+}
+
+/**
+ * The adapter answers pages, Markdown, llms-full.txt, search, and MCP from its own index
+ * and never runs the app's guards, so a docs page behind a path guard would reach anyone.
+ * Refuse that pairing instead of serving it.
+ */
+export function assertFarmDocsAdapterServesNoGuardedPages(
+  docs: FarmDocsResolvedConfig | undefined,
+  options: { root: string; srcDir?: string },
+  isPathGuarded: ((pathname: string) => boolean) | undefined,
+): void {
+  if (!isPathGuarded || !hasFarmDocsRuntimeAdapter(docs)) return;
+  const guarded = discoverFarmDocsPages(resolveFarmDocsContentDir(docs, options), docs)
+    .filter((page) => isPathGuarded(page.href) || isPathGuarded(getFarmDocsMarkdownPath(page.href)))
+    .map((page) => page.href);
+  if (guarded.length === 0) return;
+  throw new Error(
+    `Docs pages behind a path guard (${guarded.join(", ")}) would be public: the docs adapter ` +
+      `${JSON.stringify(docs.adapter.id)} serves their content in llms-full.txt, search, ` +
+      "Markdown, and MCP without running the app's guards. Move those pages out of the docs " +
+      "content directory, or set docs.adapter = false to use Farm's built-in docs runtime, " +
+      "which keeps guarded pages off anonymous surfaces.",
+  );
 }
 
 /**
@@ -178,6 +208,7 @@ export async function createFarmDocsAdapterHandler(
   if (!hasFarmDocsRuntimeAdapter(docs)) {
     throw new Error("Farm docs adapter requires server and react runtime entrypoints.");
   }
+  assertFarmDocsAdapterServesNoGuardedPages(docs, options, options.isPathGuarded);
 
   const serverModule = (await options.loadModule(
     docs.adapter.server,

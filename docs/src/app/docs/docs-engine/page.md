@@ -123,6 +123,16 @@ readers. A docs response to a request with cookies or an `Authorization` header,
 attached request data to, is sent as `Cache-Control: private, no-store`, as app pages are, so a CDN
 never hands a signed-in reader's copy to someone else.
 
+Only a page's own URL reaches it: `/docs/internal//secret`, `/docs/Internal/secret`, or
+`/api/docs?format=markdown&path=internal/./secret` answer not found rather than serving the file
+under a URL its guard never sees.
+
+An external docs adapter such as `@farming-labs/farmjs` serves pages, Markdown, `llms-full.txt`,
+search, and MCP from its own index and never runs the app's guards. `farm dev` and `farm build`
+stop with an error naming the pages when a guard covers a docs page and an adapter owns the docs
+runtime. Move private pages out of the docs folder, or set `docs.adapter: false` to use Farm's
+built-in docs runtime, which applies the rules above.
+
 ## Configure the docs experience
 
 Keep docs configuration alongside the rest of the application in `farm.config.ts`:

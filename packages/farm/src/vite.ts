@@ -1660,6 +1660,7 @@ export function farmPlugin(
                   dispose();
                 };
               },
+              isPathGuarded: isFarmDocsPathGuarded,
             })
           : farmDocsDevRuntime.createFarmDocsHandler(farmConfig.docs, {
               root: farmConfig.root,

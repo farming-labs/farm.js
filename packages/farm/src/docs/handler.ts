@@ -1,4 +1,11 @@
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import {
+  type Dirent,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
 import type {
   DocsLlmsTxtPageInput,
@@ -239,9 +246,46 @@ function getRequestSlug(docs: FarmDocsResolvedConfig, request: Request): string 
   return normalizeSlug(pathname.slice(entry.length));
 }
 
+// Discovery skips these entries, so no docs page lives under them.
+function isDiscoverableDocsEntryName(name: string): boolean {
+  return Boolean(name) && !name.startsWith(".") && name !== "node_modules";
+}
+
+/**
+ * Whether `filePath` is a file discovery lists: every segment below `contentDir` is
+ * a real directory (or, last, a real file) spelled exactly as on disk.
+ */
+function isDiscoverableDocsFile(contentDir: string, filePath: string): boolean {
+  const segments = path.relative(contentDir, filePath).split(path.sep);
+  let dir = contentDir;
+  for (const [index, name] of segments.entries()) {
+    if (!isDiscoverableDocsEntryName(name)) return false;
+    let entry: Dirent | undefined;
+    try {
+      entry = readdirSync(dir, { withFileTypes: true }).find(
+        (candidate) => candidate.name === name,
+      );
+    } catch {
+      return false;
+    }
+    const isLast = index === segments.length - 1;
+    if (!entry || !(isLast ? entry.isFile() : entry.isDirectory())) return false;
+    dir = path.join(dir, name);
+  }
+  return true;
+}
+
 function findDocsPageFile(contentDir: string, slug: string): string | null {
-  const segments = slug ? slug.split("/").filter(Boolean) : [];
-  if (!segments.every(isSafeSegment)) return null;
+  // Only a page's canonical slug, the one discovery derives from its file, loads it.
+  // Guards, listings and caches key on that href, so an alias (`a//b`, `a/./b`, `a/page`,
+  // `A/b` on a case-insensitive disk, a symlinked folder) must not reach the same file.
+  const canonicalSlug = trimSlashes(slug);
+  const segments = canonicalSlug ? canonicalSlug.split("/") : [];
+  if (
+    !segments.every((segment) => isSafeSegment(segment) && isDiscoverableDocsEntryName(segment))
+  ) {
+    return null;
+  }
 
   const slugDir = path.join(contentDir, ...segments);
   const candidates =
@@ -249,10 +293,14 @@ function findDocsPageFile(contentDir: string, slug: string): string | null {
       ? DOCS_FILE_NAMES.map((filename) => path.join(contentDir, filename))
       : [
           ...DOCS_FILE_NAMES.map((filename) => path.join(slugDir, filename)),
-          ...DOCS_FILE_EXTENSIONS.map((extension) => path.join(contentDir, `${slug}${extension}`)),
+          ...DOCS_FILE_EXTENSIONS.map((extension) =>
+            path.join(contentDir, `${canonicalSlug}${extension}`),
+          ),
         ];
 
   for (const candidate of candidates) {
+    if (pathToSlug(contentDir, candidate) !== canonicalSlug) continue;
+    if (!isDiscoverableDocsFile(contentDir, candidate)) continue;
     const safePath = resolveExistingFileInside(contentDir, candidate);
     if (safePath) {
       return safePath;
