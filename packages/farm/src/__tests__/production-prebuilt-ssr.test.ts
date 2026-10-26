@@ -809,37 +809,34 @@ export default async function IslandsPage() {
 }
 `.trim(),
       );
-      const config = await resolveConfig(
-        {
-          root,
-          srcDir: "src",
-          images: { provider: "none" },
-          telemetry: false,
-          generateBuildId: () => "client-module-preloads-test",
-          // A vendor chunk the entry imports statically, as the shared chunks of a larger app are.
-          vite: {
-            plugins: [
-              {
-                name: "react-vendor-chunk",
-                applyToEnvironment: (environment: { name: string }) =>
-                  environment.name === "client",
-                outputOptions: (options: Record<string, unknown>) => ({
-                  ...options,
-                  codeSplitting: {
-                    groups: [
-                      {
-                        name: "react-vendor",
-                        test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/,
-                      },
-                    ],
-                  },
-                }),
-              },
-            ],
-          },
+      const userConfig = {
+        root,
+        srcDir: "src",
+        images: { provider: "none" },
+        telemetry: false,
+        generateBuildId: () => "client-module-preloads-test",
+        // A vendor chunk the entry imports statically, as the shared chunks of a larger app are.
+        vite: {
+          plugins: [
+            {
+              name: "react-vendor-chunk",
+              applyToEnvironment: (environment: { name: string }) => environment.name === "client",
+              outputOptions: (options: Record<string, unknown>) => ({
+                ...options,
+                codeSplitting: {
+                  groups: [
+                    {
+                      name: "react-vendor",
+                      test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+                    },
+                  ],
+                },
+              }),
+            },
+          ],
         },
-        "production",
-      );
+      };
+      const config = await resolveConfig(userConfig, "production");
       await build(config, { root, preset: "node-server" });
 
       const publicDir = path.join(root, ".farm", ".output", "public");
@@ -903,6 +900,21 @@ export default async function IslandsPage() {
         },
         "/missing",
       );
+
+      // A nonce policy blocks parser-inserted links without the nonce, so nonce mode lists none.
+      await build(
+        await resolveConfig(
+          { ...userConfig, security: { csp: { nonce: true, policy: "script-src 'self'" } } },
+          "production",
+        ),
+        { root, preset: "node-server" },
+      );
+      await runProductionRequest(serverDir, async (response) => {
+        expect(response.status).toBe(200);
+        const html = await response.text();
+        expect(html).toContain('data-farm-island="page"');
+        expect(html).not.toContain('rel="modulepreload" href="/chunks/');
+      });
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

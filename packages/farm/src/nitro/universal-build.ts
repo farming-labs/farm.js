@@ -7303,7 +7303,10 @@ function renderFarmClientModulePreload(index) {
 // The modulepreload links for a document: the entry's static imports, then the
 // modules its hydrating page and its markup load.
 function renderFarmClientModulePreloads(markup, pageModule) {
-  if (!farmClientModulePreloads) return "";
+  // A nonce policy blocks parser-inserted links without the nonce, and the
+  // response filter manages nonces on script elements only, so CSP nonce mode
+  // keeps the documents it had.
+  if (!farmClientModulePreloads || (farmSecurityConfig.csp && farmSecurityConfig.csp.nonce)) return "";
   const modules = farmClientModulePreloads.modules;
   const listed = new Set();
   let tags = farmClientEntryPreloadTags;
