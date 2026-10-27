@@ -11,6 +11,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { InlineConfig, ViteDevServer } from "vite";
 import { loadTailwindVitePlugin } from "./build/tailwind";
+import { loadFarmReactPlugin } from "./react-refresh";
 import { resolveDeployOutputPath } from "./config";
 import { FARM_RSC_INSTALL_HINT, findFarmAppPackageDir } from "./server-components-status";
 
@@ -140,7 +141,11 @@ export async function createFarmRscViteConfig(
   for (const key of FARM_RSC_CONFIG_KEYS) {
     if (userConfig[key] !== undefined) rscConfig[key] = userConfig[key];
   }
-  const createReactPlugin = viteReact?.default;
+  // Fast Refresh: the app's plugin-react, else core's, as for other Farm apps. Without it the RSC
+  // client bootstrap's /@react-refresh import fails and nothing hydrates in development.
+  const createReactPlugin = hasPluginNamed(vitePlugins, "vite:react")
+    ? undefined
+    : (viteReact?.default ?? (await loadFarmReactPlugin()).default);
   // Built-in Tailwind, as in other Farm apps, unless the app adds @tailwindcss/vite itself.
   const tailwind = hasPluginNamed(vitePlugins, "@tailwindcss/vite")
     ? undefined

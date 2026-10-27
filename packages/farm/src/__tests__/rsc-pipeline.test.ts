@@ -129,12 +129,18 @@ describe("experimental.serverComponents from farm.config", () => {
     expect(config.i18n).toEqual({ locales: ["en"], defaultLocale: "en" });
     expect(config.resolve).toEqual({ alias: { "#app": "/web" } });
 
-    const names = config.plugins.map((plugin: { name: string }) => plugin.name);
-    // The app's own Tailwind plugin is not added twice.
-    expect(names).toEqual(["app-plugin", "@tailwindcss/vite:scan", "rsc", "nitro"]);
-    const byName = Object.fromEntries(
-      config.plugins.map((plugin: { name: string }) => [plugin.name, plugin]),
-    );
+    const plugins = config.plugins.flat(Infinity) as Array<{ name: string }>;
+    const names = plugins.map((plugin) => plugin.name);
+    // The app's own Tailwind plugin is not added twice. Without plugin-react in the app, core's
+    // gives Fast Refresh: the RSC client bootstrap imports /@react-refresh in development.
+    expect(names.filter((name) => !name.startsWith("vite:react"))).toEqual([
+      "app-plugin",
+      "@tailwindcss/vite:scan",
+      "rsc",
+      "nitro",
+    ]);
+    expect(names).toContain("vite:react-refresh");
+    const byName = Object.fromEntries(plugins.map((plugin) => [plugin.name, plugin]));
     expect(byName.rsc.options).toEqual({
       serverHandler: false,
       entries: {
@@ -148,6 +154,20 @@ describe("experimental.serverComponents from farm.config", () => {
       preset: "node-server",
       outputDir: path.join(root, ".farm", ".output"),
     });
+  });
+
+  it("keeps the app's own plugin-react instead of adding core's", async () => {
+    const config = (await createFarmRscViteConfig(
+      {
+        experimental: { serverComponents: true },
+        vite: { plugins: [{ name: "vite:react-refresh" }, { name: "@tailwindcss/vite:scan" }] },
+      },
+      { root: createApp(), command: "serve" },
+    )) as Record<string, any>;
+    const names = (config.plugins.flat(Infinity) as Array<{ name: string }>).map(
+      (plugin) => plugin.name,
+    );
+    expect(names.filter((name) => name === "vite:react-refresh")).toHaveLength(1);
   });
 
   it("names the packages to install when they are missing", async () => {
