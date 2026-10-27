@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
@@ -21,6 +21,8 @@ import { definePlugin } from "../plugin";
 import { logger } from "../utils";
 
 const isWindows = process.platform === "win32";
+// Bun is optional: the bun preset's shutdown runs only where it is installed.
+const hasBun = spawnSync("bun", ["--version"], { stdio: "ignore" }).status === 0;
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -4661,24 +4663,30 @@ export default function DynamicPage({ params }) {
 
   // Windows has no POSIX signals: child.kill("SIGTERM") maps to TerminateProcess,
   // so graceful shutdown never runs and its effects cannot be observed.
-  it("drains in-flight requests and closes production resources on SIGTERM", async (ctx) => {
-    if (isWindows) ctx.skip();
-    const root = await createProductionFixture();
-    const markerPath = path.join(root, "production-lifecycle.log");
-    const apiDir = path.join(root, "src", "app", "api", "slow");
-    const serverConfig = {
-      gracefulShutdownTimeout: "3s" as const,
-      health: {
-        livenessPath: "/health/live",
-        readinessPath: "/health/ready",
-      },
-    };
+  it.each([
+    { preset: "node-server", command: process.execPath },
+    { preset: "bun", command: "bun" },
+  ])(
+    "drains in-flight requests and closes production resources on SIGTERM ($preset)",
+    async ({ preset, command }, ctx) => {
+      if (isWindows) ctx.skip();
+      if (preset === "bun" && !hasBun) ctx.skip();
+      const root = await createProductionFixture();
+      const markerPath = path.join(root, "production-lifecycle.log");
+      const apiDir = path.join(root, "src", "app", "api", "slow");
+      const serverConfig = {
+        gracefulShutdownTimeout: "3s" as const,
+        health: {
+          livenessPath: "/health/live",
+          readinessPath: "/health/ready",
+        },
+      };
 
-    try {
-      await fs.mkdir(apiDir, { recursive: true });
-      await fs.writeFile(
-        path.join(apiDir, "route.ts"),
-        `
+      try {
+        await fs.mkdir(apiDir, { recursive: true });
+        await fs.writeFile(
+          path.join(apiDir, "route.ts"),
+          `
 import { appendFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -4689,10 +4697,10 @@ export async function GET() {
   return new Response("drained response");
 }
 `.trim(),
-      );
-      await fs.writeFile(
-        path.join(root, "farm.config.ts"),
-        `
+        );
+        await fs.writeFile(
+          path.join(root, "farm.config.ts"),
+          `
 import { appendFile } from "node:fs/promises";
 import { defineConfig, definePlugin } from "@farm.js/core";
 
@@ -4719,92 +4727,125 @@ export default defineConfig({
   plugins: [lifecyclePlugin],
 });
 `.trim(),
-      );
-
-      const config = await resolveConfig(
-        {
-          root,
-          srcDir: "src",
-          images: { provider: "none" },
-          server: serverConfig,
-          plugins: [
-            definePlugin({
-              name: "test:production-lifecycle-build-marker",
-              runtime: {
-                start() {},
-                close() {},
-              },
-            }),
-          ],
-        },
-        "production",
-      );
-      await build(config, { root, preset: "node-server" });
-
-      const serverDir = path.join(root, ".farm", ".output", "server");
-      const port = await getAvailablePort();
-      const output: string[] = [];
-      const productionServer = spawn(process.execPath, [path.join(serverDir, "index.mjs")], {
-        cwd: serverDir,
-        env: {
-          ...process.env,
-          HOST: "127.0.0.1",
-          PORT: String(port),
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      productionServer.stdout.on("data", (chunk) => output.push(String(chunk)));
-      productionServer.stderr.on("data", (chunk) => output.push(String(chunk)));
-
-      try {
-        const healthResponse = await waitForServer(
-          `http://127.0.0.1:${port}/health/ready`,
-          () => output.join(""),
-          () => productionServer.exitCode !== null,
         );
-        expect(healthResponse.status).toBe(200);
-        await expect(healthResponse.json()).resolves.toMatchObject({ status: "ok" });
 
-        const request = fetch(`http://127.0.0.1:${port}/api/slow`);
-        for (let attempt = 0; attempt < 100; attempt++) {
-          const marker = await fs.readFile(markerPath, "utf8").catch(() => "");
-          if (marker.includes("request:start")) break;
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-        expect(await fs.readFile(markerPath, "utf8")).toContain("request:start");
-
-        productionServer.kill("SIGTERM");
-        const response = await request;
-        expect(response.status).toBe(200);
-        await expect(response.text()).resolves.toBe("drained response");
-
-        const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-          (resolve, reject) => {
-            const timeout = setTimeout(() => {
-              productionServer.kill("SIGKILL");
-              reject(new Error(`Production server did not shut down:\n${output.join("")}`));
-            }, 5_000);
-            productionServer.once("exit", (code, signal) => {
-              clearTimeout(timeout);
-              resolve({ code, signal });
-            });
+        const config = await resolveConfig(
+          {
+            root,
+            srcDir: "src",
+            images: { provider: "none" },
+            server: serverConfig,
+            plugins: [
+              definePlugin({
+                name: "test:production-lifecycle-build-marker",
+                runtime: {
+                  start() {},
+                  close() {},
+                },
+              }),
+            ],
           },
+          "production",
         );
-        expect(exit).toEqual({ code: 0, signal: null });
-        expect((await fs.readFile(markerPath, "utf8")).trim().split("\n")).toEqual([
-          "runtime:ready",
-          "request:start",
-          "request:finish",
-          "runtime:closed:production-server-closed",
-          "resource:closed",
-        ]);
+        await build(config, { root, preset });
+
+        const serverDir = path.join(root, ".farm", ".output", "server");
+        const port = await getAvailablePort();
+        const output: string[] = [];
+        const productionServer = spawn(command, [path.join(serverDir, "index.mjs")], {
+          cwd: serverDir,
+          env: {
+            ...process.env,
+            HOST: "127.0.0.1",
+            PORT: String(port),
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        productionServer.stdout.on("data", (chunk) => output.push(String(chunk)));
+        productionServer.stderr.on("data", (chunk) => output.push(String(chunk)));
+
+        try {
+          const healthResponse = await waitForServer(
+            `http://127.0.0.1:${port}/health/ready`,
+            () => output.join(""),
+            () => productionServer.exitCode !== null,
+          );
+          expect(healthResponse.status).toBe(200);
+          await expect(healthResponse.json()).resolves.toMatchObject({ status: "ok" });
+
+          const request = fetch(`http://127.0.0.1:${port}/api/slow`);
+          for (let attempt = 0; attempt < 100; attempt++) {
+            const marker = await fs.readFile(markerPath, "utf8").catch(() => "");
+            if (marker.includes("request:start")) break;
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          expect(await fs.readFile(markerPath, "utf8")).toContain("request:start");
+
+          productionServer.kill("SIGTERM");
+          const response = await request;
+          expect(response.status).toBe(200);
+          await expect(response.text()).resolves.toBe("drained response");
+
+          const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+            (resolve, reject) => {
+              const timeout = setTimeout(() => {
+                productionServer.kill("SIGKILL");
+                reject(new Error(`Production server did not shut down:\n${output.join("")}`));
+              }, 5_000);
+              productionServer.once("exit", (code, signal) => {
+                clearTimeout(timeout);
+                resolve({ code, signal });
+              });
+            },
+          );
+          expect(exit).toEqual({ code: 0, signal: null });
+          expect((await fs.readFile(markerPath, "utf8")).trim().split("\n")).toEqual([
+            "runtime:ready",
+            "request:start",
+            "request:finish",
+            "runtime:closed:production-server-closed",
+            "resource:closed",
+          ]);
+        } finally {
+          if (productionServer.exitCode === null) productionServer.kill("SIGKILL");
+        }
+
+        // An idle server exits right away, still running the shutdown hooks.
+        await fs.rm(markerPath);
+        const idleServer = spawn(command, [path.join(serverDir, "index.mjs")], {
+          cwd: serverDir,
+          env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        const idleOutput: string[] = [];
+        idleServer.stdout.on("data", (chunk) => idleOutput.push(String(chunk)));
+        idleServer.stderr.on("data", (chunk) => idleOutput.push(String(chunk)));
+        try {
+          const ready = await waitForServer(
+            `http://127.0.0.1:${port}/health/ready`,
+            () => idleOutput.join(""),
+            () => idleServer.exitCode !== null,
+          );
+          await ready.arrayBuffer();
+          const exited = new Promise<number | null>((resolve) => idleServer.once("exit", resolve));
+          const signalledAt = performance.now();
+          idleServer.kill("SIGTERM");
+          expect(await exited).toBe(0);
+          expect(performance.now() - signalledAt).toBeLessThan(500);
+          expect((await fs.readFile(markerPath, "utf8")).trim().split("\n")).toEqual([
+            "runtime:ready",
+            "runtime:closed:production-server-closed",
+            "resource:closed",
+          ]);
+        } finally {
+          if (idleServer.exitCode === null) idleServer.kill("SIGKILL");
+        }
       } finally {
-        if (productionServer.exitCode === null) productionServer.kill("SIGKILL");
+        await fs.rm(root, { recursive: true, force: true });
       }
-    } finally {
-      await fs.rm(root, { recursive: true, force: true });
-    }
-  }, 120_000);
+    },
+    120_000,
+  );
 
   // Windows has no POSIX signals: child.kill("SIGTERM") maps to TerminateProcess,
   // so graceful shutdown never runs and its effects cannot be observed.

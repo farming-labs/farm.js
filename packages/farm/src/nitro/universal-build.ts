@@ -140,6 +140,7 @@ import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { buildFarmVercelRoutes } from "./vercel-assets";
 import { createFarmNetlifyEntry, resolveNitroNetlifyEntry } from "./netlify-entry";
 import {
+  createFarmBunServerEntry,
   createFarmNodeServerEntry,
   FARM_NODE_ENV_MODULE_FILE,
   FARM_NODE_ENV_MODULE_SOURCE,
@@ -10674,6 +10675,21 @@ function toFarmNodeResponse(request, response) {
       }),
     );
   }
+  // Nitro's bun entry leaves SIGTERM to srvx, which skips Farm's lifecycle and keeps an
+  // idle server alive for a second; Farm's entry drains and exits like the Node one.
+  const farmBunServerEntryPath =
+    preset === "bun" ? path.join(ssrOutputDir, "farm-bun-server-entry.mjs") : null;
+  if (farmBunServerEntryPath) {
+    await fs.writeFile(
+      farmBunServerEntryPath,
+      createFarmBunServerEntry({
+        nitroEntryFile: path.basename(nitroEntryPath),
+        bunAdapterModule: resolveNitroRuntimeDependency(root, "srvx/bun"),
+        server: config.server,
+        websocketAdapterModule: resolveNitroRuntimeDependency(root, "crossws/adapters/bun"),
+      }),
+    );
+  }
   const farmNetlifyEntryPath =
     preset === "netlify" ? path.join(ssrOutputDir, "farm-netlify-entry.mjs") : null;
   if (farmNetlifyEntryPath) {
@@ -10710,6 +10726,7 @@ function toFarmNodeResponse(request, response) {
   let nitroConfig: NitroConfig = {
     preset,
     ...(farmNodeServerEntryPath ? { entry: farmNodeServerEntryPath } : {}),
+    ...(farmBunServerEntryPath ? { entry: farmBunServerEntryPath } : {}),
     ...(farmNetlifyEntryPath ? { entry: farmNetlifyEntryPath } : {}),
     rootDir: root,
     // Farm registers every handler, task, and plugin explicitly. Scanning the
@@ -10920,8 +10937,8 @@ function toFarmNodeResponse(request, response) {
       nitroInstance.routing.sync();
     });
   }
-  if (farmNodeServerEntryPath || farmNetlifyEntryPath) {
-    // The custom entry is only for the final Node server or Netlify function.
+  if (farmNodeServerEntryPath || farmBunServerEntryPath || farmNetlifyEntryPath) {
+    // The custom entry is only for the final Node or Bun server or Netlify function.
     // Nitro derives its prerenderer config from this config, so remove the
     // override and let the nitro-prerender preset provide appFetch/closePrerenderer.
     nitroInstance.hooks.hook("prerender:config", (prerendererConfig) => {

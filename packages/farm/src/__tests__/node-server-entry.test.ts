@@ -2,7 +2,11 @@
 
 import { transform } from "esbuild";
 import { describe, expect, it } from "vitest";
-import { createFarmNodeServerEntry, FARM_NODE_ENV_MODULE_SOURCE } from "../nitro/node-server-entry";
+import {
+  createFarmBunServerEntry,
+  createFarmNodeServerEntry,
+  FARM_NODE_ENV_MODULE_SOURCE,
+} from "../nitro/node-server-entry";
 import { resolveFarmServerConfig } from "../server-http";
 
 describe("Farm production Node entry", () => {
@@ -46,6 +50,31 @@ describe("Farm production Node entry", () => {
     expect(source).toContain("wsAdapter({ resolve: resolveWebsocketHooks })");
     expect(source).toContain("await server.serve()");
     expect(source).toContain("void server.close(true)");
+    expect(source).toContain('from "./nitro-entry.mjs"');
+  });
+
+  it("gives the Bun entry Farm's startup and shutdown instead of srvx's", async () => {
+    const source = createFarmBunServerEntry({
+      nitroEntryFile: "nitro-entry.mjs",
+      bunAdapterModule: "srvx/bun",
+      server: resolveFarmServerConfig({ gracefulShutdownTimeout: "40s" }),
+      websocketAdapterModule: "crossws/adapters/bun",
+    });
+
+    await expect(transform(source, { loader: "js", format: "esm" })).resolves.toBeDefined();
+    expect(source).toContain('import { serve } from "srvx/bun"');
+    expect(source).toContain('from "crossws/adapters/bun"');
+    expect(source).not.toContain("farm-node-env.mjs");
+    expect(source).not.toContain("nodeServer");
+    // srvx's own handler would keep an idle server alive for a second and skip Farm's lifecycle.
+    expect(source).toContain("gracefulShutdown: false");
+    expect(source).toContain("() => farmProductionLifecycle.start()");
+    expect(source).toContain("farmProductionLifecycle.beginDrain(signal)");
+    expect(source).toContain('useNitroHooks().hook("close"');
+    expect(source).toContain("setupCloseHooks(server)");
+    expect(source).toContain("void server.close(true)");
+    expect(source).toContain("if (shutdownConfig.forceExit) process.exit(process.exitCode || 0)");
+    expect(source).toContain("ws.handleUpgrade(request, request.runtime.bun.server)");
     expect(source).toContain('from "./nitro-entry.mjs"');
   });
 
