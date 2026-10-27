@@ -1,0 +1,17 @@
+{
+  // Editor settings for the Electrobun main process. `electrobun dev` and
+  // `electrobun build` project the Electrobun SDK into .hutch/devkit, and this
+  // file maps `electrobun/*` imports onto it. The root tsconfig skips this
+  // folder so `pnpm type-check` works without the devkit.
+  "extends": "../.hutch/devkit/tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM"],
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["./**/*.ts"]
+}
