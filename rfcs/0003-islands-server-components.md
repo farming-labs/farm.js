@@ -157,22 +157,37 @@ Client props repeat across pages. On the benchmark, 98.5% of prop bytes on a doc
 identical to the previous page's, and one value, the navigation tree, is about 95% of them. RSC
 inlines every value in every payload. Islands mode sends a large value once:
 
-- A serialized prop value above a size threshold is identified by the hash of its canonical
-  serialization. The manifest carries `{ "$v": "<hash>" }` in its place.
-- **Static pages:** at build time, values that appear on two or more pages are written as immutable
-  files (`/_farm/v/<hash>.json`, cached for a year) and preloaded by the pages that use them. A value
-  unique to one page stays inline.
-- **Dynamic pages:** a value from a request-bound render is never written to a shared file, so
-  user-specific data cannot leak through a public URL. It is inlined, with its hash, so the client
-  can still keep it.
-- **Client:** a value store keyed by hash. An island waiting on a value file hydrates when it
-  arrives; the static HTML around it is already visible.
-- **Navigation:** the request carries the hashes the client holds as a small Bloom filter. The server
-  omits those values. A false positive costs one fetch by hash, retried inline for dynamic values.
+- A serialized prop value whose JSON reaches 512 bytes is identified by a 64-bit hash of that JSON.
+  The island's props carry `{ "$farmValue": "<hash>" }` in its place, and the value travels in a
+  `<script type="application/json" data-farm-value="<hash>">` before the island. Inner values are
+  addressed first, so a tree that changes in one place keeps sharing its unchanged parts; a thin
+  wrapper around one addressed value gets no key of its own.
+- **Client:** a value store keyed by hash. It parses each value once and hands islands that share a
+  value the same object. Only islands mode ships it.
+- **Navigation:** the request names the hashes the client holds (`x-farm-values`, the 128 most
+  recently used). The server leaves those values out, with everything inside them. An exact list
+  instead of a Bloom filter: no false positives, so no recovery fetch, and the header stays under
+  2 KB.
+- **Caching:** leaving values out makes the HTML one browser's. The server counts it as a request
+  read, the mechanism `headers()` uses, so that response never enters a PPR shell, an ISR entry or
+  a shared CDN cache, and production page responses vary on `x-farm-values`. Responses without the
+  header, including every first load, stay complete and cacheable.
+- **Static pages (not built yet):** values that appear on two or more prerendered pages could be
+  written as immutable files (`/_farm/v/<hash>.json`) and preloaded, so the first load of a second
+  page skips them too. A value from a request-bound render is never written to a shared file.
+- Why not dedupe within one document: React can discard a render attempt that suspended, so "sent
+  already" cannot be tracked during render. Each island sends its values; brotli removes the repeat,
+  and the store parses each hash once.
 
-Measured on the benchmark (brotli, averages over 376 docs pages): the first-load document drops from
-46.0 KB (islands) to 22.8 KB, plus a 23.5 KB value file shared by every docs page, and a navigation
-from 29.1 KB to 5.7 KB.
+Measured in the lab on the RSC benchmark (brotli, averages over 376 docs pages): the first-load
+document drops from 46.0 KB (islands) to 22.8 KB, plus a 23.5 KB value file shared by every docs page,
+and a navigation from 29.1 KB to 5.7 KB.
+
+Measured on the implementation (`benchmarks/server-components-payload`, a 300-page docs app whose
+layout passes a 32 KB tree to two client components, production builds in Chrome): a navigation drops
+from 100.9 KB raw (15.7 KB brotli) to 38.4 KB (12.3 KB), level with `"rsc"` at 37.4 KB (12.0 KB),
+with 28% less first-load JavaScript than `"rsc"`. Most of what remains is the layout's HTML, which
+segment navigation (phase 3) removes.
 
 ### 4. Hydration: islands, then regions
 
@@ -300,6 +315,16 @@ navigation with state kept in layouts; back and forward; HMR; error and not-foun
 | 4     | Streaming with islands in late chunks                                                                         | First content no later than `"rsc"`                                                           |
 | 5     | Actions with segment refresh                                                                                  | Parity with `"rsc"` action tests                                                              |
 | 6     | Other renderers                                                                                               | Shared renderer suite                                                                         |
+
+## Implementation status
+
+- Phase 0: done (#2315).
+- Phase 1, first part: islands mode on Farm's pipeline, server owners for context, DOM slots,
+  `"use server"` actions with progressive enhancement, content-addressed values with navigation
+  omission, in `farm dev` and production. Not yet: the island manifest as one payload, shared value
+  files for static pages, values in server-tree payloads.
+- Contract suite: `tests/e2e-server-components`, the same tests for `"rsc"` and `"islands"`, against
+  `farm dev` and production builds.
 
 ## Prior work in Farm
 
