@@ -54,6 +54,11 @@ export interface PublicValidationIssue {
  * schemas sometimes hold secrets (`z.literal(\`Bearer ${token}\`)`). Only
  * refinement messages (`code: "custom"`), which the app wrote, are kept.
  */
+// Messages safe to return: the app's own refinement text, and type mismatches,
+// which name types ("expected string, received number"), never a schema value.
+// Every other built-in message can quote an expected literal, enum or pattern.
+const PUBLIC_MESSAGE_CODES = new Set(["custom", "invalid_type"]);
+
 export function toPublicValidationIssues(error: unknown): PublicValidationIssue[] {
   const issues = (error as { issues?: unknown; errors?: unknown } | null | undefined)?.issues;
   const list = Array.isArray(issues)
@@ -71,7 +76,9 @@ export function toPublicValidationIssues(error: unknown): PublicValidationIssue[
       path: Array.isArray(path) ? path.map(toPublicPathSegment) : [],
       ...(typeof code === "string" ? { code } : {}),
       message:
-        code === "custom" && typeof message === "string" && message ? message : "Invalid value",
+        PUBLIC_MESSAGE_CODES.has(code as string) && typeof message === "string" && message
+          ? message
+          : "Invalid value",
     };
   });
 }
