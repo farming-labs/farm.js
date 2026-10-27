@@ -77,6 +77,31 @@ export function farmConfigUsesServerComponents(
   return config?.experimental?.serverComponents === true;
 }
 
+let warnedMissingRscPackages = false;
+
+/**
+ * Whether an app with `experimental.serverComponents` runs on the RSC pipeline. Apps set the flag
+ * before it loaded the pipeline (it only switched off isolated hydration), so an app without the
+ * RSC packages keeps building as before and is told once how to turn React Server Components on.
+ */
+export function farmAppUsesRscPipeline(
+  config: FarmConfigInput | null | undefined,
+  root: string,
+): boolean {
+  if (!farmConfigUsesServerComponents(config)) return false;
+  const missing = FARM_RSC_PACKAGES.filter((name) => !findPackageDir(root, name));
+  if (missing.length === 0) return true;
+  if (!warnedMissingRscPackages) {
+    warnedMissingRscPackages = true;
+    logger.warn(
+      `[Farm.js] experimental.serverComponents is set, but ${missing.join(", ")} ${
+        missing.length === 1 ? "is" : "are"
+      } not installed, so the app runs without React Server Components. Install them to turn RSC on: ${FARM_RSC_INSTALL_HINT}, or remove the flag.`,
+    );
+  }
+  return false;
+}
+
 function findPackageDir(root: string, packageName: string): string | undefined {
   for (let dir = path.resolve(root); ; dir = path.dirname(dir)) {
     const candidate = path.join(dir, "node_modules", packageName);

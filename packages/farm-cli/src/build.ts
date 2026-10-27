@@ -48,7 +48,7 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
       }
 
       // experimental.serverComponents: the RSC pipeline builds the app for the deploy preset.
-      if (userConfig.experimental?.serverComponents === true) {
+      if (buildRuntimeResult.value.farmAppUsesRscPipeline(userConfig, root)) {
         const deploy = resolveDeployConfig(userConfig, {
           preset: options.preset as any,
           target: options.target,

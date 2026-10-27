@@ -231,8 +231,10 @@ export async function createServer(
     // experimental.serverComponents: the RSC pipeline serves the app instead of Farm's renderer.
     const rscConfig = userConfig ?? config;
     if (rscConfig.experimental?.serverComponents === true) {
-      const { createFarmRscDevServer } = await import("../rsc-pipeline");
-      return await createFarmRscDevServer(rscConfig, { root, port: options.port });
+      const { createFarmRscDevServer, farmAppUsesRscPipeline } = await import("../rsc-pipeline");
+      if (farmAppUsesRscPipeline(rscConfig, root)) {
+        return await createFarmRscDevServer(rscConfig, { root, port: options.port });
+      }
     }
 
     const resolvedConfig = userConfig

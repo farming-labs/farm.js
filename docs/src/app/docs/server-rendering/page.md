@@ -301,7 +301,8 @@ export default defineConfig({
 ```
 
 The app's `vite` options and plugins apply as in other Farm apps, and so does built-in Tailwind.
-`@vitejs/plugin-react` is optional and adds Fast Refresh. The build goes to the deploy target's
+`@vitejs/plugin-react` is optional and adds Fast Refresh. Without the RSC packages installed, `farm dev` and `farm build`
+warn once and run the app without React Server Components. The build goes to the deploy target's
 output directory, so `farm start` and platform deploys work unchanged. The pipeline does not run
 `auth`, `integrations`, Farm `plugins`, `storage`, `schema`, `cron`, `workflows`, `docs`, `theme`,
 `routeRules`, `context`, `redirects`, `rewrites`, `headers`, or `observability` yet; `farm dev` and

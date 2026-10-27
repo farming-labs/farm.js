@@ -2,7 +2,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createFarmRscViteConfig, farmConfigUsesServerComponents } from "../rsc-pipeline";
+import {
+  createFarmRscViteConfig,
+  farmAppUsesRscPipeline,
+  farmConfigUsesServerComponents,
+} from "../rsc-pipeline";
 import { logger } from "../utils";
 
 const roots: string[] = [];
@@ -56,6 +60,20 @@ describe("experimental.serverComponents from farm.config", () => {
     );
     expect(farmConfigUsesServerComponents({})).toBe(false);
     expect(farmConfigUsesServerComponents(undefined)).toBe(false);
+  });
+
+  it("keeps apps without the RSC packages on the normal pipeline, with one warning", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const flag = { experimental: { serverComponents: true } };
+    // Starters set the flag before it loaded the RSC pipeline; they must keep working.
+    expect(farmAppUsesRscPipeline(flag, createApp({ plugin: false, rsc: false }))).toBe(false);
+    expect(farmAppUsesRscPipeline(flag, createApp({ plugin: false, rsc: false }))).toBe(false);
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]![0]).toContain(
+      "@farm.js/plugin, @vitejs/plugin-rsc are not installed, so the app runs without React Server Components",
+    );
+    expect(farmAppUsesRscPipeline(flag, createApp())).toBe(true);
+    expect(farmAppUsesRscPipeline({}, createApp())).toBe(false);
   });
 
   it("configures the RSC pipeline on @vitejs/plugin-rsc from the Farm config", async () => {
