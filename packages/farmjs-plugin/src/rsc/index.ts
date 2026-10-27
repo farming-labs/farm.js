@@ -150,10 +150,11 @@ export interface FarmRscConfig {
   port?: number;
   experimental?: {
     /**
-     * Enable React Server Components rendering.
+     * Enable React Server Components rendering. `{ mode: "rsc" }` is the same as `true`; this
+     * pipeline is the `"rsc"` engine of core's `experimental.serverComponents`.
      * @default true
      */
-    serverComponents?: boolean;
+    serverComponents?: boolean | { mode: "rsc" };
     /**
      * Enable React Server Actions and their public POST decoder.
      * @default false
@@ -925,7 +926,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
       async config(config: UserConfig, env: ConfigEnv) {
         const c = config as UserConfig & {
           experimental?: {
-            serverComponents?: boolean;
+            serverComponents?: boolean | { mode?: string };
             serverActions?: boolean;
             optimizedBoundary?: boolean;
           };
@@ -949,7 +950,19 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           images?: FarmImageConfig;
         };
         // Check if user enabled RSC in their config
-        rscEnabled = c.experimental?.serverComponents === true;
+        const serverComponents = c.experimental?.serverComponents;
+        if (
+          typeof serverComponents === "object" &&
+          serverComponents !== null &&
+          serverComponents.mode !== "rsc"
+        ) {
+          throw new Error(
+            `[Farm.js] @farm.js/plugin/rsc runs the "rsc" engine; experimental.serverComponents.mode "${String(serverComponents.mode)}" is not supported here.`,
+          );
+        }
+        rscEnabled =
+          serverComponents === true ||
+          (typeof serverComponents === "object" && serverComponents !== null);
         actionsEnabled = c.experimental?.serverActions === true;
         bodySizeLimit = resolveFarmServerConfig(c.server).bodySizeLimit;
         optimizedBoundaryEnabled = c.experimental?.optimizedBoundary === true;

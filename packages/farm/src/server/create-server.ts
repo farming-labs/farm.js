@@ -1,3 +1,4 @@
+import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import type { ViteDevServer } from "vite";
 import type { FarmConfig } from "../types";
 import { farmI18nClientBridgePlugin, farmPlugin, farmServerOnlyEntriesPlugin } from "../vite";
@@ -230,7 +231,7 @@ export async function createServer(
     const userConfig = await loadConfig(root, undefined, mode);
     // experimental.serverComponents: the RSC pipeline serves the app instead of Farm's renderer.
     const rscConfig = userConfig ?? config;
-    if (rscConfig.experimental?.serverComponents === true) {
+    if (resolveFarmServerComponentsMode(rscConfig.experimental?.serverComponents)) {
       const { createFarmRscDevServer, farmAppUsesRscPipeline } = await import("../rsc-pipeline");
       if (farmAppUsesRscPipeline(rscConfig, root)) {
         return await createFarmRscDevServer(rscConfig, { root, port: options.port });

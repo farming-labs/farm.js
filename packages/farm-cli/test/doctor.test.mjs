@@ -498,6 +498,16 @@ test("reports whether experimental.serverComponents runs React Server Components
       "pass",
     );
 
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      'export default { experimental: { serverComponents: { mode: "islands" } } };\n',
+    );
+    const islands = await runFarmDoctor({ root, offline: true });
+    assert.equal(
+      islands.checks.find((entry) => entry.code === "SERVER_COMPONENTS_UNAVAILABLE")?.status,
+      "fail",
+    );
+
     // Config RSC cannot run that decides what a request may receive stops it, as farm dev does.
     await writeConfig(["  headers() { return []; },"]);
     const blocked = await runFarmDoctor({ root, offline: true });

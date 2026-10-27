@@ -215,3 +215,29 @@ test("keeps building an app that sets experimental.serverComponents without the 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("stops a build that asks for islands mode, which is not available yet", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-build-islands-"));
+
+  try {
+    await writeFile(
+      path.join(root, "package.json"),
+      '{ "name": "islands-app", "type": "module" }\n',
+    );
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      'export default { experimental: { serverComponents: { mode: "islands" } } };\n',
+      "utf8",
+    );
+    await assert.rejects(
+      execFileAsync(process.execPath, [cliBin, "build", "--root", root]),
+      (error) => {
+        const output = `${error.stdout || ""}\n${error.stderr || ""}`;
+        assert.match(output, /\{ mode: "islands" \} is planned \(RFC 0003\) and not available yet/);
+        return true;
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

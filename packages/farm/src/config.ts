@@ -1,3 +1,4 @@
+import { resolveFarmServerComponentsMode } from "./server-components-mode";
 import type { FarmSchemaConfig } from "./schema";
 import { assertPluginDependencies } from "./plugin-dependencies";
 import type {
@@ -997,6 +998,8 @@ export async function resolveConfig(
   userConfig: FarmUserConfig,
   mode: "development" | "production",
 ): Promise<ResolvedFarmConfig> {
+  // An unknown serverComponents mode is a config error, not a silent no-op.
+  resolveFarmServerComponentsMode(userConfig.experimental?.serverComponents);
   const projectRoot = userConfig.root || process.cwd();
   const layerResolution = await resolveFarmLayers(userConfig, {
     root: projectRoot,

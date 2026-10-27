@@ -1,3 +1,4 @@
+import { resolveFarmServerComponentsMode } from "./server-components-mode";
 import {
   invalidateFailedFarmDevModules,
   invalidateFarmDevDependents,
@@ -3506,7 +3507,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         const isolatedHydrationMode = resolveFarmIsolatedClientHydrationMode(
           resolvedConfig?.experimental?.isolatedClientHydration,
           {
-            serverComponents: resolvedConfig?.experimental?.serverComponents === true,
+            serverComponents:
+              resolveFarmServerComponentsMode(resolvedConfig?.experimental?.serverComponents) ===
+              "rsc",
             hasUnsupportedIntegrationProvider: integrationProviders
               .filter((provider) => provider.component || provider.type === "clerk")
               .some((provider) => provider.supportsIsolatedHydration !== true),

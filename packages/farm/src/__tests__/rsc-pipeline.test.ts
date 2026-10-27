@@ -76,6 +76,22 @@ describe("experimental.serverComponents from farm.config", () => {
     expect(farmAppUsesRscPipeline({}, createApp())).toBe(false);
   });
 
+  it("fails clearly for islands mode and for an explicit rsc mode without packages", () => {
+    expect(() =>
+      farmAppUsesRscPipeline(
+        { experimental: { serverComponents: { mode: "islands" } } },
+        createApp(),
+      ),
+    ).toThrow('{ mode: "islands" } is planned (RFC 0003) and not available yet');
+    // `{ mode: "rsc" }` takes the pipeline, which then names the packages to install.
+    expect(
+      farmAppUsesRscPipeline(
+        { experimental: { serverComponents: { mode: "rsc" } } },
+        createApp({ plugin: false, rsc: false }),
+      ),
+    ).toBe(true);
+  });
+
   it("configures the RSC pipeline on @vitejs/plugin-rsc from the Farm config", async () => {
     const root = createApp();
     const middleware = () => undefined;

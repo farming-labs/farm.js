@@ -1055,7 +1055,27 @@ function collectServerComponentsChecks(
   checks: FarmDoctorCheck[],
 ): void {
   const status = inspectFarmServerComponents(userConfig, root);
+  if (status.mode === "islands") {
+    checks.push({
+      status: "fail",
+      code: "SERVER_COMPONENTS_UNAVAILABLE",
+      title: "Islands mode is not available yet",
+      message: 'experimental.serverComponents: { mode: "islands" } is planned (RFC 0003).',
+      action: 'Use { mode: "rsc" } or true.',
+    });
+    return;
+  }
   if (!status.enabled) return;
+  if (status.missingPackages.length > 0 && !status.fallback) {
+    checks.push({
+      status: "fail",
+      code: "SERVER_COMPONENTS_PACKAGES_MISSING",
+      title: "React Server Components packages are not installed",
+      message: `experimental.serverComponents: { mode: "rsc" } needs ${status.missingPackages.join(", ")}.`,
+      action: `Install them: ${FARM_RSC_INSTALL_HINT}`,
+    });
+    return;
+  }
   if (status.fallback) {
     checks.push({
       status: "warn",

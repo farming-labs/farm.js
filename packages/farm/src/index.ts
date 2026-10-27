@@ -211,6 +211,11 @@ export {
   type FarmServerComponentsStatus,
 } from "./server-components-status";
 export type {
+  FarmServerComponentsConfig,
+  FarmServerComponentsMode,
+  FarmServerComponentsOptions,
+} from "./server-components-mode";
+export type {
   FarmImageConfig,
   FarmImageFormat,
   FarmImageLocalPattern,

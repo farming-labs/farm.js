@@ -300,6 +300,13 @@ export default defineConfig({
 });
 ```
 
+`serverComponents: true` is the same as `serverComponents: { mode: "rsc" }`, React's own server
+components engine. `{ mode: "islands" }` is reserved for Farm's own engine, which sends static output
+once as HTML and hydrates only client components
+([RFC 0003](https://github.com/farming-labs/farm.js/blob/main/rfcs/0003-islands-server-components.md)).
+It is not available yet, and `farm dev` and `farm build` stop with an error that says so. Both modes
+share the authoring rules on this page, so switching between them is a one-line change.
+
 The app's `vite` options and plugins apply as in other Farm apps, and so does built-in Tailwind.
 `@vitejs/plugin-react` is optional and adds Fast Refresh. The build goes to the deploy target's
 output directory, so `farm start` and platform deploys work unchanged.
@@ -315,7 +322,8 @@ The pipeline does not run every Farm feature yet:
 Before this flag ran the RSC pipeline it only switched off isolated hydration, so some apps set it
 without using React Server Components. An app with `serverComponents: true` but without the RSC
 packages installed keeps running without them and warns once; a future release makes `true` always
-run React Server Components. `farm doctor` reports which way an app goes.
+run React Server Components. `{ mode: "rsc" }` is new, so it stops with the install command instead.
+`farm doctor` reports which way an app goes.
 
 A `vite.config.ts` built with `defineConfig` from
 `@farm.js/plugin/rsc` and the `vite` CLI keeps working, as in the

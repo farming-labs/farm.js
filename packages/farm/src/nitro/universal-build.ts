@@ -1,3 +1,4 @@
+import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import { createBundledEnv } from "../env";
 import { generateNativeMCPPluginSource } from "./native-mcp-source";
 import { getFarmMarkdownAlternatePath } from "../markdown";
@@ -1680,7 +1681,7 @@ async function buildClient(
   );
   if (
     config.experimental?.isolatedClientHydration === "enabled" &&
-    config.experimental?.serverComponents !== true &&
+    resolveFarmServerComponentsMode(config.experimental?.serverComponents) !== "rsc" &&
     unsupportedIntegrationProvider
   ) {
     logger.warn(
@@ -1690,7 +1691,8 @@ async function buildClient(
   const isolatedMode = resolveFarmIsolatedClientHydrationMode(
     config.experimental?.isolatedClientHydration,
     {
-      serverComponents: config.experimental?.serverComponents === true,
+      serverComponents:
+        resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "rsc",
       hasUnsupportedIntegrationProvider: Boolean(unsupportedIntegrationProvider),
     },
   );
@@ -5720,7 +5722,8 @@ function renderFarmRouteServerTree(element) { return element; }`;
   const isolatedHydrationMode = resolveFarmIsolatedClientHydrationMode(
     config.experimental?.isolatedClientHydration,
     {
-      serverComponents: config.experimental?.serverComponents === true,
+      serverComponents:
+        resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "rsc",
       hasUnsupportedIntegrationProvider: Boolean(unsupportedIntegrationProvider),
     },
   );

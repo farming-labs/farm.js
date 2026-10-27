@@ -89,16 +89,16 @@ set of optimized components are not a cross-version API. See the
 
 These are off by default and outside the stability promise:
 
-| Feature                   | How to enable                                                       |
-| ------------------------- | ------------------------------------------------------------------- |
-| React Server Components   | `experimental.serverComponents`, or the `@farm.js/plugin/rsc` setup |
-| Server Actions under RSC  | `experimental.serverActions`                                        |
-| Partial Prerendering      | `experimental.ppr`, then opt routes in                              |
-| Isolated client hydration | `experimental.isolatedClientHydration: "analyze" \| "enabled"`      |
-| API route MCP server      | `apiMcp()` from `@farm.js/mcp`                                      |
-| WebMCP browser tools      | `@farm.js/webmcp`                                                   |
-| Module federation         | `@farm.js/federation`                                               |
-| WebAssembly components    | `@farm.js/wasm`                                                     |
+| Feature                   | How to enable                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------- |
+| React Server Components   | `experimental.serverComponents` (`true` or `{ mode: "rsc" }`), or the `@farm.js/plugin/rsc` setup |
+| Server Actions under RSC  | `experimental.serverActions`                                                                      |
+| Partial Prerendering      | `experimental.ppr`, then opt routes in                                                            |
+| Isolated client hydration | `experimental.isolatedClientHydration: "analyze" \| "enabled"`                                    |
+| API route MCP server      | `apiMcp()` from `@farm.js/mcp`                                                                    |
+| WebMCP browser tools      | `@farm.js/webmcp`                                                                                 |
+| Module federation         | `@farm.js/federation`                                                                             |
+| WebAssembly components    | `@farm.js/wasm`                                                                                   |
 
 ## Known limits in 0.1
 

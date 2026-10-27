@@ -1,3 +1,4 @@
+import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import { loadFarmDevModule } from "../dev-module";
 import type {
   FarmConfig,
@@ -699,7 +700,7 @@ export class RouteManager {
     );
     if (
       this.config.experimental?.isolatedClientHydration === "enabled" &&
-      this.config.experimental?.serverComponents !== true &&
+      resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) !== "rsc" &&
       unsupportedIntegrationProvider
     ) {
       logger.warn(
@@ -709,7 +710,8 @@ export class RouteManager {
     const isolatedMode = resolveFarmIsolatedClientHydrationMode(
       this.config.experimental?.isolatedClientHydration,
       {
-        serverComponents: this.config.experimental?.serverComponents === true,
+        serverComponents:
+          resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) === "rsc",
         hasUnsupportedIntegrationProvider: Boolean(unsupportedIntegrationProvider),
       },
     );

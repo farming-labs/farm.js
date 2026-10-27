@@ -5,6 +5,12 @@
  */
 import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
+import {
+  FARM_ISLANDS_MODE_UNAVAILABLE,
+  isExplicitFarmServerComponentsMode,
+  resolveFarmServerComponentsMode,
+  type FarmServerComponentsMode,
+} from "./server-components-mode";
 import { logger } from "./utils";
 
 type FarmConfigInput = Record<string, any>;
@@ -44,8 +50,12 @@ const FARM_RSC_IGNORED_KEYS = [
 ] as const;
 
 export interface FarmServerComponentsStatus {
-  /** `experimental.serverComponents` is on. */
+  /** The engine the config asks for, or `undefined` when server components are off. */
+  mode: FarmServerComponentsMode | undefined;
+  /** `experimental.serverComponents` asks for the RSC pipeline. */
   enabled: boolean;
+  /** Picked with `{ mode }` rather than `true`; never falls back. */
+  explicit: boolean;
   /** RSC packages the app does not resolve. */
   missingPackages: string[];
   /**
@@ -63,7 +73,7 @@ export interface FarmServerComponentsStatus {
 export function farmConfigUsesServerComponents(
   config: FarmConfigInput | null | undefined,
 ): boolean {
-  return config?.experimental?.serverComponents === true;
+  return resolveFarmServerComponentsMode(config?.experimental?.serverComponents) === "rsc";
 }
 
 export function findFarmAppPackageDir(root: string, packageName: string): string | undefined {
@@ -84,14 +94,20 @@ export function inspectFarmServerComponents(
   config: FarmConfigInput | null | undefined,
   root: string,
 ): FarmServerComponentsStatus {
-  const enabled = farmConfigUsesServerComponents(config);
+  const value = config?.experimental?.serverComponents;
+  const mode = resolveFarmServerComponentsMode(value);
+  const enabled = mode === "rsc";
+  const explicit = enabled && isExplicitFarmServerComponentsMode(value);
   const missingPackages = enabled
     ? FARM_RSC_PACKAGES.filter((name) => !findFarmAppPackageDir(root, name))
     : [];
   return {
+    mode,
     enabled,
+    explicit,
     missingPackages,
-    fallback: enabled && missingPackages.length > 0,
+    // `true` predates the pipeline; `{ mode: "rsc" }` is new and fails with the install command.
+    fallback: enabled && !explicit && missingPackages.length > 0,
     blockingKeys: enabled ? FARM_RSC_BLOCKING_KEYS.filter((key) => isSet(config?.[key])) : [],
     ignoredKeys: enabled ? FARM_RSC_IGNORED_KEYS.filter((key) => isSet(config?.[key])) : [],
   };
@@ -129,6 +145,7 @@ export function farmAppUsesRscPipeline(
   root: string,
 ): boolean {
   const status = inspectFarmServerComponents(config, root);
+  if (status.mode === "islands") throw new Error(FARM_ISLANDS_MODE_UNAVAILABLE);
   if (!status.enabled) return false;
   if (status.fallback) {
     if (!warnedFallback) {
