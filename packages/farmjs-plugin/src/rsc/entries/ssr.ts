@@ -12,9 +12,8 @@ import type { EntryContext } from "../types.js";
  */
 export function generateSsrEntry(ctx: EntryContext): string {
   const debugLog = `// Debug disabled`;
-  const routesDir = ctx.routesDir === undefined ? "app" : ctx.routesDir.trim();
-  const routesPath = routesDir ? `/${routesDir}` : "";
-  const globalsCssPath = ctx.globalCssPath ?? `/${ctx.srcDir}${routesPath}/globals.css`;
+  // Only a global stylesheet the build found: a guessed path 404s in apps that import their CSS.
+  const globalsCssPath = ctx.globalCssPath ?? "";
 
   return `
 import React from 'react';

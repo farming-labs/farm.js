@@ -51,6 +51,8 @@ export interface NitroPluginOptions {
   };
   config?: {
     preset?: string;
+    /** Deployment output directory (default `.output`). */
+    outputDir?: string;
   };
   /** Base output dir when not using .nitro/vite/dist (fallback). */
   outDir?: string;
@@ -130,6 +132,7 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
           clientOutDir,
           serverEntryName,
           preset: options.config?.preset ?? process.env.NITRO_PRESET ?? "vercel",
+          outputDir: options.config?.outputDir,
           clientAssetsDir,
         };
       }
@@ -148,6 +151,7 @@ export async function runNitroFromBuildApp(): Promise<void> {
         serverEntryName: string;
         preset: string;
         clientAssetsDir?: string;
+        outputDir?: string;
       }
     | undefined;
   const bundle = (globalThis as any).__FARM_NITRO_SERVER_BUNDLE as Record<
@@ -183,6 +187,7 @@ async function runCapturedNitroBuild(
     serverEntryName: string;
     preset: string;
     clientAssetsDir?: string;
+    outputDir?: string;
   },
   bundle: Record<
     string,
@@ -218,5 +223,6 @@ async function runCapturedNitroBuild(
     ssrPath: resolveRscBuildOutputPath(root, paths.ssrOutDir, "index.js"),
     assetsDir: paths.clientAssetsDir ?? "assets",
     preset,
+    outputDir: paths.outputDir,
   });
 }

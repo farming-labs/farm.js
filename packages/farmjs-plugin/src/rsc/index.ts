@@ -255,6 +255,12 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
       }),
       farmApiPlugin({
         srcDir: config.srcDir ?? "src",
+        // The production entry serves API routes from the routes directory; so does development.
+        apiDir: path.join(
+          config.srcDir ?? "src",
+          config.routesDir === undefined ? "app" : config.routesDir.trim(),
+          "api",
+        ),
         debug,
         bodySizeLimit: config.server?.bodySizeLimit,
         // The dev API server mounts the MCP endpoint, as core's does.

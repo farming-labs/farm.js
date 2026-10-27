@@ -228,6 +228,12 @@ export async function createServer(
     // Load farm.config.ts if it exists
     const mode = process.env.NODE_ENV === "production" ? "production" : "development";
     const userConfig = await loadConfig(root, undefined, mode);
+    // experimental.serverComponents: the RSC pipeline serves the app instead of Farm's renderer.
+    const rscConfig = userConfig ?? config;
+    if (rscConfig.experimental?.serverComponents === true) {
+      const { createFarmRscDevServer } = await import("../rsc-pipeline");
+      return await createFarmRscDevServer(rscConfig, { root, port: options.port });
+    }
 
     const resolvedConfig = userConfig
       ? await resolveConfig(userConfig, mode)

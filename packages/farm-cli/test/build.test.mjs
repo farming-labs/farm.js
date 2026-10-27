@@ -177,3 +177,31 @@ test("lets configure change the preset when the CLI has no deploy override", asy
 test("keeps an explicit CLI preset ahead of configure", async () => {
   assert.equal(await observeBuildPreset("vercel"), "vercel");
 });
+
+test("builds an app with experimental.serverComponents on the RSC pipeline", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-build-rsc-"));
+
+  try {
+    await writeFile(path.join(root, "package.json"), '{ "name": "rsc-app", "type": "module" }\n');
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      "export default { experimental: { serverComponents: true } };\n",
+      "utf8",
+    );
+
+    // The app installs no RSC packages, so the RSC build stops before Vite runs and names them.
+    await assert.rejects(
+      execFileAsync(process.execPath, [cliBin, "build", "--root", root]),
+      (error) => {
+        const output = `${error.stdout || ""}\n${error.stderr || ""}`;
+        assert.match(
+          output,
+          /Install them: pnpm add @farm\.js\/plugin @vitejs\/plugin-rsc react-server-dom-webpack/,
+        );
+        return true;
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

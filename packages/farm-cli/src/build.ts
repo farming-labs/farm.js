@@ -47,6 +47,20 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
         throw new Error("No Farm config found. Please create farm.config.ts or config.ts.");
       }
 
+      // experimental.serverComponents: the RSC pipeline builds the app for the deploy preset.
+      if (userConfig.experimental?.serverComponents === true) {
+        const deploy = resolveDeployConfig(userConfig, {
+          preset: options.preset as any,
+          target: options.target,
+        });
+        await buildRuntimeResult.value.buildFarmRsc(userConfig, {
+          root,
+          preset: deploy.preset,
+          outputDir: deploy.outputDir,
+        });
+        return;
+      }
+
       const config = await resolveConfig(userConfig, mode);
 
       // Override preset/target if provided via CLI
