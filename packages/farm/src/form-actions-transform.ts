@@ -11,10 +11,43 @@ interface AstNode {
   [key: string]: any;
 }
 
-const USE_SERVER_DIRECTIVE = /^(?:\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*(['"])use server\1/;
-
+/**
+ * Whether the module's directive prologue (the strings before any other statement, after comments)
+ * holds `"use server"`. A linear scan: a regular expression over leading comments backtracks
+ * exponentially on a file that opens with many of them.
+ */
 export function hasUseServerDirective(code: string): boolean {
-  return USE_SERVER_DIRECTIVE.test(code);
+  let index = 0;
+  while (index < code.length) {
+    const char = code.charCodeAt(index);
+    // Whitespace, including a byte order mark.
+    if (char === 32 || (char >= 9 && char <= 13) || char === 0xfeff || char === 0xa0) {
+      index++;
+    } else if (code.startsWith("//", index)) {
+      const end = code.indexOf("\n", index);
+      if (end === -1) return false;
+      index = end + 1;
+    } else if (code.startsWith("/*", index)) {
+      const end = code.indexOf("*/", index + 2);
+      if (end === -1) return false;
+      index = end + 2;
+    } else if (char === 34 || char === 39) {
+      const quote = code[index]!;
+      const end = code.indexOf(quote, index + 1);
+      if (end === -1) return false;
+      const directive = code.slice(index + 1, end);
+      index = end + 1;
+      // A directive ends at a semicolon, a line break or the end of the file; a string followed by
+      // anything else is an expression, and ends the prologue.
+      while (index < code.length && /[ \t]/.test(code[index]!)) index++;
+      if (code[index] === ";") index++;
+      else if (index < code.length && code[index] !== "\n" && code[index] !== "\r") return false;
+      if (directive === "use server") return true;
+    } else {
+      return false;
+    }
+  }
+  return false;
 }
 
 /** The id an action has on both sides: the module's path from the app root and the export name. */

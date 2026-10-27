@@ -3639,20 +3639,20 @@ export const manifest = getManifest();
     async transform(code, id, transformOptions) {
       // Islands mode: `"use server"` modules register as actions on the server and become stubs in
       // the browser (RFC 0003). The RSC engine has its own transform.
-      if (hasUseServerDirective(code)) {
-        const actionConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
-        if (
-          resolveFarmServerComponentsMode(actionConfig.experimental?.serverComponents) === "islands"
-        ) {
-          const actionModule = transformFarmFormActionModule({
-            code,
-            id,
-            root: actionConfig.root || server?.config.root || process.cwd(),
-            ssr: transformOptions?.ssr === true,
-            parse: (source) => this.parse(source) as never,
-          });
-          if (actionModule) return { code: actionModule, map: null };
-        }
+      const actionConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
+      if (
+        resolveFarmServerComponentsMode(actionConfig.experimental?.serverComponents) ===
+          "islands" &&
+        hasUseServerDirective(code)
+      ) {
+        const actionModule = transformFarmFormActionModule({
+          code,
+          id,
+          root: actionConfig.root || server?.config.root || process.cwd(),
+          ssr: transformOptions?.ssr === true,
+          parse: (source) => this.parse(source) as never,
+        });
+        if (actionModule) return { code: actionModule, map: null };
       }
       if (!transformOptions?.ssr) {
         // The docs config module reaches the browser for adapter hydration: without credentials.

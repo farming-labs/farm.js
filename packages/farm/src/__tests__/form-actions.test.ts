@@ -7,7 +7,11 @@ import {
   registerFarmFormAction,
 } from "../form-actions";
 import { resolveServerActionsConfig } from "../server-action-security";
-import { getFarmFormActionId, transformFarmFormActionModule } from "../form-actions-transform";
+import {
+  getFarmFormActionId,
+  hasUseServerDirective,
+  transformFarmFormActionModule,
+} from "../form-actions-transform";
 
 const config = resolveServerActionsConfig(undefined);
 
@@ -143,5 +147,25 @@ describe('the "use server" transform', () => {
         parse,
       }),
     ).toBeNull();
+  });
+
+  it("finds the directive in the prologue only", () => {
+    expect(hasUseServerDirective('"use server";\nexport async function a() {}')).toBe(true);
+    expect(hasUseServerDirective("\ufeff// note\n/* license */\n'use server'\n")).toBe(true);
+    expect(hasUseServerDirective('"use strict";\n"use server";')).toBe(true);
+    expect(hasUseServerDirective('import x from "y";\n"use server";')).toBe(false);
+    expect(hasUseServerDirective('"use server".length;')).toBe(false);
+    expect(hasUseServerDirective('const s = "use server";')).toBe(false);
+    expect(hasUseServerDirective("/* unterminated")).toBe(false);
+  });
+
+  it("scans a file that opens with many comments in linear time", () => {
+    // The first version, a regular expression, took hours here and stalled production builds.
+    const code = "/* c */\n".repeat(5000) + "export const value = 1;\n";
+    const start = performance.now();
+    expect(hasUseServerDirective(code)).toBe(false);
+    expect(hasUseServerDirective(code + '"use server";')).toBe(false);
+    expect(hasUseServerDirective("/* c */\n".repeat(5000) + '"use server";')).toBe(true);
+    expect(performance.now() - start).toBeLessThan(100);
   });
 });
