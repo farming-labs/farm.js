@@ -4734,7 +4734,7 @@ function generateClientCode(
     ? `const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
   ReactRuntime: React,
   hydrateRoot,
-  load: (reference) => import(/* @vite-ignore */ reference),
+  load: (reference) => import(/* @vite-ignore */ farmModuleUrl(reference)),
   schedule: scheduleFarmIslandHydration,
   wrap: wrapWithIntegrationProviders,
 });
@@ -4754,7 +4754,7 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document, signal) {
 async function createFarmServerTreePageElement(source, pathname) {
   try {
     return await createFarmServerTreeElement(React, source, {
-      load: (reference) => import(/* @vite-ignore */ reference),
+      load: (reference) => import(/* @vite-ignore */ farmModuleUrl(reference)),
       ServerHtml: FarmServerPage,
       key: pathname,
     });
@@ -4780,6 +4780,18 @@ import {
 } from '@farm.js/core/deployment'
 ${providerClientCode.imports}
 ${clientPluginEntry.imports}
+
+// Vite appends ?import to a dynamic import of a variable, and the browser keys that URL as a second
+// copy of a module other modules import statically: two React contexts, two stores. Vite leaves an
+// absolute URL alone. Other files (Markdown pages) need ?import to be served as JavaScript.
+function farmModuleUrl(reference) {
+  return typeof reference === "string" &&
+    reference[0] === "/" &&
+    reference[1] !== "/" &&
+    /\\.(?:[cm]?[jt]sx?|vue|svelte)(?:$|\\?)/.test(reference)
+    ? new URL(reference, location.origin).href
+    : reference;
+}
 ${clientCachePersistence.imports}
 ${docsSearchClientRuntime}
 ${devtoolsClientRuntime}
@@ -5063,7 +5075,7 @@ class LegacyManifestSPARouter {
     this.prefetchingUrls.add(pathname);
     try {
       // Prefetch by importing the module (Vite caches it)
-      const module = await import(/* @vite-ignore */ modulePath);
+      const module = await import(/* @vite-ignore */ farmModuleUrl(modulePath));
       this.moduleCache.set(modulePath, module);
       pageModuleCache.set(modulePath, module);
     } catch (error) {
@@ -5311,7 +5323,7 @@ async function renderRouteSlot(slot, mode = 'render') {
 
   let slotModule = pageModuleCache.get(slot.modulePath);
   if (!slotModule) {
-    slotModule = await import(/* @vite-ignore */ slot.modulePath);
+    slotModule = await import(/* @vite-ignore */ farmModuleUrl(slot.modulePath));
     pageModuleCache.set(slot.modulePath, slotModule);
   }
   const SlotComponent = slotModule?.default;
@@ -5476,7 +5488,7 @@ async function buildClientHydrationElement(
 
   if (loadingModulePath) {
     try {
-      const loadingModule = await import(/* @vite-ignore */ loadingModulePath);
+      const loadingModule = await import(/* @vite-ignore */ farmModuleUrl(loadingModulePath));
       const LoadingComponent = loadingModule?.default;
       if (LoadingComponent) {
         const loadingFallback = React.createElement(LoadingComponent, {
@@ -5504,7 +5516,7 @@ async function loadLayoutComponents(layouts = []) {
     try {
       let LayoutComponent = layoutComponentCache.get(layout.modulePath);
       if (!LayoutComponent) {
-        const layoutModule = await import(/* @vite-ignore */ layout.modulePath);
+        const layoutModule = await import(/* @vite-ignore */ farmModuleUrl(layout.modulePath));
         LayoutComponent = layoutModule.default;
         if (LayoutComponent) {
           layoutComponentCache.set(layout.modulePath, LayoutComponent);
@@ -5670,7 +5682,7 @@ async function tryHydrateImportedPage(
   if (pageShouldHydrate) {
     let pageModule = pageModuleCache.get(modulePath);
     if (!pageModule) {
-      pageModule = await import(/* @vite-ignore */ modulePath);
+      pageModule = await import(/* @vite-ignore */ farmModuleUrl(modulePath));
       pageModuleCache.set(modulePath, pageModule);
     }
     if (signal?.aborted || !container?.isConnected) return false;
