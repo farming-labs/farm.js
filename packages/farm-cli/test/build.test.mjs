@@ -203,7 +203,10 @@ test("keeps building an app that sets experimental.serverComponents without the 
       execFileAsync(process.execPath, [cliBin, "build", "--root", root]),
       (error) => {
         const output = `${error.stdout || ""}\n${error.stderr || ""}`;
-        assert.match(output, /runs without React Server Components\. Install them to turn RSC on/);
+        assert.match(
+          output,
+          /runs without React Server Components\. A future release makes true always run them/,
+        );
         assert.match(output, /normal-pipeline-reached/);
         return true;
       },

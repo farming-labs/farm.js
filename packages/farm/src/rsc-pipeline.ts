@@ -12,17 +12,16 @@ import { pathToFileURL } from "node:url";
 import type { InlineConfig, ViteDevServer } from "vite";
 import { loadTailwindVitePlugin } from "./build/tailwind";
 import { resolveDeployOutputPath } from "./config";
-import { logger } from "./utils";
+import { FARM_RSC_INSTALL_HINT, findFarmAppPackageDir } from "./server-components-status";
+
+export {
+  FARM_RSC_PACKAGES,
+  farmAppUsesRscPipeline,
+  farmConfigUsesServerComponents,
+  inspectFarmServerComponents,
+} from "./server-components-status";
 
 type FarmConfigInput = Record<string, any>;
-
-export const FARM_RSC_PACKAGES = [
-  "@farm.js/plugin",
-  "@vitejs/plugin-rsc",
-  "react-server-dom-webpack",
-];
-
-const FARM_RSC_INSTALL_HINT = `pnpm add ${FARM_RSC_PACKAGES.join(" ")}`;
 
 /** The entry files the RSC pipeline writes and hands to @vitejs/plugin-rsc. */
 const FARM_RSC_ENTRIES = {
@@ -51,65 +50,6 @@ const FARM_RSC_CONFIG_KEYS = [
 /** Read by the RSC pipeline's own config hook, which `defineConfig` does not copy. */
 const FARM_RSC_PASSTHROUGH_KEYS = ["i18n", "cache"] as const;
 
-/** Farm features the RSC pipeline does not run yet. */
-const FARM_RSC_UNSUPPORTED_KEYS = [
-  "auth",
-  "integrations",
-  "plugins",
-  "storage",
-  "schema",
-  "cron",
-  "workflows",
-  "docs",
-  "theme",
-  "routeRules",
-  "context",
-  "redirects",
-  "rewrites",
-  "headers",
-  "observability",
-] as const;
-
-/** Whether the app opted in to React Server Components in farm.config. */
-export function farmConfigUsesServerComponents(
-  config: FarmConfigInput | null | undefined,
-): boolean {
-  return config?.experimental?.serverComponents === true;
-}
-
-let warnedMissingRscPackages = false;
-
-/**
- * Whether an app with `experimental.serverComponents` runs on the RSC pipeline. Apps set the flag
- * before it loaded the pipeline (it only switched off isolated hydration), so an app without the
- * RSC packages keeps building as before and is told once how to turn React Server Components on.
- */
-export function farmAppUsesRscPipeline(
-  config: FarmConfigInput | null | undefined,
-  root: string,
-): boolean {
-  if (!farmConfigUsesServerComponents(config)) return false;
-  const missing = FARM_RSC_PACKAGES.filter((name) => !findPackageDir(root, name));
-  if (missing.length === 0) return true;
-  if (!warnedMissingRscPackages) {
-    warnedMissingRscPackages = true;
-    logger.warn(
-      `[Farm.js] experimental.serverComponents is set, but ${missing.join(", ")} ${
-        missing.length === 1 ? "is" : "are"
-      } not installed, so the app runs without React Server Components. Install them to turn RSC on: ${FARM_RSC_INSTALL_HINT}, or remove the flag.`,
-    );
-  }
-  return false;
-}
-
-function findPackageDir(root: string, packageName: string): string | undefined {
-  for (let dir = path.resolve(root); ; dir = path.dirname(dir)) {
-    const candidate = path.join(dir, "node_modules", packageName);
-    if (existsSync(path.join(candidate, "package.json"))) return realpathSync(candidate);
-    if (path.dirname(dir) === dir) return undefined;
-  }
-}
-
 function pickImportTarget(entry: unknown): string | undefined {
   if (typeof entry === "string") return entry;
   if (!entry || typeof entry !== "object") return undefined;
@@ -129,7 +69,7 @@ async function importFromApp(
   packageName: string,
   subpath = ".",
 ): Promise<Record<string, any> | undefined> {
-  const packageDir = findPackageDir(root, packageName);
+  const packageDir = findFarmAppPackageDir(root, packageName);
   if (!packageDir) return undefined;
   const manifest = JSON.parse(readFileSync(path.join(packageDir, "package.json"), "utf8")) as {
     exports?: unknown;
@@ -155,21 +95,6 @@ function hasPluginNamed(plugins: unknown, prefix: string): boolean {
   if (Array.isArray(plugins)) return plugins.some((plugin) => hasPluginNamed(plugin, prefix));
   const name = (plugins as { name?: unknown } | null)?.name;
   return typeof name === "string" && name.startsWith(prefix);
-}
-
-function warnUnsupportedKeys(userConfig: FarmConfigInput): void {
-  const ignored = FARM_RSC_UNSUPPORTED_KEYS.filter((key) => {
-    const value = userConfig[key];
-    if (value === undefined || value === false) return false;
-    if (Array.isArray(value)) return value.length > 0;
-    return typeof value !== "object" || value === null || Object.keys(value).length > 0;
-  });
-  if (ignored.length === 0) return;
-  logger.warn(
-    `[Farm.js] experimental.serverComponents runs on the RSC pipeline, which does not support ${ignored
-      .map((key) => `\`${key}\``)
-      .join(", ")} yet. ${ignored.length === 1 ? "It is" : "They are"} ignored.`,
-  );
 }
 
 /**
@@ -201,12 +126,11 @@ export async function createFarmRscViteConfig(
     importFromApp(root, "@vitejs/plugin-rsc"),
     importFromApp(root, "@vitejs/plugin-react"),
   ]);
-  if (!pluginRsc || !viteRsc || !findPackageDir(root, "react-server-dom-webpack")) {
+  if (!pluginRsc || !viteRsc || !findFarmAppPackageDir(root, "react-server-dom-webpack")) {
     throw new Error(
       `[Farm.js] experimental.serverComponents runs on @farm.js/plugin and the official @vitejs/plugin-rsc. Install them: ${FARM_RSC_INSTALL_HINT}`,
     );
   }
-  warnUnsupportedKeys(userConfig);
 
   const { plugins: vitePlugins = [], ...viteOptions } = (userConfig.vite ?? {}) as Record<
     string,

@@ -203,6 +203,13 @@ export * from "./server-query";
 export * from "./server-query-client";
 export * from "./server-action-security";
 export * from "./deployment";
+export {
+  FARM_RSC_INSTALL_HINT,
+  formatFarmRscBlockingMessage,
+  formatFarmRscFallbackMessage,
+  inspectFarmServerComponents,
+  type FarmServerComponentsStatus,
+} from "./server-components-status";
 export type {
   FarmImageConfig,
   FarmImageFormat,

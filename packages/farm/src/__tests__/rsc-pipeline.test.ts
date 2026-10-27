@@ -70,7 +70,7 @@ describe("experimental.serverComponents from farm.config", () => {
     expect(farmAppUsesRscPipeline(flag, createApp({ plugin: false, rsc: false }))).toBe(false);
     expect(warn).toHaveBeenCalledOnce();
     expect(warn.mock.calls[0]![0]).toContain(
-      "@farm.js/plugin, @vitejs/plugin-rsc are not installed, so the app runs without React Server Components",
+      "@farm.js/plugin, @vitejs/plugin-rsc are not installed, so the app runs without React Server Components. A future release makes true always run them.",
     );
     expect(farmAppUsesRscPipeline(flag, createApp())).toBe(true);
     expect(farmAppUsesRscPipeline({}, createApp())).toBe(false);
@@ -146,26 +146,41 @@ describe("experimental.serverComponents from farm.config", () => {
     }
   });
 
-  it("rejects other renderers and reports the Farm features it ignores", async () => {
+  it("rejects other renderers", async () => {
     await expect(
       createFarmRscViteConfig(
         { renderer: { name: "vue" }, experimental: { serverComponents: true } },
         { root: createApp(), command: "serve" },
       ),
     ).rejects.toThrow('needs the React renderer; this app uses "vue"');
+  });
+
+  it("refuses to start RSC without config that protects requests, and warns about the rest", () => {
+    const root = createApp();
+    // auth would silently stop protecting pages, so this is an error, not a warning.
+    expect(() =>
+      farmAppUsesRscPipeline(
+        { auth: true, integrations: { stripe: {} }, experimental: { serverComponents: true } },
+        root,
+      ),
+    ).toThrow(
+      "does not run `auth`, `integrations` yet. Serving the app without them could expose what they protect",
+    );
 
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
-    await createFarmRscViteConfig(
-      {
-        plugins: [{ name: "devtools" }],
-        integrations: { stripe: {} },
-        storage: {},
-        cron: false,
-        experimental: { serverComponents: true },
-      },
-      { root: createApp(), command: "serve" },
-    );
+    expect(
+      farmAppUsesRscPipeline(
+        {
+          plugins: [{ name: "devtools" }],
+          storage: {},
+          cron: false,
+          integrations: {},
+          experimental: { serverComponents: true },
+        },
+        root,
+      ),
+    ).toBe(true);
     expect(warn).toHaveBeenCalledOnce();
-    expect(warn.mock.calls[0]![0]).toContain("does not support `integrations`, `plugins` yet");
+    expect(warn.mock.calls[0]![0]).toContain("does not run `plugins` yet. It is ignored.");
   });
 });

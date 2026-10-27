@@ -39,3 +39,9 @@ export { getIntegrationSchemas } from "./integrations";
 export { checkSchema, formatSchemaCheck } from "./schema-check";
 export { collectSchemaDependencies, orderSchemaOwners } from "./schema-dependencies";
 export { assertNoSchemaListField } from "./schema-capabilities";
+export {
+  FARM_RSC_INSTALL_HINT,
+  formatFarmRscBlockingMessage,
+  formatFarmRscFallbackMessage,
+  inspectFarmServerComponents,
+} from "./server-components-status";

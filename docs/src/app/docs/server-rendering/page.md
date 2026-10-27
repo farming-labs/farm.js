@@ -301,12 +301,23 @@ export default defineConfig({
 ```
 
 The app's `vite` options and plugins apply as in other Farm apps, and so does built-in Tailwind.
-`@vitejs/plugin-react` is optional and adds Fast Refresh. Without the RSC packages installed, `farm dev` and `farm build`
-warn once and run the app without React Server Components. The build goes to the deploy target's
-output directory, so `farm start` and platform deploys work unchanged. The pipeline does not run
-`auth`, `integrations`, Farm `plugins`, `storage`, `schema`, `cron`, `workflows`, `docs`, `theme`,
-`routeRules`, `context`, `redirects`, `rewrites`, `headers`, or `observability` yet; `farm dev` and
-`farm build` warn about any the app sets. A `vite.config.ts` built with `defineConfig` from
+`@vitejs/plugin-react` is optional and adds Fast Refresh. The build goes to the deploy target's
+output directory, so `farm start` and platform deploys work unchanged.
+
+The pipeline does not run every Farm feature yet:
+
+- `auth`, `integrations`, `headers`, `redirects`, `rewrites`, `routeRules`, and `context` decide
+  what a request may see or receive. Running the app without them could expose what they protect,
+  so `farm dev` and `farm build` stop with an error that names them.
+- Farm `plugins`, `storage`, `schema`, `cron`, `workflows`, `docs`, `theme`, and `observability`
+  are ignored, with a warning.
+
+Before this flag ran the RSC pipeline it only switched off isolated hydration, so some apps set it
+without using React Server Components. An app with `serverComponents: true` but without the RSC
+packages installed keeps running without them and warns once; a future release makes `true` always
+run React Server Components. `farm doctor` reports which way an app goes.
+
+A `vite.config.ts` built with `defineConfig` from
 `@farm.js/plugin/rsc` and the `vite` CLI keeps working, as in the
 [`rsc-demo` example](https://github.com/farming-labs/farm.js/tree/main/examples/rsc-demo).
 
