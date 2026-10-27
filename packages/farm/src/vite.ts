@@ -187,6 +187,7 @@ import {
   resolveFarmRendererAppSetup,
 } from "./renderer";
 import type { FarmRenderer } from "./renderer";
+import { createFarmReactRefreshPlugins, isFarmReactRefreshActive } from "./react-refresh";
 import { generateFarmIntegrationProviderClientCode } from "./integration-provider-build";
 import type { FarmIslandStrategy } from "./island";
 import { resolveRouteRenderingConfig } from "./ssg";
@@ -1113,6 +1114,7 @@ export function farmPlugin(
   });
   let farmApp: FarmApp;
   let serverFnTransformActive = false;
+  let reactRefreshActive = false;
   let server: ViteDevServer;
   let apiRouteManager: APIRouteManager;
   let openAPIManager: OpenAPIManager | null = null;
@@ -1178,6 +1180,7 @@ export function farmPlugin(
       serverFnTransformActive = config.plugins.some(
         (plugin) => plugin.name === SERVER_FN_TRANSFORM_PLUGIN,
       );
+      reactRefreshActive = isFarmReactRefreshActive(config);
       if (options.experimental?.serverActions === true && !serverFnTransformActive) {
         logger.warn(
           "experimental.serverActions has no effect without @farm.js/plugin/rsc in the Vite " +
@@ -3710,8 +3713,15 @@ export const manifest = getManifest();
         // and svelte's hot API) which preserves component state, so leave the
         // module for them to accept: appending our own `import.meta.hot.accept`
         // here would swallow the update instead of letting theirs run.
+        //
+        // React Fast Refresh, when present, swaps the edited components in
+        // place across the page and isolated island roots alike. A second
+        // accept here would re-render the module's default export as the
+        // whole root and do nothing for a module with only named exports.
         const hmrCode =
-          transformOptions?.ssr || !shouldEmitFarmClientRootHmr(currentConfig.renderer)
+          transformOptions?.ssr ||
+          reactRefreshActive ||
+          !shouldEmitFarmClientRootHmr(currentConfig.renderer)
             ? ""
             : `
 if (import.meta.hot) {
@@ -6245,6 +6255,10 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
   const rendererVitePlugins = await loadFarmRendererVitePlugins(config.renderer, appRoot, {
     ssr: true,
   });
+  // Development-only: these plugins do nothing in a build.
+  const reactRefreshPlugins = isReactRenderer(config.renderer)
+    ? await createFarmReactRefreshPlugins()
+    : [];
   // Node.js built-in module stubs for browser
   const nodeBuiltinStubs: Record<string, string> = {
     "node:string_decoder":
@@ -6419,6 +6433,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
       createFarmThemeCssPlugin(config.theme, config.basePath),
       tailwindVitePlugin,
       ...(rendererVitePlugins as any[]),
+      ...reactRefreshPlugins,
       viteBrowserExternalPlugin,
       farmI18nClientBridgePlugin(),
       farmServerOnlyEntriesPlugin(),

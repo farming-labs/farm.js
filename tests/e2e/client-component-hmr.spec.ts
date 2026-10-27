@@ -2,6 +2,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
+test.skip(process.env.FARM_E2E_MODE === "prod", "Development HMR");
+
 const fixture = path.resolve("examples/basic/src/app/hmr-e2e");
 const heading = "Client component HMR";
 
