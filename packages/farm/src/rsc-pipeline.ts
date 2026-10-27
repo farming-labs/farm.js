@@ -141,11 +141,12 @@ export async function createFarmRscViteConfig(
   for (const key of FARM_RSC_CONFIG_KEYS) {
     if (userConfig[key] !== undefined) rscConfig[key] = userConfig[key];
   }
-  // Fast Refresh: the app's plugin-react, else core's, as for other Farm apps. Without it the RSC
-  // client bootstrap's /@react-refresh import fails and nothing hydrates in development.
+  // Fast Refresh: the app's plugin-react, else core's in development, as for other Farm apps.
+  // Without it the RSC client bootstrap's /@react-refresh import fails and nothing hydrates.
   const createReactPlugin = hasPluginNamed(vitePlugins, "vite:react")
     ? undefined
-    : (viteReact?.default ?? (await loadFarmReactPlugin()).default);
+    : (viteReact?.default ??
+      (options.command === "serve" ? (await loadFarmReactPlugin()).default : undefined));
   // Built-in Tailwind, as in other Farm apps, unless the app adds @tailwindcss/vite itself.
   const tailwind = hasPluginNamed(vitePlugins, "@tailwindcss/vite")
     ? undefined

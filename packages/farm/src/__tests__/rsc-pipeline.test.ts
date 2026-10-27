@@ -131,15 +131,8 @@ describe("experimental.serverComponents from farm.config", () => {
 
     const plugins = config.plugins.flat(Infinity) as Array<{ name: string }>;
     const names = plugins.map((plugin) => plugin.name);
-    // The app's own Tailwind plugin is not added twice. Without plugin-react in the app, core's
-    // gives Fast Refresh: the RSC client bootstrap imports /@react-refresh in development.
-    expect(names.filter((name) => !name.startsWith("vite:react"))).toEqual([
-      "app-plugin",
-      "@tailwindcss/vite:scan",
-      "rsc",
-      "nitro",
-    ]);
-    expect(names).toContain("vite:react-refresh");
+    // The app's own Tailwind plugin is not added twice.
+    expect(names).toEqual(["app-plugin", "@tailwindcss/vite:scan", "rsc", "nitro"]);
     const byName = Object.fromEntries(plugins.map((plugin) => [plugin.name, plugin]));
     expect(byName.rsc.options).toEqual({
       serverHandler: false,
@@ -154,6 +147,18 @@ describe("experimental.serverComponents from farm.config", () => {
       preset: "node-server",
       outputDir: path.join(root, ".farm", ".output"),
     });
+  });
+
+  it("gives development Fast Refresh with core's plugin-react when the app has none", async () => {
+    // The RSC client bootstrap imports /@react-refresh in development.
+    const config = (await createFarmRscViteConfig(
+      { experimental: { serverComponents: true } },
+      { root: createApp(), command: "serve" },
+    )) as Record<string, any>;
+    const names = (config.plugins.flat(Infinity) as Array<{ name: string }>).map(
+      (plugin) => plugin.name,
+    );
+    expect(names).toContain("vite:react-refresh");
   });
 
   it("keeps the app's own plugin-react instead of adding core's", async () => {
