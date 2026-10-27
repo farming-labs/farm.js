@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { getFarmIslandValueHeaders } from "../client/island-value-protocol";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClientCancellation } from "../client-cancellation";
@@ -37,6 +38,7 @@ for (const [index, renderer] of ["html", "react"].entries()) {
         "createFarmDeploymentRequestHeaders",
         "isFarmDeploymentMismatchResponse",
         "createFarmDeploymentMismatchError",
+        "getFarmIslandValueHeaders",
         `
         ${generateUniversalRouterStateRuntime()}
         return ({${generateUniversalRouterStateProperties()} prefetchCache: new Map(), ${methods[index]}});
@@ -47,6 +49,7 @@ for (const [index, renderer] of ["html", "react"].entries()) {
         createFarmDeploymentRequestHeaders,
         isFarmDeploymentMismatchResponse,
         createFarmDeploymentMismatchError,
+        getFarmIslandValueHeaders,
       );
       const requests: Array<{
         resolve(response: Response): void;
