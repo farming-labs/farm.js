@@ -6,6 +6,7 @@ import {
   resolveDeployConfig,
 } from "@farm.js/core/internal/config-runtime";
 import { withProductionNodeEnv } from "@farm.js/core/internal/production-node-env";
+import { ensureFarmRscPackages } from "./rsc-packages";
 
 export { withProductionNodeEnv };
 
@@ -48,6 +49,7 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
       }
 
       // experimental.serverComponents: the RSC pipeline builds the app for the deploy preset.
+      await ensureFarmRscPackages(userConfig, root);
       if (buildRuntimeResult.value.farmAppUsesRscPipeline(userConfig, root)) {
         const deploy = resolveDeployConfig(userConfig, {
           preset: options.preset as any,

@@ -70,7 +70,7 @@ describe("experimental.serverComponents from farm.config", () => {
     expect(farmAppUsesRscPipeline(flag, createApp({ plugin: false, rsc: false }))).toBe(false);
     expect(warn).toHaveBeenCalledOnce();
     expect(warn.mock.calls[0]![0]).toContain(
-      "@farm.js/plugin, @vitejs/plugin-rsc are not installed, so the app runs without React Server Components. A future release makes true always run them.",
+      "@farm.js/plugin, @vitejs/plugin-rsc are not installed, so the app runs without React Server Components. `farm dev` and `farm build` install them",
     );
     expect(farmAppUsesRscPipeline(flag, createApp())).toBe(true);
     expect(farmAppUsesRscPipeline({}, createApp())).toBe(false);

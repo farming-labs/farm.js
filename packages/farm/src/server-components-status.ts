@@ -117,10 +117,20 @@ function formatKeys(keys: readonly string[]): string {
   return keys.map((key) => `\`${key}\``).join(", ");
 }
 
-export function formatFarmRscFallbackMessage(missingPackages: readonly string[]): string {
+export function formatFarmRscFallbackMessage(
+  missingPackages: readonly string[],
+  blockingKeys: readonly string[] = [],
+): string {
+  if (blockingKeys.length > 0) {
+    return `experimental.serverComponents is true, but this app uses ${formatKeys(
+      blockingKeys,
+    )}, which the RSC pipeline does not run yet, so it runs without React Server Components. Remove the flag, or move ${
+      blockingKeys.length === 1 ? "that feature" : "those features"
+    } out of farm.config to turn RSC on.`;
+  }
   return `experimental.serverComponents is true, but ${missingPackages.join(", ")} ${
     missingPackages.length === 1 ? "is" : "are"
-  } not installed, so the app runs without React Server Components. A future release makes true always run them. Install the packages to turn RSC on (${FARM_RSC_INSTALL_HINT}), or remove the flag.`;
+  } not installed, so the app runs without React Server Components. \`farm dev\` and \`farm build\` install them; with another tool, run ${FARM_RSC_INSTALL_HINT}.`;
 }
 
 export function formatFarmRscBlockingMessage(blockingKeys: readonly string[]): string {
@@ -150,7 +160,9 @@ export function farmAppUsesRscPipeline(
   if (status.fallback) {
     if (!warnedFallback) {
       warnedFallback = true;
-      logger.warn(`[Farm.js] ${formatFarmRscFallbackMessage(status.missingPackages)}`);
+      logger.warn(
+        `[Farm.js] ${formatFarmRscFallbackMessage(status.missingPackages, status.blockingKeys)}`,
+      );
     }
     return false;
   }

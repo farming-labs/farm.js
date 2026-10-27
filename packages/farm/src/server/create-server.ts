@@ -217,7 +217,17 @@ async function resolveInlineConfig(
  */
 export async function createServer(
   config: FarmConfig | FarmUserConfig = {},
-  options: { port?: number } = {},
+  options: {
+    port?: number;
+    /**
+     * Installs what `experimental.serverComponents` needs before the server starts. The CLI passes
+     * it; core stays free of package-manager orchestration.
+     */
+    ensureServerComponentsPackages?: (
+      config: FarmConfig | FarmUserConfig,
+      root: string,
+    ) => Promise<unknown>;
+  } = {},
 ) {
   let pluginManager: PluginManager | null = null;
   let instrumentation: FarmInstrumentationLifecycle | null = null;
@@ -233,6 +243,7 @@ export async function createServer(
     const rscConfig = userConfig ?? config;
     if (resolveFarmServerComponentsMode(rscConfig.experimental?.serverComponents)) {
       const { createFarmRscDevServer, farmAppUsesRscPipeline } = await import("../rsc-pipeline");
+      await options.ensureServerComponentsPackages?.(rscConfig, root);
       if (farmAppUsesRscPipeline(rscConfig, root)) {
         return await createFarmRscDevServer(rscConfig, { root, port: options.port });
       }
@@ -487,8 +498,12 @@ export function noticeSchemaChangesInBackground(
 /**
  * Start the development server
  */
-export async function startDevServer(config: FarmConfig | FarmUserConfig = {}, port?: number) {
-  const server = await createServer(config, { port });
+export async function startDevServer(
+  config: FarmConfig | FarmUserConfig = {},
+  port?: number,
+  options: Omit<Parameters<typeof createServer>[1], "port"> = {},
+) {
+  const server = await createServer(config, { ...options, port });
   const pluginManager = (server as any).__farmPluginManager as PluginManager | undefined;
 
   try {

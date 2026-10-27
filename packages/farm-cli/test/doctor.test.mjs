@@ -485,7 +485,7 @@ test("reports whether experimental.serverComponents runs React Server Components
       (entry) => entry.code === "SERVER_COMPONENTS_FALLBACK",
     );
     assert.equal(fallbackCheck?.status, "warn");
-    assert.match(fallbackCheck?.message || "", /A future release makes true always run them/);
+    assert.match(fallbackCheck?.message || "", /`farm dev` and `farm build` install them/);
 
     for (const name of ["@farm.js/plugin", "@vitejs/plugin-rsc", "react-server-dom-webpack"]) {
       const dir = path.join(root, "node_modules", ...name.split("/"));

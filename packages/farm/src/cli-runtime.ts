@@ -41,6 +41,7 @@ export { collectSchemaDependencies, orderSchemaOwners } from "./schema-dependenc
 export { assertNoSchemaListField } from "./schema-capabilities";
 export {
   FARM_RSC_INSTALL_HINT,
+  findFarmAppPackageDir,
   formatFarmRscBlockingMessage,
   formatFarmRscFallbackMessage,
   inspectFarmServerComponents,

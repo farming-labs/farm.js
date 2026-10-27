@@ -285,11 +285,6 @@ Turn on React Server Components in `farm.config.ts`. `farm dev`, `farm build`, a
 then run Farm's RSC pipeline on the official `@vitejs/plugin-rsc`: pages and layouts are server
 components, and `"use client"` marks client components.
 
-```bash
-pnpm add react@19.2.8 react-dom@19.2.8 react-server-dom-webpack@19.2.8
-pnpm add -D @farm.js/plugin @vitejs/plugin-rsc@0.5.32 @vitejs/plugin-react
-```
-
 ```ts
 import { defineConfig } from "@farm.js/core";
 
@@ -300,6 +295,12 @@ export default defineConfig({
 });
 ```
 
+That is the whole setup. When the RSC packages are missing, `farm dev` and `farm build` install
+them with the app's package manager: `@farm.js/plugin` at the installed `@farm.js/core` version, and
+`@vitejs/plugin-rsc`, `react`, `react-dom` and `react-server-dom-webpack` at the exact versions the
+plugin requires. Commit the updated `package.json` and lockfile. Set `FARM_SKIP_RSC_INSTALL=1` where
+the build must not change them. `@vitejs/plugin-react` is optional and adds Fast Refresh.
+
 `serverComponents: true` is the same as `serverComponents: { mode: "rsc" }`, React's own server
 components engine. `{ mode: "islands" }` is reserved for Farm's own engine, which sends static output
 once as HTML and hydrates only client components
@@ -308,7 +309,7 @@ It is not available yet, and `farm dev` and `farm build` stop with an error that
 share the authoring rules on this page, so switching between them is a one-line change.
 
 The app's `vite` options and plugins apply as in other Farm apps, and so does built-in Tailwind.
-`@vitejs/plugin-react` is optional and adds Fast Refresh. The build goes to the deploy target's
+The build goes to the deploy target's
 output directory, so `farm start` and platform deploys work unchanged.
 
 The pipeline does not run every Farm feature yet:
@@ -320,10 +321,10 @@ The pipeline does not run every Farm feature yet:
   are ignored, with a warning.
 
 Before this flag ran the RSC pipeline it only switched off isolated hydration, so some apps set it
-without using React Server Components. An app with `serverComponents: true` but without the RSC
-packages installed keeps running without them and warns once; a future release makes `true` always
-run React Server Components. `{ mode: "rsc" }` is new, so it stops with the install command instead.
-`farm doctor` reports which way an app goes.
+without using React Server Components. If such an app uses `auth`, `integrations` or another
+feature above that RSC cannot run yet, nothing is installed and it keeps running without React
+Server Components, with a warning that says why. `{ mode: "rsc" }` is always treated as a
+deliberate choice. `farm doctor` reports which way an app goes.
 
 A `vite.config.ts` built with `defineConfig` from
 `@farm.js/plugin/rsc` and the `vite` CLI keeps working, as in the

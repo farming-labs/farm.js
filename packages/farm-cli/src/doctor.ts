@@ -1081,8 +1081,11 @@ function collectServerComponentsChecks(
       status: "warn",
       code: "SERVER_COMPONENTS_FALLBACK",
       title: "experimental.serverComponents runs without React Server Components",
-      message: formatFarmRscFallbackMessage(status.missingPackages),
-      action: `Install the RSC packages (${FARM_RSC_INSTALL_HINT}) or remove experimental.serverComponents.`,
+      message: formatFarmRscFallbackMessage(status.missingPackages, status.blockingKeys),
+      action:
+        status.blockingKeys.length > 0
+          ? "Remove experimental.serverComponents, or move those features out of farm.config."
+          : `Run farm dev or farm build to install them, or ${FARM_RSC_INSTALL_HINT}.`,
     });
     return;
   }

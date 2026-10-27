@@ -205,6 +205,7 @@ export * from "./server-action-security";
 export * from "./deployment";
 export {
   FARM_RSC_INSTALL_HINT,
+  findFarmAppPackageDir,
   formatFarmRscBlockingMessage,
   formatFarmRscFallbackMessage,
   inspectFarmServerComponents,

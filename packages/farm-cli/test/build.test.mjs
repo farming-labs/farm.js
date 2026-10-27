@@ -197,16 +197,15 @@ test("keeps building an app that sets experimental.serverComponents without the 
       "utf8",
     );
 
-    // Without the RSC packages the build warns and takes the normal pipeline, as before the flag
-    // loaded the RSC pipeline; the probe stops it there.
+    // With installs skipped and no RSC packages, the build warns and takes the normal pipeline;
+    // the probe stops it there.
     await assert.rejects(
-      execFileAsync(process.execPath, [cliBin, "build", "--root", root]),
+      execFileAsync(process.execPath, [cliBin, "build", "--root", root], {
+        env: { ...process.env, FARM_SKIP_RSC_INSTALL: "1" },
+      }),
       (error) => {
         const output = `${error.stdout || ""}\n${error.stderr || ""}`;
-        assert.match(
-          output,
-          /runs without React Server Components\. A future release makes true always run them/,
-        );
+        assert.match(output, /so the app runs without React Server Components/);
         assert.match(output, /normal-pipeline-reached/);
         return true;
       },

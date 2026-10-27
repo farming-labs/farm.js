@@ -304,7 +304,7 @@ function getDependencySectionFlags(
   return ["--save-peer"];
 }
 
-function runFarmUpgradeCommand(command: FarmUpgradeCommand): Promise<void> {
+export function runFarmUpgradeCommand(command: FarmUpgradeCommand): Promise<void> {
   return new Promise((resolve, reject) => {
     const isWindows = process.platform === "win32";
     // Node rejects spawning .cmd/.bat files without a shell since the fix for
