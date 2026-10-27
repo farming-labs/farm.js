@@ -229,7 +229,9 @@ still available; a failed error hook does not prevent cleanup or replace the sta
 | `runtime.close`     | During graceful shutdown in long-running Node output.        | Nothing.                                                         |
 
 Runtime request hooks apply to page, API, server-action, integration, docs, asset, and general
-requests. Use `runtime.endpoints` when a plugin owns a small exact URL and should not make unrelated
+requests, including Farm's built-in endpoints (`/.well-known/farmjs.json`, the API and AI catalogs,
+`/mcp`, `llms.txt`, `sitemap.xml`, Markdown mirrors, and OpenAPI routes), in development and
+production. Use `runtime.endpoints` when a plugin owns a small exact URL and should not make unrelated
 static pages dynamic. Endpoint paths are application-relative, automatically honor `basePath`, and
 do not accept route parameters or wildcards.
 
