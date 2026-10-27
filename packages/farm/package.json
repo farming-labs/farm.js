@@ -306,6 +306,7 @@
     },
     "./client": {
       "types": "./types/client.d.ts",
+      "react-server": "./dist/client.react-server.mjs",
       "import": "./dist/client.mjs",
       "require": "./dist/client.cjs"
     },

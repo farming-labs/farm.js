@@ -279,6 +279,28 @@ rules. This experiment is disabled when RSC owns the route. Integration provider
 route-wide root unless they explicitly declare that they can be recreated around independent
 isolated roots.
 
+## The RSC pipeline
+
+Apps built with `defineConfig` from `@farm.js/plugin/rsc` follow the same route contract:
+
+- **Static pages.** A page that opts in to static rendering, as in [Static rendering](#static-rendering),
+  is prerendered at build time together with its RSC payload. A dynamic route lists its paths with
+  `generateStaticParams()`. Client navigation fetches the payload at `<page>.rsc` (`/index.rsc` for
+  `/`), so a prerendered page navigates without reaching the server. A page that any middleware may
+  handle, and every page of an app with i18n, stays server-rendered, because middleware never sees a
+  static file. Pages with `revalidate` also render on each request for now; the pipeline has no
+  revalidating cache yet. A page that asks to be static and fails to render fails the build.
+- **Metadata.** Layouts and pages resolve `metadata`, `generateMetadata()`, and viewport exports in
+  the same order and with the same title templates as other Farm apps, and the server renders the
+  same head tags.
+- **Images.** `<Image>` follows the app's `images` config. Without `sharp`, `provider: "auto"` keeps
+  original image URLs, and the optimizer at `images.path` runs only when it can.
+- **Root layouts.** A root layout that renders `<html>` owns the document, as in Next.js, and the
+  browser hydrates the whole document.
+
+A client that loaded an older deployment and fetches a prerendered payload from a newer one does not
+get the deployment-mismatch reload that a server-rendered payload triggers.
+
 ## Automatic optimized boundaries
 
 Automatic optimized boundaries are a React-only experiment and are not applied to Preact, Solid,

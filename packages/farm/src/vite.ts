@@ -432,6 +432,13 @@ function createRequestFromNodeRequest(
 }
 
 export { createFarmNodeRequestAbortSignal } from "./server-http";
+// The font call compiler and static image imports, for pipelines that build without farmPlugin
+// (React Server Components).
+export { farmFontImportsPlugin } from "./font-vite";
+export { farmImageImportsPlugin } from "./image-vite";
+export { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config";
+export { readRouteRenderingDirectiveFromFile } from "./ssg";
+export { resolveFarmImageProviderForRuntime, resolveFarmImageServerRuntime } from "./image-runtime";
 
 /** Exported for tests: the request boundary all Farm dev middlewares share. */
 export function withFarmRequestTracing(

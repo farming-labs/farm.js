@@ -3266,6 +3266,9 @@ importers:
       h3:
         specifier: 2.0.1-rc.32
         version: 2.0.1-rc.32(crossws@0.4.12)(ocache@0.3.0)
+      nf3:
+        specifier: 0.3.24
+        version: 0.3.24
       nitro:
         specifier: 3.0.260903-beta
         version: 3.0.260903-beta

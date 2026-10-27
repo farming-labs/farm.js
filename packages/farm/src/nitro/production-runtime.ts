@@ -1,10 +1,16 @@
 export { _runWithAfterRequest } from "../after";
 export { createFarmAppManifestResponse } from "../app-manifest";
-export { farmPathGuardCoversEndpoint, farmPathGuardCoversPage } from "../middleware/may-handle";
+export {
+  appMiddlewareMayHandlePath,
+  configMiddlewareMayHandlePath,
+  farmPathGuardCoversEndpoint,
+  farmPathGuardCoversPage,
+} from "../middleware/may-handle";
 export { farmSecretsMatch } from "../secret-compare";
 export { createFarmLayoutSelector } from "../routing/layout-selector";
 export { isInRouteGroupScope as isInFarmRouteGroupScope } from "../routing/route-groups";
 export { mergeRouteRenderingDirectiveConfig } from "../route-rendering";
+export { materializeSSGRoutePath } from "../ssg-paths";
 export type { FarmServerConfig } from "../server-http";
 export {
   bufferFarmRequestBody,
@@ -56,6 +62,7 @@ export {
   renderMetadataHead,
   renderViewportHead,
   resolveFarmNotFoundMetadata,
+  resolveMetadataTitle,
 } from "../metadata";
 export { ensureFarmDocumentMeta } from "../server/full-document";
 export { createFarmMetadataRouteResponse } from "../metadata-route";

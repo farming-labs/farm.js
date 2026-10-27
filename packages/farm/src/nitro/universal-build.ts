@@ -50,7 +50,7 @@ import type { Rollup, UserConfig as ViteUserConfig } from "vite";
 import os from "os";
 import path from "path";
 import { constants as fsConstants, existsSync, readFileSync, realpathSync, statSync } from "fs";
-import { findRequestBoundSourceBlockers, parseRouteRenderingDirective } from "../ssg";
+import { readRouteRenderingDirectiveFromFile } from "../ssg";
 import { FARM_LAYOUT_ELEMENT_CLIENT_SOURCE } from "../document-layout-client";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
@@ -159,7 +159,7 @@ import {
 } from "../integration-provider-build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
 import { loadTailwindVitePlugin } from "../build/tailwind";
-import { SHARP_INSTALL_HINT } from "../image-runtime";
+import { resolveFarmImageServerRuntime, SHARP_INSTALL_HINT } from "../image-runtime";
 import { VERCEL_OG_INSTALL_HINT } from "../optional-peer";
 import { mergeFarmFontCss } from "../font-vite";
 import type { FarmIslandStrategy } from "../island";
@@ -601,24 +601,6 @@ function isCloudflareImagePreset(preset: string): boolean {
  */
 function shouldUseExternalMetadataImageRuntime(preset: string, usesImageRuntime: boolean): boolean {
   return usesImageRuntime && preset !== "vercel-edge" && !isCloudflareImagePreset(preset);
-}
-
-function resolveImageRuntime(
-  config: ResolvedFarmConfig,
-  preset: string,
-): "none" | "node" | "cloudflare" {
-  if (config.images.provider === "none") return "none";
-  const cloudflarePreset = isCloudflareImagePreset(preset);
-  if (config.images.provider === "node" && cloudflarePreset) {
-    throw new Error('images.provider "node" cannot run in a Cloudflare deployment');
-  }
-  if (config.images.provider === "cloudflare" && !cloudflarePreset) {
-    throw new Error('images.provider "cloudflare" requires a Cloudflare deployment preset');
-  }
-  return config.images.provider === "cloudflare" ||
-    (config.images.provider === "auto" && cloudflarePreset)
-    ? "cloudflare"
-    : "node";
 }
 
 function isNitroRollupExternal(id: string): boolean {
@@ -5328,21 +5310,6 @@ function applyConfiguredResponseHeaders(response, pathname) {
 `.trim();
 }
 
-function parseRouteRenderingDirectiveFromDisk(modulePath: string) {
-  try {
-    const source = readFileSync(modulePath, "utf8");
-    const directive = parseRouteRenderingDirective(source);
-    // The runtime only sees module exports, so whether this route reads request
-    // state has to be decided here and ride the registration. Without it the
-    // runtime merge happily resolves ssg for a route the build already demoted
-    // to per-request rendering, and stamps a shared cache-control on it.
-    if (findRequestBoundSourceBlockers(source).length === 0) return directive;
-    return { ...(directive ?? { ssg: false, ppr: false, directive: "" }), requestBound: true };
-  } catch {
-    return undefined;
-  }
-}
-
 export function generatePreloadResponseRuntimeSource(): string {
   return `
 // Farm builds buffered HTML responses from strings it already holds. Remember
@@ -5804,7 +5771,7 @@ function renderFarmRouteServerTree(element) { return element; }`;
     // Directives are parsed from source at build time; the runtime only sees
     // module exports, so the parsed form must ride the registration for
     // \"use ssg; 60\" routes to keep their ISR cache headers in production.
-    const renderingDirective = parseRouteRenderingDirectiveFromDisk(route.modulePath);
+    const renderingDirective = readRouteRenderingDirectiveFromFile(route.modulePath);
     pageRegistrations.push(`
   {
     pattern: ${JSON.stringify(route.pattern)},${
@@ -6167,7 +6134,7 @@ ${integrationRuntimeImport}
 ${nativeAuth.importSource}
 ${nativeMCP.importSource}
 `;
-  const imageRuntime = resolveImageRuntime(config, preset);
+  const imageRuntime = resolveFarmImageServerRuntime(config.images, preset);
   const imageRuntimeImport =
     imageRuntime === "none"
       ? ""
@@ -10424,7 +10391,7 @@ async function buildNitroUniversal(
     ? path.join(outputDir, "functions", "__nitro.func")
     : path.join(outputDir, "server");
   const ssrOutputDir = path.join(root, distDir, "ssr");
-  const imageRuntime = resolveImageRuntime(config, preset);
+  const imageRuntime = resolveFarmImageServerRuntime(config.images, preset);
   const hasGeneratedMetadataImages = Array.from(routeManager.getMetadataImages().values()).some(
     (image) => image.sourceType === "module",
   );

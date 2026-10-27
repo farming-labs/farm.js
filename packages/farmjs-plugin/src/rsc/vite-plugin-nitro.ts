@@ -77,10 +77,18 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
       delete (globalThis as any).__FARM_NITRO_SERVER_BUNDLE;
       delete (globalThis as any).__FARM_NITRO_PATHS;
       delete (globalThis as any).__FARM_NITRO_BUILD_PROMISE;
+      // The server entries are always index.js, which the Nitro step loads: Vite names an ESM
+      // server entry index.mjs when the app's package.json is not "type": "module". The Nitro
+      // output's package.json is "type": "module", so .js loads as ESM there.
+      const serverOutput = { output: { entryFileNames: "[name].js" } };
       return {
         environments: {
-          rsc: { build: { outDir: path.join(NITRO_VITE_DIST, "rsc") } },
-          ssr: { build: { outDir: path.join(NITRO_VITE_DIST, "ssr") } },
+          rsc: {
+            build: { outDir: path.join(NITRO_VITE_DIST, "rsc"), rolldownOptions: serverOutput },
+          },
+          ssr: {
+            build: { outDir: path.join(NITRO_VITE_DIST, "ssr"), rolldownOptions: serverOutput },
+          },
           client: { build: { outDir: path.join(NITRO_VITE_DIST, "client") } },
         },
       };
