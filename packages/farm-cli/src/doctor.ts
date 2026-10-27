@@ -1057,11 +1057,11 @@ function collectServerComponentsChecks(
   const status = inspectFarmServerComponents(userConfig, root);
   if (status.mode === "islands") {
     checks.push({
-      status: "fail",
-      code: "SERVER_COMPONENTS_UNAVAILABLE",
-      title: "Islands mode is not available yet",
-      message: 'experimental.serverComponents: { mode: "islands" } is planned (RFC 0003).',
-      action: 'Use { mode: "rsc" } or true.',
+      status: "pass",
+      code: "SERVER_COMPONENTS_ISLANDS",
+      title: "Server components run in islands mode",
+      message:
+        "farm dev and farm build render server components on Farm's pipeline and hydrate only client components (experimental, RFC 0003).",
     });
     return;
   }

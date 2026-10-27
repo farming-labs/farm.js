@@ -76,13 +76,14 @@ describe("experimental.serverComponents from farm.config", () => {
     expect(farmAppUsesRscPipeline({}, createApp())).toBe(false);
   });
 
-  it("fails clearly for islands mode and for an explicit rsc mode without packages", () => {
-    expect(() =>
+  it("keeps islands mode off the rsc pipeline, and takes it for an explicit rsc mode without packages", () => {
+    // Islands mode runs on Farm's own pipeline, never the RSC one.
+    expect(
       farmAppUsesRscPipeline(
         { experimental: { serverComponents: { mode: "islands" } } },
         createApp(),
       ),
-    ).toThrow('{ mode: "islands" } is planned (RFC 0003) and not available yet');
+    ).toBe(false);
     // `{ mode: "rsc" }` takes the pipeline, which then names the packages to install.
     expect(
       farmAppUsesRscPipeline(

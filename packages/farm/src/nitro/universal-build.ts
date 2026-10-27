@@ -1,3 +1,4 @@
+import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import { createBundledEnv } from "../env";
 import { generateNativeMCPPluginSource } from "./native-mcp-source";
@@ -1625,7 +1626,7 @@ function getCachedClientModuleHydrationPlan(
   cache: Map<string, ClientModuleHydrationPlan>,
   options: FarmClientHydrationPlanOptions = {},
 ): ClientModuleHydrationPlan {
-  const key = `${path.resolve(root)}\0${mode}\0${options.asyncOwnerIslands === true}\0${path.resolve(modulePath)}`;
+  const key = `${path.resolve(root)}\0${mode}\0${options.asyncOwnerIslands === true}\0${options.serverOwners === true}\0${path.resolve(modulePath)}`;
   let plan = cache.get(key);
   if (!plan) {
     plan = getClientModuleHydrationPlan(modulePath, root, mode, options);
@@ -1700,6 +1701,11 @@ async function buildClient(
     config.renderer,
     Boolean(unsupportedIntegrationProvider),
   );
+  const pagePlanOptions = {
+    ...planOptions,
+    serverOwners:
+      resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands",
+  };
 
   const clientLayouts = layoutRoutes.map((layout) => {
     try {
@@ -1791,7 +1797,7 @@ async function buildClient(
           root,
           isolatedMode,
           hydrationPlanCache,
-          planOptions,
+          pagePlanOptions,
         ),
   }));
 
@@ -5597,6 +5603,9 @@ function generateVirtualEntryCode(
   isolatedClientBoundaryModules: ReadonlySet<string>,
   hydrationPlanCache: Map<string, ClientModuleHydrationPlan>,
 ): string {
+  // Islands mode runs `"use server"` actions posted to a page (RFC 0003).
+  const farmIslandsActions =
+    resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands";
   const hasCompressionRuntime =
     config.compress && resolveFarmInstrumentationRuntime(preset) === "nodejs";
   // agent.crawlers serves /robots.txt unless a root robots.ts owns it.
@@ -5731,6 +5740,11 @@ function renderFarmRouteServerTree(element) { return element; }`;
     config.renderer,
     Boolean(unsupportedIntegrationProvider),
   );
+  const pageHydrationPlanOptions = {
+    ...hydrationPlanOptions,
+    serverOwners:
+      resolveFarmServerComponentsMode(config.experimental?.serverComponents) === "islands",
+  };
   const layoutHydrationPlans = layoutRoutes.map((layout) => ({
     ...layout,
     hydration: getCachedClientModuleHydrationPlan(
@@ -5757,7 +5771,7 @@ function renderFarmRouteServerTree(element) { return element; }`;
             config.root,
             isolatedHydrationMode,
             hydrationPlanCache,
-            hydrationPlanOptions,
+            pageHydrationPlanOptions,
           ),
     ]),
   );
@@ -6111,7 +6125,11 @@ function renderFarmRouteServerTree(element) { return element; }`;
       ? "\n  _registerFarmStorageModules,\n  disposeFarmStorage,\n  initFarmStorage,"
       : ""
   }
-} from "@farm.js/core/internal/production-runtime";`;
+} from "@farm.js/core/internal/production-runtime";${
+    farmIslandsActions
+      ? `\nimport { handleFarmFormActionRequest } from "@farm.js/core/internal/production-runtime";\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};`
+      : ""
+  }`;
   const productionSiteTelemetryImport = config.telemetry
     ? `import { createFarmProductionSiteReporter } from "@farm.js/core/internal/product-telemetry-runtime";`
     : "";
@@ -9136,6 +9154,15 @@ ${
   // Handle page routes (SSR)
   emitFarmEvent({ type: "render.start", route: pathname, pathname });
   const matchedRoute = matchPageRoute(routePathname);
+  ${
+    farmIslandsActions
+      ? `// Islands mode: a form or client component posting a server action to this page.
+  if (matchedRoute && request.method === "POST") {
+    const actionResponse = await handleFarmFormActionRequest(request, farmFormActionsConfig);
+    if (actionResponse) return applyProductionMiddlewareHeaders(actionResponse, middlewareHeaders);
+  }`
+      : ""
+  }
   if (matchedRoute) {
     const trailingSlashLocation = resolveFarmTrailingSlashRedirect(
       url,

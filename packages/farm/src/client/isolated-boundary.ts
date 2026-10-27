@@ -63,6 +63,85 @@ function serializeBoundaryPayload(value: unknown): string {
     .replace(/\u2029/g, "\\u2029");
 }
 
+const SLOT_TAG = "farm-slot";
+const SLOT_ATTRIBUTE = "data-farm-slot";
+
+function isReactElementValue(value: unknown): value is React.ReactElement {
+  const type = (value as { $$typeof?: symbol } | null)?.$$typeof;
+  return type === REACT_ELEMENT_TYPE || type === LEGACY_REACT_ELEMENT_TYPE;
+}
+
+/**
+ * Server output passed to an island (`children`, or any element prop) travels as a DOM slot: it
+ * renders once, inside a `<farm-slot>` marker, and the serialized props carry only a reference.
+ * The browser reads the slot's HTML back from the page instead of receiving it twice.
+ */
+function splitSlotProps(
+  ReactRuntime: typeof React,
+  value: unknown,
+  slotPrefix: string,
+  counter: { next: number },
+): { render: unknown; wire: unknown } {
+  if (isReactElementValue(value)) {
+    const id = `${slotPrefix}${counter.next++}`;
+    return {
+      render: ReactRuntime.createElement(
+        SLOT_TAG,
+        { key: value.key ?? id, [SLOT_ATTRIBUTE]: id, style: { display: "contents" } },
+        value,
+      ),
+      wire: { $farmSlot: id },
+    };
+  }
+  if (Array.isArray(value)) {
+    const parts = value.map((entry) => splitSlotProps(ReactRuntime, entry, slotPrefix, counter));
+    return { render: parts.map((part) => part.render), wire: parts.map((part) => part.wire) };
+  }
+  if (value && typeof value === "object") {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return { render: value, wire: value };
+    const render: Record<string, unknown> = {};
+    const wire: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      const part = splitSlotProps(ReactRuntime, entry, slotPrefix, counter);
+      render[key] = part.render;
+      wire[key] = part.wire;
+    }
+    return { render, wire };
+  }
+  return { render: value, wire: value };
+}
+
+/** Turns slot references back into elements that keep the server HTML already in `container`. */
+function reviveSlotProps(ReactRuntime: typeof React, value: unknown, container: Element): unknown {
+  if (Array.isArray(value))
+    return value.map((entry) => reviveSlotProps(ReactRuntime, entry, container));
+  if (!value || typeof value !== "object") return value;
+  const slotId = (value as { $farmSlot?: unknown }).$farmSlot;
+  if (typeof slotId === "string" && Object.keys(value).length === 1) {
+    let html = "";
+    for (const slot of container.querySelectorAll(SLOT_TAG)) {
+      if (slot.getAttribute(SLOT_ATTRIBUTE) === slotId) {
+        html = slot.innerHTML;
+        break;
+      }
+    }
+    return ReactRuntime.createElement(SLOT_TAG, {
+      key: slotId,
+      [SLOT_ATTRIBUTE]: slotId,
+      style: { display: "contents" },
+      suppressHydrationWarning: true,
+      dangerouslySetInnerHTML: { __html: html },
+    });
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      reviveSlotProps(ReactRuntime, entry, container),
+    ]),
+  );
+}
+
 /** @internal Keeps client-to-client imports inside one isolated React root. */
 export function wrapFarmIsolatedClientGraph(
   ReactRuntime: typeof React,
@@ -94,6 +173,7 @@ export function createFarmIsolatedClientBoundary(
   moduleReference: string,
   exportName: string,
   islandStrategy: FarmIslandStrategy,
+  boundaryOptions: { slots?: boolean } = {},
 ): React.ComponentType<any> {
   function FarmIsolatedClientBoundary(props: Record<string, unknown>) {
     const Context = getBoundaryGraphContext(ReactRuntime);
@@ -105,8 +185,15 @@ export function createFarmIsolatedClientBoundary(
     }
 
     let serializedProps: string;
+    let renderProps = props;
     try {
-      serializedProps = serializeBoundaryPayload(props);
+      if (boundaryOptions.slots) {
+        const { render, wire } = splitSlotProps(ReactRuntime, props, `${boundaryId}s`, { next: 0 });
+        renderProps = render as Record<string, unknown>;
+        serializedProps = serializeBoundaryPayload(wire);
+      } else {
+        serializedProps = serializeBoundaryPayload(props);
+      }
     } catch (error) {
       // Once per component and failure: an async page passes the same props on every request.
       const message = error instanceof Error ? error.message : String(error);
@@ -135,7 +222,7 @@ export function createFarmIsolatedClientBoundary(
         ReactRuntime.createElement(
           Context.Provider,
           { value: true },
-          ReactRuntime.createElement(Component, props),
+          ReactRuntime.createElement(Component, renderProps),
         ),
       ),
       ReactRuntime.createElement("script", {
@@ -359,10 +446,11 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
                 }
                 const payload = findBoundaryPayload(container, boundaryId);
                 if (!payload) throw new Error(`serialized props ${boundaryId} were not found`);
-                const props = JSON.parse(payload.textContent || "{}");
-                if (!props || typeof props !== "object" || Array.isArray(props)) {
+                const parsedProps = JSON.parse(payload.textContent || "{}");
+                if (!parsedProps || typeof parsedProps !== "object" || Array.isArray(parsedProps)) {
                   throw new Error("serialized props must be an object");
                 }
+                const props = reviveSlotProps(options.ReactRuntime, parsedProps, container);
 
                 let rootFailure: unknown;
                 const restore = (error: unknown) => {

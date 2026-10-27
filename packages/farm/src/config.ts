@@ -1141,7 +1141,12 @@ export async function resolveConfig(
     experimental: {
       serverComponents: false,
       serverActions: false,
-      isolatedClientHydration: "off",
+      // Islands mode hydrates client components as islands (RFC 0003); an app can still pick
+      // isolatedClientHydration itself.
+      isolatedClientHydration:
+        resolveFarmServerComponentsMode(userConfig.experimental?.serverComponents) === "islands"
+          ? "enabled"
+          : "off",
       ppr: false,
       ...userConfig.experimental,
     },

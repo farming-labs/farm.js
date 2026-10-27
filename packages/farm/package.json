@@ -653,6 +653,16 @@
       "import": "./dist/internal/server-tree.mjs",
       "require": "./dist/internal/server-tree.cjs"
     },
+    "./internal/form-actions": {
+      "types": "./dist/internal/form-actions.d.ts",
+      "import": "./dist/internal/form-actions.mjs",
+      "require": "./dist/internal/form-actions.cjs"
+    },
+    "./internal/form-actions-client": {
+      "types": "./dist/internal/form-actions-client.d.ts",
+      "import": "./dist/internal/form-actions-client.mjs",
+      "require": "./dist/internal/form-actions-client.cjs"
+    },
     "./internal/build-runtime": {
       "types": "./dist/internal/build-runtime.d.ts",
       "import": "./dist/internal/build-runtime.mjs",

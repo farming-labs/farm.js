@@ -504,8 +504,8 @@ test("reports whether experimental.serverComponents runs React Server Components
     );
     const islands = await runFarmDoctor({ root, offline: true });
     assert.equal(
-      islands.checks.find((entry) => entry.code === "SERVER_COMPONENTS_UNAVAILABLE")?.status,
-      "fail",
+      islands.checks.find((entry) => entry.code === "SERVER_COMPONENTS_ISLANDS")?.status,
+      "pass",
     );
 
     // Config RSC cannot run that decides what a request may receive stops it, as farm dev does.

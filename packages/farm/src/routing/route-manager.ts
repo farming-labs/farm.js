@@ -740,12 +740,12 @@ export class RouteManager {
       entry,
       metadata: isFarmMarkdownPageFile(entry.modulePath)
         ? markdownPagePlan()
-        : getClientModuleHydrationPlan(
-            entry.modulePath,
-            normalizedProjectRoot,
-            isolatedMode,
-            planOptions,
-          ),
+        : getClientModuleHydrationPlan(entry.modulePath, normalizedProjectRoot, isolatedMode, {
+            ...planOptions,
+            serverOwners:
+              resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) ===
+              "islands",
+          }),
     }));
     // Every Markdown page shares the components module, so one warning covers them all.
     const markdownFallback = routeEntries.find(

@@ -6,7 +6,6 @@
 import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import {
-  FARM_ISLANDS_MODE_UNAVAILABLE,
   isExplicitFarmServerComponentsMode,
   resolveFarmServerComponentsMode,
   type FarmServerComponentsMode,
@@ -155,7 +154,8 @@ export function farmAppUsesRscPipeline(
   root: string,
 ): boolean {
   const status = inspectFarmServerComponents(config, root);
-  if (status.mode === "islands") throw new Error(FARM_ISLANDS_MODE_UNAVAILABLE);
+  // Islands mode runs on Farm's own pipeline (RFC 0003), never the RSC one.
+  if (status.mode === "islands") return false;
   if (!status.enabled) return false;
   if (status.fallback) {
     if (!warnedFallback) {

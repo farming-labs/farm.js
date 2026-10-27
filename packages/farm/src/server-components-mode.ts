@@ -2,7 +2,7 @@
  * `experimental.serverComponents`: which engine renders server components.
  *
  * - `"rsc"`: React's Flight pipeline (`@farm.js/plugin/rsc` on `@vitejs/plugin-rsc`).
- * - `"islands"`: Farm's own engine (RFC 0003). Reserved; not available yet.
+ * - `"islands"`: Farm's own engine (RFC 0003), on Farm's pipeline. Experimental.
  *
  * `true` means `{ mode: "rsc" }`. Both modes share one authoring contract.
  */
@@ -31,6 +31,3 @@ export function resolveFarmServerComponentsMode(
 export function isExplicitFarmServerComponentsMode(value: unknown): boolean {
   return typeof value === "object" && value !== null;
 }
-
-export const FARM_ISLANDS_MODE_UNAVAILABLE =
-  '[Farm.js] experimental.serverComponents: { mode: "islands" } is planned (RFC 0003) and not available yet. Use { mode: "rsc" } or true.';

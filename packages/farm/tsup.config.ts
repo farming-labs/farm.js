@@ -70,6 +70,8 @@ const entry = {
   "internal/client-error-overlay": "src/client/runtime-error-overlay.ts",
   "internal/isolated-boundary": "src/client/isolated-boundary.ts",
   "internal/server-tree": "src/client/server-tree.ts",
+  "internal/form-actions": "src/form-actions.ts",
+  "internal/form-actions-client": "src/form-actions-client.ts",
   "internal/production-runtime": "src/nitro/production-runtime.ts",
   "internal/product-telemetry-runtime": "src/product-telemetry.ts",
   "internal/infra-analytics-runtime": "src/infra-analytics-runtime.ts",

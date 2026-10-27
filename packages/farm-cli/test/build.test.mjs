@@ -215,7 +215,7 @@ test("keeps building an app that sets experimental.serverComponents without the 
   }
 });
 
-test("stops a build that asks for islands mode, which is not available yet", async () => {
+test("builds islands mode on Farm's own pipeline, without the RSC packages", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-build-islands-"));
 
   try {
@@ -225,14 +225,24 @@ test("stops a build that asks for islands mode, which is not available yet", asy
     );
     await writeFile(
       path.join(root, "farm.config.mjs"),
-      'export default { experimental: { serverComponents: { mode: "islands" } } };\n',
+      [
+        "export default {",
+        '  experimental: { serverComponents: { mode: "islands" } },',
+        "  generateBuildId() {",
+        '    throw new Error("normal-pipeline-reached");',
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
       "utf8",
     );
+    // Islands mode never installs or loads the RSC packages; the probe stops the normal pipeline.
     await assert.rejects(
       execFileAsync(process.execPath, [cliBin, "build", "--root", root]),
       (error) => {
         const output = `${error.stdout || ""}\n${error.stderr || ""}`;
-        assert.match(output, /\{ mode: "islands" \} is planned \(RFC 0003\) and not available yet/);
+        assert.match(output, /normal-pipeline-reached/);
+        assert.doesNotMatch(output, /Installing React Server Components packages/);
         return true;
       },
     );

@@ -1,4 +1,5 @@
 import { resolveFarmServerComponentsMode } from "./server-components-mode";
+import { hasUseServerDirective, transformFarmFormActionModule } from "./form-actions-transform";
 import {
   invalidateFailedFarmDevModules,
   invalidateFarmDevDependents,
@@ -934,6 +935,8 @@ export function transformIsolatedClientBoundaryModule(options: {
   moduleReference: string;
   islandStrategy: FarmIslandStrategy;
   parse: (code: string) => FarmModuleAstNode;
+  /** Islands mode: server output in props travels as DOM slots (RFC 0003). */
+  slots?: boolean;
 }): string | null {
   let ast: FarmModuleAstNode;
   try {
@@ -952,7 +955,7 @@ export function transformIsolatedClientBoundaryModule(options: {
     const safeName = exportName.replace(/[^A-Za-z0-9_$]/g, "_");
     const wrapperName = `__farm_isolated_boundary_${safeName || "default"}__`;
     wrapperStatements.push(
-      `const ${wrapperName} = __farm_create_isolated_boundary__(__farm_isolated_react__, ${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`,
+      `const ${wrapperName} = __farm_create_isolated_boundary__(__farm_isolated_react__, ${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)}${options.slots ? ", { slots: true }" : ""});`,
     );
     wrapperStatements.push(
       isDefault ? `export default ${wrapperName};` : `export { ${wrapperName} as ${exportName} };`,
@@ -3632,6 +3635,23 @@ export const manifest = getManifest();
     },
 
     async transform(code, id, transformOptions) {
+      // Islands mode: `"use server"` modules register as actions on the server and become stubs in
+      // the browser (RFC 0003). The RSC engine has its own transform.
+      if (hasUseServerDirective(code)) {
+        const actionConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
+        if (
+          resolveFarmServerComponentsMode(actionConfig.experimental?.serverComponents) === "islands"
+        ) {
+          const actionModule = transformFarmFormActionModule({
+            code,
+            id,
+            root: actionConfig.root || server?.config.root || process.cwd(),
+            ssr: transformOptions?.ssr === true,
+            parse: (source) => this.parse(source) as never,
+          });
+          if (actionModule) return { code: actionModule, map: null };
+        }
+      }
       if (!transformOptions?.ssr) {
         // The docs config module reaches the browser for adapter hydration: without credentials.
         const docsConfigModule = getFarmDocsAdapterConfigModule(farmApp?.getConfig()?.docs);
@@ -3728,6 +3748,9 @@ export const manifest = getManifest();
             moduleReference: isolatedModuleReference,
             islandStrategy: getIslandStrategyExport(clientBoundarySource) ?? "load",
             parse: (source) => this.parse(source) as unknown as FarmModuleAstNode,
+            slots:
+              resolveFarmServerComponentsMode(currentConfig.experimental?.serverComponents) ===
+              "islands",
           });
           if (!transformedBoundary) {
             this.error(

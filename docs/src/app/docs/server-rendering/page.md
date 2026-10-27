@@ -304,11 +304,16 @@ command to run. Set `FARM_SKIP_RSC_INSTALL=1` anywhere else the build must not c
 `@vitejs/plugin-react` is optional and adds Fast Refresh.
 
 `serverComponents: true` is the same as `serverComponents: { mode: "rsc" }`, React's own server
-components engine. `{ mode: "islands" }` is reserved for Farm's own engine, which sends static output
-once as HTML and hydrates only client components
-([RFC 0003](https://github.com/farming-labs/farm.js/blob/main/rfcs/0003-islands-server-components.md)).
-It is not available yet, and `farm dev` and `farm build` stop with an error that says so. Both modes
-share the authoring rules on this page, so switching between them is a one-line change.
+components engine. `{ mode: "islands" }` is Farm's own engine
+([RFC 0003](https://github.com/farming-labs/farm.js/blob/main/rfcs/0003-islands-server-components.md)):
+it renders on Farm's normal pipeline, sends static output once as HTML, and hydrates only client
+components. A client component that receives server output (`children`, or any element prop) keeps
+that output as a slot of the existing HTML instead of receiving it again, and a server page under a
+layout that hydrates (a client provider, say) hydrates inside that layout's tree, so its client
+components read the provider's context. `"use server"` functions work from forms, with or without
+JavaScript, and from client components. Islands mode needs none of the RSC packages and is
+experimental. Both modes share the authoring rules on this page, so switching between them is a
+one-line change; the same contract tests (`tests/e2e-server-components`) run against both.
 
 The app's `vite` options and plugins apply as in other Farm apps, and so does built-in Tailwind.
 The build goes to the deploy target's
