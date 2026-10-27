@@ -458,8 +458,9 @@ A CDN serves its copy of a page without running middleware, so Farm treats every
 matched a request as a possible guard: in production its response is sent with
 `Cache-Control: private, no-store` instead of the page's shared policy (`s-maxage`, a CDN
 directive, or a Nitro `swr` rule's header). This applies to config middleware, middleware files
-(including a root `src/app/middleware.ts`), and integration guards such as `protectedRoutes`.
-Responses the middleware returns itself keep their own headers.
+(including a root `src/app/middleware.ts`), and integration guards such as `protectedRoutes`. An
+`@farm.js/plugin/rsc` app applies the same rule to its config and file middleware. Responses the
+middleware returns itself keep their own headers.
 
 Set `cache: "public"` on middleware that never decides who may read a response, such as logging or
 headers, to keep the route's shared caching:

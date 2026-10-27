@@ -111,6 +111,7 @@ import {
   applyProductionMiddlewareHeaders,
   createProductionMiddlewareRunner,
 } from '@farm.js/core/middleware';
+import { _withFarmGuardedResponseCache } from '@farm.js/core/internal/production-runtime';
 import {
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
@@ -704,8 +705,19 @@ function getMatchingBoundary(pageFilePath, modules, kind) {
 /**
  * Main request handler - entry point for both dev and production (Nitro).
  * Exported as { fetch: handler } for the RSC/Nitro contract (see vite-plugin-rsc-deploy-example).
+ *
+ * Middleware that let a request through may have been a guard: an IP allowlist, an API key
+ * header, a VPN header. A CDN keys its copy by URL and never runs the guard on a hit, so
+ * whatever such a request answers stays out of shared caches, as in core's server. Only
+ * middleware declaring cache: "public" leaves the policy alone.
  */
 async function handleFarmRequest(request, context) {
+  const farmCacheGuard = { guarded: false };
+  const response = await resolveFarmRequest(farmCacheGuard, request, context);
+  return farmCacheGuard.guarded ? _withFarmGuardedResponseCache(response) : response;
+}
+
+async function resolveFarmRequest(farmCacheGuard, request, context) {
   let url = new URL(request.url);
   let matchedPage = null;
   let errorData = new Map();
@@ -747,6 +759,7 @@ async function handleFarmRequest(request, context) {
   // Execute middleware first
   const middlewareResult = await executeMiddleware(request, context);
   ${generateRscMiddlewareResultHandling()}
+  if (middlewareResult.guarded) farmCacheGuard.guarded = true;
 
   request = middlewareResult.request;
   url = new URL(request.url);
