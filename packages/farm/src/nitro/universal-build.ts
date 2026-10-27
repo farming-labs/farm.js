@@ -9664,14 +9664,14 @@ ${
         // the PPR shell headers would otherwise grant a shared max-age.
         if (renderedPage.stream || hasRequestScopedRender || !sharedCacheControl) {
           responseHeaders["Cache-Control"] = "private, no-store";
-        }${
+        }
+        const farmI18nSnapshot = getFarmI18nSnapshot();${
           farmIslandsMode
             ? `
         // Islands mode: a navigation that names the values it holds gets HTML without them.
         responseHeaders["Vary"] = "x-farm-values";`
             : ""
         }
-        const farmI18nSnapshot = getFarmI18nSnapshot();
         let html = renderedPage.html;
         
         // Check if the layout already rendered a full HTML document
