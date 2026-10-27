@@ -161,6 +161,7 @@ import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
 import type { FarmIslandStrategy } from "../island";
 import { createDefaultErrorDiagnostics } from "./error-diagnostics";
 import { handleFarmFormActionRequest } from "../form-actions";
+import { installFarmIslandValues } from "../client/island-values";
 import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import {
@@ -172,6 +173,9 @@ import {
   resolveFarmSecurityConfig,
   type ResolvedFarmSecurityConfig,
 } from "../security";
+
+// Islands mode: boundaries this server renders address their large prop values.
+installFarmIslandValues();
 
 let cachedClerkProvider: { ClerkProvider: any } | null = null;
 

@@ -190,6 +190,9 @@
       "internal/isolated-boundary": [
         "./dist/internal/isolated-boundary.d.ts"
       ],
+      "internal/island-value-store": [
+        "./dist/internal/island-value-store.d.ts"
+      ],
       "internal/server-tree": [
         "./dist/internal/server-tree.d.ts"
       ],
@@ -647,6 +650,11 @@
       "types": "./dist/internal/isolated-boundary.d.ts",
       "import": "./dist/internal/isolated-boundary.mjs",
       "require": "./dist/internal/isolated-boundary.cjs"
+    },
+    "./internal/island-value-store": {
+      "types": "./dist/internal/island-value-store.d.ts",
+      "import": "./dist/internal/island-value-store.mjs",
+      "require": "./dist/internal/island-value-store.cjs"
     },
     "./internal/server-tree": {
       "types": "./dist/internal/server-tree.d.ts",

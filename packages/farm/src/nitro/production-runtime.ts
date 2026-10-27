@@ -162,3 +162,4 @@ export function appendFarmLinkHeader(headers: Headers, value: string): void {
   }
 }
 export { handleFarmFormActionRequest } from "../form-actions";
+export { installFarmIslandValues } from "../client/island-values";

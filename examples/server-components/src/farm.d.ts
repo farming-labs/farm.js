@@ -23,6 +23,8 @@ export type RoutePath =
   | "/nav/b"
   | `/static/${string}`
   | "/stream"
+  | "/values/a"
+  | "/values/b"
   | "/window";
 export type RoutePattern =
   | "/"
@@ -35,6 +37,8 @@ export type RoutePattern =
   | "/nav/b"
   | "/static/[slug]"
   | "/stream"
+  | "/values/a"
+  | "/values/b"
   | "/window";
 export type RouteModulePattern =
   | "/"
@@ -48,6 +52,9 @@ export type RouteModulePattern =
   | "/nav/b"
   | "/static/[slug]"
   | "/stream"
+  | "/values"
+  | "/values/a"
+  | "/values/b"
   | "/window";
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {

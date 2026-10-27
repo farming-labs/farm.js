@@ -301,7 +301,8 @@ them with the app's package manager: `@farm.js/plugin` at the installed `@farm.j
 plugin requires. Commit the updated `package.json` and lockfile. In CI (`CI` is set) nothing is
 installed: `serverComponents: true` runs without RSC and warns, and an explicit `mode` fails with the
 command to run. Set `FARM_SKIP_RSC_INSTALL=1` anywhere else the build must not change dependencies.
-`@vitejs/plugin-react` is optional and adds Fast Refresh.
+Fast Refresh works in development without more setup; an app that installs `@vitejs/plugin-react`
+gets its own copy instead of Farm's.
 
 `serverComponents: true` is the same as `serverComponents: { mode: "rsc" }`, React's own server
 components engine. `{ mode: "islands" }` is Farm's own engine
@@ -310,10 +311,14 @@ it renders on Farm's normal pipeline, sends static output once as HTML, and hydr
 components. A client component that receives server output (`children`, or any element prop) keeps
 that output as a slot of the existing HTML instead of receiving it again, and a server page under a
 layout that hydrates (a client provider, say) hydrates inside that layout's tree, so its client
-components read the provider's context. `"use server"` functions work from forms, with or without
-JavaScript, and from client components. Islands mode needs none of the RSC packages and is
-experimental. Both modes share the authoring rules on this page, so switching between them is a
-one-line change; the same contract tests (`tests/e2e-server-components`) run against both.
+components read the provider's context. A large prop value (512 bytes of JSON or more, such as a
+navigation tree) travels once, keyed by its content: client components that share it share one
+copy, and a client navigation leaves out the values the browser already holds. `"use server"`
+functions work from forms, with or without JavaScript, and from client components, in `farm dev`
+and in production. Islands mode needs none of the RSC packages and is experimental. Both modes share
+the authoring rules on this page, so switching between them is a one-line change; the same contract
+tests (`tests/e2e-server-components`) run against both, in development and in production builds.
+`benchmarks/server-components-payload` compares what each mode sends.
 
 The app's `vite` options and plugins apply as in other Farm apps, and so does built-in Tailwind.
 The build goes to the deploy target's

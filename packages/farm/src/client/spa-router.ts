@@ -20,6 +20,7 @@ import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-state";
 import type { FarmI18nClientSnapshot } from "../i18n/types";
 import type { FarmIslandStrategy } from "../island";
 import type { FarmRouteRenderPlan } from "../navigation/render-plan";
+import { getFarmIslandValueHeaders } from "./island-value-protocol";
 
 export { getHashTargetElement } from "./hash-target";
 export { isFarmExternalNavigationURL } from "./navigation-url";
@@ -813,6 +814,8 @@ export class SPARouter {
         "X-Farm-SPA": "1",
         ...(activeLayoutChain ? { "X-Farm-Layout-Chain": activeLayoutChain } : {}),
         ...(interceptFrom ? { "X-Farm-Intercept-From": interceptFrom } : {}),
+        // Islands mode: the server leaves out island values this browser holds.
+        ...getFarmIslandValueHeaders(),
       }),
     });
 

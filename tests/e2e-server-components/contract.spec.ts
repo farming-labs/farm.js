@@ -174,3 +174,37 @@ test("browser-only code runs after hydration without a mismatch", async ({ page,
   await expect(page.getByTestId("window-width")).toHaveText(/^Width \d+$/);
   expect(errors).toEqual([]);
 });
+
+test("a large value shared by two client components survives client navigation", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  const documents: string[] = [];
+  page.on("response", async (response) => {
+    const type = response.request().resourceType();
+    if (type === "document" || type === "fetch") documents.push(await response.text());
+  });
+  await page.goto("/values/a");
+  await hydrated(page);
+  await page.evaluate(() => ((window as { __contract?: number }).__contract = 1));
+  await page.getByRole("button", { name: "Select in Sidebar" }).click();
+  await expect(page.getByText("Sidebar: 120 items, 1 selected")).toBeVisible();
+  await page.getByRole("link", { name: "Values B" }).click();
+  await expect(page.getByRole("heading", { name: "Values page B" })).toBeVisible();
+  expect(await page.evaluate(() => (window as { __contract?: number }).__contract)).toBe(1);
+  await page.getByRole("button", { name: "Select in Menu" }).click();
+  await expect(page.getByText("Menu: 120 items, 1 selected")).toBeVisible();
+  expect(errors).toEqual([]);
+
+  if (mode === "islands") {
+    // The list travels once, keyed by content. A navigation never sends it again: the server
+    // leaves out values the browser holds (or, in development, the layout altogether).
+    const [first, ...navigations] = documents;
+    expect(first).toMatch(/<script type="application\/json" data-farm-value="[0-9a-z]{14}">/);
+    expect(navigations.length).toBeGreaterThan(0);
+    for (const body of navigations) {
+      expect(body).not.toContain("data-farm-value=");
+      expect(body).not.toContain("Catalog entry 7 with");
+    }
+  }
+});

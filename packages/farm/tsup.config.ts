@@ -69,6 +69,7 @@ const entry = {
   "internal/client-runtime": "src/client/production-runtime.ts",
   "internal/client-error-overlay": "src/client/runtime-error-overlay.ts",
   "internal/isolated-boundary": "src/client/isolated-boundary.ts",
+  "internal/island-value-store": "src/client/island-value-store.ts",
   "internal/server-tree": "src/client/server-tree.ts",
   "internal/form-actions": "src/form-actions.ts",
   "internal/form-actions-client": "src/form-actions-client.ts",
