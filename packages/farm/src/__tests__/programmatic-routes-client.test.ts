@@ -174,6 +174,150 @@ export default defineRoutes(({ api }) => [api("/api/users", { ["GET"]: () => db.
     );
     expect(output).not.toContain("DB_PASSWORD_SECRET");
   });
+
+  it.each([
+    [
+      "route definition objects",
+      `import { defineRoutes } from "@farm.js/core";
+const definitions = [
+  { kind: "page", path: "/admin", component: DocPage, guard: () => db.find("admin"), data: { main: () => db.find("1") } },
+  { kind: "api", path: "/api/x", methods: { GET: () => db.find("2") } },
+  { kind: "layout", path: "/", component: DocPage, generateMetadata: () => db.find("3") },
+];
+export default defineRoutes(definitions);`,
+    ],
+    [
+      "routesBuilder",
+      `import { defineRoutes, routesBuilder } from "@farm.js/core";
+export default defineRoutes([
+  routesBuilder.page("/admin", { component: DocPage, guard: () => db.find("admin") }),
+  routesBuilder.api("/api/x", { GET: () => db.find("2") }),
+]);`,
+    ],
+    [
+      "routesBuilder through the module namespace",
+      `import * as farm from "@farm.js/core";
+export default farm.defineRoutes([
+  farm.routesBuilder.page("/admin", { component: DocPage, data: { main: () => db.find("1") } }),
+]);`,
+    ],
+    [
+      "a const alias",
+      `import { defineRoutes, page as definePage } from "@farm.js/core";
+const p = definePage;
+export default defineRoutes([p("/admin", { component: DocPage, data: { main: () => db.find("1") } })]);`,
+    ],
+    [
+      "a builder destructured inside the callback",
+      `import { defineRoutes } from "@farm.js/core";
+export default defineRoutes((r) => {
+  const { page, api: route } = r;
+  return [
+    page("/admin", { component: DocPage, data: { main: () => db.find("1") } }),
+    route("/api/x", { GET: () => db.find("2") }),
+  ];
+});`,
+    ],
+    [
+      "a named routes callback",
+      `import { defineRoutes, type ProgrammaticRouteBuilder } from "@farm.js/core";
+function routes(b: ProgrammaticRouteBuilder) {
+  return [b.page("/admin", { component: DocPage, guard: () => db.find("admin") })];
+}
+export default defineRoutes(routes);`,
+    ],
+  ])("strips server-only keys from %s", async (_name, routes) => {
+    const source = `import { db } from "./db";
+import { DocPage } from "./components";
+${routes}`;
+    const output = await buildRoutes(source, { ssr: false });
+    expect(output).not.toContain("DB_PASSWORD_SECRET");
+    expect(output).not.toContain("PRIVATE_ROW_");
+    expect(output).toContain("CLIENT_COMPONENT_MARKER");
+  });
+
+  it("keeps an empty methods map on API definition objects", async () => {
+    const output = await buildRoutes(
+      `
+import { defineRoutes } from "@farm.js/core";
+import { db } from "./db";
+export default defineRoutes([{ kind: "api", path: "/api/x", runtime: "node", methods: { GET: () => db.find("1") } }]);
+`,
+      { ssr: false },
+    );
+    expect(output).not.toContain("DB_PASSWORD_SECRET");
+    expect(output).toMatch(/methods: \{\}/);
+    expect(output).toContain('"node"');
+  });
+
+  it.each([
+    [
+      "a builder passed to a helper",
+      `const wrap = (factory: any) => factory("/admin", { component: () => null, guard: () => db.find("1") });
+export default defineRoutes(({ page }) => [wrap(page)]);`,
+      /can't follow the route builder "page" in wrap\(page\)/,
+    ],
+    [
+      "a builder stored in an object",
+      `const builders = { page };
+export default defineRoutes(({ page }) => [builders.page("/admin", { component: () => null, guard: () => db.find("1") })]);`,
+      /can't follow the route builder "page" in page,/,
+    ],
+    [
+      "a builder handed on whole",
+      `const build = (builder: any) => [builder.page("/admin", { component: () => null, guard: () => db.find("1") })];
+export default defineRoutes((r) => build(r));`,
+      /can't follow the route builder "r" in build\(r\)/,
+    ],
+    [
+      "a definition object that spreads",
+      `const hooks = { guard: () => db.find("1") };
+export default defineRoutes([{ kind: "page", path: "/admin", component: () => null, ...hooks }]);`,
+      /the \{ kind: "page" \} route definition spread another object/,
+    ],
+    [
+      "a definition object whose kind is computed",
+      `const kind = "page";
+export default defineRoutes([{ kind, path: "/admin", component: () => null, guard: () => db.find("1") }]);`,
+      /the route definition sets kind to an expression/,
+    ],
+    [
+      "spread factory arguments",
+      `const args = ["/admin", { component: () => null, guard: () => db.find("1") }] as const;
+export default defineRoutes(({ page }) => [page(...args)]);`,
+      /the page\(\) route options are spread in from a list/,
+    ],
+  ])("refuses %s", async (_name, routes, message) => {
+    await expect(
+      buildRoutes(
+        `import { defineRoutes } from "@farm.js/core";
+import { db } from "./db";
+${routes}`,
+        { ssr: false },
+      ),
+    ).rejects.toThrow(message);
+  });
+
+  it("leaves other members of the module namespace and shadowing locals alone", async () => {
+    const output = await buildRoutes(
+      `
+import * as farm from "@farm.js/core";
+import { page } from "@farm.js/core";
+import { db } from "./db";
+import { DocPage } from "./components";
+function Pager({ items }: any) {
+  const page = items.length;
+  return <nav>{page} {String(farm.isNotFoundError)}</nav>;
+}
+export default farm.defineRoutes([
+  page("/docs", { component: DocPage, pending: Pager, data: { main: () => db.find("1") } }),
+]);
+`,
+      { ssr: false },
+    );
+    expect(output).not.toContain("DB_PASSWORD_SECRET");
+    expect(output).toContain("CLIENT_COMPONENT_MARKER");
+  });
 });
 
 describe("client copies of programmatic pages", () => {

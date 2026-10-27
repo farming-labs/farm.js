@@ -79,11 +79,16 @@ The browser loads the routes file to hydrate its pages, so the client build keep
 needs: components, `pending`/`error`/`notFound`, params and search options, and actions. It removes
 `guard`, `data`, `staticPaths`, `generateMetadata`, and `api()` handlers from inline route options,
 along with the imports and top-level helpers only they use, so database clients and credentials
-stay on the server. Write route options inline for this to apply: a client build fails when a
-`page()`, `layout()`, `createRoute()`, or `api()` call passes its options by reference
-(`api("/x", handlers)`), spreads another object into them, or uses a computed key, because those
-could still carry server code. A client build also fails if the routes file, or an application
-module it keeps, still imports a Node builtin such as `node:fs`.
+stay on the server. This covers `page()`, `layout()`, `createRoute()`, and `api()` imported from
+`@farm.js/core`, `routesBuilder`, the builder `defineRoutes` passes its callback, const aliases or
+destructuring of those, and definition objects such as `{ kind: "page", path, component, guard }`
+(an `{ kind: "api" }` object keeps an empty `methods` map). Write route options inline for this to
+apply: a client build fails when a call passes its options by reference (`api("/x", handlers)`),
+spreads another object or list into them, or uses a computed key; when a definition object spreads
+or computes its `kind`; and when a route builder leaves the routes module's sight, for example
+passed to a helper (`wrap(page)`), because those could still carry server code. A client build also
+fails if the routes file, or an application module it keeps, still imports a Node builtin such as
+`node:fs`.
 
 ## Named slots and intercepted routes
 
