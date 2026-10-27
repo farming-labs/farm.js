@@ -16,7 +16,8 @@ client code, async components and Suspense stream, and server actions, metadata 
   means `{ mode: "rsc" }`.
 - `"islands"` is Farm's own engine. It sends the static output once, as HTML, plus a small manifest
   of client components and their props. It hydrates only client components, groups the ones that
-  share context into context regions, and navigates by layout segment.
+  share context into context regions, and navigates by layout segment. Large prop values are
+  content-addressed: sent once, by hash, as immutable files the browser caches across pages.
 
 ```ts
 export default defineConfig({
@@ -146,16 +147,39 @@ interface FarmIslandManifest {
 }
 ```
 
-Static output appears only in the HTML. The manifest holds no element tree for it. On the
-benchmark page this replaces the 239 KB inline payload with the props of the client components on
-the page.
+Static output appears only in the HTML. The manifest holds no element tree for it. Props are what
+remains, and on the benchmark they are not small: 150 KB raw on one docs page, almost all of it one
+value (the navigation tree passed to a client provider). Section 3 handles that.
 
-### 3. Hydration: islands, then regions
+### 3. Content-addressed values
+
+Client props repeat across pages. On the benchmark, 98.5% of prop bytes on a docs page are
+identical to the previous page's, and one value, the navigation tree, is about 95% of them. RSC
+inlines every value in every payload. Islands mode sends a large value once:
+
+- A serialized prop value above a size threshold is identified by the hash of its canonical
+  serialization. The manifest carries `{ "$v": "<hash>" }` in its place.
+- **Static pages:** at build time, values that appear on two or more pages are written as immutable
+  files (`/_farm/v/<hash>.json`, cached for a year) and preloaded by the pages that use them. A value
+  unique to one page stays inline.
+- **Dynamic pages:** a value from a request-bound render is never written to a shared file, so
+  user-specific data cannot leak through a public URL. It is inlined, with its hash, so the client
+  can still keep it.
+- **Client:** a value store keyed by hash. An island waiting on a value file hydrates when it
+  arrives; the static HTML around it is already visible.
+- **Navigation:** the request carries the hashes the client holds as a small Bloom filter. The server
+  omits those values. A false positive costs one fetch by hash, retried inline for dynamic values.
+
+Measured on the benchmark (brotli, averages over 376 docs pages): the first-load document drops from
+46.0 KB (islands) to 22.8 KB, plus a 23.5 KB value file shared by every docs page, and a navigation
+from 29.1 KB to 5.7 KB.
+
+### 4. Hydration: islands, then regions
 
 Each island hydrates as its own root with the existing island runtime and strategies, from its
 recorded props. Static HTML between islands is never hydrated.
 
-### 4. Context regions
+### 5. Context regions
 
 Independent roots cannot share context, which is why RFC 0001 falls back to route-wide hydration
 around providers. A **context region** removes that fallback.
@@ -175,13 +199,13 @@ them) cannot work with an opaque slot. That one slot is sent in element form (th
 format), and the build reports it. Eligibility is decided before any output is optimized; anything
 ambiguous takes the element form.
 
-### 5. Streaming
+### 6. Streaming
 
 HTML streams as today. A Suspense boundary's late chunk carries its HTML and the manifest entries
 for the islands inside it. The island runtime hydrates them when the chunk arrives. An island in a
 fallback that is replaced before it hydrates is never hydrated.
 
-### 6. Navigation by segment
+### 7. Navigation by segment
 
 A route is a chain of segments: each layout, then the page. Navigation requests only the segments
 below the first one that changes.
@@ -200,13 +224,13 @@ below the first one that changes.
 - **Static pages:** segment responses are written at build time as files at their own URLs, so CDNs
   cache them without relying on `Vary`.
 
-### 7. Server actions
+### 8. Server actions
 
 Islands mode keeps Farm's `"use server"` transform, ids and request security (origin check, body
 limit). The response is the action's result, plus refreshed segments in the navigation format when
 the action revalidated data the page shows. `<form action>` keeps working before JavaScript loads.
 
-### 8. Renderers
+### 9. Renderers
 
 The wire is HTML plus serialized props and DOM slot references, so it is not tied to React's tree.
 React ships first. Other renderers adopt the same manifest through their client and server bindings,
@@ -224,15 +248,35 @@ with shared coverage in `@farm.js/renderer-tests`.
 
 Every fallback logs once per module with the reason, and the build report lists them.
 
+## Measurements
+
+[`benchmarks/islands-payload`](../benchmarks/islands-payload) reads a built RSC app's static
+output and compares designs. assistant-ui.com's docs (376 static pages), brotli q5, averages:
+
+| Design                                | First-load document                       | Bytes per navigation |
+| ------------------------------------- | ----------------------------------------- | -------------------: |
+| `"rsc"`                               | 56.9 KB                                   |              38.8 KB |
+| Islands: HTML plus client props       | 46.0 KB                                   |              29.1 KB |
+| Islands plus content-addressed values | 22.8 KB, plus a shared 23.5 KB value file |               5.7 KB |
+
+Ideas that did not help, so the design leaves them out:
+
+- **String interning** (a dictionary of repeated strings such as class names): 9% smaller raw, 5%
+  larger after brotli, which already removes that repetition.
+- **Reusing payload rows or element subtrees across pages by hash:** only 22.8% of a payload's rows
+  and 7.5% of its element subtrees are already held after a navigation. Large values repeat; markup
+  does not.
+- **Hash-consing repeated subtrees inside a page:** at most 8.3% of bytes raw, before compression.
+
 ## Comparison
 
 |                         | `"rsc"`                    | `"islands"`                                  |
 | ----------------------- | -------------------------- | -------------------------------------------- |
 | Server renders per page | Two (RSC, then SSR)        | One                                          |
-| First-load extra data   | Whole tree as payload      | Client components' props                     |
+| First-load extra data   | Whole tree as payload      | Client props; large values once, by hash     |
 | Hydration               | One root, walks all output | Islands and regions; static output untouched |
 | Shared context          | Whole tree                 | Inside a region                              |
-| Navigation              | Payload per page           | Changed segments' HTML and props             |
+| Navigation              | Payload per page           | Changed segments; held values not resent     |
 | Renderers               | React                      | React first, others by design                |
 
 ## Acceptance
@@ -247,15 +291,15 @@ navigation with state kept in layouts; back and forward; HMR; error and not-foun
 
 ## Rollout
 
-| Phase | Work                                                                                | Gate                                                        |
-| ----- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| 0     | Config type, `true` = `"rsc"`, docs                                                 | Type and docs only                                          |
-| 1     | Islands mode for React: server components by default, island manifest, static pages | Documents within 10% of normal builds; only islands hydrate |
-| 2     | Context regions with DOM slots                                                      | Providers work; pixel-identical; state kept                 |
-| 3     | Segment navigation, cache and prefetch                                              | Bytes per navigation below Next.js on the same pages        |
-| 4     | Streaming with islands in late chunks                                               | First content no later than `"rsc"`                         |
-| 5     | Actions with segment refresh                                                        | Parity with `"rsc"` action tests                            |
-| 6     | Other renderers                                                                     | Shared renderer suite                                       |
+| Phase | Work                                                                                                          | Gate                                                                                          |
+| ----- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 0     | Config type, `true` = `"rsc"`, docs                                                                           | Type and docs only                                                                            |
+| 1     | Islands mode for React: server components by default, island manifest, content-addressed values, static pages | `benchmarks/islands-payload` documents at or below the measured 22.8 KB; only islands hydrate |
+| 2     | Context regions with DOM slots                                                                                | Providers work; pixel-identical; state kept                                                   |
+| 3     | Segment navigation, cache and prefetch                                                                        | Bytes per navigation below Next.js on the same pages                                          |
+| 4     | Streaming with islands in late chunks                                                                         | First content no later than `"rsc"`                                                           |
+| 5     | Actions with segment refresh                                                                                  | Parity with `"rsc"` action tests                                                              |
+| 6     | Other renderers                                                                                               | Shared renderer suite                                                                         |
 
 ## Prior work in Farm
 
@@ -289,3 +333,7 @@ navigation with state kept in layouts; back and forward; HMR; error and not-foun
    `basePath` and i18n.
 4. **Revalidation.** How ISR and `revalidate` apply to segment files.
 5. **The default.** Whether and when `true` maps to `"islands"`.
+6. **Value threshold.** The size above which a value is content-addressed, and how many pages must
+   share it before it becomes a file instead of staying inline.
+7. **Value file lifetime.** Files are immutable by hash; old ones need a cleanup story per deploy
+   target.
