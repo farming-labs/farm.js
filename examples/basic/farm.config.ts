@@ -72,6 +72,9 @@ const runtimeLifecyclePlugin = definePlugin({
   },
 
   runtime: {
+    // before() only stops one demo path, so other responses stay CDN cacheable.
+    cache: 'public',
+
     context({ request }) {
       return { requestPath: new URL(request.url).pathname };
     },
