@@ -6192,6 +6192,20 @@ export default function OpenGraphImage() {
       );
 
       await build(config, { root, preset: "node-server" });
+      await expect(
+        fs.stat(
+          path.join(
+            root,
+            ".farm",
+            ".output",
+            "server",
+            "node_modules",
+            "@vercel",
+            "og",
+            "package.json",
+          ),
+        ),
+      ).resolves.toBeTruthy();
 
       await runProductionRequest(
         path.join(root, ".farm", ".output", "server"),
@@ -6212,6 +6226,51 @@ export default function OpenGraphImage() {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 180_000);
+
+  it.each(["node-server", "bun"])(
+    "leaves @vercel/og out of %s output when the app renders no metadata image",
+    async (preset) => {
+      const root = await createProductionFixture();
+
+      try {
+        const config = await resolveConfig(
+          {
+            root,
+            srcDir: "src",
+            images: { provider: "none" },
+            // A runtime plugin pulls in core's shared server runtime, which
+            // holds the lazy @vercel/og import for JSX metadata images.
+            plugins: [definePlugin({ name: "test:runtime-before", runtime: { before() {} } })],
+            generateBuildId: () => `no-metadata-image-${preset}-test`,
+          },
+          "production",
+        );
+
+        await build(config, { root, preset });
+
+        const serverDir = path.join(root, ".farm", ".output", "server");
+        await expect(
+          fs.stat(path.join(serverDir, "node_modules", "@vercel", "og")),
+        ).rejects.toThrow(/ENOENT/);
+        const serverFiles = await fs.readdir(serverDir, { recursive: true });
+        for (const file of serverFiles) {
+          if (!/\.m?js$/.test(file)) continue;
+          expect(await fs.readFile(path.join(serverDir, file), "utf8"), file).not.toMatch(
+            /["']@vercel\/og["']/,
+          );
+        }
+        if (preset === "node-server") {
+          await runProductionRequest(serverDir, async (response) => {
+            expect(response.status).toBe(200);
+            expect(await response.text()).toContain("prebuilt SSR output");
+          });
+        }
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+    180_000,
+  );
 
   it("serves a @vercel/og ImageResponse from an API route on a built node-server", async () => {
     const root = await createProductionFixture();

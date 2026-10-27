@@ -655,6 +655,59 @@ function createReactProductionModePlugin() {
   };
 }
 
+const FARM_OMITTED_METADATA_IMAGE_RUNTIME_ID = "\0farm-omitted-metadata-image-runtime";
+
+/** Whether the nearest package.json above `file` is @farm.js/core's own. */
+function isFarmCoreModule(file: string): boolean {
+  let dir = path.dirname(file.split("?", 1)[0]);
+  while (dir !== path.dirname(dir)) {
+    const manifest = path.join(dir, "package.json");
+    if (existsSync(manifest)) {
+      try {
+        return JSON.parse(readFileSync(manifest, "utf8")).name === "@farm.js/core";
+      } catch {
+        return false;
+      }
+    }
+    dir = path.dirname(dir);
+  }
+  return false;
+}
+
+/**
+ * Core's shared server runtime keeps a lazy `import("@vercel/og")` for JSX
+ * metadata images. An app with no generated metadata image route never runs
+ * it, but the import alone makes the server output carry @vercel/og (about
+ * 6.6 MB). Resolve core's own import to a stub then. App code and
+ * `@farm.js/core/og` still resolve the real package.
+ */
+function createOmittedMetadataImageRuntimePlugin(externalizeOtherImports: boolean): Rollup.Plugin {
+  return {
+    name: "farm-omitted-metadata-image-runtime",
+    resolveId(source, importer) {
+      if (source !== "@vercel/og") return null;
+      const fromCoreRuntime =
+        importer !== undefined &&
+        isFarmCoreModule(importer) &&
+        !/^og\.[cm]?[jt]sx?$/.test(path.basename(importer.split("?", 1)[0]));
+      if (fromCoreRuntime) return FARM_OMITTED_METADATA_IMAGE_RUNTIME_ID;
+      // Rollup checks the externals list before this hook, so @vercel/og is
+      // left off that list and other importers are kept external here.
+      return externalizeOtherImports ? { id: source, external: true } : null;
+    },
+    load(id) {
+      if (id !== FARM_OMITTED_METADATA_IMAGE_RUNTIME_ID) return null;
+      return `
+export class ImageResponse {
+  constructor() {
+    throw new Error("@vercel/og is not in this server build because the app has no generated metadata image route.");
+  }
+}
+`;
+    },
+  };
+}
+
 function createMetadataImageWasmPlugin(): Rollup.Plugin {
   return {
     name: "farm-metadata-image-wasm",
@@ -4775,6 +4828,11 @@ async function buildSSRInMemory(
   // external costs nothing, and Nitro copies the package only when the bundle
   // imports it.
   const useExternalMetadataImageRuntime = shouldUseExternalMetadataImageRuntime(preset, true);
+  const omitCoreMetadataImageRuntime = !metadataImageRoutes.some(
+    (image) => image.sourceType === "module",
+  );
+  const externalMetadataImageRuntime =
+    useExternalMetadataImageRuntime && !omitCoreMetadataImageRuntime ? ["@vercel/og"] : [];
   const rendererOptionalExternals = isReactRenderer(config.renderer)
     ? []
     : [
@@ -4808,7 +4866,7 @@ async function buildSSRInMemory(
             // startup; kept external, Nitro copies the package into the output.
             "better-sqlite3",
             ...rendererOptionalExternals,
-            ...(useExternalMetadataImageRuntime ? ["@vercel/og"] : []),
+            ...externalMetadataImageRuntime,
             "@prisma/client",
             "@prisma/client/default",
             "@prisma/client/default.js",
@@ -4840,7 +4898,7 @@ async function buildSSRInMemory(
           "fsevents",
           "sharp",
           ...rendererOptionalExternals,
-          ...(useExternalMetadataImageRuntime ? ["@vercel/og"] : []),
+          ...externalMetadataImageRuntime,
           "esbuild",
           "lightningcss",
           "rolldown",
@@ -4894,6 +4952,14 @@ async function buildSSRInMemory(
         ...(!useExternalMetadataImageRuntime &&
         metadataImageRoutes.some((image) => image.sourceType === "module")
           ? [createMetadataImageWasmPlugin()]
+          : []),
+        ...(omitCoreMetadataImageRuntime
+          ? [
+              {
+                ...createOmittedMetadataImageRuntimePlugin(useExternalMetadataImageRuntime),
+                enforce: "pre" as const,
+              },
+            ]
           : []),
         { ...createReactProductionModePlugin(), enforce: "pre" as const },
         farmServerOnlyEntriesPlugin(),
