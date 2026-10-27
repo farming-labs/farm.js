@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveConfig } from "../config";
 import { logger } from "../utils";
 import {
+  applyFarmServerLayouts,
   describeSuppressedAsyncHydration,
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
@@ -16,6 +17,7 @@ import {
   getIslandStrategyExport,
   hasHydrateExport,
   hasUseClientDirective,
+  isIsolatableClientBoundarySource,
   resolveFarmIsolatedClientHydrationMode,
   resolveModuleSourcePath,
   stripUseClientDirective,
@@ -1971,5 +1973,175 @@ export function Chart() {}
     expect(routerSource).toContain(
       'if (document.documentElement.dataset.farmDocsRuntime === "true") return;',
     );
+  });
+});
+
+describe("server layouts", () => {
+  const writeApp = (files: Record<string, string>) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-server-layout-"));
+    tempDirs.push(root);
+    for (const [file, content] of Object.entries(files)) {
+      const filePath = path.join(root, file);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, content);
+    }
+    return root;
+  };
+  const clientFiles = {
+    "src/components/provider.tsx": `"use client";
+import { createContext, useState } from "react";
+export const ThemeContext = createContext("light");
+export const SIDEBAR_WIDTH = 260;
+export function Provider({ children }) {
+  const [theme] = useState("dark");
+  return <ThemeContext.Provider value={theme}>{children}</ThemeContext.Provider>;
+}`,
+    "src/components/nav.tsx": `"use client";
+export default function Nav({ items }) { return <nav>{items.map((item) => <a key={item}>{item}</a>)}</nav>; }`,
+    "src/lib/content.ts": `export const tree = ["a", "b"];`,
+  };
+  const docsLayout = `import { tree } from "../../lib/content";
+import { Provider } from "../../components/provider";
+import Nav from "../../components/nav";
+export default function DocsLayout({ children }) {
+  return <Provider><Nav items={tree} />{children}</Provider>;
+}`;
+  const rootLayout = `"use client";
+export default function RootLayout({ children }) { return <div>{children}</div>; }`;
+
+  const plan = (
+    root: string,
+    layouts: string[],
+    pages: Array<[string, string]>,
+    enabled = true,
+  ) => {
+    const layoutPlans = layouts.map((pattern) => ({
+      pattern,
+      modulePath: path.join(root, "src/app", pattern, "layout.tsx"),
+      plan: getClientModuleHydrationPlan(
+        path.join(root, "src/app", pattern, "layout.tsx"),
+        root,
+        "off",
+        { asyncOwnerIslands: true },
+      ),
+    }));
+    const skipped: string[] = [];
+    const selected = applyFarmServerLayouts({
+      enabled,
+      layouts: layoutPlans,
+      pages: pages.map(([directory, file]) => ({
+        directory,
+        shouldHydrate: getClientModuleHydrationPlan(path.join(root, file), root, "off", {
+          asyncOwnerIslands: true,
+        }).shouldHydrate,
+      })),
+      slotOwners: [],
+      root,
+      mode: "off",
+      planOptions: { asyncOwnerIslands: true },
+      layoutAppliesToRoute: (layout, directory) =>
+        layout === "/" || directory === layout || directory.startsWith(`${layout}/`),
+      onSkip: (pattern, reason) => skipped.push(`${pattern}: ${reason}`),
+    });
+    return {
+      selected,
+      skipped,
+      layouts: Object.fromEntries(layoutPlans.map((l) => [l.pattern, l.plan])),
+    };
+  };
+
+  it("renders a layout that only composes client components on the server", () => {
+    const root = writeApp({
+      ...clientFiles,
+      "src/app/layout.tsx": rootLayout,
+      "src/app/docs/layout.tsx": docsLayout,
+      "src/app/docs/page.tsx": `export default async function Page() { return <h1>docs</h1>; }`,
+    });
+    const { selected, layouts } = plan(root, ["/", "/docs"], [["/docs", "src/app/docs/page.tsx"]]);
+    expect([...selected]).toEqual(["/docs"]);
+    expect(layouts["/docs"]).toMatchObject({
+      shouldHydrate: false,
+      serverLayout: true,
+      hasIsolatedClientBoundaries: true,
+    });
+    expect(
+      layouts["/docs"].isolatedBoundaries
+        .map((boundary) => path.basename(boundary.modulePath))
+        .sort(),
+    ).toEqual(["nav.tsx", "provider.tsx"]);
+    // The root layout keeps hydrating, and nothing changes with the flag off.
+    expect(layouts["/"]).toMatchObject({ shouldHydrate: true });
+    expect([
+      ...plan(root, ["/", "/docs"], [["/docs", "src/app/docs/page.tsx"]], false).selected,
+    ]).toEqual([]);
+  });
+
+  it("keeps hydrating a layout that calls a hook, and says why", () => {
+    const root = writeApp({
+      ...clientFiles,
+      "src/app/layout.tsx": rootLayout,
+      "src/app/docs/layout.tsx": docsLayout.replace(
+        "export default function DocsLayout({ children }) {",
+        'import { useId } from "react";\nexport default function DocsLayout({ children }) {\n  useId();',
+      ),
+      "src/app/docs/page.tsx": `export default async function Page() { return <h1>docs</h1>; }`,
+    });
+    const { selected, skipped, layouts } = plan(
+      root,
+      ["/", "/docs"],
+      [["/docs", "src/app/docs/page.tsx"]],
+    );
+    expect([...selected]).toEqual([]);
+    expect(layouts["/docs"]).toMatchObject({ shouldHydrate: true });
+    expect(skipped).toEqual([expect.stringMatching(/^\/docs: .*calls useId\(\)$/)]);
+  });
+
+  it("keeps hydrating a layout with a page that hydrates as a whole or another layout inside", () => {
+    const root = writeApp({
+      ...clientFiles,
+      "src/app/layout.tsx": rootLayout,
+      "src/app/docs/layout.tsx": docsLayout,
+      "src/app/docs/page.tsx": `"use client";\nexport default function Page() { return <h1>docs</h1>; }`,
+    });
+    expect([...plan(root, ["/", "/docs"], [["/docs", "src/app/docs/page.tsx"]]).selected]).toEqual(
+      [],
+    );
+
+    const nested = writeApp({
+      ...clientFiles,
+      "src/app/layout.tsx": rootLayout,
+      "src/app/docs/layout.tsx": docsLayout,
+      "src/app/docs/guide/layout.tsx": docsLayout.replaceAll("../../", "../../../"),
+      "src/app/docs/guide/page.tsx": `export default async function Page() { return <h1>guide</h1>; }`,
+    });
+    const { selected, layouts } = plan(
+      nested,
+      ["/", "/docs", "/docs/guide"],
+      [["/docs/guide", "src/app/docs/guide/page.tsx"]],
+    );
+    // Only the innermost layout, below layouts that all hydrate, qualifies.
+    expect([...selected]).toEqual(["/docs/guide"]);
+    expect(layouts["/docs"]).toMatchObject({ shouldHydrate: true });
+    expect(layouts["/docs"].serverLayout).toBeUndefined();
+  });
+
+  it("lets a client module re-export imported constants in an export list", () => {
+    expect(
+      isIsolatableClientBoundarySource(`"use client";
+import { PLATFORMS, type Platform } from "./platforms";
+export { PLATFORMS, type Platform };
+export function PlatformProvider({ children }) { return children; }`),
+    ).toBe(true);
+    // A local component in a list would skip its isolation wrapper.
+    expect(
+      isIsolatableClientBoundarySource(`"use client";
+function Panel() { return null; }
+export { Panel };`),
+    ).toBe(false);
+    expect(
+      isIsolatableClientBoundarySource(`"use client";
+export { Panel } from "./panel";
+export function Shell() { return null; }`),
+    ).toBe(false);
   });
 });

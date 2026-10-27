@@ -43,6 +43,7 @@ import path from "path";
 import type { ViteDevServer } from "vite";
 import { toFileModuleUrl } from "../utils/file-module";
 import {
+  applyFarmServerLayouts,
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
   createMarkdownPageHydrationPlanner,
@@ -262,6 +263,14 @@ export class RouteManager {
   private programmaticLayouts: Map<string, ProgrammaticLayoutRoute> = new Map();
   private rendererRuntime?: FarmServerRendererRuntime;
   private viteServer?: ViteDevServer;
+  /**
+   * Plans layouts as server layouts when `experimental.serverLayouts` is set. Only the production
+   * build turns this on; the development server renders every layout as before.
+   *
+   * @internal
+   */
+  serverLayoutsEnabled = false;
+
   private clientManifestCache?: {
     projectRoot: string;
     manifest: FarmClientRouteManifest;
@@ -754,6 +763,27 @@ export class RouteManager {
         `[Farm.js] ${entry.pattern} is async, so it renders client components from ${metadata.staticPackageBoundaries.join(", ")} as static HTML: package client components cannot be isolated yet.`,
       );
     }
+
+    applyFarmServerLayouts({
+      enabled: this.serverLayoutsEnabled && this.config.experimental?.serverLayouts === true,
+      layouts: layoutEntries.map(({ entry, metadata }) => ({
+        pattern: entry.pattern,
+        modulePath: entry.modulePath,
+        plan: metadata,
+      })),
+      pages: routeEntries.map(({ entry, metadata }) => ({
+        directory: getRouteEntryDirectory(entry),
+        shouldHydrate: metadata.shouldHydrate,
+      })),
+      slotOwners: Array.from(
+        this.routeSlots.values(),
+        (slot) => slot.ownerDirectory ?? slot.ownerPattern,
+      ),
+      root: normalizedProjectRoot,
+      mode: isolatedMode,
+      planOptions,
+      layoutAppliesToRoute: routeBoundaryCoversDirectory,
+    });
 
     // Pages are compared by directory so a layout inside a route group applies
     // only to the pages in that group.

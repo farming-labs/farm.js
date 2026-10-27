@@ -72,7 +72,7 @@ interface ResolvedChunk {
 interface TreeResolver {
   component(reference: string, exportName: string): React.ComponentType<any>;
   chunk(id: number): ResolvedChunk;
-  serverHtml(id: number, key: React.Key | null): React.ReactElement;
+  serverHtml(id: number, key: React.Key | null, html?: string): React.ReactElement;
 }
 
 type ReactInternals = { H?: unknown; ReactCurrentDispatcher?: { current: unknown } };
@@ -141,10 +141,13 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
 
 interface ResolveContext {
   parserSensitive: boolean;
+  /** Inside a client component's props other than children, which it may never render. */
+  clientProp?: boolean;
 }
 
 interface ResolveState {
   ReactRuntime: typeof React;
+  renderHtml?: (node: React.ReactNode) => string;
   nextId: number;
   components: Map<string, React.ComponentType<any>>;
   serverHtml: Map<number, React.ReactNode>;
@@ -160,7 +163,18 @@ function serverHtmlNode(
   if (context.parserSensitive) throw new UnsupportedInParserSensitiveElement();
   const id = state.nextId++;
   state.serverHtml.set(id, node);
-  return key === null ? { $: "x", i: id } : { $: "x", i: id, k: String(key) };
+  const value: { [key: string]: TreeValue } = { $: "x", i: id };
+  if (key !== null) value.k = String(key);
+  // A client component may hold such a node without rendering it (an icon in a data prop), so its
+  // HTML is not in the document; the payload carries it for the browser.
+  if (context.clientProp && state.renderHtml) {
+    try {
+      value.h = state.renderHtml(node);
+    } catch {
+      // Async or suspending content renders only in the stream; the document has to carry it.
+    }
+  }
+  return value;
 }
 
 async function resolveProps(
@@ -254,7 +268,12 @@ async function resolveElement(
         const { children, ...rest } = props;
         const resolved = await resolveProps(state, rest, context, true);
         if (children !== undefined) {
-          resolved.children = await resolveValue(state, children, { parserSensitive }, new Set());
+          resolved.children = await resolveValue(
+            state,
+            children,
+            { parserSensitive, clientProp: context.clientProp },
+            new Set(),
+          );
         }
         return withKey({ $: "h", t: type, p: resolved });
       } catch (error) {
@@ -299,7 +318,7 @@ async function resolveElement(
     const clientReference = getClientReference(type);
     if (clientReference) {
       const { children, ...rest } = props;
-      const resolved = await resolveProps(state, rest, context, false);
+      const resolved = await resolveProps(state, rest, { ...context, clientProp: true }, false);
       if (children !== undefined) {
         resolved.children = await resolveValue(state, children, context, new Set());
       }
@@ -476,7 +495,11 @@ function createTreeValue(
         }),
       );
     case "x":
-      return resolver.serverHtml(value.i as number, typeof value.k === "string" ? value.k : null);
+      return resolver.serverHtml(
+        value.i as number,
+        typeof value.k === "string" ? value.k : null,
+        typeof value.h === "string" ? value.h : undefined,
+      );
     case "n":
       return Number(value.v);
     case "P":
@@ -531,6 +554,8 @@ function createTreePage(
 export interface FarmServerTreeRenderOptions {
   /** Renders a subtree the resolver could not represent with its client components as islands. */
   isolate(element: React.ReactNode): React.ReactNode;
+  /** Renders a node to static HTML, for nodes a client component holds in its props. */
+  renderHtml?(node: React.ReactNode): string;
 }
 
 /**
@@ -545,6 +570,7 @@ export async function renderFarmServerTreePage(
 ): Promise<React.ReactElement> {
   const state: ResolveState = {
     ReactRuntime,
+    renderHtml: options.renderHtml,
     nextId: 0,
     components: new Map(),
     serverHtml: new Map(),
@@ -624,11 +650,54 @@ function collectReferences(value: TreeValue, references: Set<string>): void {
   for (const entry of Object.values(value)) collectReferences(entry, references);
 }
 
+interface ServerTreeView {
+  build(): React.ReactElement;
+  components: Map<string, React.ComponentType<any>>;
+}
+
+const treeHosts = /* @__PURE__ */ new WeakMap<
+  object,
+  React.ComponentType<{ view: ServerTreeView }>
+>();
+
+// One component type per React runtime, so a rebuilt tree with the same key (a server layout
+// across navigations) updates in place and its client components keep their state.
+function getTreeHost(ReactRuntime: typeof React): React.ComponentType<{ view: ServerTreeView }> {
+  const existing = treeHosts.get(ReactRuntime.createElement);
+  if (existing) return existing;
+  function FarmServerTreePage({ view }: { view: ServerTreeView }): React.ReactNode {
+    const [, setVersion] = ReactRuntime.useState(0);
+    const viewRef = ReactRuntime.useRef(view);
+    viewRef.current = view;
+    ReactRuntime.useEffect(() => {
+      const listener: TreeUpdateListener = (reference, module) => {
+        const { components } = viewRef.current;
+        let changed = false;
+        for (const key of components.keys()) {
+          const separator = key.lastIndexOf("#");
+          if (key.slice(0, separator) !== reference) continue;
+          components.set(key, originalExport(module, key.slice(separator + 1)));
+          changed = true;
+        }
+        if (changed) setVersion((version) => version + 1);
+        return changed;
+      };
+      return subscribeFarmServerTreeUpdates(listener);
+    }, []);
+    return view.build();
+  }
+  treeHosts.set(ReactRuntime.createElement, FarmServerTreePage);
+  return FarmServerTreePage;
+}
+
 export interface FarmServerTreeElementOptions {
   load(reference: string): Promise<Record<string, unknown>>;
   /** Renders a `<farm-server-html>` subtree from its server HTML and hydrates its islands. */
   ServerHtml: React.ComponentType<any>;
-  /** Remounts the page's client components when it changes, as a navigation does. */
+  /**
+   * The tree's identity. A page passes its path, so a navigation remounts its client components;
+   * a server layout passes its pattern, so they keep their state across the pages below it.
+   */
   key?: string;
 }
 
@@ -639,9 +708,12 @@ function parseHtml(html: string): DocumentFragment {
 }
 
 function originalExport(module: Record<string, unknown>, exportName: string) {
-  const Component = (
-    module.__farm_client_boundary_originals__ as Record<string, unknown> | undefined
-  )?.[exportName];
+  // A compiled boundary exposes its unwrapped exports; a built-in client component (Link) is the
+  // module's own export.
+  const originals = module.__farm_client_boundary_originals__ as
+    | Record<string, unknown>
+    | undefined;
+  const Component = originals ? originals[exportName] : module[exportName];
   if (typeof Component !== "function" && typeof Component !== "object") {
     throw new Error(`compiled original export ${exportName} was not found`);
   }
@@ -709,8 +781,8 @@ export async function createFarmServerTreeElement(
       );
       return { status: "fulfilled", value, promise: Promise.resolve(value) };
     },
-    serverHtml(id, key) {
-      const html = serverHtml.get(id);
+    serverHtml(id, key, embedded) {
+      const html = serverHtml.get(id) ?? embedded;
       if (html === undefined) throw new Error(`server HTML ${id} was not found`);
       return ReactRuntime.createElement(options.ServerHtml, {
         ...(key === null ? {} : { key }),
@@ -727,27 +799,8 @@ export async function createFarmServerTreeElement(
   const build = () => createTreePage(ReactRuntime, payload.t, json, resolver);
   build();
 
-  function FarmServerTreePage(): React.ReactNode {
-    const [, setVersion] = ReactRuntime.useState(0);
-    ReactRuntime.useEffect(() => {
-      const listener: TreeUpdateListener = (reference, module) => {
-        let changed = false;
-        for (const key of components.keys()) {
-          const separator = key.lastIndexOf("#");
-          if (key.slice(0, separator) !== reference) continue;
-          components.set(key, originalExport(module, key.slice(separator + 1)));
-          changed = true;
-        }
-        if (changed) setVersion((version) => version + 1);
-        return changed;
-      };
-      return subscribeFarmServerTreeUpdates(listener);
-    }, []);
-    return build();
-  }
-
-  return ReactRuntime.createElement(
-    FarmServerTreePage,
-    options.key === undefined ? null : { key: options.key },
-  );
+  return ReactRuntime.createElement(getTreeHost(ReactRuntime), {
+    ...(options.key === undefined ? {} : { key: options.key }),
+    view: { build, components },
+  });
 }

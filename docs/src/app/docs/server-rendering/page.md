@@ -268,6 +268,9 @@ Client components that come from a package, such as the icons in `lucide-react`,
 yet. An async page renders them as static HTML and still hydrates its own client components as
 islands, and Farm logs which packages it left static.
 
+A layout can render on the server only as well, with its client components rebuilt in the
+browser under the parent layout: see [Server layouts](/docs/configuration#server-layouts).
+
 ### Isolated client leaves without RSC
 
 `"use client"` also remains available in a normal React SSR application. Set

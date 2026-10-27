@@ -58,6 +58,7 @@ import { isDeepStrictEqual } from "node:util";
 import { logger, toPosixPath, toViteModuleId } from "../utils";
 import {
   describeSuppressedAsyncHydration,
+  applyFarmServerLayouts,
   enforceFarmIsolatedHydrationRouteBudget,
   getClientModuleHydrationPlan,
   getClientModuleMetadata,
@@ -1240,6 +1241,11 @@ export async function buildUniversal(
     }
     logger.info(`📋 Found ${pageRoutes.length} page routes and ${layoutRoutes.length} layouts`);
 
+    // Server layouts render in production builds only (see RouteManager.serverLayoutsEnabled).
+    if (routeManager.serverLayoutsEnabled !== true) {
+      routeManager.serverLayoutsEnabled = true;
+      routeManager.invalidateClientManifest();
+    }
     const isolatedClientBoundaryModules = routeManager.getIsolatedClientBoundaryModules(root);
     const hydrationPlanCache = new Map<string, ClientModuleHydrationPlan>();
 
@@ -1688,6 +1694,26 @@ async function buildClient(
           planOptions,
         ),
   }));
+
+  applyFarmServerLayouts({
+    enabled: config.experimental?.serverLayouts === true,
+    layouts: clientLayouts.map((layout) => ({
+      pattern: layout.pattern,
+      modulePath: layout.modulePath,
+      plan: layout,
+    })),
+    pages: routePlans.map(({ route, metadata }) => ({
+      directory: routeDirectory(route),
+      shouldHydrate: metadata.shouldHydrate,
+    })),
+    slotOwners: routeSlots.map((slot) => slot.ownerDirectory ?? slot.ownerPattern),
+    root,
+    mode: isolatedMode,
+    planOptions,
+    layoutAppliesToRoute,
+    onSkip: (pattern, reason) =>
+      logger.info(`📋 Layout ${pattern} keeps hydrating as a whole: ${reason}.`),
+  });
 
   enforceFarmIsolatedHydrationRouteBudget(
     clientLayouts.map((layout) => ({
@@ -2882,6 +2908,7 @@ function generateClientHydrationEntry(
     islandStrategy: FarmIslandStrategy | null;
     hasIsolatedClientBoundaries: boolean;
     isolatedBoundaries: IsolatedClientBoundaryReference[];
+    serverLayout?: true;
   }>,
   clientRouteSlots: UniversalRouteSlot[],
   root: string,
@@ -2969,7 +2996,7 @@ function generateClientHydrationEntry(
       ? `, urlPattern: ${JSON.stringify(stripRouteGroups(layout.pattern))}, groupScope: ${JSON.stringify(groupScope)}`
       : "";
     layoutRegistrations.push(
-      `  { pattern: ${JSON.stringify(layout.pattern)}${groupFields}, Component: ${rendersOnClient ? `Layout${index}` : "null"}, shouldHydrate: ${JSON.stringify(layout.shouldHydrate)}, islandStrategy: ${JSON.stringify(layout.islandStrategy)} }`,
+      `  { pattern: ${JSON.stringify(layout.pattern)}${groupFields}, Component: ${rendersOnClient ? `Layout${index}` : "null"}, shouldHydrate: ${JSON.stringify(layout.shouldHydrate)}, islandStrategy: ${JSON.stringify(layout.islandStrategy)}${layout.serverLayout ? ", serverLayout: true" : ""} }`,
     );
   });
 
@@ -3342,7 +3369,10 @@ document.addEventListener("click", function(e) {
   });
   const isolatedHydrationEnabled = isolatedBoundaryModules.size > 0;
   // Only an app with a server-tree page ships the code that rebuilds one.
-  const serverTreeEnabled = isolatedHydrationEnabled && clientPages.some((page) => page.serverTree);
+  const serverLayoutsEnabled = layoutRoutes.some((layout) => layout.serverLayout === true);
+  const serverTreeEnabled =
+    isolatedHydrationEnabled &&
+    (serverLayoutsEnabled || clientPages.some((page) => page.serverTree));
   const isolatedHydrationImport = isolatedHydrationEnabled
     ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";${serverTreeEnabled ? '\nimport { createFarmServerTreeElement } from "@farm.js/core/internal/server-tree";' : ""}`
     : "";
@@ -3353,7 +3383,13 @@ ${Array.from(isolatedBoundaryModules.entries())
     ([reference, modulePath]) =>
       `  ${JSON.stringify(reference)}: () => import(${JSON.stringify(modulePath)}),`,
   )
-  .join("\n")}
+  .join("\n")}${
+        serverTreeEnabled
+          ? `
+  // Built-in client components a server tree renders by reference (Link).
+  "@farm.js/core/client": () => import("@farm.js/core/client"),`
+          : ""
+      }
 };
 async function loadFarmIsolatedBoundary(reference) {
   const loader = farmIsolatedBoundaryLoaders[reference];
@@ -3393,10 +3429,33 @@ async function createFarmServerTreePageElement(source, pathname) {
     console.warn("[Farm.js] Could not rebuild the server tree of " + pathname + "; its server HTML was kept.", error);
     return null;
   }
+}
+${
+  serverLayoutsEnabled
+    ? `
+// A server layout rebuilds from the serialized tree in its boundary (the document's on the first
+// load, the fetched document's on a navigation), keyed by its pattern so its client components
+// keep their state on the pages below it.
+async function createFarmServerLayoutElement(layout, scope) {
+  const boundary = findLayoutBoundary(scope, layout.pattern);
+  if (!boundary) return null;
+  try {
+    const tree = await createFarmServerTreeElement(React, boundary, {
+      load: loadFarmIsolatedBoundary,
+      ServerHtml: FarmServerPage,
+      key: layout.pattern,
+    });
+    return tree ? farmLayoutBoundaryElement(layout.pattern, tree) : null;
+  } catch (error) {
+    console.warn("[Farm.js] Could not rebuild the server layout " + layout.pattern + "; its server HTML was kept.", error);
+    return null;
+  }
 }`
-    : "async function createFarmServerTreePageElement() { return null; }"
+    : "async function createFarmServerLayoutElement() { return null; }"
 }`
-    : `async function createFarmServerTreePageElement() { return null; }`;
+    : "async function createFarmServerTreePageElement() { return null; }\nasync function createFarmServerLayoutElement() { return null; }"
+}`
+    : `async function createFarmServerTreePageElement() { return null; }\nasync function createFarmServerLayoutElement() { return null; }`;
   const routeClientGraphRuntime = isolatedHydrationEnabled
     ? `function wrapFarmRouteClientGraph(element) {
   return wrapFarmIsolatedClientGraph(React, element);
@@ -3499,7 +3558,7 @@ function getApplicableLayouts(pathname) {
 
 function hasHydratableLayout(pathname) {
   return getApplicableLayouts(pathname).some(function(layout) {
-    return layout.shouldHydrate === true;
+    return layout.shouldHydrate === true || layout.serverLayout === true;
   });
 }
 
@@ -3563,10 +3622,19 @@ function reviveServerPageProps(serverProps) {
     : serverProps;
 }
 
-async function createMatchedHydrationRoute(matched, pathname, searchParams, serverHtml, serverProps) {
+async function createMatchedHydrationRoute(matched, pathname, searchParams, serverHtml, serverProps, documentRoot) {
   const hydrateLayouts = hasHydratableLayout(pathname);
   const params = matched.params;
   let pageElement = null;
+
+  // Below a server layout the page is part of the layout's server tree.
+  const serverLayout = getApplicableLayouts(pathname).find(function(layout) {
+    return layout.serverLayout === true;
+  });
+  if (serverLayout) {
+    const element = await createFarmServerLayoutElement(serverLayout, documentRoot || document);
+    return element ? createFarmRouteState(element, pathname, params, true) : null;
+  }
 
   if (matched.route.pageShouldHydrate) {
     const Component = await loadRouteComponent(matched.route);
@@ -4286,6 +4354,7 @@ ${generateUniversalRouterStateProperties()}
         searchParams,
         nextPage ? nextPage.innerHTML : "",
         nextPageProps,
+        newRoot,
       );
       if (!isNavigationCurrent()) return false;
       if (routeState) {
@@ -5559,7 +5628,12 @@ function isolateFarmRouteServerPage(element) {
 // An async page below a hydrating layout renders as a serialized tree the browser rebuilds in
 // the layout's React root, so its client components read the layout's context.
 function renderFarmRouteServerTree(element) {
-  return renderFarmServerTreePage(React, element, { isolate: isolateFarmRouteServerPage });
+  return renderFarmServerTreePage(React, element, {
+    isolate: isolateFarmRouteServerPage,
+    renderHtml: typeof ReactDOMServer.renderToStaticMarkup === "function"
+      ? (node) => ReactDOMServer.renderToStaticMarkup(node)
+      : undefined,
+  });
 }`
     : `function wrapFarmRouteClientGraph(element) { return element; }
 
@@ -5647,6 +5721,24 @@ function renderFarmRouteServerTree(element) { return element; }`;
           ),
     ]),
   );
+
+  applyFarmServerLayouts({
+    enabled: config.experimental?.serverLayouts === true,
+    layouts: layoutHydrationPlans.map((layout) => ({
+      pattern: layout.pattern,
+      modulePath: layout.modulePath,
+      plan: layout.hydration,
+    })),
+    pages: pageRoutes.map((route) => ({
+      directory: route.directory ?? route.pattern,
+      shouldHydrate: pageHydrationPlans.get(route.modulePath)!.shouldHydrate,
+    })),
+    slotOwners: routeSlots.map((slot) => slot.ownerDirectory ?? slot.ownerPattern),
+    root: config.root,
+    mode: isolatedHydrationMode,
+    planOptions: hydrationPlanOptions,
+    layoutAppliesToRoute: routeBoundaryCoversDirectory,
+  });
 
   enforceFarmIsolatedHydrationRouteBudget(
     layoutHydrationPlans.map((layout) => ({
@@ -5778,7 +5870,9 @@ function renderFarmRouteServerTree(element) { return element; }`;
     pattern: ${JSON.stringify(layout.pattern)},
     module: ${varName},
     shouldHydrate: ${JSON.stringify(clientMetadata.shouldHydrate)},
-    islandStrategy: ${JSON.stringify(clientMetadata.islandStrategy)},
+    islandStrategy: ${JSON.stringify(clientMetadata.islandStrategy)},${
+      clientMetadata.serverLayout ? "\n    serverLayout: true," : ""
+    }
   }`);
   });
 
@@ -9245,9 +9339,11 @@ async function handleFarmRequestInContext(
               pageElement = React.createElement(PageComponent, pageProps);
             }
 
+            // A server layout's tree resolves the page with it, client components and all.
+            const underServerLayout = applicableLayouts.some((layout) => layout.serverLayout === true);
             if (route.shouldHydrate && !shouldHydrateLayout) {
               pageElement = wrapFarmRouteClientGraph(pageElement);
-            } else if (shouldHydrateLayout && !route.shouldHydrate) {
+            } else if (shouldHydrateLayout && !route.shouldHydrate && !underServerLayout) {
               pageElement = route.serverTree
                 ? await renderFarmRouteServerTree(pageElement)
                 : isolateFarmRouteServerPage(pageElement);
@@ -9295,6 +9391,10 @@ async function handleFarmRequestInContext(
                   params,
                   ...slotProps,
                 });
+                if (layout.serverLayout) {
+                  // Rendered here only: the browser rebuilds its client components from the tree.
+                  wrappedElement = await renderFarmRouteServerTree(wrappedElement);
+                }
                 wrappedElement = React.createElement(
                   "div",
                   {

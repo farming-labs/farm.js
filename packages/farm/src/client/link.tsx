@@ -17,6 +17,7 @@ import type { FarmViewTransitionMode } from "./spa-router";
 import { isFarmLocaleChangeHref, localizeActiveFarmHref } from "../i18n/client-state";
 import type { FarmI18nLocale } from "../i18n/types";
 import { getFarmTrailingSlashPreference } from "../trailing-slash";
+import { markFarmClientReference } from "./client-reference";
 import { applyFarmBasePath, getFarmBasePath } from "../base-path";
 import { useOptionalFarm } from "../provider";
 
@@ -563,6 +564,14 @@ LinkWithRef.displayName = "Link";
 type LinkComponentType = <TRoute extends string = DefaultRouteHref, THref extends string = string>(
   props: LinkProps<TRoute, THref> & { ref?: React.ForwardedRef<HTMLAnchorElement> },
 ) => React.ReactElement;
+
+// A server tree (a server layout, an async page) renders Link as a client component the browser
+// hydrates in place, as React Server Components treat next/link.
+markFarmClientReference(LinkWithRef, {
+  reference: "@farm.js/core/client",
+  exportName: "Link",
+  Component: LinkWithRef,
+});
 
 export const Link = LinkWithRef as unknown as LinkComponentType;
 

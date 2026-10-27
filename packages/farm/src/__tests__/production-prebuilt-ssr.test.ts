@@ -920,6 +920,115 @@ export default async function IslandsPage() {
     }
   }, 120_000);
 
+  it("keeps a server layout's module out of the client and its client state across pages", async () => {
+    const root = await createProductionFixture();
+    const files: Record<string, string> = {
+      "src/app/layout.tsx": `"use client";
+export default function RootLayout({ children }) { return <div id="shell">{children}</div>; }`,
+      "src/lib/content.ts": `export const SECRET = "server-only-content-marker";
+export const tree = [{ name: "Intro", href: "/docs" }, { name: "Guide", href: "/docs/guide" }];`,
+      "src/components/provider.tsx": `"use client";
+import { createContext, useContext, useState } from "react";
+const Count = createContext(null);
+export function Provider({ children }) {
+  const state = useState(0);
+  return <Count.Provider value={state}>{children}</Count.Provider>;
+}
+export function CounterButton() {
+  const [count, setCount] = useContext(Count);
+  return <button id="counter" onClick={() => setCount(count + 1)}>count:{count}</button>;
+}`,
+      "src/components/nav.tsx": `"use client";
+import { Link } from "@farm.js/core/client";
+export default function Nav({ items }) {
+  return <nav>{items.map((item) => <Link key={item.href} href={item.href}>{item.name}</Link>)}</nav>;
+}`,
+      "src/app/docs/layout.tsx": `import { SECRET, tree } from "../../lib/content";
+import { Provider, CounterButton } from "../../components/provider";
+import Nav from "../../components/nav";
+export default function DocsLayout({ children }) {
+  return <Provider><Nav items={tree} /><CounterButton />{children}<footer data-size={SECRET.length} /></Provider>;
+}`,
+      "src/app/docs/page.tsx": `export default async function Intro() { return <h1>Intro</h1>; }`,
+      "src/app/docs/guide/page.tsx": `export default async function Guide() { return <h1>Guide</h1>; }`,
+    };
+    try {
+      await fs.rm(path.join(root, "src", "app", "page.tsx"), { force: true });
+      for (const [file, content] of Object.entries(files)) {
+        await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
+        await fs.writeFile(path.join(root, file), content);
+      }
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          generateBuildId: () => "server-layouts-test",
+          experimental: { serverLayouts: true },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const publicDir = path.join(root, ".farm", ".output", "public");
+      const clientCode = await readJavaScriptOutput(publicDir, [".js"]);
+      expect(clientCode).toContain("count:");
+      expect(clientCode).not.toContain("server-only-content-marker");
+
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          const boundary = html.slice(html.indexOf('data-farm-layout-pattern="/docs"'));
+          expect(boundary).toContain("data-farm-server-tree");
+          expect(html).toContain('data-size="26"');
+
+          const executablePath = await resolveInstalledChromiumExecutable();
+          if (!executablePath) return;
+          const browser = await chromium.launch({ headless: true, executablePath });
+          try {
+            const page = await browser.newPage();
+            const problems: string[] = [];
+            page.on("pageerror", (error) => problems.push(String(error)));
+            page.on("console", (message) => {
+              if (message.type() === "error" || message.type() === "warning") {
+                problems.push(message.text());
+              }
+            });
+            await page.goto(response.url);
+            await expect
+              .poll(() =>
+                page.evaluate(() =>
+                  Object.keys(document.querySelector("#counter")!).some((key) =>
+                    key.startsWith("__reactProps"),
+                  ),
+                ),
+              )
+              .toBe(true);
+            await page.locator("#counter").click();
+            await expect.poll(() => page.locator("#counter").textContent()).toBe("count:1");
+            await page.evaluate(() => ((window as any).__sameDocument = true));
+            await page.locator('nav a[href="/docs/guide"]').click();
+            await expect.poll(() => page.locator("h1").textContent()).toBe("Guide");
+            expect(new URL(page.url()).pathname).toBe("/docs/guide");
+            // A client navigation: same document, and the layout's client state is kept.
+            expect(await page.evaluate(() => (window as any).__sameDocument)).toBe(true);
+            expect(await page.locator("#counter").textContent()).toBe("count:1");
+            expect(problems).toEqual([]);
+          } finally {
+            await browser.close();
+          }
+        },
+        "/docs",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("gives a fresh CSP nonce to Farm's scripts and opted-in app scripts only", async () => {
     const root = await createProductionFixture();
 

@@ -1,6 +1,7 @@
 import React from "react";
 import {
   renderToPipeableStream as reactRenderToPipeableStream,
+  renderToStaticMarkup as reactRenderToStaticMarkup,
   renderToString as reactRenderToString,
 } from "react-dom/server";
 import {
@@ -52,7 +53,10 @@ export const wrapClientGraph = (element: React.ReactNode) =>
 export const isolateServerPageGraph = (element: React.ReactNode) =>
   isolateFarmServerPageGraph(React, element);
 export const renderServerTreePage = (element: React.ReactNode) =>
-  renderFarmServerTreePage(React, element, { isolate: isolateServerPageGraph });
+  renderFarmServerTreePage(React, element, {
+    isolate: isolateServerPageGraph,
+    renderHtml: (node) => reactRenderToStaticMarkup(node),
+  });
 export const renderToString = reactRenderToString;
 export const renderToPipeableStream = reactRenderToPipeableStream;
 
