@@ -55,6 +55,7 @@ import { canonicalizeRequestPathname, canonicalizeRequestPathSegments } from "./
 import { stripFarmBasePath } from "./base-path";
 import { createFarmAPIMiddlewarePathnames, resolveFarmAPIServerBasePath } from "./api/server-path";
 import type { ResolvedFarmAPIConfig } from "./api/config";
+import { toPublicValidationIssues } from "./api/route-schema";
 import { resolveFarmLocalePath } from "./i18n/routing";
 import {
   assertSupportedMiddlewareMatcher,
@@ -2590,20 +2591,16 @@ function normalizeIntegrationValidationIssues(
   source: FarmIntegrationRouteInputSource,
   error: FarmIntegrationValidationErrorLike,
 ): FarmIntegrationValidationIssue[] {
+  // Like API routes, never echo validator messages, which can quote secrets.
   if (Array.isArray(error.issues) && error.issues.length > 0) {
-    return error.issues.map((issue) => ({
-      source,
-      path: normalizeIntegrationValidationPath(issue.path),
-      code: issue.code,
-      message: issue.message || "Invalid input",
-    }));
+    return toPublicValidationIssues(error).map((issue) => ({ source, ...issue }));
   }
 
   return [
     {
       source,
       path: [],
-      message: error.message || "Invalid input",
+      message: "Invalid input",
     },
   ];
 }
