@@ -341,6 +341,8 @@ Only literal `false` is the default denial signal. Returning `null`, `undefined`
 
 Endpoint middleware is local to one `createEndpoint` declaration and can use its validated input. Use `src/app/**/middleware.ts` for path-level behavior shared by many routes, such as request tracing, common headers, or an early rewrite before endpoint parsing.
 
+Put endpoint guards in `middleware`. `createEndpoint` throws if you pass a `use` option, which Farm never ran.
+
 > **Authorization boundary**
 >
 > Derive users, roles, tenants, and rate-limit identities from the trusted `Request` or server state. Middleware context is created only on the server and is never accepted from client input. Keep resource-specific permission checks close to the resource query even when shared authentication runs in middleware.
