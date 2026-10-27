@@ -38,6 +38,7 @@ export type RoutePath =
   | `/feature-lab/products/${string}`
   | "/feature-lab/static-metadata"
   | `/feature-lab/static/${string}`
+  | "/hmr-e2e"
   | "/markdown"
   | "/optional-catchall"
   | `/optional-catchall/${string}`
@@ -79,6 +80,7 @@ export type RoutePattern =
   | "/feature-lab/products/[id]"
   | "/feature-lab/static-metadata"
   | "/feature-lab/static/[slug]"
+  | "/hmr-e2e"
   | "/markdown"
   | "/optional-catchall/[[...slug]]"
   | "/ppr-demo"
@@ -119,6 +121,7 @@ export type RouteModulePattern =
   | "/feature-lab/products/[id]"
   | "/feature-lab/static-metadata"
   | "/feature-lab/static/[slug]"
+  | "/hmr-e2e"
   | "/markdown"
   | "/optional-catchall/[[...slug]]"
   | "/ppr-demo"
