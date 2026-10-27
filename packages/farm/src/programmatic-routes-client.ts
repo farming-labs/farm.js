@@ -65,7 +65,7 @@ export function transformProgrammaticRoutesForClient(
   if (calls.length === 0 && !bindings.definesRoutes) return null;
 
   const replacements = calls.flatMap((call) => {
-    const replacement = stripRouteOptions(options.code, call.kind, call.options);
+    const replacement = stripRouteOptions(options.code, options.id, call);
     return replacement ? [replacement] : [];
   });
 
@@ -132,6 +132,12 @@ function isNodeBuiltinId(id: string): boolean {
   const external = id.indexOf("__vite-browser-external:");
   const bare = external === 0 || external === 1 ? id.slice(external + 24) : id;
   return bare.startsWith("node:") || NODE_BUILTINS.has(bare);
+}
+
+interface RouteFactoryCall {
+  kind: RouteFactoryKind;
+  options: AstNode;
+  call: AstNode;
 }
 
 interface RouteFactoryBindings {
@@ -205,11 +211,8 @@ function findRouteFactoryBindings(ast: AstNode): RouteFactoryBindings | null {
   return { factories, namespaces, definesRoutes };
 }
 
-function findRouteFactoryCalls(
-  ast: AstNode,
-  bindings: RouteFactoryBindings,
-): Array<{ kind: RouteFactoryKind; options: AstNode }> {
-  const calls: Array<{ kind: RouteFactoryKind; options: AstNode }> = [];
+function findRouteFactoryCalls(ast: AstNode, bindings: RouteFactoryBindings): RouteFactoryCall[] {
+  const calls: RouteFactoryCall[] = [];
 
   walk(ast, (node) => {
     if (node.type !== "CallExpression" || !isAstNode(node.callee)) return;
@@ -229,7 +232,7 @@ function findRouteFactoryCalls(
     }
 
     const options = asNodes(node.arguments)[1];
-    if (kind && options?.type === "ObjectExpression") calls.push({ kind, options });
+    if (kind && options) calls.push({ kind, options, call: node });
   });
 
   return calls;
@@ -237,18 +240,30 @@ function findRouteFactoryCalls(
 
 function stripRouteOptions(
   code: string,
-  kind: RouteFactoryKind,
-  options: AstNode,
+  id: string,
+  { kind, options, call }: RouteFactoryCall,
 ): Replacement | null {
   const serverOnlyKeys = SERVER_ONLY_KEYS[kind];
   const kept: string[] = [];
   const removed: string[] = [];
 
+  // Only keys written out in an object literal can be removed. Options passed by
+  // reference, spread in, or under a computed key could still hold the server
+  // keys, which would ship their handlers and imports to the browser.
+  if (options.type !== "ObjectExpression") {
+    throw unstrippableRouteOptionsError(code, id, kind, call, "are not an object literal");
+  }
   for (const property of asNodes(options.properties)) {
-    const key =
-      property.type === "Property" && property.computed !== true
-        ? readPropertyName(property.key)
-        : undefined;
+    if (property.type !== "Property") {
+      throw unstrippableRouteOptionsError(code, id, kind, call, "spread another object");
+    }
+    if (property.computed === true && !isStringLiteral(property.key)) {
+      throw unstrippableRouteOptionsError(code, id, kind, call, "use a computed key");
+    }
+  }
+
+  for (const property of asNodes(options.properties)) {
+    const key = readPropertyName(property.key);
     if (key && serverOnlyKeys.has(kind === "api" ? key.toUpperCase() : key)) {
       removed.push(key);
     } else {
@@ -265,6 +280,28 @@ function stripRouteOptions(
     kept.push(`__farmServerHooks: ${JSON.stringify(propHooks)}`);
   }
   return { start: options.start, end: options.end, code: `{ ${kept.join(", ")} }` };
+}
+
+function unstrippableRouteOptionsError(
+  code: string,
+  id: string,
+  kind: RouteFactoryKind,
+  call: AstNode,
+  problem: string,
+): Error {
+  const source = code.slice(call.start, call.end).replace(/\s+/g, " ");
+  const snippet = source.length > 80 ? `${source.slice(0, 77)}...` : source;
+  const keys = [...SERVER_ONLY_KEYS[kind]].join(", ");
+  return new Error(
+    `[Farm.js] ${id}: in ${snippet}, the ${kind}() route options ${problem}, so Farm can't remove ` +
+      `the server-only keys (${keys}) before the browser loads this routes module. Write the ` +
+      `options inline as an object literal with each of those keys spelled out, for example ` +
+      `${kind}("/path", { ${kind === "api" ? "GET: handlers.GET" : "guard: adminGuard"} }).`,
+  );
+}
+
+function isStringLiteral(node: unknown): boolean {
+  return isAstNode(node) && node.type === "Literal" && typeof node.value === "string";
 }
 
 /**

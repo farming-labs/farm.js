@@ -140,6 +140,40 @@ export const Home = createRoute("/", { component: () => <main>{readPrivateFile()
       ),
     ).rejects.toThrow(/reaches the server-only module ".*fs.*" through the programmatic routes/);
   });
+  it.each([
+    ["imported handlers", `api("/api/users", handlers)`, "are not an object literal"],
+    ["spread handlers", `api("/api/users", { ...handlers })`, "spread another object"],
+    ["page options by reference", `page("/admin", adminOptions)`, "are not an object literal"],
+    ["a computed key", 'api("/api/users", { [method]: handlers.GET })', "use a computed key"],
+  ])("refuses route options the client build can't strip: %s", async (_name, call, problem) => {
+    await expect(
+      buildRoutes(
+        `
+import { defineRoutes } from "@farm.js/core";
+import { db } from "./db";
+const handlers = { GET: async () => Response.json(await db.find("1")) };
+const adminOptions = { guard: () => db.find("admin"), component: () => null };
+const method = "GET";
+export default defineRoutes(({ api, page }) => [${call}]);
+`,
+        { ssr: false },
+      ),
+    ).rejects.toThrow(
+      `in ${call}, the ${call.slice(0, call.indexOf("("))}() route options ${problem}`,
+    );
+  });
+
+  it("still strips string-literal computed keys", async () => {
+    const output = await buildRoutes(
+      `
+import { defineRoutes } from "@farm.js/core";
+import { db } from "./db";
+export default defineRoutes(({ api }) => [api("/api/users", { ["GET"]: () => db.find("1") })]);
+`,
+      { ssr: false },
+    );
+    expect(output).not.toContain("DB_PASSWORD_SECRET");
+  });
 });
 
 describe("client copies of programmatic pages", () => {
