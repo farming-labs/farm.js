@@ -324,25 +324,7 @@ async function planNextMigration(
     );
   }
 
-  const rootMiddleware = ["middleware.ts", "middleware.tsx", "middleware.js", "middleware.jsx"]
-    .map((file) => path.join(root, file))
-    .find((file) => existsSync(file));
-
-  if (rootMiddleware) {
-    const extension = path.extname(rootMiddleware);
-    const target = path.join(srcAppDir, `middleware${extension}`);
-    await addWriteFileOperation(plan, {
-      root,
-      source: rootMiddleware,
-      target,
-      content: await readFile(rootMiddleware, "utf8"),
-      description: `Copy root middleware to ${toPosix(path.join("src/app", `middleware${extension}`))}`,
-      force: options.force,
-    });
-    plan.manual.push(
-      "Review migrated middleware for next/server APIs; Farm middleware uses @farm.js/core/middleware.",
-    );
-  }
+  await planNextMiddleware(root, sourceAppDir, srcAppDir, plan, options);
 
   if (
     [
@@ -362,6 +344,184 @@ async function planNextMigration(
     const migratedPackage = createMigratedPackageJson(packageJson, "next");
     addPackageOperation(root, plan, migratedPackage);
   }
+}
+
+const MIDDLEWARE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx"];
+
+function findNextMiddlewareFiles(dir: string): string[] {
+  // Next 16 renamed middleware.ts to proxy.ts; both still load.
+  return ["proxy", "middleware"].flatMap((name) =>
+    MIDDLEWARE_EXTENSIONS.map((extension) => path.join(dir, `${name}${extension}`)).filter((file) =>
+      existsSync(file),
+    ),
+  );
+}
+
+/**
+ * Next loads middleware.ts / proxy.ts from the folder that holds the app directory (the
+ * project root, or src/). Farm only discovers middleware inside the app directory, so a
+ * file left at either place never runs and the pages it guarded are served unchecked.
+ */
+async function planNextMiddleware(
+  root: string,
+  sourceAppDir: string,
+  srcAppDir: string,
+  plan: FrameworkMigrationPlan,
+  options: { force?: boolean },
+) {
+  const nextDir = path.dirname(sourceAppDir);
+  const otherDir = nextDir === root ? path.join(root, "src") : root;
+  const [source, ...shadowed] = findNextMiddlewareFiles(nextDir);
+  const relative = (file: string) => toPosix(path.relative(root, file));
+
+  for (const file of shadowed) {
+    plan.warnings.push(
+      `${relative(file)} was not migrated; only ${relative(source)} moved to src/app/middleware.*. Merge any checks it adds there.`,
+    );
+  }
+  for (const file of findNextMiddlewareFiles(otherDir)) {
+    plan.warnings.push(
+      source
+        ? `${relative(file)} was not migrated: Next runs ${relative(source)} for this app, not this file.`
+        : `${relative(file)} was not migrated: Next only loads middleware next to ${relative(sourceAppDir)}/, so it did not run. Move it to src/app/middleware.* if it should guard the app.`,
+    );
+  }
+  if (!source) return;
+
+  const extension = path.extname(source);
+  const targetRelative = toPosix(path.join("src/app", `middleware${extension}`));
+  const isProxy = path.basename(source, extension) === "proxy";
+  const original = await readFile(source, "utf8");
+  const content = toFarmMiddlewareExports(original, isProxy);
+  if (!content) {
+    plan.warnings.push(
+      `${relative(source)} has no ${isProxy ? "proxy" : "middleware"} or default export Farm can call; add \`export function middleware(request)\` to ${targetRelative} or it will not run.`,
+    );
+  }
+  await addWriteFileOperation(plan, {
+    root,
+    source,
+    target: path.join(srcAppDir, `middleware${extension}`),
+    content: content ?? original,
+    description: `Copy ${relative(source)} to ${targetRelative}`,
+    force: options.force,
+  });
+  for (const matcher of findUnsupportedMatcherStrings(original)) {
+    plan.warnings.push(
+      `${targetRelative} uses matcher "${matcher}", which is regular-expression syntax Farm string matchers do not support. Farm will not run this middleware until the matcher is a RegExp, for example /^\\/(?!api|_next).*/.`,
+    );
+  }
+  plan.manual.push(
+    "Review migrated middleware for next/server APIs; Farm middleware uses @farm.js/core/middleware.",
+  );
+}
+
+/**
+ * Farm calls a named `middleware(request, context)` export the way Next does, but treats a
+ * default export as Farm `(ctx, next)` middleware. Expose the Next handler as `middleware`.
+ * Returns null when no handler export was found.
+ */
+function toFarmMiddlewareExports(content: string, isProxy: boolean): string | null {
+  const named = isProxy ? "proxy" : "middleware";
+  if (
+    /\bexport\s+(?:async\s+)?function\s+middleware\b|\bexport\s+(?:const|let|var)\s+middleware\b/.test(
+      content,
+    )
+  ) {
+    return content;
+  }
+  if (
+    isProxy &&
+    /\bexport\s+(?:async\s+)?function\s+proxy\b|\bexport\s+(?:const|let|var)\s+proxy\b/.test(
+      content,
+    )
+  ) {
+    return `${content.trimEnd()}\n\nexport { proxy as middleware };\n`;
+  }
+
+  // `export { handler as proxy }`, `export { proxy }`, `export { handler as default }`.
+  const exportList = new RegExp(`\\bexport\\s*\\{([^}]*\\b(?:${named}|default)\\b[^}]*)\\}`);
+  const list = content.match(exportList);
+  if (list) {
+    const specifiers = list[1]
+      .split(",")
+      .map((specifier) => {
+        const [local, exported = local] = specifier.trim().split(/\s+as\s+/);
+        if (exported !== named && exported !== "default") return specifier.trim();
+        return local === "middleware" ? local : `${local} as middleware`;
+      })
+      .filter(Boolean);
+    return content.replace(list[0], `export { ${specifiers.join(", ")} }`);
+  }
+
+  const defaultExport = content.match(
+    /\bexport\s+default\s+(?:(async\s+)?function\b\s*([A-Za-z_$][\w$]*)?|([A-Za-z_$][\w$]*)\s*;?\s*$)/m,
+  );
+  if (defaultExport) {
+    const [statement, isAsync = "", functionName, identifier] = defaultExport;
+    if (identifier) {
+      return content.replace(
+        statement,
+        identifier === "middleware"
+          ? "export { middleware };"
+          : `export { ${identifier} as middleware };`,
+      );
+    }
+    if (statement.includes("function")) {
+      if (!functionName || functionName === "middleware") {
+        return content.replace(statement, `export ${isAsync}function middleware`);
+      }
+      return `${content.replace(statement, `export ${isAsync}function ${functionName}`).trimEnd()}\n\nexport { ${functionName} as middleware };\n`;
+    }
+  }
+  // `export default clerkMiddleware(...)`, `export default auth((req) => ...)`.
+  if (/\bexport\s+default\s+/.test(content)) {
+    return content.replace(/\bexport\s+default\s+/, "export const middleware = ");
+  }
+  return null;
+}
+
+/** Matcher strings in a Next `config` export that Farm cannot compile (see core's matcher). */
+function findUnsupportedMatcherStrings(content: string): string[] {
+  const start = content.match(/\bmatcher\s*:\s*/);
+  if (!start) return [];
+  const strings: string[] = [];
+  let index = start.index! + start[0].length;
+  const inArray = content[index] === "[";
+  if (inArray) index++;
+  while (index < content.length) {
+    const char = content[index];
+    if (char === '"' || char === "'" || char === "`") {
+      let value = "";
+      for (index++; index < content.length && content[index] !== char; index++) {
+        value += content[index] === "\\" ? content[++index] : content[index];
+      }
+      strings.push(value);
+      if (!inArray) break;
+    } else if (!inArray || char === "]") {
+      break;
+    }
+    index++;
+  }
+  return strings.filter((matcher) => !isSupportedFarmMatcherString(matcher));
+}
+
+function isSupportedFarmMatcherString(pattern: string): boolean {
+  if (pattern === "*" || pattern === "/(.*)") return true;
+  const regexSyntax = /[()[\]|\\{}^$?]/;
+  const paramName = /^[\p{L}\p{N}_$-]+$/u;
+  const subtree = pattern.endsWith("(.*)");
+  const segments = (subtree ? pattern.slice(0, -4) : pattern).split("/").filter(Boolean);
+  return segments.every((segment) => {
+    if (subtree) {
+      return !regexSyntax.test(segment) && !segment.includes("*") && !segment.startsWith(":");
+    }
+    if (segment === "*" || segment === "**") return true;
+    if (segment.startsWith(":")) return paramName.test(segment.slice(1).replace(/[*+?]$/, ""));
+    const bracket = /^\[\[\.\.\.(.+)\]\]$|^\[\.\.\.(.+)\]$|^\[(.+)\]$/.exec(segment);
+    if (bracket) return paramName.test(bracket[1] ?? bracket[2] ?? bracket[3]);
+    return !regexSyntax.test(segment);
+  });
 }
 
 async function planTanStackMigration(
@@ -410,6 +570,8 @@ async function planTanStackMigration(
     });
   }
 
+  await warnTanStackPathlessGuards(root, routesDir, files, appDir, plan);
+
   plan.manual.push(
     "Review loaders, beforeLoad hooks, search params, and Route.use* calls; Farm page modules should move that logic into props, API routes, or server helpers.",
   );
@@ -417,6 +579,55 @@ async function planTanStackMigration(
   if (packageJson) {
     const migratedPackage = createMigratedPackageJson(packageJson, "tanstack");
     addPackageOperation(root, plan, migratedPackage);
+  }
+}
+
+function getTanStackRouteSegments(routesDir: string, file: string): string[] {
+  return toPosix(path.relative(routesDir, file))
+    .replace(/\.(tsx|ts|jsx|js)$/, "")
+    .split("/")
+    .flatMap((segment) => segment.split("."))
+    .filter(Boolean);
+}
+
+/**
+ * A pathless `_layout` route (or `__root`) whose `beforeLoad` gates its children is an
+ * access check. The migration flattens the `_` segment away and copies no layout code, so
+ * the children land in src/app with nothing in front of them.
+ */
+async function warnTanStackPathlessGuards(
+  root: string,
+  routesDir: string,
+  files: string[],
+  appDir: string,
+  plan: FrameworkMigrationPlan,
+) {
+  for (const file of files) {
+    const segments = getTanStackRouteSegments(routesDir, file);
+    if (segments[segments.length - 1] === "route") segments.pop();
+    const last = segments[segments.length - 1];
+    if (!last?.startsWith("_")) continue;
+    if (!/\bbeforeLoad\b/.test(await readFile(file, "utf8"))) continue;
+
+    const isRoot = segments.length === 1 && last === "__root";
+    const guarded = files
+      .filter((child) => {
+        if (child === file) return false;
+        const childSegments = getTanStackRouteSegments(routesDir, child);
+        return (
+          isRoot ||
+          (childSegments.length > segments.length &&
+            segments.every((segment, index) => childSegments[index] === segment))
+        );
+      })
+      .map((child) => getTanStackTargetPath(routesDir, child, appDir))
+      .filter((target): target is string => Boolean(target))
+      .map((target) => toPosix(path.relative(root, target)));
+    if (!guarded.length) continue;
+
+    plan.warnings.push(
+      `${toPosix(path.relative(root, file))} guards its child routes with beforeLoad, but Farm does not run it after the ${last} layout is flattened. The access check is not active for ${unique(guarded).join(", ")}; move it into a src/app middleware.ts (with a matcher for those paths) before deploying.`,
+    );
   }
 }
 
