@@ -3628,7 +3628,7 @@ async function createMatchedHydrationRoute(matched, pathname, searchParams, serv
   let pageElement = null;
 
   // Below a server layout the page is part of the layout's server tree.
-  const serverLayout = getApplicableLayouts(pathname).find(function(layout) {
+  const serverLayout = hydrateLayouts && getApplicableLayouts(pathname).find(function(layout) {
     return layout.serverLayout === true;
   });
   if (serverLayout) {
