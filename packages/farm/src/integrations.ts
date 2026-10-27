@@ -57,6 +57,7 @@ import { createFarmAPIMiddlewarePathnames, resolveFarmAPIServerBasePath } from "
 import type { ResolvedFarmAPIConfig } from "./api/config";
 import { resolveFarmLocalePath } from "./i18n/routing";
 import {
+  assertSupportedMiddlewareMatcher,
   compileMiddlewareConfig,
   matchesCompiledMiddlewareConfig,
   type CompiledMiddlewareConfig,
@@ -1230,6 +1231,16 @@ export function resolveIntegrationPlugins(
   for (const [key, integration] of Object.entries(integrations)) {
     if (!integration || !isFarmIntegration(integration)) {
       continue;
+    }
+
+    for (const entry of integration.middleware || []) {
+      if (!entry.matcher) continue;
+      const matchers = Array.isArray(entry.matcher) ? entry.matcher : [entry.matcher];
+      try {
+        matchers.forEach(assertSupportedMiddlewareMatcher);
+      } catch (error) {
+        throw new Error(`Integration "${key}": ${(error as Error).message}`);
+      }
     }
 
     const owner = createIntegrationPluginOwner(key, integration, "lifecycle");

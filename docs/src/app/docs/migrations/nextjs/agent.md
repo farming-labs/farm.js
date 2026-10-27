@@ -573,7 +573,7 @@ Docs: [/docs/middleware](/docs/middleware).
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------- |
 | `middleware.ts` (Next 15) or `proxy.ts` (Next 16) at the root | `src/app/middleware.ts` exporting `middleware(request, context)`                           | `different`   |
 | `export const config = { matcher }`                           | Same export; strings like `/dashboard/:path*`, `RegExp`, or functions                      | `different`   |
-| Negative-lookahead string matchers `/((?!api\|_next).*)`      | A `RegExp` matcher such as `/^\/(?!api\/).*/`, or scope the file to a folder               | `different`   |
+| Regex string matchers like `/((?!api\|_next).*)`              | A `RegExp` matcher such as `/^\/(?!api\/).*/`; Farm rejects the string at startup          | `different`   |
 | `NextResponse.next()`                                         | Return nothing                                                                             | `different`   |
 | `NextResponse.redirect(url)`                                  | `return Response.redirect(new URL("/login", request.url), 307)` or `context.redirect(url)` | `different`   |
 | `NextResponse.rewrite(url)`                                   | `context.rewrite("/path")`                                                                 | `different`   |

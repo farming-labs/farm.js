@@ -130,6 +130,52 @@ function parseColonParam(segment: string): { name: string; modifier?: string } {
   };
 }
 
+const MATCHER_PARAM_NAME = /^[\p{L}\p{N}_$-]+$/u;
+const MATCHER_REGEX_SYNTAX = /[()[\]|\\{}^$?]/;
+const MATCHER_BRACKET_PARAM = /^\[\[\.\.\.(.+)\]\]$|^\[\.\.\.(.+)\]$|^\[(.+)\]$/;
+
+function isSupportedMatcherSegment(segment: string): boolean {
+  if (segment === "*" || segment === "**") return true;
+  if (segment.startsWith(":")) return MATCHER_PARAM_NAME.test(parseColonParam(segment).name);
+  const bracket = MATCHER_BRACKET_PARAM.exec(segment);
+  if (bracket) return MATCHER_PARAM_NAME.test(bracket[1] ?? bracket[2] ?? bracket[3]);
+  return !MATCHER_REGEX_SYNTAX.test(segment);
+}
+
+// A `(.*)` subtree compares its prefix as literal text, so a param or wildcard
+// there would never match either.
+function isLiteralMatcherSegment(segment: string): boolean {
+  return !MATCHER_REGEX_SYNTAX.test(segment) && !segment.includes("*") && !segment.startsWith(":");
+}
+
+/**
+ * Reject a string matcher Farm cannot compile as written. Next-style strings such
+ * as `/((?!api|_next).*)` or `/(api|trpc)(.*)` would otherwise compile to a
+ * literal that meets no request, so a guard behind them silently never runs.
+ *
+ * @internal
+ */
+export function assertSupportedMiddlewareMatcher(pattern: string): void {
+  if (pattern === "*" || pattern === "/(.*)") return;
+  const subtree = pattern.endsWith("(.*)");
+  const path = subtree ? pattern.slice(0, -4) : pattern;
+  const segments = path.split("/").filter(Boolean);
+  if (segments.every(subtree ? isLiteralMatcherSegment : isSupportedMatcherSegment)) return;
+  throw new Error(
+    `Middleware matcher "${pattern}" is not a supported string pattern, so it would never ` +
+      "match a request and the middleware would not run. String matchers do not accept " +
+      "regular-expression syntax such as groups, alternation, character classes, or " +
+      "lookaheads. Pass a RegExp instead, for example `matcher: /^\\/(?!api|_next).*/`, " +
+      "or use the supported forms: /path/:param, /path/:param*, /path/[param], " +
+      "/path/[...param], /path/*, /path/**, or a trailing (.*) such as /path(.*).",
+  );
+}
+
+function compileConfigPattern(pattern: string | RegExp, compile: typeof compilePattern) {
+  if (typeof pattern === "string") assertSupportedMiddlewareMatcher(pattern);
+  return compile(pattern);
+}
+
 function compilePathPattern(pattern: string, trailingSlash = false): CompiledPathPattern {
   const params: string[] = [];
   const segments = pattern.split("/").filter(Boolean);
@@ -228,10 +274,12 @@ export function compileMiddlewareConfig(config: MiddlewareConfig): CompiledMiddl
   const compiled = {
     matcher: config.matcher
       ? toMatcherList(config.matcher).map((matcher) =>
-          typeof matcher === "function" ? matcher : compileMatcherPattern(matcher),
+          typeof matcher === "function"
+            ? matcher
+            : compileConfigPattern(matcher, compileMatcherPattern),
         )
       : undefined,
-    exclude: config.exclude?.map(compilePattern),
+    exclude: config.exclude?.map((pattern) => compileConfigPattern(pattern, compilePattern)),
   };
   compiledConfigCache.set(config, {
     compiled,

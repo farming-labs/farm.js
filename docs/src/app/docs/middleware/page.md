@@ -231,6 +231,18 @@ Matchers can be strings, regular expressions, or functions. String matchers supp
 | `/admin*`              | `/admin`, `/admin-panel`, but not `/admin/users`                 |
 | `/auth(.*)`            | `/auth` and nested auth paths                                    |
 
+String matchers are not regular expressions. A string that uses other
+regular-expression syntax, such as the Next.js-style
+`/((?!api|_next/static|_next/image|favicon.ico).*)` or `/(api|trpc)(.*)`, fails
+when Farm loads the middleware (`farm dev`, `farm build`, and server startup)
+instead of silently matching nothing. Pass a `RegExp` for those cases:
+
+```ts
+export const config = {
+  matcher: [/^\/(?!api|_next\/static|_next\/image|favicon\.ico).*/, "/api/:path*"],
+};
+```
+
 Matchers are compared against the same pathname the router resolves the request
 to: each segment is decoded once, so `/%64ashboard` meets a `/dashboard` matcher
 exactly like `/dashboard` does. This is what makes a matcher safe to gate access

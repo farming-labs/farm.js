@@ -84,6 +84,7 @@ import {
 } from "./mcp-config";
 import { resolveFarmPerformanceConfig, type ResolvedFarmPerformanceConfig } from "./preload";
 import { validateConfigRouteSource } from "./plugins/route-pattern";
+import { compileMiddlewareConfig } from "./middleware/matcher";
 import {
   farmCspBlocksFrameworkInlineScripts,
   getFarmSecurityHeader,
@@ -976,6 +977,15 @@ function validateRedirectConfigs(redirects: RedirectConfig[], field: string): Re
   return redirects;
 }
 
+// Compile once while resolving the config so an unsupported matcher string
+// fails `farm dev` and `farm build` instead of leaving the gate unmatched.
+function validateMiddlewareConfig(middleware: FarmMiddlewareConfig | undefined) {
+  for (const entry of Array.isArray(middleware) ? middleware : middleware ? [middleware] : []) {
+    compileMiddlewareConfig({ matcher: entry.matcher, exclude: entry.exclude });
+  }
+  return middleware;
+}
+
 function validateConfigRouteSources<T extends { source: string }>(routes: T[], field: string): T[] {
   for (const [index, route] of routes.entries()) {
     validateConfigRouteSource(route.source, `${field}[${index}].source`);
@@ -1154,7 +1164,7 @@ export async function resolveConfig(
     publicDir: userConfig.publicDir || "public",
     i18n: resolveFarmI18nConfig(userConfig.i18n, { root, mode, basePath }),
     openapi,
-    middleware: userConfig.middleware || {},
+    middleware: validateMiddlewareConfig(userConfig.middleware) || {},
     notFound: userConfig.notFound || {},
     context: userConfig.context || (() => undefined),
     server: resolveFarmServerConfig(userConfig.server),
