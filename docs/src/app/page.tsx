@@ -90,7 +90,16 @@ export const metadata = {
     description: homepageDescription,
     url: "https://farmjs.dev/",
     siteName: "Farm.js",
-    type: "website",
+    // Discord plays og:video only when og:type is video or video.*.
+    type: "video.other",
+    videos: [
+      {
+        url: "/videos/farmjs-link-preview.mp4",
+        type: "video/mp4",
+        width: 2400,
+        height: 1260,
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
