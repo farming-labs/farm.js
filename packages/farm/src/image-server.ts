@@ -6,6 +6,7 @@ import type {
 } from "./image-config";
 import { matchesFarmIfNoneMatch } from "./server-http";
 import { matchesImagePathPattern } from "./image-pattern";
+import { FARM_ANONYMOUS_CLIENT_ADDRESS } from "./anonymous-client-address";
 
 export interface FarmImageTransformInput {
   source: Uint8Array;
@@ -533,8 +534,8 @@ async function fetchImageSource(
 
   for (let redirectCount = 0; ; redirectCount += 1) {
     throwIfAborted(signal);
-    const sourceFetcher =
-      currentUrl.origin === trustedLocalOrigin ? fetcher : (fetchRemote ?? fetcher);
+    const isTrustedLocal = currentUrl.origin === trustedLocalOrigin;
+    const sourceFetcher = isTrustedLocal ? fetcher : (fetchRemote ?? fetcher);
     const response = await sourceFetcher(currentUrl, {
       method: "GET",
       redirect: "manual",
@@ -542,6 +543,9 @@ async function fetchImageSource(
       headers: {
         accept: "image/avif,image/webp,image/*,*/*;q=0.8",
         "user-agent": "Farm.js Image Optimizer",
+        // This server fetching from itself arrives from a loopback address.
+        // Mark it so the app sees an anonymous visitor, not a trusted local one.
+        ...(isTrustedLocal ? { [FARM_IMAGE_SOURCE_HEADER]: getFarmImageSourceToken() } : {}),
       },
     });
 
@@ -580,6 +584,30 @@ async function fetchImageSource(
       validateRemoteUrl,
     );
   }
+}
+
+const FARM_IMAGE_SOURCE_HEADER = "x-farm-image-source";
+const FARM_IMAGE_SOURCE_TOKEN = Symbol.for("farm.image.sourceToken");
+
+// Per process, shared by every copy of this module. Knowing it only lets a
+// caller be treated as anonymous, never as trusted.
+function getFarmImageSourceToken(): string {
+  const state = globalThis as typeof globalThis & { [FARM_IMAGE_SOURCE_TOKEN]?: string };
+  return (state[FARM_IMAGE_SOURCE_TOKEN] ??= globalThis.crypto.randomUUID());
+}
+
+/**
+ * @internal The adapter context for an incoming request. The optimizer's own fetch of a local
+ * source acts for any visitor, and its cached result is served to all of them, so it reports
+ * an anonymous client address instead of the loopback address it connects from.
+ */
+export function _withFarmImageSourceClientAddress<T extends { clientAddress?: string }>(
+  request: Request,
+  context: T | undefined,
+): T | undefined {
+  const token = (globalThis as { [FARM_IMAGE_SOURCE_TOKEN]?: string })[FARM_IMAGE_SOURCE_TOKEN];
+  if (!token || request.headers.get(FARM_IMAGE_SOURCE_HEADER) !== token) return context;
+  return { ...context, clientAddress: FARM_ANONYMOUS_CLIENT_ADDRESS } as T;
 }
 
 function resolveTrustedLocalOrigin(

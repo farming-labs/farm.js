@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { resolveFarmImageConfig } from "../image-config";
 import { createNodeImageFetcher } from "../image-sharp";
 import {
+  _withFarmImageSourceClientAddress,
   createCloudflareImageTransformer,
   createFarmImageHandler,
   isPrivateImageAddress,
@@ -165,6 +166,47 @@ describe("Farm image optimizer", () => {
     );
     expect(fetchRemote).not.toHaveBeenCalled();
     expect(validateRemoteUrl).not.toHaveBeenCalled();
+  });
+
+  it("marks only its own local source fetch as an anonymous visitor", async () => {
+    const fetch = vi.fn(
+      async (_url: URL, _init?: RequestInit) =>
+        new Response(PNG, { headers: { "content-type": "image/png" } }),
+    );
+    const fetchRemote = vi.fn(
+      async (_url: URL, _init?: RequestInit) =>
+        new Response(PNG, { headers: { "content-type": "image/png" } }),
+    );
+    const handler = createFarmImageHandler(
+      resolveFarmImageConfig({ remotePatterns: [{ hostname: "cdn.example.test" }] }),
+      {
+        fetch: fetch as typeof globalThis.fetch,
+        fetchRemote: fetchRemote as typeof globalThis.fetch,
+        validateRemoteUrl: vi.fn(),
+        transform: passthroughTransformer(),
+      },
+    );
+    const context = { trustedLocalOrigin: "http://127.0.0.1:4173" };
+    await handler(new Request(optimizerUrl("/assets/product.png")), context);
+    await handler(new Request(optimizerUrl("https://cdn.example.test/product.png")), context);
+
+    const localHeaders = new Headers(fetch.mock.calls[0]![1]!.headers);
+    const remoteHeaders = new Headers(fetchRemote.mock.calls[0]![1]!.headers);
+    expect(localHeaders.get("x-farm-image-source")).toBeTruthy();
+    // The marker never leaves the server.
+    expect(remoteHeaders.has("x-farm-image-source")).toBe(false);
+
+    const loopback = { clientAddress: "127.0.0.1" };
+    const sourceRequest = new Request("http://127.0.0.1:4173/assets/product.png", {
+      headers: localHeaders,
+    });
+    expect(_withFarmImageSourceClientAddress(sourceRequest, loopback)).toEqual({
+      clientAddress: "192.0.2.1",
+    });
+    const forged = new Request("http://127.0.0.1:4173/assets/product.png", {
+      headers: { "x-farm-image-source": "guess" },
+    });
+    expect(_withFarmImageSourceClientAddress(forged, loopback)).toBe(loopback);
   });
 
   it("handles HEAD without returning image bytes", async () => {
