@@ -455,6 +455,14 @@ function appendOpenGraph(
     appendMetaProperty(tags, "og:image:type", image.type);
   }
 
+  for (const video of normalizeMetadataVideos(openGraph.videos, metadataBase)) {
+    appendMetaProperty(tags, "og:video", video.url);
+    appendMetaProperty(tags, "og:video:secure_url", video.secureUrl);
+    appendMetaProperty(tags, "og:video:type", video.type);
+    appendMetaProperty(tags, "og:video:width", video.width);
+    appendMetaProperty(tags, "og:video:height", video.height);
+  }
+
   if (openGraph.type === "article") {
     appendMetaProperty(tags, "article:published_time", normalizeDate(openGraph.publishedTime));
     appendMetaProperty(tags, "article:modified_time", normalizeDate(openGraph.modifiedTime));
@@ -612,6 +620,37 @@ function normalizeMetadataImages(
         width: normalizeNumber(item.width),
         height: normalizeNumber(item.height),
         alt: typeof item.alt === "string" ? item.alt : undefined,
+        type: typeof item.type === "string" ? item.type : undefined,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+}
+
+function normalizeMetadataVideos(
+  value: unknown,
+  metadataBase?: string,
+): Array<{
+  url: string;
+  secureUrl?: string;
+  width?: number;
+  height?: number;
+  type?: string;
+}> {
+  return normalizeArray(value)
+    .map((item) => {
+      if (typeof item === "string") {
+        return { url: resolveMetadataUrl(item, metadataBase) || item };
+      }
+
+      if (!isRecord(item)) return null;
+      const url = resolveMetadataUrl(item.url, metadataBase);
+      if (!url) return null;
+
+      return {
+        url,
+        secureUrl: resolveMetadataUrl(item.secureUrl, metadataBase) || undefined,
+        width: normalizeNumber(item.width),
+        height: normalizeNumber(item.height),
         type: typeof item.type === "string" ? item.type : undefined,
       };
     })

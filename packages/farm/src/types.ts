@@ -671,6 +671,27 @@ export interface Metadata {
           type?: string;
         }>;
     image?: string;
+    /**
+     * `og:video` entries. Point `url` at the media file itself (an MP4, for
+     * example) rather than a player page; relative URLs resolve against
+     * `metadataBase` like `images`.
+     */
+    videos?:
+      | string
+      | {
+          url: string;
+          secureUrl?: string;
+          width?: number;
+          height?: number;
+          type?: string;
+        }
+      | Array<{
+          url: string;
+          secureUrl?: string;
+          width?: number;
+          height?: number;
+          type?: string;
+        }>;
     type?: string;
     locale?: string;
     /** `article:published_time`, rendered when `type` is `"article"`. */

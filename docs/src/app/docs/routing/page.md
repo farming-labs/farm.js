@@ -970,6 +970,25 @@ export async function generateMetadata({ params }: MetadataProps<"/blog/[slug]">
 array and render one `article:author` or `article:tag` per item. `section` renders
 `article:section`. Other `openGraph.type` values ignore these fields.
 
+### Video previews
+
+`openGraph.videos` adds a short loop to the link preview in apps that play one, such as Messages and Discord. Other apps keep showing `openGraph.images`, so set both:
+
+**src/app/page.tsx**
+
+```tsx
+export const metadata = {
+  openGraph: {
+    type: "video.other",
+    videos: [{ url: "/og/home.mp4", type: "video/mp4", width: 2400, height: 1260 }],
+  },
+};
+```
+
+Each entry renders `og:video`, plus `og:video:secure_url`, `og:video:type`, `og:video:width`, and `og:video:height` when set. `url` and `secureUrl` resolve against `metadataBase` like image URLs, and a plain string is shorthand for `{ url }`. Point `url` at the media file itself, such as an MP4 in `public/`, not at a player page. Discord plays the video only when `openGraph.type` is `"video"` or starts with `"video."`.
+
+Open Graph merges one level, so `videos` set in a layout applies to every page under it. Set it on the page that owns the video, or set `videos: []` in a page that should not inherit it.
+
 ### Favicons
 
 Place favicon files in `public/`, then declare them through the root layout metadata. Files in `public/` are served from the application root, so `public/favicon.svg` is available at `/favicon.svg`.
