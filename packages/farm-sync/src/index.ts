@@ -146,6 +146,8 @@ export function sync(options: SyncPluginOptions) {
     // the endpoint on the runtime hook so it is handled by both Nitro and the
     // development server instead of relying solely on the legacy Node hook.
     runtime: {
+      // before only answers the sync endpoint; other responses pass through untouched.
+      cache: "public",
       async before({ request }) {
         return handleSyncRequest(request, undefined, {
           path,

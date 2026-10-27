@@ -405,6 +405,8 @@ export function farmInfraAnalyticsPlugin(
       return state;
     },
     runtime: {
+      // Recording a request decides nothing about who may read the response.
+      cache: "public",
       start(context) {
         const { exporter } = context.state;
         context.state.unsubscribe = onFarmEvent(

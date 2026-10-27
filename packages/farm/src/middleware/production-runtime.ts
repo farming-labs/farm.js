@@ -72,6 +72,11 @@ export interface ProductionMiddlewareResult {
   context: Map<string, any>;
   headers: Headers;
   handled: boolean;
+  /**
+   * Middleware without `cache: "public"` ran and let the request through. It may have been a
+   * guard (an IP allowlist, an API key header), so the response must not reach a shared cache.
+   */
+  guarded: boolean;
   /** Middleware called notFound(): answer with the app's not-found page. */
   notFound?: true;
 }
@@ -550,8 +555,8 @@ function toMiddlewareConfig(
     handlers?: MiddlewareFunction[];
   },
 ): MiddlewareConfig {
-  const { matcher, exclude, runtime } = entry;
-  return { matcher, exclude, runtime };
+  const { matcher, exclude, runtime, cache } = entry;
+  return { matcher, exclude, runtime, cache };
 }
 
 function normalizeConfigMiddleware(config?: FarmMiddlewareConfig | null): {
@@ -642,6 +647,7 @@ function emptyResult(request: Request): ProductionMiddlewareResult {
     context: new Map(),
     headers: new Headers(),
     handled: false,
+    guarded: false,
   };
 }
 
@@ -711,6 +717,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     // path which have not run yet get a pass of their own. Each entry runs at
     // most once, so repeated rewrites end after at most one pass per entry.
     const ran = new Set<ProductionMiddlewareEntry>();
+    let guarded = false;
     function* applicableMiddleware() {
       for (
         let pathname = initialPathname, requestPathname = initialRequestPathname, pass = 0;
@@ -745,6 +752,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
         continue;
       }
       ran.add(entry);
+      if (entry.config?.cache !== "public") guarded = true;
 
       if (parentData) {
         contextState = createWebMiddlewareContext(
@@ -793,6 +801,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
           };
         }
 
@@ -810,6 +819,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
           };
         }
 
@@ -840,6 +850,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
           };
         }
         if (isFarmNotFoundError(error)) {
@@ -851,6 +862,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
             notFound: true,
           };
         }
@@ -877,6 +889,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       context: new Map(ctx.locals),
       headers: mapToHeaders(contextState.headers),
       handled: false,
+      guarded,
     };
   };
 }
@@ -908,5 +921,33 @@ export function applyProductionMiddlewareHeaders(
     for (const cookie of setCookies) {
       headers.append("Set-Cookie", cookie);
     }
+  });
+}
+
+const PRIVATE_CACHE_DIRECTIVE = /(?:^|,)\s*(?:private|no-store)\s*(?:[,=]|$)/i;
+// Directives a CDN reads in place of Cache-Control (RFC 9213 and the platform names).
+const CDN_CACHE_CONTROL_HEADERS = [
+  "cdn-cache-control",
+  "vercel-cdn-cache-control",
+  "netlify-cdn-cache-control",
+  "cloudflare-cdn-cache-control",
+];
+
+/**
+ * Keep a response that middleware let through out of shared caches. A CDN keys its copy by URL
+ * and serves it without running the guard again, so a page an IP allowlist or API key header
+ * let one visitor read would reach everyone. A Cache-Control that a shared cache may store
+ * becomes `private, no-store`; a private one is left as it is.
+ *
+ * @internal
+ */
+export function _withFarmGuardedResponseCache(response: Response): Response {
+  const shareable = !PRIVATE_CACHE_DIRECTIVE.test(response.headers.get("cache-control") ?? "");
+  if (!shareable && !CDN_CACHE_CONTROL_HEADERS.some((name) => response.headers.has(name))) {
+    return response;
+  }
+  return _withFarmResponseHeaders(response, (headers) => {
+    if (shareable) headers.set("Cache-Control", "private, no-store");
+    for (const name of CDN_CACHE_CONTROL_HEADERS) headers.delete(name);
   });
 }

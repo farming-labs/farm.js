@@ -347,6 +347,50 @@ export default function BillingPage() {
 }
 ```
 
+## Responses behind middleware
+
+A CDN keys its copy of a page by URL and serves it without running your middleware again. When
+middleware lets a visitor through on something other than a cookie or an `Authorization` header,
+such as an IP allowlist, an API key header, or a VPN header, a shared copy of that response would
+reach everyone. Farm cannot tell such a guard from harmless middleware, so in production every
+response that matched middleware is sent with `Cache-Control: private, no-store`: config
+middleware, `src/app/**/middleware.ts` files (a root `middleware.ts` matches every path),
+integration guards such as `protectedRoutes`, and plugins with a `runtime.before` hook. This
+covers `ssg`, `revalidate`, and PPR pages, docs pages and the docs API, Markdown sources and
+mirrors, and API responses. A shared directive (`public`, `s-maxage`, `CDN-Cache-Control`,
+`Vercel-CDN-Cache-Control`, `Netlify-CDN-Cache-Control`) and the public Cache-Control a Nitro
+`swr` route rule adds are removed; a policy that is already private, such as
+`private, max-age=60`, is kept. Responses the middleware returns itself, such as a `403` or a
+redirect, are sent as written.
+
+Middleware that never decides who may read a response, such as logging or response headers, can
+opt back into shared caching with `cache: "public"`:
+
+```ts
+// farm.config.ts
+export default defineConfig({
+  middleware: [
+    {
+      matcher: "/blog/:path*",
+      cache: "public",
+      handler(ctx) {
+        ctx.headers.set("x-area", "blog");
+      },
+    },
+  ],
+});
+```
+
+A middleware file declares it in its exported `config`, and a plugin on its `runtime` hooks:
+
+```ts
+// src/app/middleware.ts
+export const config = { cache: "public" };
+```
+
+A response stays shareable only when every middleware that matched it opts in. Shared caches serve
+it without running that middleware, so never set `cache: "public"` on a guard.
+
 ## Observability events
 
 Cache and PPR emit events such as `cache.hit`, `cache.miss`, `cache.stale`, `cache.revalidatePath`, `cache.revalidateTag`, `ppr.shell.hit`, `ppr.shell.cached`, and `ppr.suspense.holeDetected`. Subscribe in `farm.config.ts` when debugging refresh behavior.

@@ -449,6 +449,40 @@ The production middleware runtime is easiest to verify with a tiny app fixture t
 
 Farm's own test suite keeps this as a reusable helper at `packages/farm/src/__tests__/fixtures/middleware-production-fixture.ts`.
 
+## Caching
+
+A CDN serves its copy of a page without running middleware, so Farm treats every middleware that
+matched a request as a possible guard: in production its response is sent with
+`Cache-Control: private, no-store` instead of the page's shared policy (`s-maxage`, a CDN
+directive, or a Nitro `swr` rule's header). This applies to config middleware, middleware files
+(including a root `src/app/middleware.ts`), and integration guards such as `protectedRoutes`.
+Responses the middleware returns itself keep their own headers.
+
+Set `cache: "public"` on middleware that never decides who may read a response, such as logging or
+headers, to keep the route's shared caching:
+
+```ts
+// farm.config.ts
+middleware: [
+  {
+    matcher: "/:path*",
+    cache: "public",
+    handler(ctx) {
+      ctx.headers.set("x-request-id", crypto.randomUUID());
+    },
+  },
+];
+```
+
+```ts
+// src/app/middleware.ts
+export const config = { cache: "public" };
+```
+
+A response is shareable again only when every middleware that matched it declares
+`cache: "public"`. A shared cache answers later visitors without running it, so never set it on
+an IP allowlist, API key check, or other guard. See [Responses behind middleware](/docs/cache-ppr#responses-behind-middleware).
+
 ## Common uses
 
 | Use case        | Pattern                                                        |
@@ -463,6 +497,7 @@ Farm's own test suite keeps this as a reusable helper at `packages/farm/src/__te
 - `farm.config.ts` middleware and `src/app/**/middleware.ts` files both run in production builds.
 - Request-first named exports and default Farm handlers use the same matcher, cascading, response, and production runtime.
 - Responses that depend on middleware data or server context are marked private and bypass PPR shell caching.
+- A response any middleware let through is sent with `Cache-Control: private, no-store`, so a CDN never serves a guarded page to another visitor. Middleware that decides nothing about access can declare `cache: "public"` to keep shared caching; see [Caching](#caching).
 - Keep secrets server-only inside middleware.
 - Put secrets and non-serializable dependencies in server context; expose only safe page data through `ctx.data` or `context.data`.
 - Middleware is useful for early redirects, but API handlers and server functions must still enforce their own authorization.

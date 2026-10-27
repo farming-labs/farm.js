@@ -388,6 +388,13 @@ export interface FarmPluginRuntimeHooks<
 > {
   /** Exact request endpoints owned by this plugin. */
   endpoints?: readonly FarmPluginRuntimeEndpoint<TState, TIntegrationInstance, TIntegrationBound>[];
+  /**
+   * Whether a response `before` lets through may be stored by a shared cache (a CDN). `before`
+   * runs for every request and may be a guard, so by default (`"private"`) Farm sends those
+   * responses with `Cache-Control: private, no-store`. Set `"public"` when `before` never
+   * decides who may read a response, as for logging or analytics.
+   */
+  cache?: "private" | "public";
   start?(
     event: FarmPluginRuntimeEventFor<
       FarmPluginRuntimeStartEvent<TState, TIntegrationInstance>,

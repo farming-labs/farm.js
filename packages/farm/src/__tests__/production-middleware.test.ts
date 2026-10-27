@@ -270,9 +270,8 @@ describe("production middleware runtime", () => {
       );
       expect(staticImageResponse.status).toBe(200);
       expect(staticImageResponse.headers.get("content-type")).toBe("image/png");
-      expect(staticImageResponse.headers.get("cache-control")).toBe(
-        "public, max-age=31536000, immutable",
-      );
+      // dashboard/middleware.ts let this request through, so no shared cache keeps the image.
+      expect(staticImageResponse.headers.get("cache-control")).toBe("private, no-store");
       expect(staticImageResponse.headers.get("x-content-type-options")).toBe("nosniff");
       const staticImageEtag = staticImageResponse.headers.get("etag");
       expect(staticImageEtag).toMatch(/^"[a-f0-9]{16}"$/);
@@ -541,9 +540,8 @@ describe("production middleware runtime", () => {
       );
       expect(dynamicImageResponse.status).toBe(200);
       expect(dynamicImageResponse.headers.get("content-type")).toBe("image/png");
-      expect(dynamicImageResponse.headers.get("cache-control")).toBe(
-        "public, s-maxage=120, stale-while-revalidate=300",
-      );
+      // users/[id]/middleware.ts matched, so the image's s-maxage gives way to a private policy.
+      expect(dynamicImageResponse.headers.get("cache-control")).toBe("private, no-store");
       const dynamicImageBytes = Buffer.from(await dynamicImageResponse.arrayBuffer());
       expect(dynamicImageBytes.subarray(0, 8)).toEqual(
         Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),

@@ -85,7 +85,9 @@ export {
 export {
   applyProductionMiddlewareHeaders,
   createProductionMiddlewareRunner,
+  _withFarmGuardedResponseCache,
 } from "../middleware/production-runtime";
+export { _farmPluginsKeepResponsesPrivate } from "../plugin-runtime-endpoint";
 export { _runWithMiddlewareContext, _runWithMiddlewareData } from "../middleware/server";
 export {
   getFarmRedirectError,

@@ -6020,6 +6020,8 @@ function renderFarmRouteServerTree(element) { return element; }`;
   createFarmProductionLifecycle,
   createFarmNodeRequestAbortSignal,
   createProductionMiddlewareRunner,
+  _withFarmGuardedResponseCache,
+  _farmPluginsKeepResponsesPrivate,
   getTheme as getFarmTheme,
   emitFarmEvent,
   getFarmDataCache,
@@ -6492,6 +6494,10 @@ const farmPluginRuntime = ${
   : null`
       : "null"
   };
+// A plugin's runtime.before runs for every request and may be a guard, like middleware.
+const farmPluginRuntimeKeepsResponsesPrivate = farmPluginRuntime
+  ? _farmPluginsKeepResponsesPrivate(configuredPlugins)
+  : false;
 const hasFarmPluginHTMLTransforms = configuredPlugins.some(
   (plugin) => plugin.render?.html || plugin.afterRender || plugin.transformHTML,
 );
@@ -8527,6 +8533,10 @@ async function handleFarmRequest(request, adapterContext) {
   return response;
 }
 
+// Middleware that let a request through may have been a guard: an IP allowlist, an API key
+// header, a VPN header. A CDN keys its copy by URL and never runs the guard on a hit, so
+// whatever such a request answers stays out of shared caches. Only middleware declaring
+// cache: "public" (and plugins declaring runtime.cache: "public") leave the policy alone.
 async function handleFarmRequestInContext(
   request,
   farmLocaleResolution,
@@ -8534,6 +8544,31 @@ async function handleFarmRequestInContext(
   requestStartTime = Date.now(),
   adapterContext,
   requestUrl = new URL(request.url),
+) {
+  const farmCacheGuard = { guarded: farmPluginRuntimeKeepsResponsesPrivate };
+  const response = await resolveFarmRequestInContext(
+    farmCacheGuard,
+    request,
+    farmLocaleResolution,
+    configuredRewriteApplied,
+    requestStartTime,
+    adapterContext,
+    requestUrl,
+  );
+  if (!farmCacheGuard.guarded) return response;
+  // Tells the Nitro entry, which keeps this policy over a swr rule's public one.
+  adapterContext?.onGuardedResponse?.();
+  return _withFarmGuardedResponseCache(response);
+}
+
+async function resolveFarmRequestInContext(
+  farmCacheGuard,
+  request,
+  farmLocaleResolution,
+  configuredRewriteApplied,
+  requestStartTime,
+  adapterContext,
+  requestUrl,
 ) {
   let url = requestUrl;
   let pathname = url.pathname;
@@ -8622,6 +8657,7 @@ async function handleFarmRequestInContext(
   if (middlewareResult.response) {
     return middlewareResult.response;
   }
+  if (middlewareResult.guarded) farmCacheGuard.guarded = true;
   request = middlewareResult.request;${
     hasServerRuntimeIntegrations
       ? `
@@ -8643,6 +8679,13 @@ async function handleFarmRequestInContext(
   }`
       : ""
   }
+${
+  hasServerRuntimeIntegrations
+    ? `
+  // An integration guard (protectedRoutes) that let the request through.
+  if (farmIntegrationRanMiddleware.size > 0) farmCacheGuard.guarded = true;`
+    : ""
+}
   const middlewareData = middlewareResult.data;
   const middlewareContext = middlewareResult.context;
   const middlewareHeaders = ${
@@ -8665,6 +8708,13 @@ async function handleFarmRequestInContext(
     if (middlewareResult.notFound) return renderFarmNotFoundResponse();
   `
       : `
+${
+  hasServerRuntimeIntegrations
+    ? `
+  // An integration guard (protectedRoutes) that let the request through.
+  if (farmIntegrationRanMiddleware.size > 0) farmCacheGuard.guarded = true;`
+    : ""
+}
   const middlewareData = undefined;
   const middlewareContext = undefined;
   const middlewareHeaders = ${
@@ -10391,6 +10441,15 @@ function getPhysicalPrerenderBypassReason(options: {
   return undefined;
 }
 
+/** Whether a route rule makes Nitro cache responses itself (`swr`, or a raw `cache` rule). */
+function hasFarmNitroCacheRouteRule(routeRules: ResolvedFarmConfig["routeRules"]): boolean {
+  return Object.values(routeRules || {}).some((rule) => {
+    const swr = rule?.swr;
+    const cache = (rule as { cache?: unknown } | undefined)?.cache;
+    return (swr !== undefined && swr !== false) || (cache !== undefined && cache !== false);
+  });
+}
+
 async function buildNitroUniversal(
   config: ResolvedFarmConfig,
   routeManager: RouteManager,
@@ -10563,6 +10622,7 @@ async function buildNitroUniversal(
   // Response and no extra import.
   const nodeAdapterModule =
     preset === "node-server" ? resolveNitroRuntimeDependency(root, "srvx/node") : null;
+  const hasNitroCacheRouteRules = hasFarmNitroCacheRouteRule(config.routeRules);
 
   const nitroEntryCode = `
 // Farm.js Nitro Entry
@@ -10588,7 +10648,33 @@ function registerFarmCloseHook() {
     farmProductionLifecycle.close('production-server-closed')
   )
 }
-
+${
+  hasNitroCacheRouteRules
+    ? `
+// A swr route rule caches through Nitro, which writes its own public Cache-Control on
+// the event after Farm answered, and H3 lets that replace the response's. A response
+// middleware let through keeps Farm's private policy, so no CDN serves it to others.
+const FARM_PRIVATE_CACHE_DIRECTIVE = /(?:^|,)\\s*(?:private|no-store)\\s*(?:[,=]|$)/i
+const farmPrivateCacheControlKey = Symbol.for('farm.privateCacheControl')
+let farmPrivateCacheHookRegistered = false
+function keepFarmPrivateCacheControl(event, cacheControl) {
+  if (!farmPrivateCacheHookRegistered) {
+    farmPrivateCacheHookRegistered = true
+    useNitroHooks().hook('response', (response, responseEvent) => {
+      const value = responseEvent.context?.[farmPrivateCacheControlKey]
+      if (!value || response.headers.get('cache-control') === value) return
+      try {
+        response.headers.set('cache-control', value)
+      } catch {
+        // Immutable headers belong to a response Nitro passed through untouched.
+      }
+    })
+  }
+  if (event.context) event.context[farmPrivateCacheControlKey] = cacheControl
+}
+`
+    : ""
+}
 function mergeVaryHeaders(target, source) {
   const values = new Set(
     [target.get('Vary'), source]
@@ -10682,11 +10768,18 @@ export default async function farmNitroEventHandler(event) {
   const request = !srvxRequest && node?.req && node?.res
     ? new Request(webRequest, { signal: createFarmNodeRequestAbortSignal(node.req, node.res) })
     : webRequest
-  const response = await handler.fetch(request, {
+${hasNitroCacheRouteRules ? "  let farmGuardedResponse = false\n" : ""}  const response = await handler.fetch(request, {
     waitUntil: (promise) => event.waitUntil(promise),
     onResponseFinished: createResponseFinishedHook(event),
     trustedLocalOrigin: resolveTrustedLocalOrigin(event, request),
-    clientAddress: resolveFarmClientAddress(event),
+    clientAddress: resolveFarmClientAddress(event),${
+      hasNitroCacheRouteRules
+        ? `
+    onGuardedResponse: () => {
+      farmGuardedResponse = true
+    },`
+        : ""
+    }
   })
 
   // Nitro records asset compression negotiation on the event response. Merge
@@ -10697,6 +10790,18 @@ export default async function farmNitroEventHandler(event) {
   if (farmVary) {
     const nitroHeaders = event.res.headers
     if (nitroHeaders.has('Vary')) mergeVaryHeaders(nitroHeaders, farmVary)
+  }${
+    hasNitroCacheRouteRules
+      ? `
+  const farmCacheControl = response.headers.get('cache-control')
+  if (
+    farmGuardedResponse &&
+    farmCacheControl &&
+    FARM_PRIVATE_CACHE_DIRECTIVE.test(farmCacheControl)
+  ) {
+    keepFarmPrivateCacheControl(event, farmCacheControl)
+  }`
+      : ""
   }
   return ${nodeAdapterModule ? "toFarmNodeResponse(request, response)" : "response"}
 }${
@@ -10794,6 +10899,8 @@ function toFarmNodeResponse(request, response) {
     ...(farmNodeServerEntryPath ? { entry: farmNodeServerEntryPath } : {}),
     ...(farmBunServerEntryPath ? { entry: farmBunServerEntryPath } : {}),
     ...(farmNetlifyEntryPath ? { entry: farmNetlifyEntryPath } : {}),
+    // The response hook that keeps a private Cache-Control under a swr rule (nitro-entry).
+    ...(hasNitroCacheRouteRules ? { features: { runtimeHooks: true } } : {}),
     rootDir: root,
     // Farm registers every handler, task, and plugin explicitly. Scanning the
     // project root would bundle an app's own `middleware/`, `api/`, `routes/`,
