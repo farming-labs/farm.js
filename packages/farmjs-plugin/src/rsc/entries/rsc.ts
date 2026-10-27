@@ -243,6 +243,10 @@ function applyActionResponseHeaders(headers, request) {
     headers.set('cache-control', 'no-store');
     headers.set('x-content-type-options', 'nosniff');
   }
+  // A page renders per request (cookies, headers, client address), so a shared
+  // cache must not keep its HTML or Flight payload unless middleware chose a
+  // policy. Core's server defaults pages the same way.
+  if (!headers.has('cache-control')) headers.set('cache-control', 'private, no-store');
 }
 
 // Auto-discover all route modules. Every glob remains a literal so Vite can analyze it.
