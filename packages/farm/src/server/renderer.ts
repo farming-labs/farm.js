@@ -160,6 +160,9 @@ import { pathToFileURL } from "node:url";
 import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
 import type { FarmIslandStrategy } from "../island";
 import { createDefaultErrorDiagnostics } from "./error-diagnostics";
+import { handleFarmFormActionRequest } from "../form-actions";
+import { resolveServerActionsConfig } from "../server-action-security";
+import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import {
   createFarmCspNonceRewriter,
   createFarmCspNonce,
@@ -1448,6 +1451,32 @@ export class ServerRenderer {
         params,
       });
 
+      // Islands mode: a form or client component posting a server action to this page. Loading
+      // the page and its layouts registers the `"use server"` modules they import, as the
+      // production server does at startup.
+      let actionRequest: Request | undefined;
+      if (
+        req.method === "POST" &&
+        resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) === "islands"
+      ) {
+        await Promise.all([
+          this.routeManager.loadRouteModule(route.modulePath),
+          ...layouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath)),
+        ]);
+        actionRequest = createWebRequestFromFarmRequest(req, {
+          trustProxy: this.config.server?.trustProxy,
+        });
+        const actionResponse = await handleFarmFormActionRequest(
+          actionRequest,
+          resolveServerActionsConfig(this.config.serverActions),
+        );
+        if (actionResponse) {
+          await sendWebResponse(res, actionResponse);
+          completeRender(actionResponse.status, route.pattern);
+          return;
+        }
+      }
+
       const loadingBoundaryEntry = this.routeManager.getMatchingLoading(pathname, route);
       errorBoundaryEntry = this.routeManager.getMatchingError(pathname, route);
 
@@ -1456,9 +1485,12 @@ export class ServerRenderer {
       pluginExposedContext = getRequestContextSnapshot(req as object, {
         exposedOnly: true,
       });
-      const currentRequest = createWebRequestFromFarmRequest(req, {
-        trustProxy: this.config.server?.trustProxy,
-      });
+      // The action check above already read the body stream into a Request.
+      const currentRequest =
+        actionRequest ??
+        createWebRequestFromFarmRequest(req, {
+          trustProxy: this.config.server?.trustProxy,
+        });
       const routeContext = await this.resolveRouteContext({
         request: currentRequest,
         rawRequest: req,

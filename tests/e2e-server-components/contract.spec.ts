@@ -5,6 +5,7 @@ import { expect, test, type Page } from "@playwright/test";
 // The server components contract. Every test runs against the same app built with
 // { mode: "rsc" } and with { mode: "islands" } (playwright.server-components.config.ts).
 const mode = process.env.FARM_SERVER_COMPONENTS_MODE === "islands" ? "islands" : "rsc";
+const dev = process.env.FARM_SERVER_COMPONENTS_SERVER === "dev";
 const output = path.resolve("examples/server-components", `.farm/.output-${mode}`);
 
 /** Console errors and uncaught exceptions while the page runs. */
@@ -122,6 +123,7 @@ test("generateMetadata sets the head", async ({ request }) => {
 });
 
 test("static pages are prerendered at build time", async ({ request }) => {
+  test.skip(dev, "build output only");
   expect(existsSync(path.join(output, "public/static/a/index.html"))).toBe(true);
   expect(await (await request.get("/static/b")).text()).toContain("Static b");
 });
