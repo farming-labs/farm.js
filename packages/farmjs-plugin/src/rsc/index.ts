@@ -133,6 +133,9 @@ export type { NitroPluginOptions } from "./vite-plugin-nitro.js";
 
 const PAGE_FILE = /^page\.(tsx|jsx|ts|js)$/;
 
+/** Packages the generated RSC entries import that belong to this plugin, not to the app. */
+const PLUGIN_OWNED_ENTRY_IMPORTS = ["rsc-html-stream/server", "rsc-html-stream/client"];
+
 type FarmImageConfig = NonNullable<Parameters<typeof resolveFarmImageConfig>[0]>;
 
 // Extended config type for Farm.js RSC
@@ -1239,6 +1242,20 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           resolve: {
             dedupe: ["react", "react-dom", "react-server-dom-webpack"],
             alias: [
+              // The generated entries import the plugin's own dependencies; resolve them from here
+              // so an app (strict pnpm layout) does not have to install them itself.
+              ...PLUGIN_OWNED_ENTRY_IMPORTS.flatMap((specifier) => {
+                try {
+                  return [
+                    {
+                      find: new RegExp(`^${specifier.replace(/[/.]/g, "\\$&")}$`),
+                      replacement: require_.resolve(specifier),
+                    },
+                  ];
+                } catch {
+                  return [];
+                }
+              }),
               ...Object.entries(layerAliases).map(([find, replacement]) => ({
                 find,
                 replacement,
