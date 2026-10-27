@@ -335,7 +335,7 @@ through is sent with `Cache-Control: private, no-store` instead of a shared poli
 as logging or analytics, declares `runtime: { cache: "public", before() {} }` to keep the app's
 shared caching.
 
-Runtime hooks use Web APIs, so the same plugin works in development and universal production builds. The event includes `kind`, route metadata, the request `AbortSignal`, and `waitUntil()` for background work supported by the host.
+Runtime hooks don't run for files in `public/`, which are served as static assets first; serve a protected file from a route instead. Runtime hooks use Web APIs, so the same plugin works in development and universal production builds. The event includes `kind`, route metadata, the request `AbortSignal`, and `waitUntil()` for background work supported by the host.
 
 An endpoint is intentionally isolated from `runtime.context` and `runtime.before`. Perform any
 endpoint-specific authentication inside its handler. Global `runtime.after` and `runtime.error`
