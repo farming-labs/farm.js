@@ -24,7 +24,7 @@ const entry = {
   router: "src/router.ts",
   routes: "src/routes.ts",
   request: "src/request.ts",
-  plugin: "src/plugin.ts",
+  plugin: "src/plugin-entry.ts",
   integrations: "src/integrations.ts",
   schema: "src/schema.ts",
   storage: "src/storage/index.ts",

@@ -6313,6 +6313,95 @@ export default function OpenGraphImage() {
     180_000,
   );
 
+  it.each([{ docs: false }, { docs: true }])(
+    "keeps the dev pipeline out of a runtime plugin app's server output (%j)",
+    async ({ docs }) => {
+      const root = await createProductionFixture();
+
+      try {
+        // The app's own config imports the plugin API, as a real app does. The
+        // server bundles it, so whatever shares a chunk with definePlugin and
+        // PluginManager ships too.
+        await fs.writeFile(
+          path.join(root, "farm.config.ts"),
+          `import { definePlugin } from "@farm.js/core/plugin";
+
+export default {
+  plugins: [
+    definePlugin({
+      name: "test:stamp",
+      runtime: {
+        after({ response }) {
+          const headers = new Headers(response.headers);
+          headers.set("x-test-plugin", "ran");
+          return new Response(response.body, { status: response.status, headers });
+        },
+      },
+    }),
+  ],
+};
+`,
+        );
+        if (docs) {
+          await fs.mkdir(path.join(root, "src", "app", "docs"), { recursive: true });
+          await fs.writeFile(
+            path.join(root, "src", "app", "docs", "page.mdx"),
+            `# Plugin app docs\n\nServer-rendered documentation content.`,
+          );
+        }
+        const userConfig = await loadConfig(root, undefined, "production");
+        const config = await resolveConfig(
+          {
+            ...userConfig,
+            root,
+            srcDir: "src",
+            images: { provider: "none" },
+            ...(docs ? { docs: { entry: "/docs", search: false } } : {}),
+            generateBuildId: () => `plugin-server-output-${docs}-test`,
+          },
+          "production",
+        );
+
+        await build(config, { root, preset: "node-server" });
+
+        const serverDir = path.join(root, ".farm", ".output", "server");
+        let serverCode = "";
+        for (const file of await fs.readdir(serverDir, { recursive: true })) {
+          if (/\.m?js$/.test(file))
+            serverCode += await fs.readFile(path.join(serverDir, file), "utf8");
+        }
+        // The Vite plugin and dev pipeline never run in a built server.
+        expect(serverCode).not.toContain("farm:server-only-entries");
+        expect(serverCode).not.toContain("@tailwindcss/vite");
+        // The MDX compiler ships only with the docs runtime that uses it.
+        if (docs) expect(serverCode).toContain("mdxjsEsm");
+        else expect(serverCode).not.toContain("mdxjsEsm");
+
+        await runProductionRequest(serverDir, async (response) => {
+          expect(response.status).toBe(200);
+          expect(response.headers.get("x-test-plugin")).toBe("ran");
+          expect(await response.text()).toContain("prebuilt SSR output");
+
+          // Markdown mirrors are on by default and still work.
+          const markdown = await fetch(new URL("/index.md", response.url));
+          expect(markdown.status).toBe(200);
+          expect(markdown.headers.get("content-type")).toContain("text/markdown");
+          expect(await markdown.text()).toContain("prebuilt SSR output");
+
+          if (docs) {
+            const page = await fetch(new URL("/docs", response.url));
+            expect(page.status).toBe(200);
+            expect(page.headers.get("x-test-plugin")).toBe("ran");
+            expect(await page.text()).toContain("Plugin app docs");
+          }
+        });
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+    180_000,
+  );
+
   it("serves a @vercel/og ImageResponse from an API route on a built node-server", async () => {
     const root = await createProductionFixture();
 

@@ -1968,4 +1968,3 @@ export namespace definePlugin {
     };
   }
 }
-export { farmPlugin } from "./vite";
