@@ -20,7 +20,7 @@ import {
   renderToReadableStream,
   renderToString,
 } from "../server";
-import { UNIQUE_ID_ISLAND_HTML } from "./unique-id-island.fixture";
+import { SERVER_LAYOUT_ISLAND_HTML, UNIQUE_ID_ISLAND_HTML } from "./unique-id-island.fixture";
 
 defineRendererDescriptorConformance({
   name: "solid",
@@ -181,5 +181,146 @@ describe("Solid renderer", () => {
     );
 
     expect(html).toBe(UNIQUE_ID_ISLAND_HTML);
+  });
+
+  describe("server-only segments", () => {
+    const template = (strings: string[]) => strings as unknown as TemplateStringsArray;
+
+    // A layout Farm never ships to the browser, reading request data the way a
+    // server-only layout reads middleware context.
+    function AccountLayout(props: { children?: unknown }) {
+      const [account] = createResource(async () => ({
+        email: "a@example.com",
+        token: "LAYOUT-SECRET",
+      }));
+      return createComponent(Suspense, {
+        fallback: "loading",
+        get children() {
+          return ssr(
+            template(["<section", "><p>", "</p>", "</section>"]),
+            ssrHydrationKey(),
+            escape(account()?.email),
+            escape(props.children),
+          );
+        },
+      });
+    }
+
+    function CounterPage() {
+      const [data] = createResource(async () => ({ label: "PAGE-VALUE" }));
+      return createComponent(Suspense, {
+        fallback: "loading",
+        get children() {
+          return ssr(
+            template(["<button", ' type="button">', "</button>"]),
+            ssrHydrationKey(),
+            escape(data()?.label),
+          );
+        },
+      });
+    }
+
+    // The tree core builds: layout boundary, layout, then the page boundary.
+    function document(page: { client: boolean; layoutClient?: boolean }) {
+      return createElement(
+        "div",
+        { "data-farm-layout-boundary": "true", "data-farm-layout-pattern": "/" },
+        createElement(AccountLayout, {
+          children: createElement(
+            "div",
+            {
+              id: "__farm_page__",
+              "data-farm-segment": "page",
+              "data-farm-client": page.client ? "true" : "false",
+              ...(page.layoutClient ? { "data-farm-layout-client": "true" } : {}),
+              "data-farm-island": "page",
+            },
+            createElement(CounterPage),
+          ),
+        }),
+      );
+    }
+
+    const renderers = {
+      string: (element: unknown) => renderToString(element),
+      stream: (element: unknown) => new Response(renderToReadableStream(element)).text(),
+    };
+
+    it.each(Object.entries(renderers))(
+      "keeps a server-only layout's resource out of the %s HTML when only the page hydrates",
+      async (_name, render) => {
+        const html = await render(document({ client: true }));
+
+        expect(html).toContain("<p>a@example.com</p>");
+        expect(html).not.toContain("LAYOUT-SECRET");
+        // The hydrating page still serializes its resource and names its root.
+        expect(html).toContain('{label:"PAGE-VALUE"}');
+        expect(html).toMatch(/<div[^>]* id="__farm_page__"[^>]* data-farm-solid-render-id="\w+">/);
+        expect(html).toMatch(/<button data-hk="\w+" type="button">PAGE-VALUE<\/button>/);
+      },
+    );
+
+    it.each(Object.entries(renderers))(
+      "serializes nothing into the %s HTML when neither the page nor a layout hydrates",
+      async (_name, render) => {
+        const html = await render(document({ client: false }));
+
+        expect(html).toContain("<p>a@example.com</p>");
+        expect(html).toMatch(/type="button">PAGE-VALUE<\/button>/);
+        expect(html).not.toContain("LAYOUT-SECRET");
+        expect(html).not.toContain('PAGE-VALUE"');
+      },
+    );
+
+    it("keeps serializing a hydrating layout chain, which the browser renders", async () => {
+      const html = await renderToString(document({ client: false, layoutClient: true }));
+
+      expect(html).toContain('token:"LAYOUT-SECRET"');
+      // Its server-only page stays server HTML inside the hydrated chain.
+      expect(html).not.toContain('{label:"PAGE-VALUE"}');
+    });
+
+    it("renders a hydrating island inside a server-only layout", async () => {
+      function Layout(props: { children?: unknown }) {
+        const [account] = createResource(() => ({
+          email: "a@example.com",
+          token: "LAYOUT-SECRET",
+        }));
+        return ssr(
+          template(["<section", "><p>", "</p>", "</section>"]),
+          ssrHydrationKey(),
+          escape(account()?.email),
+          escape(props.children),
+        );
+      }
+      // Compiled form of the island in client-island.test.tsx (see above).
+      function UniqueIdIsland() {
+        const id = createUniqueId();
+        const [count] = createSignal(0);
+        return ssr(
+          template(["<button", ' type="button"', ">count: <!--$-->", "<!--/--></button>"]),
+          ssrHydrationKey(),
+          ssrAttribute("id", escape(id, true), false),
+          escape(count()),
+        );
+      }
+
+      const html = await renderToString(
+        createElement(Layout, {
+          children: createElement(
+            "div",
+            {
+              id: "__farm_page__",
+              "data-farm-segment": "page",
+              "data-farm-client": "true",
+              "data-farm-island": "page",
+            },
+            createElement(UniqueIdIsland),
+          ),
+        }),
+      );
+
+      expect(html).toBe(SERVER_LAYOUT_ISLAND_HTML);
+    });
   });
 });
