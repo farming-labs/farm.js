@@ -35,6 +35,14 @@ describe("middleware matcher strings", () => {
     "/docs/[id](.*)",
     "/admin$",
     "/search?q",
+    "/admin/.*",
+    "/admin.*",
+    "/admin/.+",
+    "/admin/.*(.*)",
+    "/user-:id",
+    "/api/v:version/admin",
+    "/dash:path*",
+    "/user-:id(.*)",
   ])("rejects %s, which compiled to a pattern other than the one written", (pattern) => {
     expect(() => compileMiddlewareConfig({ matcher: pattern })).toThrow(rejection);
   });
@@ -56,6 +64,9 @@ describe("middleware matcher strings", () => {
     ["*", "/anything", true],
     ["/favicon.ico", "/favicon.ico", true],
     ["/c++", "/c++", true],
+    ["/*.json", "/data.json", true],
+    ["/admin*", "/admin", true],
+    ["/:locale/admin/:path*", "/en/admin/x", true],
   ])("keeps %s matching %s as before", (pattern, pathname, matched) => {
     expect(match(pattern, pathname).matched).toBe(matched);
   });

@@ -408,7 +408,7 @@ async function planNextMiddleware(
   });
   for (const matcher of findUnsupportedMatcherStrings(original)) {
     plan.warnings.push(
-      `${targetRelative} uses matcher "${matcher}", which is regular-expression syntax Farm string matchers do not support. Farm will not run this middleware until the matcher is a RegExp, for example /^\\/(?!api|_next).*/.`,
+      `${targetRelative} uses matcher "${matcher}", which uses regular-expression syntax or an inline param that Farm string matchers do not support. Farm will not run this middleware until the matcher is a supported string or a RegExp, for example /^\\/(?!api|_next).*/.`,
     );
   }
   plan.manual.push(
@@ -508,19 +508,20 @@ function findUnsupportedMatcherStrings(content: string): string[] {
 
 function isSupportedFarmMatcherString(pattern: string): boolean {
   if (pattern === "*" || pattern === "/(.*)") return true;
-  const regexSyntax = /[()[\]|\\{}^$?]/;
+  // Mirrors MATCHER_UNSUPPORTED_LITERAL in core's middleware/matcher.ts.
+  const unsupportedLiteral = /[()[\]|\\{}^$?:]|\.[*+]/;
   const paramName = /^[\p{L}\p{N}_$-]+$/u;
   const subtree = pattern.endsWith("(.*)");
   const segments = (subtree ? pattern.slice(0, -4) : pattern).split("/").filter(Boolean);
   return segments.every((segment) => {
     if (subtree) {
-      return !regexSyntax.test(segment) && !segment.includes("*") && !segment.startsWith(":");
+      return !unsupportedLiteral.test(segment) && !segment.includes("*");
     }
     if (segment === "*" || segment === "**") return true;
     if (segment.startsWith(":")) return paramName.test(segment.slice(1).replace(/[*+?]$/, ""));
     const bracket = /^\[\[\.\.\.(.+)\]\]$|^\[\.\.\.(.+)\]$|^\[(.+)\]$/.exec(segment);
     if (bracket) return paramName.test(bracket[1] ?? bracket[2] ?? bracket[3]);
-    return !regexSyntax.test(segment);
+    return !unsupportedLiteral.test(segment);
   });
 }
 

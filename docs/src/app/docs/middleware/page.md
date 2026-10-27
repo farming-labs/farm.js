@@ -233,7 +233,8 @@ Matchers can be strings, regular expressions, or functions. String matchers supp
 
 String matchers are not regular expressions. A string that uses other
 regular-expression syntax, such as the Next.js-style
-`/((?!api|_next/static|_next/image|favicon.ico).*)` or `/(api|trpc)(.*)`, fails
+`/((?!api|_next/static|_next/image|favicon.ico).*)` or `/(api|trpc)(.*)`, a
+`.*` such as `/admin/.*`, or a param after literal text such as `/user-:id`, fails
 when Farm loads the middleware (`farm dev`, `farm build`, and server startup)
 instead of silently matching nothing. Pass a `RegExp` for those cases:
 
