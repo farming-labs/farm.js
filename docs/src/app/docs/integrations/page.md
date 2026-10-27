@@ -347,7 +347,7 @@ export const localDemo = defineIntegration({
 });
 ```
 
-Farm validates the body and query before route middleware, `before` hooks, or the handler run. Invalid input returns a `400` response with validation issues that name the `path` and `code` but not the validator's message, except refinement messages you write (`code: "custom"`).
+Farm validates the body and query before route middleware, `before` hooks, or the handler run. Invalid input returns a `400` response with validation issues that name the `path` and `code` but not the validator's message, except refinement messages you write (`code: "custom"`) and type mismatches (`code: "invalid_type"`).
 
 ## Caller shape
 

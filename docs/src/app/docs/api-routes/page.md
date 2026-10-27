@@ -154,7 +154,7 @@ export const GET = createEndpoint(
 );
 ```
 
-Farm parses and validates `body`, `query`, and `headers` before middleware or handler code runs. Header schema keys use the lower-case names exposed by the Fetch `Headers` API. Invalid input returns a `400` response with structured validation issues. Each issue in `details` has a `path` and `code`. Its `message` is a generic `"Invalid value"`, because a validator's own message can quote what it expected, such as a literal header token; only refinement messages you write (`code: "custom"`) are returned as is.
+Farm parses and validates `body`, `query`, and `headers` before middleware or handler code runs. Header schema keys use the lower-case names exposed by the Fetch `Headers` API. Invalid input returns a `400` response with structured validation issues. Each issue in `details` has a `path` and `code`. Its `message` is a generic `"Invalid value"`, because a validator's own message can quote what it expected, such as a literal header token; only refinement messages you write (`code: "custom"`) and type mismatches (`code: "invalid_type"`, which name types, not values) are returned as is.
 
 Generated callers use the schema's **input** type for body and query values; middleware and
 handlers receive its parsed **output** type. For example, a field declared as
