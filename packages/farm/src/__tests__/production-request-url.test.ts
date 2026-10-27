@@ -43,6 +43,7 @@ function runtime(i18n = false) {
     "isFarmLocalAPIPathname",
     "farmPluginRuntimeKeepsResponsesPrivate",
     "_withFarmGuardedResponseCache",
+    "farmPluginRuntime",
     `${handlers}\nreturn handleFarmRequest;`,
   )(
     new Proxy(URL, {
@@ -69,6 +70,7 @@ function runtime(i18n = false) {
     () => false,
     false,
     (response: Response) => response,
+    null,
   ) as (request: Request, adapterContext?: unknown) => Promise<Response>;
   return { request, parses };
 }

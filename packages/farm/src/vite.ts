@@ -3321,6 +3321,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
             // Run beforeRequest hooks
             if (pm && hasBeforeRequestHook) {
+              const urlBeforeRequestHooks = req.url;
               const currentPathname = new URL(
                 req.url || "/",
                 `http://${req.headers.host || "localhost:3000"}`,
@@ -3332,6 +3333,37 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 req,
                 res,
               );
+
+              // A config rewrite changed req.url after plugin guards ran on the
+              // requested URL. Re-run runtime.before on the destination, like
+              // the production entry does when a rewrite re-enters it.
+              if (
+                runtimeSession &&
+                req.url !== urlBeforeRequestHooks &&
+                req.url?.startsWith("/") &&
+                !res.writableEnded
+              ) {
+                const destinationUrl = new URL(req.url, fullUrl);
+                const destinationMatch = routeManager.matchRoute(destinationUrl.pathname);
+                const guarded = await pm.runRuntimeBeforeForRewrite(
+                  runtimeSession.request,
+                  createRequestFromNodeRequest(req, destinationUrl),
+                  {
+                    kind: "page",
+                    route: {
+                      pathname: destinationUrl.pathname,
+                      pattern: destinationMatch?.route?.pattern || null,
+                      params: destinationMatch?.params || {},
+                    },
+                  },
+                );
+                if (guarded instanceof Response) {
+                  await sendWebResponse(res, guarded);
+                } else {
+                  pm.copyRequestContext(guarded, req);
+                  applyWebRequestToNodeRequest(guarded, req);
+                }
+              }
             }
 
             if (res.writableEnded || responseInterceptor?.isEnded()) {

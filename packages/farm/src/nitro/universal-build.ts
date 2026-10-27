@@ -8601,9 +8601,25 @@ async function resolveFarmRequestInContext(
         farmLocaleResolution?.locale,
       );
       if (rewriteDestination) {
-        const rewrittenRequest = createRewrittenRequest(request, rewriteDestination);
+        let rewrittenRequest = createRewrittenRequest(request, rewriteDestination);
         if (new URL(rewrittenRequest.url).origin !== url.origin) {
           return globalThis.fetch(rewrittenRequest);
+        }
+        if (farmPluginRuntime) {
+          // Plugin guards ran on the requested URL. Re-run only runtime.before
+          // so they also see the destination, like middleware does on re-entry.
+          const guarded = await farmPluginRuntime.runRuntimeBeforeForRewrite(
+            request,
+            rewrittenRequest,
+            {
+              ...getFarmPluginRequestOptions(rewrittenRequest),
+              waitUntil: typeof adapterContext?.waitUntil === "function"
+                ? adapterContext.waitUntil.bind(adapterContext)
+                : undefined,
+            },
+          );
+          if (guarded instanceof Response) return guarded;
+          rewrittenRequest = guarded;
         }
         return _runWithCurrentRequest(rewrittenRequest, () =>
           handleFarmRequestInContext(
