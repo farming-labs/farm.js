@@ -21,10 +21,10 @@
   #flicker { position: absolute; left: 41px; right: 41px; bottom: 0; height: 300px;
     -webkit-mask-image: radial-gradient(ellipse 220% 78% at 50% -20%, transparent 55%, rgb(0 0 0 / 0.04) 62%, rgb(0 0 0 / 0.16) 70%, rgb(0 0 0 / 0.42) 80%, rgb(0 0 0 / 0.76) 90%, #000 100%); }
 
-  .hero { position: absolute; left: 40px; right: 40px; top: 64px; bottom: 0; display: flex; flex-direction: column; align-items: center; padding-top: 74px; }
-  .eyebrow { font-family: "Geist Mono", monospace; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: rgb(255 255 255 / 0.42); }
-  .eyebrow .i { color: rgb(255 255 255 / 0.26); } .eyebrow .s { color: rgb(255 255 255 / 0.18); margin: 0 8px; }
-  .title { position: relative; margin-top: 22px; padding: 6px 22px 22px; }
+  .hero { position: absolute; left: 40px; right: 40px; top: 64px; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .mark svg { display: block; width: 50px; height: 47px; overflow: visible; }
+  .mark path { transform-box: fill-box; }
+  .title { position: relative; margin-top: 4px; padding: 6px 22px 22px; }
   h1 { margin: 0; text-align: center; font-weight: 500; font-size: 82px; line-height: 1.07; letter-spacing: -0.055em; }
   h1 > span { display: block; }
   .sel { position: relative; display: inline-block; white-space: nowrap; text-align: left; clip-path: inset(-0.3em 0 -0.3em 0); }
@@ -60,7 +60,7 @@
   <span class="tick tl"></span><span class="tick tr"></span><span class="tick bl"></span><span class="tick br"></span>
   <div id="fx" style="position:absolute;inset:0;pointer-events:none;z-index:3"><span class="box" id="box"><i class="h tl"></i><i class="h tr"></i><i class="h bl"></i><i class="h br"></i></span><svg id="wires" width="1200" height="630" style="position:absolute;left:0;top:0;overflow:visible"><path id="wp" fill="none" stroke="rgb(255 255 255 / 0.28)" stroke-width="1.2"/><circle id="we" r="2.5" fill="#6a6a6a"/></svg><span class="ring" id="r1"></span><span class="ring" id="r2"></span><svg id="cursor" viewBox="0 0 24 24" width="26" height="26" style="position:absolute;left:0;top:0;overflow:visible"><path d="M4 2.5 19.5 10l-6.6 1.9L9.7 18.6z" fill="#fff" stroke="#000" stroke-width="1.2" stroke-linejoin="round"/></svg></div>
   <main class="hero">
-    <div class="eyebrow"><span class="i">00</span><span class="s">/</span>Build / Ship / Scale</div>
+    <div class="mark" id="mark">{{logo}}</div>
     <div class="title" id="title">
       <h1><span>the framework for</span><span>the web and <span class="sel" id="sel"><span id="word">agents</span></span></span></h1>
             <span class="tag" id="tag">/agents</span>
@@ -75,6 +75,23 @@ const hash=(a,b)=>{const h=Math.sin(a*127.1+b*311.7)*43758.5453;return h-Math.fl
 const $=s=>document.getElementById(s);
 const DUR=10, FPS=30, GLYPHS="#%&/_<>*+=!?01", WORD="agents";
 // The hero's SelectionWire steps (ms), reordered so the loop starts and ends on the lit pose.
+// The mark's rows retract with the reset, then build back one at a time while the command types.
+const MARK={retract:[0.8,1.15],build:1.5,row:0.36,square:0.24,bar:0.42};
+const farmEase=v=>{const x=clamp(v);return 1-Math.pow(1-x,4);};
+function mark(t){
+  const parts=[...document.querySelectorAll('#mark path')];
+  parts.forEach((p,j)=>{
+    const row=j>>1, isBar=j%2===1;
+    let k;
+    if(t<MARK.retract[0]||t>=MARK.build+3*MARK.row+MARK.bar+.1) k=1;
+    else if(t<MARK.retract[1]) k=1-farmEase(win(t,MARK.retract[0]+(2-row)*.08,MARK.retract[0]+(2-row)*.08+.2));
+    else { const a=MARK.build+row*MARK.row+(isBar?.1:0); k=farmEase(win(t,a,a+(isBar?MARK.bar:MARK.square))); }
+    if(k>=1){ p.style.transform=''; p.style.opacity=''; return; }
+    p.style.opacity=k.toFixed(3);
+    p.style.transformOrigin=isBar?'0 50%':'50% 50%';
+    p.style.transform=isBar?`scaleX(${(0.02+0.98*k).toFixed(4)})`:`scale(${(0.9+0.1*k).toFixed(4)})`;
+  });
+}
 const S={unwire:[0.8,1.16],deselect:[1.16,1.78],glide:[3.9,4.42],press:[4.42,4.54],drag:[4.54,5.26],release:[5.26,5.4],scramble:[5.4,5.88],
   toPort:[5.88,6.34],grab:[6.34,6.46],wire:[6.46,7.32],connect:[7.32,7.5],toTarget:[7.5,7.88],click:[7.88,8.04],leave:[8.12,8.58]};
 // The install command erases with the reset, then types back in before the selection plays.
@@ -115,7 +132,7 @@ const TAG={off:['transparent','transparent','rgb(255 255 255 / .5)','solid'],tar
 function setTag(state,op){ const e=$('tag'),[bc,bg,c,st]=TAG[state]; e.style.borderColor=bc; e.style.background=bg; e.style.color=c; e.style.borderStyle=st; e.style.opacity=op; }
 
 function render(t){
-  t=((t%DUR)+DUR)%DUR; if(!G) geom(); grid(t); command(t);
+  t=((t%DUR)+DUR)%DUR; geom(); grid(t); command(t); mark(t);
   const {box,port,tc,L}=G;
   // selection box
   if(t<S.deselect[1]) setBox(box.l,box.t,box.r,box.b,(1-P(t,'deselect')).toFixed(3),true);
@@ -160,6 +177,6 @@ function render(t){
     e.style.left=tag.x+'px'; e.style.top=tag.y+'px'; e.style.opacity=(k>0&&k<1?.7*(1-k):0).toFixed(3); e.style.transform=`scale(${(.3+1.4*out(k)).toFixed(3)})`; });
 }
 window.__card={render,DUR,FPS,ready:false};
-document.fonts.ready.then(()=>{ render(0); window.__card.ready=true; });
+Promise.all(['500 82px "Geist Sans"','400 17px "Geist Mono"'].map(f=>document.fonts.load(f))).then(()=>document.fonts.ready).then(()=>{ render(0); window.__card.ready=true; });
 </script>
 </body></html>

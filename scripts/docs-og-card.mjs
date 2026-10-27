@@ -20,7 +20,7 @@ export async function loadDocsOgCard() {
   return template
     .replace("{{sansFont}}", () => `data:font/woff2;base64,${sansFont.toString("base64")}`)
     .replace("{{monoFont}}", () => `data:font/woff2;base64,${monoFont.toString("base64")}`)
-    .replace("{{logo}}", () => logo.trim());
+    .replaceAll("{{logo}}", () => logo.trim());
 }
 
 /** Loads the card into a Playwright page and waits for its fonts and first frame. */
