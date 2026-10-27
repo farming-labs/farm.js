@@ -146,8 +146,10 @@ const farmMarkdownConfig = ${JSON.stringify(ctx.markdown ?? { enabled: false, ex
   createFarmLlmsFullRenderer,
   createFarmLlmsMarkdownReader,
   createFarmMetadataRouteResponse,
+  farmPathGuardCoversPage,
   renderFarmLlmsFullTxt,
 } from '@farm.js/core/internal/production-runtime';
+import { FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS } from '@farm.js/core/internal/app-markdown-runtime';
 
 const farmLlmsTxtConfig = ${JSON.stringify(ctx.llmsTxt)};
 const farmLlmsFullRenderer = createFarmLlmsFullRenderer({ revalidate: farmLlmsTxtConfig.revalidate });
@@ -1214,14 +1216,24 @@ ${
  */
 function createFarmLlmsTxtContext(request, context, full) {
   const origin = new URL(request.url).origin;
+  // A page a path-specific guard covers (a non-root middleware.ts, a config
+  // middleware matcher naming the path) is left out, as core's server does.
+  const guard = {
+    config: { middleware: farmConfigMiddleware },
+    middlewareRoutes: Object.keys(middlewares)
+      .map((filePath) => ({ path: middlewarePathToRoute(filePath) }))
+      .filter((route) => route.path !== null),
+  };
   const pages = collectFarmLlmsTxtPages(
-    pageRoutes.map(({ module, segments }) => ({
-      // Dynamic routes have no single URL, so the collector skips them.
-      pattern: '/' + segments
-        .map((part) => (part.isDynamic ? '[' + part.segment + ']' : part.segment))
-        .join('/'),
-      metadata: module && module.metadata,
-    })),
+    pageRoutes
+      .map(({ module, segments }) => ({
+        // Dynamic routes have no single URL, so the collector skips them.
+        pattern: '/' + segments
+          .map((part) => (part.isDynamic ? '[' + part.segment + ']' : part.segment))
+          .join('/'),
+        metadata: module && module.metadata,
+      }))
+      .filter((page) => page.pattern.includes('[') || !farmPathGuardCoversPage(guard, page.pattern)),
     {
       origin,
       markdown: farmMarkdownConfig,
@@ -1237,10 +1249,17 @@ function createFarmLlmsTxtContext(request, context, full) {
       config: farmLlmsTxtConfig,
       rootMetadata: rootLayout && rootLayout.metadata,
     }),
-    // Pages are read in-process through the full handler with a fresh request,
-    // so the caller's cookies never shape the file. HEAD reads nothing.
+    // Pages are read in-process through the full handler as an anonymous
+    // visitor: a fresh request, so the caller's cookies never shape the file,
+    // and a neutral client address, so an IP allowlist never admits the read.
+    // The body is shared across callers. HEAD reads nothing.
     markdown: full && request.method.toUpperCase() !== 'HEAD'
-      ? createFarmLlmsMarkdownReader((page) => handler(page, context))
+      ? createFarmLlmsMarkdownReader((page) =>
+          handler(page, {
+            waitUntil: context && context.waitUntil,
+            clientAddress: FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS,
+          }),
+        )
       : async () => null,
   };
 }
