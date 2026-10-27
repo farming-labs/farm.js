@@ -358,9 +358,9 @@ middleware, `src/app/**/middleware.ts` files (a root `middleware.ts` matches eve
 integration guards such as `protectedRoutes`, and plugins with a `runtime.before` hook. This
 covers `ssg`, `revalidate`, and PPR pages, docs pages and the docs API, Markdown sources and
 mirrors, and API responses. A shared directive (`public`, `s-maxage`, `CDN-Cache-Control`,
-`Vercel-CDN-Cache-Control`, `Netlify-CDN-Cache-Control`) and the public Cache-Control a Nitro
-`swr` route rule adds are removed; a policy that is already private, such as
-`private, max-age=60`, is kept. Responses the middleware returns itself, such as a `403` or a
+`Vercel-CDN-Cache-Control`, `Netlify-CDN-Cache-Control`) is removed, including one that a Nitro
+`swr` or `headers` route rule or a `headers()` entry in `farm.config.ts` adds for that path; a
+policy that is already private, such as `private, max-age=60`, is kept. Responses the middleware returns itself, such as a `403` or a
 redirect, are sent as written.
 
 Middleware that never decides who may read a response, such as logging or response headers, can

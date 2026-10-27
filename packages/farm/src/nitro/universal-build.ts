@@ -10224,6 +10224,20 @@ async function handleFarmFetch(request, context) {
     typeof context?.waitUntil === "function" ? context.waitUntil.bind(context) : undefined,
   );
 
+  // headers() config applies after middleware let the request through, so it learns
+  // whether the response was guarded and can't make that response shareable again.
+  let farmGuardedResponse = false;
+  if (configuredHeaderRoutes.length > 0) {
+    const adapterContext = context;
+    context = {
+      ...adapterContext,
+      onGuardedResponse() {
+        farmGuardedResponse = true;
+        adapterContext?.onGuardedResponse?.();
+      },
+    };
+  }
+
   return farmProductionLifecycle.runRequest(
     () =>
       runWithFarmRequestSpan(request, async () => {
@@ -10238,9 +10252,11 @@ async function handleFarmFetch(request, context) {
           const routePathname = configuredHeaderRoutes.length > 0
             ? getFarmRoutePathname(new URL(runtimeRequest.url).pathname)
             : undefined;
+          const configured = applyConfiguredResponseHeaders(response, routePathname);
           return applyFarmPreloadBudget(
             applyFarmCspNonceToResponse(
-              applyConfiguredResponseHeaders(response, routePathname),
+              // Configured headers may edit the response in place, so check it either way.
+              farmGuardedResponse ? _withFarmGuardedResponseCache(configured) : configured,
               farmSecurityConfig,
               cspNonce,
             ),
@@ -10463,12 +10479,20 @@ function getPhysicalPrerenderBypassReason(options: {
   return undefined;
 }
 
-/** Whether a route rule makes Nitro cache responses itself (`swr`, or a raw `cache` rule). */
+/**
+ * Whether a route rule makes Nitro write cache headers over Farm's response: a `swr` or raw
+ * `cache` rule caches through Nitro, and a `headers` rule sets its headers after Farm answered.
+ */
 function hasFarmNitroCacheRouteRule(routeRules: ResolvedFarmConfig["routeRules"]): boolean {
   return Object.values(routeRules || {}).some((rule) => {
     const swr = rule?.swr;
     const cache = (rule as { cache?: unknown } | undefined)?.cache;
-    return (swr !== undefined && swr !== false) || (cache !== undefined && cache !== false);
+    const headers = (rule as { headers?: unknown } | undefined)?.headers;
+    return (
+      (swr !== undefined && swr !== false) ||
+      (cache !== undefined && cache !== false) ||
+      (!!headers && typeof headers === "object" && Object.keys(headers).length > 0)
+    );
   });
 }
 
@@ -10674,9 +10698,16 @@ ${
   hasNitroCacheRouteRules
     ? `
 // A swr route rule caches through Nitro, which writes its own public Cache-Control on
-// the event after Farm answered, and H3 lets that replace the response's. A response
-// middleware let through keeps Farm's private policy, so no CDN serves it to others.
+// the event after Farm answered, and a headers route rule sets its headers there too. H3
+// lets those replace the response's. A response middleware let through keeps Farm's
+// private policy and no CDN cache header, so no CDN serves it to others.
 const FARM_PRIVATE_CACHE_DIRECTIVE = /(?:^|,)\\s*(?:private|no-store)\\s*(?:[,=]|$)/i
+const FARM_CDN_CACHE_CONTROL_HEADERS = [
+  'cdn-cache-control',
+  'vercel-cdn-cache-control',
+  'netlify-cdn-cache-control',
+  'cloudflare-cdn-cache-control',
+]
 const farmPrivateCacheControlKey = Symbol.for('farm.privateCacheControl')
 let farmPrivateCacheHookRegistered = false
 function keepFarmPrivateCacheControl(event, cacheControl) {
@@ -10684,9 +10715,12 @@ function keepFarmPrivateCacheControl(event, cacheControl) {
     farmPrivateCacheHookRegistered = true
     useNitroHooks().hook('response', (response, responseEvent) => {
       const value = responseEvent.context?.[farmPrivateCacheControlKey]
-      if (!value || response.headers.get('cache-control') === value) return
+      if (!value) return
       try {
-        response.headers.set('cache-control', value)
+        if (response.headers.get('cache-control') !== value) {
+          response.headers.set('cache-control', value)
+        }
+        for (const name of FARM_CDN_CACHE_CONTROL_HEADERS) response.headers.delete(name)
       } catch {
         // Immutable headers belong to a response Nitro passed through untouched.
       }
@@ -10921,7 +10955,7 @@ function toFarmNodeResponse(request, response) {
     ...(farmNodeServerEntryPath ? { entry: farmNodeServerEntryPath } : {}),
     ...(farmBunServerEntryPath ? { entry: farmBunServerEntryPath } : {}),
     ...(farmNetlifyEntryPath ? { entry: farmNetlifyEntryPath } : {}),
-    // The response hook that keeps a private Cache-Control under a swr rule (nitro-entry).
+    // The response hook that keeps a private Cache-Control under a swr or headers rule (nitro-entry).
     ...(hasNitroCacheRouteRules ? { features: { runtimeHooks: true } } : {}),
     rootDir: root,
     // Farm registers every handler, task, and plugin explicitly. Scanning the

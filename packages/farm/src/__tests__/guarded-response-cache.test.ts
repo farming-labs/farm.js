@@ -23,6 +23,9 @@ const KEY = { "x-office-key": "k-123" };
 const FARM_CONFIG = `
 import { defineConfig } from "@farm.js/core";
 
+// A headers route rule or headers() entry asking CDNs to cache everything under a path.
+const SHARED_HEADERS = { "cache-control": "public, s-maxage=3600", "cdn-cache-control": "max-age=3600" };
+
 const allowed = (ctx) => {
   const h = ctx.request.headers;
   return (typeof h.get === "function" ? h.get("x-office-key") : h["x-office-key"]) === "k-123";
@@ -34,7 +37,22 @@ export default defineConfig({
   experimental: { ppr: true },
   md: { enabled: true },
   docs: { enabled: true },
-  routeRules: { "/swr-guarded/**": { swr: 60 }, "/swr-open": { swr: 60 } },
+  routeRules: {
+    "/swr-guarded/**": { swr: 60 },
+    "/swr-open": { swr: 60 },
+    "/internal/ruled": { headers: SHARED_HEADERS },
+    "/ruled": { headers: SHARED_HEADERS },
+  },
+  headers: () => [
+    {
+      source: "/internal/configured",
+      headers: Object.entries(SHARED_HEADERS).map(([key, value]) => ({ key, value })),
+    },
+    {
+      source: "/configured",
+      headers: Object.entries(SHARED_HEADERS).map(([key, value]) => ({ key, value })),
+    },
+  ],
   middleware: [
     {
       // An API key header guard, as the docs suggest for an internal area.
@@ -74,6 +92,13 @@ const PAGES: Record<string, string> = {
   "src/app/swr-guarded/page.tsx":
     "export const ssg = true;\nexport default function Page() { return <main>GUARDED-SWR</main>; }",
   "src/app/swr-open/page.tsx": "export default function Page() { return <main>OPEN-SWR</main>; }",
+  "src/app/internal/ruled/page.tsx":
+    "export default function Page() { return <main>GUARDED-RULED</main>; }",
+  "src/app/internal/configured/page.tsx":
+    "export default function Page() { return <main>GUARDED-CONFIGURED</main>; }",
+  "src/app/ruled/page.tsx": "export default function Page() { return <main>OPEN-RULED</main>; }",
+  "src/app/configured/page.tsx":
+    "export default function Page() { return <main>OPEN-CONFIGURED</main>; }",
   // A revalidate page: an ssg page no middleware matches is prerendered to a static file.
   "src/app/open/page.tsx":
     "export const revalidate = 60;\nexport default function Page() { return <main>OPEN-ISR</main>; }",
@@ -90,7 +115,10 @@ export function middleware(_request, context) { context.headers.set("x-area", "h
     "---\ntitle: Internal runbook\n---\n# Internal runbook\n\nGUARDED-DOCS\n",
 };
 
-async function createFixture(): Promise<string> {
+async function createFixture(
+  config = FARM_CONFIG,
+  pages: Record<string, string> = PAGES,
+): Promise<string> {
   const packageRoot = process.cwd();
   const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-guarded-response-cache-"));
   await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
@@ -103,8 +131,8 @@ async function createFixture(): Promise<string> {
     );
   }
   await fs.writeFile(path.join(root, "package.json"), '{"type":"module","private":true}');
-  await fs.writeFile(path.join(root, "farm.config.ts"), FARM_CONFIG);
-  for (const [file, source] of Object.entries(PAGES)) {
+  await fs.writeFile(path.join(root, "farm.config.ts"), config);
+  for (const [file, source] of Object.entries(pages)) {
     await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await fs.writeFile(path.join(root, file), source);
   }
@@ -129,6 +157,7 @@ describe("responses middleware let through", () => {
         return {
           status: response.status,
           cacheControl: response.headers.get("cache-control"),
+          cdnCacheControl: response.headers.get("cdn-cache-control"),
           body: await response.text(),
         };
       };
@@ -164,6 +193,32 @@ describe("responses middleware let through", () => {
       expect(second.status).toBe(403);
       expect(second.body).not.toContain("GUARDED-SWR");
 
+      // A headers route rule (written by Nitro after Farm answered) or a headers() entry
+      // (applied after the guard) asking CDNs to cache the path used to replace the private
+      // policy, so a CDN served the guarded page to everyone.
+      for (const [pathname, marker] of [
+        ["/internal/ruled", "GUARDED-RULED"],
+        ["/internal/configured", "GUARDED-CONFIGURED"],
+      ] as const) {
+        const response = await send(pathname, KEY);
+        expect({ pathname, status: response.status, cache: response.cacheControl }).toEqual({
+          pathname,
+          status: 200,
+          cache: "private, no-store",
+        });
+        expect(response.cdnCacheControl).toBeNull();
+        expect(response.body).toContain(marker);
+      }
+      // Paths no middleware guards keep those headers as written.
+      for (const pathname of ["/ruled", "/configured"]) {
+        const response = await send(pathname);
+        expect({ pathname, cache: response.cacheControl, cdn: response.cdnCacheControl }).toEqual({
+          pathname,
+          cache: "public, s-maxage=3600",
+          cdn: "max-age=3600",
+        });
+      }
+
       // Pages no middleware matched keep their shared caching, as does a swr rule.
       const open = await send("/open");
       expect(open.body).toContain("OPEN-ISR");
@@ -181,6 +236,45 @@ describe("responses middleware let through", () => {
           cache: "public, s-maxage=60, stale-while-revalidate=300",
         });
       }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 240_000);
+
+  it("stay private under a headers route rule when no swr rule exists", async () => {
+    // Nitro writes a headers rule after Farm answered. Farm's response hook used to be added
+    // only for swr and cache rules, so on its own this rule made the guarded page public.
+    const root = await createFixture(
+      `
+import { defineConfig } from "@farm.js/core";
+export default defineConfig({
+  telemetry: false,
+  images: { provider: "none" },
+  routeRules: {
+    "/internal/**": { headers: { "cache-control": "public, s-maxage=3600", "cdn-cache-control": "max-age=3600" } },
+  },
+  middleware: [{ matcher: "/internal/:path*", handler() {} }],
+});
+`,
+      {
+        "src/app/layout.tsx": PAGES["src/app/layout.tsx"]!,
+        "src/app/internal/ruled/page.tsx": PAGES["src/app/internal/ruled/page.tsx"]!,
+      },
+    );
+    try {
+      const config = await resolveConfig(
+        { ...(await loadConfig(root, undefined, "production")), root },
+        "production",
+      );
+      await build(config, { root, preset: "vercel" });
+      const entry = path.join(root, ".vercel", "output", "functions", "__nitro.func", "index.mjs");
+      const server = (await import(/* @vite-ignore */ pathToFileURL(entry).href)).default;
+      const response: Response = await server.fetch(
+        new Request("https://farm.test/internal/ruled"),
+      );
+      expect(await response.text()).toContain("GUARDED-RULED");
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(response.headers.get("cdn-cache-control")).toBeNull();
     } finally {
       await fs.rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
