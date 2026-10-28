@@ -11,6 +11,7 @@ import {
 } from "./preview-gateway";
 import { runNativePreviewTunnel } from "./preview-native";
 import { createHttpLocalUrl } from "./local-url";
+import { startPreviewMarkerProxy } from "./preview-local-proxy";
 import { authorizePreviewGatewayPlan, parsePreviewDuration } from "./preview-auth";
 import { resolvePreviewProject } from "./preview-project";
 
@@ -119,17 +120,25 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
     }
   }
 
-  const plan = createPreviewTunnelPlan(target, options);
-
   if (options.dryRun) {
+    const plan = createPreviewTunnelPlan(target, options);
     logger.info(`Command: ${formatCommand(plan)}`);
+    logger.info("The tunnel will reach the app through a local proxy that marks preview requests.");
     logger.success("Preview tunnel dry run completed.");
     return { target, plan };
   }
 
-  logger.info("Opening public tunnel...");
-  const publicUrl = await runPreviewTunnel(plan, options.timeoutMs ?? 30000);
-  return { target, plan, publicUrl };
+  // A local provider forwards public traffic straight to the dev server, which would treat it
+  // as the developer's own browser. The proxy marks it, so the preview guard still applies.
+  const proxy = await startPreviewMarkerProxy(target);
+  try {
+    const plan = createPreviewTunnelPlan(proxy.target, options);
+    logger.info("Opening public tunnel...");
+    const publicUrl = await runPreviewTunnel(plan, options.timeoutMs ?? 30000);
+    return { target, plan, publicUrl };
+  } finally {
+    await proxy.close();
+  }
 }
 
 function redactPreviewGatewayPlan(plan: PreviewGatewayPlan): PreviewFarmGatewayPlan {
