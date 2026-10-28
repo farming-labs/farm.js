@@ -4,6 +4,7 @@ import type { Plugin } from "vite";
 import type { FarmEnvironment } from "./environment";
 import { getFarmSourceRoots, type ResolvedFarmLayer } from "./layers";
 import {
+  findClientNodeBuiltinChain,
   isProgrammaticRouteActionProxy,
   type FarmProgrammaticRoutesPluginApi,
 } from "./programmatic-routes-client";
@@ -131,7 +132,7 @@ export function farmEnvironmentFunctionsPlugin(
   const routeSourceError = (file: string, importers: readonly string[] = []) =>
     `[Farm.js] ${file} defines programmatic routes, but the browser bundle imports it` +
     (importers.length > 0 ? ` (from ${importers.join(", ")})` : "") +
-    ". Routes files and the modules that export route definitions carry server-only guards, " +
+    ". Routes files and the modules that define routes carry server-only guards, " +
     "data hooks, and API handlers, so they never reach the browser. Import the component, " +
     "server function, or helper from its own module instead.";
 
@@ -182,7 +183,23 @@ export function farmEnvironmentFunctionsPlugin(
       // modules it imports for their side effects still ship.
       const forbidden = routeSourceFiles();
       for (const id of this.getModuleIds()) {
-        if (parseProgrammaticRouteModuleId(id) || !forbidden.has(moduleFile(id))) continue;
+        if (parseProgrammaticRouteModuleId(id)) {
+          // Defense in depth: a component module whose static imports reach a Node builtin
+          // carries server-only code into the browser.
+          const chain = findClientNodeBuiltinChain(id, (moduleId) => {
+            return this.getModuleInfo(moduleId)?.importedIds;
+          });
+          if (chain) {
+            this.error(
+              `[Farm.js] The browser bundle reaches the server-only module "${chain.at(-1)}" ` +
+                `through the programmatic route module ${moduleFile(id)}: ${chain.map(moduleFile).join(" -> ")}. ` +
+                "Keep server-only imports in the routes file or in modules only its guard, " +
+                "data, and API handlers use.",
+            );
+          }
+          continue;
+        }
+        if (!forbidden.has(moduleFile(id))) continue;
         const info = this.getModuleInfo(id);
         if (isProgrammaticRouteActionProxy(info?.code)) continue;
         this.error(routeSourceError(moduleFile(id), info?.importers.map(moduleFile)));

@@ -120,13 +120,22 @@ options assigned after `page()` returns. Its params, search, guard, and data run
 and the page hydrates from the props the server resolved for the document.
 
 A client build fails when a hydrating page or layout's component has no module of its own: it is
-declared in the routes file (or another module that exports route definitions), computed there
-(`component: memo(AdminPage)`), or imported straight from a package. Move it to its own module, or
-re-export the package component from one. A client build also fails if any browser module imports
-a routes file or a module that exports route definitions; import the component, server function,
-or helper from its own module instead. The one exception is the action-only proxy that
-[route actions](#route-actions) get with Server Actions enabled. Pages and layouts that don't
-hydrate ship no client code, so these rules don't apply to them.
+declared in the routes file or another module that defines routes, computed there
+(`component: memo(AdminPage)`), or imported straight from a package. A module defines routes when
+it holds route definitions in any shape (exported lists, objects or maps of routes, routes kept
+behind a function) or calls `page()`, `layout()`, `api()`, or `defineRoutes()`; a component module
+that imports one counts too. Move the component to its own module, or re-export the package
+component from one. Several unrelated modules exporting the same component also fail the build
+unless the routes file imports it from one of them. A client build also fails if any browser module
+imports a module that defines routes, or if a component's imports reach a Node builtin; import the
+component, server function, or helper from its own module instead. The one exception is the
+action-only proxy that [route actions](#route-actions) get with Server Actions enabled. Pages and
+layouts that don't hydrate ship no client code, so these rules don't apply to them.
+
+Farm can't trace a route written as a plain object literal that no module exports. While such a
+route exists, a component module is only accepted when neither it nor anything it imports could
+build a route definition (an object with a route `kind`, or an imported route factory). Build those
+routes with `page()` and `layout()`, or export them, if a component module is refused.
 
 > **Migration:** earlier releases loaded the routes file in the browser and stripped its server
 > options. Move components declared in a routes file into their own modules, and stop importing

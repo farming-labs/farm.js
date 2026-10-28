@@ -39,7 +39,12 @@ afterEach(() => {
   }
 });
 
-function graphOf(modules: ProgrammaticRouteGraphModule[]): ProgrammaticRouteGraph {
+function graphOf(input: ProgrammaticRouteGraphModule[]): ProgrammaticRouteGraph {
+  // Evaluated app modules carry their code; these hold nothing that defines routes.
+  const modules = input.map((module) => ({
+    ...module,
+    code: "code" in module ? module.code : module.external ? undefined : "",
+  }));
   const byId = new Map(modules.map((module) => [module.id, module]));
   return {
     getModuleById: (id) => byId.get(id),
@@ -169,6 +174,148 @@ describe("resolving programmatic route components", () => {
       "/app/src/admin/routes.ts",
       "/app/src/routes.tsx",
     ]);
+  });
+});
+
+describe("resolving programmatic route components, fail closed", () => {
+  function Card() {
+    return null;
+  }
+  const routes = [{ kind: "page", path: "/admin", component: Card, guard() {} }];
+  const pkg = "file:///app/node_modules/@acme/ui/index.js";
+  const modules = (routesCode: string): ProgrammaticRouteGraphModule[] => [
+    {
+      id: "/app/src/routes.tsx",
+      file: "/app/src/routes.tsx",
+      imports: ["/app/src/server/admin.ts", "/app/src/components/ui.ts"],
+      exports: { default: { __farmRoutes: true, routes } },
+      code: routesCode,
+    },
+    {
+      id: "/app/src/server/admin.ts",
+      file: "/app/src/server/admin.ts",
+      url: "/src/server/admin.ts",
+      imports: [pkg, "/app/src/db.ts"],
+      exports: { Card, loadAdmin() {} },
+    },
+    {
+      id: "/app/src/components/ui.ts",
+      file: "/app/src/components/ui.ts",
+      url: "/src/components/ui.ts",
+      imports: [pkg],
+      exports: { Card },
+    },
+    { id: pkg, file: pkg, imports: [], exports: { Card }, external: true },
+    { id: "/app/src/db.ts", file: "/app/src/db.ts", imports: [], exports: { db: {} } },
+  ];
+
+  it("takes a component shared by unrelated modules from the one the routes file imports", () => {
+    const result = resolve(
+      graphOf(
+        modules(
+          'const __vite_ssr_import_0__ = await __vite_ssr_import__("/src/server/admin.ts", {"importedNames":["loadAdmin"]});\n' +
+            'const __vite_ssr_import_1__ = await __vite_ssr_import__("/src/components/ui.ts", {"importedNames":["Card"]});\n',
+        ),
+      ),
+      routes,
+    );
+    expect(routeAt(result, "/admin")?.component).toEqual({
+      file: "/app/src/components/ui.ts",
+      exportName: "Card",
+    });
+  });
+
+  it("refuses to guess between unrelated modules that export a component", () => {
+    const result = resolve(graphOf(modules("")), routes);
+    expect(routeAt(result, "/admin")?.component).toBeUndefined();
+    expect(routeAt(result, "/admin")?.problem).toMatch(
+      /exported by several modules \(.*server\/admin\.ts, .*components\/ui\.ts\) and Farm can't tell/,
+    );
+  });
+
+  it("finds definitions inside holders, maps, and sets", () => {
+    function AdminPage() {
+      return null;
+    }
+    const guard = () => {};
+    const definition = { kind: "page", path: "/admin", component: AdminPage, guard };
+    const holders = {
+      object: { admin: { routes: [definition] } },
+      map: { pages: new Map([["home", definition]]) },
+      set: { pages: new Set([definition]) },
+      fn: { adminRoutes: Object.assign(() => null, { routes: [definition] }) },
+    };
+    for (const [shape, exports] of Object.entries(holders)) {
+      const result = resolve(
+        graphOf([
+          {
+            id: "/app/src/routes.tsx",
+            file: "/app/src/routes.tsx",
+            imports: ["/app/src/features/admin.ts"],
+            exports: {},
+          },
+          {
+            id: "/app/src/features/admin.ts",
+            file: "/app/src/features/admin.ts",
+            imports: [],
+            exports: { AdminPage, ...exports },
+          },
+        ]),
+        [{ ...definition }],
+      );
+      expect([shape, routeAt(result, "/admin")?.problem]).toEqual([
+        shape,
+        expect.stringMatching(/features\/admin\.ts, which defines routes/),
+      ]);
+    }
+  });
+
+  it("refuses a component module it can't prove defines no routes", () => {
+    function AdminPage() {
+      return null;
+    }
+    const graph = (code: string | undefined) =>
+      graphOf([
+        {
+          id: "/app/src/routes.tsx",
+          file: "/app/src/routes.tsx",
+          imports: ["/app/src/features/admin.ts"],
+          exports: {},
+        },
+        {
+          id: "/app/src/features/admin.ts",
+          file: "/app/src/features/admin.ts",
+          imports: ["/app/src/features/kit.ts"],
+          exports: { AdminPage },
+        },
+        {
+          id: "/app/src/features/kit.ts",
+          file: "/app/src/features/kit.ts",
+          imports: [],
+          exports: {},
+          code,
+        },
+      ]);
+    // A raw definition carries no record of the module that wrote it.
+    const routes = [{ kind: "page", path: "/admin", component: AdminPage, guard() {} }];
+    expect(routeAt(resolve(graph(""), routes), "/admin")?.component?.file).toBe(
+      "/app/src/features/admin.ts",
+    );
+    for (const code of [
+      'const routes = [{ kind: "page", path: "/admin" }];',
+      "const make = (kind) => ({ kind, path: '/admin' });",
+      'route.kind = "page";',
+      'const __vite_ssr_import_0__ = await __vite_ssr_import__("@farm.js/core", {"importedNames":["page"]});',
+      undefined,
+    ]) {
+      expect([code, routeAt(resolve(graph(code), routes), "/admin")?.problem]).toEqual([
+        code,
+        expect.stringMatching(/can't tell that .*kit\.ts defines no routes/),
+      ]);
+    }
+    expect(
+      routeAt(resolve(graph('const tone = { kind: "primary" };'), routes), "/admin")?.problem,
+    ).toBeUndefined();
   });
 });
 
@@ -477,7 +624,13 @@ describe("programmatic routes in the client build", () => {
       [...clientRoutes.routeSourceFiles]
         .map((file) => file.replace(/\\/g, "/").replace(root.replace(/\\/g, "/"), ""))
         .sort(),
-    ).toEqual(["/src/admin/index.ts", "/src/admin/pages.ts", "/src/routes.tsx"]);
+    ).toEqual([
+      // The package helper that calls page() makes routes too.
+      "/node_modules/@acme/route-kit/index.js",
+      "/src/admin/index.ts",
+      "/src/admin/pages.ts",
+      "/src/routes.tsx",
+    ]);
   }, 60_000);
 
   it("fails the build for a hydrating page whose component lives in the routes file", async () => {
@@ -584,6 +737,170 @@ export function Nav() {
     expect(mod.__farmRouteData).toBe(route.data);
     expect(mod.default.__farmServerProps).toBeUndefined();
   });
+});
+
+const FEATURE_DB = `globalThis.__farmPool = "postgres://app:DB_PASSWORD_SECRET@db.internal/app";
+export const db = { find: async (id: string) => ({ id }) };
+`;
+const FEATURE_PAGE = `export function AdminPage() {
+  return <main>CLIENT_ADMIN_MARKER</main>;
+}
+`;
+const FEATURE_OPTIONS = `{ component: AdminPage,
+    guard: () => { throw new Error("GUARD_SECRET_MESSAGE"); },
+    data: { main: () => db.find("DATA_SECRET") } }`;
+const FEATURE_RAW = `{ kind: "page", path: "/admin", component: AdminPage,
+    guard: () => { throw new Error("GUARD_SECRET_MESSAGE"); },
+    data: { main: () => db.find("DATA_SECRET") } }`;
+
+// A feature module that keeps its component beside the routes it defines.
+const featureModule = (factory: boolean, body: string) =>
+  `${factory ? 'import { page } from "@farm.js/core";\n' : ""}import { db } from "../db.server";
+${FEATURE_PAGE}${body}`;
+
+const HOLDERS: Record<string, { feature: string; routes: string }> = {
+  "an object holding a route list": {
+    feature: featureModule(
+      true,
+      `export const admin = {\n  routes: [page("/admin", ${FEATURE_OPTIONS})],\n};\n`,
+    ),
+    routes:
+      "import { admin } from './features/admin';\nexport default defineRoutes([...admin.routes]);",
+  },
+  "a map of names to routes": {
+    feature: featureModule(
+      true,
+      `export const adminPages = {\n  home: page("/admin", ${FEATURE_OPTIONS}),\n};\n`,
+    ),
+    routes:
+      "import { adminPages } from './features/admin';\nexport default defineRoutes(Object.values(adminPages));",
+  },
+  "routes behind a function": {
+    feature: featureModule(
+      true,
+      `const routes = [page("/admin", ${FEATURE_OPTIONS})];\nexport function adminRoutes() {\n  return routes;\n}\n`,
+    ),
+    routes:
+      "import { adminRoutes } from './features/admin';\nexport default defineRoutes(adminRoutes());",
+  },
+  "routes made when a function runs": {
+    feature: featureModule(
+      true,
+      `export function adminRoutes() {\n  return [page("/admin", ${FEATURE_OPTIONS})];\n}\n`,
+    ),
+    routes:
+      "import { adminRoutes } from './features/admin';\nexport default defineRoutes(adminRoutes());",
+  },
+  "an object holding plain route objects": {
+    feature: featureModule(false, `export const admin = {\n  routes: [${FEATURE_RAW}],\n};\n`),
+    routes:
+      "import { admin } from './features/admin';\nexport default defineRoutes([...admin.routes]);",
+  },
+  "plain route objects behind a function": {
+    feature: featureModule(
+      false,
+      `const routes = [${FEATURE_RAW}];\nexport function adminRoutes() {\n  return routes;\n}\n`,
+    ),
+    routes:
+      "import { adminRoutes } from './features/admin';\nexport default defineRoutes(adminRoutes());",
+  },
+};
+
+const FEATURE_SECRETS = ["DB_PASSWORD_SECRET", "GUARD_SECRET_MESSAGE", "DATA_SECRET"];
+
+describe("modules that hold route definitions", () => {
+  for (const [shape, { feature, routes }] of Object.entries(HOLDERS)) {
+    it(`never become a component's browser import: ${shape}`, async () => {
+      const root = createRoutesFixture({
+        "src/db.server.ts": FEATURE_DB,
+        "src/features/admin.tsx": feature,
+        "src/routes.tsx": `import { defineRoutes } from "@farm.js/core";\n${routes}\n`,
+      });
+      const clientRoutes = await evaluateRoutes(root);
+      const route = clientRoutes.routes.get(
+        programmaticClientRouteKey(path.join(root, "src", "routes.tsx"), "page", "/admin"),
+      );
+      expect(route?.component).toBeUndefined();
+      expect(route?.problem).toMatch(/features\/admin\.tsx/);
+
+      let code = "";
+      await expect(
+        buildClient(root, clientRoutes, [routeId(root, "page", "/admin")]).then((output) => {
+          code = output;
+        }),
+      ).rejects.toThrow(
+        /route "\/admin" in .*routes\.tsx renders in the browser, but its component is exported by .*features\/admin\.tsx.*move the component to its own module/s,
+      );
+      expect(FEATURE_SECRETS.filter((marker) => code.includes(marker))).toEqual([]);
+    }, 60_000);
+  }
+
+  it("ship the component once it moves to its own module", async () => {
+    const root = createRoutesFixture({
+      "src/db.server.ts": FEATURE_DB,
+      "src/features/admin-page.tsx": FEATURE_PAGE,
+      "src/features/admin.ts": `import { page } from "@farm.js/core";
+import { db } from "../db.server";
+import { AdminPage } from "./admin-page";
+export const admin = { routes: [page("/admin", ${FEATURE_OPTIONS})] };
+`,
+      "src/routes.tsx": `import { defineRoutes } from "@farm.js/core";
+import { admin } from "./features/admin";
+export default defineRoutes([...admin.routes]);
+`,
+    });
+    const clientRoutes = await evaluateRoutes(root);
+    const code = await buildClient(root, clientRoutes, [routeId(root, "page", "/admin")]);
+    expect(code).toContain("CLIENT_ADMIN_MARKER");
+    expect(FEATURE_SECRETS.filter((marker) => code.includes(marker))).toEqual([]);
+  }, 60_000);
+
+  it("fail the build when a browser module imports one", async () => {
+    const root = createRoutesFixture({
+      "src/db.server.ts": FEATURE_DB,
+      "src/features/admin-page.tsx": FEATURE_PAGE,
+      "src/features/admin.ts": `import { page } from "@farm.js/core";
+import { db } from "../db.server";
+import { AdminPage } from "./admin-page";
+export const admin = { title: "Admin", routes: [page("/admin", ${FEATURE_OPTIONS})] };
+`,
+      "src/routes.tsx": `import { defineRoutes } from "@farm.js/core";
+import { admin } from "./features/admin";
+export default defineRoutes([...admin.routes]);
+`,
+      "src/components/nav.tsx": `import { admin } from "../features/admin";
+export function Nav() {
+  return <nav>{admin.title}</nav>;
+}
+`,
+    });
+    const clientRoutes = await evaluateRoutes(root);
+    await expect(
+      buildClient(root, clientRoutes, [path.join(root, "src", "components", "nav.tsx")]),
+    ).rejects.toThrow(
+      /features\/admin\.ts defines programmatic routes, but the browser bundle imports it \(from .*nav\.tsx\)/,
+    );
+  }, 60_000);
+
+  it("fail the build when a component reaches a Node builtin", async () => {
+    const root = createRoutesFixture({
+      "src/features/admin-page.tsx": `import { readFileSync } from "node:fs";
+export function AdminPage() {
+  return <main>{String(readFileSync)}</main>;
+}
+`,
+      "src/routes.tsx": `import { defineRoutes, page } from "@farm.js/core";
+import { AdminPage } from "./features/admin-page";
+export default defineRoutes([page("/admin", { component: AdminPage })]);
+`,
+    });
+    const clientRoutes = await evaluateRoutes(root);
+    await expect(
+      buildClient(root, clientRoutes, [routeId(root, "page", "/admin")]),
+    ).rejects.toThrow(
+      /reaches the server-only module ".*fs" through the programmatic route module/,
+    );
+  }, 60_000);
 });
 
 describe("client copies of programmatic pages", () => {

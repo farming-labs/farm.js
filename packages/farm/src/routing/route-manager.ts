@@ -31,6 +31,7 @@ import {
   getProgrammaticRouteSearchClientOptions,
   normalizeProgrammaticRoutePath,
   parseProgrammaticRoutePath,
+  trackProgrammaticRouteSources,
 } from "../routes-shared";
 import {
   createEvaluatedRouteGraph,
@@ -280,6 +281,9 @@ export class RouteManager {
   constructor(config: Required<FarmConfig>, viteServer?: ViteDevServer) {
     this.config = config;
     this.viteServer = viteServer;
+    // Record where route definitions are made from the first module the server evaluates, so
+    // the client build can keep every module that defines routes out of the browser.
+    if (viteServer) trackProgrammaticRouteSources();
   }
 
   setRendererRuntime(rendererRuntime: FarmServerRendererRuntime): void {
@@ -1234,6 +1238,7 @@ export class RouteManager {
     source: FarmSourceRoot,
     clientRoutes: ProgrammaticClientRoutes[],
   ): Promise<void> {
+    if (this.viteServer) trackProgrammaticRouteSources();
     const manifests = await loadProgrammaticRouteManifests({
       root: source.root,
       srcDir: source.srcDir,

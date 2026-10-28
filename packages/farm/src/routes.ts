@@ -10,7 +10,13 @@ import { getFarmRouteContext } from "./route-context";
 import { normalizeFarmRouteRuntimeConfig, type FarmRouteRuntimeConfig } from "./route-runtime";
 import type { ServerFn } from "./server-fn";
 import type { FarmServerRendererRuntime } from "./renderer";
-import { parseProgrammaticRoutePath as parseSharedProgrammaticRoutePath } from "./routes-shared";
+import {
+  getProgrammaticRouteDefinitionSource,
+  parseProgrammaticRoutePath as parseSharedProgrammaticRoutePath,
+  PROGRAMMATIC_ROUTE_SOURCE,
+  TRACK_PROGRAMMATIC_ROUTE_SOURCES,
+  type ProgrammaticRouteDefinitionSource,
+} from "./routes-shared";
 import { extractProgrammaticPageCallPathLiterals } from "./route-call-scanner";
 import type {
   FarmAppContext,
@@ -469,7 +475,9 @@ export function defineRoutes(
   const routes = typeof input === "function" ? input(routesBuilder) : input;
   const manifest = {
     __farmRoutes: true as const,
-    routes: routes.map(normalizeProgrammaticRoute),
+    routes: routes.map((route) =>
+      stampProgrammaticRouteSource(normalizeProgrammaticRoute(route), route, false),
+    ),
   };
 
   Object.defineProperty(manifest, FARM_ROUTES_BRAND, {
@@ -482,14 +490,14 @@ export function defineRoutes(
 
 export const routesBuilder: ProgrammaticRouteBuilder = {
   page(path, options) {
-    return normalizeProgrammaticRoute({
+    return createProgrammaticRoute({
       kind: "page",
       path,
       ...options,
     }) as ProgrammaticPageRoute;
   },
   layout(path, options) {
-    return normalizeProgrammaticRoute({
+    return createProgrammaticRoute({
       kind: "layout",
       path,
       ...options,
@@ -497,7 +505,7 @@ export const routesBuilder: ProgrammaticRouteBuilder = {
   },
   api(path, options) {
     const { render, runtime, regions, maxDuration, ...methods } = options;
-    return normalizeProgrammaticRoute({
+    return createProgrammaticRoute({
       kind: "api",
       path,
       render,
@@ -508,7 +516,7 @@ export const routesBuilder: ProgrammaticRouteBuilder = {
     }) as ProgrammaticApiRoute;
   },
   redirect(source, destination, options = {}) {
-    return normalizeProgrammaticRoute({
+    return createProgrammaticRoute({
       kind: "redirect",
       source,
       destination,
@@ -516,6 +524,51 @@ export const routesBuilder: ProgrammaticRouteBuilder = {
     }) as ProgrammaticRedirectRoute;
   },
 };
+
+function createProgrammaticRoute(route: ProgrammaticRouteDefinition): ProgrammaticRouteDefinition {
+  return stampProgrammaticRouteSource(normalizeProgrammaticRoute(route), route, true);
+}
+
+/**
+ * While Farm's server-side route discovery runs, record the call stack that made or copied a
+ * route definition, so the client build can tell every module that defines routes, however it
+ * holds them. Lives beside the route factories so the stack's own frames share one file.
+ */
+function stampProgrammaticRouteSource<T extends object>(
+  route: T,
+  input: unknown,
+  created: boolean,
+): T {
+  if (!(globalThis as Record<symbol, unknown>)[TRACK_PROGRAMMATIC_ROUTE_SOURCES]) return route;
+  const previous = getProgrammaticRouteDefinitionSource(input);
+  const source: ProgrammaticRouteDefinitionSource = {
+    stacks: [...(previous?.stacks ?? []), captureRouteSourceStack()],
+    raw: created ? false : (previous?.raw ?? true),
+  };
+  Object.defineProperty(route, PROGRAMMATIC_ROUTE_SOURCE, {
+    value: source,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+  return route;
+}
+
+function captureRouteSourceStack(): string {
+  const limit = Error.stackTraceLimit;
+  try {
+    Error.stackTraceLimit = 200;
+    return new Error().stack ?? "";
+  } catch {
+    return "";
+  } finally {
+    try {
+      Error.stackTraceLimit = limit;
+    } catch {
+      // A frozen Error constructor keeps its own limit.
+    }
+  }
+}
 
 export const page = routesBuilder.page;
 export const layout = routesBuilder.layout;

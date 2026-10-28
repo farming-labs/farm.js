@@ -12,7 +12,18 @@
  * because it reads the evaluated value instead of the routes file's syntax. A component that no
  * other module exports (declared in the routes file, or computed there) has no module to
  * import, so a client build that needs it fails with an actionable error.
+ *
+ * A module that holds route definitions is never a component's client import, however it holds
+ * them: Farm finds definitions in every evaluated module's exports (inside objects, arrays,
+ * maps, and sets), and route factories record the module that called them while routes are
+ * evaluated, which also finds definitions kept behind a function. A definition written as an
+ * object literal and kept out of every export can't be traced, so then a component module is
+ * accepted only when neither it nor anything it imports holds route-defining code.
  */
+
+import { builtinModules } from "node:module";
+import { fileURLToPath } from "node:url";
+import { getProgrammaticRouteDefinitionSource } from "./routes-shared";
 
 export type ProgrammaticClientRouteKind = "page" | "layout";
 
@@ -63,6 +74,10 @@ export interface ProgrammaticRouteGraphModule {
   exports: unknown;
   /** Loaded by the runtime instead of the module runner (a package dependency). */
   external?: boolean;
+  /** The specifier importers request it by. */
+  url?: string;
+  /** The code the module runner evaluated (absent for a package dependency). */
+  code?: string;
 }
 
 export interface ProgrammaticRouteGraph {
@@ -105,50 +120,121 @@ export function resolveProgrammaticClientRoutes(options: {
   const modules = collectGraph(options.graph, routesFile);
   const routeSourceFiles = new Set<string>([routesFile]);
   const exportsByValue = new Map<unknown, Array<{ module: GraphEntry; exportName: string }>>();
+  const modulesByFile = new Map<string, GraphEntry[]>();
+  const definitions = options.routes.filter(isProgrammaticRouteDefinition) as RouteLike[];
 
   for (const module of modules.values()) {
+    if (module.file) {
+      modulesByFile.set(module.file, [...(modulesByFile.get(module.file) ?? []), module]);
+    }
     for (const [exportName, value] of module.exports) {
-      if (isRouteValue(value)) module.routeSource = true;
       if (!isReferenceValue(value)) continue;
+      if (!module.routeSource && holdsRouteDefinition(value, definitions)) {
+        module.routeSource = true;
+      }
       const owners = exportsByValue.get(value) ?? [];
       owners.push({ module, exportName });
       exportsByValue.set(value, owners);
     }
+  }
+
+  // Route factories record the stack that made each definition: the module that called them
+  // defines routes, even when it keeps them behind a function instead of exporting them.
+  let untraced = false;
+  const definedIn = new Map<RouteLike, GraphEntry[]>();
+  for (const route of definitions) {
+    const source = getProgrammaticRouteDefinitionSource(route);
+    const callers = (source?.stacks ?? []).map((stack) => findRouteCallers(stack, modulesByFile));
+    for (const caller of callers.flat()) caller.routeSource = true;
+    definedIn.set(route, callers.flat());
+    if (!source || source.raw || (callers[0] ?? []).length === 0) untraced = true;
+  }
+  for (const module of modules.values()) {
     if (module.routeSource && module.file) routeSourceFiles.add(module.file);
   }
 
   const reaches = createReachability(modules);
-  const locate = (value: unknown, label: string): ProgrammaticClientModuleExport | string => {
+  const closure = createClosure(modules);
+  const routeCode = new Map<GraphEntry, boolean>();
+  const definesRoutes = (module: GraphEntry) => {
+    if (!routeCode.has(module)) routeCode.set(module, mayDefineRoutes(module.code));
+    return routeCode.get(module)!;
+  };
+  // Why a module can't be a component's client import, if it can't.
+  const refusal = new Map<GraphEntry, string | null>();
+  const refuse = (module: GraphEntry): string | null => {
+    if (refusal.has(module)) return refusal.get(module)!;
+    let reason: string | null = null;
+    for (const reached of closure(module)) {
+      if (reached.routeSource) {
+        reason =
+          reached === module
+            ? `${module.file}, which defines routes`
+            : `${module.file}, which imports ${reached.file ?? reached.id}, which defines routes`;
+        break;
+      }
+      if (untraced && !reached.external && definesRoutes(reached)) {
+        reason =
+          `${module.file}, and a route defined as an object literal outside every export ` +
+          `can't be traced to its module, so Farm can't tell that ` +
+          `${reached === module ? "it" : (reached.file ?? reached.id)} defines no routes ` +
+          "(build such routes with page(), layout(), or api(), or export them)";
+        break;
+      }
+    }
+    refusal.set(module, reason);
+    return reason;
+  };
+
+  const locate = (
+    route: RouteLike,
+    value: unknown,
+    label: string,
+  ): ProgrammaticClientModuleExport | string => {
     if (!isReferenceValue(value)) return `its ${label} is not a component`;
     const owners = exportsByValue.get(value) ?? [];
-    const eligible = owners.filter(
-      ({ module }) => module.file && !module.external && !module.routeSource,
-    );
+    const local = owners.filter(({ module }) => module.file && !module.external);
+    const eligible = local.filter(({ module }) => !refuse(module));
     if (eligible.length === 0) {
-      const routeModule = owners.find(({ module }) => module.routeSource && module.file);
-      if (routeModule) {
-        return `its ${label} is exported by ${routeModule.module.file}, which defines routes`;
-      }
+      const refused = local.find(({ module }) => refuse(module));
+      if (refused) return `its ${label} is exported by ${refuse(refused.module)}`;
       if (owners.some(({ module }) => module.external)) {
         return `its ${label} comes from a package; re-export it from a module in your app`;
       }
       return `its ${label} is not exported by any module the routes file imports`;
     }
     // The defining module, not a barrel that re-exports it: the one that reaches no other.
-    const defining = eligible.filter(
+    let defining = eligible.filter(
       (candidate) =>
         !eligible.some(
           (other) => other.module !== candidate.module && reaches(candidate.module, other.module),
         ),
     );
-    const chosen = (defining.length > 0 ? defining : eligible).sort(compareOwners)[0]!;
+    if (defining.length === 0) defining = eligible;
+    if (new Set(defining.map(({ module }) => module)).size > 1) {
+      // Several unrelated modules export it (each re-exporting a package, say). Take the one
+      // the routes file or the route's own module imported it from, then the shallowest.
+      const importers = [...(modulesByFile.get(routesFile) ?? []), ...(definedIn.get(route) ?? [])];
+      const imported = defining.filter((candidate) =>
+        importers.some((importer) => importsBinding(importer, candidate)),
+      );
+      if (imported.length > 0) defining = imported;
+      const depth = Math.min(...defining.map(({ module }) => module.depth));
+      defining = defining.filter(({ module }) => module.depth === depth);
+      const files = [...new Set(defining.map(({ module }) => module.file!))];
+      if (files.length > 1) {
+        return (
+          `its ${label} is exported by several modules (${files.join(", ")}) and Farm can't ` +
+          "tell which one the routes file uses"
+        );
+      }
+    }
+    const chosen = defining.sort(compareOwners)[0]!;
     return { file: chosen.module.file!, exportName: chosen.exportName };
   };
 
   const routes = new Map<string, ProgrammaticClientRoute>();
-  for (const value of options.routes) {
-    if (!isProgrammaticRouteDefinition(value)) continue;
-    const route = value as RouteLike;
+  for (const route of definitions) {
     if ((route.kind !== "page" && route.kind !== "layout") || typeof route.path !== "string") {
       continue;
     }
@@ -159,13 +245,13 @@ export function resolveProgrammaticClientRoutes(options: {
       routesFile,
     };
     const problems: string[] = [];
-    const component = locate(route.component, "component");
+    const component = locate(route, route.component, "component");
     if (typeof component === "string") problems.push(component);
     else clientRoute.component = component;
 
     if (route.kind === "page") {
       if (route.pending) {
-        const pending = locate(route.pending, "pending component");
+        const pending = locate(route, route.pending, "pending component");
         if (typeof pending === "string") problems.push(pending);
         else clientRoute.pending = pending;
       }
@@ -187,12 +273,17 @@ export function createEvaluatedRouteGraph(server: {
     server.environments?.ssr as { runner?: { evaluatedModules?: EvaluatedModulesLike } } | undefined
   )?.runner?.evaluatedModules;
   if (!evaluated) return undefined;
-  const toGraphModule = (node: EvaluatedModuleLike) => ({
+  const toGraphModule = (node: EvaluatedModuleLike): ProgrammaticRouteGraphModule => ({
     id: node.id,
     file: node.file || undefined,
+    url: node.url,
     imports: node.imports,
     exports: node.exports,
     external: Boolean(node.meta && "externalize" in node.meta),
+    code:
+      node.meta && typeof (node.meta as { code?: unknown }).code === "string"
+        ? (node.meta as { code: string }).code
+        : undefined,
   });
   return {
     getModuleById: (id) => {
@@ -206,6 +297,7 @@ export function createEvaluatedRouteGraph(server: {
 
 interface EvaluatedModuleLike {
   id: string;
+  url?: string;
   file: string;
   imports: Set<string>;
   exports: unknown;
@@ -316,6 +408,50 @@ export default __farmRouteModule.default;
 `.trimStart();
 }
 
+/**
+ * The import chain from a client route module to a Node builtin, if its static imports reach
+ * one through modules of the app: server-only code that reached the browser bundle.
+ */
+export function findClientNodeBuiltinChain(
+  entry: string,
+  getImportedIds: (id: string) => readonly string[] | undefined,
+): string[] | null {
+  const parents = new Map<string, string | null>([[entry, null]]);
+  const queue = [entry];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    for (const imported of getImportedIds(id) ?? []) {
+      if (isNodeBuiltinId(imported)) {
+        const chain = [imported];
+        for (let cursor: string | null = id; cursor; cursor = parents.get(cursor) ?? null) {
+          chain.unshift(cursor);
+        }
+        return chain;
+      }
+      if (parents.has(imported) || !isApplicationModuleId(imported)) continue;
+      parents.set(imported, id);
+      queue.push(imported);
+    }
+  }
+  return null;
+}
+
+const NODE_BUILTINS = new Set(builtinModules);
+const MODULE_EXTENSION_RE = /\.[cm]?[jt]sx?$/;
+
+function isApplicationModuleId(id: string): boolean {
+  if (id.startsWith("\0") || id.includes("/node_modules/") || id.includes("\\node_modules\\")) {
+    return false;
+  }
+  return MODULE_EXTENSION_RE.test(id.split("?", 1)[0]!);
+}
+
+function isNodeBuiltinId(id: string): boolean {
+  const external = id.indexOf("__vite-browser-external:");
+  const bare = external === 0 || external === 1 ? id.slice(external + 24) : id;
+  return bare.startsWith("node:") || NODE_BUILTINS.has(bare);
+}
+
 /** RSC replaces a routes module a client component imports with an action-only proxy. */
 export function isProgrammaticRouteActionProxy(code: string | null | undefined): boolean {
   return Boolean(code?.includes("__farmRouteActionTarget: true"));
@@ -324,33 +460,41 @@ export function isProgrammaticRouteActionProxy(code: string | null | undefined):
 type GraphEntry = {
   id: string;
   file?: string;
+  url?: string;
+  code?: string;
   external: boolean;
   imports: string[];
   exports: Array<[string, unknown]>;
   routeSource: boolean;
   order: number;
+  /** Imports between the routes file and this module. */
+  depth: number;
 };
 
 function collectGraph(graph: ProgrammaticRouteGraph, routesFile: string): Map<string, GraphEntry> {
   const modules = new Map<string, GraphEntry>();
-  const queue = [...graph.getModulesByFile(routesFile)];
+  const queue = [...graph.getModulesByFile(routesFile)].map((node) => ({ node, depth: 0 }));
   while (queue.length > 0) {
-    const node = queue.shift()!;
+    const { node, depth } = queue.shift()!;
     if (modules.has(node.id)) continue;
+    const file = node.file ? toModuleFile(node.file) : undefined;
     const entry: GraphEntry = {
       id: node.id,
-      file: node.file ? toPosixPath(node.file) : undefined,
+      file,
+      url: node.url,
+      code: node.code,
       external: node.external === true,
       imports: [...node.imports],
       exports: readExports(node.exports),
-      routeSource: node.file ? toPosixPath(node.file) === routesFile : false,
+      routeSource: file === routesFile,
       order: modules.size,
+      depth,
     };
     modules.set(node.id, entry);
     if (entry.external) continue;
     for (const id of entry.imports) {
       const imported = graph.getModuleById(id);
-      if (imported && !modules.has(imported.id)) queue.push(imported);
+      if (imported && !modules.has(imported.id)) queue.push({ node: imported, depth: depth + 1 });
     }
   }
   return modules;
@@ -374,6 +518,213 @@ function createReachability(modules: Map<string, GraphEntry>) {
     return seen;
   };
   return (from: GraphEntry, to: GraphEntry) => reachable(from).has(to.id);
+}
+
+/** A module, then every module it imports, breadth first. Packages are listed, not entered. */
+function createClosure(modules: Map<string, GraphEntry>) {
+  return function* closure(start: GraphEntry): Generator<GraphEntry> {
+    const seen = new Set<string>([start.id]);
+    const queue = [start];
+    while (queue.length > 0) {
+      const module = queue.shift()!;
+      yield module;
+      if (module.external) continue;
+      for (const id of module.imports) {
+        const imported = modules.get(id);
+        if (!imported || seen.has(id)) continue;
+        seen.add(id);
+        queue.push(imported);
+      }
+    }
+  };
+}
+
+const WALK_DEPTH = 10;
+const WALK_BUDGET = 20_000;
+
+/**
+ * Whether an exported value holds a route definition or a defineRoutes() manifest anywhere
+ * inside it: in a holder object, an array, a map, or a set, or as a function's property.
+ */
+function holdsRouteDefinition(value: unknown, definitions: readonly RouteLike[]): boolean {
+  const seen = new Set<unknown>();
+  const queue: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  while (queue.length > 0 && seen.size < WALK_BUDGET) {
+    const { value: current, depth } = queue.shift()!;
+    if (!isReferenceValue(current) || seen.has(current)) continue;
+    seen.add(current);
+    if (isRouteManifest(current) || isDefinitionObject(current, definitions)) return true;
+    if (depth >= WALK_DEPTH || ArrayBuffer.isView(current) || current instanceof Promise) continue;
+    const next = (child: unknown) => {
+      if (isReferenceValue(child)) queue.push({ value: child, depth: depth + 1 });
+    };
+    try {
+      if (Array.isArray(current)) current.forEach(next);
+      else if (current instanceof Map) {
+        for (const [key, child] of current) {
+          next(key);
+          next(child);
+        }
+      } else if (current instanceof Set) current.forEach(next);
+      else {
+        for (const key of Object.keys(current as object)) {
+          // Read data properties only: a getter may run arbitrary code.
+          const descriptor = Object.getOwnPropertyDescriptor(current, key);
+          if (descriptor && "value" in descriptor) next(descriptor.value);
+        }
+      }
+    } catch {
+      // A proxy or exotic object that refuses inspection holds nothing Farm can read.
+    }
+  }
+  return false;
+}
+
+function isRouteManifest(value: unknown): boolean {
+  return (
+    (value as { __farmRoutes?: unknown }).__farmRoutes === true &&
+    Array.isArray((value as { routes?: unknown }).routes)
+  );
+}
+
+/**
+ * A route definition: a route kind with its path, and either a function of its own (a
+ * component, guard, or handler) or the values of a definition in this routes file.
+ */
+function isDefinitionObject(value: unknown, definitions: readonly RouteLike[]): boolean {
+  if (!isProgrammaticRouteDefinition(value)) return false;
+  const route = value as Record<string, unknown>;
+  const where = route.kind === "redirect" ? route.source : route.path;
+  if (typeof where !== "string") return false;
+  const values = Object.values(route);
+  const own = (child: unknown) =>
+    typeof child === "function" ||
+    (isReferenceValue(child) &&
+      Object.values(child as object).some((nested) => typeof nested === "function"));
+  if (values.some(own)) return true;
+  return definitions.some(
+    (definition) =>
+      definition.kind === route.kind &&
+      Object.entries(definition).every(
+        ([key, child]) => !isReferenceValue(child) || route[key] === child,
+      ) &&
+      (definition as Record<string, unknown>)[route.kind === "redirect" ? "source" : "path"] ===
+        where,
+  );
+}
+
+/**
+ * The modules a route factory's stack runs through: the innermost module that called it, and
+ * when that is a package, also the innermost module of the app. Frames in the factory's own
+ * file are Farm's.
+ */
+function findRouteCallers(stack: string, modulesByFile: Map<string, GraphEntry[]>): GraphEntry[] {
+  const files = stack
+    .split("\n")
+    .slice(1)
+    .map(stackFrameFile)
+    .filter((file): file is string => Boolean(file));
+  const own = files[0];
+  const callers: GraphEntry[] = [];
+  for (const file of files) {
+    if (file === own) continue;
+    const modules = modulesByFile.get(file);
+    if (!modules) continue;
+    callers.push(...modules);
+    if (modules.some((module) => !module.external)) break;
+  }
+  return callers;
+}
+
+function stackFrameFile(frame: string): string | undefined {
+  const line = frame.trim();
+  if (!line.startsWith("at ")) return undefined;
+  const location = line.endsWith(")")
+    ? line.slice(line.lastIndexOf("(") + 1, -1)
+    : line.slice(3).replace(/^async /, "");
+  const file = location.replace(/:\d+(?::\d+)?$/, "");
+  if (!file || file === location || file.startsWith("node:") || file.includes("<anonymous>")) {
+    return undefined;
+  }
+  return toModuleFile(file);
+}
+
+/** Whether `importer`'s evaluated code imports the export `candidate` names from its module. */
+function importsBinding(
+  importer: GraphEntry,
+  candidate: { module: GraphEntry; exportName: string },
+): boolean {
+  if (!importer.code || !importer.imports.includes(candidate.module.id)) return false;
+  const specifiers = new Set([candidate.module.url, candidate.module.id].filter(Boolean));
+  for (const match of importer.code.matchAll(SSR_IMPORT_RE)) {
+    if (!specifiers.has(readJsonString(match[1]!))) continue;
+    if (match[2] === undefined) return true;
+    const names = readJsonArray(`[${match[2]}]`);
+    if (!names || names.includes(candidate.exportName)) return true;
+  }
+  return false;
+}
+
+// `await __vite_ssr_import__("/src/a.ts", {"importedNames":["A"]})`, as Vite's SSR transform
+// writes imports and re-exports.
+const SSR_IMPORT_RE =
+  /__vite_ssr_import__\(("(?:[^"\\]|\\.)*")(?:\s*,\s*\{\s*"importedNames"\s*:\s*\[([^\]]*)\])?/g;
+const ROUTE_KINDS = new Set(["page", "layout", "api", "redirect"]);
+const ROUTE_FACTORIES = new Set([
+  "page",
+  "layout",
+  "api",
+  "redirect",
+  "createRoute",
+  "routesBuilder",
+  "defineRoutes",
+]);
+
+/**
+ * Whether evaluated code could build a route definition: an object with a route `kind` (or
+ * one set from a variable), or a route factory imported from Farm. Code Farm can't read
+ * counts as able to.
+ */
+function mayDefineRoutes(code: string | undefined): boolean {
+  if (code === undefined) return true;
+  for (const match of code.matchAll(KIND_KEY_RE)) {
+    const value = code.slice(match.index! + match[0].length);
+    const quote = value[0];
+    if (quote !== '"' && quote !== "'" && quote !== "`") return true;
+    const end = value.indexOf(quote, 1);
+    if (end < 0 || ROUTE_KINDS.has(value.slice(1, end))) return true;
+  }
+  if (KIND_SHORTHAND_RE.test(code) || KIND_ASSIGNMENT_RE.test(code)) return true;
+  for (const match of code.matchAll(SSR_IMPORT_RE)) {
+    if (!FARM_CORE_RE.test(readJsonString(match[1]!) ?? "")) continue;
+    if (match[2] === undefined) return true;
+    const names = readJsonArray(`[${match[2]}]`);
+    if (!names || names.some((name) => ROUTE_FACTORIES.has(String(name)))) return true;
+  }
+  return false;
+}
+
+const KIND_KEY_RE = /(?<![\w$.])["']?kind["']?\s*:\s*/g;
+const KIND_SHORTHAND_RE = /[{,]\s*kind\s*[,}]/;
+const KIND_ASSIGNMENT_RE = /(?:\.kind|\[\s*["'`]kind["'`]\s*\])\s*=(?!=)/;
+const FARM_CORE_RE = /^@farm\.js\/core(?:\/routes)?$/;
+
+function readJsonString(text: string): string | undefined {
+  try {
+    const value = JSON.parse(text);
+    return typeof value === "string" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readJsonArray(text: string): unknown[] | undefined {
+  try {
+    const value = JSON.parse(text);
+    return Array.isArray(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function readExports(namespace: unknown): Array<[string, unknown]> {
@@ -405,12 +756,6 @@ function isProgrammaticRouteDefinition(value: unknown): boolean {
   return kind === "page" || kind === "layout" || kind === "api" || kind === "redirect";
 }
 
-function isRouteValue(value: unknown): boolean {
-  if (isProgrammaticRouteDefinition(value)) return true;
-  if ((value as { __farmRoutes?: unknown } | null)?.__farmRoutes === true) return true;
-  return Array.isArray(value) && value.some((item) => isProgrammaticRouteDefinition(item));
-}
-
 function compareOwners(
   left: { module: GraphEntry; exportName: string },
   right: { module: GraphEntry; exportName: string },
@@ -438,4 +783,16 @@ function importExport(
 
 function toPosixPath(filePath: string): string {
   return filePath.replace(/\\/g, "/");
+}
+
+/** A module's file as a path, for a file path or a `file:` URL alike. */
+function toModuleFile(file: string): string {
+  if (file.startsWith("file://")) {
+    try {
+      return toPosixPath(fileURLToPath(file));
+    } catch {
+      return toPosixPath(file);
+    }
+  }
+  return toPosixPath(file.split("?", 1)[0]!);
 }
