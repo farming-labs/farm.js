@@ -317,8 +317,11 @@ copy, and a client navigation leaves out the values the browser already holds. A
 also leaves out the layouts the browser keeps: the server renders the page and any layout that
 changed, so a layout's client state survives and its HTML is not sent again. A layout the browser
 keeps does not render on that navigation, so put access checks in middleware or a page `guard`,
-not in a layout's body. `router.refresh()` and full loads render every layout. Routes a shared
-cache can store (static and PPR pages) still send the whole document, so cache hits stay hits. `"use server"`
+not in a layout's body. `router.refresh()` and full loads render every layout. A PPR route caches
+each segment under its own key next to the full page, and sends every value so the cached HTML
+suits any browser; a prerendered page always sends the whole document. A page under a layout that
+hydrates as one root (a client provider around the pages) sends its large prop values once too,
+in the payload its client components rebuild from. `"use server"`
 functions work from forms, with or without JavaScript, and from client components, in `farm dev`
 and in production. Islands mode needs none of the RSC packages and is experimental. Both modes share
 the authoring rules on this page, so switching between them is a one-line change; the same contract

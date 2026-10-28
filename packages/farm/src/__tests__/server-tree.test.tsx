@@ -9,7 +9,10 @@ import {
   isolateFarmServerPageGraph,
   wrapFarmIsolatedClientGraph,
 } from "../client/isolated-boundary";
+import { getFarmIslandValueStore } from "../client/island-value-store";
+import { installFarmIslandValues } from "../client/island-values";
 import { createFarmServerTreeElement, renderFarmServerTreePage } from "../client/server-tree";
+import { _setCurrentRequestResolver } from "../server/request-bridge";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -432,5 +435,117 @@ describe("server tree pages", () => {
     expect(await createFarmServerTreeElement(React, "<p>static</p>", { load, ServerHtml })).toBe(
       null,
     );
+  });
+
+  describe("with island values (islands mode)", () => {
+    const items = Array.from({ length: 120 }, (_, index) => ({
+      id: `item-${index}`,
+      label: `Catalog entry ${index} with a description long enough to matter`,
+    }));
+    function CatalogSource({ items }: { items: Array<{ id: string; label: string }> }) {
+      const panel = usePanel();
+      return <p id="catalog">{`${items.length} items, ${panel.open ? "open" : "closed"}`}</p>;
+    }
+    modules["/src/catalog.tsx"] = {
+      __farm_client_boundary_originals__: { Catalog: CatalogSource },
+    };
+    const Catalog = createFarmIsolatedClientBoundary(
+      React,
+      CatalogSource,
+      "/src/catalog.tsx",
+      "Catalog",
+      "load",
+    );
+    async function ShopPage() {
+      await Promise.resolve();
+      return (
+        <main>
+          <h1>Shop</h1>
+          <Catalog items={items} />
+        </main>
+      );
+    }
+    installFarmIslandValues();
+    const valueKeys = (html: string) =>
+      [...html.matchAll(/data-farm-value="([0-9a-z]{14})"/g)].map((match) => match[1]!);
+    async function renderValuesPage(headers: Record<string, string> = {}) {
+      const request = new Request("http://localhost/shop", { headers });
+      _setCurrentRequestResolver(() => request);
+      try {
+        const page = await renderFarmServerTreePage(React, <ShopPage />, {
+          isolate: (node) => isolateFarmServerPageGraph(React, node),
+          values: true,
+        });
+        const stream = await renderToReadableStream(routeTree(page));
+        await stream.allReady;
+        return await new Response(stream).text();
+      } finally {
+        _setCurrentRequestResolver(undefined);
+      }
+    }
+
+    afterEach(() => {
+      delete (globalThis as Record<symbol, unknown>)[Symbol.for("farm.island-values")];
+    });
+
+    it("sends a large prop once, before the payload, and hydrates with it", async () => {
+      const html = await renderValuesPage();
+      const payload = /data-farm-server-tree="">([^<]*)<\/script>/.exec(html)![1]!;
+      expect(payload).toContain('"$farmValue"');
+      expect(payload).not.toContain("Catalog entry 7 with");
+      expect(valueKeys(html).length).toBeGreaterThan(0);
+      expect(html.lastIndexOf("data-farm-value=")).toBeLessThan(
+        html.indexOf("data-farm-server-tree"),
+      );
+
+      const container = document.createElement("div");
+      container.innerHTML = html;
+      document.body.append(container);
+      const { ServerHtml } = createClientRuntime();
+      const page = await createFarmServerTreeElement(
+        React,
+        container.querySelector("#__farm_page__")!,
+        { load, ServerHtml, values: getFarmIslandValueStore() },
+      );
+      const errors: unknown[] = [];
+      let root!: ReturnType<typeof hydrateRoot>;
+      await act(async () => {
+        root = hydrateRoot(container, routeTree(page), {
+          onRecoverableError: (error) => errors.push(error),
+        });
+      });
+      mountedRoots.push(root);
+      expect(errors).toEqual([]);
+      expect(container.querySelector("#catalog")!.textContent).toBe("120 items, closed");
+      // The page's client component reads the layout's context.
+      await click(container, "#header");
+      expect(container.querySelector("#catalog")!.textContent).toBe("120 items, open");
+    });
+
+    it("rebuilds navigation HTML that leaves out the values the browser holds", async () => {
+      const first = await renderValuesPage();
+      const keys = valueKeys(first);
+      const store = getFarmIslandValueStore();
+      store.ingest(Object.assign(document.createElement("div"), { innerHTML: first }));
+
+      const navigation = await renderValuesPage({ "x-farm-values": keys.join(",") });
+      expect(valueKeys(navigation)).toEqual([]);
+      expect(navigation.length).toBeLessThan(first.length - 5000);
+
+      const page = await createFarmServerTreeElement(
+        React,
+        Object.assign(document.createElement("div"), { innerHTML: navigation }).querySelector(
+          "#__farm_page__",
+        )!,
+        { load, ServerHtml: createClientRuntime().ServerHtml, values: store },
+      );
+      const container = document.createElement("div");
+      document.body.append(container);
+      const { createRoot } = await import("react-dom/client");
+      const root = createRoot(container);
+      await act(async () => root.render(routeTree(page)));
+      mountedRoots.push(root as unknown as ReturnType<typeof hydrateRoot>);
+      expect(container.querySelector("#catalog")!.textContent).toBe("120 items, closed");
+    });
   });
 });

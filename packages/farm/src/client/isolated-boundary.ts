@@ -5,16 +5,8 @@ import {
   FARM_VALUE_ATTRIBUTE,
   FARM_VALUE_REFERENCE,
   type FarmIslandValueStore,
+  getFarmIslandValuesServer,
 } from "./island-value-protocol";
-import type { FarmIslandValuesServer } from "./island-values";
-
-// Installed by the server (`installFarmIslandValues`), so the browser bundle never carries it.
-const ISLAND_VALUES_SERVER_KEY = Symbol.for("farm.island-values.server");
-function getIslandValuesServer(): FarmIslandValuesServer | undefined {
-  return (globalThis as typeof globalThis & Record<symbol, FarmIslandValuesServer | undefined>)[
-    ISLAND_VALUES_SERVER_KEY
-  ];
-}
 
 const REACT_ELEMENT_TYPE = Symbol.for("react.transitional.element");
 const LEGACY_REACT_ELEMENT_TYPE = Symbol.for("react.element");
@@ -223,7 +215,7 @@ export function createFarmIsolatedClientBoundary(
       if (boundaryOptions.slots) {
         const { render, wire } = splitSlotProps(ReactRuntime, props, `${boundaryId}s`, { next: 0 });
         renderProps = render as Record<string, unknown>;
-        const values = boundaryOptions.values ? getIslandValuesServer() : undefined;
+        const values = boundaryOptions.values ? getFarmIslandValuesServer() : undefined;
         if (values) {
           // Large values travel in scripts of their own, keyed by content, and a navigation
           // leaves out the ones the browser already holds.

@@ -19,6 +19,32 @@ export const FARM_MAX_HELD_VALUES = 128;
 /** Where the page's value store lives, shared by every copy of the runtime. */
 export const FARM_ISLAND_VALUE_STORE_KEY = Symbol.for("farm.island-values");
 
+/** The addressing a server installs (`installFarmIslandValues` in `island-values.ts`). */
+export interface FarmIslandValuesServerHook {
+  address(props: Record<string, unknown>): {
+    json: string;
+    values: Map<string, unknown>;
+    roots: string[];
+  };
+  select(
+    addressed: { json: string; values: Map<string, unknown>; roots: string[] },
+    held: ReadonlySet<string> | null,
+  ): Array<{ key: string; json: string }>;
+  held(): ReadonlySet<string> | null;
+}
+
+const ISLAND_VALUES_SERVER_KEY = Symbol.for("farm.island-values.server");
+
+/**
+ * @internal The value addressing this server installed, if any. Reached through a global so the
+ * browser bundle never carries it.
+ */
+export function getFarmIslandValuesServer(): FarmIslandValuesServerHook | undefined {
+  return (globalThis as typeof globalThis & Record<symbol, FarmIslandValuesServerHook | undefined>)[
+    ISLAND_VALUES_SERVER_KEY
+  ];
+}
+
 export interface FarmIslandValueStore {
   /** Reads the value scripts under `root` that the store does not hold yet. */
   ingest(root: ParentNode): void;

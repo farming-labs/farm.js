@@ -1,5 +1,11 @@
 import type React from "react";
 import {
+  FARM_VALUE_ATTRIBUTE,
+  FARM_VALUE_REFERENCE,
+  getFarmIslandValuesServer,
+  type FarmIslandValueStore,
+} from "./island-value-protocol";
+import {
   getFarmClientReference as getClientReference,
   subscribeFarmServerTreeUpdates,
   type FarmServerTreeUpdateListener as TreeUpdateListener,
@@ -360,7 +366,11 @@ async function resolveElement(
 }
 
 function serializeTreePayload(value: unknown): string {
-  return JSON.stringify(value)
+  return escapeTreeJson(JSON.stringify(value));
+}
+
+function escapeTreeJson(json: string): string {
+  return json
     .replace(/&/g, "\\u0026")
     .replace(/</g, "\\u003c")
     .replace(/>/g, "\\u003e")
@@ -500,17 +510,37 @@ function createTreeValue(
   }
 }
 
+/** A payload's JSON and the island values it sends with it (islands mode), as [key, json]. */
+type TreeValueScripts = ReadonlyArray<readonly [key: string, json: string]>;
+
 function createTreeScript(
   ReactRuntime: typeof React,
   attribute: string,
   value: string,
   json: string,
+  values: TreeValueScripts = [],
 ): React.ReactElement {
-  return ReactRuntime.createElement("script", {
+  const script = ReactRuntime.createElement("script", {
     type: "application/json",
     [attribute]: value,
     dangerouslySetInnerHTML: { __html: json },
   });
+  if (values.length === 0) return script;
+  // The values right before the payload: the browser re-renders exactly these, so hydration sees
+  // the markup the server sent.
+  return ReactRuntime.createElement(
+    ReactRuntime.Fragment,
+    null,
+    ...values.map(([valueKey, valueJson]) =>
+      ReactRuntime.createElement("script", {
+        key: valueKey,
+        type: "application/json",
+        [FARM_VALUE_ATTRIBUTE]: valueKey,
+        dangerouslySetInnerHTML: { __html: valueJson },
+      }),
+    ),
+    script,
+  );
 }
 
 function createTreePage(
@@ -519,18 +549,37 @@ function createTreePage(
   json: string,
   resolver: TreeResolver,
   key?: string,
+  values: TreeValueScripts = [],
 ): React.ReactElement {
   return ReactRuntime.createElement(
     ReactRuntime.Fragment,
     key === undefined ? null : { key },
     createTreeValue(ReactRuntime, tree, resolver) as React.ReactNode,
-    createTreeScript(ReactRuntime, FARM_SERVER_TREE_ATTRIBUTE, "", json),
+    createTreeScript(ReactRuntime, FARM_SERVER_TREE_ATTRIBUTE, "", json, values),
   );
+}
+
+/** The value scripts the server sent right before a payload script. */
+function readTreeValueScripts(script: Element): TreeValueScripts {
+  const values: Array<readonly [string, string]> = [];
+  for (
+    let node = script.previousElementSibling;
+    node?.tagName === "SCRIPT" && node.hasAttribute(FARM_VALUE_ATTRIBUTE);
+    node = node.previousElementSibling
+  ) {
+    values.unshift([node.getAttribute(FARM_VALUE_ATTRIBUTE)!, node.textContent ?? ""]);
+  }
+  return values;
 }
 
 export interface FarmServerTreeRenderOptions {
   /** Renders a subtree the resolver could not represent with its client components as islands. */
   isolate(element: React.ReactNode): React.ReactNode;
+  /**
+   * Islands mode: large values in the payload travel once, keyed by content, and a navigation
+   * leaves out the ones the browser holds.
+   */
+  values?: boolean;
 }
 
 /**
@@ -551,6 +600,18 @@ export async function renderFarmServerTreePage(
     chunks: new Map(),
   };
   const tree = await resolveValue(state, element, { parserSensitive: false }, new Set());
+  const values = options.values ? getFarmIslandValuesServer() : undefined;
+  const held = values ? values.held() : null;
+  const encode = (payload: Record<string, unknown>): { json: string; values: TreeValueScripts } => {
+    if (!values) return { json: serializeTreePayload(payload), values: [] };
+    const addressed = values.address(payload);
+    return {
+      json: escapeTreeJson(addressed.json),
+      values: values
+        .select(addressed, held)
+        .map((value) => [value.key, escapeTreeJson(value.json)] as const),
+    };
+  };
   const resolver: TreeResolver = {
     component(reference, exportName) {
       const Component = state.components.get(`${reference}#${exportName}`);
@@ -569,12 +630,16 @@ export async function renderFarmServerTreePage(
               ReactRuntime.Fragment,
               null,
               createTreeValue(ReactRuntime, encoded, resolver) as React.ReactNode,
-              createTreeScript(
-                ReactRuntime,
-                SERVER_TREE_CHUNK_ATTRIBUTE,
-                String(id),
-                serializeTreePayload({ t: encoded }),
-              ),
+              (() => {
+                const payload = encode({ t: encoded });
+                return createTreeScript(
+                  ReactRuntime,
+                  SERVER_TREE_CHUNK_ATTRIBUTE,
+                  String(id),
+                  payload.json,
+                  payload.values,
+                );
+              })(),
             );
             chunk.status = "fulfilled";
             return chunk.value;
@@ -602,11 +667,14 @@ export async function renderFarmServerTreePage(
       );
     },
   };
+  const payload = encode({ v: 1, t: tree });
   const page = createTreePage(
     ReactRuntime,
     tree,
-    serializeTreePayload({ v: 1, t: tree }),
+    payload.json,
     resolver,
+    undefined,
+    payload.values,
   );
   // The browser renders the page through FarmServerTreePage; the server renders the same layer.
   return ReactRuntime.createElement(function FarmServerTreePage() {
@@ -630,6 +698,8 @@ export interface FarmServerTreeElementOptions {
   ServerHtml: React.ComponentType<any>;
   /** Remounts the page's client components when it changes, as a navigation does. */
   key?: string;
+  /** Islands mode's value store, for payloads that reference island values. */
+  values?: Pick<FarmIslandValueStore, "ingest" | "resolve">;
 }
 
 function parseHtml(html: string): DocumentFragment {
@@ -661,17 +731,32 @@ export async function createFarmServerTreeElement(
   const script = root.querySelector<HTMLScriptElement>(`script[${FARM_SERVER_TREE_ATTRIBUTE}]`);
   if (!script) return null;
   const json = script.textContent ?? "";
-  const payload = JSON.parse(json) as { v?: number; t: TreeValue };
+  // A payload that names island values reads them from the page (or this navigation's HTML) and
+  // from the values the browser already holds.
+  let ingested = false;
+  const parsePayload = (text: string): unknown => {
+    const parsed = JSON.parse(text);
+    if (!text.includes(`"${FARM_VALUE_REFERENCE}"`)) return parsed;
+    if (!options.values) throw new Error("island values need islands mode");
+    if (!ingested) {
+      options.values.ingest(root);
+      ingested = true;
+    }
+    return options.values.resolve(parsed);
+  };
+  const payload = parsePayload(json) as { v?: number; t: TreeValue };
   if (payload.v !== 1) throw new Error("unsupported server tree payload version");
+  const values = readTreeValueScripts(script);
 
-  const chunks = new Map<number, { tree: TreeValue; json: string }>();
+  const chunks = new Map<number, { tree: TreeValue; json: string; values: TreeValueScripts }>();
   for (const chunkScript of root.querySelectorAll<HTMLScriptElement>(
     `script[${SERVER_TREE_CHUNK_ATTRIBUTE}]`,
   )) {
     const chunkJson = chunkScript.textContent ?? "";
     chunks.set(Number(chunkScript.getAttribute(SERVER_TREE_CHUNK_ATTRIBUTE)), {
-      tree: (JSON.parse(chunkJson) as { t: TreeValue }).t,
+      tree: (parsePayload(chunkJson) as { t: TreeValue }).t,
       json: chunkJson,
+      values: readTreeValueScripts(chunkScript),
     });
   }
 
@@ -705,7 +790,13 @@ export async function createFarmServerTreeElement(
         ReactRuntime.Fragment,
         null,
         createTreeValue(ReactRuntime, chunk.tree, resolver) as React.ReactNode,
-        createTreeScript(ReactRuntime, SERVER_TREE_CHUNK_ATTRIBUTE, String(id), chunk.json),
+        createTreeScript(
+          ReactRuntime,
+          SERVER_TREE_CHUNK_ATTRIBUTE,
+          String(id),
+          chunk.json,
+          chunk.values,
+        ),
       );
       return { status: "fulfilled", value, promise: Promise.resolve(value) };
     },
@@ -724,7 +815,7 @@ export async function createFarmServerTreeElement(
   };
 
   // Validate the whole tree now, so a missing chunk or module falls back before hydration starts.
-  const build = () => createTreePage(ReactRuntime, payload.t, json, resolver);
+  const build = () => createTreePage(ReactRuntime, payload.t, json, resolver, undefined, values);
   build();
 
   function FarmServerTreePage(): React.ReactNode {

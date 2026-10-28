@@ -869,6 +869,13 @@ export class ServerRenderer {
     return { html: await this.renderElementToCompleteHTML(element, options), head: "" };
   }
 
+  /** Islands mode sends large prop values once, keyed by content (RFC 0003). */
+  private islandValues(): boolean {
+    return (
+      resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) === "islands"
+    );
+  }
+
   /**
    * Render the route tree used by client navigation without producing a second
    * document response. Layout markers let the browser preserve the longest
@@ -903,7 +910,9 @@ export class ServerRenderer {
       // unless the page renders as a server tree the layout's root rebuilds.
       element =
         input.serverTree && this.rendererRuntime.renderServerTreePage
-          ? await this.rendererRuntime.renderServerTreePage(element)
+          ? await this.rendererRuntime.renderServerTreePage(element, {
+              values: this.islandValues(),
+            })
           : this.rendererRuntime.isolateServerPageGraph(element);
     }
     element = this.createPageBoundary(element, {
@@ -1917,7 +1926,9 @@ export class ServerRenderer {
               // server-tree page instead joins it: the browser rebuilds the resolved tree there.
               pageElement =
                 routeManifestEntry?.serverTree === true && this.rendererRuntime.renderServerTreePage
-                  ? await this.rendererRuntime.renderServerTreePage(pageElement)
+                  ? await this.rendererRuntime.renderServerTreePage(pageElement, {
+                      values: this.islandValues(),
+                    })
                   : this.rendererRuntime.isolateServerPageGraph(pageElement);
             }
 
