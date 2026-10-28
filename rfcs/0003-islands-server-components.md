@@ -186,8 +186,8 @@ and a navigation from 29.1 KB to 5.7 KB.
 Measured on the implementation (`benchmarks/server-components-payload`, a 300-page docs app whose
 layout passes a 32 KB tree to two client components, production builds in Chrome): a navigation drops
 from 100.9 KB raw (15.7 KB brotli) to 38.4 KB (12.3 KB), level with `"rsc"` at 37.4 KB (12.0 KB),
-with 28% less first-load JavaScript than `"rsc"`. Most of what remains is the layout's HTML, which
-segment navigation (phase 3) removes.
+with 28% less first-load JavaScript than `"rsc"`. Segment navigation then removes the layout's HTML:
+8.0 KB raw (2.5 KB brotli) per navigation.
 
 ### 4. Hydration: islands, then regions
 
@@ -323,6 +323,14 @@ navigation with state kept in layouts; back and forward; HMR; error and not-foun
   `"use server"` actions with progressive enhancement, content-addressed values with navigation
   omission, in `farm dev` and production. Not yet: the island manifest as one payload, shared value
   files for static pages, values in server-tree payloads.
+- Phase 3, first part: segment navigation in production. A navigation sends the layouts on screen
+  (`X-Farm-Layout-Chain`, keyed by pattern and params); the server renders the page and the layouts
+  that changed, and marks the rest `data-farm-layout-kept`. The browser applies a segment only where
+  the page still shows those layouts, and fetches the whole document otherwise (a stale prefetch).
+  Not kept: the root layout, any layout when one in the chain hydrates as a root, and routes with
+  slots. Routes a shared cache can store send the whole document, and the request-scoped response
+  is `private, no-store`. A kept layout does not render, as in Next.js: access checks belong in
+  middleware or page guards. Not yet: prefetch and caching of segments, PPR segments.
 - Contract suite: `tests/e2e-server-components`, the same tests for `"rsc"` and `"islands"`, against
   `farm dev` and production builds.
 
