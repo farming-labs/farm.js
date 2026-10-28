@@ -75,29 +75,63 @@ export default defineRoutes(({ page, api }) => [
 Prefer a file route when the URL maps to a folder. Reach for `defineRoutes` for colocated
 features, URLs a folder can't express, and route lists generated from data or configuration.
 
-The browser loads the routes file to hydrate its pages, so the client build keeps only what that
-needs: components, `pending`/`error`/`notFound`, params and search options, and actions. It removes
-`guard`, `data`, `staticPaths`, `generateMetadata`, and `api()` handlers from inline route options,
-along with the imports and top-level helpers only they use, so database clients and credentials
-stay on the server. This covers `page()`, `layout()`, `createRoute()`, and `api()` imported from
-`@farm.js/core`, `routesBuilder`, the builder `defineRoutes` passes its callback, const aliases or
-destructuring of those, and definition objects such as `{ kind: "page", path, component, guard }`
-(an `{ kind: "api" }` object keeps an empty `methods` map). Write route options inline for this to
-apply: a client build fails when a call passes its options by reference (`api("/x", handlers)`),
-spreads another object or list into them, or uses a computed key; when a definition object spreads
-or computes its `kind`; and when a route builder leaves the routes module's sight, for example
-passed to a helper (`wrap(page)`), because those could still carry server code. A client build also
-fails if the routes file, or an application module it keeps, still imports a Node builtin such as
-`node:fs`.
+### Routes files never reach the browser
 
-The check fails closed. Farm treats the routes file as a routes module even when it only has type
-imports from `@farm.js/core` or none at all, and so are the modules it takes route lists or a
-`defineRoutes` callback from. Once the shapes above are stripped, a client build fails if a routes
-module still sets `guard`, `data`, `staticPaths`, `generateMetadata`, `methods`, or an HTTP method
-key anywhere outside the route options Farm kept, for example
-`{ ...adminBase, path, guard }` or `Object.assign({ kind: "page" }, { guard })`. JSX props and
-other arguments passed to package functions are left alone. Move a helper that uses one of those
-keys for something else out of the routes file.
+A routes file holds server code: guards, `data` hooks, `staticPaths`, `generateMetadata`, API
+handlers, and the database clients and credentials they import. The browser never loads it. When
+a programmatic page or layout hydrates, its client copy imports only the module that defines its
+`component` (and its `pending` component), so give every component its own module and import it
+into the routes file:
+
+**src/features/admin/page.tsx**
+
+```tsx
+export function AdminPage({ data }: { data: { users: string[] } }) {
+  return (
+    <ul>
+      {data.users.map((user) => (
+        <li key={user}>{user}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+**src/routes.tsx**
+
+```tsx
+import { defineRoutes } from "@farm.js/core";
+import { AdminPage } from "./features/admin/page";
+import { db } from "./lib/db";
+import { requireAdmin } from "./lib/auth";
+
+export default defineRoutes(({ page }) => [
+  page("/admin", {
+    component: AdminPage,
+    guard: requireAdmin,
+    data: { main: async () => ({ users: await db.listUsers() }) },
+  }),
+]);
+```
+
+Farm finds each component's module from the routes it evaluates on the server, so the route list
+can be built any way you like: helpers, lists imported from other modules, definition objects, or
+options assigned after `page()` returns. Its params, search, guard, and data run on the server,
+and the page hydrates from the props the server resolved for the document.
+
+A client build fails when a hydrating page or layout's component has no module of its own: it is
+declared in the routes file (or another module that exports route definitions), computed there
+(`component: memo(AdminPage)`), or imported straight from a package. Move it to its own module, or
+re-export the package component from one. A client build also fails if any browser module imports
+a routes file or a module that exports route definitions; import the component, server function,
+or helper from its own module instead. The one exception is the action-only proxy that
+[route actions](#route-actions) get with Server Actions enabled. Pages and layouts that don't
+hydrate ship no client code, so these rules don't apply to them.
+
+> **Migration:** earlier releases loaded the routes file in the browser and stripped its server
+> options. Move components declared in a routes file into their own modules, and stop importing
+> route definitions from client components. Programmatic pages with `params` or `search` now
+> hydrate from server-resolved props, like pages with `guard` or `data`.
 
 ## Named slots and intercepted routes
 

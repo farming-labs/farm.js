@@ -53,6 +53,12 @@ import {
   parseProgrammaticRouteModuleId,
   scanProgrammaticPagePaths,
 } from "./routes-shared";
+import {
+  generateProgrammaticClientRouteModule,
+  programmaticClientRouteKey,
+  type FarmProgrammaticRoutesPluginApi,
+  type ProgrammaticClientRoutes,
+} from "./programmatic-routes-client";
 import type { FarmDocsAPIHandler } from "./docs";
 import {
   createMarkdownMirrorResponse,
@@ -93,6 +99,7 @@ import { resolveDevGlobalStylesheetHref } from "./server/dev-styles";
 import { FARM_LAYOUT_ELEMENT_CLIENT_SOURCE } from "./document-layout-client";
 import {
   getClientModuleMetadata,
+  resolveModuleSourcePath,
   getIslandStrategyExport,
   hasUseClientDirective,
   isIsolatableClientBoundarySource,
@@ -231,6 +238,8 @@ interface FarmVitePluginOptions extends FarmConfig {
   publicDir?: FarmUserConfig["publicDir"];
   /** @internal Modules selected by the compiled isolated-hydration ownership plan. */
   isolatedClientBoundaryModules?: ReadonlySet<string>;
+  /** @internal Component modules of programmatic routes, read from the evaluated routes files. */
+  programmaticClientRoutes?: ProgrammaticClientRoutes;
 }
 
 type TypeArtifactSelection = Pick<
@@ -1139,8 +1148,12 @@ export function farmPlugin(
     console.log(log);
   };
 
+  const getProgrammaticClientRoutes = () =>
+    options.programmaticClientRoutes ?? farmApp?.getRouteManager().getProgrammaticClientRoutes();
+
   return {
     name: "farm",
+    api: { getProgrammaticClientRoutes } satisfies FarmProgrammaticRoutesPluginApi,
 
     config(userConfig, configEnv) {
       isBuild = configEnv.command === "build";
@@ -1601,6 +1614,7 @@ export function farmPlugin(
       refreshRouteDiscovery = async (reason: string) => {
         await routeManager.discoverRoutes();
         await apiRouteManager.discoverRoutes();
+        invalidateProgrammaticClientRouteModules(server);
         const manifestModule = server.moduleGraph.getModuleById("/@farm/manifest");
         if (manifestModule) {
           server.moduleGraph.invalidateModule(manifestModule);
@@ -3427,7 +3441,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
       }
     },
 
-    async load(id) {
+    async load(id, loadOptions) {
       if (typeof fontImports.load === "function") {
         const fontModule = await fontImports.load.call(this, id);
         if (fontModule) return fontModule;
@@ -3440,7 +3454,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
       if (parseProgrammaticRouteModuleId(id)) {
         const renderer = farmApp?.getConfig().renderer || resolveFarmRenderer(options.renderer);
-        return generateProgrammaticRouteModule(id, server?.config.root || options.root, renderer);
+        const root = server?.config.root || options.root;
+        if (isClientEnvironment(this, loadOptions)) {
+          return generateProgrammaticClientRouteModuleForId(
+            id,
+            root,
+            renderer,
+            getProgrammaticClientRoutes(),
+            (file) => this.addWatchFile(file),
+          );
+        }
+        return generateProgrammaticRouteModule(id, root, renderer);
       }
 
       if (isFarmClientVirtualId(id)) {
@@ -4198,6 +4222,64 @@ function resolveDevelopmentRoot(farmRoot: string | undefined, viteRoot: string):
 function isFarmClientVirtualId(id: string): boolean {
   const pathname = id.split("?", 1)[0];
   return pathname === "/@farm/client" || pathname === "/@farm/client.js";
+}
+
+function isClientEnvironment(
+  context: unknown,
+  loadOptions: { ssr?: boolean } | undefined,
+): boolean {
+  const environment = (
+    context as { environment?: { name?: string; config?: { consumer?: string } } }
+  ).environment;
+  if (environment?.config?.consumer) return environment.config.consumer === "client";
+  if (environment?.name) return environment.name === "client";
+  return loadOptions?.ssr !== true;
+}
+
+/**
+ * The browser copy of a programmatic route imports only its component module, so a route list
+ * change does not reach it through the module graph. Drop the cached copies after discovery.
+ */
+function invalidateProgrammaticClientRouteModules(server: ViteDevServer): void {
+  const graph = server.environments?.client?.moduleGraph;
+  if (!graph) return;
+  for (const [id, module] of graph.idToModuleMap) {
+    if (parseProgrammaticRouteModuleId(id)) graph.invalidateModule(module);
+  }
+}
+
+function generateProgrammaticClientRouteModuleForId(
+  moduleId: string,
+  root: string | undefined,
+  renderer: FarmRenderer,
+  clientRoutes: ProgrammaticClientRoutes | undefined,
+  watchFile: (file: string) => void,
+): string {
+  const parsed = parseProgrammaticRouteModuleId(moduleId)!;
+  const routesFile = resolveRealModuleFile(parsed.filePath, root);
+  watchFile(routesFile);
+  return generateProgrammaticClientRouteModule({
+    kind: parsed.kind,
+    routePath: parsed.routePath,
+    routesFile,
+    route:
+      parsed.kind === "api"
+        ? undefined
+        : clientRoutes?.routes.get(
+            programmaticClientRouteKey(routesFile, parsed.kind, parsed.routePath),
+          ),
+    rendererServer: renderer.server,
+    toImportSpecifier: (file) => toProgrammaticRouteImportSpecifier(file, root),
+  });
+}
+
+function resolveRealModuleFile(filePath: string, root: string | undefined): string {
+  const resolved = resolveModuleSourcePath(filePath, root) ?? filePath;
+  try {
+    return toPosixPath(fs.realpathSync(resolved));
+  } catch {
+    return toPosixPath(resolved);
+  }
 }
 
 function generateProgrammaticRouteModule(

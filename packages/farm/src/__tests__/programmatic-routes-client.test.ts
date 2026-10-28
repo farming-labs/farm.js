@@ -1,13 +1,36 @@
 // @vitest-environment node
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { build, type Rollup } from "vite";
+import { build, createServer, type Plugin, type Rollup } from "vite";
+import { build as buildApp } from "../build";
+import { resolveConfig } from "../config";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
+import {
+  generateProgrammaticClientRouteModule,
+  programmaticClientRouteKey,
+  resolveProgrammaticClientRoutes,
+  type ProgrammaticClientRoutes,
+  type ProgrammaticRouteGraph,
+  type ProgrammaticRouteGraphModule,
+} from "../programmatic-routes-client";
 import { createRoute, createRouteModuleFromProgrammaticPage } from "../routes";
+import { RouteManager } from "../routing/route-manager";
+import { normalizeProgrammaticRoutePath } from "../routes-shared";
+import { farmPlugin } from "../vite";
 
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const temporaryRoots: string[] = [];
 
 afterEach(() => {
@@ -16,452 +39,544 @@ afterEach(() => {
   }
 });
 
-const SERVER_FILES = {
-  "db.ts": `
-globalThis.__farmPool = "postgres://app:DB_PASSWORD_SECRET@db.internal/app";
-export const db = {
-  async find(id: string) {
-    return { id, title: "PRIVATE_ROW_" + id };
-  },
-};
-`,
-  "fs-reader.ts": `
-import { readFileSync } from "node:fs";
-export function readPrivateFile() {
-  return readFileSync("/etc/FS_READER_SECRET", "utf8");
-}
-`,
-  "components.tsx": `
-export function DocPage({ data }: any) {
-  return <main>CLIENT_COMPONENT_MARKER {data?.title}</main>;
-}
-export function DocNotFound() {
-  return <main>CLIENT_NOT_FOUND_MARKER</main>;
-}
-`,
-};
-
-const ROUTES = `
-import { createRoute, defineRoutes } from "@farm.js/core";
-import { db } from "./db";
-import { readPrivateFile } from "./fs-reader";
-import { DocNotFound, DocPage } from "./components";
-
-const owners: Record<string, string> = { "42": "OWNER_TABLE_SECRET" };
-
-async function loadDoc(id: string) {
-  return db.find(id);
+function graphOf(modules: ProgrammaticRouteGraphModule[]): ProgrammaticRouteGraph {
+  const byId = new Map(modules.map((module) => [module.id, module]));
+  return {
+    getModuleById: (id) => byId.get(id),
+    getModulesByFile: (file) => modules.filter((module) => module.file === file),
+  };
 }
 
-export const DocRoute = createRoute("/docs/[id]", {
-  params: { parse: (value: any) => value },
-  async guard({ params, context }: any) {
-    if (owners[params.id] !== context.userId) throw new Error("GUARD_SECRET_MESSAGE");
-  },
-  data: {
-    async main({ params }: any) {
-      return loadDoc(params.id);
-    },
-  },
-  async generateMetadata({ params }: any) {
-    return { title: (await loadDoc(params.id)).title };
-  },
-  staticPaths: () => [{ id: readPrivateFile() }],
-  notFound: DocNotFound,
-  component: DocPage,
-});
-
-export default defineRoutes(({ page, api }) => [
-  DocRoute,
-  page("/about", {
-    data: { main: () => db.find("about") },
-    component: DocPage,
-  }),
-  api("/export.json", {
-    runtime: "node",
-    GET: async () => Response.json({ file: readPrivateFile() }),
-  }),
-]);
-`;
-
-describe("programmatic routes in the client build", () => {
-  it.each([false, true])(
-    "keeps guards, data, metadata, static paths, API handlers, and their imports out of the browser (through a route module: %s)",
-    async (viaRouteModule) => {
-      const output = await buildRoutes(ROUTES, { ssr: false, viaRouteModule });
-
-      for (const secret of [
-        "DB_PASSWORD_SECRET",
-        "PRIVATE_ROW_",
-        "FS_READER_SECRET",
-        "OWNER_TABLE_SECRET",
-        "GUARD_SECRET_MESSAGE",
-        "node:fs",
-      ]) {
-        expect(output, secret).not.toContain(secret);
-      }
-      expect(output).toContain("CLIENT_COMPONENT_MARKER");
-      expect(output).toContain("CLIENT_NOT_FOUND_MARKER");
-      expect(output).toContain("/docs/[id]");
-      expect(output).toContain("__farmServerHooks");
-      expect(output).toContain('"node"');
-    },
-  );
-
-  it("leaves the server build untouched", async () => {
-    const output = await buildRoutes(ROUTES, { ssr: true });
-
-    expect(output).toContain("DB_PASSWORD_SECRET");
-    expect(output).toContain("GUARD_SECRET_MESSAGE");
-    expect(output).toContain("OWNER_TABLE_SECRET");
-    expect(output).not.toContain("__farmServerHooks");
+const resolve = (graph: ProgrammaticRouteGraph, routes: unknown[]) =>
+  resolveProgrammaticClientRoutes({
+    graph,
+    routesFile: "/app/src/routes.tsx",
+    routes,
+    normalizeRoutePath: normalizeProgrammaticRoutePath,
   });
+const routeAt = (result: ProgrammaticClientRoutes, routePath: string, kind = "page" as const) =>
+  result.routes.get(programmaticClientRouteKey("/app/src/routes.tsx", kind, routePath));
 
-  it("fails the client build when the routes module itself still needs a Node builtin", async () => {
-    await expect(
-      buildRoutes(
-        `
-import { readFileSync } from "node:fs";
-import { createRoute } from "@farm.js/core";
-const banner = readFileSync("/etc/banner", "utf8");
-export const Home = createRoute("/", { component: () => <main>{banner}</main> });
-`,
-        { ssr: false },
-      ),
-    ).rejects.toThrow(/still imports the server-only module "node:fs"/);
-  });
+describe("resolving programmatic route components", () => {
+  function AdminPage() {
+    return null;
+  }
+  function Pending() {
+    return null;
+  }
 
-  it("fails the client build when a component the routes keep reaches a Node builtin", async () => {
-    await expect(
-      buildRoutes(
-        `
-import { createRoute } from "@farm.js/core";
-import { readPrivateFile } from "./fs-reader";
-export const Home = createRoute("/", { component: () => <main>{readPrivateFile()}</main> });
-`,
-        { ssr: false },
-      ),
-    ).rejects.toThrow(/reaches the server-only module ".*fs.*" through the programmatic routes/);
-  });
-  it.each([
-    ["imported handlers", `api("/api/users", handlers)`, "are not an object literal"],
-    ["spread handlers", `api("/api/users", { ...handlers })`, "spread another object"],
-    ["page options by reference", `page("/admin", adminOptions)`, "are not an object literal"],
-    ["a computed key", 'api("/api/users", { [method]: handlers.GET })', "use a computed key"],
-  ])("refuses route options the client build can't strip: %s", async (_name, call, problem) => {
-    await expect(
-      buildRoutes(
-        `
-import { defineRoutes } from "@farm.js/core";
-import { db } from "./db";
-const handlers = { GET: async () => Response.json(await db.find("1")) };
-const adminOptions = { guard: () => db.find("admin"), component: () => null };
-const method = "GET";
-export default defineRoutes(({ api, page }) => [${call}]);
-`,
-        { ssr: false },
-      ),
-    ).rejects.toThrow(
-      `in ${call}, the ${call.slice(0, call.indexOf("("))}() route options ${problem}`,
+  it("finds the module that defines a component, past barrels that re-export it", () => {
+    const routes = [
+      { kind: "page", path: "/admin/", component: AdminPage, pending: Pending, guard() {} },
+      { kind: "layout", path: "/admin", component: Pending },
+    ];
+    const result = resolve(
+      graphOf([
+        {
+          id: "/app/src/routes.tsx",
+          file: "/app/src/routes.tsx",
+          imports: ["/app/src/features/index.ts", "/app/src/db.ts"],
+          exports: { default: { __farmRoutes: true, routes } },
+        },
+        { id: "/app/src/db.ts", file: "/app/src/db.ts", imports: [], exports: { db: {} } },
+        {
+          id: "/app/src/features/index.ts",
+          file: "/app/src/features/index.ts",
+          imports: ["/app/src/features/admin.tsx"],
+          exports: { AdminPage, Pending },
+        },
+        {
+          id: "/app/src/features/admin.tsx",
+          file: "/app/src/features/admin.tsx",
+          imports: [],
+          exports: { AdminPage, Pending },
+        },
+      ]),
+      routes,
     );
+
+    expect(routeAt(result, "/admin")).toEqual({
+      kind: "page",
+      path: "/admin",
+      routesFile: "/app/src/routes.tsx",
+      component: { file: "/app/src/features/admin.tsx", exportName: "AdminPage" },
+      pending: { file: "/app/src/features/admin.tsx", exportName: "Pending" },
+      serverProps: ["guard"],
+    });
+    expect(routeAt(result, "/admin", "layout" as any)?.component?.exportName).toBe("Pending");
+    expect([...result.routeSourceFiles]).toEqual(["/app/src/routes.tsx"]);
   });
 
-  it("still strips string-literal computed keys", async () => {
-    const output = await buildRoutes(
-      `
-import { defineRoutes } from "@farm.js/core";
-import { db } from "./db";
-export default defineRoutes(({ api }) => [api("/api/users", { ["GET"]: () => db.find("1") })]);
-`,
-      { ssr: false },
+  it("records what the server resolves, however the options were set", () => {
+    const route: Record<string, unknown> = { kind: "page", path: "/docs", component: AdminPage };
+    route.data = { main: () => ({}) };
+    route.search = { parse: (value: unknown) => value };
+    const result = resolve(
+      graphOf([
+        {
+          id: "/app/src/routes.tsx",
+          file: "/app/src/routes.tsx",
+          imports: ["/app/src/page.tsx"],
+          exports: { default: [route] },
+        },
+        { id: "/app/src/page.tsx", file: "/app/src/page.tsx", imports: [], exports: { AdminPage } },
+      ]),
+      [route],
     );
-    expect(output).not.toContain("DB_PASSWORD_SECRET");
+    expect(routeAt(result, "/docs")?.serverProps).toEqual(["search", "data"]);
   });
 
-  it.each([
-    [
-      "route definition objects",
-      `import { defineRoutes } from "@farm.js/core";
-const definitions = [
-  { kind: "page", path: "/admin", component: DocPage, guard: () => db.find("admin"), data: { main: () => db.find("1") } },
-  { kind: "api", path: "/api/x", methods: { GET: () => db.find("2") } },
-  { kind: "layout", path: "/", component: DocPage, generateMetadata: () => db.find("3") },
-];
-export default defineRoutes(definitions);`,
-    ],
-    [
-      "routesBuilder",
-      `import { defineRoutes, routesBuilder } from "@farm.js/core";
-export default defineRoutes([
-  routesBuilder.page("/admin", { component: DocPage, guard: () => db.find("admin") }),
-  routesBuilder.api("/api/x", { GET: () => db.find("2") }),
-]);`,
-    ],
-    [
-      "routesBuilder through the module namespace",
-      `import * as farm from "@farm.js/core";
-export default farm.defineRoutes([
-  farm.routesBuilder.page("/admin", { component: DocPage, data: { main: () => db.find("1") } }),
-]);`,
-    ],
-    [
-      "a const alias",
-      `import { defineRoutes, page as definePage } from "@farm.js/core";
-const p = definePage;
-export default defineRoutes([p("/admin", { component: DocPage, data: { main: () => db.find("1") } })]);`,
-    ],
-    [
-      "a builder destructured inside the callback",
-      `import { defineRoutes } from "@farm.js/core";
-export default defineRoutes((r) => {
-  const { page, api: route } = r;
-  return [
-    page("/admin", { component: DocPage, data: { main: () => db.find("1") } }),
-    route("/api/x", { GET: () => db.find("2") }),
-  ];
-});`,
-    ],
-    [
-      "a named routes callback",
-      `import { defineRoutes, type ProgrammaticRouteBuilder } from "@farm.js/core";
-function routes(b: ProgrammaticRouteBuilder) {
-  return [b.page("/admin", { component: DocPage, guard: () => db.find("admin") })];
-}
-export default defineRoutes(routes);`,
-    ],
-  ])("strips server-only keys from %s", async (_name, routes) => {
-    const source = `import { db } from "./db";
-import { DocPage } from "./components";
-${routes}`;
-    for (const viaRouteModule of [false, true]) {
-      const output = await buildRoutes(source, { ssr: false, viaRouteModule });
-      expect(output).not.toContain("DB_PASSWORD_SECRET");
-      expect(output).not.toContain("PRIVATE_ROW_");
-      expect(output).toContain("CLIENT_COMPONENT_MARKER");
+  it("refuses components with no module of their own", () => {
+    function Inline() {
+      return null;
     }
-  });
-
-  it("keeps an empty methods map on API definition objects", async () => {
-    const output = await buildRoutes(
-      `
-import { defineRoutes } from "@farm.js/core";
-import { db } from "./db";
-export default defineRoutes([{ kind: "api", path: "/api/x", runtime: "node", methods: { GET: () => db.find("1") } }]);
-`,
-      { ssr: false },
+    function Exported() {
+      return null;
+    }
+    function FromPackage() {
+      return null;
+    }
+    const routes = [
+      { kind: "page", path: "/inline", component: Inline },
+      { kind: "page", path: "/exported", component: Exported },
+      { kind: "page", path: "/package", component: FromPackage },
+      { kind: "page", path: "/sibling", component: AdminPage },
+    ];
+    const result = resolve(
+      graphOf([
+        {
+          id: "/app/src/routes.tsx",
+          file: "/app/src/routes.tsx",
+          imports: ["pkg", "/app/src/admin/routes.ts"],
+          exports: { default: routes, Exported },
+        },
+        { id: "pkg", imports: [], exports: { FromPackage }, external: true },
+        {
+          id: "/app/src/admin/routes.ts",
+          file: "/app/src/admin/routes.ts",
+          imports: [],
+          exports: { AdminPage, adminRoutes: [routes[3]] },
+        },
+      ]),
+      routes,
     );
-    expect(output).not.toContain("DB_PASSWORD_SECRET");
-    expect(output).toMatch(/methods: \{\}/);
-    expect(output).toContain('"node"');
-  });
 
-  it.each([
-    [
-      "a builder passed to a helper",
-      `const wrap = (factory: any) => factory("/admin", { component: () => null, guard: () => db.find("1") });
-export default defineRoutes(({ page }) => [wrap(page)]);`,
-      /can't follow the route builder "page" in wrap\(page\)/,
-    ],
-    [
-      "a builder stored in an object",
-      `const builders = { page };
-export default defineRoutes(({ page }) => [builders.page("/admin", { component: () => null, guard: () => db.find("1") })]);`,
-      /can't follow the route builder "page" in page,/,
-    ],
-    [
-      "a builder handed on whole",
-      `const build = (builder: any) => [builder.page("/admin", { component: () => null, guard: () => db.find("1") })];
-export default defineRoutes((r) => build(r));`,
-      /can't follow the route builder "r" in build\(r\)/,
-    ],
-    [
-      "a definition object that spreads",
-      `const hooks = { guard: () => db.find("1") };
-export default defineRoutes([{ kind: "page", path: "/admin", component: () => null, ...hooks }]);`,
-      /the \{ kind: "page" \} route definition spread another object/,
-    ],
-    [
-      "a definition object whose kind is computed",
-      `const kind = "page";
-export default defineRoutes([{ kind, path: "/admin", component: () => null, guard: () => db.find("1") }]);`,
-      /the route definition sets kind to an expression/,
-    ],
-    [
-      "spread factory arguments",
-      `const args = ["/admin", { component: () => null, guard: () => db.find("1") }] as const;
-export default defineRoutes(({ page }) => [page(...args)]);`,
-      /the page\(\) route options are spread in from a list/,
-    ],
-  ])("refuses %s", async (_name, routes, message) => {
-    await expect(
-      buildRoutes(
-        `import { defineRoutes } from "@farm.js/core";
-import { db } from "./db";
-${routes}`,
-        { ssr: false },
-      ),
-    ).rejects.toThrow(message);
-  });
-
-  it("leaves other members of the module namespace and shadowing locals alone", async () => {
-    const output = await buildRoutes(
-      `
-import * as farm from "@farm.js/core";
-import { page } from "@farm.js/core";
-import { db } from "./db";
-import { DocPage } from "./components";
-function Pager({ items }: any) {
-  const page = items.length;
-  return <nav>{page} {String(farm.isNotFoundError)}</nav>;
-}
-export default farm.defineRoutes([
-  page("/docs", { component: DocPage, pending: Pager, data: { main: () => db.find("1") } }),
-]);
-`,
-      { ssr: false },
-    );
-    expect(output).not.toContain("DB_PASSWORD_SECRET");
-    expect(output).toContain("CLIENT_COMPONENT_MARKER");
+    expect(routeAt(result, "/inline")?.problem).toMatch(/not exported by any module/);
+    expect(routeAt(result, "/exported")?.problem).toMatch(/routes\.tsx, which defines routes/);
+    expect(routeAt(result, "/package")?.problem).toMatch(/comes from a package/);
+    expect(routeAt(result, "/sibling")?.problem).toMatch(/admin\/routes\.ts, which defines routes/);
+    expect([...result.routeSourceFiles].sort()).toEqual([
+      "/app/src/admin/routes.ts",
+      "/app/src/routes.tsx",
+    ]);
   });
 });
 
-describe("routes modules the client build can't read fully", () => {
-  const ADMIN = `import { db } from "./db";
-import { DocPage } from "./components";
-`;
-  const expectClean = (output: string) => {
-    expect(output).not.toContain("DB_PASSWORD_SECRET");
-    expect(output).not.toContain("PRIVATE_ROW_");
-    expect(output).toContain("CLIENT_COMPONENT_MARKER");
+describe("generated client route modules", () => {
+  const base = {
+    routesFile: "/app/src/routes.tsx",
+    rendererServer: "@farm.js/core/renderer/react/server",
+    toImportSpecifier: (file: string) => file.replace("/app", ""),
   };
 
-  it("strips a routes file whose only Farm import is a type", async () => {
-    const output = await buildRoutes(
-      `import type { ProgrammaticRouteDefinition } from "@farm.js/core";
-${ADMIN}
-export default [
-  { kind: "page", path: "/admin", component: DocPage, guard: () => db.find("admin"), data: { main: () => db.find("1") } },
-] satisfies ProgrammaticRouteDefinition[];`,
-      { ssr: false, viaRouteModule: true },
-    );
-    expectClean(output);
-    expect(output).toContain("__farmServerHooks");
-  });
-
-  it("strips a routes file that imports nothing from Farm", async () => {
-    const output = await buildRoutes(
-      `${ADMIN}
-export default [
-  { kind: "page", path: "/admin", component: DocPage, guard: () => db.find("admin") },
-  { kind: "api", path: "/api/x", methods: { GET: () => db.find("2") } },
-];`,
-      { ssr: false, viaRouteModule: true },
-    );
-    expectClean(output);
-    expect(output).toMatch(/methods: \{\}/);
-  });
-
-  it("strips a routes callback defineRoutes imports from another module", async () => {
-    const output = await buildRoutes(
-      `import { defineRoutes } from "@farm.js/core";
-import build from "./routes-impl";
-export default defineRoutes(build);`,
-      {
-        ssr: false,
-        viaRouteModule: true,
-        files: {
-          "routes-impl.ts": `${ADMIN}
-export default (r: any) => [r.page("/admin", { component: DocPage, guard: () => db.find("admin") })];`,
-        },
+  it("import only the component module", () => {
+    const code = generateProgrammaticClientRouteModule({
+      ...base,
+      kind: "page",
+      routePath: "/admin",
+      route: {
+        kind: "page",
+        path: "/admin",
+        routesFile: base.routesFile,
+        component: { file: "/app/src/admin.tsx", exportName: "AdminPage" },
+        pending: { file: "/app/src/pending.tsx", exportName: "default" },
+        serverProps: ["guard", "data"],
       },
-    );
-    expectClean(output);
+    });
+
+    expect(code).toContain('import { AdminPage as __farmComponent } from "/src/admin.tsx";');
+    expect(code).toContain('import __farmPending from "/src/pending.tsx";');
+    expect(code).toContain('__farmServerHooks: ["guard","data"]');
+    expect(code).not.toContain("routes.tsx");
+    expect(code).not.toMatch(/\b(guard|data|staticPaths|generateMetadata|methods)\s*:/);
   });
 
-  it("strips plain definitions a routes file takes from another module", async () => {
-    const output = await buildRoutes(
-      `import adminRoutes from "./admin-routes";
-export default [...adminRoutes];`,
-      {
-        ssr: false,
-        viaRouteModule: true,
-        files: {
-          "admin-routes.ts": `import type { ProgrammaticRouteDefinition } from "@farm.js/core";
-${ADMIN}
-export default [
-  { kind: "page", path: "/admin", component: DocPage, data: { main: () => db.find("1") } },
-] satisfies ProgrammaticRouteDefinition[];`,
-        },
+  it("re-export a component that needs no wrapper", () => {
+    const code = generateProgrammaticClientRouteModule({
+      ...base,
+      kind: "layout",
+      routePath: "/admin",
+      route: {
+        kind: "layout",
+        path: "/admin",
+        routesFile: base.routesFile,
+        component: { file: "/app/src/shell.tsx", exportName: "my-shell" },
       },
+    });
+    expect(code).toBe(
+      'import { "my-shell" as __farmComponent } from "/src/shell.tsx";\nexport default __farmComponent;\n',
     );
-    expectClean(output);
   });
 
-  it("keeps components declared in the routes file that pass data props", async () => {
-    const output = await buildRoutes(
-      `import { defineRoutes } from "@farm.js/core";
-${ADMIN}
-function Shell(props: any) {
-  return <DocPage {...props} data={{ title: "shell" }} />;
+  it("fail with the route and file when a component has no module", () => {
+    const generate = () =>
+      generateProgrammaticClientRouteModule({
+        ...base,
+        kind: "page",
+        routePath: "/admin",
+        route: {
+          kind: "page",
+          path: "/admin",
+          routesFile: base.routesFile,
+          problem: "its component is not exported by any module the routes file imports",
+        },
+      });
+    expect(generate).toThrow(
+      /route "\/admin" in \/app\/src\/routes\.tsx renders in the browser, but its component is not exported.*move the component to its own module/,
+    );
+  });
+
+  it("never generate a browser copy of an API route or an unknown route", () => {
+    expect(() =>
+      generateProgrammaticClientRouteModule({
+        ...base,
+        kind: "api",
+        routePath: "/feed",
+        route: undefined,
+      }),
+    ).toThrow(/server-only/);
+    expect(() =>
+      generateProgrammaticClientRouteModule({
+        ...base,
+        kind: "page",
+        routePath: "/gone",
+        route: undefined,
+      }),
+    ).toThrow(/did not find it/);
+  });
+});
+
+const COMPONENTS = {
+  "src/components/counter.tsx": `"use client";
+export function Counter() {
+  return <button>CLIENT_COUNTER_MARKER</button>;
 }
-export default defineRoutes(({ page }) => [
-  page("/admin", {
-    component: (props: any) => <Shell {...props} data={props.data} />,
-    data: { main: () => db.find("1") },
+`,
+  "src/components/pages.tsx": `import { Counter } from "./counter";
+export function DocPage({ data }: any) {
+  return <main>CLIENT_COMPONENT_MARKER {data?.title}<Counter /></main>;
+}
+export function DocPending() {
+  return <p>CLIENT_PENDING_MARKER</p>;
+}
+export default function AdminShell({ children }: any) {
+  return <section>CLIENT_LAYOUT_MARKER{children}</section>;
+}
+`,
+  "src/components/index.ts": `export { DocPage, DocPending, default as AdminShell } from "./pages";
+`,
+  "src/db.ts": `globalThis.__farmPool = "postgres://app:DB_PASSWORD_SECRET@db.internal/app";
+export const db = { find: async (id: string) => ({ id, title: "PRIVATE_ROW_" + id }) };
+`,
+  "src/guards.ts": `export function requireAdmin() {
+  throw new Error("GUARD_SECRET_MESSAGE");
+}
+`,
+  // Two modules deep, through a named export, as raw definitions.
+  "src/admin/pages.ts": `import type { ProgrammaticRouteDefinition } from "@farm.js/core";
+import { db } from "../db";
+import { requireAdmin } from "../guards";
+import { DocPage } from "../components";
+export const userPages: ProgrammaticRouteDefinition[] = [
+  { kind: "page", path: "/admin/users", component: DocPage, guard: requireAdmin,
+    data: { main: () => db.find("users") } },
+];
+`,
+  "src/admin/index.ts": `import { userPages } from "./pages";
+export const adminRoutes = [...userPages];
+`,
+  // A package helper wrapping page().
+  "node_modules/@acme/route-kit/package.json": JSON.stringify({
+    name: "@acme/route-kit",
+    type: "module",
+    exports: "./index.js",
   }),
-]);`,
-      { ssr: false, viaRouteModule: true },
-    );
-    expectClean(output);
-  });
+  "node_modules/@acme/route-kit/index.js": `import { page } from "@farm.js/core";
+export function securePage(path, options) {
+  return page(path, { ...options, guard: () => { throw new Error("KIT_GUARD_SECRET"); } });
+}
+`,
+};
 
-  it.each([
-    [
-      "a definition that spreads its kind",
-      `const adminBase = { kind: "page", component: DocPage };
-export default defineRoutes([{ ...adminBase, path: "/admin", guard: () => db.find("admin") }]);`,
-      /still sets the server-only key "guard"/,
+const ROUTES = `import {
+  defineRoutes,
+  page,
+  routesBuilder,
+  type ProgrammaticRouteDefinition,
+} from "@farm.js/core";
+import { securePage } from "@acme/route-kit";
+import { db } from "./db";
+import { requireAdmin } from "./guards";
+import { adminRoutes } from "./admin";
+import { AdminShell, DocPage, DocPending } from "./components";
+
+const { page: aliasedPage } = routesBuilder;
+const assigned = page("/assigned", { component: DocPage });
+assigned.data = { main: () => db.find("assigned") };
+
+const typed: ProgrammaticRouteDefinition[] = [
+  { kind: "page", path: "/typed", component: DocPage, guard: requireAdmin,
+    data: { main: () => db.find("typed") } },
+  { kind: "layout", path: "/admin", component: AdminShell,
+    generateMetadata: async () => ({ title: "PRIVATE_METADATA_SECRET" }) },
+];
+
+export default defineRoutes(({ api }) => [
+  ...typed,
+  ...adminRoutes,
+  securePage("/kit", { component: DocPage, data: { main: () => db.find("kit") } }),
+  assigned,
+  routesBuilder.page("/builder", { component: DocPage, pending: DocPending, guard: requireAdmin }),
+  aliasedPage("/aliased", { component: DocPage, staticPaths: async () => [db.find("paths")] }),
+  api("/api/secret", { GET: async () => Response.json(await db.find("API_HANDLER_SECRET")) }),
+]);
+`;
+
+const SERVER_MARKERS = [
+  "DB_PASSWORD_SECRET",
+  "GUARD_SECRET_MESSAGE",
+  "KIT_GUARD_SECRET",
+  "PRIVATE_METADATA_SECRET",
+  "API_HANDLER_SECRET",
+];
+
+function createRoutesFixture(files: Record<string, string>): string {
+  const root = realpathSync(mkdtempSync(path.join(packageRoot, ".tmp-programmatic-client-")));
+  temporaryRoots.push(root);
+  mkdirSync(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+  symlinkSync(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "junction");
+  writeFileSync(path.join(root, "package.json"), JSON.stringify({ type: "module" }));
+  for (const [file, source] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+    writeFileSync(path.join(root, file), source);
+  }
+  return root;
+}
+
+/** Discover the app's routes on the server, as `farm dev` and `farm build` do. */
+async function evaluateRoutes(root: string): Promise<ProgrammaticClientRoutes> {
+  const server = await createServer({
+    root,
+    configFile: false,
+    logLevel: "silent",
+    appType: "custom",
+    server: { middlewareMode: true, hmr: false, ws: false },
+    optimizeDeps: { noDiscovery: true, include: [] },
+    ssr: { external: ["@farm.js/core"] },
+  });
+  try {
+    const config = await resolveConfig({ root, srcDir: "src" }, "development");
+    const manager = new RouteManager(config as any, server);
+    await manager.discoverRoutes();
+    return manager.getProgrammaticClientRoutes();
+  } finally {
+    await server.close();
+  }
+}
+
+async function buildClient(
+  root: string,
+  clientRoutes: ProgrammaticClientRoutes,
+  entries: string[],
+): Promise<string> {
+  const entry = path.join(root, "client-entry.js");
+  writeFileSync(
+    entry,
+    entries.map((id, index) => `export * as route${index} from ${JSON.stringify(id)};`).join("\n"),
+  );
+  const result = await build({
+    configFile: false,
+    root,
+    logLevel: "silent",
+    plugins: [
+      // The route module ids the client entry imports, as Farm's client entry does.
+      {
+        name: "test:farm-route-ids",
+        enforce: "pre",
+        resolveId: (source) => (source.includes("?farm-route=") ? source : null),
+      } satisfies Plugin,
+      farmPlugin({ root, srcDir: "src", programmaticClientRoutes: clientRoutes }),
+      farmEnvironmentFunctionsPlugin({ root, srcDir: "src" }),
     ],
-    [
-      "a definition built with Object.assign",
-      `export default defineRoutes([Object.assign({ kind: "page" }, { path: "/admin", component: DocPage, guard: () => db.find("admin") })]);`,
-      /still sets the server-only key "guard"/,
-    ],
-    [
-      "an escaping builder whose name a component parameter reuses",
-      `export function Pager({ page }: any) { return page; }
-const wrap = (factory: any) => factory;
-export default defineRoutes([wrap(page)("/admin", { component: DocPage, guard: () => db.find("admin") })]);`,
-      /can't follow the route builder "page" in wrap\(page\)/,
-    ],
-    [
-      "an escaping builder whose name a callback parameter reuses",
-      `const titles = ["a"].map((page) => page.toUpperCase());
-const make = [page][0];
-export default defineRoutes([make("/admin", { component: DocPage, data: { main: () => db.find(titles[0]) } })]);`,
-      /can't follow the route builder "page" in \[page\]/,
-    ],
-    [
-      "a computed builder member",
-      `const member = "page";
-export default defineRoutes([routesBuilder[member]("/admin", { component: DocPage, guard: () => db.find("admin") })]);`,
-      /can't follow the route builder "routesBuilder"/,
-    ],
-  ])("refuses %s", async (_name, routes, message) => {
-    const source = `import { defineRoutes, page, routesBuilder } from "@farm.js/core";
-${ADMIN}${routes}`;
-    for (const viaRouteModule of [false, true]) {
-      await expect(buildRoutes(source, { ssr: false, viaRouteModule })).rejects.toThrow(message);
+    build: {
+      write: false,
+      minify: false,
+      target: "esnext",
+      rollupOptions: {
+        input: entry,
+        preserveEntrySignatures: "strict",
+        external: (id) =>
+          id.startsWith("@farm.js/core") || id === "react" || id.startsWith("react/"),
+      },
+    },
+  });
+  return (Array.isArray(result) ? result : [result])
+    .flatMap((output) => (output as Rollup.RollupOutput).output)
+    .filter((item): item is Rollup.OutputChunk => item.type === "chunk")
+    .map((chunk) => chunk.code)
+    .join("\n");
+}
+
+function readJavaScript(directory: string): string {
+  return readdirSync(directory, { withFileTypes: true, recursive: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".js"))
+    .map((entry) => readFileSync(path.join(entry.parentPath, entry.name), "utf8"))
+    .join("\n");
+}
+
+const routeId = (root: string, kind: string, routePath: string) =>
+  `${path.join(root, "src", "routes.tsx")}?farm-route=${kind}:${encodeURIComponent(routePath)}&lang.js`;
+
+describe("programmatic routes in the client build", () => {
+  it("ships components without the routes file's server code, whatever builds the routes", async () => {
+    const root = createRoutesFixture({ ...COMPONENTS, "src/routes.tsx": ROUTES });
+    const clientRoutes = await evaluateRoutes(root);
+    const pages = ["/typed", "/admin/users", "/kit", "/assigned", "/builder", "/aliased"];
+
+    const code = await buildClient(root, clientRoutes, [
+      ...pages.map((routePath) => routeId(root, "page", routePath)),
+      routeId(root, "layout", "/admin"),
+    ]);
+    expect(code).toContain("CLIENT_COMPONENT_MARKER");
+    expect(code).toContain("CLIENT_PENDING_MARKER");
+    expect(code).toContain("CLIENT_LAYOUT_MARKER");
+    expect(code).toContain("CLIENT_COUNTER_MARKER");
+    expect(SERVER_MARKERS.filter((marker) => code.includes(marker))).toEqual([]);
+
+    // Each component comes from the module that defines it, past the barrel that re-exports it.
+    expect(
+      pages.map((routePath) => {
+        const route = clientRoutes.routes.get(
+          programmaticClientRouteKey(path.join(root, "src", "routes.tsx"), "page", routePath),
+        );
+        return [routePath, route?.component?.file.replace(root, ""), route?.serverProps];
+      }),
+    ).toEqual([
+      ["/typed", "/src/components/pages.tsx", ["guard", "data"]],
+      ["/admin/users", "/src/components/pages.tsx", ["guard", "data"]],
+      ["/kit", "/src/components/pages.tsx", ["guard", "data"]],
+      ["/assigned", "/src/components/pages.tsx", ["data"]],
+      ["/builder", "/src/components/pages.tsx", ["guard"]],
+      ["/aliased", "/src/components/pages.tsx", undefined],
+    ]);
+    expect([...clientRoutes.routeSourceFiles].map((file) => file.replace(root, "")).sort()).toEqual(
+      ["/src/admin/index.ts", "/src/admin/pages.ts", "/src/routes.tsx"],
+    );
+  }, 60_000);
+
+  it("fails the build for a hydrating page whose component lives in the routes file", async () => {
+    const root = createRoutesFixture({
+      ...COMPONENTS,
+      "src/routes.tsx": `import { defineRoutes, page } from "@farm.js/core";
+import { requireAdmin } from "./guards";
+function InlinePage() {
+  return <main>INLINE</main>;
+}
+export default defineRoutes([page("/inline", { component: InlinePage, guard: requireAdmin })]);
+`,
+    });
+    const clientRoutes = await evaluateRoutes(root);
+
+    await expect(
+      buildClient(root, clientRoutes, [routeId(root, "page", "/inline")]),
+    ).rejects.toThrow(
+      /route "\/inline" in .*routes\.tsx renders in the browser, but its component is not exported by any module the routes file imports.*move the component to its own module/s,
+    );
+  }, 60_000);
+
+  it("fails the build when a browser module imports a module that defines routes", async () => {
+    const root = createRoutesFixture({
+      ...COMPONENTS,
+      "src/routes.tsx": `import { defineRoutes } from "@farm.js/core";
+import { adminRoutes } from "./admin";
+export default defineRoutes([...adminRoutes]);
+`,
+      "src/components/nav.tsx": `import { userPages } from "../admin/pages";
+export function Nav() {
+  return <nav>{userPages.map((route) => route.path).join(",")}</nav>;
+}
+`,
+    });
+    const clientRoutes = await evaluateRoutes(root);
+    const entry = path.join(root, "src", "components", "nav.tsx");
+
+    await expect(buildClient(root, clientRoutes, [entry])).rejects.toThrow(
+      /admin\/pages\.ts defines programmatic routes, but the browser bundle imports it \(from .*nav\.tsx\)/,
+    );
+  }, 60_000);
+
+  it("keeps the routes file out of a production client build", async () => {
+    const root = createRoutesFixture({
+      ...COMPONENTS,
+      "src/routes.tsx": ROUTES,
+      "src/app/layout.tsx": `export default function RootLayout({ children }: any) {
+  return <html><body>{children}</body></html>;
+}
+`,
+    });
+    const config = await resolveConfig(
+      { root, srcDir: "src", images: { provider: "none" } },
+      "production",
+    );
+    await buildApp(config, { root, preset: "node-server" });
+
+    const code = readJavaScript(path.join(root, ".farm", "client"));
+    expect(code).toContain("CLIENT_COMPONENT_MARKER");
+    expect(code).toContain("CLIENT_LAYOUT_MARKER");
+    expect(SERVER_MARKERS.filter((marker) => code.includes(marker))).toEqual([]);
+  }, 180_000);
+
+  it("serves development the same browser copy, and refuses the routes file", async () => {
+    const root = createRoutesFixture({ ...COMPONENTS, "src/routes.tsx": ROUTES });
+    const server = await createServer({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      appType: "custom",
+      server: { middlewareMode: true, hmr: false, ws: false },
+      optimizeDeps: { noDiscovery: true, include: [] },
+      ssr: { external: ["@farm.js/core"] },
+      plugins: [
+        farmPlugin({ root, srcDir: "src" }),
+        farmEnvironmentFunctionsPlugin({ root, srcDir: "src" }),
+      ],
+    });
+    try {
+      const client = server.environments.client;
+      const result = await client.transformRequest(
+        `/src/routes.tsx?farm-route=page:${encodeURIComponent("/kit")}&lang.js`,
+      );
+      expect(result?.code).toContain("/src/components/pages.tsx");
+      expect(result?.code).not.toMatch(/routes\.tsx|db\.ts|guards\.ts|route-kit/);
+      await expect(client.transformRequest("/src/admin/pages.ts")).rejects.toThrow(
+        /defines programmatic routes, but the browser bundle imports it/,
+      );
+    } finally {
+      await server.close();
     }
-  });
+  }, 60_000);
 
-  it("strips a builder member named by a static template literal", async () => {
-    const output = await buildRoutes(
-      `import { defineRoutes, routesBuilder } from "@farm.js/core";
-${ADMIN}export default defineRoutes([routesBuilder[\`page\`]("/admin", { component: DocPage, guard: () => db.find("admin") })]);`,
-      { ssr: false },
-    );
-    expectClean(output);
+  it("leaves the server build its route hooks", async () => {
+    const route = createRoute("/docs/[id]", {
+      component: () => null,
+      data: { main: () => ({}) },
+    });
+    const mod = createRouteModuleFromProgrammaticPage(route, {
+      createElement: () => null,
+      Suspense: "Suspense",
+    } as any) as any;
+    expect(mod.__farmRouteData).toBe(route.data);
+    expect(mod.default.__farmServerProps).toBeUndefined();
   });
 });
 
@@ -502,60 +617,3 @@ describe("client copies of programmatic pages", () => {
     expect(mod.default.__farmServerProps).toBeUndefined();
   });
 });
-
-async function buildRoutes(
-  routes: string,
-  options: {
-    ssr: boolean;
-    /** Load the routes file through a generated `?farm-route=` page module, as the app does. */
-    viaRouteModule?: boolean;
-    files?: Record<string, string>;
-  },
-): Promise<string> {
-  const root = mkdtempSync(path.join(tmpdir(), "farm-routes-client-"));
-  temporaryRoots.push(root);
-  for (const [file, source] of Object.entries({ ...SERVER_FILES, ...options.files })) {
-    writeFileSync(path.join(root, file), source);
-  }
-  // Outside src/, so only the generated route module marks it as the routes file.
-  const routesFile = path.join(root, "farm.routes.tsx");
-  writeFileSync(routesFile, routes);
-  const routeModuleId = `${routesFile.replace(/\\/g, "/")}?farm-route=page:%2Fadmin&lang.js`;
-  const entry = options.viaRouteModule ? routeModuleId : routesFile;
-
-  const result = await build({
-    configFile: false,
-    root,
-    logLevel: "silent",
-    plugins: [
-      {
-        name: "test:farm-route-module",
-        enforce: "pre",
-        resolveId: (source) => (source === routeModuleId ? routeModuleId : null),
-        load: (id) =>
-          id === routeModuleId
-            ? `import * as routes from ${JSON.stringify(routesFile)};\nexport default routes;`
-            : null,
-      },
-      farmEnvironmentFunctionsPlugin(),
-    ],
-    build: {
-      ssr: options.ssr,
-      write: false,
-      minify: false,
-      target: "esnext",
-      rollupOptions: {
-        input: entry,
-        external: ["@farm.js/core", "react", "react/jsx-runtime", "react/jsx-dev-runtime"],
-        preserveEntrySignatures: "strict",
-      },
-    },
-  });
-  const outputs = Array.isArray(result) ? result : [result];
-
-  return outputs
-    .flatMap((output) => (output as Rollup.RollupOutput).output)
-    .filter((item): item is Rollup.OutputChunk => item.type === "chunk")
-    .map((chunk) => chunk.code)
-    .join("\n");
-}

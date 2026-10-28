@@ -4,9 +4,8 @@ import type { Plugin } from "vite";
 import type { FarmEnvironment } from "./environment";
 import { getFarmSourceRoots, type ResolvedFarmLayer } from "./layers";
 import {
-  findClientNodeBuiltinChain,
-  isApplicationModuleId,
-  transformProgrammaticRoutesForClient,
+  isProgrammaticRouteActionProxy,
+  type FarmProgrammaticRoutesPluginApi,
 } from "./programmatic-routes-client";
 import { PROGRAMMATIC_ROUTE_FILE_NAMES, parseProgrammaticRouteModuleId } from "./routes-shared";
 
@@ -109,22 +108,43 @@ export interface FarmEnvironmentFunctionsPluginOptions {
 export function farmEnvironmentFunctionsPlugin(
   options: FarmEnvironmentFunctionsPluginOptions = {},
 ): Plugin {
-  // Programmatic routes modules seen by the client build, checked once the
-  // whole client graph is known.
-  const clientRouteModules = new Set<string>();
-  // Routes modules are known by where they sit, not by what they import: the routes
-  // files Farm loads, the files generated `?farm-route=` modules import, and the
-  // modules a routes module takes route lists from.
+  // Programmatic routes files hold server-only route hooks (guards, data, API handlers) and
+  // whatever they import. The browser copy of a route imports only its component module, so
+  // none of them, nor the modules that export route definitions, may reach the client.
   let routesFiles = new Set<string>();
-  const generatedRouteFiles = new Set<string>();
-  const routeSources = new Map<string, { importer: string; callbackExports: Set<string> }>();
-  const checkedRouteFiles = new Set<string>();
+  let farmApi: FarmProgrammaticRoutesPluginApi | undefined;
+  let isBuild = false;
+  let sources: { for: unknown; files: ReadonlySet<string> } | undefined;
+  const routeSourceFiles = (): ReadonlySet<string> => {
+    const clientRoutes = farmApi?.getProgrammaticClientRoutes();
+    if (sources?.for !== clientRoutes || !sources) {
+      sources = {
+        for: clientRoutes,
+        files: new Set([
+          ...routesFiles,
+          ...[...(clientRoutes?.routeSourceFiles ?? [])].map(resolvedFile),
+        ]),
+      };
+    }
+    return sources.files;
+  };
+  const routeSourceError = (file: string, importers: readonly string[] = []) =>
+    `[Farm.js] ${file} defines programmatic routes, but the browser bundle imports it` +
+    (importers.length > 0 ? ` (from ${importers.join(", ")})` : "") +
+    ". Routes files and the modules that export route definitions carry server-only guards, " +
+    "data hooks, and API handlers, so they never reach the browser. Import the component, " +
+    "server function, or helper from its own module instead.";
 
   return {
     name: "farm:environment-functions",
     enforce: "post",
 
     configResolved(config) {
+      isBuild = config.command === "build";
+      farmApi = config.plugins.find((plugin) => plugin.name === "farm")?.api as
+        | FarmProgrammaticRoutesPluginApi
+        | undefined;
+      sources = undefined;
       routesFiles = new Set(
         getFarmSourceRoots({ ...options, root: options.root ?? config.root }).flatMap((source) =>
           PROGRAMMATIC_ROUTE_FILE_NAMES.map((name) =>
@@ -134,89 +154,38 @@ export function farmEnvironmentFunctionsPlugin(
       );
     },
 
-    async transform(code, id, transformOptions) {
+    transform(code, id, transformOptions) {
       const environment = resolveBuildEnvironment(
         this as unknown as { environment?: { name?: string } },
         transformOptions?.ssr,
       );
       const parse = (source: string) => this.parse(source) as unknown as AstNode;
       const result = transformEnvironmentFunctions({ code, id, environment, parse });
-      if (environment !== "client") {
-        return result ? { code: result.code, map: null } : null;
+      // Development serves modules one by one, so check each as the browser asks for it.
+      // A build checks the finished bundle instead, where only shipped modules count.
+      if (
+        environment === "client" &&
+        !isBuild &&
+        !parseProgrammaticRouteModuleId(id) &&
+        routeSourceFiles().has(moduleFile(id)) &&
+        !isProgrammaticRouteActionProxy(code)
+      ) {
+        this.error(routeSourceError(moduleFile(id)));
       }
-
-      const generated = parseProgrammaticRouteModuleId(id);
-      if (generated) {
-        generatedRouteFiles.add(resolvedFile(generated.filePath));
-        return result ? { code: result.code, map: null } : null;
-      }
-
-      const file = moduleFile(id);
-      const source = routeSources.get(file);
-      let routes;
-      try {
-        routes = transformProgrammaticRoutesForClient({
-          code: result?.code ?? code,
-          id,
-          parse,
-          routesModule: routesFiles.has(file) || generatedRouteFiles.has(file) || !!source,
-          callbackExports: source ? [...source.callbackExports] : undefined,
-        });
-      } catch (error) {
-        this.error(error instanceof Error ? error.message : String(error));
-      }
-      if (routes) {
-        clientRouteModules.add(id);
-        checkedRouteFiles.add(file);
-        for (const routeSource of routes.routeSources) {
-          const resolved = await this.resolve(routeSource.source, id);
-          if (!resolved || resolved.external || !isApplicationModuleId(resolved.id)) continue;
-          const sourceFile = moduleFile(resolved.id);
-          const entry = routeSources.get(sourceFile) ?? {
-            importer: id,
-            callbackExports: new Set(),
-          };
-          for (const name of routeSource.callbackExports) entry.callbackExports.add(name);
-          routeSources.set(sourceFile, entry);
-        }
-      }
-      const output = routes?.code ?? result?.code;
-      return output !== undefined ? { code: output, map: null } : null;
+      return result ? { code: result.code, map: null } : null;
     },
 
     generateBundle() {
       const context = this as unknown as { environment?: { name?: string } };
       if (resolveBuildEnvironment(context, false) !== "client") return;
-      // A routes module the transform never checked, for example one another import
-      // reached first, could still hold server-only keys: fail instead of shipping it.
-      const expected = [
-        ...[...generatedRouteFiles].map((file) => [file, "Farm's generated route modules"]),
-        ...[...routeSources].map(([file, { importer }]) => [file, importer]),
-      ];
-      for (const [file, importer] of expected) {
-        if (checkedRouteFiles.has(file!) || !this.getModuleInfo(file!)) continue;
-        this.error(
-          `[Farm.js] ${file} holds programmatic routes that ${importer} loads in the browser, ` +
-            "but Farm could not check it for server-only route keys (guard, data, " +
-            "staticPaths, generateMetadata, and API handlers) before bundling. Define these " +
-            "routes in the routes file, or with page(), layout(), api(), or createRoute() " +
-            "imported from @farm.js/core.",
-        );
-      }
-      for (const id of clientRouteModules) {
-        const chain = findClientNodeBuiltinChain(id, (moduleId) => {
-          const info = this.getModuleInfo(moduleId);
-          // Static imports only: a dynamic import can sit behind an SSR-only branch.
-          return info?.importedIds;
-        });
-        if (chain) {
-          this.error(
-            `[Farm.js] The browser bundle reaches the server-only module "${chain.at(-1)}" ` +
-              `through the programmatic routes in ${id}: ${chain.join(" -> ")}. Import it only ` +
-              "from guard, data, staticPaths, generateMetadata, or API handlers, which Farm " +
-              "keeps out of the browser.",
-          );
-        }
+      // Every module in the client graph counts, including one tree-shaking emptied: the
+      // modules it imports for their side effects still ship.
+      const forbidden = routeSourceFiles();
+      for (const id of this.getModuleIds()) {
+        if (parseProgrammaticRouteModuleId(id) || !forbidden.has(moduleFile(id))) continue;
+        const info = this.getModuleInfo(id);
+        if (isProgrammaticRouteActionProxy(info?.code)) continue;
+        this.error(routeSourceError(moduleFile(id), info?.importers.map(moduleFile)));
       }
     },
   };

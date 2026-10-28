@@ -1181,9 +1181,10 @@ function createProgrammaticPageComponent(
 }
 
 /**
- * The client build removes a page's guard and data hooks and records them in
- * `__farmServerHooks`. The route keeps its server-props shape, and its page
- * component tells hydration that only server-resolved props can render it.
+ * The browser copy of a page never sees its params, search, guard, or data options: the
+ * generated client route module records which ones the server resolves in
+ * `__farmServerHooks`. The route keeps its server-props shape, and its page component tells
+ * hydration that only server-resolved props can render it.
  */
 function getClientStrippedServerHooks(route: ProgrammaticPageRoute): readonly string[] | undefined {
   const hooks = (route as { __farmServerHooks?: unknown }).__farmServerHooks;

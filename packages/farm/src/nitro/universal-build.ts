@@ -91,6 +91,7 @@ import { routeRulesToNitroRouteRules } from "../route-rules";
 import { getFarmAppDirectories } from "../layers";
 import { HOISTED_HEAD_ELEMENT } from "../server/full-document";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
+import type { ProgrammaticClientRoutes } from "../programmatic-routes-client";
 import {
   createFarmDocsLastModifiedManifest,
   FARM_DOCS_LAST_MODIFIED_MANIFEST,
@@ -1321,6 +1322,7 @@ export async function buildUniversal(
         isolatedClientBoundaryModules,
         hydrationPlanCache,
         rendererBuildLifetime,
+        routeManager.getProgrammaticClientRoutes(),
       );
     const buildSSRBundle = () =>
       buildSSRInMemory(
@@ -1386,6 +1388,7 @@ export async function buildUniversal(
           isolatedClientBoundaryModules,
           hydrationPlanCache,
           rendererBuildLifetime,
+          routeManager.getProgrammaticClientRoutes(),
         );
       } catch (retryError) {
         if (!(retryError instanceof IncompleteClientBuildOutputError)) throw retryError;
@@ -1596,6 +1599,7 @@ async function buildClient(
   isolatedClientBoundaryModules: ReadonlySet<string> = new Set(),
   hydrationPlanCache: Map<string, ClientModuleHydrationPlan> = new Map(),
   rendererBuildLifetime?: AbortSignal,
+  programmaticClientRoutes?: ProgrammaticClientRoutes,
 ) {
   const viteBuild = productionVite.build;
   const { farmPlugin, farmServerOnlyEntriesPlugin } = await import("../vite");
@@ -2130,7 +2134,10 @@ async function buildClient(
             return null;
           },
         },
-        farmPlugin({ ...config, isolatedClientBoundaryModules }, pluginManager),
+        farmPlugin(
+          { ...config, isolatedClientBoundaryModules, programmaticClientRoutes },
+          pluginManager,
+        ),
         farmEnvironmentFunctionsPlugin(config),
       ],
       mode: "production",
