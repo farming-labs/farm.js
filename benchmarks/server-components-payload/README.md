@@ -54,4 +54,23 @@ a client navigation, and page errors are counted.
   the layouts that changed. A navigation is then the article and its islands, about five times
   smaller than RSC's payload, which carries the layout's tree again.
 
+## Ideas measured and not built
+
+`what-if.mjs` simulates two RFC 0003 ideas on the HTML the islands build sends:
+
+```bash
+node benchmarks/server-components-payload/what-if.mjs
+```
+
+| Idea | Result |
+| --- | --- |
+| Island manifest: all islands' props in one script | 0 to +12 bytes per response after brotli. Brotli already removes the repeated script tags, and one script at the end of the body would hold back islands in streamed chunks. |
+| Shared value files: values on 2+ pages as a cached `/_farm/v/<hash>.json` | First visit 16.0 KB to 23.0 KB (+43%), plus a request before islands hydrate. A later full load with the file cached: 16.0 KB to 12.6 KB (-21%). Break-even at 2 cached full loads per first visit. |
+
+The value file loses because the values repeat text the HTML already has (the sidebar renders
+the same titles and links): inside the document brotli stores the tree for about 3.5 KB, alone it
+takes 10.4 KB. Client navigations already leave held values out, so cached full loads only come
+from new tabs, reloads and return visits. A value file could still pay for a large value the
+HTML does not render (a search index, chart data); nothing here measures one yet.
+
 `results/latest.json` has the per-page numbers of the last run.
