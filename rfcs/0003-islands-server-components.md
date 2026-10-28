@@ -336,7 +336,13 @@ navigation with state kept in layouts; back and forward; HMR; error and not-foun
   Not kept: the root layout, any layout when one in the chain hydrates as a root, and routes with
   slots. Routes a shared cache can store send the whole document, and the request-scoped response
   is `private, no-store`. A kept layout does not render, as in Next.js: access checks belong in
-  middleware or page guards. Not yet: prefetch and caching of segments, PPR segments.
+  middleware or page guards. PPR routes cache each segment under its own key (the page's shell key
+plus the number of kept layouts; `revalidatePath` clears both, since entries are stored by path).
+Not yet: a prefetch cache keyed by layout chain.
+- Values in server-tree payloads: a page under a layout that hydrates as one root sends its large
+  prop values once, in scripts right before its payload, and the browser re-renders those scripts
+  so hydration matches. On the shop benchmark a navigation drops from 5.8 KB to 4.2 KB (brotli);
+  RSC sends 3.8 KB. The rest is the client components' server HTML, unused on a navigation.
 - Contract suite: `tests/e2e-server-components`, the same tests for `"rsc"` and `"islands"`, against
   `farm dev` and production builds.
 
