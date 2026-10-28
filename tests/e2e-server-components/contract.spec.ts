@@ -210,3 +210,32 @@ test("a large value shared by two client components survives client navigation",
     }
   }
 });
+
+test("a client component calls a server action it received as a prop, and the page shows the result", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/action-props");
+  await hydrated(page);
+  await page.evaluate(() => ((window as { __contract?: number }).__contract = 1));
+  await page.getByRole("button", { name: "Island clicks: 0" }).click();
+  const title = `prop item ${Date.now()}`;
+  await page.getByLabel("Item").fill(title);
+  await page.getByRole("button", { name: "Add item" }).click();
+  // The page refreshes after the action, without a document load, and keeps client state.
+  await expect(page.getByTestId("items")).toContainText(title);
+  await expect(page.getByRole("button", { name: "Island clicks: 1" })).toBeVisible();
+  expect(await page.evaluate(() => (window as { __contract?: number }).__contract)).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test("a server action passed as a prop works before JavaScript loads", async ({ browser }) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await page.goto("/action-props");
+  const title = `no-js prop item ${Date.now()}`;
+  await page.getByLabel("Item").fill(title);
+  await page.getByRole("button", { name: "Add item" }).click();
+  await expect(page.getByTestId("items")).toContainText(title);
+  await context.close();
+});

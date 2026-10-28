@@ -3509,7 +3509,7 @@ document.addEventListener("click", function(e) {
   // Only an app with a server-tree page ships the code that rebuilds one.
   const serverTreeEnabled = isolatedHydrationEnabled && clientPages.some((page) => page.serverTree);
   const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";${islandValues ? '\nimport { getFarmIslandValueStore } from "@farm.js/core/internal/island-value-store";' : ""}${serverTreeEnabled ? '\nimport { createFarmServerTreeElement } from "@farm.js/core/internal/server-tree";' : ""}`
+    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";${islandValues ? '\nimport { getFarmIslandValueStore } from "@farm.js/core/internal/island-value-store";\nimport { getFarmFormActionStub } from "@farm.js/core/internal/form-actions-client";' : ""}${serverTreeEnabled ? '\nimport { createFarmServerTreeElement } from "@farm.js/core/internal/server-tree";' : ""}`
     : "";
   const isolatedHydrationRuntime = isolatedHydrationEnabled
     ? `const farmIsolatedBoundaryLoaders = {
@@ -3530,7 +3530,7 @@ const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
   hydrateRoot,
   load: loadFarmIsolatedBoundary,
   schedule: scheduleFarmIslandHydration,
-  wrap: wrapWithIntegrationProviders,${islandValues ? "\n  values: getFarmIslandValueStore()," : ""}
+  wrap: wrapWithIntegrationProviders,${islandValues ? "\n  values: getFarmIslandValueStore(),\n  actions: getFarmFormActionStub," : ""}
 });
 
 // A hydrating layout keeps a non-hydrating page as server HTML; this wrapper runs its islands.
@@ -3552,7 +3552,7 @@ async function createFarmServerTreePageElement(source, pathname) {
     return await createFarmServerTreeElement(React, source, {
       load: loadFarmIsolatedBoundary,
       ServerHtml: FarmServerPage,
-      key: pathname,${islandValues ? "\n      values: getFarmIslandValueStore()," : ""}
+      key: pathname,${islandValues ? "\n      values: getFarmIslandValueStore(),\n      actions: getFarmFormActionStub," : ""}
     });
   } catch (error) {
     console.warn("[Farm.js] Could not rebuild the server tree of " + pathname + "; its server HTML was kept.", error);
@@ -4170,7 +4170,7 @@ function activateNavigationScripts(root) {
   }
 }
 
-function replaceSharedLayoutBoundary(currentRoot, nextRoot) {
+function replaceSharedLayoutBoundary(currentRoot, nextRoot, refresh = false) {
   const currentPatterns = getLayoutPatterns(currentRoot);
   const nextPatterns = getLayoutPatterns(nextRoot);
   let sharedCount = 0;
@@ -4191,7 +4191,17 @@ function replaceSharedLayoutBoundary(currentRoot, nextRoot) {
     : nextRoot.querySelector("#__farm_page__");
 
   if (!currentTarget || !nextTarget) return false;
-  ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentTarget);" : ""}
+  ${
+    isolatedHydrationEnabled
+      ? `${
+          islandValues
+            ? `// A refresh keeps the islands still on the page, with their state and new props.
+  if (refresh) farmIsolatedHydrationRuntime.carryOver(currentTarget, nextTarget);
+  `
+            : ""
+        }disposeFarmIsolatedClientBoundaries(currentTarget);`
+      : ""
+  }
   currentTarget.replaceWith(nextTarget);
   activateNavigationScripts(nextTarget);
   if (nextTreeRoot && nextTreeRoot !== nextTarget) nextTreeRoot.remove();
@@ -4281,6 +4291,8 @@ ${
     cancelPendingPageHydration();
     this.saveScrollPosition(window.location.pathname + window.location.search);
     const navigation = this.startNavigation(from, url, action);
+    // A refresh keeps the islands still on the page (islands mode).
+    navigation.refresh = options.refresh === true;
     let clientNavigation;
 
     try {
@@ -4549,7 +4561,7 @@ ${
     resetRouteSlotRoots();
     const replacedSharedBoundary = rootWasReactOwned
       ? null
-      : replaceSharedLayoutBoundary(currentRoot, newRoot);
+      : replaceSharedLayoutBoundary(currentRoot, newRoot, navigation?.refresh === true);
     let isolatedHydrationScope = replacedSharedBoundary || currentRoot;
     ${islandValues ? 'if (!replacedSharedBoundary && isSegment) return "segment-mismatch";' : ""}
     if (!replacedSharedBoundary) {

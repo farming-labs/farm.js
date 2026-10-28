@@ -15,6 +15,7 @@ import "@farm.js/core/css";
 export type RoutePath =
   | "/"
   | "/action"
+  | "/action-props"
   | "/async"
   | "/children"
   | "/context"
@@ -29,6 +30,7 @@ export type RoutePath =
 export type RoutePattern =
   | "/"
   | "/action"
+  | "/action-props"
   | "/async"
   | "/children"
   | "/context"
@@ -43,6 +45,7 @@ export type RoutePattern =
 export type RouteModulePattern =
   | "/"
   | "/action"
+  | "/action-props"
   | "/async"
   | "/children"
   | "/context"

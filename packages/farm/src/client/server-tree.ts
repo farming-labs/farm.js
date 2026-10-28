@@ -1,4 +1,5 @@
 import type React from "react";
+import { getFarmActionId } from "./action-reference";
 import {
   FARM_VALUE_ATTRIBUTE,
   FARM_VALUE_REFERENCE,
@@ -84,6 +85,8 @@ interface TreeResolver {
   component(reference: string, exportName: string): React.ComponentType<any>;
   chunk(id: number): ResolvedChunk;
   serverHtml(id: number, key: React.Key | null): React.ReactElement;
+  /** The function a server action reference stands for (islands mode). */
+  action(id: string): unknown;
 }
 
 type ReactInternals = { H?: unknown; ReactCurrentDispatcher?: { current: unknown } };
@@ -160,6 +163,7 @@ interface ResolveState {
   components: Map<string, React.ComponentType<any>>;
   serverHtml: Map<number, React.ReactNode>;
   chunks: Map<number, { encoded: Promise<TreeValue>; chunk?: ResolvedChunk }>;
+  actions: Map<string, unknown>;
 }
 
 function serverHtmlNode(
@@ -206,6 +210,14 @@ async function resolveValue(
   if (typeof value === "string" || typeof value === "boolean") return value;
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : { $: "n", v: String(value) };
+  }
+  if (typeof value === "function") {
+    // A server action passes as a reference the browser can call (islands mode).
+    const actionId = getFarmActionId(value);
+    if (actionId) {
+      state.actions.set(actionId, value);
+      return { $: "a", i: actionId };
+    }
   }
   if (typeof value !== "object") throw new UnsupportedNode(`passes a ${typeof value} value`);
   if (state.ReactRuntime.isValidElement(value)) {
@@ -494,6 +506,8 @@ function createTreeValue(
       return resolver.serverHtml(value.i as number, typeof value.k === "string" ? value.k : null);
     case "n":
       return Number(value.v);
+    case "a":
+      return resolver.action(value.i as string);
     case "P":
       return fulfilledThenable(createTreeValue(ReactRuntime, value.v as TreeValue, resolver));
     case "o": {
@@ -663,6 +677,7 @@ export async function renderFarmServerTreePage(
     components: new Map(),
     serverHtml: new Map(),
     chunks: new Map(),
+    actions: new Map(),
   };
   const tree = await resolveValue(state, element, { parserSensitive: false }, new Set());
   const values = options.values ? getFarmIslandValuesServer() : undefined;
@@ -731,6 +746,9 @@ export async function renderFarmServerTreePage(
         options.isolate(state.serverHtml.get(id) as React.ReactNode),
       );
     },
+    action(id) {
+      return state.actions.get(id);
+    },
   };
   const payload = encode({ v: 1, t: tree });
   const page =
@@ -760,6 +778,8 @@ export interface FarmServerTreeElementOptions {
   key?: string;
   /** Islands mode's value store, for payloads that reference island values. */
   values?: Pick<FarmIslandValueStore, "ingest" | "resolve">;
+  /** Islands mode: the function a server action reference stands for. */
+  actions?(id: string): (...args: unknown[]) => unknown;
 }
 
 function parseHtml(html: string): DocumentFragment {
@@ -871,6 +891,10 @@ export async function createFarmServerTreeElement(
         suppressHydrationWarning: true,
         dangerouslySetInnerHTML: { __html: html },
       });
+    },
+    action(id) {
+      if (!options.actions) throw new Error("server action props need islands mode");
+      return options.actions(id);
     },
   };
 

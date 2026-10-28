@@ -4727,7 +4727,7 @@ function generateClientCode(
       ? `import React, { hydrateRoot, createRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)}\nimport __farmAppSetup from ${JSON.stringify(toViteModuleId(appSetupPath, root))}\n__farmConfigureApp(__farmAppSetup)`
       : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
   const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'${islandValues ? "\nimport { getFarmIslandValueStore } from '@farm.js/core/internal/island-value-store'" : ""}`
+    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'${islandValues ? "\nimport { getFarmIslandValueStore } from '@farm.js/core/internal/island-value-store'\nimport { getFarmFormActionStub } from '@farm.js/core/internal/form-actions-client'" : ""}`
     : "";
   const docsAdapterImportBlock = generateFarmDocsAdapterClientRuntime(
     docsAdapterReact,
@@ -4739,7 +4739,7 @@ function generateClientCode(
   hydrateRoot,
   load: (reference) => import(/* @vite-ignore */ farmModuleUrl(reference)),
   schedule: scheduleFarmIslandHydration,
-  wrap: wrapWithIntegrationProviders,${islandValues ? "\n  values: getFarmIslandValueStore()," : ""}
+  wrap: wrapWithIntegrationProviders,${islandValues ? "\n  values: getFarmIslandValueStore(),\n  actions: getFarmFormActionStub," : ""}
 });
 window.__FARM_ISOLATED_HYDRATION_RUNTIME__ = farmIsolatedHydrationRuntime;
 // A hydrating layout keeps a non-hydrating page as server HTML; this wrapper runs its islands.
@@ -4759,7 +4759,7 @@ async function createFarmServerTreePageElement(source, pathname) {
     return await createFarmServerTreeElement(React, source, {
       load: (reference) => import(/* @vite-ignore */ farmModuleUrl(reference)),
       ServerHtml: FarmServerPage,
-      key: pathname,${islandValues ? "\n      values: getFarmIslandValueStore()," : ""}
+      key: pathname,${islandValues ? "\n      values: getFarmIslandValueStore(),\n      actions: getFarmFormActionStub," : ""}
     });
   } catch (error) {
     console.warn('[Farm.js] Could not rebuild the server tree of ' + pathname + '; its server HTML was kept.', error);
@@ -5844,7 +5844,7 @@ function parseNavigationFragment(html) {
   return template.content;
 }
 
-function replaceNavigationBoundary(container, fragment, currentPatterns, nextPatterns) {
+function replaceNavigationBoundary(container, fragment, currentPatterns, nextPatterns, refresh = false) {
   let sharedCount = 0;
   while (
     sharedCount < currentPatterns.length &&
@@ -5871,7 +5871,17 @@ function replaceNavigationBoundary(container, fragment, currentPatterns, nextPat
     return container;
   }
 
-  ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentTarget);" : ""}
+  ${
+    isolatedHydrationEnabled
+      ? `${
+          islandValues
+            ? `// A refresh keeps the islands still on the page, with their state and new props.
+  if (refresh) farmIsolatedHydrationRuntime.carryOver(currentTarget, nextTarget);
+  `
+            : ""
+        }disposeFarmIsolatedClientBoundaries(currentTarget);`
+      : ""
+  }
   currentTarget.replaceWith(nextTarget);
   activateFragmentScripts(nextTarget);
   if (fragmentTreeRoot && fragmentTreeRoot !== nextTarget) fragmentTreeRoot.remove();
@@ -5895,7 +5905,7 @@ let activeLayoutShouldHydrate = window.__FARM_LAYOUT_SHOULD_HYDRATE__ === true;
 
 // ====== MANIFEST-DRIVEN HTML-FRAGMENT NAVIGATION ======
 // One page-data response carries both server HTML and the hydration plan.
-async function renderPage(pageData) {
+async function renderPage(pageData, info) {
   const container = document.getElementById('root');
   if (!container) return;
   cancelPendingPageHydration();
@@ -6030,7 +6040,7 @@ async function renderPage(pageData) {
         delete window.__FARM_REACT_ROOT__;
         ${
           isolatedHydrationEnabled
-            ? "isolatedHydrationScope = replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns) || container;"
+            ? "isolatedHydrationScope = replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns, info?.refresh === true) || container;"
             : "replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns);"
         }
       }

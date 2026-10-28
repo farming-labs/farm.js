@@ -3,6 +3,7 @@
  * stable id. A form posts the id with its fields, so actions work before JavaScript loads; a client
  * component calls the id through the same endpoint. The RSC engine has its own actions.
  */
+import { setFarmActionId } from "./client/action-reference";
 import { getFarmRedirectError, isFarmNotFoundError } from "./navigation-errors";
 import {
   createServerActionRequestErrorResponse,
@@ -32,6 +33,7 @@ function registry(): Map<string, FarmAction> {
 export function registerFarmFormAction<T>(action: T, id: string): T {
   if (typeof action !== "function") return action;
   registry().set(id, action as FarmAction);
+  setFarmActionId(action as object, id);
   if (!Object.prototype.hasOwnProperty.call(action, "$$FORM_ACTION")) {
     Object.defineProperty(action, "$$FORM_ACTION", {
       value: () => {

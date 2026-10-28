@@ -170,6 +170,12 @@ function getActiveLayoutChainHeader(): string | undefined {
 // Global router instance
 let routerInstance: SPARouter | null = null;
 
+/** What a navigation handler learns about the navigation besides its data. */
+export interface FarmNavigationRenderInfo {
+  /** A refresh of the page on screen (`router.refresh()`, or after a server action). */
+  refresh?: boolean;
+}
+
 export class SPARouter {
   private cache: Map<string, CacheEntry> = new Map();
   private prefetchingUrls: Set<string> = new Set();
@@ -200,7 +206,7 @@ export class SPARouter {
   private scrollElements: Map<string, HTMLElement> = new Map();
   private options: Required<Omit<RouterOptions, "deploymentId">> &
     Pick<RouterOptions, "deploymentId">;
-  private onNavigate?: (data: PageData) => Promise<void>;
+  private onNavigate?: (data: PageData, info?: FarmNavigationRenderInfo) => Promise<void>;
   private clientPlugins?: Pick<
     FarmClientPluginManager,
     | "beginNavigation"
@@ -286,7 +292,9 @@ export class SPARouter {
   /**
    * Set the navigation handler that updates React
    */
-  setNavigationHandler(handler: (data: PageData) => Promise<void>) {
+  setNavigationHandler(
+    handler: (data: PageData, info?: FarmNavigationRenderInfo) => Promise<void>,
+  ) {
     this.onNavigate = handler;
   }
 
@@ -403,6 +411,7 @@ export class SPARouter {
               scroll,
               state,
               url,
+              refresh,
             })
           : Promise.resolve(),
       );
@@ -640,6 +649,7 @@ export class SPARouter {
     scroll: boolean;
     state: unknown;
     url: URL;
+    refresh?: boolean;
   }): Promise<void> {
     const historyUrl = resolveFarmNavigationURL(
       options.pageData.canonicalPath || options.fullPath,
@@ -679,7 +689,7 @@ export class SPARouter {
     _hydrateFarmI18n(options.pageData.i18n);
 
     if (this.onNavigate) {
-      await this.onNavigate(options.pageData);
+      await this.onNavigate(options.pageData, { refresh: options.refresh === true });
     }
 
     if (options.scroll) {

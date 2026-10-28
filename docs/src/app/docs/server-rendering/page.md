@@ -325,7 +325,10 @@ in the payload its client components rebuild from. When the browser already rend
 a navigation to such a page carries only that payload: the browser rebuilds the page in the
 layout's React tree, so the server leaves out the page's HTML. `"use server"`
 functions work from forms, with or without JavaScript, and from client components, in `farm dev`
-and in production. Islands mode needs none of the RSC packages and is experimental. Both modes share
+and in production. A server component can pass one to a client component as a prop. After an
+action called from JavaScript, the page refreshes, as the form posted without JavaScript would show
+it: islands still on the page keep their state and get their new props, and a `redirect()` from the
+action becomes a client navigation. Islands mode needs none of the RSC packages and is experimental. Both modes share
 the authoring rules on this page, so switching between them is a one-line change; the same contract
 tests (`tests/e2e-server-components`) run against both, in development and in production builds.
 `benchmarks/server-components-payload` compares what each mode sends.
