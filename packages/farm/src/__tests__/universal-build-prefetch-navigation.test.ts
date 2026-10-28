@@ -89,6 +89,48 @@ for (const [index, renderer] of ["html", "react"].entries()) {
       expect(fetch).toHaveBeenCalledTimes(1);
     });
 
+    it("keys a partial prefetch by the layouts on screen when it was made", async () => {
+      const { page, requests, fetch, router } = setup();
+      let chain = '["/docs"]';
+      router.partialNavigationHeaders = () => ({ "X-Farm-Layout-Chain": chain });
+      const headerOf = (request: (typeof requests)[number]) =>
+        new Headers(request.options.headers).get("x-farm-layout-chain");
+
+      const preload = page("/about", { prefetch: true });
+      expect(headerOf(requests[0])).toBe('["/docs"]');
+      requests[0].resolve(html("docs segment"));
+      await preload;
+      // The same layouts on screen: the navigation uses the prefetch.
+      expect(await page()).toBe("docs segment");
+      expect(fetch).toHaveBeenCalledTimes(1);
+
+      // Other layouts on screen: a segment for them, not the stale one.
+      chain = '["/blog"]';
+      const navigation = page();
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(headerOf(requests[1])).toBe('["/blog"]');
+      requests[1].resolve(html("blog segment"));
+      expect(await navigation).toBe("blog segment");
+
+      // Back under the first layouts, the first entry still answers.
+      chain = '["/docs"]';
+      expect(await page()).toBe("docs segment");
+      expect(fetch).toHaveBeenCalledTimes(2);
+
+      // A refresh or a revalidation clears every variant of the path.
+      router.clearPrefetchedPath("/about");
+      chain = '["/blog"]';
+      void page();
+      expect(fetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("asks for a whole document when partial navigation is off for a request", async () => {
+      const { requests, router } = setup();
+      router.partialNavigationHeaders = () => ({ "X-Farm-Layout-Chain": '["/docs"]' });
+      void router.fetchPrefetchedDocument("/about", undefined, true, true, undefined, true, false);
+      expect(new Headers(requests[0].options.headers).get("x-farm-layout-chain")).toBeNull();
+    });
+
     it("cancels a waiting navigation without aborting its prefetch", async () => {
       const { page, requests, fetch, router } = setup();
       const preload = page("/about", { prefetch: true });

@@ -2773,13 +2773,17 @@ export function generateUniversalRouterStateProperties(): string {
 
   clearPrefetchedPath: function(url) {
     const interceptionPrefix = url + "\\nintercept:";
+    const partialPrefix = url + "\\npartial:";
+    const matches = function(key) {
+      return key === url || key.startsWith(interceptionPrefix) || key.startsWith(partialPrefix);
+    };
     for (const key of this.prefetchCache.keys()) {
-      if (key === url || key.startsWith(interceptionPrefix)) {
+      if (matches(key)) {
         this.prefetchCache.delete(key);
       }
     }
     for (const [key, pending] of this.pendingPrefetches) {
-      if (key === url || key.startsWith(interceptionPrefix)) {
+      if (matches(key)) {
         pending.valid = false;
         this.pendingPrefetches.delete(key);
       }
@@ -2793,9 +2797,18 @@ export function generateUniversalRouterStateProperties(): string {
     this.pendingPrefetches.clear();
   },
 
+  // Islands mode: a partial response (layouts kept, or only the page's payload) suits the page
+  // that asked for it, so the cache keys it by what that page told the server.
+  prefetchRequest: function(url, interceptFrom, layoutChain = true) {
+    const base = interceptFrom ? url + "\\nintercept:" + interceptFrom : url;
+    const partial = layoutChain && this.partialNavigationHeaders ? this.partialNavigationHeaders() : {};
+    const identity = Object.keys(partial).length ? JSON.stringify(partial) : "";
+    return { cacheKey: identity ? base + "\\npartial:" + identity : base, headers: partial };
+  },
+
   fetchPrefetchedDocument: async function(url, interceptFrom, fresh, recover, signal, cacheResult = true, layoutChain = true) {
     signal?.throwIfAborted();
-    const cacheKey = interceptFrom ? url + "\\nintercept:" + interceptFrom : url;
+    const { cacheKey, headers: partialHeaders } = this.prefetchRequest(url, interceptFrom, layoutChain);
     if (fresh) this.clearPrefetchedPath(url);
     const cached = fresh ? undefined : this.readFreshPrefetch(cacheKey);
     if (cached !== undefined) return cached;
@@ -2830,7 +2843,7 @@ export function generateUniversalRouterStateProperties(): string {
         // Islands mode: the server leaves out island values this browser holds, and the
         // layouts it shows.
         ...getFarmIslandValueHeaders(),
-        ...(layoutChain && this.partialNavigationHeaders ? this.partialNavigationHeaders() : {}),
+        ...partialHeaders,
       }, recover, signal);
       if (!response.ok) throw new Error("Failed to fetch page");
       const html = await response.text();
@@ -4625,7 +4638,7 @@ ${
     // navigation (double fetch per prefetched link) and sent
     // X-Farm-Intercept-From, which bypasses the shared cache server-side.
     const pathname = url.pathname + url.search;
-    if (this.readFreshPrefetch(pathname) !== undefined) return;
+    if (this.readFreshPrefetch(this.prefetchRequest(pathname).cacheKey) !== undefined) return;
     
     return this.fetchPage(pathname, undefined, false, false)
       .catch(function(error) {
