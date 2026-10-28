@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createFarmAppManifest,
@@ -263,31 +263,57 @@ describe("app manifest", () => {
 
 describe("Farm Infra signature", () => {
   const now = Date.parse("2026-10-23T12:00:00.000Z");
+  const url = "https://app.example/.well-known/farmjs.json";
 
-  it("accepts a fresh signature for the app's key, made from the key's hash", async () => {
-    const header = await signFarmInfraManifestRequest(keyHash, now);
-    expect(header).toMatch(/^t=\d+, v1=[0-9a-f]{64}$/);
-    expect(await verifyFarmInfraManifestSignature(header, key, now)).toBe(true);
+  it("accepts a fresh signature for the app's key and URL, made from the key's hash", async () => {
+    const header = await signFarmInfraManifestRequest(keyHash, url, now);
+    expect(header).toMatch(/^t=\d+, v2=[0-9a-f]{64}$/);
+    expect(await verifyFarmInfraManifestSignature(header, key, url, now)).toBe(true);
+    // Bound to host and path only: a proxy that rewrites the scheme or adds a query is fine.
+    const viaProxy = "http://app.example/.well-known/farmjs.json?x=1";
+    expect(await verifyFarmInfraManifestSignature(header, key, viaProxy, now)).toBe(true);
     // Infra may sign for several keys; one match is enough.
-    const other = await signFarmInfraManifestRequest("0".repeat(64), now);
+    const other = await signFarmInfraManifestRequest("0".repeat(64), url, now);
     const both = `${header}, ${other.split(", ")[1]}`;
-    expect(await verifyFarmInfraManifestSignature(both, key, now + 60_000)).toBe(true);
+    expect(await verifyFarmInfraManifestSignature(both, key, url, now + 60_000)).toBe(true);
   });
 
   it("matches Farm Infra's signer byte for byte", async () => {
-    // The same vector is pinned in farmjs-infra apps/web/src/lib/app-manifest-store.test.ts.
-    expect(await signFarmInfraManifestRequest("f".repeat(64), now)).toBe(
-      "t=1792756800, v1=c7565ef379ae5c1550db4adcf5a72a0406336b7816d732fab2585e3e88dcf17d",
+    // Pin the same vector in farmjs-infra apps/web/src/lib/app-manifest-store.test.ts.
+    expect(await signFarmInfraManifestRequest("f".repeat(64), url, now)).toBe(
+      "t=1792756800, v2=78ae23a1122021fe97b044f9e32811fb25db550d0f277c8ce76ee09034e213db",
     );
   });
 
   it("refuses another key, an old or future signature, and malformed headers", async () => {
-    const header = await signFarmInfraManifestRequest(keyHash, now);
-    expect(await verifyFarmInfraManifestSignature(header, `${key}x`, now)).toBe(false);
-    expect(await verifyFarmInfraManifestSignature(header, key, now + 301_000)).toBe(false);
-    expect(await verifyFarmInfraManifestSignature(header, key, now - 301_000)).toBe(false);
-    for (const bad of [null, "", "t=abc, v1=00", `v1=${"a".repeat(64)}`, `t=${now / 1000}`])
-      expect(await verifyFarmInfraManifestSignature(bad, key, now)).toBe(false);
+    const header = await signFarmInfraManifestRequest(keyHash, url, now);
+    expect(await verifyFarmInfraManifestSignature(header, `${key}x`, url, now)).toBe(false);
+    expect(await verifyFarmInfraManifestSignature(header, key, url, now + 301_000)).toBe(false);
+    expect(await verifyFarmInfraManifestSignature(header, key, url, now - 301_000)).toBe(false);
+    for (const bad of [null, "", "t=abc, v2=00", `v2=${"a".repeat(64)}`, `t=${now / 1000}`])
+      expect(await verifyFarmInfraManifestSignature(bad, key, url, now)).toBe(false);
+  });
+
+  it("refuses a signature replayed on another host or path", async () => {
+    const header = await signFarmInfraManifestRequest(keyHash, url, now);
+    for (const elsewhere of [
+      "https://other.example/.well-known/farmjs.json",
+      "https://app.example:8443/.well-known/farmjs.json",
+      "https://app.example/.well-known/farmjs",
+      "https://app.example/base/.well-known/farmjs.json",
+    ])
+      expect(await verifyFarmInfraManifestSignature(header, key, elsewhere, now)).toBe(false);
+  });
+
+  it("refuses the unbound v1 format, which any app sharing the key would accept", async () => {
+    const timestamp = Math.floor(now / 1000);
+    const v1 = createHmac("sha256", keyHash)
+      .update(`farmjs-manifest-v1\n${timestamp}`)
+      .digest("hex");
+    for (const tag of ["v1", "v2"])
+      expect(
+        await verifyFarmInfraManifestSignature(`t=${timestamp}, ${tag}=${v1}`, key, url, now),
+      ).toBe(false);
   });
 });
 
@@ -304,7 +330,15 @@ describe("/.well-known/farmjs.json", () => {
   });
 
   const signed = async (method = "GET") =>
-    request({ [FARM_INFRA_SIGNATURE_HEADER]: await signFarmInfraManifestRequest(keyHash) }, method);
+    request(
+      {
+        [FARM_INFRA_SIGNATURE_HEADER]: await signFarmInfraManifestRequest(
+          keyHash,
+          "https://app.example/.well-known/farmjs.json",
+        ),
+      },
+      method,
+    );
   const env = { FARMJS_API_KEY: key };
 
   it("answers anyone, with CORS and a revalidated ETag, and never contains the key", async () => {
@@ -359,11 +393,31 @@ describe("/.well-known/farmjs.json", () => {
   it("serves a signed request the public view without the key, a valid signature, or analytics", async () => {
     publishStore({ isPublic: false });
     const forged = request({
-      [FARM_INFRA_SIGNATURE_HEADER]: await signFarmInfraManifestRequest("0".repeat(64)),
+      [FARM_INFRA_SIGNATURE_HEADER]: await signFarmInfraManifestRequest(
+        "0".repeat(64),
+        "https://app.example/.well-known/farmjs.json",
+      ),
+    });
+    // A signature Infra made for another app sharing the key.
+    const replayed = request({
+      [FARM_INFRA_SIGNATURE_HEADER]: await signFarmInfraManifestRequest(
+        keyHash,
+        "https://other.example/.well-known/farmjs.json",
+      ),
+    });
+    const legacy = request({
+      [FARM_INFRA_SIGNATURE_HEADER]: `t=${Math.floor(Date.now() / 1000)}, v1=${createHmac(
+        "sha256",
+        keyHash,
+      )
+        .update(`farmjs-manifest-v1\n${Math.floor(Date.now() / 1000)}`)
+        .digest("hex")}`,
     });
     for (const [req, options, manifestInput] of [
       [await signed(), { env: {} }, input],
       [forged, { env }, input],
+      [replayed, { env }, input],
+      [legacy, { env }, input],
       [await signed(), { env }, { ...input, analytics: false }],
     ] as const) {
       const response = await createFarmAppManifestResponse(req, manifestInput, options);

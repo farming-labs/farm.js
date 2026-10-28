@@ -292,10 +292,11 @@ async function runProductionRequest(
   serverDir: string,
   assertion: (response: Response) => Promise<void>,
   pathname = "/",
-  requestInit?: RequestInit,
+  requestInit?: RequestInit | ((url: string) => Promise<RequestInit>),
   env: Record<string, string | undefined> = {},
 ): Promise<void> {
   const port = await getAvailablePort();
+  const url = `http://127.0.0.1:${port}${pathname}`;
   const output: string[] = [];
   let spawnError: Error | undefined;
   const productionServer = spawn(process.execPath, [path.join(serverDir, "index.mjs")], {
@@ -316,10 +317,10 @@ async function runProductionRequest(
 
   try {
     const response = await waitForServer(
-      `http://127.0.0.1:${port}${pathname}`,
+      url,
       () => (spawnError ? `${spawnError.message}\n${output.join("")}` : output.join("")),
       () => spawnError !== undefined || productionServer.exitCode !== null,
-      requestInit,
+      typeof requestInit === "function" ? await requestInit(url) : requestInit,
     );
     try {
       await assertion(response);
@@ -2880,7 +2881,9 @@ export const listTodos = defineWebMCPTool({
           expect(JSON.stringify(manifest)).not.toContain(key);
         },
         "/.well-known/farmjs.json",
-        { headers: { "farmjs-infra-signature": await signFarmInfraManifestRequest(keyHash) } },
+        async (url) => ({
+          headers: { "farmjs-infra-signature": await signFarmInfraManifestRequest(keyHash, url) },
+        }),
         linked,
       );
       // Farm 0.1.34 served it at /.well-known/farmjs: that path still answers, signed or not.
@@ -2920,7 +2923,9 @@ export const listTodos = defineWebMCPTool({
           expect(response.headers.get("content-type") ?? "").not.toContain("application/json");
         },
         "/.well-known/farmjs.json",
-        { headers: { "farmjs-infra-signature": await signFarmInfraManifestRequest(keyHash) } },
+        async (url) => ({
+          headers: { "farmjs-infra-signature": await signFarmInfraManifestRequest(keyHash, url) },
+        }),
         { FARMJS_API_KEY: key, FARMJS_API_URL: "http://127.0.0.1:9" },
       );
     } finally {

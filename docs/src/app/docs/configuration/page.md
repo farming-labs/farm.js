@@ -706,7 +706,8 @@ category and provider (never its configuration), and plugin names. An MCP server
 `authorize`, or a public one whose path a path-specific guard covers (middleware or an
 integration's `protectedRoutes`, as for the [sitemap](#sitemap)), is listed as requiring
 authorization without its tools, resources or prompts, and endpoint tools leave out their HTTP
-route; a request Farm Infra signed for the app's `FARMJS_API_KEY` gets the full view.
+route; a request Farm Infra signed for the app's `FARMJS_API_KEY`, the host and the path it
+requested gets the full view (a signature made for one site doesn't work on another).
 [Farm Infra analytics](/docs/infra-analytics) lists every field.
 `manifest: false` turns it off.
 

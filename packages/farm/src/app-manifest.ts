@@ -28,10 +28,14 @@ export const FARM_APP_MANIFEST_LEGACY_PATH = "/.well-known/farmjs";
 export function isFarmAppManifestPath(pathname: string): boolean {
   return pathname === FARM_APP_MANIFEST_PATH || pathname === FARM_APP_MANIFEST_LEGACY_PATH;
 }
-/** Farm Infra signs manifest requests in this header: `t=<unix seconds>, v1=<hex>`. */
+/** Farm Infra signs manifest requests in this header: `t=<unix seconds>, v2=<hex>`. */
 export const FARM_INFRA_SIGNATURE_HEADER = "farmjs-infra-signature";
 
-const SIGNED_PURPOSE = "farmjs-manifest-v1";
+/**
+ * `v2` signs the requested host and path with the time, so a signature read off one app can't
+ * unlock another app sharing the key. `v1` (time only) is no longer accepted.
+ */
+const SIGNED_PURPOSE = "farmjs-manifest-v2";
 const SIGNATURE_WINDOW_SECONDS = 300;
 
 export type FarmAppManifestToolSource = "endpoint" | "defineTool" | "serverFunction";
@@ -279,19 +283,32 @@ function sameHex(a: string, b: string) {
   return difference === 0;
 }
 
-/**
- * Signs a manifest request the way Farm Infra does. Infra stores only the SHA-256 of a key,
- * so the HMAC secret is that hash: the app derives it from its own key, Infra already has it.
- */
-export async function signFarmInfraManifestRequest(keyHash: string, now = Date.now()) {
-  const timestamp = Math.floor(now / 1000);
-  return `t=${timestamp}, v1=${await hmacHex(keyHash, `${SIGNED_PURPOSE}\n${timestamp}`)}`;
+/** The host and path a signature is bound to: the scheme is left out, proxies often rewrite it. */
+function signedTarget(url: string | URL) {
+  const { host, pathname } = new URL(url);
+  return `${host}${pathname}`;
 }
 
-/** True when the header carries a fresh signature for this key. Any `v1` may match. */
+/**
+ * Signs a manifest request for `url` the way Farm Infra does. Infra stores only the SHA-256 of
+ * a key, so the HMAC secret is that hash: the app derives it from its own key, Infra already
+ * has it.
+ */
+export async function signFarmInfraManifestRequest(
+  keyHash: string,
+  url: string | URL,
+  now = Date.now(),
+) {
+  const timestamp = Math.floor(now / 1000);
+  const message = `${SIGNED_PURPOSE}\n${timestamp}\n${signedTarget(url)}`;
+  return `t=${timestamp}, v2=${await hmacHex(keyHash, message)}`;
+}
+
+/** True when the header carries a fresh signature for this key and URL. Any `v2` may match. */
 export async function verifyFarmInfraManifestSignature(
   header: string | null,
   key: string,
+  url: string | URL,
   now = Date.now(),
 ): Promise<boolean> {
   if (!header || header.length > 2048) return false;
@@ -302,11 +319,12 @@ export async function verifyFarmInfraManifestSignature(
   if (!Number.isSafeInteger(timestamp)) return false;
   if (Math.abs(now / 1000 - timestamp) > SIGNATURE_WINDOW_SECONDS) return false;
   const signatures = parts
-    .filter((part) => part.startsWith("v1="))
+    .filter((part) => part.startsWith("v2="))
     .map((part) => part.slice(3))
     .filter((value) => /^[0-9a-f]{64}$/.test(value));
   if (!signatures.length || signatures.length > 8) return false;
-  const expected = await hmacHex(await sha256Hex(key), `${SIGNED_PURPOSE}\n${timestamp}`);
+  const message = `${SIGNED_PURPOSE}\n${timestamp}\n${signedTarget(url)}`;
+  const expected = await hmacHex(await sha256Hex(key), message);
   return signatures.some((signature) => sameHex(signature, expected));
 }
 
@@ -345,7 +363,7 @@ export async function createFarmAppManifestResponse(
   const signature = request.headers.get(FARM_INFRA_SIGNATURE_HEADER);
   const key = input.analytics ? (options.env ?? processEnv()).FARMJS_API_KEY?.trim() : undefined;
   const full = Boolean(
-    signature && key && (await verifyFarmInfraManifestSignature(signature, key)),
+    signature && key && (await verifyFarmInfraManifestSignature(signature, key, request.url)),
   );
   const body = JSON.stringify(createFarmAppManifest(input, { full }));
   const etag = createFarmWeakETag(body);
