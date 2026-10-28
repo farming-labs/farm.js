@@ -350,6 +350,13 @@ navigation), so a navigation from other layouts fetches its own answer.
   drops to 1.5 KB. A response marked payload-only that arrives where no root can rebuild it (a
   stale prefetch) makes the browser fetch the whole document; a failed chunk renders the page
   whole so its error boundary applies.
+- Server actions as props: a registered `"use server"` function in client props travels as
+  `{"$farmAction": id}` (island props) or `{ $: "a" }` (server-tree payloads); the browser turns it
+  into a cached stub, and server rendering keeps the real function, so the form still posts without
+  JavaScript. After an action called from JavaScript the page refreshes; a refresh carries the
+  islands still on the page over (same component at the same position keeps its root and state and
+  gets the new props), as one React tree would. A `redirect()` from the action is a client
+  navigation.
 - Contract suite: `tests/e2e-server-components`, the same tests for `"rsc"` and `"islands"`, against
   `farm dev` and production builds.
 
