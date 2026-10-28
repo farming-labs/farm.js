@@ -47,9 +47,9 @@ Two sections of the app:
 | Section | Engine | Document, br (raw) | First-load JS, br | Navigation, br (raw) |
 | --- | --- | --- | --- | --- |
 | docs | `rsc` | 16.2 KB (76.2 KB) | 108.8 KB | 12.0 KB (37.4 KB) |
-| docs | `islands` | 16.0 KB (103.5 KB) | 81.1 KB | 2.5 KB (7.9 KB) |
+| docs | `islands` | 16.0 KB (103.5 KB) | 81.3 KB | 2.5 KB (7.9 KB) |
 | shop | `rsc` | 5.5 KB (33.0 KB) | 108.8 KB | 3.8 KB (13.2 KB) |
-| shop | `islands` | 5.6 KB (31.4 KB) | 80.0 KB | 4.1 KB (20.4 KB) |
+| shop | `islands` | 5.6 KB (31.4 KB) | 80.3 KB | 1.5 KB (3.6 KB) |
 
 How the docs navigation got there (same build, earlier runs): 15.7 KB (100.9 KB raw) before
 content-addressed values, 12.3 KB (38.4 KB) with values, 2.5 KB (7.9 KB) with segment navigation.
@@ -61,28 +61,9 @@ content-addressed values, 12.3 KB (38.4 KB) with values, 2.5 KB (7.9 KB) with se
 - docs: a navigation names the values the browser holds (`x-farm-values`) and the layouts on
   screen (`X-Farm-Layout-Chain`, keyed by pattern and params); the server leaves both out. What
   travels is the article and its islands, about a fifth of RSC's payload.
-- shop: the catalog travels once. A navigation leaves it out of the tree payload (5.8 KB to
-  4.2 KB for that response), and what remains is mostly the list's server-rendered HTML (16 KB
-  raw), which the browser does not use on a navigation: it rebuilds the page from the payload.
-  Leaving that HTML out of navigations is the next step for this row; RSC sends no HTML there.
-
-## Ideas measured and not built
-
-`what-if.mjs` simulates two RFC 0003 ideas on the HTML the islands build sends:
-
-```bash
-node benchmarks/server-components-payload/what-if.mjs
-```
-
-| Idea                                                                      | Result                                                                                                                                                                                              |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Island manifest: all islands' props in one script                         | 0 to +12 bytes per response after brotli. Brotli already removes the repeated script tags, and one script at the end of the body would hold back islands in streamed chunks.                        |
-| Shared value files: values on 2+ pages as a cached `/_farm/v/<hash>.json` | First visit 16.0 KB to 23.0 KB (+43%), plus a request before islands hydrate. A later full load with the file cached: 16.0 KB to 12.6 KB (-21%). Break-even at 2 cached full loads per first visit. |
-
-The value file loses because the values repeat text the HTML already has (the sidebar renders
-the same titles and links): inside the document brotli stores the tree for about 3.5 KB, alone it
-takes 10.4 KB. Client navigations already leave held values out, so cached full loads only come
-from new tabs, reloads and return visits. A value file could still pay for a large value the
-HTML does not render (a search index, chart data); nothing here measures one yet.
+- shop: the catalog travels once, and a navigation leaves it out. The browser rebuilds a shop
+  page in the layout's React tree from its payload, so a navigation carries only that payload,
+  not the page's HTML (`X-Farm-Tree-Navigation`): 5.8 KB with the HTML and every value, 4.2 KB
+  without the held values, 1.5 KB without the HTML, against RSC's 3.8 KB.
 
 `results/latest.json` has the per-page numbers of the last run.
