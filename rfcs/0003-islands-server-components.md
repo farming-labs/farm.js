@@ -342,7 +342,13 @@ Not yet: a prefetch cache keyed by layout chain.
 - Values in server-tree payloads: a page under a layout that hydrates as one root sends its large
   prop values once, in scripts right before its payload, and the browser re-renders those scripts
   so hydration matches. On the shop benchmark a navigation drops from 5.8 KB to 4.2 KB (brotli);
-  RSC sends 3.8 KB. The rest is the client components' server HTML, unused on a navigation.
+  RSC sends 3.8 KB.
+- Payload-only navigations: a browser that renders the destination in its layout's React root
+  says so (`X-Farm-Tree-Navigation`), and the server sends that page's payload, chunks and
+  server-HTML parts without its HTML, which the browser would never use. The shop navigation
+  drops to 1.5 KB. A response marked payload-only that arrives where no root can rebuild it (a
+  stale prefetch) makes the browser fetch the whole document; a failed chunk renders the page
+  whole so its error boundary applies.
 - Contract suite: `tests/e2e-server-components`, the same tests for `"rsc"` and `"islands"`, against
   `farm dev` and production builds.
 
