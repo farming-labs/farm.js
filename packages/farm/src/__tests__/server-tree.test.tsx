@@ -548,4 +548,96 @@ describe("server tree pages", () => {
       expect(container.querySelector("#catalog")!.textContent).toBe("120 items, closed");
     });
   });
+
+  describe("payload-only navigations", () => {
+    async function renderRoute(element: ReactNode, payloadOnly: boolean) {
+      const page = await renderFarmServerTreePage(React, element, {
+        isolate: (node) => isolateFarmServerPageGraph(React, node),
+        payloadOnly,
+      });
+      const stream = await renderToReadableStream(routeTree(page));
+      await stream.allReady;
+      return new Response(stream).text();
+    }
+    async function rebuild(html: string) {
+      const source = Object.assign(document.createElement("div"), { innerHTML: html });
+      const page = await createFarmServerTreeElement(
+        React,
+        source.querySelector("#__farm_page__")!,
+        {
+          load,
+          ServerHtml: createClientRuntime().ServerHtml,
+        },
+      );
+      expect(page).not.toBeNull();
+      const container = document.createElement("div");
+      document.body.append(container);
+      const { createRoot } = await import("react-dom/client");
+      const root = createRoot(container);
+      await act(async () => root.render(routeTree(page)));
+      mountedRoots.push(root as unknown as ReturnType<typeof hydrateRoot>);
+      return container;
+    }
+
+    it("sends the payload without the page's HTML, and the browser rebuilds the same page", async () => {
+      const full = await renderRoute(<HomePage />, false);
+      const payloadOnly = await renderRoute(<HomePage />, true);
+      expect(full).toContain("<h1>Hello</h1>");
+      expect(payloadOnly).not.toContain("<h1>Hello</h1>");
+      expect(payloadOnly).not.toContain('id="card"');
+      expect(payloadOnly).toContain("data-farm-tree-only");
+
+      const fromFull = await rebuild(full);
+      const fromPayload = await rebuild(payloadOnly);
+      // The same page, but for useId, which counts per root.
+      const page = (container: Element) =>
+        container.querySelector("#__farm_page__")!.innerHTML.replace(/data-uid="[^"]+"/g, "");
+      expect(page(fromPayload)).toBe(page(fromFull));
+      // Client components still read the layout's context.
+      await click(fromPayload, "#header");
+      expect(fromPayload.querySelector("#page")!.textContent).toBe("page:open");
+    });
+
+    it("waits for Suspense chunks and sends their payloads", async () => {
+      async function Slow() {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return <PageButton label="slow" />;
+      }
+      async function Page() {
+        return (
+          <React.Suspense fallback={<p id="fallback">loading</p>}>
+            <Slow />
+          </React.Suspense>
+        );
+      }
+      const payloadOnly = await renderRoute(<Page />, true);
+      expect(payloadOnly).toContain("data-farm-server-tree-chunk");
+      // The fallback travels in the payload, not as HTML.
+      expect(payloadOnly).not.toContain('<p id="fallback">');
+      const container = await rebuild(payloadOnly);
+      expect(container.querySelector("#page")!.textContent).toBe("slow:closed");
+    });
+
+    it("renders the page whole when a chunk fails, so its error boundary applies", async () => {
+      async function Broken(): Promise<never> {
+        throw new Error("chunk failed");
+      }
+      async function Page() {
+        return (
+          <React.Suspense fallback={<p>loading</p>}>
+            <Broken />
+          </React.Suspense>
+        );
+      }
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const page = await renderFarmServerTreePage(React, <Page />, {
+        isolate: (node) => isolateFarmServerPageGraph(React, node),
+        payloadOnly: true,
+      });
+      const stream = await renderToReadableStream(routeTree(page), { onError: () => {} });
+      await stream.allReady;
+      const html = await new Response(stream).text();
+      expect(html).not.toContain("data-farm-tree-only");
+    });
+  });
 });

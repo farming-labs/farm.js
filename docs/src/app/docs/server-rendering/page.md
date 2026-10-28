@@ -321,7 +321,9 @@ not in a layout's body. `router.refresh()` and full loads render every layout. A
 each segment under its own key next to the full page, and sends every value so the cached HTML
 suits any browser; a prerendered page always sends the whole document. A page under a layout that
 hydrates as one root (a client provider around the pages) sends its large prop values once too,
-in the payload its client components rebuild from. `"use server"`
+in the payload its client components rebuild from. When the browser already renders that layout,
+a navigation to such a page carries only that payload: the browser rebuilds the page in the
+layout's React tree, so the server leaves out the page's HTML. `"use server"`
 functions work from forms, with or without JavaScript, and from client components, in `farm dev`
 and in production. Islands mode needs none of the RSC packages and is experimental. Both modes share
 the authoring rules on this page, so switching between them is a one-line change; the same contract

@@ -2830,7 +2830,7 @@ export function generateUniversalRouterStateProperties(): string {
         // Islands mode: the server leaves out island values this browser holds, and the
         // layouts it shows.
         ...getFarmIslandValueHeaders(),
-        ...(layoutChain && this.layoutChainHeaders ? this.layoutChainHeaders() : {}),
+        ...(layoutChain && this.partialNavigationHeaders ? this.partialNavigationHeaders() : {}),
       }, recover, signal);
       if (!response.ok) throw new Error("Failed to fetch page");
       const html = await response.text();
@@ -3753,6 +3753,10 @@ async function createMatchedHydrationRoute(matched, pathname, searchParams, serv
     const serverPage = document.getElementById("__farm_page__");
     const pageSource = typeof serverHtml === "string" ? serverHtml : serverPage;
     const serverTree = pageSource ? await createFarmServerTreePageElement(pageSource, pathname) : null;
+    // A payload-only page (islands mode) has no HTML to fall back to: fetch the whole document.
+    if (!serverTree && typeof serverHtml === "string" && serverHtml.includes("data-farm-tree-only")) {
+      return null;
+    }
     pageElement = serverTree
       ? createLayoutPageBoundary(matched.route, serverTree)
       : createLayoutPageBoundary(
@@ -4197,10 +4201,15 @@ ${generateUniversalRouterStateProperties()}
   prefetchCache: new Map(),
 ${
   islandValues
-    ? `  // Islands mode: navigations name the layouts on screen, and the server leaves them out.
-  layoutChainHeaders: function() {
-    const layouts = getLayoutPatterns(document.getElementById("root") || document.body);
-    return layouts.length ? { "X-Farm-Layout-Chain": JSON.stringify(layouts) } : {};
+    ? `  // Islands mode: navigations name the layouts on screen, and say when this page renders the
+  // next one in its own React root; the server leaves out what the browser keeps or rebuilds.
+  partialNavigationHeaders: function() {
+    const root = document.getElementById("root") || document.body;
+    const layouts = getLayoutPatterns(root);
+    return {
+      ...(layouts.length ? { "X-Farm-Layout-Chain": JSON.stringify(layouts) } : {}),
+      ...(reactRoot && reactRootContainer === root ? { "X-Farm-Tree-Navigation": "1" } : {}),
+    };
   },
 `
     : ""
@@ -4516,6 +4525,12 @@ ${
       }
     }
 
+    ${
+      islandValues
+        ? `// A payload-only page renders only in a React root that rebuilds it.
+    if (nextPage?.querySelector("[data-farm-tree-only]")) return "segment-mismatch";`
+        : ""
+    }
     const rootWasReactOwned = reactRootContainer === currentRoot;
     resetReactRoot();
     resetRouteSlotRoots();
@@ -5781,16 +5796,17 @@ function isolateFarmRouteServerPage(element) {
 
 // An async page below a hydrating layout renders as a serialized tree the browser rebuilds in
 // the layout's React root, so its client components read the layout's context.
-function renderFarmRouteServerTree(element) {
+function renderFarmRouteServerTree(element, extra) {
   return renderFarmServerTreePage(React, element, {
     isolate: isolateFarmRouteServerPage,${farmIslandsMode ? "\n    values: true," : ""}
+    ...extra,
   });
 }`
     : `function wrapFarmRouteClientGraph(element) { return element; }
 
 function isolateFarmRouteServerPage(element) { return element; }
 
-function renderFarmRouteServerTree(element) { return element; }`;
+function renderFarmRouteServerTree(element, extra) { return element; }`;
   const hasGeneratedMetadataImages = metadataImageRoutes.some(
     (image) => image.sourceType === "module",
   );
@@ -9579,8 +9595,17 @@ ${
         // navigating browser keeps: the layouts it shows and the values it holds.
         const farmSharedCacheableRoute = Boolean(getRouteSharedCacheControl(route, pprCanCache));
         if (farmSharedCacheableRoute) ignoreFarmHeldValues();
-        const farmLayoutKeyOf = getFarmLayoutKey;`
-            : `const farmLayoutKeyOf = null;`
+        const farmLayoutKeyOf = getFarmLayoutKey;
+        // A navigation the browser renders in its layout's React root rebuilds a server-tree page
+        // from its payload, so the page's rendered HTML would go unused.
+        const farmPayloadOnlyNavigation =
+          !farmSharedCacheableRoute &&
+          shouldHydrateLayout &&
+          route.serverTree === true &&
+          !route.shouldHydrate &&
+          request.headers.get("x-farm-tree-navigation") === "1";`
+            : `const farmLayoutKeyOf = null;
+        const farmPayloadOnlyNavigation = false;`
         }
         const renderPageElement = async () => {
             // First, render the page content
@@ -9608,7 +9633,10 @@ ${
               pageElement = wrapFarmRouteClientGraph(pageElement);
             } else if (shouldHydrateLayout && !route.shouldHydrate) {
               pageElement = route.serverTree
-                ? await renderFarmRouteServerTree(pageElement)
+                ? await renderFarmRouteServerTree(
+                    pageElement,
+                    farmPayloadOnlyNavigation ? { payloadOnly: true } : undefined,
+                  )
                 : isolateFarmRouteServerPage(pageElement);
             }
 
@@ -9796,7 +9824,7 @@ ${
           farmLocaleResolution,
         );
         const hasRequestScopedRender = Boolean(
-          pageStatus >= 400 ||${farmIslandsMode ? "\n          farmKeptLayouts > 0 ||" : ""}
+          pageStatus >= 400 ||${farmIslandsMode ? "\n          farmKeptLayouts > 0 ||\n          farmPayloadOnlyNavigation ||" : ""}
           renderReadRequest ||
           request.headers.get("x-farm-intercept-from") ||
           hasPrivateRequestHeaders ||
@@ -9823,7 +9851,7 @@ ${
         // gets HTML without them.
         responseHeaders["Vary"] = farmSharedCacheableRoute
           ? "x-farm-layout-chain"
-          : "x-farm-values, x-farm-layout-chain";`
+          : "x-farm-values, x-farm-layout-chain, x-farm-tree-navigation";`
             : ""
         }
         let html = renderedPage.html;

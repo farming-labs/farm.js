@@ -30,6 +30,11 @@ const FORWARD_REF_TYPE = Symbol.for("react.forward_ref");
 const SERVER_HTML_TAG = "farm-server-html";
 export const FARM_SERVER_TREE_ATTRIBUTE = "data-farm-server-tree";
 const SERVER_TREE_CHUNK_ATTRIBUTE = "data-farm-server-tree-chunk";
+/**
+ * Marks a navigation response that carries only the page's payload. The browser rebuilds such a
+ * page in its layout's React root and never shows its HTML, so the server leaves the HTML out.
+ */
+export const FARM_SERVER_TREE_PAYLOAD_ONLY_ATTRIBUTE = "data-farm-tree-only";
 const SERVER_HTML_ATTRIBUTE = "data-farm-server-html";
 
 // The HTML parser moves or drops a custom element placed inside these, so a subtree that needs a
@@ -519,10 +524,12 @@ function createTreeScript(
   value: string,
   json: string,
   values: TreeValueScripts = [],
+  attributes: Record<string, string> = {},
 ): React.ReactElement {
   const script = ReactRuntime.createElement("script", {
     type: "application/json",
     [attribute]: value,
+    ...attributes,
     dangerouslySetInnerHTML: { __html: json },
   });
   if (values.length === 0) return script;
@@ -572,6 +579,59 @@ function readTreeValueScripts(script: Element): TreeValueScripts {
   return values;
 }
 
+/**
+ * The page as a navigation the browser renders itself receives it: its payload, every chunk's
+ * payload, and the server HTML parts, with none of the HTML the payload rebuilds. Waits for every
+ * chunk, since a navigation reads the whole response anyway. Returns null when a chunk failed,
+ * so the page renders as usual and its error boundaries apply.
+ */
+async function createPayloadOnlyPage(
+  state: ResolveState,
+  payload: { json: string; values: TreeValueScripts },
+  encode: (payload: Record<string, unknown>) => { json: string; values: TreeValueScripts },
+  resolver: TreeResolver,
+): Promise<React.ReactElement | null> {
+  const { ReactRuntime } = state;
+  const chunks = new Map<number, TreeValue>();
+  // A chunk can contain further chunks; settle until none are pending.
+  for (let pending = [...state.chunks.keys()]; pending.length > 0; ) {
+    const settled = await Promise.allSettled(
+      pending.map(async (id) => [id, await state.chunks.get(id)!.encoded] as const),
+    );
+    for (const result of settled) {
+      if (result.status === "rejected") return null;
+      chunks.set(result.value[0], result.value[1]);
+    }
+    pending = [...state.chunks.keys()].filter((id) => !chunks.has(id));
+  }
+  return ReactRuntime.createElement(
+    ReactRuntime.Fragment,
+    null,
+    ...Array.from(state.serverHtml.keys(), (id) => resolver.serverHtml(id, `h${id}`)),
+    ReactRuntime.createElement(
+      ReactRuntime.Fragment,
+      { key: "payload" },
+      createTreeScript(ReactRuntime, FARM_SERVER_TREE_ATTRIBUTE, "", payload.json, payload.values, {
+        [FARM_SERVER_TREE_PAYLOAD_ONLY_ATTRIBUTE]: "",
+      }),
+    ),
+    ...Array.from(chunks, ([id, encoded]) => {
+      const chunk = encode({ t: encoded });
+      return ReactRuntime.createElement(
+        ReactRuntime.Fragment,
+        { key: `c${id}` },
+        createTreeScript(
+          ReactRuntime,
+          SERVER_TREE_CHUNK_ATTRIBUTE,
+          String(id),
+          chunk.json,
+          chunk.values,
+        ),
+      );
+    }),
+  );
+}
+
 export interface FarmServerTreeRenderOptions {
   /** Renders a subtree the resolver could not represent with its client components as islands. */
   isolate(element: React.ReactNode): React.ReactNode;
@@ -580,6 +640,11 @@ export interface FarmServerTreeRenderOptions {
    * leaves out the ones the browser holds.
    */
   values?: boolean;
+  /**
+   * A navigation the browser renders in its layout's React root: send the payload, the chunks it
+   * streams and the server HTML parts it cannot represent, without the page's rendered HTML.
+   */
+  payloadOnly?: boolean;
 }
 
 /**
@@ -668,14 +733,9 @@ export async function renderFarmServerTreePage(
     },
   };
   const payload = encode({ v: 1, t: tree });
-  const page = createTreePage(
-    ReactRuntime,
-    tree,
-    payload.json,
-    resolver,
-    undefined,
-    payload.values,
-  );
+  const page =
+    (options.payloadOnly && (await createPayloadOnlyPage(state, payload, encode, resolver))) ||
+    createTreePage(ReactRuntime, tree, payload.json, resolver, undefined, payload.values);
   // The browser renders the page through FarmServerTreePage; the server renders the same layer.
   return ReactRuntime.createElement(function FarmServerTreePage() {
     return page;
