@@ -14,8 +14,9 @@ Farm uses its process-local memory cache when `cache.adapter` is not configured.
 servers or ephemeral deployments, configure one shared adapter in `farm.config.ts`:
 
 The memory cache retains at most 1,024 entries by default and evicts the least recently used entry
-when it reaches that limit. Set `cache.maxEntries` to a larger positive integer when one process
-must keep a larger working set:
+when it reaches that limit. PPR shells, one per query string, keep their own LRU of the same size,
+so a flood of shell variants never evicts `unstable_cache`, server query or route data entries. Set
+`cache.maxEntries` to a larger positive integer when one process must keep a larger working set:
 
 ```ts
 import { defineConfig } from "@farm.js/core";
@@ -286,7 +287,8 @@ can still serve the previous value. Adapters with native expiry should pass it t
 one-off keys, such as one PPR shell per query string or one server query entry per input, do not
 accumulate forever. Farm also deletes an entry it reads after `expiresAt`. Entries with
 `revalidate: false` or no `revalidate` never expire on their own and stay until they are replaced or
-invalidated.
+invalidated, except PPR shells: a shell without `revalidate` expires from the adapter after 24 hours
+and is rendered again on the next request.
 
 For any Farm/unstorage-compatible client, `storageCacheAdapter(storage)` provides a portable
 baseline. It percent-encodes keys and tags before handing them to the storage client, because

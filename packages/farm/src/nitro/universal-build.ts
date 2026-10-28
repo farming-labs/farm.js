@@ -8388,7 +8388,8 @@ ${
     : ""
 }
 
-const pprShellCache = getFarmDataCache();
+// Shells keep their own LRU so query-string variants never evict app cache entries.
+const pprShellCache = getFarmDataCache().pprShellCache;
 const experimentalPPREnabled = ${JSON.stringify(config.experimental?.ppr === true)};
 
 function resolveRouteRenderingView(route) {

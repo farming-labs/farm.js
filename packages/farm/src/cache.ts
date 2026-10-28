@@ -110,7 +110,8 @@ export interface FarmCacheEntry<T = unknown> {
   revalidate?: number | false;
   /**
    * Epoch milliseconds after which no reader can use the entry, so shared
-   * storage may drop it. Set only for entries with a finite `revalidate`.
+   * storage may drop it. Set for entries with a finite `revalidate`, and for PPR shells
+   * stored through an adapter (see {@link PPR_SHELL_ADAPTER_TTL_SECONDS}).
    * Adapters with native expiry (Redis PX, unstorage `ttl`) should honor it.
    */
   expiresAt?: number;
@@ -292,6 +293,12 @@ async function encodeStorageKeySegment(value: string): Promise<string> {
  */
 const MIN_STALE_RETENTION_MS = 60_000;
 
+/**
+ * How long a PPR shell without `revalidate` stays in a shared cache adapter. Every query
+ * string variant stores its own shell, so without an expiry they would pile up forever.
+ */
+export const PPR_SHELL_ADAPTER_TTL_SECONDS = 86_400;
+
 function getFarmCacheEntryExpiresAt(
   createdAt: number,
   revalidate: number | false | undefined,
@@ -342,6 +349,10 @@ export class FarmDataCache {
   private namespace = "farm";
   private local = true;
   private maxEntries = 1_024;
+  private config: FarmCacheUserConfig = {};
+  /** PPR shells, kept apart so query-string variants never evict app entries. */
+  private shells?: FarmDataCache;
+  private isShellCache = false;
   private lease = {
     enabled: true,
     ttlMs: 10_000,
@@ -354,6 +365,8 @@ export class FarmDataCache {
   }
 
   configure(config: FarmCacheUserConfig = {}): void {
+    this.config = config;
+    this.shells?.configure(config);
     this.generation++;
     this.entries.clear();
     this.entriesByTag.clear();
@@ -382,6 +395,20 @@ export class FarmDataCache {
               "cache.lease.pollIntervalMs",
             ),
           };
+  }
+
+  /**
+   * Where PPR shells live: the same adapter and namespace, so path and tag invalidation
+   * reaches them, but their own in-memory LRU of `maxEntries`.
+   * @internal
+   */
+  get pprShellCache(): FarmDataCache {
+    if (this.isShellCache) return this;
+    if (!this.shells) {
+      this.shells = new FarmDataCache(this.config);
+      this.shells.isShellCache = true;
+    }
+    return this.shells;
   }
 
   get adapterName(): string {
@@ -552,7 +579,11 @@ export class FarmDataCache {
     const capturedVersions =
       tagVersions ?? (await this.getAdapterTagVersions(Array.from(tags.values())));
     const createdAt = options.createdAt ?? Date.now();
-    const expiresAt = getFarmCacheEntryExpiresAt(createdAt, revalidate);
+    const expiresAt =
+      getFarmCacheEntryExpiresAt(createdAt, revalidate) ??
+      (this.isShellCache && this.adapter
+        ? createdAt + PPR_SHELL_ADAPTER_TTL_SECONDS * 1000
+        : undefined);
     const entry: FarmCacheEntry<T> = {
       key,
       value,
@@ -596,6 +627,12 @@ export class FarmDataCache {
   }
 
   clear(): void {
+    const count = this.entries.size + (this.shells?.resetLocal() ?? 0);
+    this.resetLocal();
+    emitFarmEvent({ type: "cache.clear", count });
+  }
+
+  private resetLocal(): number {
     const count = this.entries.size;
     this.generation++;
     this.entries.clear();
@@ -604,7 +641,7 @@ export class FarmDataCache {
     this.invalidatedTagVersions.clear();
     this.activeGenerations.clear();
     this.version = 0;
-    emitFarmEvent({ type: "cache.clear", count });
+    return count;
   }
 
   async clearAsync(): Promise<void> {
@@ -647,7 +684,7 @@ export class FarmDataCache {
     options: { source?: "revalidateTag" | "updateTag"; profile?: RevalidateTagProfile } = {},
   ): number {
     const normalized = normalizeCacheTag(tag);
-    const count = this.invalidateTag(normalized);
+    const count = this.invalidateTag(normalized) + (this.shells?.invalidateTag(normalized) ?? 0);
     emitFarmEvent(
       options.source === "updateTag"
         ? { type: "cache.updateTag", tag: normalized, count }
@@ -661,7 +698,7 @@ export class FarmDataCache {
     options: { source?: "revalidateTag" | "updateTag"; profile?: RevalidateTagProfile } = {},
   ): Promise<number> {
     const normalized = normalizeCacheTag(tag);
-    const count = this.invalidateTag(normalized);
+    const count = this.invalidateTag(normalized) + (this.shells?.invalidateTag(normalized) ?? 0);
     await this.adapter?.invalidateTags?.([this.createAdapterTag(normalized)]);
     emitFarmEvent(
       options.source === "updateTag"
@@ -674,8 +711,10 @@ export class FarmDataCache {
   revalidatePath(routePath: string): number {
     const normalizedPath = normalizeRevalidatePath(routePath);
     const pathTag = createPathCacheTag(normalizedPath);
-    const pprCount = this.countEntriesForTags([pathTag, "ppr"]);
-    const count = this.invalidateTag(pathTag);
+    const pprCount =
+      this.countEntriesForTags([pathTag, "ppr"]) +
+      (this.shells?.countEntriesForTags([pathTag, "ppr"]) ?? 0);
+    const count = this.invalidateTag(pathTag) + (this.shells?.invalidateTag(pathTag) ?? 0);
     emitFarmEvent({ type: "cache.revalidatePath", path: normalizedPath, count });
 
     if (pprCount > 0) {
@@ -693,8 +732,10 @@ export class FarmDataCache {
   async revalidatePathAsync(routePath: string): Promise<number> {
     const normalizedPath = normalizeRevalidatePath(routePath);
     const pathTag = createPathCacheTag(normalizedPath);
-    const pprCount = this.countEntriesForTags([pathTag, "ppr"]);
-    const count = this.invalidateTag(pathTag);
+    const pprCount =
+      this.countEntriesForTags([pathTag, "ppr"]) +
+      (this.shells?.countEntriesForTags([pathTag, "ppr"]) ?? 0);
+    const count = this.invalidateTag(pathTag) + (this.shells?.invalidateTag(pathTag) ?? 0);
     await this.adapter?.invalidateTags?.([this.createAdapterTag(pathTag)]);
     emitFarmEvent({ type: "cache.revalidatePath", path: normalizedPath, count });
 

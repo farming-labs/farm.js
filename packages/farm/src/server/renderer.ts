@@ -1037,7 +1037,7 @@ export class ServerRenderer {
   }
 
   private getCachedPPRShell(pathname: string, search: string, locale = "", origin = "") {
-    return this.dataCache.getEntryAsync<CachedPPRShell>(
+    return this.dataCache.pprShellCache.getEntryAsync<CachedPPRShell>(
       this.getPPRCacheKey(pathname, search, locale, origin),
     );
   }
@@ -1049,7 +1049,7 @@ export class ServerRenderer {
       options.locale,
       options.origin,
     );
-    await this.dataCache.setAsync(
+    await this.dataCache.pprShellCache.setAsync(
       key,
       { html },
       {
