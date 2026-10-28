@@ -2131,7 +2131,7 @@ async function buildClient(
           },
         },
         farmPlugin({ ...config, isolatedClientBoundaryModules }, pluginManager),
-        farmEnvironmentFunctionsPlugin(),
+        farmEnvironmentFunctionsPlugin(config),
       ],
       mode: "production",
       css: postcssSearchPath
@@ -4965,7 +4965,7 @@ async function buildSSRInMemory(
         { ...createReactProductionModePlugin(), enforce: "pre" as const },
         farmServerOnlyEntriesPlugin(),
         farmPlugin({ ...config, isolatedClientBoundaryModules }, pluginManager),
-        farmEnvironmentFunctionsPlugin(),
+        farmEnvironmentFunctionsPlugin(config),
         {
           name: "farm-virtual-ssr-entry",
           resolveId(id) {

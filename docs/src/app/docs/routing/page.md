@@ -90,6 +90,15 @@ passed to a helper (`wrap(page)`), because those could still carry server code. 
 fails if the routes file, or an application module it keeps, still imports a Node builtin such as
 `node:fs`.
 
+The check fails closed. Farm treats the routes file as a routes module even when it only has type
+imports from `@farm.js/core` or none at all, and so are the modules it takes route lists or a
+`defineRoutes` callback from. Once the shapes above are stripped, a client build fails if a routes
+module still sets `guard`, `data`, `staticPaths`, `generateMetadata`, `methods`, or an HTTP method
+key anywhere outside the route options Farm kept, for example
+`{ ...adminBase, path, guard }` or `Object.assign({ kind: "page" }, { guard })`. JSX props and
+other arguments passed to package functions are left alone. Move a helper that uses one of those
+keys for something else out of the routes file.
+
 ## Named slots and intercepted routes
 
 An `@name` directory gives its owning layout another rendered node alongside `children`. Use slots

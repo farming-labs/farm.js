@@ -1,9 +1,14 @@
+import { realpathSync } from "node:fs";
+import path from "node:path";
 import type { Plugin } from "vite";
 import type { FarmEnvironment } from "./environment";
+import { getFarmSourceRoots, type ResolvedFarmLayer } from "./layers";
 import {
   findClientNodeBuiltinChain,
+  isApplicationModuleId,
   transformProgrammaticRoutesForClient,
 } from "./programmatic-routes-client";
+import { PROGRAMMATIC_ROUTE_FILE_NAMES, parseProgrammaticRouteModuleId } from "./routes-shared";
 
 type EnvironmentFunctionKind = "createServerOnlyFn" | "createClientOnlyFn" | "createIsomorphicFn";
 
@@ -94,16 +99,42 @@ export function transformEnvironmentFunctions(
   return { code: output };
 }
 
-export function farmEnvironmentFunctionsPlugin(): Plugin {
+export interface FarmEnvironmentFunctionsPluginOptions {
+  /** The app's root, srcDir, and layers: where Farm loads programmatic routes files from. */
+  root?: string;
+  srcDir?: string;
+  layers?: readonly ResolvedFarmLayer[];
+}
+
+export function farmEnvironmentFunctionsPlugin(
+  options: FarmEnvironmentFunctionsPluginOptions = {},
+): Plugin {
   // Programmatic routes modules seen by the client build, checked once the
   // whole client graph is known.
   const clientRouteModules = new Set<string>();
+  // Routes modules are known by where they sit, not by what they import: the routes
+  // files Farm loads, the files generated `?farm-route=` modules import, and the
+  // modules a routes module takes route lists from.
+  let routesFiles = new Set<string>();
+  const generatedRouteFiles = new Set<string>();
+  const routeSources = new Map<string, { importer: string; callbackExports: Set<string> }>();
+  const checkedRouteFiles = new Set<string>();
 
   return {
     name: "farm:environment-functions",
     enforce: "post",
 
-    transform(code, id, transformOptions) {
+    configResolved(config) {
+      routesFiles = new Set(
+        getFarmSourceRoots({ ...options, root: options.root ?? config.root }).flatMap((source) =>
+          PROGRAMMATIC_ROUTE_FILE_NAMES.map((name) =>
+            resolvedFile(path.resolve(source.root, source.srcDir, name)),
+          ),
+        ),
+      );
+    },
+
+    async transform(code, id, transformOptions) {
       const environment = resolveBuildEnvironment(
         this as unknown as { environment?: { name?: string } },
         transformOptions?.ssr,
@@ -114,13 +145,41 @@ export function farmEnvironmentFunctionsPlugin(): Plugin {
         return result ? { code: result.code, map: null } : null;
       }
 
+      const generated = parseProgrammaticRouteModuleId(id);
+      if (generated) {
+        generatedRouteFiles.add(resolvedFile(generated.filePath));
+        return result ? { code: result.code, map: null } : null;
+      }
+
+      const file = moduleFile(id);
+      const source = routeSources.get(file);
       let routes;
       try {
-        routes = transformProgrammaticRoutesForClient({ code: result?.code ?? code, id, parse });
+        routes = transformProgrammaticRoutesForClient({
+          code: result?.code ?? code,
+          id,
+          parse,
+          routesModule: routesFiles.has(file) || generatedRouteFiles.has(file) || !!source,
+          callbackExports: source ? [...source.callbackExports] : undefined,
+        });
       } catch (error) {
         this.error(error instanceof Error ? error.message : String(error));
       }
-      if (routes) clientRouteModules.add(id);
+      if (routes) {
+        clientRouteModules.add(id);
+        checkedRouteFiles.add(file);
+        for (const routeSource of routes.routeSources) {
+          const resolved = await this.resolve(routeSource.source, id);
+          if (!resolved || resolved.external || !isApplicationModuleId(resolved.id)) continue;
+          const sourceFile = moduleFile(resolved.id);
+          const entry = routeSources.get(sourceFile) ?? {
+            importer: id,
+            callbackExports: new Set(),
+          };
+          for (const name of routeSource.callbackExports) entry.callbackExports.add(name);
+          routeSources.set(sourceFile, entry);
+        }
+      }
       const output = routes?.code ?? result?.code;
       return output !== undefined ? { code: output, map: null } : null;
     },
@@ -128,6 +187,22 @@ export function farmEnvironmentFunctionsPlugin(): Plugin {
     generateBundle() {
       const context = this as unknown as { environment?: { name?: string } };
       if (resolveBuildEnvironment(context, false) !== "client") return;
+      // A routes module the transform never checked, for example one another import
+      // reached first, could still hold server-only keys: fail instead of shipping it.
+      const expected = [
+        ...[...generatedRouteFiles].map((file) => [file, "Farm's generated route modules"]),
+        ...[...routeSources].map(([file, { importer }]) => [file, importer]),
+      ];
+      for (const [file, importer] of expected) {
+        if (checkedRouteFiles.has(file!) || !this.getModuleInfo(file!)) continue;
+        this.error(
+          `[Farm.js] ${file} holds programmatic routes that ${importer} loads in the browser, ` +
+            "but Farm could not check it for server-only route keys (guard, data, " +
+            "staticPaths, generateMetadata, and API handlers) before bundling. Define these " +
+            "routes in the routes file, or with page(), layout(), api(), or createRoute() " +
+            "imported from @farm.js/core.",
+        );
+      }
       for (const id of clientRouteModules) {
         const chain = findClientNodeBuiltinChain(id, (moduleId) => {
           const info = this.getModuleInfo(moduleId);
@@ -145,6 +220,19 @@ export function farmEnvironmentFunctionsPlugin(): Plugin {
       }
     },
   };
+}
+
+function moduleFile(id: string): string {
+  return id.split("?", 1)[0]!.replace(/\\/g, "/");
+}
+
+/** A file path as Vite ids spell it: symlinks resolved, forward slashes. */
+function resolvedFile(filePath: string): string {
+  try {
+    return moduleFile(realpathSync(filePath));
+  } catch {
+    return moduleFile(filePath);
+  }
 }
 
 function resolveBuildEnvironment(

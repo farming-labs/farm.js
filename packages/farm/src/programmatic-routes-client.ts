@@ -8,6 +8,11 @@ import { builtinModules } from "node:module";
  * so the client build removes them from the route options and then drops the
  * top-level imports and declarations only they used. Their server import graph
  * (database clients, credentials, node:fs) never enters the client bundle.
+ *
+ * The transform fails closed. A routes module (the file Farm loads routes from,
+ * and the modules it takes route lists from) is always transformed, whatever it
+ * imports, and once the known shapes are stripped any server-only route key Farm
+ * did not remove fails the build instead of shipping.
  */
 
 interface AstNode {
@@ -29,12 +34,28 @@ export interface TransformProgrammaticRoutesForClientOptions {
   code: string;
   id: string;
   parse: (code: string) => AstNode;
+  /**
+   * The module is known to hold routes: the routes file, or a module a routes file takes
+   * route lists from. It is checked even when it imports nothing from Farm.
+   */
+  routesModule?: boolean;
+  /** Exports another routes module passes to defineRoutes() as its routes callback. */
+  callbackExports?: readonly string[];
+}
+
+export interface ProgrammaticRouteSource {
+  /** The import specifier, as written in the routes module. */
+  source: string;
+  /** Exports of that module defineRoutes() receives as its routes callback. */
+  callbackExports: string[];
 }
 
 export interface TransformProgrammaticRoutesForClientResult {
   code: string;
   /** True when the module defines programmatic routes, even if nothing was removed. */
   definesRoutes: boolean;
+  /** Modules this one takes route definitions from, which must be checked as routes modules. */
+  routeSources: ProgrammaticRouteSource[];
 }
 
 const ROUTE_IMPORT_SOURCES = new Set(["@farm.js/core", "@farm.js/core/routes"]);
@@ -52,20 +73,32 @@ const SERVER_ONLY_KEYS: Record<RouteFactoryKind, ReadonlySet<string>> = {
 };
 // A `{ kind: "api" }` definition holds its handlers under `methods`.
 const RAW_API_SERVER_ONLY_KEYS: ReadonlySet<string> = new Set(["methods", ...API_METHOD_KEYS]);
+// Keys too specific to route hooks to be anything else when assigned or declared on a class.
+const ROUTE_HOOK_MEMBER_KEYS: ReadonlySet<string> = new Set([
+  "guard",
+  "staticPaths",
+  "generateMetadata",
+  ...API_METHOD_KEYS,
+]);
 const MODULE_EXTENSION_RE = /\.[cm]?[jt]sx?$/;
 const NODE_BUILTINS = new Set(builtinModules);
 
 export function transformProgrammaticRoutesForClient(
   options: TransformProgrammaticRoutesForClientOptions,
 ): TransformProgrammaticRoutesForClientResult | null {
-  if (!isTransformableModule(options.id) || !options.code.includes("@farm.js/core")) return null;
+  if (!isTransformableModule(options.id)) return null;
+  const routesModule = options.routesModule === true;
+  // Other modules only define routes through Farm's builders. A routes module is read
+  // structurally: type-only imports are already erased by the time this runs.
+  if (!routesModule && !options.code.includes("@farm.js/core")) return null;
 
   let ast = options.parse(options.code);
-  const bindings = findRouteBindings(ast);
-  if (!bindings) return null;
+  const callbackExports = options.callbackExports ?? [];
+  const bindings = findRouteBindings(ast, callbackExports);
+  if (!routesModule && bindings.names.size === 0) return null;
 
   let definitions = findRouteDefinitions(ast, bindings);
-  if (definitions.length === 0 && !bindings.definesRoutes) return null;
+  if (!routesModule && definitions.length === 0 && !bindings.definesRoutes) return null;
   assertRouteBindingsFollowed(options.code, options.id, ast, bindings);
 
   // Strip the outermost definitions first, then look again: a definition nested
@@ -81,11 +114,17 @@ export function transformProgrammaticRoutesForClient(
     stripped = true;
     code = applyReplacements(code, withoutNested(replacements));
     ast = options.parse(code);
-    definitions = findRouteDefinitions(ast, findRouteBindings(ast)!);
+    definitions = findRouteDefinitions(ast, findRouteBindings(ast, callbackExports));
   }
-  if (stripped) code = applyReplacements(code, removeUnusedTopLevel(code, ast));
+  if (stripped) {
+    code = applyReplacements(code, removeUnusedTopLevel(code, ast));
+    ast = options.parse(code);
+  }
 
-  const builtin = findNodeBuiltinImport(options.parse(code));
+  const finalBindings = findRouteBindings(ast, callbackExports);
+  assertNoServerKeysRemain(code, options.id, ast, finalBindings);
+
+  const builtin = findNodeBuiltinImport(ast);
   if (builtin) {
     throw new Error(
       `[Farm.js] ${options.id} defines programmatic routes and is loaded in the browser to ` +
@@ -95,7 +134,7 @@ export function transformProgrammaticRoutesForClient(
     );
   }
 
-  return { code, definesRoutes: true };
+  return { code, definesRoutes: true, routeSources: findRouteSources(ast, finalBindings) };
 }
 
 /**
@@ -135,7 +174,7 @@ function isTransformableModule(id: string): boolean {
   return MODULE_EXTENSION_RE.test(id.split("?", 1)[0]!);
 }
 
-function isApplicationModuleId(id: string): boolean {
+export function isApplicationModuleId(id: string): boolean {
   return !id.startsWith("\0") && isTransformableModule(id);
 }
 
@@ -154,6 +193,8 @@ interface RouteBindings {
   names: Map<string, RouteBinding>;
   /** Identifiers Farm read as declaring or using a route binding. */
   followed: Set<AstNode>;
+  /** Identifiers that name a local reusing a builder's name, not the builder. */
+  shadowed: Set<AstNode>;
   definesRoutes: boolean;
 }
 
@@ -174,9 +215,10 @@ const UNRESOLVED_KIND_SERVER_KEYS: ReadonlySet<string> = new Set([
 /**
  * Find the names that hold Farm's route builders: page, layout, api, createRoute,
  * routesBuilder, defineRoutes, or the whole module imported from Farm; the builder
- * defineRoutes hands its callback; and const aliases or destructuring of any of those.
+ * defineRoutes hands its callback (here, or as `callbackExports` from another routes
+ * module); and const aliases or destructuring of any of those.
  */
-function findRouteBindings(ast: AstNode): RouteBindings | null {
+function findRouteBindings(ast: AstNode, callbackExports: readonly string[] = []): RouteBindings {
   const names = new Map<string, RouteBinding>();
   const followed = new Set<AstNode>();
   let definesRoutes = false;
@@ -198,8 +240,6 @@ function findRouteBindings(ast: AstNode): RouteBindings | null {
     }
   }
 
-  if (names.size === 0) return null;
-
   const bind = (target: unknown, binding: RouteBinding | undefined): boolean => {
     if (!binding || !isAstNode(target) || target.type !== "Identifier") return false;
     followed.add(target);
@@ -220,7 +260,12 @@ function findRouteBindings(ast: AstNode): RouteBindings | null {
     return changed;
   };
 
-  for (let changed = true; changed; ) {
+  for (const callback of findExportedFunctions(ast, callbackExports)) {
+    const builder = asNodes(callback.params)[0];
+    if (builder && bindBuilderPattern(builder)) definesRoutes = true;
+  }
+
+  for (let changed = names.size > 0; changed; ) {
     changed = false;
     walk(ast, (node) => {
       if (node.type === "VariableDeclarator" && isAstNode(node.id)) {
@@ -241,7 +286,137 @@ function findRouteBindings(ast: AstNode): RouteBindings | null {
     });
   }
 
-  return { names, followed, definesRoutes };
+  const shadowed = findShadowedReferences(ast, names, followed);
+  return { names, followed, shadowed, definesRoutes };
+}
+
+/** Functions the module exports under one of `names` ("default" for the default export). */
+function findExportedFunctions(ast: AstNode, names: readonly string[]): AstNode[] {
+  if (names.length === 0) return [];
+  const wanted = new Set(names);
+  const found: AstNode[] = [];
+  const add = (node: AstNode | undefined) => {
+    if (node) found.push(node);
+  };
+  for (const statement of asNodes(ast.body)) {
+    if (statement.type === "ExportDefaultDeclaration" && wanted.has("default")) {
+      const declaration = statement.declaration as AstNode;
+      add(
+        declaration.type === "FunctionDeclaration"
+          ? declaration
+          : findRoutesCallback(ast, declaration),
+      );
+    }
+    if (statement.type !== "ExportNamedDeclaration" || statement.source) continue;
+    const declaration = isAstNode(statement.declaration) ? statement.declaration : undefined;
+    if (declaration?.type === "FunctionDeclaration" && isAstNode(declaration.id)) {
+      if (wanted.has(String(declaration.id.name))) add(declaration);
+    }
+    for (const item of declaration?.type === "VariableDeclaration"
+      ? asNodes(declaration.declarations)
+      : []) {
+      if (isAstNode(item.id) && item.id.type === "Identifier" && wanted.has(String(item.id.name))) {
+        add(isAstNode(item.init) && isFunctionNode(item.init) ? item.init : undefined);
+      }
+    }
+    for (const specifier of asNodes(statement.specifiers)) {
+      if (wanted.has(String(readPropertyName(specifier.exported)))) {
+        add(findRoutesCallback(ast, specifier.local as AstNode));
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Identifiers that resolve to a local declared with a builder's name (a component
+ * parameter `{ page }`, a `.map((page) => ...)` callback) rather than to the builder.
+ * Only uses inside the scope of such a declaration are exempt.
+ */
+function findShadowedReferences(
+  ast: AstNode,
+  names: ReadonlyMap<string, RouteBinding>,
+  followed: ReadonlySet<AstNode>,
+): Set<AstNode> {
+  const scopes = new Map<AstNode, Set<string>>();
+  walkWithAncestors(ast, (node, ancestors) => {
+    for (const [identifier, scope] of scopedDeclarations(node, ancestors)) {
+      const name = String(identifier.name);
+      if (!names.has(name) || followed.has(identifier) || !scope) continue;
+      let declared = scopes.get(scope);
+      if (!declared) scopes.set(scope, (declared = new Set()));
+      declared.add(name);
+    }
+  });
+
+  const shadowed = new Set<AstNode>();
+  if (scopes.size === 0) return shadowed;
+  walkWithAncestors(ast, (node, ancestors) => {
+    if (node.type !== "Identifier" || followed.has(node)) return;
+    const name = String(node.name);
+    if (ancestors.some((ancestor) => scopes.get(ancestor)?.has(name))) shadowed.add(node);
+  });
+  return shadowed;
+}
+
+const FUNCTION_SCOPES = new Set([
+  "Program",
+  "FunctionDeclaration",
+  "FunctionExpression",
+  "ArrowFunctionExpression",
+]);
+const BLOCK_SCOPES = new Set([
+  ...FUNCTION_SCOPES,
+  "BlockStatement",
+  "StaticBlock",
+  "SwitchStatement",
+  "ForStatement",
+  "ForInStatement",
+  "ForOfStatement",
+]);
+
+/** The identifiers `node` declares, each with the node whose scope holds it. */
+function scopedDeclarations(
+  node: AstNode,
+  ancestors: readonly AstNode[],
+): Array<[AstNode, AstNode | undefined]> {
+  const nearest = (types: ReadonlySet<string>) => {
+    for (let index = ancestors.length - 1; index >= 0; index--) {
+      if (types.has(ancestors[index]!.type)) return ancestors[index];
+    }
+    return undefined;
+  };
+  const withScope = (identifiers: AstNode[], scope: AstNode | undefined) =>
+    identifiers.map((identifier): [AstNode, AstNode | undefined] => [identifier, scope]);
+
+  switch (node.type) {
+    case "VariableDeclarator": {
+      const declaration = ancestors.at(-1);
+      const scope = nearest(declaration?.kind === "var" ? FUNCTION_SCOPES : BLOCK_SCOPES);
+      return withScope(patternIdentifiers(node.id), scope);
+    }
+    case "FunctionDeclaration":
+      return [
+        ...withScope(patternIdentifiers(node.id), nearest(BLOCK_SCOPES)),
+        ...withScope(asNodes(node.params).flatMap(patternIdentifiers), node),
+      ];
+    case "FunctionExpression":
+    case "ArrowFunctionExpression":
+      return withScope(
+        [...patternIdentifiers(node.id), ...asNodes(node.params).flatMap(patternIdentifiers)],
+        node,
+      );
+    case "ClassDeclaration":
+      return withScope(patternIdentifiers(node.id), nearest(BLOCK_SCOPES));
+    case "ClassExpression":
+    case "CatchClause":
+      return withScope(
+        patternIdentifiers(node.type === "CatchClause" ? node.param : node.id),
+        node,
+      );
+    default:
+      return [];
+  }
 }
 
 function builderMember(name: string): RouteBinding | undefined {
@@ -254,12 +429,15 @@ function builderMember(name: string): RouteBinding | undefined {
 function resolveRouteBinding(
   node: unknown,
   names: ReadonlyMap<string, RouteBinding>,
+  shadowed?: ReadonlySet<AstNode>,
 ): RouteBinding | undefined {
   if (!isAstNode(node)) return undefined;
-  if (node.type === "Identifier") return names.get(String(node.name));
+  if (node.type === "Identifier") {
+    return shadowed?.has(node) ? undefined : names.get(String(node.name));
+  }
   if (node.type !== "MemberExpression") return undefined;
-  if (resolveRouteBinding(node.object, names)?.type !== "builder") return undefined;
-  if (node.computed === true && !isStringLiteral(node.property)) return undefined;
+  if (resolveRouteBinding(node.object, names, shadowed)?.type !== "builder") return undefined;
+  if (node.computed === true && !isStaticString(node.property)) return undefined;
   const property = readPropertyName(node.property);
   return property ? builderMember(property) : undefined;
 }
@@ -296,7 +474,7 @@ function findRouteDefinitions(ast: AstNode, bindings: RouteBindings): RouteDefin
 
   walk(ast, (node) => {
     if (node.type !== "CallExpression") return;
-    const binding = resolveRouteBinding(node.callee, bindings.names);
+    const binding = resolveRouteBinding(node.callee, bindings.names, bindings.shadowed);
     if (binding?.type !== "factory") return;
     markFollowed(node.callee, bindings.followed);
     const args = asNodes(node.arguments);
@@ -321,16 +499,15 @@ function readDefinitionKind(node: AstNode): RouteFactoryKind | null | undefined 
   let serverKey = false;
   for (const property of asNodes(node.properties)) {
     if (property.type !== "Property") continue;
-    if (property.computed === true && !isStringLiteral(property.key)) continue;
+    if (property.computed === true && !isStaticString(property.key)) continue;
     const key = readPropertyName(property.key);
     if (key === "kind" && isAstNode(property.value)) kind = property.value;
     else if (key && UNRESOLVED_KIND_SERVER_KEYS.has(key)) serverKey = true;
   }
   if (!kind) return undefined;
-  if (kind.type === "Literal") {
-    return kind.value === "page" || kind.value === "layout" || kind.value === "api"
-      ? kind.value
-      : undefined;
+  if (isStaticString(kind)) {
+    const value = readPropertyName(kind);
+    return value === "page" || value === "layout" || value === "api" ? value : undefined;
   }
   return serverKey ? null : undefined;
 }
@@ -373,7 +550,7 @@ function stripRouteDefinition(
   }
   for (const property of asNodes(options.properties)) {
     if (property.type !== "Property") throw refuse("spread another object");
-    if (property.computed === true && !isStringLiteral(property.key)) {
+    if (property.computed === true && !isStaticString(property.key)) {
       throw refuse("use a computed key");
     }
   }
@@ -443,31 +620,22 @@ function assertRouteBindingsFollowed(
   code: string,
   id: string,
   ast: AstNode,
-  { names, followed }: RouteBindings,
+  { names, followed, shadowed }: RouteBindings,
 ): void {
-  // A local that reuses a builder's name (a shadowing variable or parameter) can't be
-  // told apart by name, so its uses are left alone.
-  const shadowed = new Set<string>();
-  walk(ast, (node) => {
-    for (const declared of declaredIdentifiers(node)) {
-      if (names.has(String(declared.name)) && !followed.has(declared)) {
-        shadowed.add(String(declared.name));
-      }
-    }
-  });
-
   walk(ast, (node, parent, key) => {
-    if (node.type !== "Identifier" || !parent || followed.has(node)) return;
+    if (node.type !== "Identifier" || !parent || followed.has(node) || shadowed.has(node)) return;
     const name = String(node.name);
     const binding = names.get(name);
-    if (!binding || binding.type === "defineRoutes" || shadowed.has(name)) return;
+    if (!binding || binding.type === "defineRoutes") return;
     if (!isReferencePosition(parent, key)) return;
-    // Other members of the module, such as core.notFound(), are not route builders.
+    // Other members of the module, such as core.notFound(), are not route builders. A
+    // member Farm can't name, such as routesBuilder[key], could be any of them.
     if (
       binding.type === "builder" &&
       parent.type === "MemberExpression" &&
       key === "object" &&
-      !resolveRouteBinding(parent, names)
+      (parent.computed !== true || isStaticString(parent.property)) &&
+      !resolveRouteBinding(parent, names, shadowed)
     ) {
       return;
     }
@@ -479,24 +647,6 @@ function assertRouteBindingsFollowed(
         "or through a const alias or destructuring in this module.",
     );
   });
-}
-
-function declaredIdentifiers(node: AstNode): AstNode[] {
-  switch (node.type) {
-    case "VariableDeclarator":
-      return patternIdentifiers(node.id);
-    case "FunctionDeclaration":
-    case "FunctionExpression":
-    case "ArrowFunctionExpression":
-      return [...patternIdentifiers(node.id), ...asNodes(node.params).flatMap(patternIdentifiers)];
-    case "ClassDeclaration":
-    case "ClassExpression":
-      return patternIdentifiers(node.id);
-    case "CatchClause":
-      return patternIdentifiers(node.param);
-    default:
-      return [];
-  }
 }
 
 function patternIdentifiers(pattern: unknown): AstNode[] {
@@ -531,8 +681,282 @@ function sourceSnippet(code: string, node: AstNode): string {
   return source.length > 80 ? `${source.slice(0, 77)}...` : source;
 }
 
-function isStringLiteral(node: unknown): boolean {
-  return isAstNode(node) && node.type === "Literal" && typeof node.value === "string";
+/** A string literal, or a template literal without expressions. */
+function isStaticString(node: unknown): boolean {
+  if (!isAstNode(node)) return false;
+  if (node.type === "Literal") return typeof node.value === "string";
+  return node.type === "TemplateLiteral" && asNodes(node.expressions).length === 0;
+}
+
+/**
+ * The last line of defence: once the known shapes are stripped, a routes module must not
+ * still set a server-only route key anywhere its route list could pick it up. Shapes Farm
+ * can't read (a definition that spreads its kind, Object.assign, a builder hidden behind
+ * a helper) fail here instead of shipping their hooks and imports to the browser.
+ *
+ * Exempt are the values of route options Farm kept (components, schemas, metadata) and
+ * the arguments of calls into packages (JSX runtimes, schema builders), unless such an
+ * argument names a route itself with `kind` or `path`.
+ */
+function assertNoServerKeysRemain(
+  code: string,
+  id: string,
+  ast: AstNode,
+  bindings: RouteBindings,
+): void {
+  const exempt = new Set<AstNode>();
+  for (const definition of findRouteDefinitions(ast, bindings)) {
+    for (const property of asNodes(definition.options.properties)) {
+      if (isAstNode(property.value)) exempt.add(property.value);
+    }
+  }
+
+  const packageImports = new Set<string>();
+  for (const statement of asNodes(ast.body)) {
+    if (statement.type !== "ImportDeclaration") continue;
+    const source = isAstNode(statement.source) ? statement.source.value : undefined;
+    if (typeof source !== "string" || !isPackageSpecifier(source)) continue;
+    for (const specifier of asNodes(statement.specifiers)) {
+      if (isAstNode(specifier.local)) packageImports.add(String(specifier.local.name));
+    }
+  }
+  walk(ast, (node) => {
+    if (node.type !== "CallExpression" && node.type !== "NewExpression") return;
+    const root = rootIdentifier(node.callee);
+    if (!root || bindings.shadowed.has(root) || !packageImports.has(String(root.name))) return;
+    if (resolveRouteBinding(node.callee, bindings.names, bindings.shadowed)) return;
+    for (const argument of asNodes(node.arguments)) {
+      if (argument.type === "ObjectExpression" && namesRoute(argument)) continue;
+      exempt.add(argument);
+    }
+  });
+
+  walk(
+    ast,
+    (node) => {
+      const key = remainingServerKey(node);
+      if (!key) return;
+      throw new Error(
+        `[Farm.js] ${id}: ${sourceSnippet(code, node)} still sets the server-only key ` +
+          `"${key}" after Farm removed the server route hooks for the browser, so its code and ` +
+          "imports would ship in public JavaScript. Farm removes guard, data, staticPaths, " +
+          "generateMetadata, and API handlers only from page(), layout(), api(), and " +
+          'createRoute() options and { kind: "page" } definitions written inline as object ' +
+          "literals. Write this route that way, or move code that uses these keys out of the " +
+          "routes module.",
+      );
+    },
+    null,
+    "",
+    exempt,
+  );
+}
+
+function remainingServerKey(node: AstNode): string | undefined {
+  if (node.type === "ObjectExpression") {
+    for (const property of asNodes(node.properties)) {
+      if (property.type !== "Property") continue;
+      if (property.computed === true && !isStaticString(property.key)) continue;
+      const key = readPropertyName(property.key);
+      if (!key || !UNRESOLVED_KIND_SERVER_KEYS.has(key)) continue;
+      const value = property.value as AstNode;
+      // The empty map Farm keeps on a stripped { kind: "api" } definition.
+      if (
+        key === "methods" &&
+        value.type === "ObjectExpression" &&
+        !asNodes(value.properties).length
+      ) {
+        continue;
+      }
+      return key;
+    }
+    return undefined;
+  }
+  let member: unknown;
+  if (node.type === "AssignmentExpression" && isAstNode(node.left)) {
+    if (node.left.type !== "MemberExpression") return undefined;
+    member =
+      node.left.computed === true && !isStaticString(node.left.property)
+        ? undefined
+        : node.left.property;
+  } else if (node.type === "MethodDefinition" || node.type === "PropertyDefinition") {
+    member = node.computed === true && !isStaticString(node.key) ? undefined : node.key;
+  }
+  const key = readPropertyName(member);
+  return key && ROUTE_HOOK_MEMBER_KEYS.has(key) ? key : undefined;
+}
+
+function namesRoute(node: AstNode): boolean {
+  return asNodes(node.properties).some((property) => {
+    const key = property.type === "Property" ? readPropertyName(property.key) : undefined;
+    return key === "kind" || key === "path";
+  });
+}
+
+function rootIdentifier(node: unknown): AstNode | undefined {
+  if (!isAstNode(node)) return undefined;
+  if (node.type === "Identifier") return node;
+  if (node.type === "MemberExpression") return rootIdentifier(node.object);
+  if (node.type === "ChainExpression") return rootIdentifier(node.expression);
+  return undefined;
+}
+
+/** A bare package specifier, not a relative, absolute, or `@/`/`~/`/`#` alias path. */
+function isPackageSpecifier(source: string): boolean {
+  return /^(?:@[a-z0-9][\w.-]*\/)?[a-z0-9]/i.test(source) && !/^[a-z]:[\\/]/i.test(source);
+}
+
+/**
+ * Modules whose exports this routes module puts in its route list: imports reached from
+ * the default, `routes`, or `Route` export or a defineRoutes() argument, through arrays,
+ * spreads, conditionals, local declarations, and calls. Their route definitions reach the
+ * browser through this module, so they are checked as routes modules too.
+ */
+function findRouteSources(ast: AstNode, bindings: RouteBindings): ProgrammaticRouteSource[] {
+  const imports = new Map<string, { source: string; imported: string }>();
+  for (const statement of asNodes(ast.body)) {
+    if (statement.type !== "ImportDeclaration" || statement.importKind === "type") continue;
+    const source = isAstNode(statement.source) ? statement.source.value : undefined;
+    if (typeof source !== "string") continue;
+    for (const specifier of asNodes(statement.specifiers)) {
+      if (!isAstNode(specifier.local)) continue;
+      const imported =
+        specifier.type === "ImportDefaultSpecifier"
+          ? "default"
+          : specifier.type === "ImportSpecifier"
+            ? String(readPropertyName(specifier.imported))
+            : "*";
+      imports.set(String(specifier.local.name), { source, imported });
+    }
+  }
+
+  const sources = new Map<string, Set<string>>();
+  const record = (source: string, callbackExport?: string) => {
+    if (ROUTE_IMPORT_SOURCES.has(source) || source.startsWith("@farm.js/core/")) return;
+    let callbacks = sources.get(source);
+    if (!callbacks) sources.set(source, (callbacks = new Set()));
+    if (callbackExport) callbacks.add(callbackExport);
+  };
+  const visited = new Set<AstNode>();
+  const visit = (node: unknown, callback = false): void => {
+    if (!isAstNode(node) || visited.has(node)) return;
+    visited.add(node);
+    switch (node.type) {
+      case "Identifier": {
+        const name = String(node.name);
+        const imported = imports.get(name);
+        if (imported) {
+          record(
+            imported.source,
+            callback && imported.imported !== "*" ? imported.imported : undefined,
+          );
+        } else {
+          visit(findLocalDeclaration(ast, name), callback);
+        }
+        return;
+      }
+      case "VariableDeclarator":
+        return visit(node.init, callback);
+      case "MemberExpression":
+        return visit(node.object);
+      case "ArrayExpression":
+        for (const element of asNodes(node.elements)) visit(element);
+        return;
+      case "ObjectExpression":
+        for (const property of asNodes(node.properties)) {
+          if (property.type === "SpreadElement") visit(property.argument);
+        }
+        return;
+      case "SpreadElement":
+      case "AwaitExpression":
+        return visit(node.argument);
+      case "ChainExpression":
+      case "ParenthesizedExpression":
+        return visit(node.expression);
+      case "ConditionalExpression":
+        visit(node.consequent);
+        return visit(node.alternate);
+      case "LogicalExpression":
+        visit(node.left);
+        return visit(node.right);
+      case "SequenceExpression":
+        return visit(asNodes(node.expressions).at(-1));
+      case "CallExpression":
+      case "NewExpression": {
+        const binding = resolveRouteBinding(node.callee, bindings.names, bindings.shadowed);
+        if (binding?.type === "defineRoutes") return visit(asNodes(node.arguments)[0], true);
+        if (binding) return;
+        visit(node.callee);
+        for (const argument of asNodes(node.arguments)) visit(argument);
+        return;
+      }
+      case "FunctionDeclaration":
+      case "FunctionExpression":
+      case "ArrowFunctionExpression": {
+        const body = node.body as AstNode;
+        if (body.type !== "BlockStatement") return visit(body);
+        walkFunctionBody(body, (statement) => {
+          if (statement.type === "ReturnStatement") visit(statement.argument);
+        });
+        return;
+      }
+      default:
+        return;
+    }
+  };
+
+  for (const statement of asNodes(ast.body)) {
+    if (statement.type === "ExportDefaultDeclaration") visit(statement.declaration);
+    if (statement.type === "ExportAllDeclaration" && isAstNode(statement.source)) {
+      record(String(statement.source.value));
+    }
+    if (statement.type !== "ExportNamedDeclaration") continue;
+    if (isAstNode(statement.source)) {
+      record(String(statement.source.value));
+      continue;
+    }
+    const declaration = isAstNode(statement.declaration) ? statement.declaration : undefined;
+    for (const item of declaration?.type === "VariableDeclaration"
+      ? asNodes(declaration.declarations)
+      : []) {
+      if (isAstNode(item.id) && ROUTE_LIST_EXPORTS.has(String(item.id.name))) visit(item);
+    }
+    for (const specifier of asNodes(statement.specifiers)) {
+      if (ROUTE_LIST_EXPORTS.has(String(readPropertyName(specifier.exported)))) {
+        visit(specifier.local);
+      }
+    }
+  }
+  walk(ast, (node) => {
+    if (
+      node.type === "CallExpression" &&
+      resolveRouteBinding(node.callee, bindings.names, bindings.shadowed)?.type === "defineRoutes"
+    ) {
+      visit(node);
+    }
+  });
+
+  return [...sources].map(([source, callbacks]) => ({
+    source,
+    callbackExports: [...callbacks],
+  }));
+}
+
+// The exports Farm's generated route modules read routes from.
+const ROUTE_LIST_EXPORTS = new Set(["default", "routes", "Route"]);
+
+function findLocalDeclaration(ast: AstNode, name: string): AstNode | undefined {
+  let found: AstNode | undefined;
+  walk(ast, (node) => {
+    if (found || !isAstNode(node.id) || node.id.name !== name) return;
+    if (node.type === "VariableDeclarator" || node.type === "FunctionDeclaration") found = node;
+  });
+  return found;
+}
+
+/** Visit a function body's statements without entering nested functions. */
+function walkFunctionBody(body: AstNode, visit: (node: AstNode) => void): void {
+  walk(body, visit, null, "", undefined, (node) => node !== body && FUNCTION_SCOPES.has(node.type));
 }
 
 /**
@@ -688,6 +1112,10 @@ function readPropertyName(node: unknown): string | undefined {
   if (!isAstNode(node)) return undefined;
   if (node.type === "Identifier") return String(node.name);
   if (node.type === "Literal" && typeof node.value === "string") return node.value;
+  if (isStaticString(node)) {
+    const cooked = (asNodes(node.quasis)[0]?.value as { cooked?: unknown } | undefined)?.cooked;
+    return typeof cooked === "string" ? cooked : undefined;
+  }
   return undefined;
 }
 
@@ -700,15 +1128,35 @@ function walk(
   visit: (node: AstNode, parent: AstNode | null, key: string) => void,
   parent: AstNode | null = null,
   parentKey = "",
+  skip?: ReadonlySet<AstNode>,
+  skipWhen?: (node: AstNode) => boolean,
 ): void {
+  if (skip?.has(node) || skipWhen?.(node)) return;
   visit(node, parent, parentKey);
   for (const [key, value] of Object.entries(node)) {
     if (key === "start" || key === "end" || key === "loc" || key === "range") continue;
-    if (isAstNode(value)) walk(value, visit, node, key);
+    if (isAstNode(value)) walk(value, visit, node, key, skip, skipWhen);
     else if (Array.isArray(value)) {
-      for (const item of value) if (isAstNode(item)) walk(item, visit, node, key);
+      for (const item of value) if (isAstNode(item)) walk(item, visit, node, key, skip, skipWhen);
     }
   }
+}
+
+function walkWithAncestors(
+  node: AstNode,
+  visit: (node: AstNode, ancestors: readonly AstNode[]) => void,
+  ancestors: AstNode[] = [],
+): void {
+  visit(node, ancestors);
+  ancestors.push(node);
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "start" || key === "end" || key === "loc" || key === "range") continue;
+    if (isAstNode(value)) walkWithAncestors(value, visit, ancestors);
+    else if (Array.isArray(value)) {
+      for (const item of value) if (isAstNode(item)) walkWithAncestors(item, visit, ancestors);
+    }
+  }
+  ancestors.pop();
 }
 
 function asNodes(value: unknown): AstNode[] {

@@ -337,7 +337,7 @@ export async function createServer(
             farmI18nClientBridgePlugin(),
             farmServerOnlyEntriesPlugin(),
             farmPlugin(finalConfig, pluginManager),
-            farmEnvironmentFunctionsPlugin(),
+            farmEnvironmentFunctionsPlugin(finalConfig),
             createBrandingPlugin(),
             createFarmDevLifecyclePlugin(pluginManager, instrumentation),
           ],

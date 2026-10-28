@@ -411,7 +411,7 @@ async function buildClient(
       farmI18nClientBridgePlugin(),
       farmServerOnlyEntriesPlugin(),
       farmPlugin(config, pluginManager),
-      farmEnvironmentFunctionsPlugin(),
+      farmEnvironmentFunctionsPlugin(config),
     ],
     mode: "production",
   });
@@ -457,7 +457,7 @@ async function buildSSR(
     plugins: [
       farmI18nClientBridgePlugin(),
       farmPlugin(config, pluginManager),
-      farmEnvironmentFunctionsPlugin(),
+      farmEnvironmentFunctionsPlugin(config),
     ],
     mode: "production",
   });

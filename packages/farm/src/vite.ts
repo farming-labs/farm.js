@@ -6470,7 +6470,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
       farmI18nClientBridgePlugin(),
       farmServerOnlyEntriesPlugin(),
       farmPlugin(config),
-      farmEnvironmentFunctionsPlugin(),
+      farmEnvironmentFunctionsPlugin(config),
       farmBrandingPlugin,
     ],
     customLogger: farmLogger,

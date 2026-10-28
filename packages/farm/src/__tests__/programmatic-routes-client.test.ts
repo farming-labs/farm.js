@@ -85,25 +85,28 @@ export default defineRoutes(({ page, api }) => [
 `;
 
 describe("programmatic routes in the client build", () => {
-  it("keeps guards, data, metadata, static paths, API handlers, and their imports out of the browser", async () => {
-    const output = await buildRoutes(ROUTES, { ssr: false });
+  it.each([false, true])(
+    "keeps guards, data, metadata, static paths, API handlers, and their imports out of the browser (through a route module: %s)",
+    async (viaRouteModule) => {
+      const output = await buildRoutes(ROUTES, { ssr: false, viaRouteModule });
 
-    for (const secret of [
-      "DB_PASSWORD_SECRET",
-      "PRIVATE_ROW_",
-      "FS_READER_SECRET",
-      "OWNER_TABLE_SECRET",
-      "GUARD_SECRET_MESSAGE",
-      "node:fs",
-    ]) {
-      expect(output, secret).not.toContain(secret);
-    }
-    expect(output).toContain("CLIENT_COMPONENT_MARKER");
-    expect(output).toContain("CLIENT_NOT_FOUND_MARKER");
-    expect(output).toContain("/docs/[id]");
-    expect(output).toContain("__farmServerHooks");
-    expect(output).toContain('"node"');
-  });
+      for (const secret of [
+        "DB_PASSWORD_SECRET",
+        "PRIVATE_ROW_",
+        "FS_READER_SECRET",
+        "OWNER_TABLE_SECRET",
+        "GUARD_SECRET_MESSAGE",
+        "node:fs",
+      ]) {
+        expect(output, secret).not.toContain(secret);
+      }
+      expect(output).toContain("CLIENT_COMPONENT_MARKER");
+      expect(output).toContain("CLIENT_NOT_FOUND_MARKER");
+      expect(output).toContain("/docs/[id]");
+      expect(output).toContain("__farmServerHooks");
+      expect(output).toContain('"node"');
+    },
+  );
 
   it("leaves the server build untouched", async () => {
     const output = await buildRoutes(ROUTES, { ssr: true });
@@ -230,10 +233,12 @@ export default defineRoutes(routes);`,
     const source = `import { db } from "./db";
 import { DocPage } from "./components";
 ${routes}`;
-    const output = await buildRoutes(source, { ssr: false });
-    expect(output).not.toContain("DB_PASSWORD_SECRET");
-    expect(output).not.toContain("PRIVATE_ROW_");
-    expect(output).toContain("CLIENT_COMPONENT_MARKER");
+    for (const viaRouteModule of [false, true]) {
+      const output = await buildRoutes(source, { ssr: false, viaRouteModule });
+      expect(output).not.toContain("DB_PASSWORD_SECRET");
+      expect(output).not.toContain("PRIVATE_ROW_");
+      expect(output).toContain("CLIENT_COMPONENT_MARKER");
+    }
   });
 
   it("keeps an empty methods map on API definition objects", async () => {
@@ -320,6 +325,146 @@ export default farm.defineRoutes([
   });
 });
 
+describe("routes modules the client build can't read fully", () => {
+  const ADMIN = `import { db } from "./db";
+import { DocPage } from "./components";
+`;
+  const expectClean = (output: string) => {
+    expect(output).not.toContain("DB_PASSWORD_SECRET");
+    expect(output).not.toContain("PRIVATE_ROW_");
+    expect(output).toContain("CLIENT_COMPONENT_MARKER");
+  };
+
+  it("strips a routes file whose only Farm import is a type", async () => {
+    const output = await buildRoutes(
+      `import type { ProgrammaticRouteDefinition } from "@farm.js/core";
+${ADMIN}
+export default [
+  { kind: "page", path: "/admin", component: DocPage, guard: () => db.find("admin"), data: { main: () => db.find("1") } },
+] satisfies ProgrammaticRouteDefinition[];`,
+      { ssr: false, viaRouteModule: true },
+    );
+    expectClean(output);
+    expect(output).toContain("__farmServerHooks");
+  });
+
+  it("strips a routes file that imports nothing from Farm", async () => {
+    const output = await buildRoutes(
+      `${ADMIN}
+export default [
+  { kind: "page", path: "/admin", component: DocPage, guard: () => db.find("admin") },
+  { kind: "api", path: "/api/x", methods: { GET: () => db.find("2") } },
+];`,
+      { ssr: false, viaRouteModule: true },
+    );
+    expectClean(output);
+    expect(output).toMatch(/methods: \{\}/);
+  });
+
+  it("strips a routes callback defineRoutes imports from another module", async () => {
+    const output = await buildRoutes(
+      `import { defineRoutes } from "@farm.js/core";
+import build from "./routes-impl";
+export default defineRoutes(build);`,
+      {
+        ssr: false,
+        viaRouteModule: true,
+        files: {
+          "routes-impl.ts": `${ADMIN}
+export default (r: any) => [r.page("/admin", { component: DocPage, guard: () => db.find("admin") })];`,
+        },
+      },
+    );
+    expectClean(output);
+  });
+
+  it("strips plain definitions a routes file takes from another module", async () => {
+    const output = await buildRoutes(
+      `import adminRoutes from "./admin-routes";
+export default [...adminRoutes];`,
+      {
+        ssr: false,
+        viaRouteModule: true,
+        files: {
+          "admin-routes.ts": `import type { ProgrammaticRouteDefinition } from "@farm.js/core";
+${ADMIN}
+export default [
+  { kind: "page", path: "/admin", component: DocPage, data: { main: () => db.find("1") } },
+] satisfies ProgrammaticRouteDefinition[];`,
+        },
+      },
+    );
+    expectClean(output);
+  });
+
+  it("keeps components declared in the routes file that pass data props", async () => {
+    const output = await buildRoutes(
+      `import { defineRoutes } from "@farm.js/core";
+${ADMIN}
+function Shell(props: any) {
+  return <DocPage {...props} data={{ title: "shell" }} />;
+}
+export default defineRoutes(({ page }) => [
+  page("/admin", {
+    component: (props: any) => <Shell {...props} data={props.data} />,
+    data: { main: () => db.find("1") },
+  }),
+]);`,
+      { ssr: false, viaRouteModule: true },
+    );
+    expectClean(output);
+  });
+
+  it.each([
+    [
+      "a definition that spreads its kind",
+      `const adminBase = { kind: "page", component: DocPage };
+export default defineRoutes([{ ...adminBase, path: "/admin", guard: () => db.find("admin") }]);`,
+      /still sets the server-only key "guard"/,
+    ],
+    [
+      "a definition built with Object.assign",
+      `export default defineRoutes([Object.assign({ kind: "page" }, { path: "/admin", component: DocPage, guard: () => db.find("admin") })]);`,
+      /still sets the server-only key "guard"/,
+    ],
+    [
+      "an escaping builder whose name a component parameter reuses",
+      `export function Pager({ page }: any) { return page; }
+const wrap = (factory: any) => factory;
+export default defineRoutes([wrap(page)("/admin", { component: DocPage, guard: () => db.find("admin") })]);`,
+      /can't follow the route builder "page" in wrap\(page\)/,
+    ],
+    [
+      "an escaping builder whose name a callback parameter reuses",
+      `const titles = ["a"].map((page) => page.toUpperCase());
+const make = [page][0];
+export default defineRoutes([make("/admin", { component: DocPage, data: { main: () => db.find(titles[0]) } })]);`,
+      /can't follow the route builder "page" in \[page\]/,
+    ],
+    [
+      "a computed builder member",
+      `const member = "page";
+export default defineRoutes([routesBuilder[member]("/admin", { component: DocPage, guard: () => db.find("admin") })]);`,
+      /can't follow the route builder "routesBuilder"/,
+    ],
+  ])("refuses %s", async (_name, routes, message) => {
+    const source = `import { defineRoutes, page, routesBuilder } from "@farm.js/core";
+${ADMIN}${routes}`;
+    for (const viaRouteModule of [false, true]) {
+      await expect(buildRoutes(source, { ssr: false, viaRouteModule })).rejects.toThrow(message);
+    }
+  });
+
+  it("strips a builder member named by a static template literal", async () => {
+    const output = await buildRoutes(
+      `import { defineRoutes, routesBuilder } from "@farm.js/core";
+${ADMIN}export default defineRoutes([routesBuilder[\`page\`]("/admin", { component: DocPage, guard: () => db.find("admin") })]);`,
+      { ssr: false },
+    );
+    expectClean(output);
+  });
+});
+
 describe("client copies of programmatic pages", () => {
   const runtime = {
     createElement: (type: unknown, props: unknown) => ({ type, props }),
@@ -358,20 +503,42 @@ describe("client copies of programmatic pages", () => {
   });
 });
 
-async function buildRoutes(routes: string, options: { ssr: boolean }): Promise<string> {
+async function buildRoutes(
+  routes: string,
+  options: {
+    ssr: boolean;
+    /** Load the routes file through a generated `?farm-route=` page module, as the app does. */
+    viaRouteModule?: boolean;
+    files?: Record<string, string>;
+  },
+): Promise<string> {
   const root = mkdtempSync(path.join(tmpdir(), "farm-routes-client-"));
   temporaryRoots.push(root);
-  for (const [file, source] of Object.entries(SERVER_FILES)) {
+  for (const [file, source] of Object.entries({ ...SERVER_FILES, ...options.files })) {
     writeFileSync(path.join(root, file), source);
   }
-  const entry = path.join(root, "farm.routes.tsx");
-  writeFileSync(entry, routes);
+  // Outside src/, so only the generated route module marks it as the routes file.
+  const routesFile = path.join(root, "farm.routes.tsx");
+  writeFileSync(routesFile, routes);
+  const routeModuleId = `${routesFile.replace(/\\/g, "/")}?farm-route=page:%2Fadmin&lang.js`;
+  const entry = options.viaRouteModule ? routeModuleId : routesFile;
 
   const result = await build({
     configFile: false,
     root,
     logLevel: "silent",
-    plugins: [farmEnvironmentFunctionsPlugin()],
+    plugins: [
+      {
+        name: "test:farm-route-module",
+        enforce: "pre",
+        resolveId: (source) => (source === routeModuleId ? routeModuleId : null),
+        load: (id) =>
+          id === routeModuleId
+            ? `import * as routes from ${JSON.stringify(routesFile)};\nexport default routes;`
+            : null,
+      },
+      farmEnvironmentFunctionsPlugin(),
+    ],
     build: {
       ssr: options.ssr,
       write: false,
