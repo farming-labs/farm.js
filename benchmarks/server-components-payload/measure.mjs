@@ -25,7 +25,23 @@ const args = process.argv.slice(2);
 const skipBuild = args.includes("--skip-build");
 const modesArg = args[args.indexOf("--modes") + 1];
 const modes = args.includes("--modes") ? modesArg.split(",") : ["rsc", "islands"];
-const FIRST_LOAD_PAGES = ["/docs/p0", "/docs/p40", "/docs/p120", "/docs/p200", "/docs/p299"];
+// docs: a server layout with client islands (segment navigation applies).
+// shop: a layout that hydrates as one root around a client provider; pages pass a shared catalog
+// to a client component (values in the server-tree payload apply, segments do not).
+const SCENARIOS = [
+  {
+    name: "docs",
+    firstLoad: ["/docs/p0", "/docs/p40", "/docs/p120", "/docs/p200", "/docs/p299"],
+    start: "/docs/p0",
+    page: (index) => `/docs/p${index}`,
+  },
+  {
+    name: "shop",
+    firstLoad: ["/shop/s0", "/shop/s30", "/shop/s60", "/shop/s90", "/shop/s120"],
+    start: "/shop/s0",
+    page: (index) => `/shop/s${index}`,
+  },
+];
 const NAVIGATIONS = 10;
 
 const br = (buffer) =>
@@ -137,10 +153,10 @@ function sum(bodies, types) {
   };
 }
 
-async function measure(mode, url, browser) {
+async function measure(mode, url, browser, scenario) {
   const errors = [];
   const firstLoad = [];
-  for (const pathname of FIRST_LOAD_PAGES) {
+  for (const pathname of scenario.firstLoad) {
     const context = await browser.newContext();
     const page = await context.newPage();
     page.on("pageerror", (error) => errors.push(error.message));
@@ -156,11 +172,11 @@ async function measure(mode, url, browser) {
   const context = await browser.newContext();
   const page = await context.newPage();
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(`${url}/docs/p0`);
+  await page.goto(url + scenario.start);
   await page.waitForLoadState("networkidle");
   const navigations = [];
   for (let index = 0; index < NAVIGATIONS; index++) {
-    const expected = `/docs/p${index + 1}`;
+    const expected = scenario.page(index + 1);
     const bodies = await record(page, async () => {
       await page.click("[data-next]");
       await page.waitForURL(`**${expected}`);
@@ -182,7 +198,7 @@ async function measure(mode, url, browser) {
     });
   }
   await context.close();
-  return { mode, firstLoad, navigations, errors };
+  return { mode, scenario: scenario.name, firstLoad, navigations, errors };
 }
 
 function average(entries, pick) {
@@ -202,7 +218,9 @@ try {
   for (const [index, mode] of modes.entries()) {
     const server = await serve(mode, 4281 + index);
     try {
-      results.push(await measure(mode, server.url, browser));
+      for (const scenario of SCENARIOS) {
+        results.push(await measure(mode, server.url, browser, scenario));
+      }
     } finally {
       server.stop();
     }
@@ -217,6 +235,7 @@ const rows = results.map((result) => {
   const dataAverage = average(result.navigations, (entry) => entry.data);
   const navigationJavascript = average(result.navigations, (entry) => entry.javascript);
   return {
+    scenario: result.scenario,
     mode: result.mode,
     "document (br)": kb(documentAverage.br),
     "document (raw)": kb(documentAverage.raw),

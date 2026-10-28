@@ -88,3 +88,18 @@ export function getArticle(slug: string): Article | undefined {
     sections,
   };
 }
+
+export interface Product {
+  id: string;
+  name: string;
+  price: number;
+  href: string;
+}
+
+// A shop's catalog: product pages pass it to a client "related products" list.
+export const catalog: Product[] = Array.from({ length: 150 }, (_, index) => ({
+  id: `sku-${index}`,
+  name: title(index + 2000, 3),
+  price: 5 + ((index * 37) % 200),
+  href: `/shop/s${index}`,
+}));

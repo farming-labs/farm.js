@@ -35,24 +35,36 @@ a client navigation, and page errors are counted.
 
 ## Results
 
-2026-10-27, Apple M1, macOS 26.2, Node 24.21.0, Chrome 156. Averages; KB = 1024 bytes.
+2026-10-28, Apple M1, macOS 26.2, Node 24.21.0, Chrome 156. Averages; KB = 1024 bytes.
 
-| Engine | Document, br (raw) | First-load JS, br | Navigation, br (raw) |
-| --- | --- | --- | --- |
-| `rsc` | 16.2 KB (76.2 KB) | 108.5 KB | 12.0 KB (37.4 KB) |
-| `islands`, before content-addressed values | 15.8 KB (100.8 KB) | 77.2 KB | 15.7 KB (100.9 KB) |
-| `islands`, values without segment navigation | 16.0 KB (103.5 KB) | 77.9 KB | 12.3 KB (38.4 KB) |
-| `islands` | 16.0 KB (103.5 KB) | 78.2 KB | 2.5 KB (8.0 KB) |
+Two sections of the app:
 
-- Islands ships 28% less JavaScript: no Flight client, and only the islands' code.
+- **docs**: a server layout whose client components are islands. Segment navigation applies.
+- **shop**: a layout that hydrates as one root around a client cart provider; product pages pass
+  a shared 150-product catalog to a client list that reads the cart. Pages rebuild from a server
+  tree payload, and segments do not apply.
+
+| Section | Engine | Document, br (raw) | First-load JS, br | Navigation, br (raw) |
+| --- | --- | --- | --- | --- |
+| docs | `rsc` | 16.2 KB (76.2 KB) | 108.8 KB | 12.0 KB (37.4 KB) |
+| docs | `islands` | 16.0 KB (103.5 KB) | 81.1 KB | 2.5 KB (7.9 KB) |
+| shop | `rsc` | 5.5 KB (33.0 KB) | 108.8 KB | 3.8 KB (13.2 KB) |
+| shop | `islands` | 5.6 KB (31.4 KB) | 80.0 KB | 4.1 KB (20.4 KB) |
+
+How the docs navigation got there (same build, earlier runs): 15.7 KB (100.9 KB raw) before
+content-addressed values, 12.3 KB (38.4 KB) with values, 2.5 KB (7.9 KB) with segment navigation.
+
+- Islands ships 26% less JavaScript. Both sections now carry the server-tree runtime, which the
+  shop pages need (docs alone measured 78.2 KB).
 - The documents compress to the same size. Islands sends the tree twice (once per island) where
   Flight sends it once, but brotli removes the repeat; the browser parses each value once.
-- Navigation in production fetches the next document. Content-addressed values took the tree out of
-  it: the browser names the values it holds (`x-farm-values`) and the server leaves them out.
-- Segment navigation took out the layout: the browser names the layouts on screen
-  (`X-Farm-Layout-Chain`, keyed by pattern and params) and the server renders only the page and
-  the layouts that changed. A navigation is then the article and its islands, about five times
-  smaller than RSC's payload, which carries the layout's tree again.
+- docs: a navigation names the values the browser holds (`x-farm-values`) and the layouts on
+  screen (`X-Farm-Layout-Chain`, keyed by pattern and params); the server leaves both out. What
+  travels is the article and its islands, about a fifth of RSC's payload.
+- shop: the catalog travels once. A navigation leaves it out of the tree payload (5.8 KB to
+  4.2 KB for that response), and what remains is mostly the list's server-rendered HTML (16 KB
+  raw), which the browser does not use on a navigation: it rebuilds the page from the payload.
+  Leaving that HTML out of navigations is the next step for this row; RSC sends no HTML there.
 
 ## Ideas measured and not built
 
@@ -62,9 +74,9 @@ a client navigation, and page errors are counted.
 node benchmarks/server-components-payload/what-if.mjs
 ```
 
-| Idea | Result |
-| --- | --- |
-| Island manifest: all islands' props in one script | 0 to +12 bytes per response after brotli. Brotli already removes the repeated script tags, and one script at the end of the body would hold back islands in streamed chunks. |
+| Idea                                                                      | Result                                                                                                                                                                                              |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Island manifest: all islands' props in one script                         | 0 to +12 bytes per response after brotli. Brotli already removes the repeated script tags, and one script at the end of the body would hold back islands in streamed chunks.                        |
 | Shared value files: values on 2+ pages as a cached `/_farm/v/<hash>.json` | First visit 16.0 KB to 23.0 KB (+43%), plus a request before islands hydrate. A later full load with the file cached: 16.0 KB to 12.6 KB (-21%). Break-even at 2 cached full loads per first visit. |
 
 The value file loses because the values repeat text the HTML already has (the sidebar renders
