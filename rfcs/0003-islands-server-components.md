@@ -172,9 +172,13 @@ inlines every value in every payload. Islands mode sends a large value once:
   read, the mechanism `headers()` uses, so that response never enters a PPR shell, an ISR entry or
   a shared CDN cache, and production page responses vary on `x-farm-values`. Responses without the
   header, including every first load, stay complete and cacheable.
-- **Static pages (not built yet):** values that appear on two or more prerendered pages could be
-  written as immutable files (`/_farm/v/<hash>.json`) and preloaded, so the first load of a second
-  page skips them too. A value from a request-bound render is never written to a shared file.
+- **Shared value files (measured, not built):** writing values that two or more prerendered pages
+  share as immutable files (`/_farm/v/<hash>.json`) makes a first visit 43% heavier on the docs
+  benchmark (16.0 KB to 23.0 KB, plus a request before islands hydrate) and a later full load 21%
+  lighter (16.0 KB to 12.6 KB): break-even at two cached full loads per first visit. The values
+  repeat text the HTML renders, which brotli shares inside the document (3.5 KB) but not in a
+  separate file (10.4 KB). Worth revisiting only for large values the HTML does not render, such as
+  search indexes. The lab figure above assumed the file was already cached.
 - Why not dedupe within one document: React can discard a render attempt that suspended, so "sent
   already" cannot be tracked during render. Each island sends its values; brotli removes the repeat,
   and the store parses each hash once.
@@ -319,10 +323,12 @@ navigation with state kept in layouts; back and forward; HMR; error and not-foun
 ## Implementation status
 
 - Phase 0: done (#2315).
-- Phase 1, first part: islands mode on Farm's pipeline, server owners for context, DOM slots,
-  `"use server"` actions with progressive enhancement, content-addressed values with navigation
-  omission, in `farm dev` and production. Not yet: the island manifest as one payload, shared value
-  files for static pages, values in server-tree payloads.
+- Phase 1: islands mode on Farm's pipeline, server owners for context, DOM slots, `"use server"`
+  actions with progressive enhancement, content-addressed values with navigation omission, in
+  `farm dev` and production. Each island keeps its own props script: one manifest for the page
+  measured 0 to 12 bytes worse after brotli and would hold back islands in streamed chunks, so the
+  "manifest" is the set of per-island scripts. Not built: shared value files (measured above),
+  values in server-tree payloads.
 - Phase 3, first part: segment navigation in production. A navigation sends the layouts on screen
   (`X-Farm-Layout-Chain`, keyed by pattern and params); the server renders the page and the layouts
   that changed, and marks the rest `data-farm-layout-kept`. The browser applies a segment only where
