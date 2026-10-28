@@ -1,5 +1,5 @@
 {
-  "date": "2026-10-27T21:17:39.698Z",
+  "date": "2026-10-28T04:17:01.264Z",
   "rows": [
     {
       "mode": "rsc",
@@ -15,9 +15,9 @@
       "mode": "islands",
       "document (br)": "16.0 KB",
       "document (raw)": "103.5 KB",
-      "first-load JS (br)": "77.9 KB",
-      "navigation data (br)": "12.3 KB",
-      "navigation data (raw)": "38.4 KB",
+      "first-load JS (br)": "78.2 KB",
+      "navigation data (br)": "2.5 KB",
+      "navigation data (raw)": "8.0 KB",
       "navigation JS (br)": "0.0 KB",
       "page errors": 0
     }
@@ -36,7 +36,7 @@
           "javascript": {
             "count": 2,
             "raw": 374794,
-            "br": 111119
+            "br": 111112
           }
         },
         {
@@ -44,12 +44,12 @@
           "document": {
             "count": 1,
             "raw": 78053,
-            "br": 16561
+            "br": 16562
           },
           "javascript": {
             "count": 2,
             "raw": 374794,
-            "br": 111119
+            "br": 111112
           }
         },
         {
@@ -57,12 +57,12 @@
           "document": {
             "count": 1,
             "raw": 78137,
-            "br": 16792
+            "br": 16796
           },
           "javascript": {
             "count": 2,
             "raw": 374794,
-            "br": 111119
+            "br": 111112
           }
         },
         {
@@ -70,12 +70,12 @@
           "document": {
             "count": 1,
             "raw": 77841,
-            "br": 16732
+            "br": 16735
           },
           "javascript": {
             "count": 2,
             "raw": 374794,
-            "br": 111119
+            "br": 111112
           }
         },
         {
@@ -88,7 +88,7 @@
           "javascript": {
             "count": 2,
             "raw": 374794,
-            "br": 111119
+            "br": 111112
           }
         }
       ],
@@ -233,65 +233,65 @@
           "pathname": "/docs/p0",
           "document": {
             "count": 1,
-            "raw": 106037,
-            "br": 16040
+            "raw": 106066,
+            "br": 16046
           },
           "javascript": {
             "count": 6,
-            "raw": 268533,
-            "br": 79806
+            "raw": 269467,
+            "br": 80077
           }
         },
         {
           "pathname": "/docs/p40",
           "document": {
             "count": 1,
-            "raw": 106022,
-            "br": 16345
+            "raw": 106051,
+            "br": 16349
           },
           "javascript": {
             "count": 6,
-            "raw": 268533,
-            "br": 79806
+            "raw": 269467,
+            "br": 80077
           }
         },
         {
           "pathname": "/docs/p120",
           "document": {
             "count": 1,
-            "raw": 106073,
-            "br": 16545
+            "raw": 106102,
+            "br": 16548
           },
           "javascript": {
             "count": 6,
-            "raw": 268533,
-            "br": 79806
+            "raw": 269467,
+            "br": 80077
           }
         },
         {
           "pathname": "/docs/p200",
           "document": {
             "count": 1,
-            "raw": 105918,
-            "br": 16510
+            "raw": 105947,
+            "br": 16514
           },
           "javascript": {
             "count": 6,
-            "raw": 268533,
-            "br": 79806
+            "raw": 269467,
+            "br": 80077
           }
         },
         {
           "pathname": "/docs/p299",
           "document": {
             "count": 1,
-            "raw": 105929,
-            "br": 16511
+            "raw": 105958,
+            "br": 16517
           },
           "javascript": {
             "count": 6,
-            "raw": 268533,
-            "br": 79806
+            "raw": 269467,
+            "br": 80077
           }
         }
       ],
@@ -300,8 +300,8 @@
           "pathname": "/docs/p1",
           "data": {
             "count": 1,
-            "raw": 39253,
-            "br": 12494
+            "raw": 8080,
+            "br": 2403
           },
           "javascript": {
             "count": 0,
@@ -313,8 +313,8 @@
           "pathname": "/docs/p2",
           "data": {
             "count": 1,
-            "raw": 39361,
-            "br": 12620
+            "raw": 8188,
+            "br": 2584
           },
           "javascript": {
             "count": 0,
@@ -326,8 +326,8 @@
           "pathname": "/docs/p3",
           "data": {
             "count": 1,
-            "raw": 39430,
-            "br": 12625
+            "raw": 8257,
+            "br": 2600
           },
           "javascript": {
             "count": 0,
@@ -339,8 +339,8 @@
           "pathname": "/docs/p4",
           "data": {
             "count": 1,
-            "raw": 39441,
-            "br": 12620
+            "raw": 8268,
+            "br": 2605
           },
           "javascript": {
             "count": 0,
@@ -352,8 +352,8 @@
           "pathname": "/docs/p5",
           "data": {
             "count": 1,
-            "raw": 39326,
-            "br": 12622
+            "raw": 8153,
+            "br": 2572
           },
           "javascript": {
             "count": 0,
@@ -365,8 +365,8 @@
           "pathname": "/docs/p6",
           "data": {
             "count": 1,
-            "raw": 39319,
-            "br": 12584
+            "raw": 8146,
+            "br": 2552
           },
           "javascript": {
             "count": 0,
@@ -378,8 +378,8 @@
           "pathname": "/docs/p7",
           "data": {
             "count": 1,
-            "raw": 39341,
-            "br": 12621
+            "raw": 8168,
+            "br": 2604
           },
           "javascript": {
             "count": 0,
@@ -391,8 +391,8 @@
           "pathname": "/docs/p8",
           "data": {
             "count": 1,
-            "raw": 39244,
-            "br": 12550
+            "raw": 8071,
+            "br": 2515
           },
           "javascript": {
             "count": 0,
@@ -404,8 +404,8 @@
           "pathname": "/docs/p9",
           "data": {
             "count": 1,
-            "raw": 39386,
-            "br": 12671
+            "raw": 8213,
+            "br": 2607
           },
           "javascript": {
             "count": 0,
@@ -417,8 +417,8 @@
           "pathname": "/docs/p10",
           "data": {
             "count": 1,
-            "raw": 39272,
-            "br": 12682
+            "raw": 8099,
+            "br": 2548
           },
           "javascript": {
             "count": 0,

@@ -41,16 +41,17 @@ a client navigation, and page errors are counted.
 | --- | --- | --- | --- |
 | `rsc` | 16.2 KB (76.2 KB) | 108.5 KB | 12.0 KB (37.4 KB) |
 | `islands`, before content-addressed values | 15.8 KB (100.8 KB) | 77.2 KB | 15.7 KB (100.9 KB) |
-| `islands` | 16.0 KB (103.5 KB) | 77.9 KB | 12.3 KB (38.4 KB) |
+| `islands`, values without segment navigation | 16.0 KB (103.5 KB) | 77.9 KB | 12.3 KB (38.4 KB) |
+| `islands` | 16.0 KB (103.5 KB) | 78.2 KB | 2.5 KB (8.0 KB) |
 
 - Islands ships 28% less JavaScript: no Flight client, and only the islands' code.
 - The documents compress to the same size. Islands sends the tree twice (once per island) where
   Flight sends it once, but brotli removes the repeat; the browser parses each value once.
-- Navigation in production fetches the next document. Before content-addressed values it carried
-  the tree again for both islands; now the browser names the values it holds
-  (`x-farm-values`) and the server leaves them out, which brings islands level with RSC.
-- What remains of an islands navigation is mostly the layout's HTML (the sidebar's 30 KB),
-  which the server renders again for every page. Development already skips layouts the browser
-  keeps (`X-Farm-Layout-Chain`); production does not yet. That is the next step for this number.
+- Navigation in production fetches the next document. Content-addressed values took the tree out of
+  it: the browser names the values it holds (`x-farm-values`) and the server leaves them out.
+- Segment navigation took out the layout: the browser names the layouts on screen
+  (`X-Farm-Layout-Chain`, keyed by pattern and params) and the server renders only the page and
+  the layouts that changed. A navigation is then the article and its islands, about five times
+  smaller than RSC's payload, which carries the layout's tree again.
 
 `results/latest.json` has the per-page numbers of the last run.
