@@ -3539,7 +3539,7 @@ async function createFarmServerTreePageElement(source, pathname) {
     return await createFarmServerTreeElement(React, source, {
       load: loadFarmIsolatedBoundary,
       ServerHtml: FarmServerPage,
-      key: pathname,
+      key: pathname,${islandValues ? "\n      values: getFarmIslandValueStore()," : ""}
     });
   } catch (error) {
     console.warn("[Farm.js] Could not rebuild the server tree of " + pathname + "; its server HTML was kept.", error);
@@ -5782,7 +5782,9 @@ function isolateFarmRouteServerPage(element) {
 // An async page below a hydrating layout renders as a serialized tree the browser rebuilds in
 // the layout's React root, so its client components read the layout's context.
 function renderFarmRouteServerTree(element) {
-  return renderFarmServerTreePage(React, element, { isolate: isolateFarmRouteServerPage });
+  return renderFarmServerTreePage(React, element, {
+    isolate: isolateFarmRouteServerPage,${farmIslandsMode ? "\n    values: true," : ""}
+  });
 }`
     : `function wrapFarmRouteClientGraph(element) { return element; }
 
@@ -9282,6 +9284,25 @@ ${
     emitFarmEvent({ type: "route.matched", pathname, route: route.pattern, params });
     
     try {
+      ${
+        farmIslandsMode
+          ? `// Islands mode: the layouts the navigating browser keeps, decided before the shell cache
+      // so a PPR route caches each segment under its own key. A static page, a layout that
+      // hydrates as a root, or a route slot always renders whole.
+      const farmSegmentLayouts = getApplicableLayouts(
+        routePathname,
+        route.directory || route.pattern,
+      );
+      const farmKeptLayoutCount =
+        resolveRouteRenderingView(route).ssg ||
+        farmSegmentLayouts.some((layout) => layout.shouldHydrate === true) ||
+        matchRouteSlots(routePathname, request.headers.get("x-farm-intercept-from")).length > 0
+          ? 0
+          : countFarmKeptLayouts(request, farmSegmentLayouts, params);
+      // The root layout always renders, so keeping one layout keeps nothing.
+      const farmKeptLayouts = farmKeptLayoutCount > 1 ? farmKeptLayoutCount : 0;`
+          : `const farmKeptLayouts = 0;`
+      }
       const pprConfig = resolvePPRConfig(route);
       const pprBypassReason = pprConfig.enabled
         ? getPPRShellBypassReason(request, middlewareData, middlewareContext)
@@ -9294,7 +9315,7 @@ ${
             farmLocaleResolution && farmI18nConfig.routing !== "none"
               ? resolveFarmI18nAlternateOrigin(request)
               : ""
-          )
+          ) + (farmKeptLayouts ? ":segment:" + farmKeptLayouts : "")
         : null;
       if (pprConfig.enabled && pprBypassReason) {
         emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: pprBypassReason });
@@ -9321,6 +9342,10 @@ ${
               "x-farm-preload-buffered": getFarmBufferedPreloadMarker(cachedPPRShell),
               ...(farmFontPreloadHeader ? { "Link": farmFontPreloadHeader } : {}),
               ...getPPRHeaders("hit", pprConfig),
+              // A segment is one navigation's answer, never a CDN entry: some CDNs ignore Vary.
+              ...(farmKeptLayouts
+                ? { "Cache-Control": "private, no-store", "Vary": "x-farm-layout-chain" }
+                : {}),
             },
           }), middlewareHeaders), cachedPPRShell);
         }
@@ -9554,13 +9579,8 @@ ${
         // navigating browser keeps: the layouts it shows and the values it holds.
         const farmSharedCacheableRoute = Boolean(getRouteSharedCacheControl(route, pprCanCache));
         if (farmSharedCacheableRoute) ignoreFarmHeldValues();
-        const farmKeptLayouts =
-          farmSharedCacheableRoute || shouldHydrateLayout || renderedRouteSlots.length > 0
-            ? 0
-            : countFarmKeptLayouts(request, applicableLayouts, params);
         const farmLayoutKeyOf = getFarmLayoutKey;`
-            : `const farmKeptLayouts = 0;
-        const farmLayoutKeyOf = null;`
+            : `const farmLayoutKeyOf = null;`
         }
         const renderPageElement = async () => {
             // First, render the page content
@@ -9801,7 +9821,9 @@ ${
             ? `
         // Islands mode: a navigation that names the values it holds, or the layouts it shows,
         // gets HTML without them.
-        responseHeaders["Vary"] = "x-farm-values, x-farm-layout-chain";`
+        responseHeaders["Vary"] = farmSharedCacheableRoute
+          ? "x-farm-layout-chain"
+          : "x-farm-values, x-farm-layout-chain";`
             : ""
         }
         let html = renderedPage.html;
