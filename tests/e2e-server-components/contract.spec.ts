@@ -198,11 +198,13 @@ test("a large value shared by two client components survives client navigation",
 
   if (mode === "islands") {
     // The list travels once, keyed by content. A navigation never sends it again: the server
-    // leaves out values the browser holds (or, in development, the layout altogether).
+    // leaves out the layout the browser keeps, and values the browser holds.
     const [first, ...navigations] = documents;
     expect(first).toMatch(/<script type="application\/json" data-farm-value="[0-9a-z]{14}">/);
     expect(navigations.length).toBeGreaterThan(0);
     for (const body of navigations) {
+      // Nor the layout the browser keeps: only the page segment travels.
+      expect(body).not.toContain("Select in Sidebar");
       expect(body).not.toContain("data-farm-value=");
       expect(body).not.toContain("Catalog entry 7 with");
     }

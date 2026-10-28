@@ -136,6 +136,16 @@ export function parseFarmHeldValues(header: string | null | undefined): Readonly
 }
 
 const heldByRequest = new WeakMap<Request, ReadonlySet<string>>();
+const ignoredRequests = new WeakSet<Request>();
+
+/**
+ * Makes the current request's render send every value, whatever the browser holds: its HTML may
+ * be stored in a shared cache (a PPR shell, an ISR entry) and served to browsers that hold none.
+ */
+export function ignoreFarmHeldValues(): void {
+  const request = _resolveCurrentRequest();
+  if (request) ignoredRequests.add(request);
+}
 
 /**
  * The value keys the browser making the current request holds, or null outside a request or
@@ -143,7 +153,7 @@ const heldByRequest = new WeakMap<Request, ReadonlySet<string>>();
  */
 export function readFarmHeldValues(): ReadonlySet<string> | null {
   const request = _resolveCurrentRequest();
-  if (!request) return null;
+  if (!request || ignoredRequests.has(request)) return null;
   let held = heldByRequest.get(request);
   if (!held) {
     held = parseFarmHeldValues(request.headers.get(FARM_VALUES_HEADER));

@@ -1868,7 +1868,7 @@ export function Chart() {}
     expect(source).toContain("delete window.__farmDocsRuntime;");
     expect(source).toContain("script.replaceWith(freshScript);");
     expect(source).toContain('document.documentElement.dataset.farmDocsRuntime === "true"');
-    expect(source).toContain("const swapped = await this.swapContent(");
+    expect(source).toContain("let swapped = await this.swapContent(");
     expect(source).toContain(
       "const targetUrl = new URL(targetPath || window.location.href, window.location.origin);",
     );

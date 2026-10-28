@@ -2793,7 +2793,7 @@ export function generateUniversalRouterStateProperties(): string {
     this.pendingPrefetches.clear();
   },
 
-  fetchPrefetchedDocument: async function(url, interceptFrom, fresh, recover, signal, cacheResult = true) {
+  fetchPrefetchedDocument: async function(url, interceptFrom, fresh, recover, signal, cacheResult = true, layoutChain = true) {
     signal?.throwIfAborted();
     const cacheKey = interceptFrom ? url + "\\nintercept:" + interceptFrom : url;
     if (fresh) this.clearPrefetchedPath(url);
@@ -2827,8 +2827,10 @@ export function generateUniversalRouterStateProperties(): string {
       const response = await fetchFarmNavigationDocument(url, {
         "Accept": "text/html",
         ...(interceptFrom ? { "X-Farm-Intercept-From": interceptFrom } : {}),
-        // Islands mode: the server leaves out island values this browser holds.
+        // Islands mode: the server leaves out island values this browser holds, and the
+        // layouts it shows.
         ...getFarmIslandValueHeaders(),
+        ...(layoutChain && this.layoutChainHeaders ? this.layoutChainHeaders() : {}),
       }, recover, signal);
       if (!response.ok) throw new Error("Failed to fetch page");
       const html = await response.text();
@@ -2985,6 +2987,32 @@ export function generateUniversalRouterStateProperties(): string {
   },
 `.trim();
 }
+
+/**
+ * Islands mode's segment navigation on the production server (RFC 0003). A client navigation names
+ * the layouts the browser shows, by key: the pattern with its params filled in, so a layout whose
+ * params change renders again. The response leaves out the leading layouts the browser keeps.
+ */
+/** @internal Exported for tests. */
+export const FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME = `
+function getFarmLayoutKey(pattern, params) {
+  return pattern.replace(/\\[\\[?\\.\\.\\.([^\\]]+)\\]?\\]|\\[([^\\]]+)\\]/g, function(match, rest, name) {
+    const value = params ? params[rest || name] : undefined;
+    if (Array.isArray(value)) return value.map(encodeURIComponent).join("/");
+    return value === undefined ? "" : encodeURIComponent(String(value));
+  });
+}
+
+function countFarmKeptLayouts(request, layouts, params) {
+  const chain = parseFarmLayoutChainHeader(request.headers.get("x-farm-layout-chain"));
+  if (chain.length === 0) return 0;
+  const keys = layouts.map(function(layout) { return getFarmLayoutKey(layout.pattern, params); });
+  if (chain[0] === keys[0]) return getSharedLayoutPrefixLength(chain, keys);
+  // A root layout that renders the document itself leaves no boundary in the page, so the
+  // browser's chain starts at the next layout.
+  return keys.length > 1 ? 1 + getSharedLayoutPrefixLength(chain, keys.slice(1)) : 0;
+}
+`;
 
 function generateClientHydrationEntry(
   clientPages: Array<{
@@ -4075,18 +4103,43 @@ async function hydrate() {
   }
 }
 
+// A layout boundary is the same layout when its key matches: islands mode keys it by pattern and
+// params, so a layout whose params change renders again. Other modes compare patterns.
+function getLayoutIdentity(boundary) {
+  return boundary.getAttribute("data-farm-layout-key") || boundary.getAttribute("data-farm-layout-pattern");
+}
+
 function findLayoutBoundary(root, pattern) {
   const boundaries = root?.querySelectorAll?.('[data-farm-layout-boundary="true"]') || [];
   for (const boundary of boundaries) {
-    if (boundary.getAttribute("data-farm-layout-pattern") === pattern) return boundary;
+    if (getLayoutIdentity(boundary) === pattern) return boundary;
   }
   return null;
 }
 
 function getLayoutPatterns(root) {
   return Array.from(root?.querySelectorAll?.('[data-farm-layout-boundary="true"]') || [])
-    .map(function(element) { return element.getAttribute("data-farm-layout-pattern"); })
+    .map(getLayoutIdentity)
     .filter(Boolean);
+}
+
+${
+  islandValues
+    ? `// A segment response leaves out the layouts the browser said it shows. It fits this page only if
+// the page still shows each of them, at the same depth.
+function fitsSegmentResponse(currentRoot, nextRoot) {
+  const nextBoundaries = Array.from(nextRoot.querySelectorAll('[data-farm-layout-boundary="true"]'));
+  const lastKept = nextBoundaries.map(function(boundary) {
+    return boundary.getAttribute("data-farm-layout-kept") === "true";
+  }).lastIndexOf(true);
+  if (lastKept === -1) return true;
+  const current = getLayoutPatterns(currentRoot);
+  for (let index = 0; index <= lastKept; index++) {
+    if (current[index] !== getLayoutIdentity(nextBoundaries[index])) return false;
+  }
+  return true;
+}`
+    : ""
 }
 
 function activateNavigationScripts(root) {
@@ -4142,7 +4195,16 @@ function replaceSharedLayoutBoundary(currentRoot, nextRoot) {
 const spaRouter = {
 ${generateUniversalRouterStateProperties()}
   prefetchCache: new Map(),
-  
+${
+  islandValues
+    ? `  // Islands mode: navigations name the layouts on screen, and the server leaves them out.
+  layoutChainHeaders: function() {
+    const layouts = getLayoutPatterns(document.getElementById("root") || document.body);
+    return layouts.length ? { "X-Farm-Layout-Chain": JSON.stringify(layouts) } : {};
+  },
+`
+    : ""
+}  
   navigate: async function(href, options = {}) {
     const url = new URL(href, window.location.href);
     if (isFarmBlockedNavigationURL(url)) return;
@@ -4299,26 +4361,48 @@ ${generateUniversalRouterStateProperties()}
           this.currentPath = to;
         });
       } else {
+        // A refresh renders every layout again; other navigations keep the ones on screen.
         const html = await this.fetchPage(
           url.pathname + url.search,
           undefined,
           options.refresh === true,
           true,
           navigation.controller.signal,
+          options.refresh !== true,
         );
         if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         await farmClientRuntime.markNavigationLoaded(clientNavigation, html);
         if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
         await this.runViewTransition(options.viewTransition, async () => {
           if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
-          const swapped = await this.swapContent(
+          let swapped = await this.swapContent(
             html,
             url.pathname + url.search,
             navigation,
             clientNavigation,
           );
           if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
-          if (!swapped) {
+          if (swapped === "segment-mismatch") {
+            // The page changed since this segment was requested (a prefetch, a later
+            // navigation): fetch the whole document instead.
+            const documentHtml = await this.fetchPage(
+              url.pathname + url.search,
+              undefined,
+              true,
+              true,
+              navigation.controller.signal,
+              false,
+            );
+            if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+            swapped = await this.swapContent(
+              documentHtml,
+              url.pathname + url.search,
+              navigation,
+              clientNavigation,
+            );
+            if (!this.isCurrentNavigation(navigation, clientNavigation)) return;
+          }
+          if (!swapped || swapped === "segment-mismatch") {
             throw new Error("Farm could not swap the target document");
           }
           this.writeHistoryEntry(action, url.pathname + url.search, options.state, url);
@@ -4368,8 +4452,8 @@ ${generateUniversalRouterStateProperties()}
     });
   },
   
-  fetchPage: async function(url, interceptFrom, fresh = false, recover = true, signal) {
-    return this.fetchPrefetchedDocument(url, interceptFrom, fresh, recover, signal);
+  fetchPage: async function(url, interceptFrom, fresh = false, recover = true, signal, layoutChain = true) {
+    return this.fetchPrefetchedDocument(url, interceptFrom, fresh, recover, signal, true, layoutChain);
   },
   
   swapContent: async function(html, targetPath, navigation, clientNavigation) {
@@ -4390,6 +4474,18 @@ ${generateUniversalRouterStateProperties()}
     // whole document (and remounting every isolated client boundary).
     const newRoot = doc.getElementById("root") || doc.body;
     const currentRoot = document.getElementById("root") || document.body;
+    ${
+      islandValues
+        ? `const isSegment = Boolean(newRoot?.querySelector('[data-farm-layout-kept="true"]'));
+    // A segment needs this page's kept layouts in place, outside a React-owned root.
+    if (
+      isSegment &&
+      (!currentRoot || reactRootContainer === currentRoot || !fitsSegmentResponse(currentRoot, newRoot))
+    ) {
+      return "segment-mismatch";
+    }`
+        : ""
+    }
     if (!newRoot || !currentRoot) {
       if (!isNavigationCurrent()) return false;
       return this.swapDocument(doc);
@@ -4427,6 +4523,7 @@ ${generateUniversalRouterStateProperties()}
       ? null
       : replaceSharedLayoutBoundary(currentRoot, newRoot);
     let isolatedHydrationScope = replacedSharedBoundary || currentRoot;
+    ${islandValues ? 'if (!replacedSharedBoundary && isSegment) return "segment-mismatch";' : ""}
     if (!replacedSharedBoundary) {
       ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentRoot);" : ""}
       currentRoot.innerHTML = newRoot.innerHTML;
@@ -6131,7 +6228,7 @@ function renderFarmRouteServerTree(element) { return element; }`;
   }
 } from "@farm.js/core/internal/production-runtime";${
     farmIslandsMode
-      ? `\nimport { handleFarmFormActionRequest, installFarmIslandValues } from "@farm.js/core/internal/production-runtime";\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();`
+      ? `\nimport { getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader } from "@farm.js/core/internal/production-runtime";\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
       : ""
   }`;
   const productionSiteTelemetryImport = config.telemetry
@@ -9450,6 +9547,21 @@ ${
           };
         });
         
+        ${
+          farmIslandsMode
+            ? `// Islands mode: a route a shared cache may store (a PPR shell, a static page) renders
+        // whole for every request, so a cache hit stays a hit. Other routes leave out what the
+        // navigating browser keeps: the layouts it shows and the values it holds.
+        const farmSharedCacheableRoute = Boolean(getRouteSharedCacheControl(route, pprCanCache));
+        if (farmSharedCacheableRoute) ignoreFarmHeldValues();
+        const farmKeptLayouts =
+          farmSharedCacheableRoute || shouldHydrateLayout || renderedRouteSlots.length > 0
+            ? 0
+            : countFarmKeptLayouts(request, applicableLayouts, params);
+        const farmLayoutKeyOf = getFarmLayoutKey;`
+            : `const farmKeptLayouts = 0;
+        const farmLayoutKeyOf = null;`
+        }
         const renderPageElement = async () => {
             // First, render the page content
             let pageElement;
@@ -9501,6 +9613,22 @@ ${
             for (let i = applicableLayouts.length - 1; i >= 0; i--) {
               const layout = applicableLayouts[i];
               const LayoutComponent = layout.module.default;
+              // Islands mode: a layout the browser keeps sends only its boundary, so the client
+              // knows where the rest goes. The root layout always renders: it may own the document.
+              if (LayoutComponent && i > 0 && i < farmKeptLayouts) {
+                wrappedElement = React.createElement(
+                  "div",
+                  {
+                    "data-farm-layout-boundary": "true",
+                    "data-farm-layout-pattern": layout.pattern,
+                    "data-farm-layout-key": farmLayoutKeyOf(layout.pattern, params),
+                    "data-farm-layout-kept": "true",
+                    style: { display: "contents" },
+                  },
+                  wrappedElement,
+                );
+                continue;
+              }
               if (LayoutComponent) {
                 const slotProps = {};
                 for (const slot of renderedRouteSlots) {
@@ -9527,6 +9655,9 @@ ${
                   {
                     "data-farm-layout-boundary": "true",
                     "data-farm-layout-pattern": layout.pattern,
+                    "data-farm-layout-key": farmLayoutKeyOf
+                      ? farmLayoutKeyOf(layout.pattern, params)
+                      : undefined,
                     style: { display: "contents" },
                   },
                   wrappedElement,
@@ -9645,7 +9776,7 @@ ${
           farmLocaleResolution,
         );
         const hasRequestScopedRender = Boolean(
-          pageStatus >= 400 ||
+          pageStatus >= 400 ||${farmIslandsMode ? "\n          farmKeptLayouts > 0 ||" : ""}
           renderReadRequest ||
           request.headers.get("x-farm-intercept-from") ||
           hasPrivateRequestHeaders ||
@@ -9668,8 +9799,9 @@ ${
         const farmI18nSnapshot = getFarmI18nSnapshot();${
           farmIslandsMode
             ? `
-        // Islands mode: a navigation that names the values it holds gets HTML without them.
-        responseHeaders["Vary"] = "x-farm-values";`
+        // Islands mode: a navigation that names the values it holds, or the layouts it shows,
+        // gets HTML without them.
+        responseHeaders["Vary"] = "x-farm-values, x-farm-layout-chain";`
             : ""
         }
         let html = renderedPage.html;

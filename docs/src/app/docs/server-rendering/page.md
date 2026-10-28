@@ -313,7 +313,12 @@ that output as a slot of the existing HTML instead of receiving it again, and a 
 layout that hydrates (a client provider, say) hydrates inside that layout's tree, so its client
 components read the provider's context. A large prop value (512 bytes of JSON or more, such as a
 navigation tree) travels once, keyed by its content: client components that share it share one
-copy, and a client navigation leaves out the values the browser already holds. `"use server"`
+copy, and a client navigation leaves out the values the browser already holds. A client navigation
+also leaves out the layouts the browser keeps: the server renders the page and any layout that
+changed, so a layout's client state survives and its HTML is not sent again. A layout the browser
+keeps does not render on that navigation, so put access checks in middleware or a page `guard`,
+not in a layout's body. `router.refresh()` and full loads render every layout. Routes a shared
+cache can store (static and PPR pages) still send the whole document, so cache hits stay hits. `"use server"`
 functions work from forms, with or without JavaScript, and from client components, in `farm dev`
 and in production. Islands mode needs none of the RSC packages and is experimental. Both modes share
 the authoring rules on this page, so switching between them is a one-line change; the same contract
