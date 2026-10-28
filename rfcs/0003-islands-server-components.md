@@ -338,7 +338,8 @@ navigation with state kept in layouts; back and forward; HMR; error and not-foun
   is `private, no-store`. A kept layout does not render, as in Next.js: access checks belong in
   middleware or page guards. PPR routes cache each segment under its own key (the page's shell key
 plus the number of kept layouts; `revalidatePath` clears both, since entries are stored by path).
-Not yet: a prefetch cache keyed by layout chain.
+The prefetch cache keys a partial response by the headers it was asked with (layout chain, tree
+navigation), so a navigation from other layouts fetches its own answer.
 - Values in server-tree payloads: a page under a layout that hydrates as one root sends its large
   prop values once, in scripts right before its payload, and the browser re-renders those scripts
   so hydration matches. On the shop benchmark a navigation drops from 5.8 KB to 4.2 KB (brotli);
