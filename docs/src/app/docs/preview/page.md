@@ -252,6 +252,10 @@ https://stripe-webhook.preview.farmjs.dev
 
 Names are best treated as temporary handles. Stop and restart the command when you want to rotate the session.
 
+A name belongs to the account that claimed it. While your preview runs, and for five minutes after it
+stops or disconnects, another account gets an "already active" error for that name, so a restart or
+dropped connection can reconnect before anyone else takes the URL. You can always reclaim your own name.
+
 ## Request Logging
 
 Every remote request is visible in the preview terminal:
