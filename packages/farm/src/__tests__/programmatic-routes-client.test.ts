@@ -459,7 +459,11 @@ describe("programmatic routes in the client build", () => {
         const route = clientRoutes.routes.get(
           programmaticClientRouteKey(path.join(root, "src", "routes.tsx"), "page", routePath),
         );
-        return [routePath, route?.component?.file.replace(root, ""), route?.serverProps];
+        return [
+          routePath,
+          route?.component?.file.replace(root.replace(/\\/g, "/"), ""),
+          route?.serverProps,
+        ];
       }),
     ).toEqual([
       ["/typed", "/src/components/pages.tsx", ["guard", "data"]],
@@ -469,9 +473,11 @@ describe("programmatic routes in the client build", () => {
       ["/builder", "/src/components/pages.tsx", ["guard"]],
       ["/aliased", "/src/components/pages.tsx", undefined],
     ]);
-    expect([...clientRoutes.routeSourceFiles].map((file) => file.replace(root, "")).sort()).toEqual(
-      ["/src/admin/index.ts", "/src/admin/pages.ts", "/src/routes.tsx"],
-    );
+    expect(
+      [...clientRoutes.routeSourceFiles]
+        .map((file) => file.replace(/\\/g, "/").replace(root.replace(/\\/g, "/"), ""))
+        .sort(),
+    ).toEqual(["/src/admin/index.ts", "/src/admin/pages.ts", "/src/routes.tsx"]);
   }, 60_000);
 
   it("fails the build for a hydrating page whose component lives in the routes file", async () => {
