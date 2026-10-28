@@ -5237,7 +5237,7 @@ function matchLocalIntegrationRequest(request) {
   }
 }
 
-async function handleIntegrationRequest(request, ranMiddleware) {
+async function handleIntegrationRequest(request, ranMiddleware, clientAddress) {
   ${
     options.hasServerRuntimeIntegrations
       ? `return dispatchIntegrationRequests(
@@ -5248,7 +5248,7 @@ async function handleIntegrationRequest(request, ranMiddleware) {
       isProd: true,
     },
     request,
-    { ranMiddleware },
+    { ranMiddleware, clientAddress },
   );`
       : `return { response: null, setCookies: [] };`
   }
@@ -8657,6 +8657,7 @@ async function resolveFarmRequestInContext(
   const integrationDispatch = await handleIntegrationRequest(
     cloneFarmRequestWithContext(request),
     farmIntegrationRanMiddleware,
+    adapterContext?.clientAddress,
   );
   if (integrationDispatch.response) {
     return integrationDispatch.response;
@@ -8691,6 +8692,7 @@ async function resolveFarmRequestInContext(
     const rewrittenDispatch = await handleIntegrationRequest(
       cloneFarmRequestWithContext(request),
       farmIntegrationRanMiddleware,
+      adapterContext?.clientAddress,
     );
     farmIntegrationSetCookies = [...farmIntegrationSetCookies, ...rewrittenDispatch.setCookies];
     if (rewrittenDispatch.response) {

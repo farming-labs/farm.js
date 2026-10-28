@@ -2484,6 +2484,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     isProd: false,
                   },
                   request,
+                  { clientAddress: req.socket?.remoteAddress },
                 );
                 if (!result) {
                   throw new Error(`Matched integration route did not return a response`);

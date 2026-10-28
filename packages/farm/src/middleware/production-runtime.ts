@@ -19,7 +19,7 @@ import { normalizeMiddlewareModule } from "./module";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import { stripFarmBasePath } from "../base-path";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
-import type { ResolvedFarmServerConfig } from "../server-http";
+import { withFarmRequestClientAddress, type ResolvedFarmServerConfig } from "../server-http";
 import {
   parseMiddlewareCookieHeader,
   serializeMiddlewareCookie as serializeCookie,
@@ -342,34 +342,6 @@ function createResponseShim(headers: WebResponseHeaderMap): WebResponseShimState
   };
 }
 
-function withNodeRequestShape(
-  request: Request,
-  trustProxy: boolean,
-  clientAddress: string | undefined,
-): Request {
-  const requestWithShape = request as Request & {
-    socket?: { remoteAddress?: string };
-  };
-
-  if (!requestWithShape.socket) {
-    const forwardedFor = trustProxy
-      ? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-      : undefined;
-    try {
-      // A web Request carries no socket, so the address comes from a trusted
-      // proxy or from the server adapter's own connection. Never invent one:
-      // reporting `127.0.0.1` used to make every visitor look like the same
-      // client, which collapsed per-client rate limiting into one shared
-      // bucket. Leave it undefined so a consumer can tell that it does not know.
-      requestWithShape.socket = { remoteAddress: forwardedFor || clientAddress || undefined };
-    } catch {
-      // Some Request implementations may not be extensible.
-    }
-  }
-
-  return requestWithShape;
-}
-
 function createHandledResponse(
   body: BodyInit | null,
   init: ResponseInit,
@@ -396,7 +368,7 @@ function createWebMiddlewareContext(
   clientAddress?: string,
   toRoutePathname?: (pathname: string) => string,
 ): WebMiddlewareContextState {
-  let currentRequest = withNodeRequestShape(request, trustProxy, clientAddress);
+  let currentRequest = withFarmRequestClientAddress(request, trustProxy, clientAddress);
   let handledResponse: Response | null = null;
   const url = new URL(currentRequest.url);
   const data = parent?.data ? new Map(parent.data) : new Map<string, any>();
@@ -455,7 +427,7 @@ function createWebMiddlewareContext(
     rewrite(rewriteUrl: string): void {
       ctx._rewriteUrl = rewriteUrl;
       const nextUrl = new URL(rewriteUrl, currentRequest.url);
-      currentRequest = withNodeRequestShape(
+      currentRequest = withFarmRequestClientAddress(
         new Request(nextUrl, currentRequest),
         trustProxy,
         clientAddress,

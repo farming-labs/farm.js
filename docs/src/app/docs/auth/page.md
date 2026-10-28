@@ -174,6 +174,12 @@ deployment URL still works for testing. Set `FARM_AUTH_URL` explicitly when the 
 from a domain Vercel does not report, such as a proxy in front of the deployment - the auth
 routes reject any origin that is neither the base URL nor a trusted host.
 
+Better Auth's sign-in rate limit keys on the client address Farm resolves for the request: the
+server's peer address, or the first `X-Forwarded-For` hop only when
+[`server.trustProxy`](/docs/configuration) is on. A client-sent forwarding header never picks the
+bucket on its own. Behind a proxy, enable `trustProxy` so visitors are not all counted as the
+proxy's address.
+
 Apply the production schema before serving traffic:
 
 ```bash

@@ -91,6 +91,7 @@ import {
   createFarmRequestBodyErrorResponse,
   readNodeRequestBody,
   resolveFarmServerConfig,
+  withFarmRequestClientAddress,
 } from "./server-http";
 
 export { api, defineIntegrationAPI, defineIntegrationAPIOperation } from "./integration-api";
@@ -1994,7 +1995,11 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
 
       const createHandlerRequest = async (): Promise<Request | null> => {
         try {
-          return createWebRequest(req, fullUrl, await getRequestBody());
+          return withFarmRequestClientAddress(
+            createWebRequest(req, fullUrl, await getRequestBody()),
+            resolveFarmServerConfig(context.config.server).trustProxy,
+            req.socket?.remoteAddress,
+          );
         } catch (error) {
           const response = createFarmRequestBodyErrorResponse(error);
           if (!response) throw error;
@@ -2885,18 +2890,21 @@ export async function dispatchIntegrationRequest(
      * at most once per request, as app middleware does.
      */
     ranMiddleware?: Set<object>;
+    /** The peer address the server adapter reports, used unless `server.trustProxy` applies. */
+    clientAddress?: string;
   } = {},
 ): Promise<Response | null> {
+  const serverConfig = resolveFarmServerConfig(runtime.config.server);
   try {
-    request = await bufferFarmRequestBody(
-      request,
-      resolveFarmServerConfig(runtime.config.server).bodySizeLimit,
-    );
+    request = await bufferFarmRequestBody(request, serverConfig.bodySizeLimit);
   } catch (error) {
     const response = createFarmRequestBodyErrorResponse(error);
     if (response) return response;
     throw error;
   }
+  // Handlers such as Farm Auth key rate limits on the caller, so they get the
+  // address Farm resolved rather than a client-supplied header.
+  request = withFarmRequestClientAddress(request, serverConfig.trustProxy, options.clientAddress);
 
   const integration = runtime.integration;
   const url = new URL(request.url);
@@ -3207,7 +3215,7 @@ export async function dispatchIntegrationRequests(
   integrations: FarmIntegrationsUserConfig | undefined,
   runtime: Omit<RegisteredIntegrationRuntime, "integration">,
   request: Request,
-  options: { currentRequest?: Request; ranMiddleware?: Set<object> } = {},
+  options: { currentRequest?: Request; ranMiddleware?: Set<object>; clientAddress?: string } = {},
 ): Promise<{ response: Response | null; setCookies: string[] }> {
   const setCookies: string[] = [];
   if (!integrations) {
@@ -3235,6 +3243,7 @@ export async function dispatchIntegrationRequests(
       {
         currentRequest: options.currentRequest,
         ranMiddleware: options.ranMiddleware,
+        clientAddress: options.clientAddress,
         onForwardedCookies: (cookies) => setCookies.push(...cookies),
       },
     );

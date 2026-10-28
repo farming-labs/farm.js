@@ -328,6 +328,39 @@ export function parseBodySizeLimit(value: number | string, optionName = "bodySiz
   return bytes;
 }
 
+/**
+ * Attach the caller's address as `request.socket.remoteAddress`, the shape Farm's
+ * middleware and integrations read it from.
+ *
+ * A web Request carries no socket, so the address comes from a trusted proxy or
+ * from the server adapter's own connection. Never invent one: reporting
+ * `127.0.0.1` used to make every visitor look like the same client, which
+ * collapsed per-client rate limiting into one shared bucket. Leave it undefined
+ * so a consumer can tell that it does not know.
+ */
+export function withFarmRequestClientAddress<T extends Request>(
+  request: T,
+  trustProxy: boolean,
+  clientAddress: string | undefined,
+): T {
+  const requestWithShape = request as T & {
+    socket?: { remoteAddress?: string };
+  };
+
+  if (!requestWithShape.socket) {
+    const forwardedFor = trustProxy
+      ? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+      : undefined;
+    try {
+      requestWithShape.socket = { remoteAddress: forwardedFor || clientAddress || undefined };
+    } catch {
+      // Some Request implementations may not be extensible.
+    }
+  }
+
+  return requestWithShape;
+}
+
 export function cloneFarmRequestWithContext(request: Request): Request {
   const cloned = request.clone();
   copyRequestContext(request, cloned);
