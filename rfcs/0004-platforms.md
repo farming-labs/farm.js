@@ -114,6 +114,63 @@ export default defineConfig({
 Both keys are optional. Their types live in core so `defineConfig` checks them, but their
 implementations load only when the matching flag is passed.
 
+### 1.1 Static or dynamic blocks
+
+`desktop` and `mobile` take either a static object or a function that returns one, sync or
+async. The function receives the platform context once; every field inside the returned object
+is a plain value that can use that context through the closure.
+
+```ts
+type Configurable<C, T> = T | ((context: C) => T | Promise<T>);
+
+interface MobileContext {
+  os: "ios" | "android";
+  mode: "development" | "production";
+  command: "dev" | "build";
+  profile: string; // farm build --mobile --profile beta, default "production"
+  env: Readonly<Record<string, string | undefined>>;
+  root: string;
+}
+
+interface DesktopContext extends Omit<MobileContext, "os"> {
+  os: "macos" | "windows" | "linux";
+}
+
+interface FarmUserConfig {
+  desktop?: Configurable<DesktopContext, FarmDesktopConfig>;
+  mobile?: Configurable<MobileContext, FarmMobileConfig>;
+}
+```
+
+```ts
+export default defineConfig({
+  mobile: async ({ os, command, profile, env, root }) => ({
+    id: profile === "beta" ? "dev.farmjs.notes.beta" : "dev.farmjs.notes",
+    server: command === "dev" ? "http://192.168.1.20:3000" : "https://api.notes.app",
+    tabs: os === "android" ? ["/notes", "/search", "/settings"] : ["/notes", "/settings"],
+    native: {
+      push: os === "ios" ? { apnsKeyId: env.APNS_KEY_ID } : { firebase: "./google-services.json" },
+    },
+    version: (await import(`${root}/package.json`)).version,
+  }),
+});
+```
+
+Rules:
+
+- The function runs at build time, and when `farm dev` starts or restarts, once per target OS
+  (`farm build --mobile` resolves `ios` and `android` separately). Only the resolved values reach
+  the generated output; the function never ships, so it may use `fs`, network calls and `env`.
+- Fields inside the block are plain values. Real callbacks (`onReady`, menu actions, bridge
+  handlers) live in `src/desktop.ts` and `src/mobile.ts`, so nothing in the block is ambiguous.
+- Resolved values are validated with errors that name the OS and field, for example
+  `mobile (os: android): tabs[2] must be a route path`. A `--web` build does not call the
+  functions but still type-checks the keys.
+- Secrets come from `env`; signing identities and keys are never literals in the config file.
+- `farm config inspect --mobile --os ios --profile beta` prints the resolved block.
+- Values that must change without a new build or store release (feature flags, minimum app
+  version) are runtime config served by the app's server, not part of these blocks.
+
 ## 2. CLI flags
 
 ```sh
