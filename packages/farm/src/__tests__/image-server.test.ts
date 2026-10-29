@@ -442,6 +442,50 @@ describe("Farm image optimizer", () => {
     expect(svg?.status).toBe(415);
   });
 
+  describe("transformed results", () => {
+    const SVG_BYTES = new TextEncoder().encode(
+      '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+    );
+    const WEBP_BYTES = new TextEncoder().encode("RIFF\0\0\0\0WEBPVP8 ");
+    // The edge's reply to the transform request: what Cloudflare (or anything
+    // pretending to be it) says it produced.
+    const cloudflareHandler = (body: Uint8Array, contentType: string) =>
+      createFarmImageHandler(resolveFarmImageConfig(undefined), {
+        fetch: vi.fn(
+          async () => new Response(PNG, { headers: { "content-type": "image/png" } }),
+        ) as typeof fetch,
+        transform: createCloudflareImageTransformer(
+          vi.fn(
+            async () => new Response(body, { headers: { "content-type": contentType } }),
+          ) as typeof fetch,
+        ),
+      });
+
+    it.each([
+      ["a type list ending in SVG", SVG_BYTES, "image/png, image/svg+xml"],
+      ["SVG bytes claimed as PNG", SVG_BYTES, "image/png"],
+      ["PNG bytes claimed as WebP", PNG, "image/webp"],
+      ["HTML claimed as an icon", new TextEncoder().encode("<html><script>"), "image/x-icon"],
+    ])("refuses %s", async (_label, body, contentType) => {
+      const response = await cloudflareHandler(
+        body,
+        contentType,
+      )(new Request(optimizerUrl("/photo.png"), { headers: { accept: "image/webp" } }));
+      expect(response?.status).toBe(500);
+      expect(response?.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    });
+
+    it("serves a result that is the type it claims, sandboxed", async () => {
+      const response = await cloudflareHandler(
+        WEBP_BYTES,
+        "image/webp; charset=binary",
+      )(new Request(optimizerUrl("/photo.png"), { headers: { accept: "image/webp" } }));
+      expect(response?.status).toBe(200);
+      expect(response?.headers.get("content-type")).toBe("image/webp");
+      expect(response?.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+    });
+  });
+
   it("returns a sanitized cancellation response", async () => {
     const controller = new AbortController();
     controller.abort(new DOMException("stop", "AbortError"));

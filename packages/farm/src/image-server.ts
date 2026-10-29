@@ -190,7 +190,7 @@ export function createFarmImageHandler(
         });
       }
 
-      return createOptimizedImageResponse(request, optimized, config);
+      return createOptimizedImageResponse(request, optimized);
     } catch (error) {
       if (!(error instanceof FarmImageRequestError) && !isAbortError(error)) {
         try {
@@ -789,12 +789,31 @@ function validateTransformedResult(
   if (!contentType || (contentType === "image/svg+xml" && !config.dangerouslyAllowSVG)) {
     throw new Error("The image transformer returned an unsupported content type");
   }
+  // The type a transformer claims (for Cloudflare, an upstream header) is not
+  // proof. Serve the bytes only as the type they actually are.
+  if (detectImageContentType(result.body) !== contentType) {
+    throw new Error("The image transformer returned bytes that do not match their content type");
+  }
   result.contentType = contentType;
 }
 
+const OPTIMIZED_IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "image/svg+xml",
+]);
+
+/**
+ * The single image type `value` names, or "" for anything else. A list such as
+ * `image/png, image/svg+xml` is not one type: a browser may render it as the
+ * last one, which turns a "png" into a scriptable SVG.
+ */
 function normalizeImageContentType(value: string | null): string {
   const type = value?.split(";", 1)[0].trim().toLowerCase() ?? "";
-  return type.startsWith("image/") ? type : "";
+  return OPTIMIZED_IMAGE_TYPES.has(type) ? type : "";
 }
 
 function matchesRemoteSource(url: URL, config: ResolvedFarmImageConfig): boolean {
@@ -835,11 +854,7 @@ function matchesHostname(hostname: string, pattern: string): boolean {
   return normalizedHostname === normalizedPattern;
 }
 
-function createOptimizedImageResponse(
-  request: Request,
-  image: OptimizedImage,
-  config: ResolvedFarmImageConfig,
-): Response {
+function createOptimizedImageResponse(request: Request, image: OptimizedImage): Response {
   const headers = new Headers({
     "cache-control": image.cacheControl,
     "content-type": image.contentType,
@@ -848,10 +863,10 @@ function createOptimizedImageResponse(
     etag: image.etag,
     vary: "Accept",
     "x-content-type-options": "nosniff",
+    // Every optimized image, not only SVG: if a response is ever rendered as a
+    // document, it still cannot run script or load anything.
+    "content-security-policy": "default-src 'none'; sandbox",
   });
-  if (image.contentType === "image/svg+xml" && config.dangerouslyAllowSVG) {
-    headers.set("content-security-policy", "default-src 'none'; sandbox");
-  }
   if (matchesFarmIfNoneMatch(request.headers.get("if-none-match"), image.etag)) {
     headers.delete("content-length");
     return new Response(null, { status: 304, headers });
