@@ -38,6 +38,8 @@ export type SyncRequestBody = {
   input?: Record<string, unknown>;
   /** Incremental cursor for list; the largest `updatedAt` the client already holds. */
   since?: string | null;
+  /** Scope fingerprint `since` was recorded under; a mismatch gets a full snapshot. */
+  scope?: string | null;
 };
 
 export type SyncListResult = {
@@ -50,6 +52,8 @@ export type SyncListResult = {
    * drop rows that were deleted or left its scope since the last list.
    */
   keys?: unknown[];
+  /** Fingerprint of the caller's resolved row filter; see `scopeFingerprint`. */
+  scope: string;
 };
 
 export type SyncErrorCode =

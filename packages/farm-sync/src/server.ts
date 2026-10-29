@@ -85,7 +85,7 @@ export async function executeSyncOperation(
 
   switch (body.operation) {
     case "list":
-      return listRows(client, resolved, scope, body.since);
+      return listRows(client, resolved, scope, body.since, body.scope);
     case "insert":
       return insertRow(client, resolved, scope, body.input);
     case "update":
@@ -234,10 +234,17 @@ async function listRows(
   resolved: ResolvedSyncModel,
   scope: ResolvedScope,
   since: unknown,
+  clientScope: unknown,
 ): Promise<SyncListResult> {
   const cursorField = resolved.cursorField;
   const sinceDate = parseSince(since);
-  const incremental = Boolean(cursorField && sinceDate);
+  const fingerprint = await scopeFingerprint(resolved, scope);
+  // A cursor kept under another scope (a previous account, an old org) says
+  // nothing about this one: answer with a full snapshot so the client drops
+  // what it holds instead of merging a delta into the previous caller's rows.
+  const sameScope =
+    clientScope === undefined || clientScope === null || clientScope === fingerprint;
+  const incremental = Boolean(cursorField && sinceDate && sameScope);
   const where: Record<string, unknown> = { ...scope.where };
   // `gte`, not `gt`: the cursor has millisecond precision, so a row written in
   // the same millisecond as the cursor row but after the previous list would
@@ -247,7 +254,12 @@ async function listRows(
 
   const rows = await client.findMany({ where });
   if (!incremental) {
-    return { rows, cursor: cursorField ? nextCursor(rows, cursorField, null) : null, full: true };
+    return {
+      rows,
+      cursor: cursorField ? nextCursor(rows, cursorField, null) : null,
+      full: true,
+      scope: fingerprint,
+    };
   }
 
   // A delta cannot carry deletions, so it also lists every key the caller can
@@ -259,7 +271,43 @@ async function listRows(
     cursor: nextCursor(rows, cursorField!, since as string),
     full: false,
     keys: visible.map((row) => row[resolved.key]),
+    scope: fingerprint,
   };
+}
+
+/** Fingerprint of a model with `where: false`: the same for every caller. */
+export const PUBLIC_SYNC_SCOPE = "public";
+
+/**
+ * Identifies the rows a caller can see without revealing the filter's values.
+ * The browser stores it with persisted rows and only reuses rows saved under
+ * the fingerprint the server reports for the current session, so a reload
+ * after a sign-out never paints the previous account's rows.
+ */
+async function scopeFingerprint(
+  resolved: ResolvedSyncModel,
+  scope: ResolvedScope,
+): Promise<string> {
+  if (!resolved.where) return PUBLIC_SYNC_SCOPE;
+  const bytes = new TextEncoder().encode(stableStringify([resolved.name, scope.where]));
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return Array.from(digest.subarray(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function stableStringify(value: unknown): string {
+  if (value instanceof Date) return JSON.stringify({ $date: value.toISOString() });
+  if (typeof value === "bigint") return JSON.stringify({ $bigint: value.toString() });
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.keys(value)
+      .sort()
+      .map(
+        (key) =>
+          `${JSON.stringify(key)}:${stableStringify((value as Record<string, unknown>)[key])}`,
+      );
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
 }
 
 /** A cursor the client echoes back; anything else is a malformed request. */

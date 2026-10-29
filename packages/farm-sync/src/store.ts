@@ -8,6 +8,8 @@ export type SyncModelDescriptor = {
   /** Schema column names, for deriving an action's optimistic patch from its
    *  input. Absent on configs emitted before this field existed. */
   fields?: readonly string[];
+  /** Scope fingerprint shared by every caller, set only for `where: false` models. */
+  scope?: string;
 };
 
 export type SyncRuntimeConfig = {
@@ -49,6 +51,11 @@ export class SyncModelStore {
   status: SyncStoreStatus = "idle";
   error: Error | null = null;
   cursor: string | null = null;
+  /**
+   * Fingerprint of the scope the confirmed rows belong to, as the server last
+   * reported it. Null until a list succeeds (or public rows are hydrated).
+   */
+  scope: string | null = null;
   pending = 0;
   paused = 0;
   /** Rolled-back writes awaiting the user. Replaced, never mutated, so a
@@ -114,7 +121,13 @@ export class SyncModelStore {
    */
   applyServerRows(
     rows: SyncRow[],
-    options: { full: boolean; cursor: string | null; keys?: unknown[]; revision?: number },
+    options: {
+      full: boolean;
+      cursor: string | null;
+      keys?: unknown[];
+      revision?: number;
+      scope?: string | null;
+    },
   ): void {
     if (options.full) this.confirmed.clear();
     for (const row of rows) {
@@ -130,6 +143,7 @@ export class SyncModelStore {
       }
     }
     this.cursor = options.cursor ?? this.cursor;
+    if (options.scope !== undefined) this.scope = options.scope;
     this.status = "ready";
     this.error = null;
     this.invalidate();
@@ -182,6 +196,7 @@ export class SyncModelStore {
     this.layers = [];
     this.failures = [];
     this.cursor = null;
+    this.scope = null;
     this.status = "idle";
     this.error = null;
     this.invalidate();
@@ -192,13 +207,26 @@ export class SyncModelStore {
     return Array.from(this.confirmed.values());
   }
 
-  hydrate(rows: SyncRow[], cursor: string | null): void {
+  hydrate(rows: SyncRow[], cursor: string | null, scope: string | null = null): void {
     if (this.confirmed.size > 0) return; // live data always wins
     for (const row of rows) {
       this.confirmed.set(String(row[this.descriptor.key]), row);
     }
     this.cursor = cursor;
+    this.scope = scope;
     if (rows.length > 0) this.status = "ready";
+    this.invalidate();
+  }
+
+  /**
+   * Fold saved rows under a delta the server confirmed for the same scope.
+   * Rows this session already holds win; the delta's `keys` prunes the rest.
+   */
+  seed(rows: SyncRow[]): void {
+    for (const row of rows) {
+      const id = String(row[this.descriptor.key]);
+      if (!this.confirmed.has(id)) this.confirmed.set(id, row);
+    }
     this.invalidate();
   }
 

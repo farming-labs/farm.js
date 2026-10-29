@@ -214,6 +214,47 @@ describe("executeSyncOperation", () => {
     expect(result.keys).toEqual(["1", "3"]);
   });
 
+  it("fingerprints the caller's scope without revealing it, and snapshots on a scope change", async () => {
+    const { orm } = makeOrm([
+      { id: "1", title: "a", listId: "list-a", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "2", title: "b", listId: "list-b", updatedAt: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const list = (listId: string, extra: Record<string, unknown> = {}) =>
+      executeSyncOperation({
+        body: { model: "tasks", operation: "list", ...extra },
+        models: models(),
+        orm,
+        request,
+        context: { listId },
+      }) as Promise<any>;
+
+    const a = await list("list-a");
+    const again = await list("list-a");
+    const b = await list("list-b");
+    expect(a.scope).toMatch(/^[0-9a-f]{32}$/);
+    expect(again.scope).toBe(a.scope);
+    expect(b.scope).not.toBe(a.scope);
+    expect(a.scope).not.toContain("list-a");
+
+    // A cursor kept under list-a's scope gets list-b a full snapshot.
+    const switched = await list("list-b", { since: "2026-01-15T00:00:00.000Z", scope: a.scope });
+    expect(switched.full).toBe(true);
+    const same = await list("list-b", { since: "2026-01-15T00:00:00.000Z", scope: b.scope });
+    expect(same.full).toBe(false);
+  });
+
+  it("reports one public fingerprint for an unscoped model", async () => {
+    const { orm } = makeOrm([{ id: "1", title: "a", listId: "list-a" }]);
+    const result: any = await executeSyncOperation({
+      body: { model: "tasks", operation: "list" },
+      models: resolveSyncModels(schema as any, { tasks: "write" }, false, true),
+      orm,
+      request,
+      context,
+    });
+    expect(result.scope).toBe("public");
+  });
+
   it("does not send keys with a full snapshot", async () => {
     const { orm } = makeOrm([{ id: "1", title: "a", listId: "list-a" }]);
     const result: any = await executeSyncOperation({
@@ -602,6 +643,22 @@ describe("primary keys must be single values", () => {
     ).rejects.toMatchObject({ code: "invalid_input" });
 
     expect(store).toHaveLength(0);
+  });
+});
+
+describe("sync middleware", () => {
+  it("rejects a middleware entry that is not a function at config time", () => {
+    // createServerMiddleware() returns a frozen descriptor, not a function;
+    // calling it per request would answer every operation with a 500.
+    expect(() =>
+      sync({
+        schema: schema as any,
+        client: {},
+        models: { tasks: "read" },
+        where: false,
+        middleware: [{ __farmServerFnMiddleware: true, handler() {} } as any],
+      }),
+    ).toThrow(/middleware\[0\] must be a function/);
   });
 });
 
