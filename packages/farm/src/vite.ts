@@ -124,6 +124,7 @@ import {
 } from "./devtools-config";
 import { generateFarmDevIndicatorsClientRuntime } from "./dev-indicators";
 import { createFarmDevPreviewGuard, getFarmDevFsDeny } from "./dev-preview-guard";
+import { resolveFarmPlatform } from "./desktop/config";
 import * as fs from "fs";
 import * as path from "path";
 import { pathToFileURL } from "node:url";
@@ -328,6 +329,21 @@ export function farmI18nClientBridgePlugin(): Plugin {
 /** Core entries whose runtime must never ship to the browser. */
 const FARM_SERVER_ONLY_ENTRIES = new Set(["@farm.js/core/og"]);
 
+const FARM_PLATFORM_ENTRY = "@farm.js/core/platform";
+const FARM_PLATFORM_CLIENT_ID = "\0farm:platform-client";
+
+/**
+ * `@farm.js/core/platform` in browser code: `platform()` returns this build's platform as a
+ * literal, so `platform() === "desktop"` branches fold away, and nothing reaches for node:fs.
+ */
+function createFarmPlatformClientModule(): string {
+  return `export function platform() { return ${JSON.stringify(resolveFarmPlatform())}; }
+export function appDataDir() {
+  throw new Error("[Farm] appDataDir() is server-only. Read and write app data from a server function or API route.");
+}
+`;
+}
+
 /**
  * Fail a browser graph that imports a server-only core entry, instead of
  * bundling its server runtime (for `@farm.js/core/og`, the `@vercel/og` wasm
@@ -344,6 +360,7 @@ export function farmServerOnlyEntriesPlugin(): Plugin {
       root = config.root;
     },
     resolveId(id, importer, options) {
+      if (id === FARM_PLATFORM_ENTRY) return options?.ssr ? null : FARM_PLATFORM_CLIENT_ID;
       if (!FARM_SERVER_ONLY_ENTRIES.has(id)) return null;
       const importedBy = importer ? ` (imported by ${importer})` : "";
       if (!options?.ssr) {
@@ -358,6 +375,9 @@ export function farmServerOnlyEntriesPlugin(): Plugin {
         );
       }
       return null;
+    },
+    load(id) {
+      return id === FARM_PLATFORM_CLIENT_ID ? createFarmPlatformClientModule() : null;
     },
   };
 }
@@ -1222,6 +1242,13 @@ export function farmPlugin(
     },
 
     async configureServer(viteServer) {
+      // `farm dev --desktop`: only the desktop window gets an answer, as in the packaged app.
+      if (resolveFarmPlatform() === "desktop") {
+        const { createFarmDesktopDevGuard } = await import("./desktop/dev-guard");
+        viteServer.middlewares.use(
+          createFarmDesktopDevGuard(viteServer, { basePath: options.basePath || "" }),
+        );
+      }
       // First, so a tunnelled request is checked before Farm's routes and Vite's file serving.
       viteServer.middlewares.use(
         createFarmDevPreviewGuard(viteServer, {

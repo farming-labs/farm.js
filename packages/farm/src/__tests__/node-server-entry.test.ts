@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   createFarmBunServerEntry,
   createFarmNodeServerEntry,
+  FARM_DESKTOP_ENV_MODULE_SOURCE,
   FARM_NODE_ENV_MODULE_SOURCE,
 } from "../nitro/node-server-entry";
 import { resolveFarmServerConfig } from "../server-http";
@@ -76,6 +77,56 @@ describe("Farm production Node entry", () => {
     expect(source).toContain("if (shutdownConfig.forceExit) process.exit(process.exitCode || 0)");
     expect(source).toContain("ws.handleUpgrade(request, request.runtime.bun.server)");
     expect(source).toContain('from "./nitro-entry.mjs"');
+  });
+
+  it.each(["node", "bun"] as const)(
+    "exports start() and guards every request in a desktop entry (%s)",
+    async (runtime) => {
+      const options = {
+        nitroEntryFile: "nitro-entry.mjs",
+        server: resolveFarmServerConfig({}),
+        websocketAdapterModule: `crossws/adapters/${runtime}`,
+      };
+      const create = (desktop?: { basePath: string; guardModule: string }) =>
+        runtime === "node"
+          ? createFarmNodeServerEntry({ ...options, nodeAdapterModule: "srvx/node", desktop })
+          : createFarmBunServerEntry({ ...options, bunAdapterModule: "srvx/bun", desktop });
+      const web = create();
+      const source = create({ basePath: "/notes", guardModule: "@farm.js/core/internal/desktop-guard" });
+
+      await expect(transform(source, { loader: "js", format: "esm" })).resolves.toBeDefined();
+      // platform() must read "desktop" in every module, so the env module comes first.
+      expect(source.trimStart().startsWith('import "./farm-desktop-env.mjs";')).toBe(true);
+      expect(source).toContain(
+        'import { createFarmDesktopGuard } from "@farm.js/core/internal/desktop-guard"',
+      );
+      expect(source).toContain("export function start(options = {})");
+      expect(source).toContain('basePath: "/notes"');
+      expect(source).toContain("farmDesktopGuard(request) ??");
+      // Nothing starts on import, and the user's HOST and PORT never apply.
+      expect(source).not.toContain("process.env.PORT");
+      expect(source).not.toContain("process.env.HOST");
+      expect(source).toContain("const port = options.port ?? 0;");
+      expect(source).toContain('const host = options.host || "127.0.0.1";');
+      expect(source).toContain('stop: () => (shutdownPromise ||= shutdown("stop", false))');
+      expect(source).toContain("shutdownConfig.forceExit && exitProcess");
+      expect(source).toContain('"farm:ready " + JSON.stringify({ port: server.port })');
+      if (runtime === "node") {
+        // WebSocket upgrades skip srvx's fetch, so they get their own guard check.
+        expect(source).toMatch(/nodeServer\.on\("upgrade"[\s\S]*farmDesktopGuard\(\{/);
+      }
+
+      // A web entry carries none of it.
+      for (const marker of ["farmDesktop", "desktop-guard", "farm:ready", "export function start"]) {
+        expect(web).not.toContain(marker);
+      }
+    },
+  );
+
+  it("marks the desktop platform before NODE_ENV defaults apply", () => {
+    const env: Record<string, string | undefined> = {};
+    new Function("process", FARM_DESKTOP_ENV_MODULE_SOURCE)({ env });
+    expect(env).toEqual({ FARM_PLATFORM: "desktop", NODE_ENV: "production" });
   });
 
   it("sets NODE_ENV to production unless the deployment set one", () => {

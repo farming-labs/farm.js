@@ -101,6 +101,14 @@ import {
 import { isFarmRedirectStatus } from "./navigation-errors";
 import { resolveFarmThemeConfig } from "./theme/config";
 import { resolveFarmAgentConfig, type ResolvedFarmAgentConfig } from "./agent-config";
+import {
+  getFarmDesktopOutputDirs,
+  resolveFarmDesktopConfig,
+  resolveFarmPlatform,
+  validateFarmDesktopConfig,
+  type FarmDesktopUserConfig,
+  type ResolvedFarmDesktopConfig,
+} from "./desktop/config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
 import type { OpenAPISecurityMode } from "./openapi/types";
 import { isReactRenderer, resolveFarmRenderer } from "./renderer";
@@ -134,6 +142,11 @@ export type {
   ResolvedFarmMigrationsConfig,
 } from "./types";
 export type { FarmWorkflowsResolvedConfig, FarmWorkflowsUserConfig } from "./workflows";
+export type {
+  FarmDesktopUserConfig,
+  FarmDesktopWindowConfig,
+  ResolvedFarmDesktopConfig,
+} from "./desktop/config";
 export type { FarmCronJobConfig, FarmCronResolvedConfig, FarmCronUserConfig } from "./cron";
 export type {
   FarmRouteRule,
@@ -356,6 +369,11 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   workflows?: FarmWorkflowsUserConfig | boolean;
   preset?: BaseFarmConfig["preset"];
   deploy?: FarmDeployConfig;
+  /**
+   * The native desktop app `farm dev --desktop` and `farm build --desktop` produce. A web build
+   * ignores it.
+   */
+  desktop?: FarmDesktopUserConfig;
   docs?: FarmDocsUserConfig;
   md?: FarmMarkdownUserConfig | boolean;
   mdx?: FarmMdxUserConfig;
@@ -451,9 +469,12 @@ export interface ResolvedFarmConfig extends Required<
     | "theme"
     | "renderer"
     | "agent"
+    | "desktop"
   >
 > {
   agent: ResolvedFarmAgentConfig;
+  /** Set only in a desktop dev session or build (`--desktop`); `null` on the web. */
+  desktop: ResolvedFarmDesktopConfig | null;
   /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
   [FARM_RESOLVED_CUSTOM_CONTEXT]?: boolean;
   root: string;
@@ -1059,8 +1080,19 @@ export async function resolveConfig(
     );
   }
 
-  const deploy = resolveDeployConfig(userConfig);
   const root = userConfig.root || process.cwd();
+  validateFarmDesktopConfig(userConfig.desktop);
+  const desktop =
+    resolveFarmPlatform() === "desktop" ? resolveDesktopForBuild(userConfig, root) : null;
+  // A desktop build is not a deployment: its server runs in the shell, on Bun by default
+  // (the CLI picks node-server for Node shells), whatever deploy.target says.
+  const deploy = desktop
+    ? resolveDeployConfig(userConfig, {
+        preset: "bun",
+        outputDir: getFarmDesktopOutputDirs(userConfig.distDir || ".farm").server,
+        env: {},
+      })
+    : resolveDeployConfig(userConfig);
   const srcDir = userConfig.srcDir || "src";
   setFarmProjectSourceDir(root, srcDir);
   const docs = await resolveDocsConfig(userConfig.docs, { root, srcDir });
@@ -1150,7 +1182,8 @@ export async function resolveConfig(
       ppr: false,
       ...userConfig.experimental,
     },
-    agent: resolveFarmAgentConfig(userConfig.agent, { docs: docs.enabled }),
+    agent: resolveFarmAgentConfig(userConfig.agent, { docs: docs.enabled, desktop: !!desktop }),
+    desktop,
     plugins: [
       ...resolveIntegrationPlugins(integrations),
       ...(nativeMCPPlugin ? [nativeMCPPlugin] : []),
@@ -1166,7 +1199,12 @@ export async function resolveConfig(
       ...(securityHeader ? [{ source: "/*", headers: [securityHeader] }] : []),
     ],
     routeRules,
-    images: resolveFarmImageConfig(userConfig.images),
+    // No image optimizer in a desktop app unless it asks: sharp's native binaries are ~18 MB.
+    images: resolveFarmImageConfig(
+      desktop && userConfig.images?.provider === undefined
+        ? { ...userConfig.images, provider: "none" }
+        : userConfig.images,
+    ),
     performance: resolveFarmPerformanceConfig(userConfig.performance),
     theme: resolveFarmThemeConfig(userConfig.theme, basePath),
     publicDir: userConfig.publicDir || "public",
@@ -1193,6 +1231,18 @@ export async function resolveConfig(
   assertPluginDependencies(resolved.plugins, resolved.integrations as never);
 
   return resolved;
+}
+
+function resolveDesktopForBuild(
+  userConfig: FarmUserConfig,
+  root: string,
+): ResolvedFarmDesktopConfig {
+  if (userConfig.desktop === undefined) {
+    throw new Error(
+      '--desktop needs a `desktop` entry in farm.config.ts, for example `desktop: { name: "Notes" }`.',
+    );
+  }
+  return resolveFarmDesktopConfig(userConfig.desktop, root);
 }
 
 function formatConfigLoadError(error: unknown): string {

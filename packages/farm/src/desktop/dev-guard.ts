@@ -1,0 +1,58 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { ViteDevServer } from "vite";
+import { sendWebResponse } from "../server/response";
+import { createFarmDesktopGuard } from "./guard";
+
+/** Where `farm dev --desktop` leaves the session for the dev server in the same process. */
+export const FARM_DESKTOP_DEV_SESSION = Symbol.for("@farm.js/core/desktop-dev-session");
+
+export interface FarmDesktopDevSession {
+  secret: string;
+  handshakeToken: string;
+}
+
+export function getFarmDesktopDevSession(): FarmDesktopDevSession | undefined {
+  return (globalThis as Record<PropertyKey, unknown>)[FARM_DESKTOP_DEV_SESSION] as
+    | FarmDesktopDevSession
+    | undefined;
+}
+
+/**
+ * The desktop guard as the first dev middleware, ahead of Farm's routes and Vite's module and
+ * file serving, so the dev server answers only the desktop window as the packaged app does.
+ * Vite's HMR WebSocket keeps its own token check.
+ */
+export function createFarmDesktopDevGuard(
+  server: ViteDevServer,
+  options: { basePath: string },
+): (request: IncomingMessage, response: ServerResponse, next: (error?: unknown) => void) => void {
+  const session = getFarmDesktopDevSession();
+  if (!session) {
+    throw new Error(
+      "[Farm] FARM_PLATFORM=desktop without a desktop session. Start desktop development with `farm dev --desktop`.",
+    );
+  }
+  const guard = createFarmDesktopGuard({
+    secret: session.secret,
+    handshakeToken: session.handshakeToken,
+    basePath: options.basePath,
+    port: () => {
+      const address = server.httpServer?.address();
+      return address && typeof address === "object" ? address.port : undefined;
+    },
+  });
+  return (request, response, next) => {
+    const blocked = guard({
+      method: request.method || "GET",
+      url: request.url || "/",
+      headers: {
+        get(name) {
+          const value = request.headers[name];
+          return Array.isArray(value) ? value.join(", ") : (value ?? null);
+        },
+      },
+    });
+    if (!blocked) return next();
+    sendWebResponse(response, blocked).catch(next);
+  };
+}

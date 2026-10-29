@@ -166,8 +166,21 @@ const DEFAULT_JSON_LD: FarmAgentJsonLd = { type: "WebSite" };
 
 export function resolveFarmAgentConfig(
   input: FarmAgentUserConfig | undefined,
-  context: { docs?: boolean } = {},
+  context: { docs?: boolean; desktop?: boolean } = {},
 ): ResolvedFarmAgentConfig {
+  // A desktop app answers only its own window, so public-site surfaces default off there.
+  // Each one still turns on when the app sets it explicitly.
+  if (context.desktop) {
+    input = {
+      jsonLd: false,
+      llmsTxt: false,
+      sitemap: false,
+      aiCatalog: false,
+      manifest: false,
+      mcp: false,
+      ...input,
+    };
+  }
   const jsonLd = input?.jsonLd;
   return {
     jsonLd:
