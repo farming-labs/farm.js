@@ -52,6 +52,7 @@ export default {
         hooksFile: context.hooksFile && path.relative(context.root, context.hooksFile),
       }) },
       ...(process.env.FAKE_SHELL_ESCAPE ? [{ path: "../escape.txt", contents: "x" }] : []),
+      ...(process.env.FAKE_SHELL_EXTRA ? [{ path: "nested/extra.txt", contents: "x" }] : []),
     ];
   },
   async dev(context) {
@@ -194,6 +195,24 @@ test("farm build --desktop builds the server, generates the shell, and packages 
   const source = await readFile(entry, "utf8");
   assert.match(source, /function start\(/);
   assert.match(source, /farm:ready /);
+});
+
+test("regenerating the shell drops stale files and keeps the shell's own caches", async (t) => {
+  const root = await createApp(t);
+  const shellDir = path.join(root, ".farm", "output", "desktop", "shell");
+  assert.equal(
+    (await runFarm(["build", "--desktop", "--root", root], { FAKE_SHELL_EXTRA: "1" })).code,
+    0,
+  );
+  await readFile(path.join(shellDir, "nested", "extra.txt"), "utf8");
+  await writeFile(path.join(shellDir, "toolchain-cache.txt"), "keep");
+  assert.equal((await runFarm(["build", "--desktop", "--root", root])).code, 0);
+  await assert.rejects(readFile(path.join(shellDir, "nested", "extra.txt"), "utf8"));
+  assert.equal(await readFile(path.join(shellDir, "toolchain-cache.txt"), "utf8"), "keep");
+  assert.deepEqual(
+    JSON.parse(await readFile(path.join(shellDir, ".farm-generated.json"), "utf8")),
+    ["main.json"],
+  );
 });
 
 test("the shell may not write outside its directory", async (t) => {

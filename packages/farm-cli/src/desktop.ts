@@ -106,16 +106,23 @@ function findHooksFile(root: string, srcDir: string): string | undefined {
   return undefined;
 }
 
-/** Write the adapter's files, refusing paths that would leave the shell directory. */
+/** Lists what the last generation wrote, so a file the adapter stopped generating goes away. */
+const GENERATED_MANIFEST = ".farm-generated.json";
+
+/**
+ * Write the adapter's files, refusing paths that would leave the shell directory. Everything
+ * else in it (the shell's own caches and build folders) is left alone.
+ */
 async function writeShellFiles(
   shellDir: string,
   files: Array<{ path: string; contents: string }>,
 ): Promise<void> {
-  await rm(shellDir, { recursive: true, force: true });
   await mkdir(shellDir, { recursive: true });
+  const written = new Set<string>();
   for (const file of files) {
     const target = path.resolve(shellDir, file.path);
-    if (path.relative(shellDir, target).startsWith("..") || path.isAbsolute(file.path)) {
+    const relative = path.relative(shellDir, target);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(file.path)) {
       throw new FarmDesktopError(
         "unsafe-output",
         `The desktop shell tried to write ${file.path} outside ${shellDir}.`,
@@ -123,7 +130,21 @@ async function writeShellFiles(
     }
     await mkdir(path.dirname(target), { recursive: true });
     await writeFile(target, file.contents);
+    written.add(relative);
   }
+  const manifestPath = path.join(shellDir, GENERATED_MANIFEST);
+  let previous: unknown = [];
+  try {
+    previous = JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch {
+    // First generation.
+  }
+  for (const relative of Array.isArray(previous) ? previous : []) {
+    if (typeof relative !== "string" || written.has(relative)) continue;
+    const stale = path.resolve(shellDir, relative);
+    if (!path.relative(shellDir, stale).startsWith("..")) await rm(stale, { force: true });
+  }
+  await writeFile(manifestPath, `${JSON.stringify([...written].sort(), null, 2)}\n`);
 }
 
 function createSecret(): string {
