@@ -35,6 +35,10 @@
       "import": "./dist/build.mjs",
       "require": "./dist/build.js"
     },
+    "./desktop": {
+      "import": "./dist/desktop.mjs",
+      "require": "./dist/desktop.js"
+    },
     "./add-integration": {
       "import": "./dist/add-integration.mjs",
       "require": "./dist/add-integration.js"

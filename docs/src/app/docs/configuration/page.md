@@ -299,6 +299,7 @@ mount, and shortcut together.
 | telemetry     | Controlling automatic production-site reporting to Farm's usage dashboard.             |
 | analytics     | Turning off request and MCP analytics for an app linked to a Farm Infra project.       |
 | deploy        | Selecting a target, preset, and output directory.                                      |
+| desktop       | The native desktop app `--desktop` builds ([Desktop Apps](/docs/desktop)).             |
 | deploymentId  | Detecting stale browser requests during rolling deployments.                           |
 | trailingSlash | Choosing the canonical URL shape for application page routes and links.                |
 | routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns.      |
