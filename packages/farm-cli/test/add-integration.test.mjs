@@ -518,6 +518,9 @@ test("adds a Vercel AI SDK chat route template", async () => {
     assert.match(route, /import \{ aiChatRoute \} from "@farm.js\/ai"/);
     assert.match(route, /export const POST = aiChatRoute/);
     assert.match(route, /model: "openai\/gpt-4o-mini"/);
+    // Fails closed in production until the app checks a session.
+    assert.match(route, /authorize: \(\) => process\.env\.NODE_ENV === "development"/);
+    assert.doesNotMatch(route, /allowUnauthenticated/);
     await assert.rejects(() => readFile(path.join(root, "src/lib/integrations.ts"), "utf8"));
     await assert.rejects(() => readFile(path.join(root, "farm.config.ts"), "utf8"));
   } finally {

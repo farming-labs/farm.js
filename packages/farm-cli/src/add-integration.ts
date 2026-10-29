@@ -119,6 +119,7 @@ const PROVIDERS: readonly IntegrationProviderDefinition[] = [
     notes: [
       'Use @ai-sdk/react useChat with api: "/api/chat" on the client.',
       "Replace model with any AI SDK provider model or Vercel AI Gateway model id.",
+      "The chat route answers only in development until authorize checks your session: every request spends your AI credits.",
       "No farm.config integration wiring is required for this route.",
     ],
     ui: aiChatUIFeature(),
@@ -127,6 +128,10 @@ const PROVIDERS: readonly IntegrationProviderDefinition[] = [
 export const POST = aiChatRoute({
   model: "openai/gpt-4o-mini",
   system: "You are a helpful assistant.",
+  // Every request spends your AI credits. TODO: check the signed-in user, for
+  // example authorize: async ({ request }) => Boolean(await getSession(request)).
+  // Until then the route answers in development and refuses in production.
+  authorize: () => process.env.NODE_ENV === "development",
 });
 `,
   },

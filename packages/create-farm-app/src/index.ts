@@ -680,7 +680,7 @@ async function writeIntegrationReadme(
     : "";
   const wiring =
     integration.provider === "ai"
-      ? "The AI route lives in `src/app/api/chat/route.ts` and its local UI lives under `src/components/farm`."
+      ? "The AI route lives in `src/app/api/chat/route.ts` and its local UI lives under `src/components/farm`. Every request spends your AI credits, so the route answers only in development until its `authorize` checks a signed-in user."
       : "The provider wiring lives in `src/lib/integrations` and is registered from `farm.config.ts`.";
   const source = `# FARMJS ${integration.label} Starter
 
