@@ -224,6 +224,107 @@ test("the shell may not write outside its directory", async (t) => {
   assert.match(result.output, /tried to write \.\.\/escape\.txt outside/);
 });
 
+const FUNCTION_CONFIG = (marker) => `import { appendFileSync } from "node:fs";
+export default {
+  telemetry: false,
+  desktop: async ({ os, mode, command, profile, env, root }) => {
+    appendFileSync(${JSON.stringify(marker)}, JSON.stringify({ os, mode, command, profile, flag: env.FARM_TEST_FLAG, root }) + "\\n");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return { name: "Notes " + profile, id: "com.example.notes." + profile, shell: "fake" };
+  },
+};`;
+
+test("--profile needs --desktop", async () => {
+  const result = await runFarm(["build", "--profile", "beta", "--root", testDir]);
+  assert.notEqual(result.code, 0);
+  assert.match(result.output, /--profile selects a desktop build profile; use it with --desktop/);
+});
+
+test("a function-valued desktop block is called once per build with the context", async (t) => {
+  const marker = path.join(cliRoot, `.tmp-desktop-calls-${process.pid}-build.log`);
+  t.after(() => rm(marker, { force: true }));
+  const root = await createApp(t, { config: FUNCTION_CONFIG(marker) });
+  const result = await runFarm(["build", "--desktop", "--profile", "beta", "--root", root], {
+    FARM_TEST_FLAG: "on",
+  });
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /📦 \.farm\/output\/desktop\/dist\/Notes beta\.app\.txt/);
+  const calls = (await readFile(marker, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(calls.length, 1);
+  const { root: calledRoot, ...context } = calls[0];
+  assert.deepEqual(context, {
+    os: process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux",
+    mode: "production",
+    command: "build",
+    profile: "beta",
+    flag: "on",
+  });
+  assert.equal(calledRoot, root);
+});
+
+test("farm dev --desktop calls a function-valued block once per start", async (t) => {
+  const marker = path.join(cliRoot, `.tmp-desktop-calls-${process.pid}-dev.log`);
+  t.after(() => rm(marker, { force: true }));
+  const root = await createApp(t, { config: FUNCTION_CONFIG(marker) });
+  const result = await runFarm(["dev", "--desktop", "--root", root, "--port", String(await freePort())]);
+  assert.equal(result.code, 0, result.output);
+  const calls = (await readFile(marker, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(
+    calls.map(({ mode, command, profile }) => ({ mode, command, profile })),
+    [{ mode: "development", command: "dev", profile: "production" }],
+  );
+  const dev = JSON.parse(await readFile(path.join(root, "dev-result.json"), "utf8"));
+  assert.equal(dev.home, 200);
+  assert.equal(dev.generated.name, "Notes production");
+});
+
+test("a web build never calls a function-valued block and fails on a malformed static one", async (t) => {
+  const marker = path.join(cliRoot, `.tmp-desktop-calls-${process.pid}-web.log`);
+  t.after(() => rm(marker, { force: true }));
+  const root = await createApp(t, { config: FUNCTION_CONFIG(marker) });
+  const web = await runFarm(["build", "--root", root]);
+  assert.equal(web.code, 0, web.output);
+  await assert.rejects(readFile(marker, "utf8"));
+
+  await writeFile(
+    path.join(root, "farm.config.ts"),
+    `export default { telemetry: false, desktop: { window: { width: "wide" } } };`,
+  );
+  const malformed = await runFarm(["build", "--root", root]);
+  assert.notEqual(malformed.code, 0);
+  assert.match(malformed.output, /desktop: window\.width must be a whole number/);
+});
+
+test("farm config inspect --desktop prints the resolved block for an OS and profile", async (t) => {
+  const marker = path.join(cliRoot, `.tmp-desktop-calls-${process.pid}-inspect.log`);
+  t.after(() => rm(marker, { force: true }));
+  const root = await createApp(t, { config: FUNCTION_CONFIG(marker) });
+  const result = await runFarm([
+    "config", "inspect", "--desktop", "--os", "windows", "--profile", "beta", "--root", root,
+  ]);
+  assert.equal(result.code, 0, result.output);
+  const printed = JSON.parse(result.output.slice(result.output.indexOf("{")));
+  assert.deepEqual(printed, {
+    context: { os: "windows", mode: "production", command: "build", profile: "beta" },
+    desktop: {
+      name: "Notes beta",
+      id: "com.example.notes.beta",
+      version: "1.0.0",
+      window: { width: 1024, height: 768, title: "Notes beta" },
+      shell: "fake",
+      shellPackage: "@farm.js/desktop-fake",
+    },
+  });
+
+  await writeFile(
+    path.join(root, "farm.config.ts"),
+    `export default { desktop: ({ os }) => ({ window: { height: os === "linux" ? 1 : 700 } }) };`,
+  );
+  const invalid = await runFarm(["config", "inspect", "--desktop", "--os", "linux", "--root", root]);
+  assert.notEqual(invalid.code, 0);
+  assert.match(invalid.output, /desktop \(os: linux\): window\.height must be a whole number/);
+});
+
 test("farm dev --desktop guards the dev server and hands the shell a one-time handshake", async (t) => {
   const root = await createApp(t);
   const child = spawn(

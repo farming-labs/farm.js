@@ -33,6 +33,8 @@ export class FarmDesktopError extends Error {
 export interface FarmDesktopCommandOptions {
   root?: string;
   port?: number;
+  /** `--profile`, passed to a function-valued `desktop` block. Defaults to "production". */
+  profile?: string;
 }
 
 const HOOK_FILE_EXTENSIONS = [".ts", ".mts", ".js", ".mjs"];
@@ -174,11 +176,12 @@ async function resolveDesktopConfig(
   root: string,
   mode: "development" | "production",
   runtime: ConfigRuntime,
+  setup: Parameters<ConfigRuntime["installFarmDesktopSetup"]>[0],
   loadEnv?: Parameters<ConfigRuntime["loadConfig"]>[3],
 ): Promise<ResolvedConfig> {
   setFarmPlatform("desktop");
   // Desktop resolution lives outside resolveConfig, so web server bundles never carry it.
-  runtime.installFarmDesktopSetup();
+  runtime.installFarmDesktopSetup(setup);
   const userConfig = await runtime.loadConfig(root, undefined, mode, loadEnv);
   if (!userConfig) {
     throw new FarmDesktopError(
@@ -196,7 +199,10 @@ async function resolveDesktopConfig(
 export async function devFarmDesktop(options: FarmDesktopCommandOptions = {}): Promise<void> {
   const root = path.resolve(options.root || process.cwd());
   const runtime = await import("@farm.js/core/internal/config-runtime");
-  const config = await resolveDesktopConfig(root, "development", runtime);
+  const config = await resolveDesktopConfig(root, "development", runtime, {
+    command: "dev",
+    profile: options.profile,
+  });
   const context = createShellContext(root, config, runtime);
   const shell = await loadFarmDesktopShell(context.desktop, root);
 
@@ -268,7 +274,13 @@ export async function buildFarmDesktop(options: FarmDesktopCommandOptions = {}):
   return withProductionNodeEnv(async () => {
     const runtime = await import("@farm.js/core/internal/config-runtime");
     const productionVite = await runtime.loadFarmProductionVite();
-    const config = await resolveDesktopConfig(root, "production", runtime, productionVite.loadEnv);
+    const config = await resolveDesktopConfig(
+      root,
+      "production",
+      runtime,
+      { command: "build", profile: options.profile },
+      productionVite.loadEnv,
+    );
     const context = createShellContext(root, config, runtime);
     const shell = await loadFarmDesktopShell(context.desktop, root);
 
@@ -289,4 +301,43 @@ export async function buildFarmDesktop(options: FarmDesktopCommandOptions = {}):
     }
     return artifacts.files;
   });
+}
+
+export interface FarmDesktopInspectOptions {
+  root?: string;
+  os?: "macos" | "windows" | "linux";
+  profile?: string;
+  command?: "dev" | "build";
+}
+
+/**
+ * `farm config inspect --desktop`: the `desktop` block a dev session or build would use for an
+ * OS and profile, with defaults filled in. Builds nothing and loads no shell.
+ */
+export async function inspectFarmDesktopConfig(
+  options: FarmDesktopInspectOptions = {},
+): Promise<{ context: Record<string, string>; desktop: ResolvedFarmDesktopConfig }> {
+  const root = path.resolve(options.root || process.cwd());
+  const command = options.command ?? "build";
+  const mode = command === "dev" ? "development" : "production";
+  const runtime = await import("@farm.js/core/internal/config-runtime");
+  const userConfig = await runtime.loadConfig(root, undefined, mode);
+  if (userConfig?.desktop === undefined) {
+    throw new FarmDesktopError(
+      "config-missing",
+      'farm.config.ts has no `desktop` entry. Add one, such as `desktop: { name: "Notes" }`.',
+    );
+  }
+  const context = runtime.createFarmDesktopContext({
+    command,
+    profile: options.profile,
+    os: options.os,
+    root,
+    mode,
+  });
+  const block = await runtime.resolveFarmDesktopBlock(userConfig.desktop, context);
+  return {
+    context: { os: context.os, mode, command, profile: context.profile },
+    desktop: runtime.resolveFarmDesktopConfig(block, root, context),
+  };
 }
