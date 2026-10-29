@@ -48,69 +48,91 @@ type DriverFactoryModule = {
 type DriverResolver = () => Driver | Promise<Driver>;
 type ModuleLoader = <T = any>(specifier: string) => Promise<T>;
 
-const loadModule: ModuleLoader = (specifier) => import(/* @vite-ignore */ specifier);
+// A production build bundles the driver modules its storage config names and
+// registers them here as literal imports. Outside one, load them by name.
+const STORAGE_MODULES_KEY = Symbol.for("farmjs.storage.modules");
+type StorageModuleLoaders = Record<string, () => Promise<unknown>>;
+
+function getRegisteredStorageModules(): StorageModuleLoaders | undefined {
+  return (globalThis as Record<PropertyKey, unknown>)[STORAGE_MODULES_KEY] as
+    | StorageModuleLoaders
+    | undefined;
+}
+
+const loadModule: ModuleLoader = (specifier) => {
+  const registered = getRegisteredStorageModules()?.[specifier];
+  return (registered ? registered() : import(/* @vite-ignore */ specifier)) as Promise<any>;
+};
+
+/** @internal Register literal imports for the storage driver modules a build needs. */
+export function _registerFarmStorageModules(loaders: StorageModuleLoaders): void {
+  (globalThis as Record<PropertyKey, unknown>)[STORAGE_MODULES_KEY] = {
+    ...getRegisteredStorageModules(),
+    ...loaders,
+  };
+}
 
 const DATABASE_CONNECTORS: {
   [K in FarmStorageDatabaseDriverName]: {
     connector: FarmStorageDatabaseDriverMap[K];
-    load: () => Promise<{ default: (options?: any) => any }>;
+    module: string;
   };
 } = {
   sqlite: {
     connector: "node-sqlite",
-    load: () => loadModule("db0/connectors/node-sqlite"),
+    module: "db0/connectors/node-sqlite",
   },
   "node-sqlite": {
     connector: "node-sqlite",
-    load: () => loadModule("db0/connectors/node-sqlite"),
+    module: "db0/connectors/node-sqlite",
   },
   sqlite3: {
     connector: "sqlite3",
-    load: () => loadModule("db0/connectors/sqlite3"),
+    module: "db0/connectors/sqlite3",
   },
   "better-sqlite3": {
     connector: "better-sqlite3",
-    load: () => loadModule("db0/connectors/better-sqlite3"),
+    module: "db0/connectors/better-sqlite3",
   },
   postgres: {
     connector: "postgresql",
-    load: () => loadModule("db0/connectors/postgresql"),
+    module: "db0/connectors/postgresql",
   },
   postgresql: {
     connector: "postgresql",
-    load: () => loadModule("db0/connectors/postgresql"),
+    module: "db0/connectors/postgresql",
   },
   pg: {
     connector: "postgresql",
-    load: () => loadModule("db0/connectors/postgresql"),
+    module: "db0/connectors/postgresql",
   },
   mysql: {
     connector: "mysql2",
-    load: () => loadModule("db0/connectors/mysql2"),
+    module: "db0/connectors/mysql2",
   },
   mysql2: {
     connector: "mysql2",
-    load: () => loadModule("db0/connectors/mysql2"),
+    module: "db0/connectors/mysql2",
   },
   pglite: {
     connector: "pglite",
-    load: () => loadModule("db0/connectors/pglite"),
+    module: "db0/connectors/pglite",
   },
   planetscale: {
     connector: "planetscale",
-    load: () => loadModule("db0/connectors/planetscale"),
+    module: "db0/connectors/planetscale",
   },
   libsql: {
     connector: "libsql",
-    load: () => loadModule("db0/connectors/libsql/node"),
+    module: "db0/connectors/libsql/node",
   },
   "libsql-node": {
     connector: "libsql-node",
-    load: () => loadModule("db0/connectors/libsql/node"),
+    module: "db0/connectors/libsql/node",
   },
   "libsql-http": {
     connector: "libsql-http",
-    load: () => loadModule("db0/connectors/libsql/http"),
+    module: "db0/connectors/libsql/http",
   },
 };
 
@@ -221,7 +243,7 @@ async function loadDatabaseDriver(config: FarmStorageDatabaseConfig): Promise<Dr
   const connectorEntry = DATABASE_CONNECTORS[config.driver as FarmStorageDatabaseDriverName];
   const [{ createDatabase }, connectorModule, db0DriverModule] = await Promise.all([
     loadModule<typeof import("db0")>("db0"),
-    connectorEntry.load(),
+    loadModule<{ default: (options?: any) => any }>(connectorEntry.module),
     loadModule<typeof import("unstorage/drivers/db0")>("unstorage/drivers/db0"),
   ]);
 
@@ -270,7 +292,14 @@ async function resolveDriver(config?: FarmStorageMountConfig): Promise<Driver> {
   );
 }
 
-function createStorageClientFromResolver(resolveDriver: DriverResolver): FarmStorageClient {
+// The driver modules a Farm-built storage client loads, so a production build
+// can bundle them. A client from defineStorageClient imports its own driver.
+const STORAGE_CLIENT_MODULES_KEY = Symbol.for("farmjs.storage.clientModules");
+
+function createStorageClientFromResolver(
+  resolveDriver: DriverResolver,
+  modules: readonly string[] = [],
+): FarmStorageClient {
   let driverPromise: Promise<Driver> | undefined;
   let storagePromise: Promise<Storage> | undefined;
 
@@ -308,9 +337,10 @@ function createStorageClientFromResolver(resolveDriver: DriverResolver): FarmSto
     ready: ensureStorage,
     createStorage: ensureStorage,
     resolveDriver: ensureDriver,
+    [STORAGE_CLIENT_MODULES_KEY]: modules,
   };
 
-  return new Proxy(target as FarmStorageClient, {
+  return new Proxy(target as unknown as FarmStorageClient, {
     get(currentTarget, prop, receiver) {
       if (prop === "then") {
         return undefined;
@@ -351,7 +381,10 @@ export function defineStorageClient(resolveDriver: DriverResolver): FarmStorageC
 }
 
 export function createStorageClient(config: FarmStorageClientConfig): FarmStorageClient {
-  return defineStorageClient(() => resolveDriver(config));
+  return createStorageClientFromResolver(
+    () => resolveDriver(config),
+    _collectFarmStorageModules(config as FarmStorageUserConfig),
+  );
 }
 
 export function driverStorage(
@@ -364,7 +397,7 @@ export function databaseStorage(
   database: Database,
   options: { tableName?: string } = {},
 ): FarmStorageClient {
-  return defineStorageClient(async () => {
+  return createStorageClientFromResolver(async () => {
     const db0DriverModule =
       await loadModule<typeof import("unstorage/drivers/db0")>("unstorage/drivers/db0");
     // The caller owns this database. Newer db0 drivers close their database on
@@ -374,7 +407,7 @@ export function databaseStorage(
       tableName: options.tableName,
     });
     return driver;
-  });
+  }, ["unstorage/drivers/db0"]);
 }
 
 export function memoryStorage(): FarmStorageClient {
@@ -501,6 +534,46 @@ export function vercelBlobStorage(
   });
 }
 
+function collectDriverModules(config: unknown, modules: Set<string>): void {
+  if (!config || typeof config !== "object") return;
+  // Before the instance check: a client proxies every Storage method.
+  if (isStorageClient(config)) {
+    const clientModules = (config as unknown as Record<PropertyKey, unknown>)[
+      STORAGE_CLIENT_MODULES_KEY
+    ];
+    if (Array.isArray(clientModules)) for (const module of clientModules) modules.add(module);
+    return;
+  }
+  if (isStorageInstance(config)) return;
+
+  const source = config as Record<string, unknown>;
+  const driver = source.driver;
+  if (typeof driver === "string") {
+    if (isDatabaseDriverName(driver)) {
+      modules.add("db0");
+      modules.add(DATABASE_CONNECTORS[driver].module);
+      modules.add("unstorage/drivers/db0");
+    } else {
+      const module = builtinDrivers[(driver === "local" ? "fs-lite" : driver) as BuiltinDriverName];
+      if (module) modules.add(module);
+    }
+  }
+  collectDriverModules(source.client, modules);
+  if (source.mounts && typeof source.mounts === "object") {
+    for (const mount of Object.values(source.mounts)) collectDriverModules(mount, modules);
+  }
+}
+
+/**
+ * @internal The driver modules `config` loads by name. A production build
+ * imports each one literally so the server bundle contains it.
+ */
+export function _collectFarmStorageModules(config: FarmStorageUserConfig | undefined): string[] {
+  const modules = new Set<string>();
+  collectDriverModules(config, modules);
+  return [...modules];
+}
+
 async function mountNamespaces(storage: Storage, mounts?: FarmStorageMounts): Promise<void> {
   if (!mounts) {
     return;
@@ -566,6 +639,14 @@ export function getStorage(namespace?: string): Storage {
   globalStorage = getActiveGlobalStorage();
   const base = normalizeMountKey(namespace);
   if (!base) {
+    // A name made only of separators or spaces is not "no namespace": handing
+    // back the root store would expose every other namespace's keys.
+    if (namespace) {
+      throw new TypeError(
+        `getStorage(${JSON.stringify(namespace)}) names no namespace. ` +
+          "Pass a non-empty name, or call getStorage() for the root store.",
+      );
+    }
     return globalStorage;
   }
 

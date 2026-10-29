@@ -17,6 +17,11 @@ export {
   resolveFarmServerConfig,
 } from "../server-http";
 export { createFarmProductionLifecycle } from "../production-lifecycle";
+export {
+  _registerFarmStorageModules,
+  disposeStorage as disposeFarmStorage,
+  initStorage as initFarmStorage,
+} from "../storage";
 export { resolveFarmPreviewDeployment } from "../deployment-environment";
 export { applyFarmPreviewRobotsTag } from "../preview-noindex";
 export {

@@ -1,6 +1,7 @@
 import { createBundledEnv } from "../env";
 import { generateNativeMCPPluginSource } from "./native-mcp-source";
 import { getFarmMarkdownAlternatePath } from "../markdown";
+import { _collectFarmStorageModules } from "../storage";
 import { FARM_API_CATALOG_PATH, resolveFarmApiCatalogInput } from "../api-catalog";
 import {
   FARM_APP_MANIFEST_LEGACY_PATH,
@@ -478,6 +479,44 @@ export function createPrerenderRuntimeResolverPlugin(
   };
 }
 
+/**
+ * Literal imports for the storage driver modules `config.storage` loads by name.
+ * A bundled server has no node_modules to find them in, and under pnpm the app
+ * cannot resolve Farm's own unstorage, so each is resolved from Farm's package
+ * and imported by path. A module that cannot be resolved is left to the runtime
+ * loader, which reports it when storage starts.
+ */
+function createFarmStorageModuleRegistration(config: ResolvedFarmConfig): string {
+  const modules = _collectFarmStorageModules(config.storage);
+  if (modules.length === 0) return "";
+  const root = config.root || process.cwd();
+  const projectRequire = createRequire(path.join(root, "package.json"));
+  let runtimeRequire = projectRequire;
+  try {
+    runtimeRequire = createRequire(projectRequire.resolve("@farm.js/core"));
+  } catch {
+    // Source-only framework builds resolve drivers from the project.
+  }
+  const loaders: string[] = [];
+  for (const specifier of modules) {
+    let resolved: string | undefined;
+    for (const require of [runtimeRequire, projectRequire]) {
+      try {
+        resolved = require.resolve(specifier);
+        break;
+      } catch {
+        // Try the next context.
+      }
+    }
+    if (resolved) {
+      loaders.push(
+        `  ${JSON.stringify(specifier)}: () => import(${toVirtualEntryImportSpecifier(resolved)}),`,
+      );
+    }
+  }
+  return loaders.length > 0 ? `_registerFarmStorageModules({\n${loaders.join("\n")}\n});` : "";
+}
+
 function resolveNitroPackageEntry(root: string): string {
   const projectRequire = createRequire(path.join(root, "package.json"));
   let runtimeRequire = projectRequire;
@@ -836,6 +875,13 @@ export function hasFarmServerCacheConfig(cache: ResolvedFarmConfig["cache"] | un
     cache.maxEntries !== undefined ||
     cache.lease !== undefined
   );
+}
+
+/** Whether the app configured storage, rather than taking the default empty object. */
+export function hasFarmServerStorageConfig(
+  storage: ResolvedFarmConfig["storage"] | undefined,
+): boolean {
+  return !!storage && typeof storage === "object" && Reflect.ownKeys(storage).length > 0;
 }
 
 export function hasFarmRuntimeConfigModule(
@@ -4759,6 +4805,7 @@ async function buildSSRInMemory(
     hasServerRuntimePlugins ||
     hasPluginRoutes ||
     hasServerCacheConfig ||
+    hasFarmServerStorageConfig(config.storage) ||
     hasIntegrationProviders
       ? await findFarmConfigPath(root)
       : null;
@@ -6076,7 +6123,11 @@ function renderFarmRouteServerTree(element) { return element; }`;
   stripFarmLocaleFromPathname,
   withFarmRouteContext,
   createLateNotFoundRecovery,
-  createLateRedirectRecovery,
+  createLateRedirectRecovery,${
+    hasFarmServerStorageConfig(config.storage)
+      ? "\n  _registerFarmStorageModules,\n  disposeFarmStorage,\n  initFarmStorage,"
+      : ""
+  }
 } from "@farm.js/core/internal/production-runtime";`;
   const productionSiteTelemetryImport = config.telemetry
     ? `import { createFarmProductionSiteReporter } from "@farm.js/core/internal/product-telemetry-runtime";`
@@ -6566,6 +6617,7 @@ const farmObservabilityConfig = farmUserConfig?.observability ?? ${JSON.stringif
   )};
 configureFarmObservability(farmObservabilityConfig);
 configureFarmCache(farmResolvedRuntimeConfig.cache);
+${createFarmStorageModuleRegistration(config)}
 const farmI18nConfig = ${JSON.stringify(config.i18n)};
 const farmServerConfig = ${JSON.stringify(config.server)};
 const farmThemeConfig = ${JSON.stringify(config.theme)};
@@ -6584,9 +6636,17 @@ export const farmProductionLifecycle = createFarmProductionLifecycle({
   server: farmServerConfig,
   start: async () => {
     await farmInstrumentationLifecycle.start();
-    try {
+    try {${
+      hasFarmServerStorageConfig(config.storage)
+        ? `
+      // The configured drivers and mounts, as the development server applies them.
+      await initFarmStorage(farmResolvedRuntimeConfig.storage);`
+        : ""
+    }
       await farmPluginRuntime?.startRuntime();
-    } catch (error) {
+    } catch (error) {${
+      hasFarmServerStorageConfig(config.storage) ? "\n      await disposeFarmStorage();" : ""
+    }
       await farmInstrumentationLifecycle.shutdown();
       throw error;
     }
@@ -6598,7 +6658,7 @@ export const farmProductionLifecycle = createFarmProductionLifecycle({
           ? "\n      await farmInfraAnalytics?.close();"
           : ""
       }
-    } finally {
+    } finally {${hasFarmServerStorageConfig(config.storage) ? "\n      await disposeFarmStorage();" : ""}
       await farmInstrumentationLifecycle.shutdown();
     }
   },

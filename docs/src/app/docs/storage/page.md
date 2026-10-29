@@ -70,6 +70,10 @@ A mount name is not a URL, route, database table, or filesystem directory. It is
 
 `getStorage(name)` always returns a namespaced key/value view. When the name matches a configured mount, operations use that mount's driver. When no matching mount exists, Farm uses the same namespace on the root store instead. The default root store is in memory, so a missing or misspelled production mount does not throw but may store data only for the lifetime of one process. Rate-limit middleware is an exception: enforcement requires its dedicated atomic storage contract and never treats a generic KV mount as atomic.
 
+A name made only of separators or spaces, such as `" "`, `"/"`, or `"::"`, names no namespace, so `getStorage()` throws for it instead of returning the root store. Call `getStorage()` without an argument for the root store.
+
+The development server and a built app both apply `storage` from `farm.config` before they serve the first request. A production build bundles the drivers the config names (such as `local` or `sqlite`), and the server disposes the configured drivers when it shuts down.
+
 ## Use a mounted store
 
 Call `getStorage("app")` from server-side code to retrieve the client registered under the `app` mount.
