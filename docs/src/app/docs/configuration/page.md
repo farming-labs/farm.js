@@ -814,6 +814,56 @@ option and measure the route's client JavaScript and interaction cost before ado
 The maintained benchmark includes equivalent RSC controls rather than assuming the non-RSC path is
 faster.
 
+## Server layouts
+
+A layout without `"use client"` that renders client components hydrates as a whole route by
+default, so its module and everything it imports ship to the browser, including server-only data
+such as a content collection or a database query. `experimental.serverLayouts` renders such a layout
+the way React Server Components render a server layout:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  experimental: {
+    serverLayouts: true,
+  },
+});
+```
+
+```tsx
+// app/docs/layout.tsx: runs on the server only
+import { source } from "@/lib/source";
+import { DocsShell } from "@/components/docs-shell"; // "use client"
+
+export default function DocsLayout({ children }) {
+  return <DocsShell tree={source.pageTree}>{children}</DocsShell>;
+}
+```
+
+The server renders the layout and its page, and embeds the result in the HTML as host elements plus
+references to the client components it renders. The browser rebuilds that tree inside the parent
+layout's React root, so the client components hydrate with the props the server passed, read each
+other's context, and keep their state on client navigation between the pages of the layout. The
+layout module and its server-only imports stay out of the client bundle. Farm's `Link` renders as a
+client component inside the tree.
+
+A layout becomes a server layout when all of these hold; any other layout keeps hydrating as a whole,
+and the build logs why for a layout that only fails the module checks:
+
+- It does not use `"use client"`, export `hydrate = true`, or render the `<html>` document.
+- Neither it nor a server component it imports calls a hook.
+- Every client component it reaches is a local `"use client"` module that hydrates on load. A
+  package client component keeps the layout hydrating.
+- It is the innermost layout of its pages, every layout around it hydrates as a whole, it owns no
+  route slot, and no page below it hydrates as a whole.
+
+Server JSX passed to a client component, as `children` or another prop, crosses as part of the tree.
+A part the tree cannot describe, such as a server component that calls hooks, stays server HTML and
+its own client components hydrate as islands. The option applies to React and to production builds;
+the development server renders every layout as before. An error or not-found page below a server
+layout keeps its server HTML without hydrating the layout.
+
 ## Partial Prerendering
 
 Partial Prerendering (static-shell caching) is experimental and disabled by default. Enable it

@@ -282,6 +282,23 @@ export interface FarmConfig {
      */
     isolatedClientHydration?: FarmIsolatedClientHydrationMode;
     /**
+     * Render qualifying layouts on the server only, the way React Server Components render a
+     * server layout. A layout qualifies when it does not use `"use client"` and only composes
+     * local client components: the server renders it, embeds the result as a serialized tree, and
+     * the browser rebuilds its client components inside the parent layout's React root. The
+     * layout module and its server-only imports (a content collection, a database client) stay
+     * out of the client bundle, and the client components keep reading each other's context.
+     *
+     * A layout keeps hydrating as a whole when it calls a hook, renders a package client
+     * component or the whole `<html>` document, owns a route slot, wraps another layout, sits
+     * below a layout that does not hydrate, or contains a page that hydrates as a whole. React
+     * only; production builds only for now.
+     *
+     * @experimental
+     * @default false
+     */
+    serverLayouts?: boolean;
+    /**
      * Automatically optimize eligible server-only host-element subtrees with
      * the native Strata renderer. Unsupported trees keep normal React
      * rendering; no application boundary component is required.

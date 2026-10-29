@@ -99,6 +99,12 @@ export interface ClientModuleHydrationPlan extends ClientModuleMetadata {
   asyncOwnerIslands?: true;
   /** Packages whose client components a Markdown page or async owner renders as static server HTML. */
   staticPackageBoundaries?: string[];
+  /**
+   * The owner is a server layout (`experimental.serverLayouts`): the server renders it as a
+   * serialized tree and the browser rebuilds only its client components, so the layout module and
+   * its server-only imports stay out of the client bundle.
+   */
+  serverLayout?: true;
 }
 
 export interface FarmClientHydrationPlanOptions {
@@ -111,6 +117,11 @@ export interface FarmClientHydrationPlanOptions {
    * route.
    */
   asyncOwnerIslands?: boolean;
+  /**
+   * Plan a layout as a server layout when it qualifies (`experimental.serverLayouts`). A layout
+   * that does not keeps the plan it would have had.
+   */
+  serverLayout?: boolean;
 }
 
 /**
@@ -628,7 +639,7 @@ export function getClientModuleHydrationPlan(
   const asyncOwner =
     metadata.suppressedAsyncHydration === true && options.asyncOwnerIslands === true;
 
-  if (mode === "off" && !asyncOwner) return emptyPlan();
+  if (mode === "off" && !asyncOwner && options.serverLayout !== true) return emptyPlan();
 
   // Legacy metadata already inspected the owner. Only reread it when isolation
   // analysis is needed, including async-owner islands with the experiment off.
@@ -642,6 +653,13 @@ export function getClientModuleHydrationPlan(
   if (parsed.hasHydrateExport) {
     return emptyPlan("the owner explicitly exports `hydrate = true`");
   }
+
+  if (options.serverLayout === true && metadata.shouldHydrate && !asyncOwner) {
+    const serverLayout = planServerLayout(resolvedPath, content, root, metadata, mode);
+    return "reason" in serverLayout ? emptyPlan(serverLayout.reason) : serverLayout;
+  }
+
+  if (mode === "off" && !asyncOwner) return emptyPlan();
 
   // An async owner never hydrates as a whole, so a package client component it renders (an icon
   // library, say) stays static HTML instead of keeping every local island static too.
@@ -689,6 +707,126 @@ export function getClientModuleHydrationPlan(
       plan.staticPackageBoundaries = inspection.staticPackages;
   }
   return plan;
+}
+
+/**
+ * A layout that hydrates today only because it renders client components becomes a server layout
+ * when every client component it reaches can be rebuilt from the server tree: local `"use client"`
+ * modules that hydrate on load. Anything else (a hook call in the layout or a server module it
+ * renders, a package client component, a whole-document layout) returns null and the layout keeps
+ * hydrating as a whole.
+ */
+function planServerLayout(
+  ownerPath: string,
+  content: string | null,
+  root: string | undefined,
+  metadata: ClientModuleMetadata,
+  mode: FarmIsolatedClientHydrationMode,
+): ClientModuleHydrationPlan | { reason: string } {
+  if (/<html[\s>]/.test(content ?? "")) return { reason: "it renders the whole document" };
+  const inspection = collectIsolatedClientBoundaries(ownerPath, root, {
+    allowDynamicCardinality: true,
+    allowElementProps: true,
+    rejectHookCalls: true,
+  });
+  if (inspection.fallbackReason) return { reason: inspection.fallbackReason };
+  if (inspection.boundaries.length === 0) return { reason: "it renders no local client component" };
+  const deferred = inspection.boundaries.find((boundary) => boundary.islandStrategy !== "load");
+  if (deferred) {
+    return { reason: `${deferred.modulePath} hydrates on ${deferred.islandStrategy}, not on load` };
+  }
+  return {
+    ...metadata,
+    shouldHydrate: false,
+    islandStrategy: null,
+    mode,
+    legacyShouldHydrate: metadata.shouldHydrate,
+    legacyIslandStrategy: metadata.islandStrategy,
+    estimatedIsolatedRootCount: 0,
+    isolatedHydrationEligible: true,
+    hasIsolatedClientBoundaries: true,
+    isolatedBoundaries: inspection.boundaries,
+    serverLayout: true,
+  };
+}
+
+/** The plan fields a layout's route entry carries, which a server layout replaces. */
+type FarmLayoutPlanFields = Pick<
+  ClientModuleHydrationPlan,
+  | "shouldHydrate"
+  | "islandStrategy"
+  | "estimatedIsolatedRootCount"
+  | "isolatedHydrationEligible"
+  | "hasIsolatedClientBoundaries"
+  | "isolatedBoundaries"
+  | "serverLayout"
+  | "fallbackReason"
+>;
+
+/**
+ * Turns qualifying layouts into server layouts (`experimental.serverLayouts`), in place. A layout
+ * qualifies when its server-layout plan holds (see planServerLayout) and the browser can rebuild
+ * it without its module: it is the innermost layout of every page below it, every layout outside
+ * it hydrates as a whole, it owns no route slot, and no page below it hydrates as a whole. Every
+ * other layout keeps its plan. Returns the patterns of the server layouts.
+ */
+export function applyFarmServerLayouts(options: {
+  enabled: boolean;
+  layouts: Array<{ pattern: string; modulePath: string; plan: FarmLayoutPlanFields }>;
+  pages: Array<{ directory: string; shouldHydrate: boolean }>;
+  slotOwners: Iterable<string>;
+  root: string | undefined;
+  mode: FarmIsolatedClientHydrationMode;
+  planOptions: FarmClientHydrationPlanOptions;
+  layoutAppliesToRoute: (layoutPattern: string, routeDirectory: string) => boolean;
+  /** Called with a hydrating layout that stays one, and why. */
+  onSkip?: (pattern: string, reason: string) => void;
+}): Set<string> {
+  const selected = new Set<string>();
+  if (!options.enabled || options.planOptions.asyncOwnerIslands !== true) return selected;
+  const slotOwners = new Set(options.slotOwners);
+  for (const layout of options.layouts) {
+    if (!layout.plan.shouldHydrate || slotOwners.has(layout.pattern)) continue;
+    const pages = options.pages.filter((page) =>
+      options.layoutAppliesToRoute(layout.pattern, page.directory),
+    );
+    const qualifies =
+      pages.length > 0 &&
+      pages.every(
+        (page) =>
+          !page.shouldHydrate &&
+          options.layouts.every(
+            (other) =>
+              other === layout ||
+              !options.layoutAppliesToRoute(other.pattern, page.directory) ||
+              // Only layouts outside this one, and those hydrate as a whole.
+              (options.layoutAppliesToRoute(other.pattern, layout.pattern) &&
+                other.plan.shouldHydrate &&
+                other.plan.serverLayout !== true),
+          ),
+      );
+    if (!qualifies) continue;
+    const plan = getClientModuleHydrationPlan(layout.modulePath, options.root, options.mode, {
+      ...options.planOptions,
+      serverLayout: true,
+    });
+    if (plan.serverLayout !== true) {
+      options.onSkip?.(layout.pattern, plan.fallbackReason ?? "it does not qualify");
+      continue;
+    }
+    Object.assign(layout.plan, {
+      shouldHydrate: plan.shouldHydrate,
+      islandStrategy: plan.islandStrategy,
+      estimatedIsolatedRootCount: plan.estimatedIsolatedRootCount,
+      isolatedHydrationEligible: plan.isolatedHydrationEligible,
+      hasIsolatedClientBoundaries: plan.hasIsolatedClientBoundaries,
+      isolatedBoundaries: plan.isolatedBoundaries,
+      serverLayout: true,
+      fallbackReason: undefined,
+    } satisfies FarmLayoutPlanFields);
+    selected.add(layout.pattern);
+  }
+  return selected;
 }
 
 /**
@@ -772,6 +910,7 @@ export function createMarkdownPageHydrationPlanner(
 
 interface FarmIsolatedHydrationRoutePlan {
   mode: FarmIsolatedClientHydrationMode;
+  serverLayout?: true;
   asyncOwnerIslands?: true;
   suppressedAsyncHydration?: true;
   shouldHydrate: boolean;
@@ -885,7 +1024,11 @@ export function enforceFarmIsolatedHydrationRouteBudget(
         ancestor.metadata.shouldHydrate &&
         layoutAppliesToRoute(ancestor.pattern, layout.pattern),
     );
-    if (hasRouteWideAncestor && layout.metadata.hasIsolatedClientBoundaries) {
+    if (
+      hasRouteWideAncestor &&
+      layout.metadata.hasIsolatedClientBoundaries &&
+      layout.metadata.serverLayout !== true
+    ) {
       restoreRouteWideHydration(layout.metadata);
     }
   }
@@ -898,9 +1041,33 @@ export function enforceFarmIsolatedHydrationRouteBudget(
  * The first compiler pass intentionally accepts only statically named React
  * component exports. A rejected module retains route-wide hydration.
  */
+/**
+ * An `export { ... }` list passes its values through unwrapped, so it may only name values that
+ * cannot be this module's components: imported bindings and lowercase names. A re-export from
+ * another module (`export { ... } from`) is rejected.
+ */
+function exportListsExposeNoLocalComponent(content: string): boolean {
+  const lists = [...content.matchAll(/\bexport\s+(?:type\s+)?\{([^}]*)\}(\s*from\b)?/g)];
+  if (lists.length === 0) return true;
+  const imported = new Set([...getStaticImportBindings(content).values()].flat());
+  return lists.every(([statement, specifiers, from]) => {
+    if (from) return false;
+    if (/^export\s+type\b/.test(statement)) return true;
+    return specifiers!
+      .split(",")
+      .map((specifier) => specifier.trim())
+      .filter(Boolean)
+      .every((specifier) => {
+        if (/^type\s/.test(specifier)) return true;
+        const local = specifier.split(/\s+as\s+/)[0]!.trim();
+        return !/^[A-Z]/.test(local) || imported.has(local);
+      });
+  });
+}
+
 export function isIsolatableClientBoundarySource(content: string | null): boolean {
   if (!content || !hasUseClientDirective(content)) return false;
-  if (/\bexport\s*\{/.test(content) || /\bexport\s*\*/.test(content)) return false;
+  if (/\bexport\s*\*/.test(content) || !exportListsExposeNoLocalComponent(content)) return false;
   return (
     /\bexport\s+default\s+(?!(?:type|interface)\b)/.test(content) ||
     /\bexport\s+(?:async\s+)?function\s+[A-Z][$\w]*/.test(content) ||
@@ -1284,6 +1451,12 @@ function hasDynamicJsxCardinality(content: string | null, localBindings: string[
   return false;
 }
 
+/** The first hook-like call in a module (`useX(`, `React.useX(`, `use(`), if any. */
+function findHookCall(content: string | null): string | null {
+  const match = /(?:^|[^\w$.])(?:React\.)?(use(?:[A-Z0-9][\w$]*)?)\s*\(/m.exec(content ?? "");
+  return match ? match[1]! : null;
+}
+
 function collectIsolatedClientBoundaries(
   ownerPath: string,
   root: string | undefined,
@@ -1301,6 +1474,11 @@ function collectIsolatedClientBoundaries(
      * Only for owners with no route-wide fallback, where rejecting leaves everything static.
      */
     staticPackageBoundaries?: boolean;
+    /**
+     * Reject an owner when it, or a server module between it and its client components, calls a
+     * hook. A server layout runs those modules outside React, where a hook has nothing to run in.
+     */
+    rejectHookCalls?: boolean;
   } = {},
 ): {
   boundaries: IsolatedClientBoundaryReference[];
@@ -1347,6 +1525,14 @@ function collectIsolatedClientBoundaries(
     if (parsed.hasHydrateExport) {
       fallbackReason = `imported module ${moduleSourcePath} explicitly exports hydrate = true`;
       return 0;
+    }
+
+    if (options.rejectHookCalls) {
+      const hook = findHookCall(content);
+      if (hook) {
+        fallbackReason = `${moduleSourcePath} calls ${hook}()`;
+        return 0;
+      }
     }
 
     const importedBindings = getStaticImportBindings(content);

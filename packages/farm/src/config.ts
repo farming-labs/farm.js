@@ -1139,6 +1139,7 @@ export async function resolveConfig(
       serverComponents: false,
       serverActions: false,
       isolatedClientHydration: "off",
+      serverLayouts: false,
       ppr: false,
       ...userConfig.experimental,
     },

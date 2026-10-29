@@ -929,6 +929,14 @@ export function rewriteEarlySsrRelativeImports(options: {
   return output;
 }
 
+/** Initializers an exported uppercase binding can hold and still be a React component. */
+const COMPONENT_INITIALIZER_TYPES = new Set<string | undefined>([
+  "ArrowFunctionExpression",
+  "FunctionExpression",
+  "ClassExpression",
+  "CallExpression",
+]);
+
 export function transformIsolatedClientBoundaryModule(options: {
   code: string;
   moduleReference: string;
@@ -989,6 +997,7 @@ export function transformIsolatedClientBoundaryModule(options: {
     if (node?.type !== "ExportNamedDeclaration" || !node.declaration) continue;
     const declaration = node.declaration;
     const declaredNames: string[] = [];
+    const dataNames = new Set<string>();
     if (
       (declaration.type === "FunctionDeclaration" || declaration.type === "ClassDeclaration") &&
       declaration.id?.name
@@ -996,10 +1005,19 @@ export function transformIsolatedClientBoundaryModule(options: {
       declaredNames.push(declaration.id.name);
     } else if (declaration.type === "VariableDeclaration") {
       for (const declarator of declaration.declarations || []) {
-        if (declarator.id?.type === "Identifier") declaredNames.push(declarator.id.name);
+        if (declarator.id?.type !== "Identifier") continue;
+        declaredNames.push(declarator.id.name);
+        // An uppercase constant (`export const SIDEBAR_WIDTH = 260`) is data, not a component:
+        // only a value that can be one (a function, a class, a call such as memo() or
+        // forwardRef()) is wrapped.
+        if (!COMPONENT_INITIALIZER_TYPES.has(declarator.init?.type)) {
+          dataNames.add(declarator.id.name);
+        }
       }
     }
-    const componentNames = declaredNames.filter((name) => /^[A-Z]/.test(name));
+    const componentNames = declaredNames.filter(
+      (name) => /^[A-Z]/.test(name) && !dataNames.has(name),
+    );
     if (componentNames.length === 0) continue;
 
     replacements.push({
@@ -1008,7 +1026,7 @@ export function transformIsolatedClientBoundaryModule(options: {
       code: options.code.slice(declaration.start, declaration.end),
     });
     for (const name of declaredNames) {
-      if (/^[A-Z]/.test(name)) addWrapper(name, name);
+      if (componentNames.includes(name)) addWrapper(name, name);
       else wrapperStatements.push(`export { ${name} };`);
     }
   }
@@ -4733,7 +4751,11 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document, signal) {
 async function createFarmServerTreePageElement(source, pathname) {
   try {
     return await createFarmServerTreeElement(React, source, {
-      load: (reference) => import(/* @vite-ignore */ reference),
+      // Built-in client components (Link) are referenced by package name.
+      load: (reference) =>
+        reference === '@farm.js/core/client'
+          ? import('@farm.js/core/client')
+          : import(/* @vite-ignore */ reference),
       ServerHtml: FarmServerPage,
       key: pathname,
     });

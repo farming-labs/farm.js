@@ -95,6 +95,7 @@ These are off by default and outside the stability promise:
 | Server Actions under RSC  | `experimental.serverActions`                                        |
 | Partial Prerendering      | `experimental.ppr`, then opt routes in                              |
 | Isolated client hydration | `experimental.isolatedClientHydration: "analyze" \| "enabled"`      |
+| Server layouts            | `experimental.serverLayouts`                                        |
 | API route MCP server      | `apiMcp()` from `@farm.js/mcp`                                      |
 | WebMCP browser tools      | `@farm.js/webmcp`                                                   |
 | Module federation         | `@farm.js/federation`                                               |
