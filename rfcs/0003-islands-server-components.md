@@ -357,6 +357,12 @@ navigation), so a navigation from other layouts fetches its own answer.
   islands still on the page over (same component at the same position keeps its root and state and
   gets the new props), as one React tree would. A `redirect()` from the action is a client
   navigation.
+- Typed values: props, server-tree payloads and action arguments and results carry `undefined`,
+  non-finite numbers and `-0`, `BigInt`, `Date`, `Map`, `Set`, `URL`, `RegExp`, typed arrays and
+  `ArrayBuffer` as one-key `$farm…` markers (`client/island-codec.ts`). The server encodes through
+  its installed hook, so the browser bundle carries only the decoder, and only in islands mode.
+  Decoding action arguments accepts browser input: no `__proto__` assignment, unknown or malformed
+  markers rejected with 400. Keys starting with `$farm` are reserved.
 - Contract suite: `tests/e2e-server-components`, the same tests for `"rsc"` and `"islands"`, against
   `farm dev` and production builds.
 
