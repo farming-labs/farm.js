@@ -254,7 +254,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.optimizations.keyedArraySortHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArrayMapPipeline");
     expect(result.code).toContain("createCompilerKeyedArrayMapReorder");
-    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
     expect(result.code).toContain("reorderIndexIndependent");
     expect(result.code).not.toContain("createCompilerKeyedMapUpdate");
     expect(result.code).not.toContain("createCompilerKeyedArraySort");
@@ -313,7 +313,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code.match(/createCompilerKeyedArrayMapPipeline\(/g)).toHaveLength(1);
     expect(result.code.match(/_farmApplyMap\d*\(/g)).toHaveLength(2);
     expect(result.code.match(/createCompilerKeyedArrayMapReorder\(/g)).toHaveLength(2);
-    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
     expect(result.code).not.toContain("createCompilerKeyedMapUpdate");
     await expect(
       transformWithEsbuild(result.code, "/app/KeyedArraySortHints.tsx", {
@@ -352,7 +352,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code.match(/createCompilerKeyedArrayMapPipeline\(/g)).toHaveLength(1);
     expect(result.code.match(/_farmApplyMap\d*\(/g)).toHaveLength(2);
     expect(result.code.match(/createCompilerKeyedArrayMapReorder\(/g)).toHaveLength(1);
-    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
   });
 
   it("carries a structured block-bodied map through a native sort", async () => {
@@ -385,7 +385,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.optimizations.keyedArraySortHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArrayMapPipeline");
     expect(result.code).toContain("createCompilerKeyedArrayMapReorder");
-    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
   });
 
   it("carries a switch-branched map through a native sort", async () => {
@@ -420,7 +420,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.optimizations.keyedArraySortHints).toBe(1);
     expect(result.code).toContain("createCompilerKeyedArrayMapPipeline");
     expect(result.code).toContain("createCompilerKeyedArrayMapReorder");
-    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
   });
 
   it("preserves every step in an exact mapped reverse-parity pipeline", async () => {
@@ -449,7 +449,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.optimizations.keyedArrayReorderHints).toBe(3);
     expect(result.code.match(/createCompilerKeyedArrayMapPipeline\(/g)).toHaveLength(1);
     expect(result.code.match(/createCompilerKeyedArrayMapReorder\(/g)).toHaveLength(3);
-    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
   });
 
   it("preserves reverse and map metadata across separately queued setters", async () => {
@@ -480,7 +480,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code.match(/createCompilerKeyedArrayReorder\(/g)).toHaveLength(1);
     expect(result.code.match(/createCompilerKeyedArrayMapPipeline\(/g)).toHaveLength(1);
     expect(result.code.match(/createCompilerKeyedArrayMapReorder\(/g)).toHaveLength(1);
-    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
   });
 
   it("preserves an exact reverse through final maps returned from an updater block", async () => {
@@ -511,7 +511,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code.match(/createCompilerKeyedArrayMapPipeline\(/g)).toHaveLength(1);
     expect(result.code.match(/_farmApplyMap\d*\(/g)).toHaveLength(2);
     expect(result.code.match(/createCompilerKeyedArrayMapReorder\(/g) || []).toHaveLength(0);
-    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
   });
 
   it("carries mapped lineage through reorder steps on both sides of a safe map", async () => {
@@ -541,7 +541,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.code.match(/createCompilerKeyedArraySort\(/g)).toHaveLength(1);
     expect(result.code.match(/createCompilerKeyedArrayMapPipeline\(/g)).toHaveLength(1);
     expect(result.code.match(/createCompilerKeyedArrayMapReorder\(/g)).toHaveLength(1);
-    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
   });
 
   it("does not lower map and reorder pipelines for host-backed keyed rows", async () => {
@@ -628,6 +628,7 @@ describe("React AOT keyed-array sort hints", () => {
     expect(result.optimizations.keyedArraySortHints).toBe(0);
     expect(result.code).not.toContain("createCompilerKeyedArrayMapPipeline");
     expect(result.code).not.toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
   });
 
   it("keeps mapped lineage when filter or slice ends the pipeline", async () => {

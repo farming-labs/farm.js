@@ -323,14 +323,17 @@ if (
 }
 if (
   !keyedMapReorderOn.code.includes("FarmCompiledKeyedRows") ||
-  !keyedMapReorderOn.code.includes("keyed-rows:map-reorder-hinted") ||
+  !keyedMapReorderOn.code.includes("keyed-rows:plain-map-reorder-hinted") ||
   !keyedMapReorderOn.code.includes("reorderIndexIndependent")
 ) {
   throw new Error(
-    `Keyed map-reorder fixture did not retain its isolated runtime: rows=${keyedMapReorderOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedMapReorderOn.code.includes("keyed-rows:map-reorder-hinted")}, proof=${keyedMapReorderOn.code.includes("reorderIndexIndependent")}.`,
+    `Keyed map-reorder fixture did not retain its isolated runtime: rows=${keyedMapReorderOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedMapReorderOn.code.includes("keyed-rows:plain-map-reorder-hinted")}, proof=${keyedMapReorderOn.code.includes("reorderIndexIndependent")}.`,
   );
 }
-if (keyedReorderOn.code.includes("keyed-rows:map-reorder-hinted")) {
+if (
+  keyedReorderOn.code.includes("keyed-rows:map-reorder-hinted") ||
+  keyedReorderOn.code.includes("keyed-rows:plain-map-reorder-hinted")
+) {
   throw new Error("Reorder-only fixture retained the optional map-reorder runtime.");
 }
 if (
@@ -369,7 +372,9 @@ for (const [name, output] of [
   if (
     output.code.includes("reorderIndexIndependent") ||
     output.code.includes("keyed-rows:reorder-hinted") ||
-    output.code.includes("keyed-rows:plain-reorder-hinted")
+    output.code.includes("keyed-rows:plain-reorder-hinted") ||
+    output.code.includes("keyed-rows:plain-map-reorder-hinted") ||
+    output.code.includes("keyed-rows:map-reorder-hinted")
   ) {
     throw new Error(`${name} fixture retained the optional reorder-hint runtime.`);
   }
