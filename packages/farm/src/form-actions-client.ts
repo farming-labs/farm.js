@@ -6,6 +6,8 @@
  * After an action, the page refreshes, as the same form posted without JavaScript would show it:
  * islands keep their state, and a redirect from the action is a client navigation.
  */
+import { decodeFarmJson, encodeFarmJson } from "./client/island-codec";
+
 const FARM_FORM_ACTION_HEADER = "x-farm-action";
 
 interface FarmActionRouter {
@@ -24,7 +26,8 @@ export async function callFarmFormAction(id: string, args: unknown[]): Promise<u
     headers: single
       ? { [FARM_FORM_ACTION_HEADER]: id }
       : { [FARM_FORM_ACTION_HEADER]: id, "content-type": "text/plain;charset=UTF-8" },
-    body: single ?? JSON.stringify(args),
+    // Arguments and the result keep their types (Date, Map, BigInt, …): see island-codec.ts.
+    body: single ?? JSON.stringify(encodeFarmJson(args)),
     credentials: "same-origin",
   });
   if (!response.ok) throw new Error(`Server action failed: ${response.status}`);
@@ -38,7 +41,7 @@ export async function callFarmFormAction(id: string, args: unknown[]): Promise<u
   // The action may have changed what the page shows. The caller's pending state (a form's
   // `useFormStatus`, `useActionState`) lasts until the page shows it.
   if (router?.refresh) await router.refresh({ scroll: false });
-  return payload.result;
+  return decodeFarmJson(payload.result);
 }
 
 export function createFarmFormActionStub(id: string) {

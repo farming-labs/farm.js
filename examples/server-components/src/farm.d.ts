@@ -24,6 +24,7 @@ export type RoutePath =
   | "/nav/b"
   | `/static/${string}`
   | "/stream"
+  | "/types"
   | "/values/a"
   | "/values/b"
   | "/window";
@@ -39,6 +40,7 @@ export type RoutePattern =
   | "/nav/b"
   | "/static/[slug]"
   | "/stream"
+  | "/types"
   | "/values/a"
   | "/values/b"
   | "/window";
@@ -55,6 +57,7 @@ export type RouteModulePattern =
   | "/nav/b"
   | "/static/[slug]"
   | "/stream"
+  | "/types"
   | "/values"
   | "/values/a"
   | "/values/b"

@@ -4727,7 +4727,7 @@ function generateClientCode(
       ? `import React, { hydrateRoot, createRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)}\nimport __farmAppSetup from ${JSON.stringify(toViteModuleId(appSetupPath, root))}\n__farmConfigureApp(__farmAppSetup)`
       : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
   const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'${islandValues ? "\nimport { getFarmIslandValueStore } from '@farm.js/core/internal/island-value-store'\nimport { getFarmFormActionStub } from '@farm.js/core/internal/form-actions-client'" : ""}`
+    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'${islandValues ? "\nimport { getFarmIslandValueStore } from '@farm.js/core/internal/island-value-store'\nimport { getFarmFormActionStub } from '@farm.js/core/internal/form-actions-client'\nimport { decodeFarmMarker } from '@farm.js/core/internal/island-codec'" : ""}`
     : "";
   const docsAdapterImportBlock = generateFarmDocsAdapterClientRuntime(
     docsAdapterReact,
@@ -4739,7 +4739,7 @@ function generateClientCode(
   hydrateRoot,
   load: (reference) => import(/* @vite-ignore */ farmModuleUrl(reference)),
   schedule: scheduleFarmIslandHydration,
-  wrap: wrapWithIntegrationProviders,${islandValues ? "\n  values: getFarmIslandValueStore(),\n  actions: getFarmFormActionStub," : ""}
+  wrap: wrapWithIntegrationProviders,${islandValues ? "\n  values: getFarmIslandValueStore(),\n  actions: getFarmFormActionStub,\n  decode: decodeFarmMarker," : ""}
 });
 window.__FARM_ISOLATED_HYDRATION_RUNTIME__ = farmIsolatedHydrationRuntime;
 // A hydrating layout keeps a non-hydrating page as server HTML; this wrapper runs its islands.
@@ -4759,7 +4759,7 @@ async function createFarmServerTreePageElement(source, pathname) {
     return await createFarmServerTreeElement(React, source, {
       load: (reference) => import(/* @vite-ignore */ farmModuleUrl(reference)),
       ServerHtml: FarmServerPage,
-      key: pathname,${islandValues ? "\n      values: getFarmIslandValueStore(),\n      actions: getFarmFormActionStub," : ""}
+      key: pathname,${islandValues ? "\n      values: getFarmIslandValueStore(),\n      actions: getFarmFormActionStub,\n      decode: decodeFarmMarker," : ""}
     });
   } catch (error) {
     console.warn('[Farm.js] Could not rebuild the server tree of ' + pathname + '; its server HTML was kept.', error);

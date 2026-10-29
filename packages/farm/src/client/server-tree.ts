@@ -30,6 +30,8 @@ const MEMO_TYPE = Symbol.for("react.memo");
 const FORWARD_REF_TYPE = Symbol.for("react.forward_ref");
 const SERVER_HTML_TAG = "farm-server-html";
 export const FARM_SERVER_TREE_ATTRIBUTE = "data-farm-server-tree";
+// `NOT_A_FARM_MARKER` in island-codec.ts, without importing the codec into every bundle.
+const FARM_NOT_A_MARKER = Symbol.for("farm.codec.not-a-marker");
 const SERVER_TREE_CHUNK_ATTRIBUTE = "data-farm-server-tree-chunk";
 /**
  * Marks a navigation response that carries only the page's payload. The browser rebuilds such a
@@ -87,6 +89,8 @@ interface TreeResolver {
   serverHtml(id: number, key: React.Key | null): React.ReactElement;
   /** The function a server action reference stands for (islands mode). */
   action(id: string): unknown;
+  /** Islands mode: decodes a value JSON cannot hold, or returns `NOT_A_FARM_MARKER`. */
+  decode?(object: Record<string, unknown>, decodeChild: (value: TreeValue) => unknown): unknown;
 }
 
 type ReactInternals = { H?: unknown; ReactCurrentDispatcher?: { current: unknown } };
@@ -164,6 +168,8 @@ interface ResolveState {
   serverHtml: Map<number, React.ReactNode>;
   chunks: Map<number, { encoded: Promise<TreeValue>; chunk?: ResolvedChunk }>;
   actions: Map<string, unknown>;
+  /** Islands mode: the server's codec for values JSON cannot hold. */
+  codec?: { encodeLeaf(value: unknown): Record<string, unknown> | undefined };
 }
 
 function serverHtmlNode(
@@ -186,7 +192,8 @@ async function resolveProps(
 ): Promise<{ [key: string]: TreeValue }> {
   const entries = await Promise.all(
     Object.entries(props).map(async ([name, value]): Promise<[string, TreeValue] | null> => {
-      if (value === undefined) return null;
+      // A client component's undefined prop keeps its key in islands mode, as in RSC.
+      if (value === undefined && (host || !state.codec)) return null;
       if (name === "ref") {
         if (value === null) return null;
         throw new UnsupportedNode("receives a ref");
@@ -206,6 +213,10 @@ async function resolveValue(
   context: ResolveContext,
   seen: Set<object>,
 ): Promise<TreeValue> {
+  // Islands mode: the server's codec marks values JSON cannot hold (Date, Map, BigInt, …).
+  const codec = state.codec;
+  const leaf = codec?.encodeLeaf(value);
+  if (leaf) return leaf as TreeValue;
   if (value === null || value === undefined) return null;
   if (typeof value === "string" || typeof value === "boolean") return value;
   if (typeof value === "number") {
@@ -237,13 +248,20 @@ async function resolveValue(
     if (Array.isArray(value)) {
       return await Promise.all(value.map((entry) => resolveValue(state, entry, context, seen)));
     }
+    if (codec && value instanceof Map) {
+      return { $farmMap: await resolveValue(state, Array.from(value), context, seen) };
+    }
+    if (codec && value instanceof Set) {
+      return { $farmSet: await resolveValue(state, Array.from(value), context, seen) };
+    }
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) {
       throw new UnsupportedNode("passes a class instance");
     }
     const entries = await Promise.all(
       Object.entries(value)
-        .filter(([, entry]) => entry !== undefined)
+        // Islands mode keeps a key whose value is undefined, as `{"$farmUndefined":1}`.
+        .filter(([, entry]) => entry !== undefined || codec)
         .map(
           async ([name, entry]): Promise<[string, TreeValue]> => [
             name,
@@ -251,6 +269,9 @@ async function resolveValue(
           ],
         ),
     );
+    if (codec && entries.some(([name]) => name.startsWith("$farm"))) {
+      throw new UnsupportedNode("uses a reserved $farm key");
+    }
     const object = Object.fromEntries(entries);
     return Object.prototype.hasOwnProperty.call(object, "$") ? { $: "o", v: object } : object;
   } finally {
@@ -519,13 +540,22 @@ function createTreeValue(
         ]),
       );
     }
-    default:
+    default: {
+      const keys = Object.keys(value);
+      if (keys.length === 1 && keys[0]!.startsWith("$farm")) {
+        if (!resolver.decode) throw new Error("typed props need islands mode");
+        const decoded = resolver.decode(value as Record<string, unknown>, (child) =>
+          createTreeValue(ReactRuntime, child, resolver),
+        );
+        if (decoded !== FARM_NOT_A_MARKER) return decoded;
+      }
       return Object.fromEntries(
         Object.entries(value).map(([name, entry]) => [
           name,
           createTreeValue(ReactRuntime, entry, resolver),
         ]),
       );
+    }
   }
 }
 
@@ -678,6 +708,7 @@ export async function renderFarmServerTreePage(
     serverHtml: new Map(),
     chunks: new Map(),
     actions: new Map(),
+    codec: options.values ? getFarmIslandValuesServer() : undefined,
   };
   const tree = await resolveValue(state, element, { parserSensitive: false }, new Set());
   const values = options.values ? getFarmIslandValuesServer() : undefined;
@@ -749,6 +780,10 @@ export async function renderFarmServerTreePage(
     action(id) {
       return state.actions.get(id);
     },
+    decode: state.codec
+      ? (object, decodeChild) =>
+          getFarmIslandValuesServer()!.decode(object, decodeChild as (value: unknown) => unknown)
+      : undefined,
   };
   const payload = encode({ v: 1, t: tree });
   const page =
@@ -780,6 +815,8 @@ export interface FarmServerTreeElementOptions {
   values?: Pick<FarmIslandValueStore, "ingest" | "resolve">;
   /** Islands mode: the function a server action reference stands for. */
   actions?(id: string): (...args: unknown[]) => unknown;
+  /** Islands mode: decodes props JSON cannot hold (`decodeFarmMarker` in island-codec.ts). */
+  decode?(object: Record<string, unknown>, decodeChild: (value: unknown) => unknown): unknown;
 }
 
 function parseHtml(html: string): DocumentFragment {
@@ -896,6 +933,9 @@ export async function createFarmServerTreeElement(
       if (!options.actions) throw new Error("server action props need islands mode");
       return options.actions(id);
     },
+    decode: options.decode
+      ? (object, decodeChild) => options.decode!(object, decodeChild as (value: unknown) => unknown)
+      : undefined,
   };
 
   // Validate the whole tree now, so a missing chunk or module falls back before hydration starts.

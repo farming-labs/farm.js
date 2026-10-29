@@ -3509,7 +3509,7 @@ document.addEventListener("click", function(e) {
   // Only an app with a server-tree page ships the code that rebuilds one.
   const serverTreeEnabled = isolatedHydrationEnabled && clientPages.some((page) => page.serverTree);
   const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";${islandValues ? '\nimport { getFarmIslandValueStore } from "@farm.js/core/internal/island-value-store";\nimport { getFarmFormActionStub } from "@farm.js/core/internal/form-actions-client";' : ""}${serverTreeEnabled ? '\nimport { createFarmServerTreeElement } from "@farm.js/core/internal/server-tree";' : ""}`
+    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";${islandValues ? '\nimport { getFarmIslandValueStore } from "@farm.js/core/internal/island-value-store";\nimport { getFarmFormActionStub } from "@farm.js/core/internal/form-actions-client";\nimport { decodeFarmMarker } from "@farm.js/core/internal/island-codec";' : ""}${serverTreeEnabled ? '\nimport { createFarmServerTreeElement } from "@farm.js/core/internal/server-tree";' : ""}`
     : "";
   const isolatedHydrationRuntime = isolatedHydrationEnabled
     ? `const farmIsolatedBoundaryLoaders = {
@@ -3530,7 +3530,7 @@ const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
   hydrateRoot,
   load: loadFarmIsolatedBoundary,
   schedule: scheduleFarmIslandHydration,
-  wrap: wrapWithIntegrationProviders,${islandValues ? "\n  values: getFarmIslandValueStore(),\n  actions: getFarmFormActionStub," : ""}
+  wrap: wrapWithIntegrationProviders,${islandValues ? "\n  values: getFarmIslandValueStore(),\n  actions: getFarmFormActionStub,\n  decode: decodeFarmMarker," : ""}
 });
 
 // A hydrating layout keeps a non-hydrating page as server HTML; this wrapper runs its islands.
@@ -3552,7 +3552,7 @@ async function createFarmServerTreePageElement(source, pathname) {
     return await createFarmServerTreeElement(React, source, {
       load: loadFarmIsolatedBoundary,
       ServerHtml: FarmServerPage,
-      key: pathname,${islandValues ? "\n      values: getFarmIslandValueStore(),\n      actions: getFarmFormActionStub," : ""}
+      key: pathname,${islandValues ? "\n      values: getFarmIslandValueStore(),\n      actions: getFarmFormActionStub,\n      decode: decodeFarmMarker," : ""}
     });
   } catch (error) {
     console.warn("[Farm.js] Could not rebuild the server tree of " + pathname + "; its server HTML was kept.", error);

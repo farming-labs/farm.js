@@ -239,3 +239,21 @@ test("a server action passed as a prop works before JavaScript loads", async ({ 
   await expect(page.getByTestId("items")).toContainText(title);
   await context.close();
 });
+
+test("a client component receives values JSON cannot hold as their own types", async ({
+  page,
+  request,
+}) => {
+  const expected =
+    "2026-10-28T09:00:00.000Z | new,sale | sku-1=3 | 12345678901234567890n | undefined | NaN | Infinity | -0 | 0.1.254.255";
+  expect(await (await request.get("/types")).text()).toContain("12345678901234567890n");
+  const errors = collectErrors(page);
+  await page.goto("/types");
+  await hydrated(page);
+  await expect(page.getByTestId("typed")).toHaveText(expected);
+  // It hydrated with those props: it responds, and still shows the same values.
+  await page.getByRole("button", { name: "Typed clicks: 0" }).click();
+  await expect(page.getByRole("button", { name: "Typed clicks: 1" })).toBeVisible();
+  await expect(page.getByTestId("typed")).toHaveText(expected);
+  expect(errors).toEqual([]);
+});

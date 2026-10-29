@@ -4,6 +4,7 @@
  * component calls the id through the same endpoint. The RSC engine has its own actions.
  */
 import { setFarmActionId } from "./client/action-reference";
+import { decodeFarmJson, encodeFarmJson } from "./client/island-codec";
 import { getFarmRedirectError, isFarmNotFoundError } from "./navigation-errors";
 import {
   createServerActionRequestErrorResponse,
@@ -86,13 +87,21 @@ export async function handleFarmFormActionRequest(
     }
     const action = registry().get(headerId);
     if (!action) return noStore(404, "Not Found");
-    const args =
-      prepared.body instanceof FormData
-        ? [prepared.body]
-        : (JSON.parse(prepared.body || "[]") as unknown[]);
+    let args: unknown[];
+    try {
+      // Arguments keep their types (Date, Map, BigInt, …): see island-codec.ts.
+      const decoded =
+        prepared.body instanceof FormData
+          ? [prepared.body]
+          : decodeFarmJson(JSON.parse(prepared.body || "[]"));
+      if (!Array.isArray(decoded)) throw new TypeError("arguments must be an array");
+      args = decoded;
+    } catch {
+      return noStore(400, "Bad Request");
+    }
     try {
       const result = await runWithServerActionRequest(request, () => action(...args));
-      return noStore(200, JSON.stringify({ result: result ?? null }), {
+      return noStore(200, JSON.stringify({ result: encodeFarmJson(result) }), {
         "content-type": "application/json",
       });
     } catch (error) {

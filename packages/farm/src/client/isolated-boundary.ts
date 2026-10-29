@@ -28,6 +28,10 @@ function getBoundaryGraphContext(ReactRuntime: typeof React): React.Context<bool
 }
 
 function serializeBoundaryProps(value: unknown, seen = new Set<object>()): unknown {
+  // Islands mode: the server's codec marks values JSON cannot hold (Date, Map, BigInt, …).
+  const codec = getFarmIslandValuesServer();
+  const leaf = codec?.encodeLeaf(value);
+  if (leaf) return leaf;
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
   if (typeof value === "number") {
     if (!Number.isFinite(value)) throw new TypeError("non-finite numbers are not serializable");
@@ -54,6 +58,17 @@ function serializeBoundaryProps(value: unknown, seen = new Set<object>()): unkno
   seen.add(value);
   try {
     if (Array.isArray(value)) return value.map((entry) => serializeBoundaryProps(entry, seen));
+    if (codec && value instanceof Map) {
+      return {
+        $farmMap: Array.from(value, ([key, entry]) => [
+          serializeBoundaryProps(key, seen),
+          serializeBoundaryProps(entry, seen),
+        ]),
+      };
+    }
+    if (codec && value instanceof Set) {
+      return { $farmSet: Array.from(value, (entry) => serializeBoundaryProps(entry, seen)) };
+    }
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) {
       throw new TypeError("class instances are not serializable");
@@ -119,7 +134,7 @@ function splitSlotProps(
     const render: Record<string, unknown> = {};
     const wire: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value)) {
-      if (key === "$farmSlot" || key === FARM_VALUE_REFERENCE || key === FARM_ACTION_REFERENCE) {
+      if (key.startsWith("$farm")) {
         throw new TypeError(`${key} is a reserved prop key`);
       }
       const part = splitSlotProps(ReactRuntime, entry, slotPrefix, counter);
@@ -135,16 +150,25 @@ function splitSlotProps(
  * Turns slot references back into elements that keep the server HTML already in `container`.
  * Values without a slot come back as they are, so islands sharing a value share one object.
  */
+// `NOT_A_FARM_MARKER` in island-codec.ts, without importing the codec into every bundle.
+const FARM_NOT_A_MARKER = Symbol.for("farm.codec.not-a-marker");
+
+type FarmMarkerDecoder = (
+  object: Record<string, unknown>,
+  decodeChild: (value: unknown) => unknown,
+) => unknown;
+
 function reviveSlotProps(
   ReactRuntime: typeof React,
   value: unknown,
   container: Element,
   actions?: (id: string) => unknown,
+  decode?: FarmMarkerDecoder,
 ): unknown {
   if (Array.isArray(value)) {
     let changed = false;
     const revived = value.map((entry) => {
-      const next = reviveSlotProps(ReactRuntime, entry, container, actions);
+      const next = reviveSlotProps(ReactRuntime, entry, container, actions, decode);
       if (next !== entry) changed = true;
       return next;
     });
@@ -155,6 +179,15 @@ function reviveSlotProps(
   if (typeof actionId === "string" && Object.keys(value).length === 1) {
     if (!actions) throw new Error("server action props need islands mode");
     return actions(actionId);
+  }
+  const keys = Object.keys(value);
+  if (keys.length === 1 && keys[0]!.startsWith("$farm") && keys[0] !== "$farmSlot") {
+    // Islands mode: a value JSON cannot hold (Date, Map, BigInt, …).
+    if (!decode) throw new Error("typed props need islands mode");
+    const decoded = decode(value as Record<string, unknown>, (child) =>
+      reviveSlotProps(ReactRuntime, child, container, actions, decode),
+    );
+    if (decoded !== FARM_NOT_A_MARKER) return decoded;
   }
   const slotId = (value as { $farmSlot?: unknown }).$farmSlot;
   if (typeof slotId === "string" && Object.keys(value).length === 1) {
@@ -176,8 +209,15 @@ function reviveSlotProps(
   let changed = false;
   const revived: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    revived[key] = reviveSlotProps(ReactRuntime, entry, container, actions);
-    if (revived[key] !== entry) changed = true;
+    const next = reviveSlotProps(ReactRuntime, entry, container, actions, decode);
+    // defineProperty, not assignment: a "__proto__" key stays an ordinary property.
+    Object.defineProperty(revived, key, {
+      value: next,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+    if (next !== entry) changed = true;
   }
   return changed ? revived : value;
 }
@@ -352,6 +392,8 @@ export interface FarmIsolatedHydrationRuntimeOptions {
   values?: Pick<FarmIslandValueStore, "ingest" | "resolve">;
   /** Islands mode: the function a server action reference in props stands for. */
   actions?(id: string): (...args: unknown[]) => unknown;
+  /** Islands mode: decodes props JSON cannot hold (`decodeFarmMarker` in island-codec.ts). */
+  decode?: FarmMarkerDecoder;
 }
 
 function findBoundaryPayload(container: Element, boundaryId: string): HTMLScriptElement | null {
@@ -460,6 +502,7 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
       resolvedProps,
       container,
       options.actions,
+      options.decode,
     ) as Record<string, unknown>;
   }
 

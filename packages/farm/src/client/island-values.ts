@@ -5,6 +5,7 @@
  * the wire format and `island-value-store.ts` for the browser side.
  */
 import { _resolveCurrentRequest, _resolveCurrentRequestForApp } from "../server/request-bridge";
+import { decodeFarmMarker, encodeFarmLeaf } from "./island-codec";
 import {
   FARM_MAX_HELD_VALUES,
   FARM_VALUE_KEY_PATTERN,
@@ -169,6 +170,9 @@ export interface FarmIslandValuesServer {
   address: typeof addressFarmValues;
   select: typeof selectFarmValuesToSend;
   held: typeof readFarmHeldValues;
+  /** Markers for values JSON cannot hold (`island-codec.ts`). */
+  encodeLeaf: typeof encodeFarmLeaf;
+  decode: typeof decodeFarmMarker;
 }
 
 const SERVER_KEY = Symbol.for("farm.island-values.server");
@@ -182,6 +186,8 @@ export function installFarmIslandValues(): void {
     address: addressFarmValues,
     select: selectFarmValuesToSend,
     held: readFarmHeldValues,
+    encodeLeaf: encodeFarmLeaf,
+    decode: decodeFarmMarker,
   };
 }
 

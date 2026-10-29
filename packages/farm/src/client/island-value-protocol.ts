@@ -31,6 +31,8 @@ export interface FarmIslandValuesServerHook {
     held: ReadonlySet<string> | null,
   ): Array<{ key: string; json: string }>;
   held(): ReadonlySet<string> | null;
+  encodeLeaf(value: unknown): Record<string, unknown> | undefined;
+  decode(object: Record<string, unknown>, decodeChild: (value: unknown) => unknown): unknown;
 }
 
 const ISLAND_VALUES_SERVER_KEY = Symbol.for("farm.island-values.server");
