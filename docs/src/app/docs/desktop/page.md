@@ -35,7 +35,7 @@ export default defineConfig({
 ```
 
 ```sh
-pnpm add -D @farm.js/desktop-electrobun
+pnpm add -D @farm.js/desktop-electrobun electrobun
 ```
 
 | Option          | Default                              | Notes                                                              |
@@ -150,6 +150,37 @@ A desktop app is not a public site. Unless the config sets them, desktop builds 
 
 The server is the `bun` preset, or `node-server` for shells that embed Node. `HOST` and `PORT` in
 the environment do not apply: the server binds `127.0.0.1` on a port the OS assigns.
+
+## Electrobun
+
+`@farm.js/desktop-electrobun` is the default shell. It generates `electrobun.config.ts` and the
+main process into `.farm/output/desktop/shell` on every run, embeds the Farm server in Electrobun's
+Bun, and uses the system WebView (WKWebView on macOS), so no Chromium ships with the app.
+
+- `farm dev --desktop` runs `electrobun dev` with the window on `farm dev`.
+- `farm build --desktop` runs `electrobun build --env=stable` and moves the app to
+  `.farm/output/desktop/dist`, with update archives in `dist/update`.
+- `appDataDir()` is Electrobun's `Utils.paths.userData`, for example
+  `~/Library/Application Support/<desktop.id>/stable` on macOS.
+- Quitting the app drains requests and runs Farm's shutdown hooks before the process exits.
+
+The first `electrobun` command downloads Hutch and the Electrobun runtime into `~/.hutch`. The
+packaged app ships its own Bun. Measured on macOS 26, Apple silicon, with
+`examples/desktop-electrobun`: a 32 MB `.app` (94 MB after the first launch unpacks it, 85 MB of it
+Bun) and a 3.1 MB server.
+
+Optional hooks run in the shell process:
+
+```ts
+// src/desktop.ts
+import { defineDesktop } from "@farm.js/core/desktop";
+
+export default defineDesktop({
+  onReady({ window, server, mode }) {
+    console.log(`Notes on ${server.origin} (${mode})`);
+  },
+});
+```
 
 ## Shell adapters
 
