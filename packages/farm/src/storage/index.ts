@@ -229,6 +229,11 @@ async function loadBuiltinDriver(
   name: BuiltinDriverName,
   options?: Record<string, any>,
 ): Promise<Driver> {
+  // The default driver, imported statically: loading it by name would leave a
+  // bare `unstorage` import in a bundled server, which an app that does not
+  // depend on unstorage itself cannot resolve.
+  if (name === "memory") return memoryDriver();
+
   const modulePath = builtinDrivers[name];
 
   if (!modulePath) {
@@ -553,7 +558,7 @@ function collectDriverModules(config: unknown, modules: Set<string>): void {
       modules.add("db0");
       modules.add(DATABASE_CONNECTORS[driver].module);
       modules.add("unstorage/drivers/db0");
-    } else {
+    } else if (driver !== "memory") {
       const module = builtinDrivers[(driver === "local" ? "fs-lite" : driver) as BuiltinDriverName];
       if (module) modules.add(module);
     }

@@ -3,6 +3,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -142,13 +143,19 @@ describe("production storage config", () => {
   it("writes through the configured mounts in a built app", async () => {
     const { root, filesDir, notesDir } = await createFixture();
     let production: Awaited<ReturnType<typeof startProductionServer>> | undefined;
+    let outputDir: string | undefined;
 
     try {
       const userConfig = await loadConfig(root, undefined, "production");
       const config = await resolveConfig({ ...userConfig, root }, "production");
       await build(config, { root, preset: "node-server" });
 
-      production = await startProductionServer(path.join(root, ".farm", ".output", "server"));
+      // Run the output from outside the repository, as a deployment does: no
+      // node_modules above it can supply a module the bundle left external,
+      // and the app itself does not depend on unstorage or db0.
+      outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "farm-production-storage-output-"));
+      await fs.cp(path.join(root, ".farm", ".output"), outputDir, { recursive: true });
+      production = await startProductionServer(path.join(outputDir, "server"));
       const response = await fetch(`${production.origin}/api/note`, { method: "POST" });
       expect(response.status).toBe(200);
 
@@ -161,6 +168,7 @@ describe("production storage config", () => {
     } finally {
       await production?.stop();
       await fs.rm(root, { recursive: true, force: true });
+      if (outputDir) await fs.rm(outputDir, { recursive: true, force: true });
     }
   }, 180_000);
 });

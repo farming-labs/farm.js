@@ -16,6 +16,7 @@ import {
   getStorage,
   initStorage,
   localStorage,
+  memoryStorage,
   mongodbStorage,
   mysqlStorage,
   postgresStorage,
@@ -275,6 +276,10 @@ describe("Storage", () => {
       ].sort(),
     );
     expect(_collectFarmStorageModules(localStorage())).toEqual(["unstorage/drivers/fs-lite"]);
+    // Memory is core's static default, never loaded by name.
+    expect(
+      _collectFarmStorageModules({ driver: "memory", mounts: { cache: memoryStorage() } }),
+    ).toEqual([]);
     expect(_collectFarmStorageModules(undefined)).toEqual([]);
   });
 
