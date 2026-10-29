@@ -400,7 +400,9 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
     const details = templateDetails[template!].integration!;
     logger.info(`Open ${details.route} for the ${details.label} starter.`);
     if (integrationResult.env.length) {
-      logger.info("Copy .env.example to .env.local and add your provider credentials.");
+      logger.info(
+        "Copy .env.example to .env.local, add your provider credentials, and generate any empty secret with openssl rand -base64 32.",
+      );
     }
     for (const note of integrationResult.notes) {
       logger.info(note);
@@ -598,7 +600,7 @@ async function writeEnvironmentExample(projectPath: string, keys: string[]) {
   );
   const additions = keys
     .filter((key) => !existingKeys.has(key))
-    .map((key) => `${key}=${environmentExampleValue(key)}`);
+    .flatMap((key) => environmentExampleLines(key));
 
   if (additions.length > 0) {
     await fs.writeFile(
@@ -609,17 +611,28 @@ async function writeEnvironmentExample(projectPath: string, keys: string[]) {
   }
 }
 
-function environmentExampleValue(key: string) {
-  if (key === "APP_BASE_URL") {
-    return "http://localhost:3000";
+// Secrets the app signs or encrypts sessions with. A placeholder long enough to
+// pass the provider's length check would be accepted as-is when the file is
+// copied, and every app that kept it could forge the others' sessions, so they
+// ship empty with the command that generates one.
+const GENERATED_SECRET_KEYS = new Set([
+  "AUTH_SECRET",
+  "AUTH0_SECRET",
+  "BETTER_AUTH_SECRET",
+  "WORKOS_COOKIE_PASSWORD",
+]);
+
+function environmentExampleLines(key: string): string[] {
+  if (GENERATED_SECRET_KEYS.has(key)) {
+    return ["# Generate with: openssl rand -base64 32", `${key}=`];
   }
-  if (key === "AUTH_SECRET") {
-    return "replace-with-at-least-32-random-characters";
+  if (key === "APP_BASE_URL") {
+    return [`${key}=http://localhost:3000`];
   }
   if (key === "UNKEY_BASE_URL") {
-    return "https://api.unkey.com";
+    return [`${key}=https://api.unkey.com`];
   }
-  return "";
+  return [`${key}=`];
 }
 
 async function writeIntegrationHomePage(
@@ -676,7 +689,7 @@ async function writeIntegrationReadme(
   env: string[],
 ) {
   const environmentSetup = env.length
-    ? `cp .env.example .env.local\n# Add values for: ${env.join(", ")}\n`
+    ? `cp .env.example .env.local\n# Add values for: ${env.join(", ")}\n# Generate secrets with: openssl rand -base64 32\n`
     : "";
   const wiring =
     integration.provider === "ai"

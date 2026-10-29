@@ -466,7 +466,8 @@ await migrations.runMigrations();
       {
         path: ".env.example",
         merge: "lines",
-        source: () => `BETTER_AUTH_SECRET=replace-with-at-least-32-random-characters
+        source: () => `# Generate with: openssl rand -base64 32
+BETTER_AUTH_SECRET=
 BETTER_AUTH_URL=http://localhost:3000
 BETTER_AUTH_DATABASE_PATH=better-auth.sqlite
 `,

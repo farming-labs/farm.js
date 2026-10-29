@@ -411,7 +411,9 @@ test("scaffolds a working Better Auth starter with its UI dependencies", async (
     assert.match(panel, /authClient\.signUp\.email/);
     assert.match(panel, /authClient\.getSession/);
     assert.match(panel, /authClient\.signOut/);
-    assert.match(env, /BETTER_AUTH_SECRET=/);
+    // Empty: a placeholder long enough for Better Auth would be accepted as-is.
+    assert.match(env, /^BETTER_AUTH_SECRET=$/m);
+    assert.match(env, /^# Generate with: openssl rand -base64 32$/m);
     assert.match(env, /EXISTING_VALUE=kept/);
     assert.match(gitignore, /node_modules/);
     assert.match(gitignore, /better-auth\.sqlite/);
