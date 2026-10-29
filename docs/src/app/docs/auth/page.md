@@ -175,7 +175,7 @@ from a domain Vercel does not report, such as a proxy in front of the deployment
 routes reject any origin that is neither the base URL nor a trusted host.
 
 Better Auth's sign-in rate limit keys on the client address Farm resolves for the request: the
-server's peer address, or the first `X-Forwarded-For` hop only when
+server's peer address, or the last `X-Forwarded-For` hop (the one your proxy appended) only when
 [`server.trustProxy`](/docs/configuration) is on. A client-sent forwarding header never picks the
 bucket on its own. Behind a proxy, enable `trustProxy` so visitors are not all counted as the
 proxy's address.

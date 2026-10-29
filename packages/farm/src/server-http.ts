@@ -71,7 +71,10 @@ export interface ResolvedFarmServerHealthConfig {
 export interface FarmServerConfig {
   /** Maximum request body size for API routes, integrations, workflows, and uploads. */
   bodySizeLimit?: number | string;
-  /** Trust proxy-provided client address and request authority headers. Enable only behind a trusted proxy. */
+  /**
+   * Trust proxy-provided client address and request authority headers. Enable only behind a trusted proxy.
+   * The client address is the last `X-Forwarded-For` hop, the one the closest proxy appended.
+   */
   trustProxy?: boolean;
   /** Maximum time for a Node client to send complete request headers. */
   headersTimeout?: FarmServerDuration;
@@ -348,8 +351,10 @@ export function withFarmRequestClientAddress<T extends Request>(
   };
 
   if (!requestWithShape.socket) {
+    // The trusted proxy appends the address it saw, so that hop is the last
+    // one. Anything before it was sent by the client and can be anything.
     const forwardedFor = trustProxy
-      ? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+      ? request.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim()
       : undefined;
     try {
       requestWithShape.socket = { remoteAddress: forwardedFor || clientAddress || undefined };

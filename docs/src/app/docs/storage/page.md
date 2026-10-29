@@ -189,8 +189,8 @@ export default middleware().rateLimit({
 The default bucket is the caller's address and the request path. A built app
 takes that address from the server's own connection, as the development server
 does. Behind a reverse proxy or a platform load balancer that connection belongs
-to the proxy, so set `server.trustProxy` to key on the proxy's `x-forwarded-for`
-instead. When the runtime reports no address at all, the limiter refuses rather
+to the proxy, so set `server.trustProxy` to key on the last `x-forwarded-for` hop, the
+address the proxy appended, instead. When the runtime reports no address at all, the limiter refuses rather
 than putting every caller in one bucket, so set `trustProxy` or supply a
 `keyGenerator` that uses an identity you do have. Do not fall back to a constant
 such as `"unknown"`: that is the shared bucket the limiter refuses, and one

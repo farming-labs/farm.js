@@ -385,6 +385,22 @@ describe("production integration client address", () => {
     const { response } = await runtime.handleIntegrationRequest(signIn(), new Set(), "10.0.0.1");
     await expect(response?.json()).resolves.toEqual({ address: "198.51.100.9" });
   });
+
+  // An appending proxy keeps whatever the client sent ahead of the hop it adds,
+  // so a leading hop would let a caller pick its own rate-limit bucket.
+  it("takes the hop the trusted proxy appended, not one the client sent", async () => {
+    const runtime = createProductionIntegrationRuntime(
+      { auth: createAddressIntegration() },
+      { server: { trustProxy: true } },
+    );
+    const request = new Request("https://app.test/api/auth/sign-in/email", {
+      method: "POST",
+      headers: { "x-forwarded-for": "6.6.6.6, 198.51.100.9" },
+      body: "{}",
+    });
+    const { response } = await runtime.handleIntegrationRequest(request, new Set(), "10.0.0.1");
+    await expect(response?.json()).resolves.toEqual({ address: "198.51.100.9" });
+  });
 });
 
 describe("dev and production run the same integration middleware", () => {
