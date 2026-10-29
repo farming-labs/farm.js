@@ -1,33 +1,34 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, rename, rm } from "node:fs/promises";
-import { createRequire } from "node:module";
 import path from "node:path";
 import {
   defineDesktopShell,
   type DesktopDevSession,
   type DesktopShellContext,
 } from "@farm.js/core/desktop";
-import { createElectrobunConfig, createElectrobunMain } from "./templates";
+import { createElectrobunConfig, createElectrobunMain } from "./templates.js";
 
-export { createElectrobunConfig, createElectrobunMain } from "./templates";
+export { createElectrobunConfig, createElectrobunMain } from "./templates.js";
 
 const isWindows = process.platform === "win32";
 
-/** The `electrobun` bootstrap installed in the app, which runs Hutch's Electrobun toolchain. */
+/**
+ * The `electrobun` bootstrap installed in the app, which runs Hutch's Electrobun toolchain.
+ * Looked up in the app's node_modules folders only, like a package bin.
+ */
 export function resolveElectrobunCli(root: string): string {
-  const requireFromApp = createRequire(path.join(root, "package.json"));
-  try {
-    const manifest = requireFromApp.resolve("electrobun/package.json");
-    return path.join(path.dirname(manifest), "bin", "electrobun.cjs");
-  } catch {
-    throw Object.assign(
-      new Error(
-        `@farm.js/desktop-electrobun needs the electrobun package in ${root}. Install it next to the adapter, for example:\n  pnpm add -D electrobun`,
-      ),
-      { name: "FarmDesktopError", code: "shell-missing" },
-    );
+  for (let dir = path.resolve(root); ; dir = path.dirname(dir)) {
+    const cli = path.join(dir, "node_modules", "electrobun", "bin", "electrobun.cjs");
+    if (existsSync(cli)) return cli;
+    if (path.dirname(dir) === dir) break;
   }
+  throw Object.assign(
+    new Error(
+      `@farm.js/desktop-electrobun needs the electrobun package in ${root}. Install it next to the adapter, for example:\n  pnpm add -D electrobun`,
+    ),
+    { name: "FarmDesktopError", code: "shell-missing" },
+  );
 }
 
 function runElectrobun(context: DesktopShellContext, args: string[], env?: NodeJS.ProcessEnv) {
