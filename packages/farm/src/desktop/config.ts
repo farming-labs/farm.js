@@ -276,32 +276,44 @@ export function createFarmDesktopContext(
   });
 }
 
-// One call per loaded block: dev resolves config more than once per start, and a restart
-// reloads farm.config, which brings a new function.
-const resolvedBlocks = new WeakMap<object, Map<string, Promise<FarmDesktopUserConfig>>>();
+/** Results of function-valued blocks for one dev session or build. */
+export type FarmDesktopBlockCache = Map<string, Promise<FarmDesktopUserConfig>>;
 
 /**
  * The plain `desktop` block for a context: the static object, or what the function returned.
  * Validated, with errors naming the OS and field.
+ *
+ * With a cache, the function runs once per session: `farm dev` loads farm.config more than once
+ * while it starts, and each load brings a new function with the same source. An edited block has
+ * new source, so it runs again.
  */
 export async function resolveFarmDesktopBlock(
   input: FarmDesktopConfigInput,
   context: FarmDesktopContext,
+  cache?: FarmDesktopBlockCache,
 ): Promise<FarmDesktopUserConfig> {
   if (typeof input !== "function") {
     return validateFarmDesktopConfig(input, context) ?? {};
   }
-  const key = `${context.os}\0${context.mode}\0${context.command}\0${context.profile}\0${context.root}`;
-  let byContext = resolvedBlocks.get(input);
-  if (!byContext) resolvedBlocks.set(input, (byContext = new Map()));
-  let resolved = byContext.get(key);
-  if (!resolved) {
-    resolved = Promise.resolve()
+  const call = () =>
+    Promise.resolve()
       .then(() => input(context))
       .then((value) => validateFarmDesktopConfig(value, context) ?? {});
-    byContext.set(key, resolved);
-    // A failed call is retried on the next resolution (after the app fixes farm.config).
-    resolved.catch(() => byContext.delete(key));
+  if (!cache) return call();
+  const key = [
+    context.os,
+    context.mode,
+    context.command,
+    context.profile,
+    context.root,
+    String(input),
+  ].join("\0");
+  let resolved = cache.get(key);
+  if (!resolved) {
+    resolved = call();
+    cache.set(key, resolved);
+    // A failed call runs again on the next resolution, after the app fixes farm.config.
+    resolved.catch(() => cache.delete(key));
   }
   return resolved;
 }
@@ -341,6 +353,7 @@ export async function createFarmDesktopSetup(
   root: string,
   mode: FarmDesktopContext["mode"],
   options: FarmDesktopSetupOptions,
+  cache?: FarmDesktopBlockCache,
 ): Promise<FarmDesktopSetup | undefined> {
   if (resolveFarmPlatform() !== "desktop") return undefined;
   if (userConfig.desktop === undefined) {
@@ -349,7 +362,7 @@ export async function createFarmDesktopSetup(
     );
   }
   const context = createFarmDesktopContext({ ...options, root, mode });
-  const block = await resolveFarmDesktopBlock(userConfig.desktop, context);
+  const block = await resolveFarmDesktopBlock(userConfig.desktop, context, cache);
   const desktop = resolveFarmDesktopConfig(block, root, context);
   return {
     desktop,
@@ -383,6 +396,7 @@ export async function createFarmDesktopSetup(
 
 /** Called by `farm dev|build --desktop` before any config resolves. */
 export function installFarmDesktopSetup(options: FarmDesktopSetupOptions): void {
+  const cache: FarmDesktopBlockCache = new Map();
   (globalThis as FarmDesktopSetupHost)[FARM_DESKTOP_SETUP] = (userConfig, root, mode) =>
-    createFarmDesktopSetup(userConfig, root, mode, options);
+    createFarmDesktopSetup(userConfig, root, mode, options, cache);
 }

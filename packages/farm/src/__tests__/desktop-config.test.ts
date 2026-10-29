@@ -136,18 +136,22 @@ describe("desktop config", () => {
     expect(fromAsync.desktop).toMatchObject({ name: "Async production", id: "com.example.async" });
   });
 
-  it("passes the context once per loaded block, and only resolved values reach the config", async () => {
+  it("passes the context once per session, and only resolved values reach the config", async () => {
     setPlatform("desktop");
     process.env.FARM_TEST_DESKTOP_FLAG = "on";
     installFarmDesktopSetup({ command: "dev", profile: "beta" });
     const root = await appRoot({ name: "notes" });
     const seen: FarmDesktopContext[] = [];
-    const desktop = (context: FarmDesktopContext) => {
+    // Each farm.config load brings a new function with the same source.
+    const loadBlock = () => (context: FarmDesktopContext) => {
       seen.push(context);
       return { name: `Notes ${context.profile}`, id: `com.example.notes.${context.profile}` };
     };
+    const desktop = loadBlock();
     const first = await resolveConfig({ root, desktop }, "development");
     await resolveConfig({ root, desktop }, "development");
+    // farm.config loaded again during the same start: same source, no second call.
+    await resolveConfig({ root, desktop: loadBlock() }, "development");
     delete process.env.FARM_TEST_DESKTOP_FLAG;
 
     expect(seen).toHaveLength(1);
@@ -167,9 +171,12 @@ describe("desktop config", () => {
     expect(context.env.FARM_TEST_DESKTOP_FLAG).toBe("on");
     expect(Object.isFrozen(context.env)).toBe(true);
     expect(first.desktop).toMatchObject({ name: "Notes beta", id: "com.example.notes.beta" });
-    // A new function (a dev restart reloads farm.config) is called again.
+    // An edited block (new source) runs again, and so does every block in a new session.
     await resolveConfig({ root, desktop: (ctx) => desktop(ctx) }, "development");
     expect(seen).toHaveLength(2);
+    installFarmDesktopSetup({ command: "dev", profile: "beta" });
+    await resolveConfig({ root, desktop }, "development");
+    expect(seen).toHaveLength(3);
   });
 
   it("names the OS and field when a returned block is invalid", async () => {
