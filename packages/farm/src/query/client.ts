@@ -12,7 +12,7 @@ import {
   subscribeHistoryChange,
   writeFarmURLSearchHistory,
 } from "../client/history-sync";
-import { _resolveCurrentRequest } from "../server/request-bridge";
+import { _peekCurrentRequest } from "../server/request-bridge";
 import { emitter, type KeyUpdate } from "./sync";
 export { parseRouteParams, loadRouteParams, type RouteParamsInput } from "./params";
 
@@ -59,7 +59,7 @@ const getCurrentSearchParams = (): URLSearchParams => {
   // Server rendering used to see an empty query string here, so a hook read one
   // value on the server and another in the browser. React reports that as a
   // hydration mismatch and discards the server rendered markup for the branch.
-  const request = _resolveCurrentRequest();
+  const request = _peekCurrentRequest();
   if (!request) return new URLSearchParams();
   try {
     return new URL(request.url).searchParams;

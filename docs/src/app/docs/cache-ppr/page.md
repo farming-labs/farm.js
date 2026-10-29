@@ -122,16 +122,17 @@ Values passed as call arguments already participate in the key, so they do not n
 in `keyParts`.
 
 The cached result is shared by every request, so the function cannot read the request:
-`cookies()`, `headers()`, `getCspNonce()`, `getCurrentRequest()` and a server function's
-`request.headers` throw inside it. Read what you need outside and pass it in as an argument, which
-also puts it in the key:
+`cookies()`, `headers()`, `getCspNonce()`, `getCurrentRequest()`, a server function's
+`request.headers`, Farm Auth's `auth.user()` and `auth.session()`, the server `api` client, and
+integration server clients throw inside it. Read what you need outside and pass it in as an
+argument, which also puts it in the key:
 
 ```ts
 const getCart = unstable_cache(async (userId: string) => db.cart(userId), ["cart"]);
 
 // Outside the cached function, where reading the request is fine:
-const session = await getSession(); // reads cookies()
-const cart = await getCart(session.userId);
+const user = await auth.user({ required: true }); // reads cookies()
+const cart = await getCart(user.id);
 ```
 
 ## Revalidate

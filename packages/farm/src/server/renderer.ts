@@ -54,7 +54,7 @@ import {
   getCurrentRequestOrNull,
   resolveFarmRequestURL,
 } from "./request";
-import { _resolveCurrentCspNonce, _resolveCurrentRequest } from "./request-bridge";
+import { _peekCurrentRequest, _resolveCurrentCspNonce } from "./request-bridge";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
 import { resolveFarmNotFoundComponentPath } from "../not-found";
 import { getFarmAppDirectories } from "../layers";
@@ -1605,7 +1605,7 @@ export class ServerRenderer {
 
       // Metadata runs in the outer request scope and the page in its own, so
       // count reads on both: a render that read the request is per-visitor.
-      const outerRequest = _resolveCurrentRequest();
+      const outerRequest = _peekCurrentRequest();
       const countRequestReads = () =>
         (outerRequest ? _getRequestReadCount(outerRequest) : 0) +
         _getRequestReadCount(currentRequest);

@@ -116,7 +116,17 @@ function getAppRequestView(request: Request): Request {
   return view;
 }
 
-_setCurrentRequestResolver(() => requestStore.getStore());
+_setCurrentRequestResolver(
+  () => {
+    // Auth helpers, the server `api` client, and integration clients read the
+    // visitor's cookies through this resolver.
+    _assertRequestReadAllowed(
+      "A helper that reads the current request (such as auth.user() or the server api client)",
+    );
+    return requestStore.getStore();
+  },
+  () => requestStore.getStore(),
+);
 
 // The CSP nonce of the response being rendered. It is scoped apart from the
 // request because rewrites and middleware replace the Request object while
