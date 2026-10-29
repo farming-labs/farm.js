@@ -48,8 +48,43 @@ pnpm add -D @farm.js/desktop-electrobun
 | `window.title`  | `name`                               |                                                                    |
 | `shell`         | `"electrobun"`                       | Resolves to `@farm.js/desktop-<shell>`, or a package name          |
 
-A web build ignores `desktop`: its output is byte-identical to the same app without the key.
-`--desktop` fails with an actionable message when the key or the shell package is missing.
+A web build checks a static block's shape and otherwise ignores it: Farm removes `desktop` from
+the config module a server bundle imports, so the output is byte-identical to the same app without
+the key. `--desktop` fails with an actionable message when the key or the shell package is missing.
+
+### Function-valued blocks
+
+`desktop` can also be a function, sync or async, that returns the block:
+
+```ts
+export default defineConfig({
+  desktop: async ({ os, mode, command, profile, env, root }) => ({
+    name: profile === "beta" ? "Notes Beta" : "Notes",
+    id: profile === "beta" ? "com.example.notes.beta" : "com.example.notes",
+    window: { width: os === "macos" ? 1100 : 1200, height: 760 },
+  }),
+});
+```
+
+| Field     | Value                                           |
+| --------- | ----------------------------------------------- |
+| `os`      | `"macos"`, `"windows"`, or `"linux"` (the host) |
+| `mode`    | `"development"` or `"production"`               |
+| `command` | `"dev"` or `"build"`                            |
+| `profile` | `--profile <name>`, `"production"` by default   |
+| `env`     | a frozen snapshot of `process.env`              |
+| `root`    | the app root                                    |
+
+The function runs once when `farm dev --desktop` starts and once per `farm build --desktop`. A web
+build never calls it. Only the values it returns reach the generated shell; the function and
+anything it imports never ship, so it may read files, call the network, or use `env`. The returned
+block is validated with errors that name the OS and field, such as
+`desktop (os: windows): window.width must be a whole number of points between 100 and 16384.`
+
+```sh
+farm build --desktop --profile beta
+farm config inspect --desktop --os windows --profile beta   # prints the resolved block
+```
 
 ## Platform and app data
 

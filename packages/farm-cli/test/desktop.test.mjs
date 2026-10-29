@@ -249,11 +249,15 @@ test("a function-valued desktop block is called once per build with the context"
   });
   assert.equal(result.code, 0, result.output);
   assert.match(result.output, /📦 \.farm\/output\/desktop\/dist\/Notes beta\.app\.txt/);
-  const calls = (await readFile(marker, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  const calls = (await readFile(marker, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
   assert.equal(calls.length, 1);
   const { root: calledRoot, ...context } = calls[0];
   assert.deepEqual(context, {
-    os: process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux",
+    os:
+      process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux",
     mode: "production",
     command: "build",
     profile: "beta",
@@ -266,9 +270,19 @@ test("farm dev --desktop calls a function-valued block once per start", async (t
   const marker = path.join(cliRoot, `.tmp-desktop-calls-${process.pid}-dev.log`);
   t.after(() => rm(marker, { force: true }));
   const root = await createApp(t, { config: FUNCTION_CONFIG(marker) });
-  const result = await runFarm(["dev", "--desktop", "--root", root, "--port", String(await freePort())]);
+  const result = await runFarm([
+    "dev",
+    "--desktop",
+    "--root",
+    root,
+    "--port",
+    String(await freePort()),
+  ]);
   assert.equal(result.code, 0, result.output);
-  const calls = (await readFile(marker, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  const calls = (await readFile(marker, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
   assert.deepEqual(
     calls.map(({ mode, command, profile }) => ({ mode, command, profile })),
     [{ mode: "development", command: "dev", profile: "production" }],
@@ -300,7 +314,15 @@ test("farm config inspect --desktop prints the resolved block for an OS and prof
   t.after(() => rm(marker, { force: true }));
   const root = await createApp(t, { config: FUNCTION_CONFIG(marker) });
   const result = await runFarm([
-    "config", "inspect", "--desktop", "--os", "windows", "--profile", "beta", "--root", root,
+    "config",
+    "inspect",
+    "--desktop",
+    "--os",
+    "windows",
+    "--profile",
+    "beta",
+    "--root",
+    root,
   ]);
   assert.equal(result.code, 0, result.output);
   const printed = JSON.parse(result.output.slice(result.output.indexOf("{")));
@@ -320,7 +342,15 @@ test("farm config inspect --desktop prints the resolved block for an OS and prof
     path.join(root, "farm.config.ts"),
     `export default { desktop: ({ os }) => ({ window: { height: os === "linux" ? 1 : 700 } }) };`,
   );
-  const invalid = await runFarm(["config", "inspect", "--desktop", "--os", "linux", "--root", root]);
+  const invalid = await runFarm([
+    "config",
+    "inspect",
+    "--desktop",
+    "--os",
+    "linux",
+    "--root",
+    root,
+  ]);
   assert.notEqual(invalid.code, 0);
   assert.match(invalid.output, /desktop \(os: linux\): window\.height must be a whole number/);
 });

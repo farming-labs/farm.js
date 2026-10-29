@@ -189,7 +189,11 @@ configCommand
       if (!options.desktop) {
         throw new Error("Choose a block to inspect: farm config inspect --desktop.");
       }
-      if (options.command !== undefined && options.command !== "dev" && options.command !== "build") {
+      if (
+        options.command !== undefined &&
+        options.command !== "dev" &&
+        options.command !== "build"
+      ) {
         throw new Error("--command must be dev or build.");
       }
       const { inspectFarmDesktopConfig } = require("../dist/desktop.js");
