@@ -177,6 +177,8 @@ async function resolveDesktopConfig(
   loadEnv?: Parameters<ConfigRuntime["loadConfig"]>[3],
 ): Promise<ResolvedConfig> {
   setFarmPlatform("desktop");
+  // Desktop resolution lives outside resolveConfig, so web server bundles never carry it.
+  runtime.installFarmDesktopSetup();
   const userConfig = await runtime.loadConfig(root, undefined, mode, loadEnv);
   if (!userConfig) {
     throw new FarmDesktopError(
