@@ -327,8 +327,10 @@ A client calling `db.tasks.update({ id: "another-org-row" })` produces a query
 filtered by both the id and the scope, so it matches nothing and returns
 `not_found`. Three consequences follow:
 
-- **Columns named by `where` are server-owned.** They are injected on insert and
-  ignored when a client sends them, so no separate read-only list is needed.
+- **Columns named by `where` are server-owned.** Every field the filter names,
+  including inside `AND`, `OR`, and `NOT`, is ignored when a client sends it,
+  and inserts stamp the filter's values, so no separate read-only list is
+  needed.
 - **Synced rows are scoped too.** A device only holds rows that passed the
   filter, so the local store cannot leak another tenant's data offline.
 - **A writable model with no filter fails the build.** Set `where: false` on a
@@ -355,6 +357,35 @@ same origin contract as server actions: a POST from another site — including a
 simple request that skips the CORS preflight — is rejected with `403` before
 the body is read. A trusted second origin, such as a separate marketing site
 embedding the app, goes in `allowedOrigins`.
+
+### Filter shapes
+
+`where` returns an ORM filter: field values, the operators `eq`, `in`, `not`,
+`contains`, `gt`, `gte`, `lt`, and `lte`, and the combinators `AND`, `OR`, and
+`NOT`. Every read, update, and delete applies the whole filter. Inserts need to
+know the new row's values, so they only work when the filter is plain equality,
+optionally combined with `AND`:
+
+```ts
+// Inserts stamp orgId and ownerId on the new row.
+where: ({ context }) => ({ AND: [{ orgId: context.org.id }, { ownerId: context.user.id }] });
+
+// Reads, updates, and deletes work; inserts are refused, because "own or shared"
+// does not say which owner a new row gets. Insert through a server action.
+where: ({ context }) => ({ OR: [{ ownerId: context.user.id }, { shared: true }] });
+```
+
+Sync fails closed on a filter it cannot enforce. A request returns
+`server_error` (500) before any query runs when the filter:
+
+- gives a field `undefined`, such as `context.user?.id` for a signed-out
+  caller. Use `null` to match rows with no value, or reject the request in
+  middleware.
+- names something that is not a schema field, such as the column name
+  `owner_id` instead of the field `ownerId`.
+- passes an object that is not one of the operators above.
+
+Some drivers would otherwise drop such a condition and return every row.
 
 ## Persistence
 
