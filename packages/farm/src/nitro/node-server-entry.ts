@@ -100,7 +100,9 @@ if (import.meta._websocket) {
 
 // Bun.serve's graceful stop waits for in-flight requests and closes idle keep-alive
 // connections itself.
-const bunServerSource = (desktop: boolean) => `const ws = import.meta._websocket ? wsAdapter({ resolve: resolveWebsocketHooks }) : undefined;
+const bunServerSource = (
+  desktop: boolean,
+) => `const ws = import.meta._websocket ? wsAdapter({ resolve: resolveWebsocketHooks }) : undefined;
 const server = serve({
   manual: true,
   silent: true,
@@ -310,8 +312,8 @@ if (startupSignal) {
 }
 
 ${
-    desktop
-      ? `// The shell picks the address. HOST and PORT from the user's environment never apply.
+  desktop
+    ? `// The shell picks the address. HOST and PORT from the user's environment never apply.
 const cert = undefined;
 const key = undefined;
 const port = options.port ?? 0;
@@ -319,12 +321,12 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) {
   throw new TypeError("[Farm] start() port must be an integer from 0 to 65535.");
 }
 const host = options.host || "127.0.0.1";`
-      : `const cert = process.env.NITRO_SSL_CERT;
+    : `const cert = process.env.NITRO_SSL_CERT;
 const key = process.env.NITRO_SSL_KEY;
 const configuredPort = Number(process.env.NITRO_PORT || process.env.PORT);
 const port = Number.isFinite(configuredPort) && configuredPort > 0 ? configuredPort : 3000;
 const host = process.env.NITRO_HOST || process.env.HOST;`
-  }
+}
 ${node ? nodeServerSource(Boolean(desktop)) : bunServerSource(Boolean(desktop))}
 setupCloseHooks(server);
 trapUnhandledErrors();
@@ -427,8 +429,8 @@ if (import.meta._tasks) {
   startScheduleRunner({ waitUntil: server.waitUntil });
 }
 ${
-    desktop
-      ? `
+  desktop
+    ? `
 const farmDesktopHost = host.includes(":") ? \`[\${host}]\` : host;
 return {
   origin: \`http://\${farmDesktopHost}:\${farmDesktopBoundPort}\`,
@@ -439,8 +441,8 @@ return {
 
 ${DESKTOP_MAIN_SOURCE}
 `
-      : ""
-  }
+    : ""
+}
 export default {};
   `.trim();
 }

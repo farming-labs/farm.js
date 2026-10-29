@@ -37,8 +37,7 @@ export function platform(): FarmPlatform {
  * Server only. A desktop app's bundle is read-only and signed, so never write next to the code.
  */
 export function appDataDir(): string {
-  const dir =
-    platform() === "desktop" ? readEnv(DESKTOP_DATA_DIR_ENV) : readEnv(DATA_DIR_ENV);
+  const dir = platform() === "desktop" ? readEnv(DESKTOP_DATA_DIR_ENV) : readEnv(DATA_DIR_ENV);
   if (!dir) {
     throw new Error(
       platform() === "desktop"

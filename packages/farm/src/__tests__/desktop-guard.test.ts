@@ -60,9 +60,9 @@ describe("desktop guard", () => {
 
   it("rejects a wrong token without consuming the real one", async () => {
     const guard = guardWith();
-    expect(await reason(guard(request(`${FARM_DESKTOP_HANDSHAKE_PATH}?t=${"x".repeat(43)}`)))).toContain(
-      "handshake token",
-    );
+    expect(
+      await reason(guard(request(`${FARM_DESKTOP_HANDSHAKE_PATH}?t=${"x".repeat(43)}`))),
+    ).toContain("handshake token");
     expect(await reason(guard(request(FARM_DESKTOP_HANDSHAKE_PATH)))).toContain("handshake token");
     // HEAD and POST never consume it either.
     expect(
@@ -82,7 +82,9 @@ describe("desktop guard", () => {
   it("answers only requests that carry the session cookie", async () => {
     const guard = guardWith();
     expect(await reason(guard(request("/")))).toContain("own desktop window");
-    expect(await reason(guard(request("/api/notes", { headers: { cookie: "farm_desktop=forged" } })))).toBeDefined();
+    expect(
+      await reason(guard(request("/api/notes", { headers: { cookie: "farm_desktop=forged" } }))),
+    ).toBeDefined();
     expect(
       await reason(
         guard(request("/", { headers: { cookie: `${FARM_DESKTOP_COOKIE}=${SECRET}x` } })),
@@ -128,7 +130,9 @@ describe("desktop guard", () => {
       ).toContain("cross-site");
     }
     for (const site of ["same-origin", "none"]) {
-      expect(guard(request("/", { headers: { ...cookie, "sec-fetch-site": site } }))).toBeUndefined();
+      expect(
+        guard(request("/", { headers: { ...cookie, "sec-fetch-site": site } })),
+      ).toBeUndefined();
     }
   });
 

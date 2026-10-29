@@ -92,7 +92,10 @@ describe("Farm production Node entry", () => {
           ? createFarmNodeServerEntry({ ...options, nodeAdapterModule: "srvx/node", desktop })
           : createFarmBunServerEntry({ ...options, bunAdapterModule: "srvx/bun", desktop });
       const web = create();
-      const source = create({ basePath: "/notes", guardModule: "@farm.js/core/internal/desktop-guard" });
+      const source = create({
+        basePath: "/notes",
+        guardModule: "@farm.js/core/internal/desktop-guard",
+      });
 
       await expect(transform(source, { loader: "js", format: "esm" })).resolves.toBeDefined();
       // platform() must read "desktop" in every module, so the env module comes first.
@@ -117,7 +120,12 @@ describe("Farm production Node entry", () => {
       }
 
       // A web entry carries none of it.
-      for (const marker of ["farmDesktop", "desktop-guard", "farm:ready", "export function start"]) {
+      for (const marker of [
+        "farmDesktop",
+        "desktop-guard",
+        "farm:ready",
+        "export function start",
+      ]) {
         expect(web).not.toContain(marker);
       }
     },

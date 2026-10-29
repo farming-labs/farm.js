@@ -92,7 +92,7 @@ function optionalSize(value: unknown, key: string): number | undefined {
  */
 export function validateFarmDesktopConfig(input: unknown): FarmDesktopUserConfig | undefined {
   if (input === undefined) return undefined;
-  if (!isPlainObject(input)) fail("must be an object, such as { name: \"Notes\" }.");
+  if (!isPlainObject(input)) fail('must be an object, such as { name: "Notes" }.');
   checkKeys(input, DESKTOP_KEYS, "");
   optionalString(input.name, "name");
   const id = optionalString(input.id, "id");
@@ -158,9 +158,7 @@ export function resolveFarmDesktopConfig(
     name,
     id: config.id?.trim() || `local.farm.${slug(name)}`,
     version:
-      config.version?.trim() ||
-      (typeof pkg.version === "string" && pkg.version.trim()) ||
-      "0.0.0",
+      config.version?.trim() || (typeof pkg.version === "string" && pkg.version.trim()) || "0.0.0",
     window: {
       width: config.window?.width ?? 1024,
       height: config.window?.height ?? 768,

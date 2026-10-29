@@ -91,7 +91,9 @@ export interface DesktopShell {
   /** The runtime the shell embeds the Farm server in; selects the `bun` or `node-server` preset. */
   runtime: "bun" | "node";
   /** Shell main process and config, written into `shellDir`. */
-  generateMain(context: DesktopShellContext): DesktopGeneratedFile[] | Promise<DesktopGeneratedFile[]>;
+  generateMain(
+    context: DesktopShellContext,
+  ): DesktopGeneratedFile[] | Promise<DesktopGeneratedFile[]>;
   /** Start the shell with its window on `farm dev`. */
   dev(context: DesktopDevContext): Promise<DesktopDevSession>;
   /** Package the generated shell and server into an app. */
