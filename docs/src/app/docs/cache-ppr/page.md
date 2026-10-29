@@ -123,7 +123,7 @@ in `keyParts`.
 
 The cached result is shared by every request, so the function cannot read the request:
 `cookies()`, `headers()`, `getCspNonce()`, `getCurrentRequest()`, a server function's
-`request.headers`, Farm Auth's `auth.user()` and `auth.session()`, the server `api` client, and
+`request.headers` and `request.clone()` (in a render or an action), Farm Auth's `auth.user()` and `auth.session()`, the server `api` client, and
 integration server clients throw inside it. Read what you need outside and pass it in as an
 argument, which also puts it in the key:
 
