@@ -167,6 +167,11 @@ import type { FarmIslandStrategy } from "../island";
 import { createFarmSourceAlias, mergeFarmProductionViteConfig } from "../server/vite-config";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import { createFarmThemeCssPlugin } from "../theme/vite";
+import {
+  createFarmPrivateClientSourcemapsPlugin,
+  FARM_CLIENT_SOURCEMAPS_DIR,
+  resolveFarmClientSourcemap,
+} from "./client-sourcemaps";
 import { resolveFarmInstrumentationFile } from "../instrumentation";
 import { getFarmPresetRuntime } from "../deployment";
 import { isFarmPreviewDeploymentEnvironment } from "../deployment-environment";
@@ -1979,6 +1984,8 @@ async function buildClient(
         target: FARM_CLIENT_BUILD_TARGET,
         outDir: outputDir,
         emptyOutDir: true,
+        // Never public: see resolveFarmClientSourcemap.
+        sourcemap: resolveFarmClientSourcemap(config.vite?.build?.sourcemap),
         assetsInlineLimit: 0,
         cssCodeSplit: false, // Bundle all CSS into one file
         rollupOptions: {
@@ -2033,6 +2040,9 @@ async function buildClient(
       },
       plugins: [
         createFarmThemeCssPlugin(config.theme, config.basePath),
+        createFarmPrivateClientSourcemapsPlugin({
+          outDir: path.join(path.dirname(outputDir), FARM_CLIENT_SOURCEMAPS_DIR),
+        }),
         createFarmClientModulePreloadPlugin({
           root,
           buildDir: path.dirname(outputDir),

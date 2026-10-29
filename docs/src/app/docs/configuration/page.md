@@ -331,6 +331,12 @@ Farm keeps the options it needs to produce its production output: `root`, `base`
 `build.rollupOptions.input`, and `build.rollupOptions.output`), and any `build`, `define`, or
 `esbuild` value Farm sets for that build. Use `basePath` and `publicDir` in Farm's config instead.
 
+`vite.build.sourcemap` never publishes client source maps. A client map carries the original
+source of each module, including code Farm strips from the browser bundle such as
+`createServerOnlyFn` bodies and `generateMetadata`, so any enabled value builds hidden maps (the
+JS names no map) and writes them to `.farm/client-sourcemaps/` instead of the public output. Upload
+them from there to your error tracker.
+
 During development, Farm loads server modules through Vite's `ssr` environment runner. With
 React Server Components enabled, RSC entries use a separate `rsc` runner and resolution conditions;
 the browser uses `client`. Vite owns runner caching, hot updates, and cleanup when the server closes.
