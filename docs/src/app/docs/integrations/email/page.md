@@ -159,10 +159,13 @@ resend({ templates, allowUnauthenticated: true });
 ```
 
 The recipient (`to`) and template data come from the request body, so `authorize` is where you
-decide who may address mail to whom. The sender and copy fields (`from`, `replyTo`, `cc`, `bcc`)
-come from your template and `defaults` configuration: a request that sets any of them is rejected
-with `400`, so a caller allowed to send a template cannot send it as someone else or copy it to
-extra recipients. To let trusted callers choose them, opt in:
+decide who may address mail to whom. `to` may be an array, so check every recipient there, not
+only the first. The sender, copy, and attachment fields (`from`, `replyTo`, `cc`, `bcc`,
+`attachments`, `tags`, `topicId`) come from your template and `defaults` configuration: a request
+that sets any of them is rejected with `400`, so a caller allowed to send a template cannot send
+it as someone else, copy it to extra recipients, or attach files. Resend fetches an attachment's
+`path` URL itself, so a caller-chosen attachment can pull any URL into your mail. To let trusted
+callers choose these fields, opt in:
 
 ```ts
 resend({ templates, authorize, allowCallerHeaders: true });

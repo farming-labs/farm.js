@@ -102,10 +102,13 @@ export interface ResendIntegrationInput<TTemplates extends EmailTemplates = Emai
   /** Extra trusted origins, using the `serverActions.allowedOrigins` syntax. */
   allowedOrigins?: readonly string[];
   /**
-   * Let callers set `from`, `replyTo`, `cc`, and `bcc` in the request body.
-   * Off by default: those come from the template and `defaults`, and a request
-   * that sets them is rejected, so a caller allowed to send one template
-   * cannot send it as someone else or copy it to extra recipients.
+   * Let callers set `from`, `replyTo`, `cc`, `bcc`, `attachments`, `tags`, and
+   * `topicId` in the request body. Off by default: those come from the template
+   * and `defaults`, and a request that sets them is rejected, so a caller
+   * allowed to send one template cannot send it as someone else, copy it to
+   * extra recipients, or attach files (Resend fetches an attachment `path` URL).
+   * `to` is always the caller's, including an array of recipients: check it in
+   * `authorize`.
    */
   allowCallerHeaders?: boolean;
 }
@@ -174,9 +177,17 @@ async function guardEmailRoute(
   return Response.json({ error: MISSING_EMAIL_AUTHORIZE_ERROR }, { status: 401 });
 }
 
-const CALLER_HEADER_FIELDS = ["from", "replyTo", "cc", "bcc"] as const;
+const CALLER_HEADER_FIELDS = [
+  "from",
+  "replyTo",
+  "cc",
+  "bcc",
+  "attachments",
+  "tags",
+  "topicId",
+] as const;
 
-/** Refuse caller-supplied sender and copy fields unless the app opted in. */
+/** Refuse caller-supplied sender, copy, attachment, and tracking fields unless the app opted in. */
 function rejectCallerHeaders(
   body: Record<string, unknown>,
   input: { allowCallerHeaders?: boolean },

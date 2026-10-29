@@ -50,7 +50,7 @@ test("rejects malformed and non-object JSON before calling Resend", async () => 
   assert.equal(sendCalls, 0);
 });
 
-test("callers cannot set the sender or copy fields unless the app opts in", async () => {
+test("callers cannot set the sender, copy, or attachment fields unless the app opts in", async () => {
   const sent = [];
   const create = (options = {}) =>
     resend({
@@ -88,6 +88,11 @@ test("callers cannot set the sender or copy fields unless the app opts in", asyn
       { replyTo: "attacker@evil.test" },
       { cc: "copy@evil.test" },
       { bcc: "hidden@evil.test" },
+      // Resend fetches an attachment `path` itself and forwards `content` as is.
+      { attachments: [{ filename: "invoice.pdf", path: "https://evil.test/payload.pdf" }] },
+      { attachments: [{ filename: "a.txt", content: "aGk=" }] },
+      { tags: [{ name: "campaign", value: "spoofed" }] },
+      { topicId: "topic_123" },
     ]) {
       const response = await call(integration, path, { ...when, ...field });
       assert.equal(response.status, 400, `${path} should reject ${Object.keys(field)[0]}`);
@@ -101,14 +106,21 @@ test("callers cannot set the sender or copy fields unless the app opts in", asyn
     assert.equal(payload.replyTo, "support@app.test");
     assert.equal(payload.cc, undefined);
     assert.equal(payload.bcc, undefined);
+    assert.equal(payload.attachments, undefined);
+    assert.equal(payload.tags, undefined);
+    assert.equal(payload.topicId, undefined);
   }
 
   sent.length = 0;
   const response = await call(create({ allowCallerHeaders: true }), "/api/email/send", {
     from: "team@app.test",
     bcc: "audit@app.test",
+    attachments: [{ filename: "a.txt", content: "aGk=" }],
+    tags: [{ name: "kind", value: "reset" }],
   });
   assert.equal(response.status, 200);
   assert.equal(sent[0].from, "team@app.test");
   assert.equal(sent[0].bcc, "audit@app.test");
+  assert.deepEqual(sent[0].attachments, [{ filename: "a.txt", content: "aGk=" }]);
+  assert.deepEqual(sent[0].tags, [{ name: "kind", value: "reset" }]);
 });
