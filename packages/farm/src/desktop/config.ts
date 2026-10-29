@@ -8,6 +8,21 @@ export type { FarmPlatform };
 /** Environment variable the CLI sets for `--desktop`. Anything other than "desktop" means web. */
 export const FARM_PLATFORM_ENV = "FARM_PLATFORM";
 
+/** Where `farm dev --desktop` leaves the session for the dev server in the same process. */
+export const FARM_DESKTOP_DEV_SESSION = Symbol.for("@farm.js/core/desktop-dev-session");
+
+export interface FarmDesktopDevSession {
+  secret: string;
+  handshakeToken: string;
+}
+
+/** Called by the CLI before it starts the dev server for `farm dev --desktop`. */
+export function setFarmDesktopDevSession(session: FarmDesktopDevSession | undefined): void {
+  const store = globalThis as Record<PropertyKey, unknown>;
+  if (session) store[FARM_DESKTOP_DEV_SESSION] = session;
+  else delete store[FARM_DESKTOP_DEV_SESSION];
+}
+
 export function resolveFarmPlatform(env: NodeJS.ProcessEnv = process.env): FarmPlatform {
   return env[FARM_PLATFORM_ENV] === "desktop" ? "desktop" : "web";
 }

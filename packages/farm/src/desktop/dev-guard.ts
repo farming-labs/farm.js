@@ -1,15 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ViteDevServer } from "vite";
 import { sendWebResponse } from "../server/response";
+import { FARM_DESKTOP_DEV_SESSION, type FarmDesktopDevSession } from "./config";
 import { createFarmDesktopGuard } from "./guard";
 
-/** Where `farm dev --desktop` leaves the session for the dev server in the same process. */
-export const FARM_DESKTOP_DEV_SESSION = Symbol.for("@farm.js/core/desktop-dev-session");
-
-export interface FarmDesktopDevSession {
-  secret: string;
-  handshakeToken: string;
-}
+export { FARM_DESKTOP_DEV_SESSION };
 
 export function getFarmDesktopDevSession(): FarmDesktopDevSession | undefined {
   return (globalThis as Record<PropertyKey, unknown>)[FARM_DESKTOP_DEV_SESSION] as
