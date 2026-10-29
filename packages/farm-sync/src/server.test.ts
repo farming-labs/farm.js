@@ -106,6 +106,28 @@ describe("resolveSyncModels", () => {
     );
   });
 
+  it("rejects a read-only model with no row filter", () => {
+    // An unfiltered read model would hand every row to any caller.
+    expect(() => resolveSyncModels(schema as any, { tasks: "read" }, undefined, true)).toThrow(
+      /models\.tasks is readable but no row filter is configured/,
+    );
+    expect(() =>
+      resolveSyncModels(schema as any, { tasks: { access: "read" } }, undefined, true),
+    ).toThrow(/no row filter is configured/);
+  });
+
+  it("allows an explicitly public read-only model", () => {
+    const perModel = resolveSyncModels(
+      schema as any,
+      { tasks: { access: "read", where: false } },
+      undefined,
+      true,
+    );
+    expect(perModel.get("tasks")!.where).toBe(false);
+    const global = resolveSyncModels(schema as any, { tasks: "read" }, false, true);
+    expect(global.get("tasks")!.where).toBe(false);
+  });
+
   it("allows an explicit unscoped model", () => {
     const resolved = resolveSyncModels(
       schema as any,

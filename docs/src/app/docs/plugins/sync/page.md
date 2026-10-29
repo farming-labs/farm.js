@@ -333,8 +333,11 @@ filtered by both the id and the scope, so it matches nothing and returns
   needed.
 - **Synced rows are scoped too.** A device only holds rows that passed the
   filter, so the local store cannot leak another tenant's data offline.
-- **A writable model with no filter fails the build.** Set `where: false` on a
-  model to expose every row deliberately.
+- **A model with no filter fails the build**, whether it is `"write"` or
+  `"read"`: an unfiltered read model would hand every row to any caller,
+  signed in or not. Set `where: false` on a model, for example
+  `{ access: "read", where: false }`, to expose every row to every caller
+  deliberately.
 
 The context `where` reads comes from your own middleware, the same kind used by
 server functions:
