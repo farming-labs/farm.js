@@ -4,6 +4,7 @@ export type { FarmProductionViteRuntime } from "./build/production-vite";
 export { logger } from "./utils";
 export {
   getFarmDesktopOutputDirs,
+  installFarmDesktopSetup,
   setFarmDesktopDevSession,
   type FarmDesktopDevSession,
 } from "./desktop/config";

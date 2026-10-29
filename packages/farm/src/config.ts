@@ -101,13 +101,10 @@ import {
 import { isFarmRedirectStatus } from "./navigation-errors";
 import { resolveFarmThemeConfig } from "./theme/config";
 import { resolveFarmAgentConfig, type ResolvedFarmAgentConfig } from "./agent-config";
-import {
-  getFarmDesktopOutputDirs,
-  resolveFarmDesktopConfig,
-  resolveFarmPlatform,
-  validateFarmDesktopConfig,
-  type FarmDesktopUserConfig,
-  type ResolvedFarmDesktopConfig,
+import type {
+  FarmDesktopSetupHost,
+  FarmDesktopUserConfig,
+  ResolvedFarmDesktopConfig,
 } from "./desktop/config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
 import type { OpenAPISecurityMode } from "./openapi/types";
@@ -1081,18 +1078,12 @@ export async function resolveConfig(
   }
 
   const root = userConfig.root || process.cwd();
-  validateFarmDesktopConfig(userConfig.desktop);
-  const desktop =
-    resolveFarmPlatform() === "desktop" ? resolveDesktopForBuild(userConfig, root) : null;
-  // A desktop build is not a deployment: its server runs in the shell, on Bun by default
-  // (the CLI picks node-server for Node shells), whatever deploy.target says.
-  const deploy = desktop
-    ? resolveDeployConfig(userConfig, {
-        preset: "bun",
-        outputDir: getFarmDesktopOutputDirs(userConfig.distDir || ".farm").server,
-        env: {},
-      })
-    : resolveDeployConfig(userConfig);
+  // `farm dev|build --desktop` installs this (desktop/config.ts); a web build never loads it.
+  const desktopSetup = (globalThis as FarmDesktopSetupHost)[
+    Symbol.for("@farm.js/core/desktop-setup")
+  ]?.(userConfig, root);
+  if (desktopSetup) userConfig = desktopSetup.userConfig;
+  const deploy = resolveDeployConfig(userConfig, desktopSetup?.deploy);
   const srcDir = userConfig.srcDir || "src";
   setFarmProjectSourceDir(root, srcDir);
   const docs = await resolveDocsConfig(userConfig.docs, { root, srcDir });
@@ -1182,8 +1173,8 @@ export async function resolveConfig(
       ppr: false,
       ...userConfig.experimental,
     },
-    agent: resolveFarmAgentConfig(userConfig.agent, { docs: docs.enabled, desktop: !!desktop }),
-    desktop,
+    agent: resolveFarmAgentConfig(userConfig.agent, { docs: docs.enabled }),
+    desktop: desktopSetup?.desktop ?? null,
     plugins: [
       ...resolveIntegrationPlugins(integrations),
       ...(nativeMCPPlugin ? [nativeMCPPlugin] : []),
@@ -1199,12 +1190,7 @@ export async function resolveConfig(
       ...(securityHeader ? [{ source: "/*", headers: [securityHeader] }] : []),
     ],
     routeRules,
-    // No image optimizer in a desktop app unless it asks: sharp's native binaries are ~18 MB.
-    images: resolveFarmImageConfig(
-      desktop && userConfig.images?.provider === undefined
-        ? { ...userConfig.images, provider: "none" }
-        : userConfig.images,
-    ),
+    images: resolveFarmImageConfig(userConfig.images),
     performance: resolveFarmPerformanceConfig(userConfig.performance),
     theme: resolveFarmThemeConfig(userConfig.theme, basePath),
     publicDir: userConfig.publicDir || "public",
@@ -1231,18 +1217,6 @@ export async function resolveConfig(
   assertPluginDependencies(resolved.plugins, resolved.integrations as never);
 
   return resolved;
-}
-
-function resolveDesktopForBuild(
-  userConfig: FarmUserConfig,
-  root: string,
-): ResolvedFarmDesktopConfig {
-  if (userConfig.desktop === undefined) {
-    throw new Error(
-      '--desktop needs a `desktop` entry in farm.config.ts, for example `desktop: { name: "Notes" }`.',
-    );
-  }
-  return resolveFarmDesktopConfig(userConfig.desktop, root);
 }
 
 function formatConfigLoadError(error: unknown): string {

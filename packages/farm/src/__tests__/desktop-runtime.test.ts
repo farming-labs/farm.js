@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ViteDevServer } from "vite";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
+import { installFarmDesktopSetup } from "../desktop/config";
 import { FARM_DESKTOP_DEV_SESSION } from "../desktop/dev-guard";
 import { FARM_DESKTOP_COOKIE, FARM_DESKTOP_HANDSHAKE_PATH } from "../desktop/guard";
 import { createServer } from "../server/create-server";
@@ -242,6 +243,7 @@ function waitForLine(
 }
 
 async function buildDesktop(root: string, preset: "bun" | "node-server") {
+  installFarmDesktopSetup();
   process.env.FARM_PLATFORM = "desktop";
   try {
     const config = await resolveConfig(
@@ -259,6 +261,7 @@ describe("farm dev --desktop", () => {
   it("guards pages, APIs, endpoints, agent surfaces, and Vite's own modules", async () => {
     const root = await createApp("farm-desktop-dev-");
     const session = secretPair();
+    installFarmDesktopSetup();
     process.env.FARM_PLATFORM = "desktop";
     process.env.FARM_DESKTOP_DATA_DIR = path.join(root, ".farm", "data", "desktop");
     (globalThis as Record<PropertyKey, unknown>)[FARM_DESKTOP_DEV_SESSION] = session;

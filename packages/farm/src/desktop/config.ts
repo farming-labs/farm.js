@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 
+import type { FarmDeployConfig, FarmUserConfig } from "../config";
 import type { FarmPlatform } from "../platform";
 
 export type { FarmPlatform };
@@ -200,4 +201,74 @@ export function getFarmDesktopOutputDirs(distDir: string): {
     dist: path.join(root, "dist"),
     devData: path.join(distDir, "data", "desktop"),
   };
+}
+
+/** What the desktop setup hands back to `resolveConfig`. */
+export interface FarmDesktopSetup {
+  desktop: ResolvedFarmDesktopConfig;
+  userConfig: FarmUserConfig;
+  deploy: {
+    preset: NonNullable<FarmDeployConfig["preset"]>;
+    outputDir: string;
+    env: NodeJS.ProcessEnv;
+  };
+}
+
+/** @internal `resolveConfig` reads the setup from this global, so web builds carry none of it. */
+export type FarmDesktopSetupHost = typeof globalThis & {
+  [key: symbol]:
+    | ((userConfig: FarmUserConfig, root: string) => FarmDesktopSetup | undefined)
+    | undefined;
+};
+
+const FARM_DESKTOP_SETUP = Symbol.for("@farm.js/core/desktop-setup");
+
+/**
+ * Desktop resolution for a `--desktop` dev session or build: fills in `desktop`, turns off the
+ * public-site features a local app cannot use (unless the app sets them), drops the image
+ * optimizer (sharp's native binaries are ~18 MB), and builds the server for the shell instead of
+ * `deploy.target`. Returns undefined on the web.
+ */
+export function createFarmDesktopSetup(
+  userConfig: FarmUserConfig,
+  root: string,
+): FarmDesktopSetup | undefined {
+  if (resolveFarmPlatform() !== "desktop") return undefined;
+  if (userConfig.desktop === undefined) {
+    throw new Error(
+      '--desktop needs a `desktop` entry in farm.config.ts, for example `desktop: { name: "Notes" }`.',
+    );
+  }
+  const desktop = resolveFarmDesktopConfig(userConfig.desktop, root);
+  return {
+    desktop,
+    userConfig: {
+      ...userConfig,
+      agent: {
+        jsonLd: false,
+        llmsTxt: false,
+        sitemap: false,
+        aiCatalog: false,
+        manifest: false,
+        mcp: false,
+        ...userConfig.agent,
+      },
+      images:
+        userConfig.images?.provider === undefined
+          ? { ...userConfig.images, provider: "none" }
+          : userConfig.images,
+    },
+    // On Bun by default; the CLI picks node-server for shells that embed Node. A platform
+    // build environment (VERCEL=1) must not move it either.
+    deploy: {
+      preset: "bun",
+      outputDir: getFarmDesktopOutputDirs(userConfig.distDir || ".farm").server,
+      env: {},
+    },
+  };
+}
+
+/** Called by `farm dev|build --desktop` before any config resolves. */
+export function installFarmDesktopSetup(): void {
+  (globalThis as FarmDesktopSetupHost)[FARM_DESKTOP_SETUP] = createFarmDesktopSetup;
 }

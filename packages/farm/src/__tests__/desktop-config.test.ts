@@ -5,7 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveConfig, type FarmUserConfig, type ResolvedFarmConfig } from "../config";
-import { resolveFarmDesktopConfig, validateFarmDesktopConfig } from "../desktop/config";
+import {
+  installFarmDesktopSetup,
+  resolveFarmDesktopConfig,
+  validateFarmDesktopConfig,
+} from "../desktop/config";
 import { appDataDir, platform } from "../platform";
 import { farmServerOnlyEntriesPlugin } from "../vite";
 
@@ -24,7 +28,11 @@ function setPlatform(value: string | undefined) {
   else process.env.FARM_PLATFORM = value;
 }
 
-beforeEach(() => setPlatform(undefined));
+beforeEach(() => {
+  setPlatform(undefined);
+  // What `farm dev|build --desktop` does first. It changes nothing until FARM_PLATFORM says desktop.
+  installFarmDesktopSetup();
+});
 afterEach(async () => {
   setPlatform(previousPlatform);
   delete process.env.FARM_DESKTOP_DATA_DIR;
@@ -76,7 +84,8 @@ describe("desktop config", () => {
     });
   });
 
-  it("fails a web build on a malformed desktop key", async () => {
+  it("fails a desktop build on a malformed desktop key", async () => {
+    setPlatform("desktop");
     const root = await appRoot();
     await expect(
       resolveConfig({ root, desktop: { window: { height: -1 } } } as FarmUserConfig, "production"),
