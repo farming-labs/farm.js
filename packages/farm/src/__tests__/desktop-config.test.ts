@@ -4,7 +4,15 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resolveConfig, type FarmUserConfig, type ResolvedFarmConfig } from "../config";
+import {
+  resolveConfig,
+  type FarmDesktopContext,
+  type FarmUserConfig,
+  type ResolvedFarmConfig,
+} from "../config";
+import { createServer } from "../server/create-server";
+import { stripPlatformConfigSource } from "../build/strip-platform-config";
+import { parseAst } from "rolldown/parseAst";
 import {
   installFarmDesktopSetup,
   resolveFarmDesktopConfig,
@@ -31,12 +39,13 @@ function setPlatform(value: string | undefined) {
 beforeEach(() => {
   setPlatform(undefined);
   // What `farm dev|build --desktop` does first. It changes nothing until FARM_PLATFORM says desktop.
-  installFarmDesktopSetup();
+  installFarmDesktopSetup({ command: "build" });
 });
 afterEach(async () => {
   setPlatform(previousPlatform);
   delete process.env.FARM_DESKTOP_DATA_DIR;
   delete process.env.FARM_DATA_DIR;
+  delete process.env.FARM_TEST_DESKTOP_FLAG;
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
 });
 
@@ -102,6 +111,152 @@ describe("desktop config", () => {
     );
     expect(withDesktop.desktop).toBeNull();
     expect(fingerprint(withDesktop)).toBe(fingerprint(without));
+  });
+
+  it("resolves a static block, a sync function, and an async function", async () => {
+    setPlatform("desktop");
+    const root = await appRoot({ name: "notes" });
+    const fromStatic = await resolveConfig({ root, desktop: { name: "Static" } }, "production");
+    expect(fromStatic.desktop?.name).toBe("Static");
+    const fromSync = await resolveConfig(
+      { root, desktop: () => ({ name: "Sync", window: { width: 800 } }) },
+      "production",
+    );
+    expect(fromSync.desktop).toMatchObject({ name: "Sync", window: { width: 800, height: 768 } });
+    const fromAsync = await resolveConfig(
+      {
+        root,
+        desktop: async ({ profile }) => {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return { name: `Async ${profile}`, id: "com.example.async" };
+        },
+      },
+      "production",
+    );
+    expect(fromAsync.desktop).toMatchObject({ name: "Async production", id: "com.example.async" });
+  });
+
+  it("passes the context once per loaded block, and only resolved values reach the config", async () => {
+    setPlatform("desktop");
+    process.env.FARM_TEST_DESKTOP_FLAG = "on";
+    installFarmDesktopSetup({ command: "dev", profile: "beta" });
+    const root = await appRoot({ name: "notes" });
+    const seen: FarmDesktopContext[] = [];
+    const desktop = (context: FarmDesktopContext) => {
+      seen.push(context);
+      return { name: `Notes ${context.profile}`, id: `com.example.notes.${context.profile}` };
+    };
+    const first = await resolveConfig({ root, desktop }, "development");
+    await resolveConfig({ root, desktop }, "development");
+    delete process.env.FARM_TEST_DESKTOP_FLAG;
+
+    expect(seen).toHaveLength(1);
+    const [context] = seen;
+    expect(context).toMatchObject({
+      os:
+        process.platform === "darwin"
+          ? "macos"
+          : process.platform === "win32"
+            ? "windows"
+            : "linux",
+      mode: "development",
+      command: "dev",
+      profile: "beta",
+      root,
+    });
+    expect(context.env.FARM_TEST_DESKTOP_FLAG).toBe("on");
+    expect(Object.isFrozen(context.env)).toBe(true);
+    expect(first.desktop).toMatchObject({ name: "Notes beta", id: "com.example.notes.beta" });
+    // A new function (a dev restart reloads farm.config) is called again.
+    await resolveConfig({ root, desktop: (ctx) => desktop(ctx) }, "development");
+    expect(seen).toHaveLength(2);
+  });
+
+  it("names the OS and field when a returned block is invalid", async () => {
+    setPlatform("desktop");
+    installFarmDesktopSetup({ command: "build", os: "windows" });
+    const root = await appRoot();
+    await expect(
+      resolveConfig({ root, desktop: () => ({ window: { width: 5 } }) }, "production"),
+    ).rejects.toThrow("desktop (os: windows): window.width must be a whole number");
+    await expect(
+      resolveConfig({ root, desktop: async () => ({ nmae: "x" }) as never }, "production"),
+    ).rejects.toThrow("desktop (os: windows): unknown option nmae");
+    await expect(
+      resolveConfig({ root, desktop: () => null as never }, "production"),
+    ).rejects.toThrow("desktop (os: windows): the function must return an object");
+    await expect(
+      resolveConfig(
+        {
+          root,
+          desktop: () => {
+            throw new Error("no signing identity");
+          },
+        },
+        "production",
+      ),
+    ).rejects.toThrow("no signing identity");
+    expect(() => installFarmDesktopSetup({ command: "build", os: "beos" as never })).not.toThrow();
+    await expect(resolveConfig({ root, desktop: {} }, "production")).rejects.toThrow(
+      /--os must be macos, windows, or linux/,
+    );
+  });
+
+  it("never calls a function-valued block on the web", async () => {
+    const root = await appRoot();
+    let calls = 0;
+    const desktop = () => {
+      calls += 1;
+      return { name: "Notes" };
+    };
+    const config = await resolveConfig({ root, desktop }, "production");
+    expect(config.desktop).toBeNull();
+    expect(calls).toBe(0);
+  });
+
+  it("fails web dev on a malformed static block, without calling a function", async () => {
+    const root = await appRoot();
+    await fs.writeFile(
+      path.join(root, "farm.config.ts"),
+      'export default { desktop: { window: { width: "wide" } } };',
+    );
+    await expect(createServer({ root })).rejects.toThrow(/desktop: window.width must be/);
+  });
+
+  it("strips the desktop entry from the config a server bundle imports", () => {
+    const parse = (code: string) => parseAst(code);
+    expect(
+      stripPlatformConfigSource(
+        `import { readFileSync } from "node:fs";
+export default defineConfig({ plugins: [a], desktop: async ({ root }) => ({ name: readFileSync(root) }), images: {} });`,
+        parse,
+      ),
+    ).toBe(`import { readFileSync } from "node:fs";
+export default defineConfig({ plugins: [a], images: {} });`);
+    expect(
+      stripPlatformConfigSource(`export default { a: 1, desktop: { name: "x" } };`, parse),
+    ).toBe("export default { a: 1 };");
+    expect(stripPlatformConfigSource(`export default { "desktop": {}, };`, parse)).toBe(
+      "export default {  };",
+    );
+    expect(
+      stripPlatformConfigSource(
+        `const c = farm.defineConfig({ desktop, x }); export default c;`,
+        parse,
+      ),
+    ).toBe("const c = farm.defineConfig({ x }); export default c;");
+    expect(
+      stripPlatformConfigSource(
+        `import type { FarmDesktopContext } from "@farm.js/core";
+export default defineConfig({ desktop: (ctx: FarmDesktopContext) => ({ name: ctx.os }) as const, plugins: [] satisfies unknown[] });`,
+        (code) => parseAst(code, { lang: "ts" }),
+      ),
+    ).toBe(`import type { FarmDesktopContext } from "@farm.js/core";
+export default defineConfig({ plugins: [] satisfies unknown[] });`);
+    // Nested desktop keys belong to something else.
+    expect(
+      stripPlatformConfigSource(`export default { theme: { desktop: 1 } };`, parse),
+    ).toBeNull();
   });
 
   it("needs a desktop key for --desktop", async () => {

@@ -102,8 +102,8 @@ import { isFarmRedirectStatus } from "./navigation-errors";
 import { resolveFarmThemeConfig } from "./theme/config";
 import { resolveFarmAgentConfig, type ResolvedFarmAgentConfig } from "./agent-config";
 import type {
+  FarmDesktopConfigInput,
   FarmDesktopSetupHost,
-  FarmDesktopUserConfig,
   ResolvedFarmDesktopConfig,
 } from "./desktop/config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
@@ -140,6 +140,8 @@ export type {
 } from "./types";
 export type { FarmWorkflowsResolvedConfig, FarmWorkflowsUserConfig } from "./workflows";
 export type {
+  FarmDesktopConfigInput,
+  FarmDesktopContext,
   FarmDesktopUserConfig,
   FarmDesktopWindowConfig,
   ResolvedFarmDesktopConfig,
@@ -367,10 +369,11 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   preset?: BaseFarmConfig["preset"];
   deploy?: FarmDeployConfig;
   /**
-   * The native desktop app `farm dev --desktop` and `farm build --desktop` produce. A web build
-   * ignores it.
+   * The native desktop app `farm dev --desktop` and `farm build --desktop` produce: a block, or a
+   * function of `{ os, mode, command, profile, env, root }` that returns one. A web build checks
+   * a static block's shape, never calls the function, and ships neither.
    */
-  desktop?: FarmDesktopUserConfig;
+  desktop?: FarmDesktopConfigInput;
   docs?: FarmDocsUserConfig;
   md?: FarmMarkdownUserConfig | boolean;
   mdx?: FarmMdxUserConfig;
@@ -1079,9 +1082,9 @@ export async function resolveConfig(
 
   const root = userConfig.root || process.cwd();
   // `farm dev|build --desktop` installs this (desktop/config.ts); a web build never loads it.
-  const desktopSetup = (globalThis as FarmDesktopSetupHost)[
+  const desktopSetup = await (globalThis as FarmDesktopSetupHost)[
     Symbol.for("@farm.js/core/desktop-setup")
-  ]?.(userConfig, root);
+  ]?.(userConfig, root, mode);
   if (desktopSetup) userConfig = desktopSetup.userConfig;
   const deploy = resolveDeployConfig(userConfig, desktopSetup?.deploy);
   const srcDir = userConfig.srcDir || "src";

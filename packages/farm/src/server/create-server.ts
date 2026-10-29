@@ -1,5 +1,6 @@
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import type { ViteDevServer } from "vite";
+import { resolveFarmPlatform, validateFarmDesktopConfig } from "../desktop/config";
 import type { FarmConfig } from "../types";
 import { farmI18nClientBridgePlugin, farmPlugin, farmServerOnlyEntriesPlugin } from "../vite";
 import { logger } from "../utils";
@@ -213,6 +214,15 @@ async function resolveInlineConfig(
 }
 
 /**
+ * A web session still catches a malformed static `desktop` block. A function-valued block is
+ * only called by `--desktop`.
+ */
+function checkWebDesktopBlock(desktop: unknown): void {
+  if (desktop === undefined || typeof desktop === "function") return;
+  if (resolveFarmPlatform() === "web") validateFarmDesktopConfig(desktop);
+}
+
+/**
  * Create a Vite development server with Farm.js integration
  */
 export async function createServer(
@@ -239,6 +249,7 @@ export async function createServer(
     // Load farm.config.ts if it exists
     const mode = process.env.NODE_ENV === "production" ? "production" : "development";
     const userConfig = await loadConfig(root, undefined, mode);
+    checkWebDesktopBlock(userConfig?.desktop);
     // experimental.serverComponents: the RSC pipeline serves the app instead of Farm's renderer.
     const rscConfig = userConfig ?? config;
     if (resolveFarmServerComponentsMode(rscConfig.experimental?.serverComponents)) {

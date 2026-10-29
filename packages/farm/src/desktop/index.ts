@@ -5,6 +5,8 @@
 import type { ResolvedFarmDesktopConfig } from "./config";
 
 export type {
+  FarmDesktopConfigInput,
+  FarmDesktopContext,
   FarmDesktopUserConfig,
   FarmDesktopWindowConfig,
   ResolvedFarmDesktopConfig,

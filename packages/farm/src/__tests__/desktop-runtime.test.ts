@@ -243,7 +243,7 @@ function waitForLine(
 }
 
 async function buildDesktop(root: string, preset: "bun" | "node-server") {
-  installFarmDesktopSetup();
+  installFarmDesktopSetup({ command: "build" });
   process.env.FARM_PLATFORM = "desktop";
   try {
     const config = await resolveConfig(
@@ -261,7 +261,7 @@ describe("farm dev --desktop", () => {
   it("guards pages, APIs, endpoints, agent surfaces, and Vite's own modules", async () => {
     const root = await createApp("farm-desktop-dev-");
     const session = secretPair();
-    installFarmDesktopSetup();
+    installFarmDesktopSetup({ command: "dev" });
     process.env.FARM_PLATFORM = "desktop";
     process.env.FARM_DESKTOP_DATA_DIR = path.join(root, ".farm", "data", "desktop");
     (globalThis as Record<PropertyKey, unknown>)[FARM_DESKTOP_DEV_SESSION] = session;
@@ -371,9 +371,17 @@ async function outputManifest(dir: string): Promise<Record<string, string>> {
 }
 
 describe("a web build", () => {
-  it("is byte-identical with or without a desktop key and carries no desktop code", async () => {
+  it("is byte-identical with or without a desktop block and carries no desktop code", async () => {
+    // A runtime plugin, so the server bundle imports farm.config itself.
+    const webConfig = (desktop: string) => `import { definePlugin } from "@farm.js/core";
+import { readFileSync } from "node:fs";
+export default {
+  telemetry: false,
+  deploymentId: "fixed",
+  plugins: [definePlugin({ name: "test:runtime", runtime: { cache: "public", before() {} } })],${desktop}
+};`;
     const files = {
-      "farm.config.ts": `export default { telemetry: false, deploymentId: "fixed" };`,
+      "farm.config.ts": webConfig(""),
       "src/app/layout.tsx": APP_FILES["src/app/layout.tsx"],
       "src/app/page.tsx": APP_FILES["src/app/page.tsx"],
       "src/app/api/data/route.ts": `import { platform } from "@farm.js/core/platform";
@@ -395,10 +403,21 @@ export function GET() { return Response.json({ platform: platform() }); }`,
     const without = await buildWeb();
     await fs.writeFile(
       path.join(root, "farm.config.ts"),
-      `export default { telemetry: false, deploymentId: "fixed", desktop: { name: "Notes", window: { width: 900 } } };`,
+      webConfig(`\n  desktop: { name: "DESKTOP_STATIC_MARKER", window: { width: 900 } },`),
     );
-    const withDesktop = await buildWeb();
-    expect(withDesktop).toEqual(without);
+    expect(await buildWeb()).toEqual(without);
+    const calledMarker = path.join(root, "desktop-fn-called");
+    await fs.writeFile(
+      path.join(root, "farm.config.ts"),
+      webConfig(`
+  desktop: async ({ root, profile }) => {
+    (await import("node:fs")).writeFileSync(${JSON.stringify(calledMarker)}, "called");
+    return { name: "DESKTOP_FN_MARKER " + profile, version: JSON.parse(readFileSync(root + "/package.json", "utf8")).version };
+  },`),
+    );
+    expect(await buildWeb()).toEqual(without);
+    // A web build never calls the function.
+    await expect(fs.stat(calledMarker)).rejects.toThrow();
 
     const serverDir = path.join(root, ".farm", ".output", "server");
     const offenders: string[] = [];
@@ -408,7 +427,13 @@ export function GET() { return Response.json({ platform: platform() }); }`,
       // Core's own dist is traced into node_modules as a package, not app server code.
       if (file.includes(`${path.sep}node_modules${path.sep}`)) continue;
       const source = await fs.readFile(file, "utf8");
-      for (const marker of ["createFarmDesktopGuard", "__farm/desktop", "farm:ready"]) {
+      for (const marker of [
+        "createFarmDesktopGuard",
+        "__farm/desktop",
+        "farm:ready",
+        "DESKTOP_FN_MARKER",
+        "DESKTOP_STATIC_MARKER",
+      ]) {
         if (source.includes(marker)) offenders.push(`${path.relative(serverDir, file)}: ${marker}`);
       }
     }

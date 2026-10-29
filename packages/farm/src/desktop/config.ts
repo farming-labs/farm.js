@@ -55,6 +55,27 @@ export interface FarmDesktopUserConfig {
   shell?: "electrobun" | (string & {});
 }
 
+/** What a function-valued `desktop` block receives. Resolved once per dev start or build. */
+export interface FarmDesktopContext {
+  /** The OS the app is built for. Builds target the host OS. */
+  os: "macos" | "windows" | "linux";
+  mode: "development" | "production";
+  command: "dev" | "build";
+  /** `--profile`, `"production"` by default. */
+  profile: string;
+  env: Readonly<Record<string, string | undefined>>;
+  /** App root. */
+  root: string;
+}
+
+/**
+ * `desktop` in farm.config: a static block, or a function of the platform context that returns
+ * one. The function runs in the CLI only; its code never reaches a server or browser bundle.
+ */
+export type FarmDesktopConfigInput =
+  | FarmDesktopUserConfig
+  | ((context: FarmDesktopContext) => FarmDesktopUserConfig | Promise<FarmDesktopUserConfig>);
+
 export interface ResolvedFarmDesktopConfig {
   name: string;
   id: string;
@@ -72,8 +93,10 @@ const APP_ID = /^[A-Za-z][A-Za-z0-9-]*(?:\.[A-Za-z0-9][A-Za-z0-9-]*)+$/;
 const SHELL_NAME = /^[a-z][a-z0-9-]*$/;
 const SHELL_PACKAGE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 
+let failPrefix = "desktop";
+
 function fail(message: string): never {
-  throw new TypeError(`desktop: ${message}`);
+  throw new TypeError(`${failPrefix}: ${message}`);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -103,12 +126,22 @@ function optionalSize(value: unknown, key: string): number | undefined {
 }
 
 /**
- * Check the shape of `desktop` in farm.config. Runs for every build, so a typo fails a web build
- * too, but resolves nothing: a web build never reads package.json or picks a shell for it.
+ * Check a `desktop` block. Web builds check a static block this way (a function-valued block is
+ * not called there); desktop builds check the value a function returned, naming the OS.
  */
-export function validateFarmDesktopConfig(input: unknown): FarmDesktopUserConfig | undefined {
+export function validateFarmDesktopConfig(
+  input: unknown,
+  context?: Pick<FarmDesktopContext, "os">,
+): FarmDesktopUserConfig | undefined {
+  failPrefix = context ? `desktop (os: ${context.os})` : "desktop";
   if (input === undefined) return undefined;
-  if (!isPlainObject(input)) fail('must be an object, such as { name: "Notes" }.');
+  if (!isPlainObject(input)) {
+    fail(
+      context
+        ? 'the function must return an object, such as { name: "Notes" }.'
+        : 'must be an object, such as { name: "Notes" }, or a function that returns one.',
+    );
+  }
   checkKeys(input, DESKTOP_KEYS, "");
   optionalString(input.name, "name");
   const id = optionalString(input.id, "id");
@@ -158,11 +191,13 @@ export function resolveFarmDesktopShellPackage(shell: string): string {
 }
 
 /** Fill in `desktop` defaults for a desktop dev session or build. */
+/** Fill in defaults for an already resolved (static or returned) `desktop` block. */
 export function resolveFarmDesktopConfig(
   input: FarmDesktopUserConfig | undefined,
   root: string,
+  context?: Pick<FarmDesktopContext, "os">,
 ): ResolvedFarmDesktopConfig {
-  const config = validateFarmDesktopConfig(input) ?? {};
+  const config = validateFarmDesktopConfig(input, context) ?? {};
   const pkg = readPackageJson(root);
   const packageName =
     (typeof pkg.productName === "string" && pkg.productName.trim()) ||
@@ -203,6 +238,74 @@ export function getFarmDesktopOutputDirs(distDir: string): {
   };
 }
 
+export function getFarmHostDesktopOS(
+  platform: NodeJS.Platform = process.platform,
+): FarmDesktopContext["os"] {
+  return platform === "darwin" ? "macos" : platform === "win32" ? "windows" : "linux";
+}
+
+export interface FarmDesktopSetupOptions {
+  command: FarmDesktopContext["command"];
+  /** `--profile`; defaults to `"production"`. */
+  profile?: string;
+  /** Target OS; defaults to the host. `farm config inspect --os` sets another one. */
+  os?: FarmDesktopContext["os"];
+}
+
+const DESKTOP_OS = new Set(["macos", "windows", "linux"]);
+
+/** The context a function-valued block receives. `env` is a frozen snapshot. */
+export function createFarmDesktopContext(
+  options: FarmDesktopSetupOptions & { root: string; mode: FarmDesktopContext["mode"] },
+): FarmDesktopContext {
+  const os = options.os ?? getFarmHostDesktopOS();
+  if (!DESKTOP_OS.has(os)) {
+    throw new TypeError(`--os must be macos, windows, or linux, got "${os}".`);
+  }
+  const profile = options.profile ?? "production";
+  if (typeof profile !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(profile)) {
+    throw new TypeError(`--profile must be a name such as "beta", got "${String(profile)}".`);
+  }
+  return Object.freeze({
+    os,
+    mode: options.mode,
+    command: options.command,
+    profile,
+    env: Object.freeze({ ...process.env }),
+    root: options.root,
+  });
+}
+
+// One call per loaded block: dev resolves config more than once per start, and a restart
+// reloads farm.config, which brings a new function.
+const resolvedBlocks = new WeakMap<object, Map<string, Promise<FarmDesktopUserConfig>>>();
+
+/**
+ * The plain `desktop` block for a context: the static object, or what the function returned.
+ * Validated, with errors naming the OS and field.
+ */
+export async function resolveFarmDesktopBlock(
+  input: FarmDesktopConfigInput,
+  context: FarmDesktopContext,
+): Promise<FarmDesktopUserConfig> {
+  if (typeof input !== "function") {
+    return validateFarmDesktopConfig(input, context) ?? {};
+  }
+  const key = `${context.os}\0${context.mode}\0${context.command}\0${context.profile}\0${context.root}`;
+  let byContext = resolvedBlocks.get(input);
+  if (!byContext) resolvedBlocks.set(input, (byContext = new Map()));
+  let resolved = byContext.get(key);
+  if (!resolved) {
+    resolved = Promise.resolve()
+      .then(() => input(context))
+      .then((value) => validateFarmDesktopConfig(value, context) ?? {});
+    byContext.set(key, resolved);
+    // A failed call is retried on the next resolution (after the app fixes farm.config).
+    resolved.catch(() => byContext.delete(key));
+  }
+  return resolved;
+}
+
 /** What the desktop setup hands back to `resolveConfig`. */
 export interface FarmDesktopSetup {
   desktop: ResolvedFarmDesktopConfig;
@@ -217,7 +320,11 @@ export interface FarmDesktopSetup {
 /** @internal `resolveConfig` reads the setup from this global, so web builds carry none of it. */
 export type FarmDesktopSetupHost = typeof globalThis & {
   [key: symbol]:
-    | ((userConfig: FarmUserConfig, root: string) => FarmDesktopSetup | undefined)
+    | ((
+        userConfig: FarmUserConfig,
+        root: string,
+        mode: FarmDesktopContext["mode"],
+      ) => Promise<FarmDesktopSetup | undefined>)
     | undefined;
 };
 
@@ -229,21 +336,27 @@ const FARM_DESKTOP_SETUP = Symbol.for("@farm.js/core/desktop-setup");
  * optimizer (sharp's native binaries are ~18 MB), and builds the server for the shell instead of
  * `deploy.target`. Returns undefined on the web.
  */
-export function createFarmDesktopSetup(
+export async function createFarmDesktopSetup(
   userConfig: FarmUserConfig,
   root: string,
-): FarmDesktopSetup | undefined {
+  mode: FarmDesktopContext["mode"],
+  options: FarmDesktopSetupOptions,
+): Promise<FarmDesktopSetup | undefined> {
   if (resolveFarmPlatform() !== "desktop") return undefined;
   if (userConfig.desktop === undefined) {
     throw new Error(
       '--desktop needs a `desktop` entry in farm.config.ts, for example `desktop: { name: "Notes" }`.',
     );
   }
-  const desktop = resolveFarmDesktopConfig(userConfig.desktop, root);
+  const context = createFarmDesktopContext({ ...options, root, mode });
+  const block = await resolveFarmDesktopBlock(userConfig.desktop, context);
+  const desktop = resolveFarmDesktopConfig(block, root, context);
   return {
     desktop,
     userConfig: {
       ...userConfig,
+      // Only the resolved block goes on; the function stays in the CLI.
+      desktop: block,
       agent: {
         jsonLd: false,
         llmsTxt: false,
@@ -269,6 +382,7 @@ export function createFarmDesktopSetup(
 }
 
 /** Called by `farm dev|build --desktop` before any config resolves. */
-export function installFarmDesktopSetup(): void {
-  (globalThis as FarmDesktopSetupHost)[FARM_DESKTOP_SETUP] = createFarmDesktopSetup;
+export function installFarmDesktopSetup(options: FarmDesktopSetupOptions): void {
+  (globalThis as FarmDesktopSetupHost)[FARM_DESKTOP_SETUP] = (userConfig, root, mode) =>
+    createFarmDesktopSetup(userConfig, root, mode, options);
 }

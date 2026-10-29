@@ -144,6 +144,7 @@ import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "..
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { buildFarmVercelRoutes } from "./vercel-assets";
 import { createFarmNetlifyEntry, resolveNitroNetlifyEntry } from "./netlify-entry";
+import { farmStripPlatformConfigPlugin } from "../build/strip-platform-config";
 import {
   createFarmBunServerEntry,
   createFarmNodeServerEntry,
@@ -5178,6 +5179,16 @@ async function buildSSRInMemory(
         farmServerOnlyEntriesPlugin(),
         farmPlugin({ ...config, isolatedClientBoundaryModules }, pluginManager),
         farmEnvironmentFunctionsPlugin(config),
+        ...(hasRuntimeConfigModule
+          ? [
+              farmStripPlatformConfigPlugin(
+                [
+                  configModulePath,
+                  ...(config.layers || []).map((layer) => layer.configFile),
+                ].filter((file): file is string => Boolean(file)),
+              ),
+            ]
+          : []),
         {
           name: "farm-virtual-ssr-entry",
           resolveId(id) {
