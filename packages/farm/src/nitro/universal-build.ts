@@ -425,13 +425,26 @@ function resolveNitroRuntimeDependency(root: string, specifier: string): string 
 }
 
 function resolveNitroInternalRuntimeAliases(root: string): Record<string, string> {
-  const runtimeDir = path.dirname(resolveNitroPackageEntry(root));
-  return Object.fromEntries(
-    ["app", "error/hooks", "runtime-config", "shutdown", "task"].map((moduleName) => [
-      `#nitro/runtime/${moduleName}`,
-      path.join(runtimeDir, "internal", `${moduleName}.mjs`).split(path.sep).join("/"),
-    ]),
-  );
+  const nitroEntry = resolveNitroPackageEntry(root);
+  const runtimeDir = path.dirname(nitroEntry);
+  const nitroRequire = createRequire(nitroEntry);
+  return {
+    ...Object.fromEntries(
+      ["app", "error/hooks", "runtime-config", "shutdown", "task"].map((moduleName) => [
+        `#nitro/runtime/${moduleName}`,
+        path.join(runtimeDir, "internal", `${moduleName}.mjs`).split(path.sep).join("/"),
+      ]),
+    ),
+    // Farm's generated workflow and cron wrappers live under `.farm/` and
+    // import these. An app that only depends on @farm.js/core (pnpm) cannot
+    // resolve them from there, and an unresolved id ships as a bare import.
+    ...Object.fromEntries(
+      ["nitro/app", "nitro/h3", "nitro/task"].map((specifier) => [
+        specifier,
+        nitroRequire.resolve(specifier).split(path.sep).join("/"),
+      ]),
+    ),
+  };
 }
 
 /**
@@ -11076,7 +11089,11 @@ function toFarmNodeResponse(request, response) {
       ...farmWorkflows.tasks,
       ...farmCron.tasks,
     },
-    scheduledTasks: isVercel ? farmWorkflows.scheduledTasks : scheduledTasks,
+    // Vercel crons call Farm's own secret-checked workflow and cron routes
+    // (postProcessVercelOutput). Nitro's Vercel preset would also turn
+    // scheduledTasks into a `/_vercel/cron` route that runs tasks without a
+    // secret check unless CRON_SECRET is set, and double-schedules them when it is.
+    scheduledTasks: isVercel ? {} : scheduledTasks,
     ...(isCloudflareWorker && cloudflareCronConfig
       ? {
           cloudflare: cloudflareCronConfig,
