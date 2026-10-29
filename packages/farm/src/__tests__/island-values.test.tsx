@@ -7,6 +7,7 @@ import {
   createFarmIsolatedHydrationRuntime,
 } from "../client/isolated-boundary";
 import { getFarmIslandValueHeaders } from "../client/island-value-protocol";
+import { decodeFarmTagged } from "../client/island-codec";
 import { getFarmIslandValueStore } from "../client/island-value-store";
 import {
   addressFarmValues,
@@ -57,9 +58,9 @@ function serve(headers: Record<string, string> = {}) {
 }
 
 function valueScripts(html: string): string[] {
-  return [
-    ...html.matchAll(/<script type="application\/json" data-farm-value="([0-9a-z]{14})">/g),
-  ].map((match) => match[1]!);
+  return [...html.matchAll(/<script type="f\/value" name="([0-9a-z]{14})">/g)].map(
+    (match) => match[1]!,
+  );
 }
 
 afterEach(() => {
@@ -83,8 +84,8 @@ describe("content-addressed island values", () => {
     const props = JSON.parse(addressed.json);
     expect(props.label).toBe("Docs");
     expect(props.count).toBe(3);
-    expect(Object.keys(props.tree)).toEqual(["$farmValue"]);
-    expect(addressed.roots).toEqual([props.tree.$farmValue]);
+    expect(Object.keys(props.tree)).toEqual(["$", "v"]);
+    expect(addressed.roots).toEqual([props.tree.v]);
     expect(addressed.json.length).toBeLessThan(100);
   });
 
@@ -128,7 +129,7 @@ describe("content-addressed island values", () => {
     expect(plain.reads()).toBe(0);
 
     const key = hashFarmValue("x");
-    const navigation = serve({ "x-farm-values": key });
+    const navigation = serve({ "f-values": key });
     expect([...readFarmHeldValues()!]).toEqual([key]);
     readFarmHeldValues();
     expect(navigation.reads()).toBe(1);
@@ -148,14 +149,14 @@ describe("content-addressed island values", () => {
     const [key] = valueScripts(html);
     expect(key).toMatch(/^[0-9a-z]{14}$/);
     // The value script comes before the island, and the props only name it.
-    expect(html.indexOf("data-farm-value")).toBeLessThan(html.indexOf("<farm-client-boundary"));
-    const props = /data-farm-client-props="[^"]+">([^<]*)<\/script>/.exec(html)![1]!;
-    expect(JSON.parse(props)).toEqual({ tree: { $farmValue: key }, label: "Docs" });
+    expect(html.indexOf('type="f/value"')).toBeLessThan(html.indexOf("<f-island"));
+    const props = /<script type="f\/props" for="[^"]+">([^<]*)<\/script>/.exec(html)![1]!;
+    expect(JSON.parse(props)).toEqual({ tree: { $: "r", v: key }, label: "Docs" });
 
-    serve({ "x-farm-values": key! });
+    serve({ "f-values": key! });
     const navigation = renderToString(<Boundary tree={tree} label="Docs" />);
     expect(valueScripts(navigation)).toEqual([]);
-    expect(navigation).toContain(`{"tree":{"$farmValue":"${key}"},"label":"Docs"}`);
+    expect(navigation).toContain(`{"tree":{"$":"r","v":"${key}"},"label":"Docs"}`);
     // The server HTML is the same either way.
     expect(navigation.replace(/<script[\s\S]*?<\/script>/g, "")).toBe(
       html.replace(/<script[\s\S]*?<\/script>/g, ""),
@@ -176,20 +177,38 @@ describe("content-addressed island values", () => {
     expect(html).toContain(JSON.stringify(tree).slice(0, 40));
   });
 
-  it("rejects props that use a reserved key, and keeps the server HTML", () => {
+  it("carries app data that looks like a tag as data", async () => {
+    // An object with its own "$" key travels wrapped, so it is never read as a reference.
+    const lookalike = [{ title: "x", items: [{ $: "r", v: "04jiw29097x8ki" } as any] }];
+    const seen: unknown[] = [];
+    function Recording(props: { tree: typeof tree; label: string }) {
+      seen.push(props.tree);
+      return <Sidebar {...props} />;
+    }
     const Boundary = createFarmIsolatedClientBoundary(
       React,
-      Sidebar,
-      "/src/sidebar-reserved.tsx",
-      "Sidebar",
+      Recording,
+      "/src/sidebar-lookalike.tsx",
+      "default",
       "load",
       { slots: true, values: true },
     );
-    const html = renderToString(
-      <Boundary tree={[{ title: "x", items: [{ $farmValue: "y" } as any] }]} label="Docs" />,
-    );
-    expect(html).not.toContain("farm-client-boundary");
-    expect(html).toContain('<nav aria-label="Docs"');
+    serve();
+    document.body.innerHTML = renderToString(<Boundary tree={lookalike} label="Docs" />);
+    _setCurrentRequestResolver(undefined);
+    expect(document.body.innerHTML).toContain('{"$":"o","v":{"$":"r","v":"04jiw29097x8ki"}}');
+    seen.length = 0;
+    const runtime = createFarmIsolatedHydrationRuntime({
+      ReactRuntime: React,
+      hydrateRoot,
+      load: async () => ({ __farm_client_boundary_originals__: { default: Recording } }),
+      schedule: async ({ hydrate }) => hydrate(),
+      values: getFarmIslandValueStore(),
+      decode: decodeFarmTagged,
+    });
+    await act(async () => runtime.hydrate(document));
+    expect(runtime.rootCount()).toBe(1);
+    expect(seen[0]).toEqual(lookalike);
   });
 
   it("hydrates islands that share a value with one parsed copy", async () => {
@@ -235,7 +254,7 @@ describe("content-addressed island values", () => {
     expect(seen[0]).toEqual(tree);
     expect(seen[0]).toBe(seen[1]);
     // The next navigation names the value, so the server can leave it out.
-    expect(getFarmIslandValueHeaders()["x-farm-values"]!.split(",").sort()).toEqual(
+    expect(getFarmIslandValueHeaders()["F-Values"]!.split(",").sort()).toEqual(
       [...new Set(scripts)].sort(),
     );
   });
@@ -270,12 +289,9 @@ describe("content-addressed island values", () => {
       "load",
       { slots: true, values: true },
     );
-    serve({ "x-farm-values": "" });
+    serve({ "f-values": "" });
     const html = renderToString(<Boundary tree={tree} label="Docs" />);
-    document.body.innerHTML = html.replace(
-      /<script type="application\/json" data-farm-value[\s\S]*?<\/script>/g,
-      "",
-    );
+    document.body.innerHTML = html.replace(/<script type="f\/value"[\s\S]*?<\/script>/g, "");
     const report = vi.fn();
     const runtime = createFarmIsolatedHydrationRuntime({
       ReactRuntime: React,

@@ -45,7 +45,7 @@ function loadClientCheck() {
 
 function chain(...layouts: string[]) {
   return new Request("http://localhost/", {
-    headers: { "x-farm-layout-chain": JSON.stringify(layouts) },
+    headers: { "f-layouts": JSON.stringify(layouts) },
   });
 }
 
@@ -81,7 +81,7 @@ describe("islands segment navigation", () => {
     expect(server.countFarmKeptLayouts(new Request("http://localhost/"), layouts, params)).toBe(0);
     expect(
       server.countFarmKeptLayouts(
-        new Request("http://localhost/", { headers: { "x-farm-layout-chain": "not json" } }),
+        new Request("http://localhost/", { headers: { "f-layouts": "not json" } }),
         layouts,
         params,
       ),

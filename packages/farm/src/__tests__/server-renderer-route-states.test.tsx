@@ -1108,9 +1108,7 @@ describe("file route loading.tsx and error.tsx", () => {
     // The layout keeps this page as server HTML, so the client component must arrive as an island
     // the client can start, not as plain markup inside the layout's React tree.
     expect(response.body).toContain('data-farm-client="false"');
-    expect(response.body).toMatch(
-      /<farm-client-boundary[^>]*data-farm-client-boundary="\/src\/counter\.tsx"/,
-    );
+    expect(response.body).toMatch(/<f-island src="\/src\/counter\.tsx"/);
   });
 
   it("renders a hydrating layout tree directly in #root, matching the client tree", async () => {

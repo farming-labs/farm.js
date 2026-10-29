@@ -232,7 +232,7 @@ describe("server tree pages", () => {
 
   it("hydrates an async page's client components inside the layout's React tree", async () => {
     const html = await renderPage(<HomePage />);
-    expect(html).not.toContain("farm-client-boundary");
+    expect(html).not.toContain("f-island");
     expect(html).toContain("<strong>42</strong>");
 
     const serverUid = /data-uid="([^"]+)"/.exec(html)?.[1];
@@ -296,7 +296,7 @@ describe("server tree pages", () => {
       rest += decoder.decode(chunk.value);
     }
     expect(rest).toContain("slow<!-- -->:<!-- -->closed");
-    expect(rest).toContain("data-farm-server-tree-chunk");
+    expect(rest).toContain('type="f/chunk"');
 
     // A completed render, as the browser has it once the stream ends.
     const { container, errors } = await hydratePage(await renderPage(<Page />));
@@ -323,8 +323,8 @@ describe("server tree pages", () => {
       );
     }
     const html = await renderPage(<Page />);
-    expect(html).toContain("<farm-server-html");
-    expect(html).toContain('data-farm-client-boundary="/src/counter.tsx"');
+    expect(html).toContain("<f-html");
+    expect(html).toContain('<f-island src="/src/counter.tsx"');
 
     const { container, errors, runtime } = await hydratePage(html);
     expect(errors).toEqual([]);
@@ -346,7 +346,7 @@ describe("server tree pages", () => {
     }
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const html = await renderPage(<Page />);
-    expect(html).toMatch(/<farm-server-html[^>]*><button id="callback"/);
+    expect(html).toMatch(/<f-html[^>]*><button id="callback"/);
     const { container, errors } = await hydratePage(html);
     expect(errors).toEqual([]);
     await click(container, "#header");
@@ -373,8 +373,8 @@ describe("server tree pages", () => {
       );
     }
     const html = await renderPage(<Page />);
-    expect(html).toContain("<section><farm-server-html");
-    expect(html).toMatch(/<farm-server-html[^>]*><table>/);
+    expect(html).toContain("<section><f-html");
+    expect(html).toMatch(/<f-html[^>]*><table>/);
     const { container, errors } = await hydratePage(html);
     expect(errors).toEqual([]);
     expect(container.querySelector("td")!.textContent).toBe("cell");
@@ -467,7 +467,9 @@ describe("server tree pages", () => {
     }
     installFarmIslandValues();
     const valueKeys = (html: string) =>
-      [...html.matchAll(/data-farm-value="([0-9a-z]{14})"/g)].map((match) => match[1]!);
+      [...html.matchAll(/<script type="f\/value" name="([0-9a-z]{14})"/g)].map(
+        (match) => match[1]!,
+      );
     async function renderValuesPage(headers: Record<string, string> = {}) {
       const request = new Request("http://localhost/shop", { headers });
       _setCurrentRequestResolver(() => request);
@@ -490,13 +492,11 @@ describe("server tree pages", () => {
 
     it("sends a large prop once, before the payload, and hydrates with it", async () => {
       const html = await renderValuesPage();
-      const payload = /data-farm-server-tree="">([^<]*)<\/script>/.exec(html)![1]!;
-      expect(payload).toContain('"$farmValue"');
+      const payload = /<script type="f\/tree">([^<]*)<\/script>/.exec(html)![1]!;
+      expect(payload).toContain('"$":"r"');
       expect(payload).not.toContain("Catalog entry 7 with");
       expect(valueKeys(html).length).toBeGreaterThan(0);
-      expect(html.lastIndexOf("data-farm-value=")).toBeLessThan(
-        html.indexOf("data-farm-server-tree"),
-      );
+      expect(html.lastIndexOf('type="f/value"')).toBeLessThan(html.indexOf('type="f/tree"'));
 
       const container = document.createElement("div");
       container.innerHTML = html;
@@ -528,7 +528,7 @@ describe("server tree pages", () => {
       const store = getFarmIslandValueStore();
       store.ingest(Object.assign(document.createElement("div"), { innerHTML: first }));
 
-      const navigation = await renderValuesPage({ "x-farm-values": keys.join(",") });
+      const navigation = await renderValuesPage({ "f-values": keys.join(",") });
       expect(valueKeys(navigation)).toEqual([]);
       expect(navigation.length).toBeLessThan(first.length - 5000);
 
@@ -585,7 +585,7 @@ describe("server tree pages", () => {
       expect(full).toContain("<h1>Hello</h1>");
       expect(payloadOnly).not.toContain("<h1>Hello</h1>");
       expect(payloadOnly).not.toContain('id="card"');
-      expect(payloadOnly).toContain("data-farm-tree-only");
+      expect(payloadOnly).toContain('type="f/tree" partial');
 
       const fromFull = await rebuild(full);
       const fromPayload = await rebuild(payloadOnly);
@@ -611,7 +611,7 @@ describe("server tree pages", () => {
         );
       }
       const payloadOnly = await renderRoute(<Page />, true);
-      expect(payloadOnly).toContain("data-farm-server-tree-chunk");
+      expect(payloadOnly).toContain('type="f/chunk"');
       // The fallback travels in the payload, not as HTML.
       expect(payloadOnly).not.toContain('<p id="fallback">');
       const container = await rebuild(payloadOnly);
@@ -637,7 +637,7 @@ describe("server tree pages", () => {
       const stream = await renderToReadableStream(routeTree(page), { onError: () => {} });
       await stream.allReady;
       const html = await new Response(stream).text();
-      expect(html).not.toContain("data-farm-tree-only");
+      expect(html).not.toContain('type="f/tree" partial');
     });
   });
 });

@@ -4,7 +4,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   decodeFarmJson,
-  decodeFarmMarker,
+  decodeFarmTagged,
   encodeFarmJson,
   NOT_A_FARM_MARKER,
 } from "../client/island-codec";
@@ -81,8 +81,11 @@ afterEach(() => {
 describe("island codec", () => {
   it("round-trips every type through JSON", () => {
     const json = JSON.stringify(encodeFarmJson(sample()));
-    expect(json).toContain('{"$farmDate":"2026-10-28T09:00:00.000Z"}');
-    expect(json).toContain('{"$farmBigInt":"12345678901234567890"}');
+    expect(json).toContain('{"$":"D","v":"2026-10-28T09:00:00.000Z"}');
+    expect(json).toContain('{"$":"B","v":"12345678901234567890"}');
+    expect(json).toContain(
+      '{"$":"M","v":[["sku-1",3],[7,{"$":"D","v":"2026-01-01T00:00:00.000Z"}]]}',
+    );
     expectSample(decodeFarmJson(JSON.parse(json)));
   });
 
@@ -94,14 +97,21 @@ describe("island codec", () => {
     expect(Object.getPrototypeOf(decoded)).toBe(Object.prototype);
     expect(({} as Record<string, unknown>).admin).toBeUndefined();
     expect(Object.keys(decoded)).toEqual(["__proto__", "a"]);
-    expect(() => decodeFarmJson({ $farmBigInt: "1e9" })).toThrow("malformed $farmBigInt");
-    expect(() => decodeFarmJson({ $farmBytes: ["Window", "AAAA"] })).toThrow("malformed");
-    expect(() => decodeFarmJson({ $farmSomething: 1 })).toThrow("unknown $farmSomething");
-    expect(decodeFarmMarker({ title: "x" }, (value) => value)).toBe(NOT_A_FARM_MARKER);
+    expect(() => decodeFarmJson({ $: "B", v: "1e9" })).toThrow('malformed "B" tag');
+    expect(() => decodeFarmJson({ $: "Y", v: ["Window", "AAAA"] })).toThrow("malformed");
+    expect(() => decodeFarmJson({ $: "zz" })).toThrow('unknown "zz" tag');
+    // A browser cannot smuggle in the runtime's own references.
+    expect(() => decodeFarmJson({ $: "a", v: "some-action" })).toThrow("not allowed");
+    expect(() => decodeFarmJson({ $: "r", v: "04jiw29097x8ki" })).toThrow("not allowed");
+    expect(decodeFarmTagged({ $: "r", v: "x" }, (value) => value)).toBe(NOT_A_FARM_MARKER);
   });
 
-  it("refuses app data that uses a reserved key, and values it cannot carry", () => {
-    expect(() => encodeFarmJson({ $farmDate: "spoof" })).toThrow("reserved key");
+  it("wraps app data that looks like a tag, and refuses values it cannot carry", () => {
+    // App data with its own "$" key travels wrapped and comes back as it was.
+    const lookalike = { $: "D", v: "not a date", note: 1 };
+    const wrapped = encodeFarmJson(lookalike);
+    expect(wrapped).toEqual({ $: "o", v: { $: "D", v: "not a date", note: 1 } });
+    expect(decodeFarmJson(JSON.parse(JSON.stringify(wrapped)))).toEqual(lookalike);
     expect(() => encodeFarmJson({ run: () => {} })).toThrow("function values");
     class Point {}
     expect(() => encodeFarmJson(new Point())).toThrow("class instances");
@@ -128,8 +138,8 @@ describe("typed props", () => {
 
   it("reach an island as the types the server passed", async () => {
     const html = renderToString(<Show {...sample()} />);
-    expect(html).toContain('"$farmDate"');
-    expect(html).toContain("farm-client-boundary");
+    expect(html).toContain('{"$":"D","v":"2026-10-28T09:00:00.000Z"}');
+    expect(html).toContain("f-island");
     document.body.innerHTML = html;
     seen.length = 0;
     const runtime = createFarmIsolatedHydrationRuntime({
@@ -137,7 +147,7 @@ describe("typed props", () => {
       hydrateRoot,
       load: async () => ({ __farm_client_boundary_originals__: { Show: Recording } }),
       schedule: async ({ hydrate }) => hydrate(),
-      decode: decodeFarmMarker,
+      decode: decodeFarmTagged,
     });
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     await act(async () => runtime.hydrate(document));
@@ -156,7 +166,7 @@ describe("typed props", () => {
       values: true,
     });
     const html = renderToString(<div id="__farm_page__">{page}</div>);
-    expect(html).toContain("$farmBigInt");
+    expect(html).toContain('{"$":"B","v":"12345678901234567890"}');
     const container = Object.assign(document.createElement("div"), { innerHTML: html });
     seen.length = 0;
     const element = await createFarmServerTreeElement(
@@ -165,7 +175,7 @@ describe("typed props", () => {
       {
         load: async () => ({ __farm_client_boundary_originals__: { Show: Recording } }),
         ServerHtml: () => null,
-        decode: decodeFarmMarker,
+        decode: decodeFarmTagged,
         values: getFarmIslandValueStore(),
       },
     );
@@ -223,7 +233,7 @@ describe("typed server action calls", () => {
           "content-type": "text/plain;charset=UTF-8",
           origin: "https://app.test",
         },
-        body: JSON.stringify([{ $farmBigInt: "not a number" }]),
+        body: JSON.stringify([{ $: "B", v: "not a number" }]),
       }),
       resolveServerActionsConfig(undefined),
     );

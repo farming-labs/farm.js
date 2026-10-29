@@ -1,8 +1,9 @@
 import type React from "react";
 import { getFarmActionId } from "./action-reference";
 import {
-  FARM_VALUE_ATTRIBUTE,
-  FARM_VALUE_REFERENCE,
+  FARM_REFERENCE_TAG,
+  FARM_TAG,
+  FARM_VALUE_SCRIPT_TYPE,
   getFarmIslandValuesServer,
   type FarmIslandValueStore,
 } from "./island-value-protocol";
@@ -28,17 +29,20 @@ import {
 
 const MEMO_TYPE = Symbol.for("react.memo");
 const FORWARD_REF_TYPE = Symbol.for("react.forward_ref");
-const SERVER_HTML_TAG = "farm-server-html";
-export const FARM_SERVER_TREE_ATTRIBUTE = "data-farm-server-tree";
+/** The element around server HTML a tree cannot represent; its `name` is the HTML's id. */
+const SERVER_HTML_TAG = "f-html";
+/** The script type of a page's tree. */
+export const FARM_SERVER_TREE_SCRIPT_TYPE = "f/tree";
 // `NOT_A_FARM_MARKER` in island-codec.ts, without importing the codec into every bundle.
 const FARM_NOT_A_MARKER = Symbol.for("farm.codec.not-a-marker");
-const SERVER_TREE_CHUNK_ATTRIBUTE = "data-farm-server-tree-chunk";
+/** The script type of a chunk a Suspense boundary streamed later; its `name` is the chunk id. */
+const SERVER_TREE_CHUNK_SCRIPT_TYPE = "f/chunk";
 /**
  * Marks a navigation response that carries only the page's payload. The browser rebuilds such a
  * page in its layout's React root and never shows its HTML, so the server leaves the HTML out.
  */
-export const FARM_SERVER_TREE_PAYLOAD_ONLY_ATTRIBUTE = "data-farm-tree-only";
-const SERVER_HTML_ATTRIBUTE = "data-farm-server-html";
+export const FARM_SERVER_TREE_PAYLOAD_ONLY_ATTRIBUTE = "partial";
+const SERVER_HTML_ATTRIBUTE = "name";
 
 // The HTML parser moves or drops a custom element placed inside these, so a subtree that needs a
 // `<farm-server-html>` wrapper there is wrapped at the nearest ancestor outside them instead.
@@ -227,7 +231,7 @@ async function resolveValue(
     const actionId = getFarmActionId(value);
     if (actionId) {
       state.actions.set(actionId, value);
-      return { $: "a", i: actionId };
+      return { $: "a", v: actionId };
     }
   }
   if (typeof value !== "object") throw new UnsupportedNode(`passes a ${typeof value} value`);
@@ -249,10 +253,10 @@ async function resolveValue(
       return await Promise.all(value.map((entry) => resolveValue(state, entry, context, seen)));
     }
     if (codec && value instanceof Map) {
-      return { $farmMap: await resolveValue(state, Array.from(value), context, seen) };
+      return { $: "M", v: await resolveValue(state, Array.from(value), context, seen) };
     }
     if (codec && value instanceof Set) {
-      return { $farmSet: await resolveValue(state, Array.from(value), context, seen) };
+      return { $: "S", v: await resolveValue(state, Array.from(value), context, seen) };
     }
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) {
@@ -260,7 +264,7 @@ async function resolveValue(
     }
     const entries = await Promise.all(
       Object.entries(value)
-        // Islands mode keeps a key whose value is undefined, as `{"$farmUndefined":1}`.
+        // Islands mode keeps a key whose value is undefined, as `{"$":"u"}`.
         .filter(([, entry]) => entry !== undefined || codec)
         .map(
           async ([name, entry]): Promise<[string, TreeValue]> => [
@@ -269,9 +273,6 @@ async function resolveValue(
           ],
         ),
     );
-    if (codec && entries.some(([name]) => name.startsWith("$farm"))) {
-      throw new UnsupportedNode("uses a reserved $farm key");
-    }
     const object = Object.fromEntries(entries);
     return Object.prototype.hasOwnProperty.call(object, "$") ? { $: "o", v: object } : object;
   } finally {
@@ -337,7 +338,7 @@ async function resolveElement(
       // Rendering reads the result; a rejection must not be reported before React sees it.
       encoded.catch(() => {});
       state.chunks.set(id, { encoded });
-      return withKey({ $: "s", f: fallback, i: id });
+      return withKey({ $: "p", f: fallback, i: id });
     }
 
     const clientReference = getClientReference(type);
@@ -508,7 +509,7 @@ function createTreeValue(
         typeof value.k === "string" ? { key: value.k } : null,
         ...createTreeChildren(ReactRuntime, value.c, resolver),
       );
-    case "s":
+    case "p":
       return ReactRuntime.createElement(
         ReactRuntime.Suspense,
         {
@@ -528,7 +529,7 @@ function createTreeValue(
     case "n":
       return Number(value.v);
     case "a":
-      return resolver.action(value.i as string);
+      return resolver.action(value.v as string);
     case "P":
       return fulfilledThenable(createTreeValue(ReactRuntime, value.v as TreeValue, resolver));
     case "o": {
@@ -541,8 +542,8 @@ function createTreeValue(
       );
     }
     default: {
-      const keys = Object.keys(value);
-      if (keys.length === 1 && keys[0]!.startsWith("$farm")) {
+      if (value.$ !== undefined) {
+        // A value JSON cannot hold (islands mode): Date, Map, BigInt, …
         if (!resolver.decode) throw new Error("typed props need islands mode");
         const decoded = resolver.decode(value as Record<string, unknown>, (child) =>
           createTreeValue(ReactRuntime, child, resolver),
@@ -564,15 +565,15 @@ type TreeValueScripts = ReadonlyArray<readonly [key: string, json: string]>;
 
 function createTreeScript(
   ReactRuntime: typeof React,
-  attribute: string,
-  value: string,
+  type: string,
+  name: string,
   json: string,
   values: TreeValueScripts = [],
   attributes: Record<string, string> = {},
 ): React.ReactElement {
   const script = ReactRuntime.createElement("script", {
-    type: "application/json",
-    [attribute]: value,
+    type,
+    ...(name ? { name } : {}),
     ...attributes,
     dangerouslySetInnerHTML: { __html: json },
   });
@@ -585,8 +586,8 @@ function createTreeScript(
     ...values.map(([valueKey, valueJson]) =>
       ReactRuntime.createElement("script", {
         key: valueKey,
-        type: "application/json",
-        [FARM_VALUE_ATTRIBUTE]: valueKey,
+        type: FARM_VALUE_SCRIPT_TYPE,
+        name: valueKey,
         dangerouslySetInnerHTML: { __html: valueJson },
       }),
     ),
@@ -606,7 +607,7 @@ function createTreePage(
     ReactRuntime.Fragment,
     key === undefined ? null : { key },
     createTreeValue(ReactRuntime, tree, resolver) as React.ReactNode,
-    createTreeScript(ReactRuntime, FARM_SERVER_TREE_ATTRIBUTE, "", json, values),
+    createTreeScript(ReactRuntime, FARM_SERVER_TREE_SCRIPT_TYPE, "", json, values),
   );
 }
 
@@ -615,10 +616,10 @@ function readTreeValueScripts(script: Element): TreeValueScripts {
   const values: Array<readonly [string, string]> = [];
   for (
     let node = script.previousElementSibling;
-    node?.tagName === "SCRIPT" && node.hasAttribute(FARM_VALUE_ATTRIBUTE);
+    node?.tagName === "SCRIPT" && node.getAttribute("type") === FARM_VALUE_SCRIPT_TYPE;
     node = node.previousElementSibling
   ) {
-    values.unshift([node.getAttribute(FARM_VALUE_ATTRIBUTE)!, node.textContent ?? ""]);
+    values.unshift([node.getAttribute("name") ?? "", node.textContent ?? ""]);
   }
   return values;
 }
@@ -655,9 +656,16 @@ async function createPayloadOnlyPage(
     ReactRuntime.createElement(
       ReactRuntime.Fragment,
       { key: "payload" },
-      createTreeScript(ReactRuntime, FARM_SERVER_TREE_ATTRIBUTE, "", payload.json, payload.values, {
-        [FARM_SERVER_TREE_PAYLOAD_ONLY_ATTRIBUTE]: "",
-      }),
+      createTreeScript(
+        ReactRuntime,
+        FARM_SERVER_TREE_SCRIPT_TYPE,
+        "",
+        payload.json,
+        payload.values,
+        {
+          [FARM_SERVER_TREE_PAYLOAD_ONLY_ATTRIBUTE]: "",
+        },
+      ),
     ),
     ...Array.from(chunks, ([id, encoded]) => {
       const chunk = encode({ t: encoded });
@@ -666,7 +674,7 @@ async function createPayloadOnlyPage(
         { key: `c${id}` },
         createTreeScript(
           ReactRuntime,
-          SERVER_TREE_CHUNK_ATTRIBUTE,
+          SERVER_TREE_CHUNK_SCRIPT_TYPE,
           String(id),
           chunk.json,
           chunk.values,
@@ -745,7 +753,7 @@ export async function renderFarmServerTreePage(
                 const payload = encode({ t: encoded });
                 return createTreeScript(
                   ReactRuntime,
-                  SERVER_TREE_CHUNK_ATTRIBUTE,
+                  SERVER_TREE_CHUNK_SCRIPT_TYPE,
                   String(id),
                   payload.json,
                   payload.values,
@@ -815,7 +823,7 @@ export interface FarmServerTreeElementOptions {
   values?: Pick<FarmIslandValueStore, "ingest" | "resolve">;
   /** Islands mode: the function a server action reference stands for. */
   actions?(id: string): (...args: unknown[]) => unknown;
-  /** Islands mode: decodes props JSON cannot hold (`decodeFarmMarker` in island-codec.ts). */
+  /** Islands mode: decodes props JSON cannot hold (`decodeFarmTagged` in island-codec.ts). */
   decode?(object: Record<string, unknown>, decodeChild: (value: unknown) => unknown): unknown;
 }
 
@@ -845,7 +853,9 @@ export async function createFarmServerTreeElement(
   options: FarmServerTreeElementOptions,
 ): Promise<React.ReactElement | null> {
   const root = typeof source === "string" ? parseHtml(source) : source;
-  const script = root.querySelector<HTMLScriptElement>(`script[${FARM_SERVER_TREE_ATTRIBUTE}]`);
+  const script = root.querySelector<HTMLScriptElement>(
+    `script[type="${FARM_SERVER_TREE_SCRIPT_TYPE}"]`,
+  );
   if (!script) return null;
   const json = script.textContent ?? "";
   // A payload that names island values reads them from the page (or this navigation's HTML) and
@@ -853,7 +863,7 @@ export async function createFarmServerTreeElement(
   let ingested = false;
   const parsePayload = (text: string): unknown => {
     const parsed = JSON.parse(text);
-    if (!text.includes(`"${FARM_VALUE_REFERENCE}"`)) return parsed;
+    if (!text.includes(`"${FARM_TAG}":"${FARM_REFERENCE_TAG}"`)) return parsed;
     if (!options.values) throw new Error("island values need islands mode");
     if (!ingested) {
       options.values.ingest(root);
@@ -867,10 +877,10 @@ export async function createFarmServerTreeElement(
 
   const chunks = new Map<number, { tree: TreeValue; json: string; values: TreeValueScripts }>();
   for (const chunkScript of root.querySelectorAll<HTMLScriptElement>(
-    `script[${SERVER_TREE_CHUNK_ATTRIBUTE}]`,
+    `script[type="${SERVER_TREE_CHUNK_SCRIPT_TYPE}"]`,
   )) {
     const chunkJson = chunkScript.textContent ?? "";
-    chunks.set(Number(chunkScript.getAttribute(SERVER_TREE_CHUNK_ATTRIBUTE)), {
+    chunks.set(Number(chunkScript.getAttribute("name")), {
       tree: (parsePayload(chunkJson) as { t: TreeValue }).t,
       json: chunkJson,
       values: readTreeValueScripts(chunkScript),
@@ -909,7 +919,7 @@ export async function createFarmServerTreeElement(
         createTreeValue(ReactRuntime, chunk.tree, resolver) as React.ReactNode,
         createTreeScript(
           ReactRuntime,
-          SERVER_TREE_CHUNK_ATTRIBUTE,
+          SERVER_TREE_CHUNK_SCRIPT_TYPE,
           String(id),
           chunk.json,
           chunk.values,

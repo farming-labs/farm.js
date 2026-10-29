@@ -8,7 +8,7 @@
  */
 import { decodeFarmJson, encodeFarmJson } from "./client/island-codec";
 
-const FARM_FORM_ACTION_HEADER = "x-farm-action";
+const FARM_FORM_ACTION_HEADER = "F-Action";
 
 interface FarmActionRouter {
   refresh?(options?: { scroll?: boolean }): Promise<void>;

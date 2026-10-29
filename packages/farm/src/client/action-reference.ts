@@ -1,9 +1,8 @@
 /**
  * Server actions as props (islands mode, RFC 0003). A registered `"use server"` function passed to
- * a client component travels as `{"$farmAction": id}`; the browser turns it back into a function
+ * a client component travels as `{"$":"a","v":id}`; the browser turns it back into a function
  * that calls the action. Kept free of server code: island boundaries import it.
  */
-export const FARM_ACTION_REFERENCE = "$farmAction";
 
 const ACTION_IDS_KEY = Symbol.for("farm.form-actions.ids");
 

@@ -3017,7 +3017,7 @@ function getFarmLayoutKey(pattern, params) {
 }
 
 function countFarmKeptLayouts(request, layouts, params) {
-  const chain = parseFarmLayoutChainHeader(request.headers.get("x-farm-layout-chain"));
+  const chain = parseFarmLayoutChainHeader(request.headers.get("f-layouts"));
   if (chain.length === 0) return 0;
   const keys = layouts.map(function(layout) { return getFarmLayoutKey(layout.pattern, params); });
   if (chain[0] === keys[0]) return getSharedLayoutPrefixLength(chain, keys);
@@ -3509,7 +3509,7 @@ document.addEventListener("click", function(e) {
   // Only an app with a server-tree page ships the code that rebuilds one.
   const serverTreeEnabled = isolatedHydrationEnabled && clientPages.some((page) => page.serverTree);
   const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";${islandValues ? '\nimport { getFarmIslandValueStore } from "@farm.js/core/internal/island-value-store";\nimport { getFarmFormActionStub } from "@farm.js/core/internal/form-actions-client";\nimport { decodeFarmMarker } from "@farm.js/core/internal/island-codec";' : ""}${serverTreeEnabled ? '\nimport { createFarmServerTreeElement } from "@farm.js/core/internal/server-tree";' : ""}`
+    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";${islandValues ? '\nimport { getFarmIslandValueStore } from "@farm.js/core/internal/island-value-store";\nimport { getFarmFormActionStub } from "@farm.js/core/internal/form-actions-client";\nimport { decodeFarmTagged } from "@farm.js/core/internal/island-codec";' : ""}${serverTreeEnabled ? '\nimport { createFarmServerTreeElement } from "@farm.js/core/internal/server-tree";' : ""}`
     : "";
   const isolatedHydrationRuntime = isolatedHydrationEnabled
     ? `const farmIsolatedBoundaryLoaders = {
@@ -3530,7 +3530,7 @@ const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
   hydrateRoot,
   load: loadFarmIsolatedBoundary,
   schedule: scheduleFarmIslandHydration,
-  wrap: wrapWithIntegrationProviders,${islandValues ? "\n  values: getFarmIslandValueStore(),\n  actions: getFarmFormActionStub,\n  decode: decodeFarmMarker," : ""}
+  wrap: wrapWithIntegrationProviders,${islandValues ? "\n  values: getFarmIslandValueStore(),\n  actions: getFarmFormActionStub,\n  decode: decodeFarmTagged," : ""}
 });
 
 // A hydrating layout keeps a non-hydrating page as server HTML; this wrapper runs its islands.
@@ -3552,7 +3552,7 @@ async function createFarmServerTreePageElement(source, pathname) {
     return await createFarmServerTreeElement(React, source, {
       load: loadFarmIsolatedBoundary,
       ServerHtml: FarmServerPage,
-      key: pathname,${islandValues ? "\n      values: getFarmIslandValueStore(),\n      actions: getFarmFormActionStub,\n      decode: decodeFarmMarker," : ""}
+      key: pathname,${islandValues ? "\n      values: getFarmIslandValueStore(),\n      actions: getFarmFormActionStub,\n      decode: decodeFarmTagged," : ""}
     });
   } catch (error) {
     console.warn("[Farm.js] Could not rebuild the server tree of " + pathname + "; its server HTML was kept.", error);
@@ -3767,7 +3767,7 @@ async function createMatchedHydrationRoute(matched, pathname, searchParams, serv
     const pageSource = typeof serverHtml === "string" ? serverHtml : serverPage;
     const serverTree = pageSource ? await createFarmServerTreePageElement(pageSource, pathname) : null;
     // A payload-only page (islands mode) has no HTML to fall back to: fetch the whole document.
-    if (!serverTree && typeof serverHtml === "string" && serverHtml.includes("data-farm-tree-only")) {
+    if (!serverTree && typeof serverHtml === "string" && serverHtml.includes('<script type="f/tree" partial')) {
       return null;
     }
     pageElement = serverTree
@@ -4107,7 +4107,7 @@ async function hydrate() {
       isolatedHydrationEnabled
         ? `const isolatedHydration =
       !hasHydratableLayout(pathname) &&
-      document.querySelector('farm-client-boundary[data-farm-client-boundary]')
+      document.querySelector('f-island[src]')
         ? hydrateFarmIsolatedClientBoundaries(document, hydrationController.signal)
         : Promise.resolve();
     await Promise.all([pageHydration, isolatedHydration]);`
@@ -4230,8 +4230,8 @@ ${
     const root = document.getElementById("root") || document.body;
     const layouts = getLayoutPatterns(root);
     return {
-      ...(layouts.length ? { "X-Farm-Layout-Chain": JSON.stringify(layouts) } : {}),
-      ...(reactRoot && reactRootContainer === root ? { "X-Farm-Tree-Navigation": "1" } : {}),
+      ...(layouts.length ? { "F-Layouts": JSON.stringify(layouts) } : {}),
+      ...(reactRoot && reactRootContainer === root ? { "F-Render": "tree" } : {}),
     };
   },
 `
@@ -4553,7 +4553,7 @@ ${
     ${
       islandValues
         ? `// A payload-only page renders only in a React root that rebuilds it.
-    if (nextPage?.querySelector("[data-farm-tree-only]")) return "segment-mismatch";`
+    if (nextPage?.querySelector('script[type="f/tree"][partial]')) return "segment-mismatch";`
         : ""
     }
     const rootWasReactOwned = reactRootContainer === currentRoot;
@@ -7587,7 +7587,7 @@ const farmClientEntryPreloadTags = farmClientModulePreloads
   : "";
 // The client modules a document's markup loads: its islands' boundaries and the
 // client references of its server tree.
-const FARM_CLIENT_MODULE_REFERENCE_PATTERN = /data-farm-client-boundary="([^"]+)"|"r":"(\\/[^"]+)"/g;
+const FARM_CLIENT_MODULE_REFERENCE_PATTERN = /<f-island src="([^"]+)"|"r":"(\\/[^"]+)"/g;
 
 function renderFarmClientModulePreload(index) {
   return '\\n  <link rel="modulepreload" href="/' +
@@ -9385,7 +9385,7 @@ ${
               ...getPPRHeaders("hit", pprConfig),
               // A segment is one navigation's answer, never a CDN entry: some CDNs ignore Vary.
               ...(farmKeptLayouts
-                ? { "Cache-Control": "private, no-store", "Vary": "x-farm-layout-chain" }
+                ? { "Cache-Control": "private, no-store", "Vary": "F-Layouts" }
                 : {}),
             },
           }), middlewareHeaders), cachedPPRShell);
@@ -9628,7 +9628,7 @@ ${
           shouldHydrateLayout &&
           route.serverTree === true &&
           !route.shouldHydrate &&
-          request.headers.get("x-farm-tree-navigation") === "1";`
+          request.headers.get("f-render") === "tree";`
             : `const farmLayoutKeyOf = null;
         const farmPayloadOnlyNavigation = false;`
         }
@@ -9875,8 +9875,8 @@ ${
         // Islands mode: a navigation that names the values it holds, or the layouts it shows,
         // gets HTML without them.
         responseHeaders["Vary"] = farmSharedCacheableRoute
-          ? "x-farm-layout-chain"
-          : "x-farm-values, x-farm-layout-chain, x-farm-tree-navigation";`
+          ? "F-Layouts"
+          : "F-Values, F-Layouts, F-Render";`
             : ""
         }
         let html = renderedPage.html;

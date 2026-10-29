@@ -1821,9 +1821,7 @@ export function Chart() {}
 
     expect(productionSource).toContain("disposeFarmIsolatedClientBoundaries(document);");
     expect(developmentSource).toContain("if (hydrationController.signal.aborted) return;");
-    expect(developmentSource).toContain(
-      "Boolean(rootContainer.querySelector('farm-client-boundary[data-farm-client-boundary]'))",
-    );
+    expect(developmentSource).toContain("Boolean(rootContainer.querySelector('f-island[src]'))");
     const isolatedBootstrap = developmentSource.indexOf(
       "if (hasIsolatedClientBoundaries && !pageShouldHydrate && !layoutShouldHydrate)",
     );

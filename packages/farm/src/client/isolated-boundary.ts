@@ -1,13 +1,28 @@
 import type React from "react";
 import type { FarmIslandStrategy } from "../island";
-import { FARM_ACTION_REFERENCE, getFarmActionId } from "./action-reference";
+import { getFarmActionId } from "./action-reference";
 import { markFarmClientReference, updateFarmServerTreeModule } from "./client-reference";
 import {
-  FARM_VALUE_ATTRIBUTE,
-  FARM_VALUE_REFERENCE,
+  FARM_ACTION_TAG,
+  FARM_ISLAND_ELEMENT,
+  FARM_OBJECT_TAG,
+  FARM_PROPS_SCRIPT_TYPE,
+  FARM_REFERENCE_TAG,
+  FARM_SLOT_ELEMENT,
+  FARM_SLOT_TAG,
+  FARM_TAG,
+  FARM_TAG_VALUE,
+  FARM_VALUE_SCRIPT_TYPE,
   type FarmIslandValueStore,
   getFarmIslandValuesServer,
+  getFarmTag,
 } from "./island-value-protocol";
+
+/** Selects an island element. */
+const ISLAND_SELECTOR = `${FARM_ISLAND_ELEMENT}[src]`;
+
+// Tagged objects the runtime made (slots), as opposed to app data that has its own "$" key.
+const runtimeTagged = new WeakSet<object>();
 
 const REACT_ELEMENT_TYPE = Symbol.for("react.transitional.element");
 const LEGACY_REACT_ELEMENT_TYPE = Symbol.for("react.element");
@@ -43,7 +58,7 @@ function serializeBoundaryProps(value: unknown, seen = new Set<object>()): unkno
   if (typeof value === "function") {
     // A server action passes as a reference the browser can call (islands mode).
     const actionId = getFarmActionId(value);
-    if (actionId) return { [FARM_ACTION_REFERENCE]: actionId };
+    if (actionId) return { [FARM_TAG]: FARM_ACTION_TAG, [FARM_TAG_VALUE]: actionId };
   }
   if (typeof value !== "object") {
     throw new TypeError(`${typeof value} values are not serializable`);
@@ -60,22 +75,32 @@ function serializeBoundaryProps(value: unknown, seen = new Set<object>()): unkno
     if (Array.isArray(value)) return value.map((entry) => serializeBoundaryProps(entry, seen));
     if (codec && value instanceof Map) {
       return {
-        $farmMap: Array.from(value, ([key, entry]) => [
+        [FARM_TAG]: "M",
+        [FARM_TAG_VALUE]: Array.from(value, ([key, entry]) => [
           serializeBoundaryProps(key, seen),
           serializeBoundaryProps(entry, seen),
         ]),
       };
     }
     if (codec && value instanceof Set) {
-      return { $farmSet: Array.from(value, (entry) => serializeBoundaryProps(entry, seen)) };
+      return {
+        [FARM_TAG]: "S",
+        [FARM_TAG_VALUE]: Array.from(value, (entry) => serializeBoundaryProps(entry, seen)),
+      };
     }
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) {
       throw new TypeError("class instances are not serializable");
     }
-    return Object.fromEntries(
+    const serialized = Object.fromEntries(
       Object.entries(value).map(([key, entry]) => [key, serializeBoundaryProps(entry, seen)]),
     );
+    // Islands mode: app data that has its own "$" key travels wrapped, never read as a tag.
+    return codec &&
+      !runtimeTagged.has(value) &&
+      Object.prototype.hasOwnProperty.call(value, FARM_TAG)
+      ? { [FARM_TAG]: FARM_OBJECT_TAG, [FARM_TAG_VALUE]: serialized }
+      : serialized;
   } finally {
     seen.delete(value);
   }
@@ -94,8 +119,7 @@ function escapeScriptJson(json: string): string {
     .replace(/\u2029/g, "\\u2029");
 }
 
-const SLOT_TAG = "farm-slot";
-const SLOT_ATTRIBUTE = "data-farm-slot";
+const SLOT_ELEMENT = FARM_SLOT_ELEMENT;
 
 function isReactElementValue(value: unknown): value is React.ReactElement {
   const type = (value as { $$typeof?: symbol } | null)?.$$typeof;
@@ -104,9 +128,15 @@ function isReactElementValue(value: unknown): value is React.ReactElement {
 
 /**
  * Server output passed to an island (`children`, or any element prop) travels as a DOM slot: it
- * renders once, inside a `<farm-slot>` marker, and the serialized props carry only a reference.
+ * renders once, inside an `<f-slot>` marker, and the serialized props carry only a reference.
  * The browser reads the slot's HTML back from the page instead of receiving it twice.
  */
+function slotReference(id: string): Record<string, unknown> {
+  const reference = { [FARM_TAG]: FARM_SLOT_TAG, [FARM_TAG_VALUE]: id };
+  runtimeTagged.add(reference);
+  return reference;
+}
+
 function splitSlotProps(
   ReactRuntime: typeof React,
   value: unknown,
@@ -117,11 +147,11 @@ function splitSlotProps(
     const id = `${slotPrefix}${counter.next++}`;
     return {
       render: ReactRuntime.createElement(
-        SLOT_TAG,
-        { key: value.key ?? id, [SLOT_ATTRIBUTE]: id, style: { display: "contents" } },
+        SLOT_ELEMENT,
+        { key: value.key ?? id, name: id, style: { display: "contents" } },
         value,
       ),
-      wire: { $farmSlot: id },
+      wire: slotReference(id),
     };
   }
   if (Array.isArray(value)) {
@@ -134,9 +164,6 @@ function splitSlotProps(
     const render: Record<string, unknown> = {};
     const wire: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value)) {
-      if (key.startsWith("$farm")) {
-        throw new TypeError(`${key} is a reserved prop key`);
-      }
       const part = splitSlotProps(ReactRuntime, entry, slotPrefix, counter);
       render[key] = part.render;
       wire[key] = part.wire;
@@ -175,36 +202,37 @@ function reviveSlotProps(
     return changed ? revived : value;
   }
   if (!value || typeof value !== "object") return value;
-  const actionId = (value as Record<string, unknown>)[FARM_ACTION_REFERENCE];
-  if (typeof actionId === "string" && Object.keys(value).length === 1) {
+  // Tags are read only in islands mode, where the server writes them; elsewhere props are JSON.
+  const tag = decode || actions ? getFarmTag(value) : undefined;
+  const data = tag === undefined ? undefined : (value as Record<string, unknown>)[FARM_TAG_VALUE];
+  if (tag === FARM_ACTION_TAG && typeof data === "string") {
     if (!actions) throw new Error("server action props need islands mode");
-    return actions(actionId);
+    return actions(data);
   }
-  const keys = Object.keys(value);
-  if (keys.length === 1 && keys[0]!.startsWith("$farm") && keys[0] !== "$farmSlot") {
-    // Islands mode: a value JSON cannot hold (Date, Map, BigInt, …).
+  if (tag === FARM_SLOT_TAG && typeof data === "string") {
+    let html = "";
+    for (const slot of container.querySelectorAll(SLOT_ELEMENT)) {
+      if (slot.getAttribute("name") === data) {
+        html = slot.innerHTML;
+        break;
+      }
+    }
+    return ReactRuntime.createElement(SLOT_ELEMENT, {
+      key: data,
+      name: data,
+      style: { display: "contents" },
+      suppressHydrationWarning: true,
+      dangerouslySetInnerHTML: { __html: html },
+    });
+  }
+  if (tag === FARM_REFERENCE_TAG) throw new Error(`island value ${String(data)} was not resolved`);
+  if (tag !== undefined) {
+    // A value JSON cannot hold (Date, Map, BigInt, …), or app data wrapped as `o`.
     if (!decode) throw new Error("typed props need islands mode");
     const decoded = decode(value as Record<string, unknown>, (child) =>
       reviveSlotProps(ReactRuntime, child, container, actions, decode),
     );
     if (decoded !== FARM_NOT_A_MARKER) return decoded;
-  }
-  const slotId = (value as { $farmSlot?: unknown }).$farmSlot;
-  if (typeof slotId === "string" && Object.keys(value).length === 1) {
-    let html = "";
-    for (const slot of container.querySelectorAll(SLOT_TAG)) {
-      if (slot.getAttribute(SLOT_ATTRIBUTE) === slotId) {
-        html = slot.innerHTML;
-        break;
-      }
-    }
-    return ReactRuntime.createElement(SLOT_TAG, {
-      key: slotId,
-      [SLOT_ATTRIBUTE]: slotId,
-      style: { display: "contents" },
-      suppressHydrationWarning: true,
-      dangerouslySetInnerHTML: { __html: html },
-    });
   }
   let changed = false;
   const revived: Record<string, unknown> = {};
@@ -280,8 +308,8 @@ export function createFarmIsolatedClientBoundary(
           valueScripts = values.select(addressed, values.held()).map((value) =>
             ReactRuntime.createElement("script", {
               key: value.key,
-              type: "application/json",
-              [FARM_VALUE_ATTRIBUTE]: value.key,
+              type: FARM_VALUE_SCRIPT_TYPE,
+              name: value.key,
               dangerouslySetInnerHTML: { __html: escapeScriptJson(value.json) },
             }),
           );
@@ -309,12 +337,12 @@ export function createFarmIsolatedClientBoundary(
       null,
       ...valueScripts,
       ReactRuntime.createElement(
-        "farm-client-boundary",
+        FARM_ISLAND_ELEMENT,
         {
-          "data-farm-client-boundary": moduleReference,
-          "data-farm-client-id": boundaryId,
-          "data-farm-client-export": exportName,
-          "data-farm-island-strategy": islandStrategy,
+          src: moduleReference,
+          export: exportName,
+          props: boundaryId,
+          strategy: islandStrategy,
           style: { display: "contents" },
         },
         ReactRuntime.createElement(
@@ -324,8 +352,8 @@ export function createFarmIsolatedClientBoundary(
         ),
       ),
       ReactRuntime.createElement("script", {
-        type: "application/json",
-        "data-farm-client-props": boundaryId,
+        type: FARM_PROPS_SCRIPT_TYPE,
+        htmlFor: boundaryId,
         dangerouslySetInnerHTML: { __html: serializedProps },
       }),
     );
@@ -392,7 +420,7 @@ export interface FarmIsolatedHydrationRuntimeOptions {
   values?: Pick<FarmIslandValueStore, "ingest" | "resolve">;
   /** Islands mode: the function a server action reference in props stands for. */
   actions?(id: string): (...args: unknown[]) => unknown;
-  /** Islands mode: decodes props JSON cannot hold (`decodeFarmMarker` in island-codec.ts). */
+  /** Islands mode: decodes props JSON cannot hold (`decodeFarmTagged` in island-codec.ts). */
   decode?: FarmMarkerDecoder;
 }
 
@@ -400,16 +428,16 @@ function findBoundaryPayload(container: Element, boundaryId: string): HTMLScript
   const sibling = container.nextElementSibling;
   if (
     sibling instanceof HTMLScriptElement &&
-    sibling.type === "application/json" &&
-    sibling.getAttribute("data-farm-client-props") === boundaryId
+    sibling.type === FARM_PROPS_SCRIPT_TYPE &&
+    sibling.getAttribute("for") === boundaryId
   ) {
     return sibling;
   }
 
   for (const candidate of container.ownerDocument.querySelectorAll<HTMLScriptElement>(
-    'script[type="application/json"][data-farm-client-props]',
+    `script[type="${FARM_PROPS_SCRIPT_TYPE}"]`,
   )) {
-    if (candidate.getAttribute("data-farm-client-props") === boundaryId) return candidate;
+    if (candidate.getAttribute("for") === boundaryId) return candidate;
   }
   return null;
 }
@@ -492,7 +520,7 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
       throw new Error("serialized props must be an object");
     }
     let resolvedProps: unknown = parsedProps;
-    if (payload.textContent?.includes(`"${FARM_VALUE_REFERENCE}"`)) {
+    if (payload.textContent?.includes(`"${FARM_TAG}":"${FARM_REFERENCE_TAG}"`)) {
       if (!options.values) throw new Error("island values need islands mode");
       options.values.ingest(container.ownerDocument);
       resolvedProps = options.values.resolve(parsedProps);
@@ -507,16 +535,11 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
   }
 
   const topLevelBoundaries = (scope: ParentNode) =>
-    Array.from(
-      scope.querySelectorAll<Element>("farm-client-boundary[data-farm-client-boundary]"),
-    ).filter(
-      (container) =>
-        !container.parentElement?.closest("farm-client-boundary[data-farm-client-boundary]"),
+    Array.from(scope.querySelectorAll<Element>(ISLAND_SELECTOR)).filter(
+      (container) => !container.parentElement?.closest(ISLAND_SELECTOR),
     );
   const boundaryKey = (container: Element) =>
-    `${container.getAttribute("data-farm-client-boundary")}#${
-      container.getAttribute("data-farm-client-export") || "default"
-    }`;
+    `${container.getAttribute("src")}#${container.getAttribute("export") || "default"}`;
 
   /**
    * Keeps the live islands of `current` across a refresh of the same page: each island in `next`
@@ -535,7 +558,7 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
     for (const container of topLevelBoundaries(next)) {
       const previous = live.get(boundaryKey(container))?.shift();
       const record = previous && roots.get(previous);
-      const boundaryId = container.getAttribute("data-farm-client-id");
+      const boundaryId = container.getAttribute("props");
       if (!previous || !record || !boundaryId) continue;
       try {
         const props = readBoundaryProps(container, boundaryId);
@@ -551,28 +574,22 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIsolatedHydratio
   }
 
   async function hydrate(scope: ParentNode = document, signal?: AbortSignal): Promise<void> {
-    const candidates = Array.from(
-      scope.querySelectorAll<Element>("farm-client-boundary[data-farm-client-boundary]"),
-    );
-    if (
-      scope instanceof Element &&
-      scope.matches("farm-client-boundary[data-farm-client-boundary]")
-    ) {
+    const candidates = Array.from(scope.querySelectorAll<Element>(ISLAND_SELECTOR));
+    if (scope instanceof Element && scope.matches(ISLAND_SELECTOR)) {
       candidates.unshift(scope);
     }
     const boundaries = candidates.filter((container) => {
       if (roots.has(container) || pending.has(container)) return false;
-      return !container.parentElement?.closest("farm-client-boundary[data-farm-client-boundary]");
+      return !container.parentElement?.closest(ISLAND_SELECTOR);
     });
 
     await Promise.all(
       boundaries.map(async (container) => {
-        const reference = container.getAttribute("data-farm-client-boundary");
-        const boundaryId = container.getAttribute("data-farm-client-id");
-        const exportName = container.getAttribute("data-farm-client-export") || "default";
+        const reference = container.getAttribute("src");
+        const boundaryId = container.getAttribute("props");
+        const exportName = container.getAttribute("export") || "default";
         const strategy =
-          (container.getAttribute("data-farm-island-strategy") as FarmIslandStrategy | null) ??
-          "load";
+          (container.getAttribute("strategy") as FarmIslandStrategy | null) ?? "load";
         if (!reference || !boundaryId) {
           report("An isolated client boundary is missing its module reference or payload ID.");
           return;
@@ -773,9 +790,7 @@ export function createFarmServerPageBoundary(
     ReactRuntime.useLayoutEffect(() => {
       const page = ref.current;
       if (!page) return;
-      const islands = Array.from(
-        page.querySelectorAll("farm-client-boundary[data-farm-client-boundary]"),
-      );
+      const islands = Array.from(page.querySelectorAll(ISLAND_SELECTOR));
       if (islands.length === 0) return;
       const controller = new AbortController();
       runtime.hydrate(page, controller.signal).catch((error) => {

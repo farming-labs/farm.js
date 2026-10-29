@@ -172,10 +172,10 @@ type IsolatedBoundaryMetadata = {
 function readIsolatedBoundaryMetadata(html: string): IsolatedBoundaryMetadata[] {
   const readAttribute = (attributes: string, name: string) =>
     attributes.match(new RegExp(`${name}="([^"]*)"`))?.[1] ?? "";
-  return Array.from(html.matchAll(/<farm-client-boundary\b([^>]*)>/g), ([, attributes]) => ({
-    reference: readAttribute(attributes, "data-farm-client-boundary"),
-    exportName: readAttribute(attributes, "data-farm-client-export"),
-    strategy: readAttribute(attributes, "data-farm-island-strategy"),
+  return Array.from(html.matchAll(/<f-island\b([^>]*)>/g), ([, attributes]) => ({
+    reference: readAttribute(attributes, "src"),
+    exportName: readAttribute(attributes, "export"),
+    strategy: readAttribute(attributes, "strategy"),
   }));
 }
 
@@ -894,7 +894,7 @@ export default async function IslandsPage() {
         async (response) => {
           expect(response.status).toBe(200);
           const html = await response.text();
-          expect(html).toContain('data-farm-client-boundary="/src/app/counter.tsx"');
+          expect(html).toContain('<f-island src="/src/app/counter.tsx"');
           const files = await preloadsIn(html);
           expect(files).toContain(moduleChunk("/src/app/counter.tsx"));
           expect(files).not.toContain(moduleChunk("/src/app/page.tsx"));
@@ -2238,14 +2238,14 @@ export function CopyButton({ text }) {
           const html = await response.text();
           expect(html).toContain("Some server-rendered text.");
           expect(html).toContain('data-farm-layout-client="true"');
-          expect(html).toMatch(/<farm-client-boundary[^>]*copy-button/);
+          expect(html).toMatch(/<f-island[^>]*copy-button/);
           expect(html).toContain("<title>Notes</title>");
 
           const mdx = await fetch(new URL("/notes-mdx", response.url));
           expect(mdx.status).toBe(200);
           const mdxHtml = await mdx.text();
           expect(mdxHtml).toContain("Some server-rendered text.");
-          expect(mdxHtml).toMatch(/<farm-client-boundary[^>]*copy-button/);
+          expect(mdxHtml).toMatch(/<f-island[^>]*copy-button/);
           expect(mdxHtml).toContain("<title>Notes</title>");
 
           for (const pathname of ["/notes.md", "/notes-mdx.md"]) {
@@ -3190,7 +3190,7 @@ export default function Counter({ name, initial = 0 }) {
   const [count, setCount] = useState(initial);
   const ref = useRef(null);
   useEffect(() => {
-    const container = ref.current?.closest("farm-client-boundary");
+    const container = ref.current?.closest("f-island");
     globalThis.__farmIsolatedLifecycle = globalThis.__farmIsolatedLifecycle || [];
     globalThis.__farmIsolatedLifecycle.push({ type: "mount", name });
     return () => globalThis.__farmIsolatedLifecycle.push({
@@ -3211,7 +3211,7 @@ export default function PageCounter({ name }) {
   const [count, setCount] = useState(0);
   const ref = useRef(null);
   useEffect(() => {
-    const container = ref.current?.closest("farm-client-boundary");
+    const container = ref.current?.closest("f-island");
     globalThis.__farmIsolatedLifecycle = globalThis.__farmIsolatedLifecycle || [];
     globalThis.__farmIsolatedLifecycle.push({ type: "mount", name });
     return () => globalThis.__farmIsolatedLifecycle.push({
@@ -3323,7 +3323,7 @@ export default function SecondPage() {
       await build(baselineConfig, { root: baselineRoot, preset: "node-server" });
       const baselineJavaScript = await readAllClientJavaScript(baselineRoot);
       expect(baselineJavaScript).toContain("SERVER_LAYOUT_SENTINEL_");
-      expect(baselineJavaScript).not.toContain("data-farm-client-boundary");
+      expect(baselineJavaScript).not.toContain("<f-island");
       expect(baselineJavaScript).not.toContain("__farm_client_boundary_originals__");
       expect(baselineJavaScript).not.toContain("Could not hydrate isolated client boundary");
       expect(Buffer.byteLength(clientJavaScript)).toBeLessThan(
@@ -3352,17 +3352,15 @@ export default function SecondPage() {
           expect(response.status).toBe(200);
           const html = await response.text();
           expect(html).toContain("SERVER_LAYOUT_SENTINEL_");
-          expect(html).toContain('data-farm-client-boundary="/src/components/counter.tsx"');
-          expect(html).toContain('data-farm-client-export="default"');
+          expect(html).toContain('<f-island src="/src/components/counter.tsx"');
+          expect(html).toContain('export="default"');
           expect(html).toContain('data-isolated-counter="first"');
           expect(html).toContain('data-isolated-counter="second"');
           expect(html).toContain("data-nested-counter");
           expect(html).toContain(">2</button>");
           expect(html).toContain('data-page-counter="first-page"');
-          expect(html.match(/<farm-client-boundary/g)).toHaveLength(4);
-          expect(html).not.toContain(
-            'data-farm-client-boundary="/src/components/child-counter.tsx"',
-          );
+          expect(html.match(/<f-island/g)).toHaveLength(4);
+          expect(html).not.toContain('<f-island src="/src/components/child-counter.tsx"');
 
           const executablePath = await resolveInstalledChromiumExecutable();
           if (!executablePath) return;
@@ -3389,7 +3387,7 @@ export default function SecondPage() {
               await expect
                 .poll(() =>
                   counter.evaluate((element) =>
-                    element.closest("farm-client-boundary")?.getAttribute("data-farm-hydrated"),
+                    element.closest("f-island")?.getAttribute("data-farm-hydrated"),
                   ),
                 )
                 .toBe("true");
@@ -3405,7 +3403,7 @@ export default function SecondPage() {
             await expect.poll(() => first.getAttribute("data-identity")).toBe("retained");
             await expect.poll(() => pageCounter.textContent()).toBe("1");
             await expect
-              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
               .toBe(4);
 
             await page.locator("[data-nav-second]").click();
@@ -3476,7 +3474,7 @@ export default function SecondPage() {
             await expect.poll(() => first.textContent()).toBe("3");
             await expect.poll(() => first.getAttribute("data-identity")).toBe("retained");
             await expect
-              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
               .toBe(4);
 
             const lifecycle = await page.evaluate(
@@ -3603,7 +3601,7 @@ await server.listen(Number(process.env.PORT));
       ) => {
         expect(response.status).toBe(200);
         const html = await response.text();
-        expect(html.match(/<farm-client-boundary/g) ?? []).toHaveLength(expected.isolatedRoots);
+        expect(html.match(/<f-island/g) ?? []).toHaveLength(expected.isolatedRoots);
         expect(html).toMatch(
           new RegExp(
             `id="__farm_page__"[^>]*data-farm-client="${expected.pageHydrates ? "true" : "false"}`,
@@ -3624,7 +3622,7 @@ await server.listen(Number(process.env.PORT));
           const counter = page.locator(`[data-cost-counter="${expected.counter}"]`);
           try {
             await expect
-              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
               .toBe(expected.isolatedRoots);
             await counter.click();
             await expect.poll(() => counter.textContent()).toBe(`${expected.counter}:1`);
@@ -3833,8 +3831,7 @@ await server.listen(Number(process.env.PORT));
             });
             await page.goto(url);
 
-            const boundary = (strategy: string) =>
-              page.locator(`farm-client-boundary[data-farm-island-strategy="${strategy}"]`);
+            const boundary = (strategy: string) => page.locator(`f-island[strategy="${strategy}"]`);
             await boundary("load").locator('[data-strategy="load"]').waitFor();
             await expect
               .poll(() => boundary("load").getAttribute("data-farm-hydrated"))
@@ -3952,9 +3949,9 @@ await server.listen(Number(process.env.PORT));
           expect(response.status).toBe(200);
           const html = await response.text();
           for (const strategy of ["load", "interaction", "visible", "idle"]) {
-            expect(html).toContain(`data-farm-island-strategy="${strategy}"`);
+            expect(html).toContain(`strategy="${strategy}"`);
           }
-          expect(html.match(/<farm-client-boundary/g)).toHaveLength(4);
+          expect(html.match(/<f-island/g)).toHaveLength(4);
           await verifyScheduling(response.url);
         },
       );
@@ -4036,7 +4033,7 @@ await server.listen(Number(process.env.PORT));
           await page.goto(new URL("/fallback", url).href);
 
           await expect
-            .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+            .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
             .toBe(expectedIsolatedRoots);
           expect(
             await page.locator("#__farm_page__").getAttribute("data-farm-island-hydrated"),
@@ -4101,7 +4098,7 @@ await server.listen(Number(process.env.PORT));
           try {
             await page.goto(response.url);
             await expect
-              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
               .toBe(3);
             await page.locator("[data-parity-layout]").evaluate((element) => {
               element.setAttribute("data-layout-identity", "retained");
@@ -4196,7 +4193,7 @@ await server.listen(Number(process.env.PORT));
               })
               .toBe("server-stable");
             await expect
-              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
               .toBe(2);
 
             await fs.writeFile(
@@ -4211,7 +4208,7 @@ export default function Page() { return <main data-parity-page>Parity page <Page
             );
             await expect.poll(() => page.locator("[data-page-owner]").count()).toBe(1);
             await expect
-              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
               .toBe(3);
             await page.evaluate(() => {
               (
@@ -4242,7 +4239,7 @@ export default function PageOwner() { return <section data-page-owner><LiveCount
               .poll(() => page.locator("#__farm_page__").getAttribute("data-farm-client"))
               .toBe("true");
             await expect
-              .poll(() => page.locator('farm-client-boundary[data-farm-hydrated="true"]').count())
+              .poll(() => page.locator('f-island[data-farm-hydrated="true"]').count())
               .toBe(2);
             expect(
               browserErrors,

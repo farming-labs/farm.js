@@ -71,8 +71,10 @@ afterEach(() => {
 describe("server actions as island props", () => {
   it("sends an action as a reference and hydrates it as a callable stub", async () => {
     const html = renderToString(<TodoForm action={addTodo} count={2} />);
-    const props = JSON.parse(/data-farm-client-props="[^"]+">([^<]*)<\/script>/.exec(html)![1]!);
-    expect(props.action).toEqual({ $farmAction: "add-todo-id" });
+    const props = JSON.parse(
+      /<script type="f\/props" for="[^"]+">([^<]*)<\/script>/.exec(html)![1]!,
+    );
+    expect(props.action).toEqual({ $: "a", v: "add-todo-id" });
     expect(html).not.toContain("formData.get");
 
     document.body.innerHTML = html;
@@ -92,7 +94,7 @@ describe("server actions as island props", () => {
   it("keeps a function that is not an action out, as before", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const html = renderToString(<TodoForm action={async () => {}} count={1} />);
-    expect(html).not.toContain("farm-client-boundary");
+    expect(html).not.toContain("f-island");
   });
 
   it("keeps an island's state across a refresh and gives it the new props", async () => {
@@ -101,7 +103,7 @@ describe("server actions as island props", () => {
     )}</main>`;
     const runtime = createRuntime();
     await act(async () => runtime.hydrate(document));
-    const live = document.querySelector("farm-client-boundary")!;
+    const live = document.querySelector("f-island")!;
     await act(async () => (document.querySelector("[data-clicks]") as HTMLButtonElement).click());
     expect(document.querySelector("[data-clicks]")!.textContent).toBe("clicks 1");
 
@@ -113,7 +115,7 @@ describe("server actions as island props", () => {
       carried = runtime.carryOver(document.querySelector("#current")!, next);
     });
     expect(carried).toBe(1);
-    expect(next.querySelector("farm-client-boundary")).toBe(live);
+    expect(next.querySelector("f-island")).toBe(live);
     document.querySelector("#current")!.replaceWith(next);
     await act(async () => runtime.hydrate(document));
 
@@ -153,7 +155,7 @@ describe("server actions as island props", () => {
       isolate: (node) => node,
     });
     const html = renderToString(<div id="__farm_page__">{page}</div>);
-    expect(html).toContain('{"$":"a","i":"add-todo-id"}');
+    expect(html).toContain('{"$":"a","v":"add-todo-id"}');
     const container = Object.assign(document.createElement("div"), { innerHTML: html });
     const element = await createFarmServerTreeElement(
       React,

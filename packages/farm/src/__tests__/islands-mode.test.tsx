@@ -40,11 +40,13 @@ describe("islands mode", () => {
       </Boundary>,
     );
     expect(html).toMatch(
-      /<farm-slot data-farm-slot="[^"]+s0" style="display:contents"><p>Server comment<\/p><\/farm-slot>/,
+      /<f-slot name="[^"]+s0" style="display:contents"><p>Server comment<\/p><\/f-slot>/,
     );
-    const props = JSON.parse(/data-farm-client-props="[^"]+">([^<]*)<\/script>/.exec(html)![1]!);
+    const props = JSON.parse(
+      /<script type="f\/props" for="[^"]+">([^<]*)<\/script>/.exec(html)![1]!,
+    );
     expect(props.title).toBe("Comments");
-    expect(props.children).toEqual({ $farmSlot: expect.stringMatching(/s0$/) });
+    expect(props.children).toEqual({ $: "s", v: expect.stringMatching(/s0$/) });
     expect(JSON.stringify(props)).not.toContain("Server comment");
   });
 
@@ -62,7 +64,7 @@ describe("islands mode", () => {
         <p>Server comment</p>
       </Boundary>,
     );
-    expect(html).not.toContain("farm-client-boundary");
+    expect(html).not.toContain("f-island");
   });
 
   it("plans a synchronous server page like an async one, so it can join a layout's tree", () => {

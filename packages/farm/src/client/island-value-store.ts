@@ -6,9 +6,13 @@
 import {
   FARM_ISLAND_VALUE_STORE_KEY,
   FARM_MAX_HELD_VALUES,
-  FARM_VALUE_ATTRIBUTE,
+  FARM_OBJECT_TAG,
+  FARM_REFERENCE_TAG,
+  FARM_TAG,
+  FARM_TAG_VALUE,
   FARM_VALUE_KEY_PATTERN,
-  FARM_VALUE_REFERENCE,
+  FARM_VALUE_SCRIPT_TYPE,
+  getFarmTag,
   type FarmIslandValueStore,
 } from "./island-value-protocol";
 
@@ -48,20 +52,44 @@ function createFarmIslandValueStore(): FarmIslandValueStore {
   const resolve = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(resolve);
     if (!value || typeof value !== "object") return value;
-    const keys = Object.keys(value);
-    const reference = (value as Record<string, unknown>)[FARM_VALUE_REFERENCE];
-    if (keys.length === 1 && typeof reference === "string") return get(reference);
+    const object = value as Record<string, unknown>;
+    const tag = getFarmTag(object);
+    if (tag === FARM_REFERENCE_TAG && typeof object[FARM_TAG_VALUE] === "string") {
+      return get(object[FARM_TAG_VALUE]);
+    }
+    // App data wrapped as `o` may itself look tagged: resolve only inside its properties.
+    if (
+      tag === FARM_OBJECT_TAG &&
+      object[FARM_TAG_VALUE] &&
+      typeof object[FARM_TAG_VALUE] === "object"
+    ) {
+      return {
+        [FARM_TAG]: FARM_OBJECT_TAG,
+        [FARM_TAG_VALUE]: resolveEntries(object[FARM_TAG_VALUE] as Record<string, unknown>),
+      };
+    }
+    return resolveEntries(object);
+  };
+
+  const resolveEntries = (object: Record<string, unknown>): Record<string, unknown> => {
     const resolved: Record<string, unknown> = {};
-    for (const key of keys) resolved[key] = resolve((value as Record<string, unknown>)[key]);
+    for (const key of Object.keys(object)) {
+      Object.defineProperty(resolved, key, {
+        value: resolve(object[key]),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
     return resolved;
   };
 
   return {
     ingest(root) {
-      for (const script of root.querySelectorAll(`script[${FARM_VALUE_ATTRIBUTE}]`)) {
+      for (const script of root.querySelectorAll(`script[type="${FARM_VALUE_SCRIPT_TYPE}"]`)) {
         if (read.has(script)) continue;
         read.add(script);
-        const key = script.getAttribute(FARM_VALUE_ATTRIBUTE) ?? "";
+        const key = script.getAttribute("name") ?? "";
         if (FARM_VALUE_KEY_PATTERN.test(key) && !entries.has(key)) {
           entries.set(key, { json: script.textContent || "null", state: "raw" });
         }

@@ -5,11 +5,11 @@
  * the wire format and `island-value-store.ts` for the browser side.
  */
 import { _resolveCurrentRequest, _resolveCurrentRequestForApp } from "../server/request-bridge";
-import { decodeFarmMarker, encodeFarmLeaf } from "./island-codec";
+import { decodeFarmTagged, encodeFarmLeaf } from "./island-codec";
 import {
   FARM_MAX_HELD_VALUES,
   FARM_VALUE_KEY_PATTERN,
-  FARM_VALUE_REFERENCE,
+  FARM_REFERENCE_TAG,
   FARM_VALUES_HEADER,
 } from "./island-value-protocol";
 
@@ -59,7 +59,7 @@ export function addressFarmValues(
     const key = hashFarmValue(json);
     if (!values.has(key)) values.set(key, { key, json, children });
     parent.push(key);
-    return `{"${FARM_VALUE_REFERENCE}":"${key}"}`;
+    return `{"$":"${FARM_REFERENCE_TAG}","v":"${key}"}`;
   };
   // Returns the value's JSON with large inner values replaced, and the length of its full JSON:
   // a value is addressed by its full size, so a tree whose parts are all addressed still gets one
@@ -172,7 +172,7 @@ export interface FarmIslandValuesServer {
   held: typeof readFarmHeldValues;
   /** Markers for values JSON cannot hold (`island-codec.ts`). */
   encodeLeaf: typeof encodeFarmLeaf;
-  decode: typeof decodeFarmMarker;
+  decode: typeof decodeFarmTagged;
 }
 
 const SERVER_KEY = Symbol.for("farm.island-values.server");
@@ -187,7 +187,7 @@ export function installFarmIslandValues(): void {
     select: selectFarmValuesToSend,
     held: readFarmHeldValues,
     encodeLeaf: encodeFarmLeaf,
-    decode: decodeFarmMarker,
+    decode: decodeFarmTagged,
   };
 }
 

@@ -16,7 +16,7 @@ import {
 /** The form field carrying the action id. */
 export const FARM_FORM_ACTION_FIELD = "$FARM_ACTION";
 /** The header carrying the action id for calls from client components. */
-export const FARM_FORM_ACTION_HEADER = "x-farm-action";
+export const FARM_FORM_ACTION_HEADER = "F-Action";
 
 type FarmAction = (...args: unknown[]) => unknown;
 
