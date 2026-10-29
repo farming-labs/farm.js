@@ -52,3 +52,24 @@ export function _resolveCurrentCspNonce(): string | undefined {
   ] as CspNonceResolver | undefined;
   return resolver?.();
 }
+
+type SharedCacheScopeRunner = <T>(label: string, fn: () => T) => T;
+
+const SHARED_CACHE_SCOPE_RUNNER_KEY = Symbol.for("farm.sharedCacheScopeRunner");
+
+export function _setSharedCacheScopeRunner(runner: SharedCacheScopeRunner | undefined): void {
+  (globalThis as typeof globalThis & Record<symbol, unknown>)[SHARED_CACHE_SCOPE_RUNNER_KEY] =
+    runner;
+}
+
+/**
+ * Run `fn` as the body of a cache entry every request shares, such as an
+ * `unstable_cache` function. Reading the request inside it throws: the value
+ * would be cached for one visitor and served to the rest.
+ */
+export function _runInSharedCacheScope<T>(label: string, fn: () => T): T {
+  const runner = (globalThis as typeof globalThis & Record<symbol, unknown>)[
+    SHARED_CACHE_SCOPE_RUNNER_KEY
+  ] as SharedCacheScopeRunner | undefined;
+  return runner ? runner(label, fn) : fn();
+}

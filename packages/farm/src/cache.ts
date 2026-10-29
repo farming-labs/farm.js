@@ -1,6 +1,7 @@
 import { emitFarmEvent } from "./observability";
 import { notifyFarmCacheInvalidation, notifyFarmCacheTask } from "./cache-invalidation";
 import { getActiveFarmI18nSnapshot } from "./i18n/bridge";
+import { _runInSharedCacheScope } from "./server/request-bridge";
 import {
   createFarmCacheKey,
   createRouteDataCacheKey,
@@ -1100,6 +1101,10 @@ export function configureFarmCache(config: FarmCacheUserConfig | undefined): voi
  * Values passed as call arguments already participate in the key and do not
  * need to be repeated in `keyParts`.
  *
+ * The result is shared by every request, so the function cannot read the
+ * request: `cookies()`, `headers()`, `getCspNonce()`, and `getCurrentRequest()`
+ * throw inside it. Read them outside and pass what you need as an argument.
+ *
  * @param fn The async function to memoize.
  * @param keyParts Extra values that identify this call site. Include every
  *   variable the function closes over that is not one of its arguments.
@@ -1119,7 +1124,11 @@ export function unstable_cache<Args extends unknown[], Result>(
       keyParts,
       args,
     ]);
-    return getFarmDataCache().getOrSet<Result>(key, () => fn(...args), options);
+    return getFarmDataCache().getOrSet<Result>(
+      key,
+      () => _runInSharedCacheScope("unstable_cache()", () => fn(...args)),
+      options,
+    );
   };
 }
 

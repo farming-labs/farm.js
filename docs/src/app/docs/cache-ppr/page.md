@@ -121,6 +121,19 @@ const makeLoader = (table: string) =>
 Values passed as call arguments already participate in the key, so they do not need to be repeated
 in `keyParts`.
 
+The cached result is shared by every request, so the function cannot read the request:
+`cookies()`, `headers()`, `getCspNonce()`, `getCurrentRequest()` and a server function's
+`request.headers` throw inside it. Read what you need outside and pass it in as an argument, which
+also puts it in the key:
+
+```ts
+const getCart = unstable_cache(async (userId: string) => db.cart(userId), ["cart"]);
+
+// Outside the cached function, where reading the request is fine:
+const session = await getSession(); // reads cookies()
+const cart = await getCart(session.userId);
+```
+
 ## Revalidate
 
 **server action or route handler**

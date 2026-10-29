@@ -5,6 +5,7 @@ import {
   _setAppRequestView,
   _setCspNonceResolver,
   _setCurrentRequestResolver,
+  _setSharedCacheScopeRunner,
 } from "./request-bridge";
 
 const REQUEST_STORAGE_KEY = Symbol.for("@farm.js/core/request-storage");
@@ -22,6 +23,36 @@ function getRequestStore(): AsyncLocalStorage<Request> {
 }
 
 const requestStore = getRequestStore();
+
+// Set while a function whose result every request shares (unstable_cache) runs.
+// A request read there would cache one visitor's cookies or headers for all of
+// them, and a later cache hit reads nothing, so the shared-response checks that
+// count reads cannot see it. Refuse the read instead.
+const SHARED_CACHE_SCOPE_KEY = Symbol.for("@farm.js/core/shared-cache-scope");
+
+function getSharedCacheScopeStore(): AsyncLocalStorage<string> {
+  const runtime = globalThis as typeof globalThis & Record<PropertyKey, unknown>;
+  const existing = runtime[SHARED_CACHE_SCOPE_KEY];
+  if (existing instanceof AsyncLocalStorage) return existing as AsyncLocalStorage<string>;
+  const storage = new AsyncLocalStorage<string>();
+  runtime[SHARED_CACHE_SCOPE_KEY] = storage;
+  return storage;
+}
+
+const sharedCacheScope = getSharedCacheScopeStore();
+_setSharedCacheScopeRunner((label, fn) => sharedCacheScope.run(label, fn));
+
+/** @internal Throw when `api` reads the request inside a shared cache function. */
+export function _assertRequestReadAllowed(api: string): void {
+  const scope = sharedCacheScope.getStore();
+  if (!scope) return;
+  throw new Error(
+    `${api} cannot be called inside ${scope}: its result is cached and shared by every ` +
+      "request, so one visitor's request data would be served to others. Read it outside " +
+      "the cached function and pass the value in as an argument, which also makes it part " +
+      "of the cache key.",
+  );
+}
 
 // How many times app code read each request through getCurrentRequest(),
 // headers(), or cookies(). Renderers compare it across a render: HTML that
@@ -66,6 +97,7 @@ function getAppRequestView(request: Request): Request {
       headers: {
         configurable: true,
         get() {
+          _assertRequestReadAllowed("request.headers");
           countRequestRead(request);
           return request.headers;
         },
@@ -73,6 +105,7 @@ function getAppRequestView(request: Request): Request {
       clone: {
         configurable: true,
         value() {
+          _assertRequestReadAllowed("request.clone()");
           countRequestRead(request);
           return request.clone();
         },
@@ -232,6 +265,7 @@ export async function _runWithCurrentRequest<T>(
 }
 
 export function getCurrentRequest(): Request {
+  _assertRequestReadAllowed("getCurrentRequest()");
   const request = requestStore.getStore();
   if (!request) {
     throw new Error(
