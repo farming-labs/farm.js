@@ -536,6 +536,43 @@ importers:
         specifier: 8.3.4
         version: 8.3.4(@types/node@22.20.5)(yaml@2.9.0)
 
+  examples/desktop-electrobun:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../../packages/farm
+      react:
+        specifier: 19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: 19.2.8
+        version: 19.2.8(react@19.2.8)
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@farm.js/cli':
+        specifier: workspace:*
+        version: link:../../packages/farm-cli
+      '@farm.js/desktop-electrobun':
+        specifier: workspace:*
+        version: link:../../packages/farm-desktop-electrobun
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.13
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.13)
+      electrobun:
+        specifier: 2.0.5
+        version: 2.0.5
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vite:
+        specifier: 8.3.4
+        version: 8.3.4(@types/node@22.20.5)(esbuild@0.27.3)
+
   examples/docs-integration:
     dependencies:
       '@farm.js/core':
