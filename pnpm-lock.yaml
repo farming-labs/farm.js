@@ -2497,6 +2497,27 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
 
+  packages/farm-desktop-electrobun:
+    devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      electrobun:
+        specifier: 2.0.5
+        version: 2.0.5
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vite:
+        specifier: 8.3.4
+        version: 8.3.4(@types/node@22.20.5)(yaml@2.9.0)
+      vitest:
+        specifier: 5.0.5
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
+
   packages/farm-devtools:
     dependencies:
       '@fontsource-variable/geist-mono':
@@ -15941,6 +15962,12 @@ packages:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 3.23.2
+
+  /electrobun@2.0.5:
+    resolution: {integrity: sha512-/4Vp0p6LgdD7bySSblnoqM0rtcQT5uYsGeqZPhsOESeSxMGeiKsfQkBjNwMnjFI5z4StJKXfs386ay2mpif1BA==}
+    engines: {node: '>=18'}
+    hasBin: true
+    dev: true
 
   /electron-to-chromium@1.5.469:
     resolution: {integrity: sha512-HIR230i9MGRHzaB8QRfXePYN23CF5osVvSqrZWQxqmlIMkIrT//wCEiDMM8yK2Il8TTqw39sjbwR4W2/axBFag==}
