@@ -93,7 +93,7 @@ export default defineConfig({
   mobile: {
     id: "dev.farmjs.notes",
     name: "Notes",
-    server: "https://notes.example.com", // omitted: managed hosting, see 7.8
+    server: "https://notes.example.com", // omitted: managed hosting, see 7.9
     tabs: [
       { route: "/", title: "Notes", icon: "note.text" },
       { route: "/settings", title: "Settings", icon: "gear" },
@@ -341,7 +341,8 @@ web app, and not React DOM compiled to native views.
 | native chrome: nav bar, search bar             |
 +------------------------------------------------+
 | content: exactly one of                        |
-|   - a WebView showing a Farm page              |
+|   - a WebView showing a Farm page,             |
+|     optionally with native islands (7.5)       |
 |   - a native view (list, React Native screen)  |
 +------------------------------------------------+
 | native chrome: tab bar                         |
@@ -350,8 +351,9 @@ web app, and not React DOM compiled to native views.
   action sheets, camera, share, Face ID
 ```
 
-A screen's content is a WebView or a native view, never a native view inside a scrolling WebView.
-Mixed scrolling content breaks gestures, accessibility order and keyboard handling.
+A screen's content is a WebView or a native view. Native views inside a WebView screen are only
+allowed as native islands (7.5), which follow fixed placement and scrolling rules; free-form mixed
+scrolling content breaks gestures, accessibility order and keyboard handling.
 
 ### 7.2 Navigation
 
@@ -458,7 +460,94 @@ export default function Feed() {
 `@farm.js/native` hooks call the same server functions over the same transport as the web client,
 with the mobile auth token. Native screens are the escape hatch, not the default.
 
-### 7.5 Styling
+### 7.5 Native islands
+
+Some parts of a web screen should be native views while the rest of the screen stays HTML: a map,
+a video player, a chart, a carousel, a native list block, a native form row. A native island is a
+block of the page that renders as a real native view, placed inside the WebView at the block's
+position and scrolling with the page.
+
+`@farm.js/native` provides the primitives. Every component in it is in one of two groups:
+
+| Group       | Components                                                                                     | Web and desktop                                       | Mobile                 |
+| ----------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ---------------------- |
+| Shared      | `View`, `Text`, `Image`, `Pressable`, `TextInput`, `List`, `Carousel`, `Map`, `Video`, `Chart` | DOM, styled from the same tokens or a Tailwind subset | always a native island |
+| Native-only | for example `CameraPreview`, `ApplePayButton`, `ARView`, `LiveActivity`                        | renders its `fallback` prop, or nothing (dev warning) | native island          |
+
+Rules:
+
+- Every shared component is islanded on mobile. There is no "web on mobile" mode for them, so a
+  shared component behaves the same on every phone.
+- Native-only components have no web equivalent and Farm does not invent one. On web and desktop
+  they render the `fallback` prop when given, otherwise nothing, with a development warning.
+- Styling is token props (`padding="md"`, `background="surface"`, `radius="card"`) or a
+  Tailwind subset compiled the NativeWind way. Arbitrary CSS is not accepted on these components;
+  that limit is what keeps them translatable.
+
+```tsx
+import { View, Text, Map, List, CameraPreview } from "@farm.js/native";
+
+<View padding="md" background="surface" radius="card">
+  <Text variant="title">Nearby</Text>
+  <Map region={region} markers={places} height={240} />
+  <List
+    items={places}
+    row={(p) => ({ title: p.name, subtitle: p.distance, href: `/places/${p.id}` })}
+  />
+  <CameraPreview fallback={<UploadPhoto />} />
+</View>;
+```
+
+#### How islands render
+
+Islands are rendered by a custom React renderer, not by compiling components to Swift or Kotlin.
+Component logic (state, hooks, server functions) stays ordinary React running in the WebView.
+
+```text
+React (in the WebView JS)
+  @farm.js/native host config (react-reconciler)
+    records ops: create(12, "List", props), append(11, 12), update(12, { items }), remove(12)
+    batches them once per frame
+  bridge (JSON) ──▶ native renderer (generated Swift / Kotlin in the app)
+                       builds and updates UIKit / Android views
+                       mounts the tree at the island's placeholder
+```
+
+- On web and desktop the same components use the DOM host, so there is one component source.
+- The native renderer is generated source under `.farm/output/mobile/ios` and `android`. It is
+  readable and ejectable with `farm eject mobile`.
+- `farm native inspect` prints the live native tree of each island for debugging.
+- Events (`onPress`, `onChangeText`, `onEndReached`) travel back over the bridge to the React
+  handlers.
+
+#### Placement and scrolling
+
+The WebView renders a placeholder element of the island's size. The page reports each island's
+frame when layout changes (`ResizeObserver` plus a layout pass after navigation).
+
+- iOS: the native view is added inside `WKWebView.scrollView`, so it scrolls with the page on the
+  same scroll view, with no per-frame syncing.
+- Android: the native view is added as a child of the WebView's content layer and positioned in
+  content coordinates.
+
+Island rules, enforced in development:
+
+1. The island has a fixed height, or reports its height to the page.
+2. No HTML overlaps an island. Native views draw above the WebView content.
+3. No CSS transforms or animations on an island's container.
+4. One scroll direction per axis. A vertical `List` island grows to its full height inside the
+   page; only horizontal scrolling (carousels) happens inside an island.
+5. Focus and accessibility order follow the placeholder's position in the DOM.
+
+Violations log a development error that names the island and the rule.
+
+#### Staging
+
+1. Full-bleed and fixed islands: `Map`, `Video`, `Chart`, native-only components.
+2. `View`, `Text`, `Image`, `Pressable`, `TextInput` through the renderer, scrolling with the page.
+3. `List` and `Carousel` islands.
+
+### 7.6 Styling
 
 - WebView screens keep the app's CSS.
 - Farm injects a small mobile base stylesheet: system font, `env(safe-area-inset-*)` padding,
@@ -488,7 +577,7 @@ export default defineTheme({
 Native parts accept token-level styling only (colors, radii, fonts, spacing). There is no general
 CSS-to-native compiler.
 
-### 7.6 Mobile output
+### 7.7 Mobile output
 
 ```text
 .farm/output/mobile/
@@ -505,13 +594,13 @@ CSS-to-native compiler.
     Notes.ipa  Notes.aab
 ```
 
-### 7.7 Development
+### 7.8 Development
 
 `farm dev --mobile` starts `farm dev`, generates the native project, and runs it in the iOS
 Simulator or Android emulator with `mobile.server` pointed at the dev server's LAN address. WebView
 screens get HMR. Native screens use Metro's fast refresh.
 
-### 7.8 Backend
+### 7.9 Backend
 
 The server for a mobile app is either:
 
@@ -544,6 +633,7 @@ Rules that hold either way:
 | HMR              | yes                 | yes, window loads `farm dev`     | WebView HMR, Metro for native screens        |
 | Agent-readiness  | full, on by default | off or guarded (6.5)             | served by the web deployment                 |
 | Native features  | web APIs            | shell APIs (menu, tray, dialogs) | Capacitor plugins through `native`           |
+| Native islands   | DOM                 | DOM                              | `@farm.js/native` shared components (7.5)    |
 | Auth             | cookies             | cookies, local guard             | Keychain/Keystore tokens                     |
 | Store acceptance | n/a                 | signing and notarization (open)  | native navigation and chrome (see 7.1)       |
 
@@ -555,8 +645,8 @@ Rules that hold either way:
 3. **Electrobun adapter** in `@farm.js/desktop-electrobun`, and #2303 rewritten as a config-only
    app: `farm.config.ts` with `desktop: {}`, no `desktop/main.ts`, no dev script, no guard plugin.
 4. **Electron and Tauri adapters.**
-5. **Mobile** (0.2.x): shell generator, bridge, `@farm.js/ui` mappings, `@farm.js/native`, token
-   auth. Needs macOS CI with Xcode and Linux CI with Android Studio tooling before it ships.
+5. **Mobile** (0.2.x): shell generator, bridge, `@farm.js/ui` mappings, `@farm.js/native` native
+   islands (staged as in 7.5), token auth. Needs macOS CI with Xcode and Linux CI with Android Studio tooling before it ships.
 6. **Docs and examples**, landing with each phase.
 
 Managed backend hosting in Infra comes after phase 5.
@@ -593,6 +683,12 @@ Requires every DOM and CSS feature to have a native equivalent. It does not hold
 would split behavior between platforms in ways Farm cannot test. Per-route React Native screens
 cover the cases that need native rendering.
 
+### Compile `@farm.js/native` components to Swift and Kotlin at build time
+
+Static code generation breaks as soon as a component uses state, hooks or data, which is most
+components. A React renderer that sends batched view operations to a generated native renderer
+keeps component logic in React and still produces native views.
+
 ### Run the server on the phone
 
 Mobile OSes do not allow a long-running local HTTP server reliably, background execution is
@@ -615,6 +711,11 @@ limited, and server secrets would ship in the app binary.
 6. **Static client assets and the guard.** Nitro serves client chunks before Farm's runtime hooks,
    so the spike's guard did not cover them. They contain only client code, but the desktop server
    entry could put the guard in front of static serving for uniformity.
+7. **Island placement on Android.** Positioning native children in the WebView's content
+   coordinates works on current Android WebView, but needs a device matrix check (scroll, zoom,
+   keyboard insets) before islands that scroll with the page ship on Android.
+8. **Native-only component catalog.** Which native-only components ship first-party, and how
+   third parties publish their own (a Capacitor-style plugin with a renderer registration).
 
 ## Decision requested
 
