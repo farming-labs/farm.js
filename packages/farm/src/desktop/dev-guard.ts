@@ -48,6 +48,11 @@ export function createFarmDesktopDevGuard(
       },
     });
     if (!blocked) return next();
+    // The window never sees a 403 body, so say in the terminal what was refused and why.
+    server.config.logger.warn(
+      `[farm] desktop guard refused ${request.method} ${(request.url || "/").split("?")[0]}: ${blocked.headers.get("x-farm-desktop-guard") ?? "forbidden"}`,
+      { timestamp: true },
+    );
     sendWebResponse(response, blocked).catch(next);
   };
 }

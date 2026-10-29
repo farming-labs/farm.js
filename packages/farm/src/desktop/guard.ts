@@ -57,6 +57,7 @@ function forbidden(reason: string): Response {
       "cache-control": "no-store",
       "content-type": "text/plain; charset=utf-8",
       "x-content-type-options": "nosniff",
+      "x-farm-desktop-guard": reason,
     },
   });
 }
