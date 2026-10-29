@@ -335,7 +335,9 @@ Farm keeps the options it needs to produce its production output: `root`, `base`
 source of each module, including code Farm strips from the browser bundle such as
 `createServerOnlyFn` bodies and `generateMetadata`, so any enabled value builds hidden maps (the
 JS names no map) and writes them to `.farm/client-sourcemaps/` instead of the public output. Upload
-them from there to your error tracker.
+them from there to your error tracker. RSC apps built with `@farm.js/plugin/rsc` do the same for
+`build.sourcemap` in `vite.config.ts`, writing the maps to `dist/client-sourcemaps/` beside
+`dist/client/`.
 
 During development, Farm loads server modules through Vite's `ssr` environment runner. With
 React Server Components enabled, RSC entries use a separate `rsc` runner and resolution conditions;

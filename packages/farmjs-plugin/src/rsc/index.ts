@@ -65,6 +65,7 @@ import {
 } from "./server-fn-transform.js";
 import { transformAutomaticOptimizedBoundaries } from "./automatic-optimized-boundary.js";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
+import { rscPrivateClientSourcemaps } from "./client-sourcemaps.js";
 import { findDocumentLayouts, findRouteFiles } from "./document-layouts.js";
 import { assertRscPackageCompatibility } from "./compatibility.js";
 import { sendRscDevelopmentResponse } from "./dev-response.js";
@@ -833,6 +834,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
 
   return [
     farmEnvironmentFunctionsPlugin() as unknown as Plugin,
+    rscPrivateClientSourcemaps(),
     {
       name: "@farm.js/plugin/rsc:middleware-config",
       enforce: "pre",
