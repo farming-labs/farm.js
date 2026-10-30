@@ -1,0 +1,11 @@
+node_modules/
+.farm/
+.output/
+# Electrobun / Hutch generated state and packaged apps
+.hutch/
+build/
+artifacts/
+hutch.lock
+# Notes saved by `pnpm dev`
+.data/
+.cottontail-tmp/

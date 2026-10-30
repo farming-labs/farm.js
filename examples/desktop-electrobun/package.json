@@ -1,0 +1,27 @@
+{
+  "name": "farm-example-desktop-electrobun",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "farm dev",
+    "build": "farm build --preset bun",
+    "build:desktop": "farm build --preset bun && electrobun build --env=stable",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@farm.js/cli": "workspace:*",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "electrobun": "2.0.5",
+    "typescript": "^5.3.3",
+    "vite": "8.3.4"
+  }
+}

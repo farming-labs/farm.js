@@ -32,6 +32,7 @@ Use the examples folder as executable docs for routing, RSC, agents, docs, markd
 | examples/jobs-inngest           | Inngest jobs runtime.                                                                           |
 | examples/eve-agent              | Eve instructions, same-origin chat UI, managed development, and Vercel composition.             |
 | examples/cf-agent               | Cloudflare Agent state, callable RPC, Wrangler development, and combined Worker deployment.     |
+| examples/desktop-electrobun     | An Electrobun desktop app running the Farm server on loopback, with a launch-secret guard.      |
 
 ## Run one example
 
@@ -58,6 +59,7 @@ pnpm --dir examples/basic dev
 | Jobs                 | Trigger, batch trigger, schedule, status, and cancel calls.                                                    |
 | Eve agent            | Farm page rendering, `/eve/v1/health`, streaming messages, and Vercel output.                                  |
 | Cloudflare agent     | Farm page rendering, WebSocket connection, synchronized state, callable RPC, and Wrangler dry-run deployment.  |
+| Desktop app          | Native window, notes saved to app data across relaunches, and 403 for requests from outside the window.        |
 | Cron                 | A schedule in `farm.config.ts` mapped to a protected API route.                                                |
 | Internationalization | Locale URLs, browser and cookie detection, translated server/client content, RTL, and generated message types. |
 | Markdown             | `.md` mirrors for public pages and cache headers.                                                              |
