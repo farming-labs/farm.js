@@ -7440,6 +7440,73 @@ function createFarmDocumentStream(contentStream, prefix, suffix, onComplete) {
   });
 }
 
+// Streams a layout's own <html> document. React's output is held until the opening <body>, so
+// Farm's head assets go into the document's head (openDocument); the body then streams through.
+// The closing </body></html> React writes with its shell is held back: Suspense content React
+// streams later belongs inside the body, before Farm's footer (closeDocument) and the closing tags.
+function createFarmFullDocumentStream(contentStream, openDocument, closeDocument, onComplete) {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const reader = contentStream.getReader();
+  // The footer renders after the handler returned, outside its async scope.
+  const cspNonce = _resolveCurrentCspNonce();
+  let opening = "";
+  let opened = false;
+  let rootOpened = false;
+  let closing = false;
+  return new ReadableStream({
+    async pull(controller) {
+      try {
+        for (;;) {
+          const result = await reader.read();
+          let text = result.done ? decoder.decode() : decoder.decode(result.value, { stream: true });
+          if (!opened) {
+            opening += text;
+            if (!result.done && !/<body\\b[^>]*>/i.test(opening)) continue;
+            opened = true;
+            text = opening;
+            opening = "";
+            const closeAt = text.search(/<\\/body>/i);
+            const head = closeAt >= 0 ? text.slice(0, closeAt) : text;
+            const rest = closeAt >= 0 ? text.slice(closeAt) : "";
+            // ensureFarmDocumentRoot opens #root unless the layout's body already does.
+            rootOpened = !/<body\\b[^>]*>\\s*<div\\b[^>]*\\sid=["']root["']/i.test(head);
+            text = openDocument(head) + rest;
+          }
+          if (!closing) {
+            const closeAt = text.search(/<\\/body>/i);
+            if (closeAt >= 0) {
+              closing = true;
+              // Drop the closing tags and Farm's wrapper divs around the document; keep what React
+              // wrote after them.
+              text = text.slice(0, closeAt) +
+                text.slice(closeAt).replace(/^<\\/body>\\s*(?:<\\/html>)?(?:\\s*<\\/div>)*/i, "");
+            }
+          }
+          if (result.done) {
+            const footer = await _runWithFarmCspNonce(cspNonce, function() {
+              return closeDocument(rootOpened);
+            });
+            controller.enqueue(encoder.encode(text + footer + "</body>\\n</html>"));
+            if (onComplete) onComplete();
+            controller.close();
+            return;
+          }
+          if (text) {
+            controller.enqueue(encoder.encode(text));
+            return;
+          }
+        }
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+}
+
 function stripFarmDocumentWrappers(markup) {
   return peelFarmDocumentPrefix(markup).inner;
 }
@@ -9889,126 +9956,22 @@ ${
         const initialHtml = html !== undefined ? html : renderedPage.shellHtml || "";
         const hasFullDocument = opensFarmFullDocument(initialHtml);
 
-        // Stream a suspended body as soon as React's shell is ready. Full-document
-        // layouts, localized documents, and cacheable PPR shells still use the
-        // buffered path because they require whole-document transformation, and so
-        // does the anonymous check behind a page's Markdown source: there, a
-        // redirect() under a loading boundary must still decide the status.
-        if (
-          pageStatus === 200 &&
-          renderedPage.stream &&
-          !hasFullDocument &&
-          !farmI18nSnapshot &&
-          !pprCacheKey &&
-          !_isFarmMarkdownPageCheck(request.headers.get(FARM_MARKDOWN_PAGE_CHECK_HEADER))
-        ) {
-          const farmThemeDocument = createFarmThemeDocumentParts(
-            farmThemeConfig,
-            farmResolvedRuntimeConfig.basePath,
-            getFarmTheme(request)
-          );
-          const streamPrefix = '<!DOCTYPE html>\\n<html lang="en">\\n<head>\\n' +
-            farmThemeDocument.head + '\\n' +
-            '  <meta charset="utf-8">\\n' +
-            '  ' + viewportTags + '\\n' +
-            (hasFavicon ? '' : '  <link rel="icon" href="data:,">\\n') +
-            '  <title>' + title + '</title>' + metaTags + '\\n' +
-            '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n' +
-            '  <link rel="modulepreload" href="/__farm_client_js_src__">' + renderFarmClientModulePreloads(null, route.clientModule) + '\\n' +
-            renderFarmRendererHydrationScript() + '\\n' +
-            '</head>\\n<body>\\n  <div id="root">';
-          const streamSuffix = '</div>\\n' +
-            '  ' + renderFarmClientBootstrapScript(
-              pageProps.__farmCanonicalPath,
-              routeSlotPayload,
-              clientPageProps
-            ) + '\\n' +
-            '  ' + renderFarmClientEntryScript() + '\\n' +
-            '</body>\\n</html>';
-          const themedStreamPrefix = streamPrefix.replace(
-            '<html lang="en">',
-            () => '<html lang="en"' + farmThemeDocument.attributes + '>'
-          );
-          const streamedDocument = createFarmDocumentStream(
-            renderedPage.stream,
-            themedStreamPrefix,
-            async function() {
-              // A redirect()/notFound() after the 200 shell went out can only
-              // be recovered in the document.
-              const lateNavigationError = renderedPage.streamErrors.find(function(error) {
-                return isFarmRedirectError(error) || isFarmNotFoundError(error);
-              });
-              if (!lateNavigationError) return streamSuffix;
-              if (isFarmRedirectError(lateNavigationError)) {
-                return createLateRedirectRecovery(
-                  getFarmRedirectError(lateNavigationError).url
-                ) + streamSuffix;
-              }
-              try {
-                return createLateNotFoundRecovery(
-                  await ReactDOMServer.renderToString(
-                    wrapWithFarmIntegrationProviders(createFarmNotFoundElement(pathname)),
-                    getFarmRendererRenderOptions()
-                  )
-                ) + streamSuffix;
-              } catch (error) {
-                // The layouts are already in the shell; a not-found page that
-                // needs their context cannot render alone, so use Farm's.
-                console.warn("not-found page could not render outside its layout, using Farm's:", error);
-                return createLateNotFoundRecovery(
-                  await ReactDOMServer.renderToString(
-                    React.createElement(FarmDefault404Page),
-                    getFarmRendererRenderOptions()
-                  )
-                ) + streamSuffix;
-              }
-            },
-            function() {
-              if (pprBypassReason === "refresh") {
-                emitFarmEvent({
-                  type: "ppr.refresh.complete",
-                  route: pathname,
-                  durationMs: Date.now() - requestStartTime,
-                });
-              }
-              emitFarmEvent({
-                type: "render.complete",
-                route: pathname,
-                pathname,
-                status: pageStatus,
-                durationMs: Date.now() - requestStartTime,
-              });
-            }
-          );
-          return applyProductionMiddlewareHeaders(farmOwnedResponse(streamedDocument, {
-            status: pageStatus,
-            headers: { ...responseHeaders, "x-farm-preload-streaming": "1" },
-          }), middlewareHeaders);
-        }
-
-        if (html === undefined) {
-          html = await new Response(renderedPage.stream).text();
-          if (renderedPage.streamErrors.length > 0) {
-            throw renderedPage.streamErrors[0];
-          }
-        }
-        
         const rendererHead = renderedPage.head || "";
         const rendererHasTitle = /<title[\\s>]/i.test(rendererHead);
         // First <title> wins: the fallback framework title yields to a
         // renderer-emitted one; explicit metadata titles still come first.
         const suppressDefaultTitle =
           !renderedMetadata.hasExplicitTitle && rendererHasTitle;
-        let fullHtml;
-        if (hasFullDocument) {
-          // Layout provides full HTML structure - inject CSS and client script
-          html = addFarmFallbackIcon(
-            ensureFarmDocumentRoot(ensureFarmDocumentHead(extractFarmFullDocument(html) || html)),
+        // A layout's own <html> document with Farm's head assets merged in and the #root the client
+        // hydrates opening its body: the whole document, or a streamed one's opening.
+        const composeFarmFullDocument = function(markup) {
+          let composed = addFarmFallbackIcon(
+            ensureFarmDocumentRoot(ensureFarmDocumentHead(markup)),
             hasFavicon,
           );
-          fullHtml = html
+          composed = composed
             // Inject CSS link after opening head tag or first meta tag
-            .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + renderFarmClientModulePreloads(html, route.clientModule); })
+            .replace(/<head([^>]*)>/i, function(match, attrs) { return '<head' + attrs + '>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">' + renderFarmClientModulePreloads(composed, route.clientModule); })
             .replace(/<\\/head>/i, () => renderFarmRendererHydrationScript() + '\\n</head>')
             // Explicit metadata wins over renderer and layout titles. Without
             // explicit metadata, a renderer title wins over the layout title.
@@ -10030,7 +9993,154 @@ ${
               return nextHeadContent === headContent
                 ? match
                 : "<head" + attrs + ">" + nextHeadContent + "\\n</head>";
-            })
+            });
+          // Last, so the charset (and the viewport, unless the layout wrote one) open the head.
+          composed = ensureFarmDocumentMeta(composed, viewportTags);
+          if (!composed.trim().startsWith('<!DOCTYPE')) {
+            composed = '<!DOCTYPE html>\\n' + composed;
+          }
+          return composed;
+        };
+
+        // Stream a suspended body as soon as React's shell is ready, a layout's own <html> document
+        // included. Localized documents and cacheable PPR shells still use the buffered path
+        // because they require whole-document transformation, and so does the anonymous check
+        // behind a page's Markdown source: there, a redirect() under a loading boundary must still
+        // decide the status.
+        if (
+          pageStatus === 200 &&
+          renderedPage.stream &&
+          !farmI18nSnapshot &&
+          !pprCacheKey &&
+          !_isFarmMarkdownPageCheck(request.headers.get(FARM_MARKDOWN_PAGE_CHECK_HEADER))
+        ) {
+          const farmThemeDocument = createFarmThemeDocumentParts(
+            farmThemeConfig,
+            farmResolvedRuntimeConfig.basePath,
+            getFarmTheme(request)
+          );
+          // The page's client data and entry, after its content.
+          const farmClientScripts = function() {
+            return '  ' + renderFarmClientBootstrapScript(
+              pageProps.__farmCanonicalPath,
+              routeSlotPayload,
+              clientPageProps
+            ) + '\\n' +
+              '  ' + renderFarmClientEntryScript() + '\\n';
+          };
+          const streamPrefix = '<!DOCTYPE html>\\n<html lang="en">\\n<head>\\n' +
+            farmThemeDocument.head + '\\n' +
+            '  <meta charset="utf-8">\\n' +
+            '  ' + viewportTags + '\\n' +
+            (hasFavicon ? '' : '  <link rel="icon" href="data:,">\\n') +
+            '  <title>' + title + '</title>' + metaTags + '\\n' +
+            '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n' +
+            '  <link rel="modulepreload" href="/__farm_client_js_src__">' + renderFarmClientModulePreloads(null, route.clientModule) + '\\n' +
+            renderFarmRendererHydrationScript() + '\\n' +
+            '</head>\\n<body>\\n  <div id="root">';
+          const streamSuffix = '</div>\\n' + farmClientScripts() + '</body>\\n</html>';
+          const themedStreamPrefix = streamPrefix.replace(
+            '<html lang="en">',
+            () => '<html lang="en"' + farmThemeDocument.attributes + '>'
+          );
+          const lateNavigationRecovery = async function() {
+              // A redirect()/notFound() after the 200 shell went out can only
+              // be recovered in the document.
+              const lateNavigationError = renderedPage.streamErrors.find(function(error) {
+                return isFarmRedirectError(error) || isFarmNotFoundError(error);
+              });
+              if (!lateNavigationError) return "";
+              if (isFarmRedirectError(lateNavigationError)) {
+                return createLateRedirectRecovery(
+                  getFarmRedirectError(lateNavigationError).url
+                );
+              }
+              try {
+                return createLateNotFoundRecovery(
+                  await ReactDOMServer.renderToString(
+                    wrapWithFarmIntegrationProviders(createFarmNotFoundElement(pathname)),
+                    getFarmRendererRenderOptions()
+                  )
+                );
+              } catch (error) {
+                // The layouts are already in the shell; a not-found page that
+                // needs their context cannot render alone, so use Farm's.
+                console.warn("not-found page could not render outside its layout, using Farm's:", error);
+                return createLateNotFoundRecovery(
+                  await ReactDOMServer.renderToString(
+                    React.createElement(FarmDefault404Page),
+                    getFarmRendererRenderOptions()
+                  )
+                );
+              }
+            };
+          const onStreamComplete = function() {
+              if (pprBypassReason === "refresh") {
+                emitFarmEvent({
+                  type: "ppr.refresh.complete",
+                  route: pathname,
+                  durationMs: Date.now() - requestStartTime,
+                });
+              }
+              emitFarmEvent({
+                type: "render.complete",
+                route: pathname,
+                pathname,
+                status: pageStatus,
+                durationMs: Date.now() - requestStartTime,
+              });
+            };
+          const streamedDocument = hasFullDocument
+            ? createFarmFullDocumentStream(
+                renderedPage.stream,
+                function(opening) {
+                  // Farm's wrappers and the head elements React hoisted ahead of the layout's <html>.
+                  const peeled = peelFarmDocumentPrefix(opening);
+                  const start = opening.search(/<!doctype|<html[\\s>]/i);
+                  return applyFarmThemeDocument(
+                    composeFarmFullDocument(
+                      restoreFarmHoistedHead(opening.slice(Math.max(start, 0)), peeled.hoisted)
+                    // The client entry arrives last: fetch it while the body streams.
+                    ).replace(/<\\/head>/i, function() {
+                      return '  <link rel="modulepreload" href="/__farm_client_js_src__">\\n</head>';
+                    }),
+                    farmThemeConfig,
+                    farmResolvedRuntimeConfig.basePath,
+                    getFarmTheme(request)
+                  );
+                },
+                async function(rootOpened) {
+                  return (await lateNavigationRecovery()) +
+                    (rootOpened ? '</div>\\n' : '') +
+                    farmClientScripts();
+                },
+                onStreamComplete
+              )
+            : createFarmDocumentStream(
+                renderedPage.stream,
+                themedStreamPrefix,
+                async function() {
+                  return (await lateNavigationRecovery()) + streamSuffix;
+                },
+                onStreamComplete
+              );
+          return applyProductionMiddlewareHeaders(farmOwnedResponse(streamedDocument, {
+            status: pageStatus,
+            headers: { ...responseHeaders, "x-farm-preload-streaming": "1" },
+          }), middlewareHeaders);
+        }
+
+        if (html === undefined) {
+          html = await new Response(renderedPage.stream).text();
+          if (renderedPage.streamErrors.length > 0) {
+            throw renderedPage.streamErrors[0];
+          }
+        }
+        
+        let fullHtml;
+        if (hasFullDocument) {
+          // Layout provides full HTML structure - inject CSS and client script
+          fullHtml = composeFarmFullDocument(extractFarmFullDocument(html) || html)
             // Inject client script before closing body tag. Function replacement:
             // serialized page props may contain $-sequences ($&, $', $$) that a
             // string replacement would expand into surrounding document markup,
@@ -10044,14 +10154,6 @@ ${
               ) + '\\n' +
                 '  ' + renderFarmClientEntryScript() + '\\n</body>',
             );
-          
-          // Last, so the charset (and the viewport, unless the layout wrote one) open the head.
-          fullHtml = ensureFarmDocumentMeta(fullHtml, viewportTags);
-
-          // Add DOCTYPE if not present
-          if (!fullHtml.trim().startsWith('<!DOCTYPE')) {
-            fullHtml = '<!DOCTYPE html>\\n' + fullHtml;
-          }
         } else {
           // No layout with full document - wrap in HTML structure
           fullHtml = \`<!DOCTYPE html>

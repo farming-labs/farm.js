@@ -116,6 +116,18 @@ test("a Suspense boundary streams its fallback first, then the content", async (
   await expect(page.getByTestId("slow-content")).toBeVisible();
 });
 
+test("client components before and inside slow Suspense content both hydrate", async ({ page }) => {
+  await page.goto("/stream");
+  await expect(page.getByTestId("slow-content")).toBeVisible();
+  for (const label of ["Early", "Late"]) {
+    const button = page.getByRole("button", { name: new RegExp(`^${label}: `) });
+    await expect(async () => {
+      await button.click({ timeout: 200 });
+      await expect(button).toHaveText(new RegExp(`^${label}: [1-9]`), { timeout: 100 });
+    }).toPass({ timeout: 10_000 });
+  }
+});
+
 test("generateMetadata sets the head", async ({ request }) => {
   const html = await (await request.get("/meta")).text();
   expect(html).toContain("<title>Contract meta 42</title>");

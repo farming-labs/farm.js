@@ -4,7 +4,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { renderViewportHead } from "../metadata";
-import { ensureFarmDocumentMeta } from "../server/full-document";
+import {
+  ensureFarmDocumentHead,
+  ensureFarmDocumentMeta,
+  ensureFarmDocumentRoot,
+  extractFarmFullDocument,
+} from "../server/full-document";
 
 const universalBuildSource = fs.readFileSync(
   path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
@@ -13,14 +18,26 @@ const universalBuildSource = fs.readFileSync(
 
 // The production handler is emitted from a template literal, so the snippet is
 // extracted from the source and un-escaped (\\ -> \, \` -> `, \$ -> $) before
-// being executed the way the emitted bundle runs it.
+// being executed the way the emitted bundle runs it: the shared full-document
+// composer, then the buffered response's footer injection.
 function extractEmittedFullDocumentInjection(): string {
-  const start = universalBuildSource.indexOf("fullHtml = html\n            // Inject CSS link");
-  const end = universalBuildSource.indexOf("// Add DOCTYPE if not present", start);
-  expect(start).toBeGreaterThan(-1);
-  expect(end).toBeGreaterThan(start);
-  const emitted = universalBuildSource.slice(start, end).replace(/\\([\\`$])/g, "$1");
-  return emitted.slice(0, emitted.lastIndexOf(";") + 1);
+  const composeStart = universalBuildSource.indexOf(
+    "const composeFarmFullDocument = function(markup) {",
+  );
+  const composeEnd = universalBuildSource.indexOf("\n        };\n", composeStart);
+  const injectStart = universalBuildSource.indexOf(
+    "fullHtml = composeFarmFullDocument(extractFarmFullDocument(html) || html)",
+  );
+  const injectEnd = universalBuildSource.indexOf("\n            );\n", injectStart);
+  expect(composeStart).toBeGreaterThan(-1);
+  expect(composeEnd).toBeGreaterThan(composeStart);
+  expect(injectStart).toBeGreaterThan(composeEnd);
+  expect(injectEnd).toBeGreaterThan(injectStart);
+  const emitted =
+    universalBuildSource.slice(composeStart, composeEnd + "\n        };".length) +
+    "\n" +
+    universalBuildSource.slice(injectStart, injectEnd + "\n            );".length);
+  return emitted.replace(/\\([\\`$])/g, "$1");
 }
 
 function serializeFarmInlineValue(value: unknown): string {
@@ -66,6 +83,11 @@ function createInjector(viewportTags = renderViewportHead(undefined)) {
     "renderFarmClientEntryScript",
     "renderFarmClientModulePreloads",
     "route",
+    "extractFarmFullDocument",
+    "ensureFarmDocumentHead",
+    "ensureFarmDocumentRoot",
+    "addFarmFallbackIcon",
+    "hasFavicon",
     "let fullHtml;\n" + extractEmittedFullDocumentInjection() + "\nreturn fullHtml;",
   );
   return ((...args: unknown[]) =>
@@ -76,6 +98,11 @@ function createInjector(viewportTags = renderViewportHead(undefined)) {
       renderFarmClientEntryScript,
       () => MODULE_PRELOAD_TAGS,
       { clientModule: undefined },
+      extractFarmFullDocument,
+      ensureFarmDocumentHead,
+      ensureFarmDocumentRoot,
+      (markup: string) => markup,
+      true,
     )) as (
     html: string,
     title: string,
