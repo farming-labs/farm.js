@@ -15,8 +15,13 @@ import {
 } from "./icons";
 import type { LucideIcon } from "lucide-react";
 import githubIconUrl from "simple-icons/icons/github.svg?url";
+import npmIconUrl from "simple-icons/icons/npm.svg?url";
 import farmingLabsLogoUrl from "../assets/farming-labs-logo-dark.svg?url";
 import { launchPost } from "../lib/blog";
+import { formatCount, useSiteStats } from "./site-stats";
+
+const statLinkClass =
+  "inline-flex h-11 min-w-11 items-center justify-center gap-2 border-l border-white/12 px-3.5 text-white/52 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white";
 
 const navItems = [
   {
@@ -102,6 +107,21 @@ function GithubIcon({ className }: { className?: string }) {
   return <BrandIcon className={className} src={githubIconUrl} />;
 }
 
+function NpmIcon({ className }: { className?: string }) {
+  return <BrandIcon className={className} src={npmIconUrl} />;
+}
+
+// A live count from /api/stats; nothing until it arrives, so the header never shows a made-up number.
+function StatCount({ value, suffix = "" }: { value: number | null | undefined; suffix?: string }) {
+  if (typeof value !== "number") return null;
+  return (
+    <span className="font-mono text-[10px] tabular-nums tracking-normal text-white/72">
+      {formatCount(value)}
+      {suffix}
+    </span>
+  );
+}
+
 export function IndexedLabel({
   index,
   icon: Icon,
@@ -177,6 +197,7 @@ export function AnnouncementBar() {
 }
 
 export function SiteHeader({ activePage }: { activePage?: "blog" | "agents" }) {
+  const stats = useSiteStats();
   return (
     <header className="farm-full-rule sticky top-0 z-50 bg-black/94 backdrop-blur-xl">
       <div className="flex h-11 w-full items-stretch">
@@ -202,12 +223,30 @@ export function SiteHeader({ activePage }: { activePage?: "blog" | "agents" }) {
 
         <div className="ml-auto hidden shrink-0 items-stretch xl:flex">
           <a
-            aria-label="Open Farm.js on GitHub"
-            className="grid size-11 place-items-center border-l border-white/12 text-white/52 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
+            aria-label={
+              typeof stats?.stars === "number"
+                ? `Farm.js on GitHub, ${formatCount(stats.stars)} stars`
+                : "Open Farm.js on GitHub"
+            }
+            className={statLinkClass}
             href="https://github.com/farming-labs/farm.js"
             title="GitHub"
           >
             <GithubIcon className="size-4" />
+            <StatCount value={stats?.stars} />
+          </a>
+          <a
+            aria-label={
+              typeof stats?.peakWeeklyDownloads === "number"
+                ? `@farm.js/core on npm, ${formatCount(stats.peakWeeklyDownloads)} downloads in its best week`
+                : "Open @farm.js/core on npm"
+            }
+            className={statLinkClass}
+            href="https://www.npmjs.com/package/@farm.js/core"
+            title="npm"
+          >
+            <NpmIcon className="size-4" />
+            <StatCount value={stats?.peakWeeklyDownloads} suffix="/wk" />
           </a>
           <a
             className="inline-flex h-11 items-center gap-1.5 border-l border-white/12 bg-white bg-clip-padding px-5 font-mono text-[10px] font-normal uppercase tracking-normal text-black transition-colors duration-150 hover:bg-white/88 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
