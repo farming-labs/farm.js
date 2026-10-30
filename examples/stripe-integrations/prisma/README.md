@@ -27,7 +27,8 @@ Add `.env.local` first with at least:
 ```bash
 APP_BASE_URL=http://localhost:3000
 BETTER_AUTH_URL=http://localhost:3000
-BETTER_AUTH_SECRET=farm-example-better-auth-secret-for-local-dev-only
+# Generate with: openssl rand -base64 32
+BETTER_AUTH_SECRET=
 STRIPE_SECRET_KEY=sk_test_your_key_here
 ```
 

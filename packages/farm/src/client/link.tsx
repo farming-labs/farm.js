@@ -8,7 +8,11 @@ import {
   type FarmRouterPathParam,
   type FarmRouterPathParams,
 } from "../router";
-import { resolveFarmNavigationURL } from "./navigation-url";
+import {
+  isFarmBlockedNavigationURL,
+  isFarmScriptURL,
+  resolveFarmNavigationURL,
+} from "./navigation-url";
 import type { FarmViewTransitionMode } from "./spa-router";
 import { isFarmLocaleChangeHref, localizeActiveFarmHref } from "../i18n/client-state";
 import type { FarmI18nLocale } from "../i18n/types";
@@ -350,6 +354,8 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
     ? localizedHref
     : applyFarmBasePath(localizedHref, farm?.basePath ?? getFarmBasePath());
   const isExternal = isExternalUrl(resolvedHref);
+  // Rendered without an href, so neither a click nor "open in new tab" runs it.
+  const isScriptHref = isFarmScriptURL(resolvedHref);
 
   const doPrefetch = useCallback(() => {
     if (isExternal || activePrefetch.current) return;
@@ -480,6 +486,11 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>) => {
       onClick?.(event);
+      if (isScriptHref) {
+        event.preventDefault();
+        isFarmBlockedNavigationURL(resolveFarmNavigationURL(resolvedHref, window.location.href));
+        return;
+      }
       if (event.defaultPrevented) return;
       if (isExternal) return;
       if (event.currentTarget.hasAttribute("download")) return;
@@ -502,7 +513,17 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
         }
       }
     },
-    [localizedHref, resolvedHref, replace, scroll, viewTransition, target, isExternal, onClick],
+    [
+      localizedHref,
+      resolvedHref,
+      replace,
+      scroll,
+      viewTransition,
+      target,
+      isExternal,
+      isScriptHref,
+      onClick,
+    ],
   );
 
   const setRefs = useCallback(
@@ -517,7 +538,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref, THref extends strin
   return (
     <a
       ref={setRefs}
-      href={resolvedHref}
+      href={isScriptHref ? undefined : resolvedHref}
       target={target}
       onClick={handleClick}
       onMouseEnter={handleMouseEnter}

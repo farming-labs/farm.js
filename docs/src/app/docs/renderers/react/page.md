@@ -1774,8 +1774,11 @@ DOM write.
 
 No API or option is added. Reports count the prepared map and reorder calls through the existing
 `keyedMapUpdateHints`, `keyedArraySortHints`, and `keyedArrayReorderHints` fields. Modules that do
-not contain a supported map-and-reorder pipeline do not retain its optional runtime. Farm does not
-polyfill `Array.prototype.toSorted` or `Array.prototype.toReversed`.
+not contain a supported map-and-reorder pipeline do not retain its optional runtime. When every
+keyed list in a component is target-free, the compiler also omits identity-selection, membership,
+and map-lookup target machinery. A target used by any sibling list keeps the full target runtime;
+map, append, reorder, and complete-reconciliation behavior is unchanged. Farm does not polyfill
+`Array.prototype.toSorted` or `Array.prototype.toReversed`.
 
 #### Keyed array sort hints
 

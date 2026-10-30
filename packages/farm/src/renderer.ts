@@ -288,6 +288,16 @@ export interface FarmRendererViteModule {
   }): unknown | readonly unknown[] | Promise<unknown | readonly unknown[]>;
 }
 
+/**
+ * Per-render options Farm passes to a server renderer. A renderer that emits
+ * its own inline scripts (hydration data, streaming reveals) puts `nonce` on
+ * them; under `security.csp.nonce` any script without it is blocked.
+ */
+export interface FarmRendererRenderOptions {
+  /** CSP nonce of the response being rendered. */
+  nonce?: string;
+}
+
 export interface FarmServerRendererRuntime {
   readonly name: string;
   readonly Fragment: unknown;
@@ -299,7 +309,7 @@ export interface FarmServerRendererRuntime {
   /** Lets a server-only page under a route-owned client tree render its own isolated islands. */
   isolateServerPageGraph?(element: unknown): unknown;
   /** Resolves an async page below a hydrating layout into a tree the browser rebuilds there. */
-  renderServerTreePage?(element: unknown): Promise<unknown>;
+  renderServerTreePage?(element: unknown, options?: { values?: boolean }): Promise<unknown>;
   /**
    * Optional: tag a plain function component so a renderer that compiles its
    * own components can tell the two apart. Renderers without the hook treat
@@ -321,7 +331,7 @@ export interface FarmServerRendererRuntime {
    * guessing would mean caching a per-request response as if it were shared.
    */
   findStaticShellBoundary?(chunk: string): number;
-  renderToString(element: unknown): string | Promise<string>;
+  renderToString(element: unknown, options?: FarmRendererRenderOptions): string | Promise<string>;
   /**
    * Optional variant for renderers whose components emit document-head markup
    * during render (e.g. <svelte:head>). `html` is the body markup exactly as
@@ -330,6 +340,7 @@ export interface FarmServerRendererRuntime {
    */
   renderToStringWithHead?(
     element: unknown,
+    options?: FarmRendererRenderOptions,
   ): { html: string; head: string } | Promise<{ html: string; head: string }>;
   /** Optional runtime copy of the descriptor capabilities for diagnostics. */
   readonly capabilities?: FarmRendererCapabilitiesInput;
@@ -355,6 +366,7 @@ export interface FarmServerRendererRuntime {
   /** WHATWG streaming primitive used by Web-stream-capable renderers. */
   renderToReadableStream?: (
     element: unknown,
+    options?: FarmRendererRenderOptions,
   ) => ReadableStream<Uint8Array | string> | Promise<ReadableStream<Uint8Array | string>>;
 }
 

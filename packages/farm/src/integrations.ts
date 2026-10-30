@@ -51,17 +51,22 @@ import type {
 } from "./integration-api";
 import type { InferFarmIntegrationOrmClient } from "./integration-orm";
 import { setFarmPluginIntegrationContext } from "./plugin-integration-context";
-import { canonicalizeRequestPathname, canonicalizeRequestPathSegments } from "./utils/decode";
-import { stripFarmBasePath } from "./base-path";
-import { createFarmAPIMiddlewarePathnames, resolveFarmAPIServerBasePath } from "./api/server-path";
-import type { ResolvedFarmAPIConfig } from "./api/config";
-import { resolveFarmLocalePath } from "./i18n/routing";
+import { canonicalizeRequestPathSegments } from "./utils/decode";
+import { toPublicValidationIssues } from "./api/route-schema";
+import { assertSupportedMiddlewareMatcher } from "./middleware/matcher";
 import {
-  compileMiddlewareConfig,
-  matchesCompiledMiddlewareConfig,
-  type CompiledMiddlewareConfig,
-} from "./middleware/matcher";
-import type { MiddlewareContext } from "./middleware/types";
+  isFarmIntegration,
+  matchPathSegments,
+  resolveIntegrationMiddlewareParams,
+  resolveMatcherParams,
+  splitPath,
+} from "./integration-middleware-matcher";
+
+export {
+  FARM_INTEGRATION_API_BASE_PATH_KEY,
+  integrationMiddlewareMayHandlePath,
+  isFarmIntegration,
+} from "./integration-middleware-matcher";
 import {
   assertTerminalCatchAll,
   assertUniqueRouteParameters,
@@ -89,6 +94,7 @@ import {
   createFarmRequestBodyErrorResponse,
   readNodeRequestBody,
   resolveFarmServerConfig,
+  withFarmRequestClientAddress,
 } from "./server-http";
 
 export { api, defineIntegrationAPI, defineIntegrationAPIOperation } from "./integration-api";
@@ -1213,12 +1219,6 @@ export function defineIntegration<
   } as unknown as DefinedIntegration<TIntegration, TSchema>;
 }
 
-export function isFarmIntegration(value: unknown): value is FarmIntegration {
-  return (
-    !!value && typeof value === "object" && (value as FarmIntegration).kind === "farm-integration"
-  );
-}
-
 export function resolveIntegrationPlugins(
   integrations: FarmIntegrationsUserConfig | undefined,
 ): FarmPlugin[] {
@@ -1230,6 +1230,16 @@ export function resolveIntegrationPlugins(
   for (const [key, integration] of Object.entries(integrations)) {
     if (!integration || !isFarmIntegration(integration)) {
       continue;
+    }
+
+    for (const entry of integration.middleware || []) {
+      if (!entry.matcher) continue;
+      const matchers = Array.isArray(entry.matcher) ? entry.matcher : [entry.matcher];
+      try {
+        matchers.forEach(assertSupportedMiddlewareMatcher);
+      } catch (error) {
+        throw new Error(`Integration "${key}": ${(error as Error).message}`);
+      }
     }
 
     const owner = createIntegrationPluginOwner(key, integration, "lifecycle");
@@ -1982,7 +1992,11 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
 
       const createHandlerRequest = async (): Promise<Request | null> => {
         try {
-          return createWebRequest(req, fullUrl, await getRequestBody());
+          return withFarmRequestClientAddress(
+            createWebRequest(req, fullUrl, await getRequestBody()),
+            resolveFarmServerConfig(context.config.server).trustProxy,
+            req.socket?.remoteAddress,
+          );
         } catch (error) {
           const response = createFarmRequestBodyErrorResponse(error);
           if (!response) throw error;
@@ -2579,20 +2593,16 @@ function normalizeIntegrationValidationIssues(
   source: FarmIntegrationRouteInputSource,
   error: FarmIntegrationValidationErrorLike,
 ): FarmIntegrationValidationIssue[] {
+  // Like API routes, never echo validator messages, which can quote secrets.
   if (Array.isArray(error.issues) && error.issues.length > 0) {
-    return error.issues.map((issue) => ({
-      source,
-      path: normalizeIntegrationValidationPath(issue.path),
-      code: issue.code,
-      message: issue.message || "Invalid input",
-    }));
+    return toPublicValidationIssues(error).map((issue) => ({ source, ...issue }));
   }
 
   return [
     {
       source,
       path: [],
-      message: error.message || "Invalid input",
+      message: "Invalid input",
     },
   ];
 }
@@ -2877,18 +2887,21 @@ export async function dispatchIntegrationRequest(
      * at most once per request, as app middleware does.
      */
     ranMiddleware?: Set<object>;
+    /** The peer address the server adapter reports, used unless `server.trustProxy` applies. */
+    clientAddress?: string;
   } = {},
 ): Promise<Response | null> {
+  const serverConfig = resolveFarmServerConfig(runtime.config.server);
   try {
-    request = await bufferFarmRequestBody(
-      request,
-      resolveFarmServerConfig(runtime.config.server).bodySizeLimit,
-    );
+    request = await bufferFarmRequestBody(request, serverConfig.bodySizeLimit);
   } catch (error) {
     const response = createFarmRequestBodyErrorResponse(error);
     if (response) return response;
     throw error;
   }
+  // Handlers such as Farm Auth key rate limits on the caller, so they get the
+  // address Farm resolved rather than a client-supplied header.
+  request = withFarmRequestClientAddress(request, serverConfig.trustProxy, options.clientAddress);
 
   const integration = runtime.integration;
   const url = new URL(request.url);
@@ -3199,7 +3212,7 @@ export async function dispatchIntegrationRequests(
   integrations: FarmIntegrationsUserConfig | undefined,
   runtime: Omit<RegisteredIntegrationRuntime, "integration">,
   request: Request,
-  options: { currentRequest?: Request; ranMiddleware?: Set<object> } = {},
+  options: { currentRequest?: Request; ranMiddleware?: Set<object>; clientAddress?: string } = {},
 ): Promise<{ response: Response | null; setCookies: string[] }> {
   const setCookies: string[] = [];
   if (!integrations) {
@@ -3227,6 +3240,7 @@ export async function dispatchIntegrationRequests(
       {
         currentRequest: options.currentRequest,
         ranMiddleware: options.ranMiddleware,
+        clientAddress: options.clientAddress,
         onForwardedCookies: (cookies) => setCookies.push(...cookies),
       },
     );
@@ -3424,209 +3438,6 @@ function matchesMatcher(
   pathname: string,
 ): boolean {
   return resolveMatcherParams(matcher, pathname) !== null;
-}
-
-const compiledIntegrationGuards = new WeakMap<object, CompiledMiddlewareConfig>();
-const noMiddlewareContext = {} as MiddlewareContext;
-
-/**
- * Integration middleware is a guard (`protectedRoutes` compiles straight into
- * one), documented to take the same matcher syntax as Farm middleware and to
- * see the router's pathname. The integration pattern language alone knows only
- * `(.*)` and `[param]`, so `/dashboard/:path*` or `/api/**` compared as literal
- * text and protected nothing, and `/fr/dashboard` or `/console/dashboard`
- * (basePath) walked past `/dashboard(.*)` while the router served the page.
- * Every step here can only add a match, never remove one.
- */
-function resolveIntegrationMiddlewareParams(
-  entry: { matcher?: string | readonly string[] },
-  pathname: string,
-  config: FarmPluginContext["config"] | undefined,
-): FarmIntegrationRouteParams | null {
-  const params = resolveMatcherParams(entry.matcher, pathname);
-  // A missing matcher already matched everything above.
-  if (params || !entry.matcher) return params;
-
-  // A local API route answers at `/api/...` and at the public `api.basePath`, so a guard written
-  // for either prefix must see both, the way app middleware does.
-  const routePathname = resolveIntegrationRoutePathname(pathname, config);
-  const candidates = [...new Set([pathname, ...getIntegrationAPIPathnames(config)(routePathname)])];
-  for (const candidate of candidates) {
-    if (candidate === pathname) continue;
-    const routeParams = resolveMatcherParams(entry.matcher, candidate);
-    if (routeParams) return routeParams;
-  }
-
-  let compiled = compiledIntegrationGuards.get(entry);
-  if (!compiled) {
-    compiled = compileMiddlewareConfig({
-      matcher: typeof entry.matcher === "string" ? entry.matcher : [...entry.matcher],
-    });
-    compiledIntegrationGuards.set(entry, compiled);
-  }
-  for (const candidate of candidates) {
-    const result = matchesCompiledMiddlewareConfig(candidate, compiled, noMiddlewareContext);
-    if (result.matched) return result.params ?? {};
-  }
-  return null;
-}
-
-/**
- * @internal Runtime config key holding the app's same-origin API path. The built server keeps the
- * user's raw `api` config, whose values may be resolver functions, so the build records the
- * resolved path here; development configs carry the resolved `api` itself.
- */
-export const FARM_INTEGRATION_API_BASE_PATH_KEY = "__farmAPIServerBasePath";
-
-const integrationAPIPathnames = new WeakMap<object, (pathname: string) => readonly string[]>();
-
-function getIntegrationAPIPathnames(
-  config: FarmPluginContext["config"] | undefined,
-): (pathname: string) => readonly string[] {
-  if (!config) return (pathname) => [pathname];
-  let toPathnames = integrationAPIPathnames.get(config);
-  if (!toPathnames) {
-    const recorded = (config as Record<string, unknown>)[FARM_INTEGRATION_API_BASE_PATH_KEY];
-    const api = config.api as Partial<ResolvedFarmAPIConfig> | undefined;
-    const serverBasePath =
-      typeof recorded === "string"
-        ? recorded
-        : typeof api?.baseURL === "string" && typeof api.basePath === "string"
-          ? resolveFarmAPIServerBasePath(api as ResolvedFarmAPIConfig)
-          : undefined;
-    toPathnames = createFarmAPIMiddlewarePathnames(serverBasePath);
-    integrationAPIPathnames.set(config, toPathnames);
-  }
-  return toPathnames;
-}
-
-/** The pathname the page router matches: basePath and locale prefix removed. */
-function resolveIntegrationRoutePathname(
-  pathname: string,
-  config: FarmPluginContext["config"] | undefined,
-): string {
-  const basePath = typeof config?.basePath === "string" ? config.basePath : undefined;
-  let routePathname = basePath ? stripFarmBasePath(pathname, basePath) : pathname;
-  const i18n = config?.i18n;
-  if (i18n && Array.isArray(i18n.locales) && i18n.locales.length > 0) {
-    routePathname = resolveFarmLocalePath(routePathname, {
-      locales: i18n.locales,
-      defaultLocale: i18n.defaultLocale,
-      routing: i18n.routing || "prefix-except-default",
-    }).pathname;
-  }
-  return routePathname;
-}
-
-function resolveMatcherParams(
-  matcher: string | readonly string[] | undefined,
-  pathname: string,
-): FarmIntegrationRouteParams | null {
-  if (!matcher) {
-    return {};
-  }
-
-  const list = Array.isArray(matcher) ? matcher : [matcher];
-  // An integration matcher is a guard (`protectedRoutes` compiles straight into
-  // one), so it has to see the same pathname the route matchers do. Comparing
-  // the raw pathname let `/%64ashboard` miss a `/dashboard` matcher while the
-  // page router still served the protected page. Resolved on first use so a
-  // match-everything matcher stays allocation free.
-  let canonicalPathname: string | undefined;
-  let canonicalSegments: string[] | undefined;
-
-  for (const item of list) {
-    if (item === "/(.*)" || item === "*") {
-      return {};
-    }
-    if (item.endsWith("(.*)")) {
-      canonicalPathname ??= canonicalizeRequestPathname(pathname);
-      const prefix = item.slice(0, -4);
-      if (canonicalPathname === prefix || canonicalPathname.startsWith(`${prefix}/`)) {
-        return {};
-      }
-      continue;
-    }
-    canonicalSegments ??= canonicalizeRequestPathSegments(pathname);
-    const params = matchPathSegments(splitPath(item), canonicalSegments);
-    if (params) {
-      return params;
-    }
-  }
-
-  return null;
-}
-
-/**
- * Walk an integration route pattern against already-canonical request segments.
- *
- * `pathSegments` arrive decoded exactly once, so nothing here decodes again: a
- * second pass would turn a literal `%2541BC` segment into `ABC` and resolve a
- * record the request never asked for.
- */
-function matchPathSegments(
-  routeSegments: readonly string[],
-  pathSegments: readonly string[],
-): FarmIntegrationRouteParams | null {
-  const params: FarmIntegrationRouteParams = {};
-
-  let routeIndex = 0;
-  let pathIndex = 0;
-
-  while (routeIndex < routeSegments.length && pathIndex < pathSegments.length) {
-    const routeSegment = routeSegments[routeIndex];
-    const pathSegment = pathSegments[pathIndex];
-
-    if (isCatchAllSegment(routeSegment)) {
-      params[getSegmentParamName(routeSegment)] = pathSegments.slice(pathIndex);
-      return params;
-    }
-
-    if (isDynamicSegment(routeSegment)) {
-      params[getSegmentParamName(routeSegment)] = pathSegment;
-      routeIndex += 1;
-      pathIndex += 1;
-      continue;
-    }
-
-    if (routeSegment !== pathSegment) {
-      return null;
-    }
-
-    routeIndex += 1;
-    pathIndex += 1;
-  }
-
-  if (routeIndex === routeSegments.length && pathIndex === pathSegments.length) {
-    return params;
-  }
-
-  if (routeIndex === routeSegments.length - 1 && isCatchAllSegment(routeSegments[routeIndex])) {
-    params[getSegmentParamName(routeSegments[routeIndex])] = [];
-    return params;
-  }
-
-  return null;
-}
-
-function splitPath(value: string): string[] {
-  return value.split("/").filter(Boolean);
-}
-
-function isDynamicSegment(segment: string): boolean {
-  return segment.startsWith("[") && segment.endsWith("]");
-}
-
-function isCatchAllSegment(segment: string): boolean {
-  return segment.startsWith("[...") && segment.endsWith("]");
-}
-
-function getSegmentParamName(segment: string): string {
-  if (isCatchAllSegment(segment)) {
-    return segment.slice(4, -1);
-  }
-
-  return segment.slice(1, -1);
 }
 
 function getRequestId(req: FarmRequest): string {

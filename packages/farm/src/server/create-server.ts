@@ -1,3 +1,4 @@
+import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import type { ViteDevServer } from "vite";
 import type { FarmConfig } from "../types";
 import { farmI18nClientBridgePlugin, farmPlugin, farmServerOnlyEntriesPlugin } from "../vite";
@@ -46,7 +47,8 @@ import {
   resolveFarmInstrumentationFile,
   type FarmInstrumentationLifecycle,
 } from "../instrumentation";
-import { loadFarmRendererVitePlugins, resolveFarmRenderer } from "../renderer";
+import { isReactRenderer, loadFarmRendererVitePlugins, resolveFarmRenderer } from "../renderer";
+import { createFarmReactRefreshPlugins } from "../react-refresh";
 
 export const DEFAULT_FARM_DEV_SERVER_PORT = 3000;
 
@@ -215,7 +217,17 @@ async function resolveInlineConfig(
  */
 export async function createServer(
   config: FarmConfig | FarmUserConfig = {},
-  options: { port?: number } = {},
+  options: {
+    port?: number;
+    /**
+     * Installs what `experimental.serverComponents` needs before the server starts. The CLI passes
+     * it; core stays free of package-manager orchestration.
+     */
+    ensureServerComponentsPackages?: (
+      config: FarmConfig | FarmUserConfig,
+      root: string,
+    ) => Promise<unknown>;
+  } = {},
 ) {
   let pluginManager: PluginManager | null = null;
   let instrumentation: FarmInstrumentationLifecycle | null = null;
@@ -227,6 +239,15 @@ export async function createServer(
     // Load farm.config.ts if it exists
     const mode = process.env.NODE_ENV === "production" ? "production" : "development";
     const userConfig = await loadConfig(root, undefined, mode);
+    // experimental.serverComponents: the RSC pipeline serves the app instead of Farm's renderer.
+    const rscConfig = userConfig ?? config;
+    if (resolveFarmServerComponentsMode(rscConfig.experimental?.serverComponents)) {
+      const { createFarmRscDevServer, farmAppUsesRscPipeline } = await import("../rsc-pipeline");
+      await options.ensureServerComponentsPackages?.(rscConfig, root);
+      if (farmAppUsesRscPipeline(rscConfig, root)) {
+        return await createFarmRscDevServer(rscConfig, { root, port: options.port });
+      }
+    }
 
     const resolvedConfig = userConfig
       ? await resolveConfig(userConfig, mode)
@@ -310,6 +331,9 @@ export async function createServer(
       projectRoot,
       { ssr: true },
     );
+    const reactRefreshPlugins = isReactRenderer(finalConfig.renderer)
+      ? await createFarmReactRefreshPlugins()
+      : [];
 
     let tailwindVitePlugin: any = undefined;
     const shouldUseProjectPostcss = hasProjectPostcssConfig(projectRoot);
@@ -328,11 +352,12 @@ export async function createServer(
             createFarmThemeCssPlugin(finalConfig.theme, finalConfig.basePath),
             ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
             ...(rendererVitePlugins as any[]),
+            ...reactRefreshPlugins,
             createDevDependencyStubsPlugin(),
             farmI18nClientBridgePlugin(),
             farmServerOnlyEntriesPlugin(),
             farmPlugin(finalConfig, pluginManager),
-            farmEnvironmentFunctionsPlugin(),
+            farmEnvironmentFunctionsPlugin(finalConfig),
             createBrandingPlugin(),
             createFarmDevLifecyclePlugin(pluginManager, instrumentation),
           ],
@@ -473,8 +498,12 @@ export function noticeSchemaChangesInBackground(
 /**
  * Start the development server
  */
-export async function startDevServer(config: FarmConfig | FarmUserConfig = {}, port?: number) {
-  const server = await createServer(config, { port });
+export async function startDevServer(
+  config: FarmConfig | FarmUserConfig = {},
+  port?: number,
+  options: Omit<Parameters<typeof createServer>[1], "port"> = {},
+) {
+  const server = await createServer(config, { ...options, port });
   const pluginManager = (server as any).__farmPluginManager as PluginManager | undefined;
 
   try {

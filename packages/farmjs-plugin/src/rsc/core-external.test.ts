@@ -486,7 +486,9 @@ export default defineConfig({
         if (name === "cache-variants") {
           writeFileSync(
             path.join(srcDir, "middleware.ts"),
-            `export function middleware(request, context) {
+            // Only sets headers, so it opts back into shared caching.
+            `export const config = { cache: "public" };
+          export function middleware(request, context) {
             context.headers.set("cache-control", "public, max-age=60");
             context.headers.set("vary", new URL(request.url).searchParams.has("wildcard") ? "*" : "Origin, aCcEpT");
           }`,

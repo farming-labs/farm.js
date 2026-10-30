@@ -42,3 +42,25 @@ export function resolveFarmImageProviderForRuntime<T extends FarmImageConfig>(
   );
   return Object.freeze({ ...images, provider: "none" }) as T;
 }
+
+/**
+ * Which image optimizer a production server mounts for `images.provider`:
+ * none, Sharp on Node, or the platform's transformer on Cloudflare presets.
+ */
+export function resolveFarmImageServerRuntime(
+  images: Pick<FarmImageConfig, "provider">,
+  preset: string,
+): "none" | "node" | "cloudflare" {
+  const provider = images.provider ?? "auto";
+  if (provider === "none") return "none";
+  const cloudflarePreset = CLOUDFLARE_IMAGE_PRESETS.has(preset);
+  if (provider === "node" && cloudflarePreset) {
+    throw new Error('images.provider "node" cannot run in a Cloudflare deployment');
+  }
+  if (provider === "cloudflare" && !cloudflarePreset) {
+    throw new Error('images.provider "cloudflare" requires a Cloudflare deployment preset');
+  }
+  return provider === "cloudflare" || (provider === "auto" && cloudflarePreset)
+    ? "cloudflare"
+    : "node";
+}

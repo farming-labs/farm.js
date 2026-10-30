@@ -76,13 +76,20 @@ The browser still renders `page.tsx` at `/pricing`. Requests to `/pricing.md`, o
 `/pricing` with `Accept: text/markdown`, receive the exact contents of `page.md`.
 
 The source is served only for a page an anonymous visitor may open. Farm checks by requesting the
-page through the same middleware and integration guards with only standard browser headers (no
-cookies, `Authorization`, custom headers such as an API key, or the caller's IP address), so a page
-behind sign-in has no `.md` version: `/account.md` answers `404` even for a signed-in caller, and
-the page is left out of `llms-full.txt`. The check drops `X-Forwarded-For`, `X-Real-IP`,
-`Forwarded`, and `Via`, and in a production build the server reports the documentation address
+page as a new request through the same plugin `runtime.before` hooks, middleware, and integration
+guards, with its own `cookies()` and `headers()` and only standard browser headers (no
+cookies, `Authorization`, custom headers such as an API key, or the caller's IP address). The check
+renders the page's HTML as that visitor to the end, without streaming or following redirects, so a
+guard in `page.tsx` or `layout.tsx` counts too, even a `redirect()` under a `<Suspense>` boundary.
+The page has a `.md` version only when it answers with its HTML and the page itself renders in it;
+a redirect to sign-in, a `401`, a `403`, an error, or a layout that shows a sign-in prompt instead
+of its children means it has none. `/account.md` answers `404` even for a
+signed-in caller, and the page is left out of `llms-full.txt`. The check drops `X-Forwarded-For`,
+`X-Real-IP`, `Forwarded`, and `Via`, and in a production build the server reports the documentation address
 `192.0.2.1` as its client, so a page behind an IP allowlist has no public `.md` version either. In
-development the check arrives from the dev server's loopback address.
+development the check arrives from the dev server's loopback address. A source sent to a request
+with cookies or `Authorization` uses `Cache-Control: private, no-store`, so only anonymous requests
+fill a shared cache.
 
 ## Configure MDX components
 
@@ -233,7 +240,9 @@ document head, while ordinary browser requests continue to receive HTML. Set
 Converted mirrors preserve the page response's `Set-Cookie` headers, including on redirects, sign-in errors,
 partial views, `HEAD`, and conditional `304` responses. A mirror that sets cookies uses
 `Cache-Control: private, no-store`, even when `md.cache` is enabled, so a shared cache cannot replay
-one reader's session cookies to another. Cookie-free mirrors keep their configured cache policy.
+one reader's session cookies to another. So does a mirror of a request with cookies or
+`Authorization`, since the page was rendered for that reader. Other mirrors keep their configured
+cache policy.
 
 If the page returns a non-HTML response, such as a JSON error or a `429` rate limit, Farm returns
 that response and its headers (including `Retry-After`) without dispatching the page again.

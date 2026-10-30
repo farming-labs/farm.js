@@ -19,7 +19,7 @@ import { normalizeMiddlewareModule } from "./module";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import { stripFarmBasePath } from "../base-path";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
-import type { ResolvedFarmServerConfig } from "../server-http";
+import { withFarmRequestClientAddress, type ResolvedFarmServerConfig } from "../server-http";
 import {
   parseMiddlewareCookieHeader,
   serializeMiddlewareCookie as serializeCookie,
@@ -31,6 +31,7 @@ import {
   matchesMiddlewareConfig as matchesPreparedMiddlewareConfig,
   matchesMiddlewareConfigAt,
   matchesMiddlewareRouteAt,
+  toMiddlewareRoutePathname,
 } from "./matcher";
 import { createFarmAPIMiddlewarePathnames } from "../api/server-path";
 
@@ -71,6 +72,11 @@ export interface ProductionMiddlewareResult {
   context: Map<string, any>;
   headers: Headers;
   handled: boolean;
+  /**
+   * Middleware without `cache: "public"` ran and let the request through. It may have been a
+   * guard (an IP allowlist, an API key header), so the response must not reach a shared cache.
+   */
+  guarded: boolean;
   /** Middleware called notFound(): answer with the app's not-found page. */
   notFound?: true;
 }
@@ -336,34 +342,6 @@ function createResponseShim(headers: WebResponseHeaderMap): WebResponseShimState
   };
 }
 
-function withNodeRequestShape(
-  request: Request,
-  trustProxy: boolean,
-  clientAddress: string | undefined,
-): Request {
-  const requestWithShape = request as Request & {
-    socket?: { remoteAddress?: string };
-  };
-
-  if (!requestWithShape.socket) {
-    const forwardedFor = trustProxy
-      ? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-      : undefined;
-    try {
-      // A web Request carries no socket, so the address comes from a trusted
-      // proxy or from the server adapter's own connection. Never invent one:
-      // reporting `127.0.0.1` used to make every visitor look like the same
-      // client, which collapsed per-client rate limiting into one shared
-      // bucket. Leave it undefined so a consumer can tell that it does not know.
-      requestWithShape.socket = { remoteAddress: forwardedFor || clientAddress || undefined };
-    } catch {
-      // Some Request implementations may not be extensible.
-    }
-  }
-
-  return requestWithShape;
-}
-
 function createHandledResponse(
   body: BodyInit | null,
   init: ResponseInit,
@@ -388,8 +366,9 @@ function createWebMiddlewareContext(
   parent?: MiddlewareContext["parent"],
   trustProxy = false,
   clientAddress?: string,
+  toRoutePathname?: (pathname: string) => string,
 ): WebMiddlewareContextState {
-  let currentRequest = withNodeRequestShape(request, trustProxy, clientAddress);
+  let currentRequest = withFarmRequestClientAddress(request, trustProxy, clientAddress);
   let handledResponse: Response | null = null;
   const url = new URL(currentRequest.url);
   const data = parent?.data ? new Map(parent.data) : new Map<string, any>();
@@ -411,6 +390,7 @@ function createWebMiddlewareContext(
     response: responseShim.response as any,
     url,
     pathname: url.pathname,
+    routePathname: toMiddlewareRoutePathname(url.pathname, toRoutePathname),
     searchParams: url.searchParams,
     method: currentRequest.method || "GET",
     params: {},
@@ -447,7 +427,7 @@ function createWebMiddlewareContext(
     rewrite(rewriteUrl: string): void {
       ctx._rewriteUrl = rewriteUrl;
       const nextUrl = new URL(rewriteUrl, currentRequest.url);
-      currentRequest = withNodeRequestShape(
+      currentRequest = withFarmRequestClientAddress(
         new Request(nextUrl, currentRequest),
         trustProxy,
         clientAddress,
@@ -455,6 +435,7 @@ function createWebMiddlewareContext(
       ctx.request = currentRequest as any;
       ctx.url = nextUrl;
       ctx.pathname = nextUrl.pathname;
+      ctx.routePathname = toMiddlewareRoutePathname(nextUrl.pathname, toRoutePathname);
       ctx.searchParams = nextUrl.searchParams;
       ctx.route = nextUrl.pathname;
     },
@@ -546,8 +527,8 @@ function toMiddlewareConfig(
     handlers?: MiddlewareFunction[];
   },
 ): MiddlewareConfig {
-  const { matcher, exclude, runtime } = entry;
-  return { matcher, exclude, runtime };
+  const { matcher, exclude, runtime, cache } = entry;
+  return { matcher, exclude, runtime, cache };
 }
 
 function normalizeConfigMiddleware(config?: FarmMiddlewareConfig | null): {
@@ -638,6 +619,7 @@ function emptyResult(request: Request): ProductionMiddlewareResult {
     context: new Map(),
     headers: new Headers(),
     handled: false,
+    guarded: false,
   };
 }
 
@@ -658,20 +640,21 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       return emptyResult(request);
     }
 
-    let contextState = createWebMiddlewareContext(
-      request,
-      undefined,
-      options.server?.trustProxy === true,
-      requestOptions.clientAddress,
-    );
-    let ctx = contextState.ctx;
-    let currentRequest = contextState.getRequest();
     // Match the app path page routing sees: without basePath (the locale step
     // strips it too), so file and config middleware run beneath a basePath.
     const toRoutePathname = (pathname: string) =>
       options.i18n?.enabled
         ? stripFarmLocaleFromPathname(pathname, options.i18n)
         : stripFarmBasePath(pathname, options.i18n?.basePath ?? "/");
+    let contextState = createWebMiddlewareContext(
+      request,
+      undefined,
+      options.server?.trustProxy === true,
+      requestOptions.clientAddress,
+      toRoutePathname,
+    );
+    let ctx = contextState.ctx;
+    let currentRequest = contextState.getRequest();
     const initialRequestPathname = ctx.pathname;
     const initialPathname = toRoutePathname(initialRequestPathname);
     // Middleware guards every path a page can match: with raw-path routing that includes the
@@ -706,6 +689,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     // path which have not run yet get a pass of their own. Each entry runs at
     // most once, so repeated rewrites end after at most one pass per entry.
     const ran = new Set<ProductionMiddlewareEntry>();
+    let guarded = false;
     function* applicableMiddleware() {
       for (
         let pathname = initialPathname, requestPathname = initialRequestPathname, pass = 0;
@@ -740,6 +724,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
         continue;
       }
       ran.add(entry);
+      if (entry.config?.cache !== "public") guarded = true;
 
       if (parentData) {
         contextState = createWebMiddlewareContext(
@@ -747,6 +732,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
           parentData,
           options.server?.trustProxy === true,
           requestOptions.clientAddress,
+          toRoutePathname,
         );
         ctx = contextState.ctx;
       }
@@ -787,6 +773,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
           };
         }
 
@@ -804,6 +791,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
           };
         }
 
@@ -834,6 +822,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
           };
         }
         if (isFarmNotFoundError(error)) {
@@ -845,6 +834,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             context: new Map(ctx.locals),
             headers: mapToHeaders(contextState.headers),
             handled: true,
+            guarded,
             notFound: true,
           };
         }
@@ -871,6 +861,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       context: new Map(ctx.locals),
       headers: mapToHeaders(contextState.headers),
       handled: false,
+      guarded,
     };
   };
 }
@@ -902,5 +893,33 @@ export function applyProductionMiddlewareHeaders(
     for (const cookie of setCookies) {
       headers.append("Set-Cookie", cookie);
     }
+  });
+}
+
+const PRIVATE_CACHE_DIRECTIVE = /(?:^|,)\s*(?:private|no-store)\s*(?:[,=]|$)/i;
+// Directives a CDN reads in place of Cache-Control (RFC 9213 and the platform names).
+const CDN_CACHE_CONTROL_HEADERS = [
+  "cdn-cache-control",
+  "vercel-cdn-cache-control",
+  "netlify-cdn-cache-control",
+  "cloudflare-cdn-cache-control",
+];
+
+/**
+ * Keep a response that middleware let through out of shared caches. A CDN keys its copy by URL
+ * and serves it without running the guard again, so a page an IP allowlist or API key header
+ * let one visitor read would reach everyone. A Cache-Control that a shared cache may store
+ * becomes `private, no-store`; a private one is left as it is.
+ *
+ * @internal
+ */
+export function _withFarmGuardedResponseCache(response: Response): Response {
+  const shareable = !PRIVATE_CACHE_DIRECTIVE.test(response.headers.get("cache-control") ?? "");
+  if (!shareable && !CDN_CACHE_CONTROL_HEADERS.some((name) => response.headers.has(name))) {
+    return response;
+  }
+  return _withFarmResponseHeaders(response, (headers) => {
+    if (shareable) headers.set("Cache-Control", "private, no-store");
+    for (const name of CDN_CACHE_CONTROL_HEADERS) headers.delete(name);
   });
 }

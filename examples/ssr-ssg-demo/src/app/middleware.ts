@@ -11,7 +11,7 @@ export default middleware()
     await next();
   })
   .when(
-    (ctx: MiddlewareContext) => ctx.pathname.startsWith('/api'),
+    (ctx: MiddlewareContext) => ctx.routePathname.startsWith('/api'),
     async (ctx: MiddlewareContext, next: NextFunction) => {
       ctx.headers.set('X-API-Version', '1.0.0');
       await next();
@@ -20,6 +20,8 @@ export default middleware()
 
 export const config = {
   matcher: '/:path*',
+  // Only sets headers and redirects, so pages stay CDN cacheable.
+  cache: 'public',
   exclude: [
     '/_next/:path*',
     '/assets/:path*',

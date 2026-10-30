@@ -10,7 +10,13 @@ import { getFarmRouteContext } from "./route-context";
 import { normalizeFarmRouteRuntimeConfig, type FarmRouteRuntimeConfig } from "./route-runtime";
 import type { ServerFn } from "./server-fn";
 import type { FarmServerRendererRuntime } from "./renderer";
-import { parseProgrammaticRoutePath as parseSharedProgrammaticRoutePath } from "./routes-shared";
+import {
+  getProgrammaticRouteDefinitionSource,
+  parseProgrammaticRoutePath as parseSharedProgrammaticRoutePath,
+  PROGRAMMATIC_ROUTE_SOURCE,
+  TRACK_PROGRAMMATIC_ROUTE_SOURCES,
+  type ProgrammaticRouteDefinitionSource,
+} from "./routes-shared";
 import { extractProgrammaticPageCallPathLiterals } from "./route-call-scanner";
 import type {
   FarmAppContext,
@@ -469,7 +475,9 @@ export function defineRoutes(
   const routes = typeof input === "function" ? input(routesBuilder) : input;
   const manifest = {
     __farmRoutes: true as const,
-    routes: routes.map(normalizeProgrammaticRoute),
+    routes: routes.map((route) =>
+      stampProgrammaticRouteSource(normalizeProgrammaticRoute(route), route, false),
+    ),
   };
 
   Object.defineProperty(manifest, FARM_ROUTES_BRAND, {
@@ -482,14 +490,14 @@ export function defineRoutes(
 
 export const routesBuilder: ProgrammaticRouteBuilder = {
   page(path, options) {
-    return normalizeProgrammaticRoute({
+    return createProgrammaticRoute({
       kind: "page",
       path,
       ...options,
     }) as ProgrammaticPageRoute;
   },
   layout(path, options) {
-    return normalizeProgrammaticRoute({
+    return createProgrammaticRoute({
       kind: "layout",
       path,
       ...options,
@@ -497,7 +505,7 @@ export const routesBuilder: ProgrammaticRouteBuilder = {
   },
   api(path, options) {
     const { render, runtime, regions, maxDuration, ...methods } = options;
-    return normalizeProgrammaticRoute({
+    return createProgrammaticRoute({
       kind: "api",
       path,
       render,
@@ -508,7 +516,7 @@ export const routesBuilder: ProgrammaticRouteBuilder = {
     }) as ProgrammaticApiRoute;
   },
   redirect(source, destination, options = {}) {
-    return normalizeProgrammaticRoute({
+    return createProgrammaticRoute({
       kind: "redirect",
       source,
       destination,
@@ -516,6 +524,51 @@ export const routesBuilder: ProgrammaticRouteBuilder = {
     }) as ProgrammaticRedirectRoute;
   },
 };
+
+function createProgrammaticRoute(route: ProgrammaticRouteDefinition): ProgrammaticRouteDefinition {
+  return stampProgrammaticRouteSource(normalizeProgrammaticRoute(route), route, true);
+}
+
+/**
+ * While Farm's server-side route discovery runs, record the call stack that made or copied a
+ * route definition, so the client build can tell every module that defines routes, however it
+ * holds them. Lives beside the route factories so the stack's own frames share one file.
+ */
+function stampProgrammaticRouteSource<T extends object>(
+  route: T,
+  input: unknown,
+  created: boolean,
+): T {
+  if (!(globalThis as Record<symbol, unknown>)[TRACK_PROGRAMMATIC_ROUTE_SOURCES]) return route;
+  const previous = getProgrammaticRouteDefinitionSource(input);
+  const source: ProgrammaticRouteDefinitionSource = {
+    stacks: [...(previous?.stacks ?? []), captureRouteSourceStack()],
+    raw: created ? false : (previous?.raw ?? true),
+  };
+  Object.defineProperty(route, PROGRAMMATIC_ROUTE_SOURCE, {
+    value: source,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+  return route;
+}
+
+function captureRouteSourceStack(): string {
+  const limit = Error.stackTraceLimit;
+  try {
+    Error.stackTraceLimit = 200;
+    return new Error().stack ?? "";
+  } catch {
+    return "";
+  } finally {
+    try {
+      Error.stackTraceLimit = limit;
+    } catch {
+      // A frozen Error constructor keeps its own limit.
+    }
+  }
+}
 
 export const page = routesBuilder.page;
 export const layout = routesBuilder.layout;
@@ -1181,9 +1234,10 @@ function createProgrammaticPageComponent(
 }
 
 /**
- * The client build removes a page's guard and data hooks and records them in
- * `__farmServerHooks`. The route keeps its server-props shape, and its page
- * component tells hydration that only server-resolved props can render it.
+ * The browser copy of a page never sees its params, search, guard, or data options: the
+ * generated client route module records which ones the server resolves in
+ * `__farmServerHooks`. The route keeps its server-props shape, and its page component tells
+ * hydration that only server-resolved props can render it.
  */
 function getClientStrippedServerHooks(route: ProgrammaticPageRoute): readonly string[] | undefined {
   const hooks = (route as { __farmServerHooks?: unknown }).__farmServerHooks;
@@ -1358,6 +1412,12 @@ async function resolveProgrammaticRouteData(
     return dataHooks.main(context);
   }
 
+  const revalidate = normalizeProgrammaticRouteStaleTime(dataHooks.staleTime, route.path);
+  // Always revalidate: the result belongs to this request alone, as with createServerQuery.
+  if (revalidate === 0) {
+    return dataHooks.main(context);
+  }
+
   const cacheKey = createFarmCacheKey(["route-data", routeDataKey]);
   const cacheOptions: FarmCacheOptions = {
     tags: [
@@ -1368,7 +1428,7 @@ async function resolveProgrammaticRouteData(
       ...(typeof context.path === "string" ? [context.path] : []),
       ...(await resolveProgrammaticRouteDataKeys(dataHooks.paths, context)),
     ],
-    revalidate: normalizeProgrammaticRouteStaleTime(dataHooks.staleTime),
+    revalidate,
   };
 
   return getFarmDataCache().getOrSet(cacheKey, () => dataHooks.main(context), cacheOptions);
@@ -1383,34 +1443,37 @@ async function resolveProgrammaticRouteDataKeys(
   return value.filter((item) => typeof item === "string" && item.trim().length > 0);
 }
 
+/**
+ * `staleTime` as cache seconds: `0` means "always revalidate", so the result is
+ * never shared through the cache; `undefined` and `false` keep it until
+ * invalidated. An unreadable value throws, instead of silently caching forever.
+ */
 function normalizeProgrammaticRouteStaleTime(
   staleTime: ProgrammaticRouteDataStaleTime | undefined,
+  routePath: string,
 ): number | false | undefined {
   if (staleTime === undefined) return undefined;
   if (staleTime === false) return false;
 
+  let milliseconds: number;
   if (typeof staleTime === "number") {
-    if (!Number.isFinite(staleTime) || staleTime <= 0) return undefined;
-    return Math.max(1, Math.ceil(staleTime / 1000));
+    milliseconds = staleTime;
+  } else {
+    const match = typeof staleTime === "string" && staleTime.match(/^(\d+(?:\.\d+)?)(ms|s|m|h)$/);
+    if (!match) {
+      throw new TypeError(
+        `Route "${routePath}" data.staleTime must be milliseconds or a duration like "250ms", "30s", "5m", or "1h".`,
+      );
+    }
+    const unit = match[2];
+    milliseconds =
+      Number(match[1]) *
+      (unit === "ms" ? 1 : unit === "s" ? 1000 : unit === "m" ? 60_000 : 3_600_000);
   }
-
-  const match = staleTime.match(/^(\d+(?:\.\d+)?)(ms|s|m|h)$/);
-  if (!match) return undefined;
-
-  const value = Number(match[1]);
-  if (!Number.isFinite(value) || value <= 0) return undefined;
-
-  const unit = match[2];
-  const milliseconds =
-    unit === "ms"
-      ? value
-      : unit === "s"
-        ? value * 1000
-        : unit === "m"
-          ? value * 60000
-          : value * 3600000;
-
-  return Math.max(1, Math.ceil(milliseconds / 1000));
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) {
+    throw new TypeError(`Route "${routePath}" data.staleTime must be a non-negative duration.`);
+  }
+  return milliseconds === 0 ? 0 : Math.max(1, Math.ceil(milliseconds / 1000));
 }
 
 function isProgrammaticRoutePropsResolved(value: unknown): boolean {
@@ -1485,6 +1548,8 @@ function normalizeProgrammaticRoute(
   }
 
   const routeActions = route.kind === "page" ? normalizeProgrammaticRouteActions(route) : undefined;
+  // Reject an unreadable staleTime when the route is defined, not on its first request.
+  normalizeProgrammaticRouteStaleTime((route as ProgrammaticPageRoute).data?.staleTime, route.path);
 
   return {
     ...route,

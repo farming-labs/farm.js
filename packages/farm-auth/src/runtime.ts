@@ -8,6 +8,13 @@ const FARM_AUTH_STATE_KEY = Symbol.for("@farm.js/auth/runtime");
 const CURRENT_REQUEST_RESOLVER_KEY = Symbol.for("farm.currentRequestResolver");
 const loadNodeModule = createRequire(import.meta.url);
 
+/**
+ * Where Better Auth reads the caller's address from. Farm Auth sets it from the
+ * address Farm resolved for the request (the server's peer address, or the
+ * forwarded one under `server.trustProxy`) and drops any copy the client sent.
+ */
+const CLIENT_ADDRESS_HEADER = "x-farm-auth-client-address";
+
 interface FarmAuthRuntimeOptions {
   root: string;
   mode: "development" | "production";
@@ -88,6 +95,23 @@ export async function getFarmAuthRuntime(): Promise<BetterAuthRuntime> {
     });
   }
   return state.runtime;
+}
+
+/**
+ * The request Better Auth's handler sees, carrying the client address Farm
+ * resolved. Better Auth keys its sign-in rate limit on that address; left to
+ * its default it reads a client-supplied single-value x-forwarded-for, so a
+ * rotating header bypassed the limit and requests without one shared a bucket.
+ */
+export function withFarmAuthClientAddress(request: Request): Request {
+  const address = (request as Request & { socket?: { remoteAddress?: string } }).socket
+    ?.remoteAddress;
+  if (!address && !request.headers.has(CLIENT_ADDRESS_HEADER)) return request;
+
+  const headers = new Headers(request.headers);
+  headers.delete(CLIENT_ADDRESS_HEADER);
+  if (address) headers.set(CLIENT_ADDRESS_HEADER, address);
+  return new Request(request, { headers });
 }
 
 export function getFarmAuthRequest(request?: Request): Request {
@@ -205,6 +229,9 @@ async function createBetterAuthOptions(
     session: {
       expiresIn: config.session.expiresIn,
       updateAge: config.session.updateAge,
+    },
+    advanced: {
+      ipAddress: { ipAddressHeaders: [CLIENT_ADDRESS_HEADER] },
     },
   };
 }

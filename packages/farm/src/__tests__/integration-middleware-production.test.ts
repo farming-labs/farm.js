@@ -57,7 +57,10 @@ function createClerkShapedIntegration(seen: string[] = []) {
  * to the real core functions the generated bundle imports. Nothing here is a
  * stand-in for the runtime: the source is the generated source.
  */
-function createProductionIntegrationRuntime(integrations: Record<string, unknown>) {
+function createProductionIntegrationRuntime(
+  integrations: Record<string, unknown>,
+  config: Record<string, unknown> = {},
+) {
   const source = generateIntegrationRequestRuntimeSource({
     hasServerRuntimeIntegrations: true,
   });
@@ -73,9 +76,11 @@ return {
   matchLocalIntegrationRequest,
   withFarmIntegrationSetCookies,
 };`,
-  )(integrations, {}, matchIntegrationRoute, dispatchIntegrationRequests) as {
+  )(integrations, config, matchIntegrationRoute, dispatchIntegrationRequests) as {
     handleIntegrationRequest: (
       request: Request,
+      ranMiddleware?: Set<object>,
+      clientAddress?: string,
     ) => Promise<{ response: Response | null; setCookies: string[] }>;
     matchLocalIntegrationRequest: (request: Request) => unknown;
     withFarmIntegrationSetCookies: (
@@ -338,6 +343,63 @@ describe("production integration middleware dispatch", () => {
 
     expect(response?.status).toBe(302);
     expect(response?.headers.getSetCookie()).toEqual(["sb-access-token=fresh; Path=/"]);
+  });
+});
+
+describe("production integration client address", () => {
+  function createAddressIntegration() {
+    return defineIntegration({
+      category: "auth",
+      type: "address",
+      routes: [
+        {
+          path: "/api/auth/[...auth]",
+          methods: ["POST"],
+          handler(request: Request) {
+            const socket = (request as Request & { socket?: { remoteAddress?: string } }).socket;
+            return Response.json({ address: socket?.remoteAddress ?? null });
+          },
+        },
+      ],
+    });
+  }
+  const signIn = () =>
+    new Request("https://app.test/api/auth/sign-in/email", {
+      method: "POST",
+      headers: { "x-forwarded-for": "198.51.100.9" },
+      body: "{}",
+    });
+
+  // Farm Auth keys its rate limit on this address instead of a client header.
+  it("hands an integration route the address the server adapter reported", async () => {
+    const runtime = createProductionIntegrationRuntime({ auth: createAddressIntegration() });
+    const { response } = await runtime.handleIntegrationRequest(signIn(), new Set(), "203.0.113.4");
+    await expect(response?.json()).resolves.toEqual({ address: "203.0.113.4" });
+  });
+
+  it("uses the forwarded address only under server.trustProxy", async () => {
+    const runtime = createProductionIntegrationRuntime(
+      { auth: createAddressIntegration() },
+      { server: { trustProxy: true } },
+    );
+    const { response } = await runtime.handleIntegrationRequest(signIn(), new Set(), "10.0.0.1");
+    await expect(response?.json()).resolves.toEqual({ address: "198.51.100.9" });
+  });
+
+  // An appending proxy keeps whatever the client sent ahead of the hop it adds,
+  // so a leading hop would let a caller pick its own rate-limit bucket.
+  it("takes the hop the trusted proxy appended, not one the client sent", async () => {
+    const runtime = createProductionIntegrationRuntime(
+      { auth: createAddressIntegration() },
+      { server: { trustProxy: true } },
+    );
+    const request = new Request("https://app.test/api/auth/sign-in/email", {
+      method: "POST",
+      headers: { "x-forwarded-for": "6.6.6.6, 198.51.100.9" },
+      body: "{}",
+    });
+    const { response } = await runtime.handleIntegrationRequest(request, new Set(), "10.0.0.1");
+    await expect(response?.json()).resolves.toEqual({ address: "198.51.100.9" });
   });
 });
 

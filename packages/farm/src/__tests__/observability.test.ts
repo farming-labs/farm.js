@@ -250,6 +250,70 @@ describe("observability", () => {
     );
   });
 
+  it("logs a digest of cache and PPR shell keys, never the raw key", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    configureFarmObservability({ logs: true });
+    const key = 'unstable_cache:["getUser",["alice@example.com"]]';
+    emitFarmEvent({ type: "cache.miss", key });
+    emitFarmEvent({ type: "ppr.shell.hit", route: "/p", key: "/p?email=bob@example.com" });
+
+    const lines = log.mock.calls.map(([line]) => String(line));
+    expect(lines).toHaveLength(2);
+    expect(lines.join("\n")).not.toMatch(/alice@example\.com|bob@example\.com/);
+    expect(lines[0]).toMatch(/^\[farm:debug\] cache\.miss key_hash=[0-9a-f]{8}$/);
+    expect(lines[1]).toMatch(/^\[farm:debug\] ppr\.shell\.hit route=\/p key_hash=[0-9a-f]{8}$/);
+    // Same key, same digest: events stay correlatable.
+    emitFarmEvent({ type: "cache.dedupe", key });
+    expect(String(log.mock.calls[2]?.[0])).toContain(lines[0]!.split(" ").pop());
+  });
+
+  it("drops the query and fragment from redirect targets", async () => {
+    const events: FarmEvent[] = [];
+    configureFarmObservability({ tracing: true, onEvent: (event) => events.push(event) });
+    await runWithFarmRequestSpan(new Request("https://farm.test/old"), async () => {
+      emitFarmEvent({
+        type: "route.redirect",
+        from: "/old",
+        to: "https://farm.test/verify?token=s3cret#t=1",
+        status: 307,
+      });
+      emitFarmEvent({ type: "route.redirect", from: "/a", to: "/login?next=%2Fme", status: 302 });
+      return new Response("ok");
+    });
+    await processor.forceFlush();
+
+    const redirects = events.filter((event) => event.type === "route.redirect");
+    expect(redirects.map((event) => (event as { to?: string }).to)).toEqual([
+      "https://farm.test/verify",
+      "/login",
+    ]);
+    const exported = exporter
+      .getFinishedSpans()
+      .flatMap((span) => span.events)
+      .filter((event) => event.name === "route.redirect");
+    expect(exported.map((event) => event.attributes?.["farm.to"])).toEqual([
+      "https://farm.test/verify",
+      "/login",
+    ]);
+    expect(JSON.stringify(exported)).not.toContain("s3cret");
+  });
+
+  it("redacts PPR shell keys from exported span events", async () => {
+    configureFarmObservability({ tracing: true });
+    await runWithFarmRequestSpan(new Request("https://farm.test/p"), async () => {
+      emitFarmEvent({ type: "ppr.shell.miss", route: "/p", key: "/p?email=bob@example.com" });
+      return new Response("ok");
+    });
+    await processor.forceFlush();
+
+    const shellEvent = exporter
+      .getFinishedSpans()
+      .flatMap((span) => span.events)
+      .find((event) => event.name === "ppr.shell.miss");
+    expect(shellEvent?.attributes).not.toHaveProperty("farm.key");
+    expect(typeof shellEvent?.attributes?.["farm.key_hash"]).toBe("string");
+  });
+
   it("creates correlated request and lifecycle spans with propagated trace context", async () => {
     const events: FarmEvent[] = [];
     configureFarmObservability({

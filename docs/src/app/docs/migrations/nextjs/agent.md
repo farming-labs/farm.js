@@ -339,51 +339,33 @@ Dynamic API segments bind through `params`: `src/app/api/todos/[id]/route.ts` ex
 
 #### Option B: server functions as actions
 
-The only supported way to make server functions callable from the browser is Farm's RSC pipeline from `@farm.js/plugin/rsc`, configured in `vite.config.ts` and run with the `vite` CLI (see `examples/rsc-demo`). Setting `experimental.serverComponents` and `experimental.serverActions` in `farm.config.ts` under `farm dev` does not load that pipeline: the server-function transform lives only in `@farm.js/plugin/rsc`. Worse, `experimental.serverActions: true` without the plugin turns off the build check that stops a client component from bundling a `createServerFn` module, so server code and its imports reach the browser. Never set it without the plugin.
+The only supported way to make server functions callable from the browser is Farm's React Server Components pipeline. Turn it on in `farm.config.ts` with `experimental.serverComponents: true`: `farm dev`, `farm build`, and `farm start` then run it on the official `@vitejs/plugin-rsc`, and pages and layouts are server components, as in Next.js. `experimental.serverActions: true` without `serverComponents` does not load that pipeline and turns off the build check that stops a client component from bundling a `createServerFn` module, so server code and its imports reach the browser. Never set it alone.
 
-Install (the RSC plugin refuses to start unless these exact versions resolve; pin React to them even if the Next.js app used another 19.x release):
+Install (the RSC pipeline refuses to start unless these exact versions resolve; pin React to them even if the Next.js app used another 19.x release):
 
 ```bash
 pnpm add @farm.js/core@<version> react@19.2.8 react-dom@19.2.8 react-server-dom-webpack@19.2.8 zod
 pnpm add -D @farm.js/plugin@<version> @vitejs/plugin-rsc@0.5.32 @vitejs/plugin-react vite
 ```
 
-Create `vite.config.ts` (adapted from `examples/rsc-demo`; it reads routes from `src/app` because `routesDir` is left unset):
+Enable it in `farm.config.ts` (routes stay in `src/app`):
 
 ```ts
-import rsc from "@vitejs/plugin-rsc";
-import react from "@vitejs/plugin-react";
-import { defineConfig, nitro } from "@farm.js/plugin/rsc";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
-  srcDir: "src",
   experimental: {
-    // serverComponents defaults to true in this defineConfig.
+    serverComponents: true,
     serverActions: true,
   },
   serverActions: {
     allowedOrigins: [],
     bodySizeLimit: "1mb",
   },
-  plugins: [
-    rsc({
-      serverHandler: false,
-      entries: {
-        rsc: "./.farm/rsc-entries/entry.rsc.tsx",
-        ssr: "./.farm/rsc-entries/entry.ssr.tsx",
-        client: "./.farm/rsc-entries/entry.browser.tsx",
-      },
-    }),
-    react(),
-    nitro({
-      server: { environmentName: "rsc" },
-      config: { preset: process.env.NITRO_PRESET || "vercel" },
-    }),
-  ],
 });
 ```
 
-Copy `examples/rsc-demo/scripts/nitro-post.mjs` into `scripts/` and use the example's scripts: `"dev": "vite"`, `"build": "vite build && node scripts/nitro-post.mjs"`, `"start": "node .output/server/index.mjs"`. These replace the Phase 2 scripts. The Nitro preset defaults to `vercel`; build with `NITRO_PRESET=node-server` for a Node server. Add `tailwindcss()` from `@tailwindcss/vite` to `plugins` if the app uses Tailwind (the RSC pipeline does not add it automatically). `farm.config.ts` is still read for `middleware`; `serverActions` options belong in this `defineConfig`.
+Keep the Phase 2 scripts. Vite plugins and options stay under `vite`, and Tailwind is enabled as in other Farm apps. `@vitejs/plugin-react` is optional and adds Fast Refresh. The pipeline does not run `auth`, `integrations`, Farm `plugins`, `storage`, `schema`, `cron`, `workflows`, `docs`, `theme`, `routeRules`, `context`, `redirects`, `rewrites`, `headers`, or `observability` yet; `farm dev` and `farm build` warn about any the app sets.
 
 | Next.js                                           | Farm (Option B)                                                                                                                                                       | Status                                                                                                                           |
 | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -400,7 +382,7 @@ Copy `examples/rsc-demo/scripts/nitro-post.mjs` into `scripts/` and use the exam
 | `cookies().set()` / `.delete()` inside an action  | None                                                                                                                                                                  | `none`: set cookies in middleware (`context.cookies.set`) or move that action to an Option A endpoint that returns `Set-Cookie`. |
 | `revalidatePath`, `revalidateTag`, `updateTag`    | Same names from `@farm.js/core/cache`, or declare `invalidates: ({ input, result }) => [{ path }, { tag }, { key }]` (applied after success)                          | `rename`                                                                                                                         |
 | Route-scoped actions                              | `createRoute(path, { actions: { update }, defaultAction: "update" })` from `@farm.js/core/routes`, then `useAction(Route)`                                            | Farm addition                                                                                                                    |
-| `serverActions.allowedOrigins`, `bodySizeLimit`   | Same keys in the `@farm.js/plugin/rsc` `defineConfig`; cross-origin requests are rejected (403), bodies over 1 MB return 413                                          | `rename`                                                                                                                         |
+| `serverActions.allowedOrigins`, `bodySizeLimit`   | Same keys in `farm.config.ts`; cross-origin requests are rejected (403), bodies over 1 MB return 413                                                                  | `rename`                                                                                                                         |
 
 Rules for server modules: export each server function inline (`export const x = createServerFn(...)`; re-exporting one is a build error), never define them in a `"use client"` file, and authorize the user inside every handler because each action is a public endpoint.
 
@@ -573,7 +555,7 @@ Docs: [/docs/middleware](/docs/middleware).
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------- |
 | `middleware.ts` (Next 15) or `proxy.ts` (Next 16) at the root | `src/app/middleware.ts` exporting `middleware(request, context)`                           | `different`   |
 | `export const config = { matcher }`                           | Same export; strings like `/dashboard/:path*`, `RegExp`, or functions                      | `different`   |
-| Negative-lookahead string matchers `/((?!api\|_next).*)`      | A `RegExp` matcher such as `/^\/(?!api\/).*/`, or scope the file to a folder               | `different`   |
+| Regex string matchers like `/((?!api\|_next).*)`              | A `RegExp` matcher such as `/^\/(?!api\/).*/`; Farm rejects the string at startup          | `different`   |
 | `NextResponse.next()`                                         | Return nothing                                                                             | `different`   |
 | `NextResponse.redirect(url)`                                  | `return Response.redirect(new URL("/login", request.url), 307)` or `context.redirect(url)` | `different`   |
 | `NextResponse.rewrite(url)`                                   | `context.rewrite("/path")`                                                                 | `different`   |

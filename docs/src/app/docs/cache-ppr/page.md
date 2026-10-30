@@ -14,8 +14,9 @@ Farm uses its process-local memory cache when `cache.adapter` is not configured.
 servers or ephemeral deployments, configure one shared adapter in `farm.config.ts`:
 
 The memory cache retains at most 1,024 entries by default and evicts the least recently used entry
-when it reaches that limit. Set `cache.maxEntries` to a larger positive integer when one process
-must keep a larger working set:
+when it reaches that limit. PPR shells, one per query string, keep their own LRU of the same size,
+so a flood of shell variants never evicts `unstable_cache`, server query or route data entries. Set
+`cache.maxEntries` to a larger positive integer when one process must keep a larger working set:
 
 ```ts
 import { defineConfig } from "@farm.js/core";
@@ -119,6 +120,20 @@ const makeLoader = (table: string) =>
 
 Values passed as call arguments already participate in the key, so they do not need to be repeated
 in `keyParts`.
+
+The cached result is shared by every request, so the function cannot read the request:
+`cookies()`, `headers()`, `getCspNonce()`, `getCurrentRequest()`, a server function's
+`request.headers` and `request.clone()` (in a render or an action), Farm Auth's `auth.user()` and `auth.session()`, the server `api` client, and
+integration server clients throw inside it. Read what you need outside and pass it in as an
+argument, which also puts it in the key:
+
+```ts
+const getCart = unstable_cache(async (userId: string) => db.cart(userId), ["cart"]);
+
+// Outside the cached function, where reading the request is fine:
+const user = await auth.user({ required: true }); // reads cookies()
+const cart = await getCart(user.id);
+```
 
 ## Revalidate
 
@@ -286,7 +301,8 @@ can still serve the previous value. Adapters with native expiry should pass it t
 one-off keys, such as one PPR shell per query string or one server query entry per input, do not
 accumulate forever. Farm also deletes an entry it reads after `expiresAt`. Entries with
 `revalidate: false` or no `revalidate` never expire on their own and stay until they are replaced or
-invalidated.
+invalidated, except PPR shells: a shell without `revalidate` expires from the adapter after 24 hours
+and is rendered again on the next request.
 
 For any Farm/unstorage-compatible client, `storageCacheAdapter(storage)` provides a portable
 baseline. It percent-encodes keys and tags before handing them to the storage client, because
@@ -323,10 +339,14 @@ instead of caching a completed response as though it were a reusable partial she
 
 A render that reads the request with `headers()`, `cookies()`, or `getCurrentRequest()` is one
 visitor's HTML, wherever the read happens: the page, a layout, `generateMetadata`, or a helper they
-import. Farm never stores that render as a PPR shell, in development or production. Production
+import. Reading `request.headers` in a server function or server query the render calls counts too;
+calling one that leaves the request alone does not. Farm never stores that render as a PPR shell, in development or production. Production
 sends it with `X-Farm-PPR: bypass` and `Cache-Control: private, no-store`. The same applies to a `revalidate` route whose layout reads the
 request: it renders per request instead of advertising a shared `s-maxage`. Reads in middleware do
 not count, since they run before the page renders.
+
+`preloadQuery` from [`@farm.js/convex/server`](/docs/integrations/convex#caching) reads the request
+the same way, so a page that preloads live Convex data is never stored in the shared cache.
 
 ```tsx
 import { Suspense } from "react";
@@ -345,6 +365,50 @@ export default function BillingPage() {
   );
 }
 ```
+
+## Responses behind middleware
+
+A CDN keys its copy of a page by URL and serves it without running your middleware again. When
+middleware lets a visitor through on something other than a cookie or an `Authorization` header,
+such as an IP allowlist, an API key header, or a VPN header, a shared copy of that response would
+reach everyone. Farm cannot tell such a guard from harmless middleware, so in production every
+response that matched middleware is sent with `Cache-Control: private, no-store`: config
+middleware, `src/app/**/middleware.ts` files (a root `middleware.ts` matches every path),
+integration guards such as `protectedRoutes`, and plugins with a `runtime.before` hook. This
+covers `ssg`, `revalidate`, and PPR pages, docs pages and the docs API, Markdown sources and
+mirrors, and API responses. A shared directive (`public`, `s-maxage`, `CDN-Cache-Control`,
+`Vercel-CDN-Cache-Control`, `Netlify-CDN-Cache-Control`) is removed, including one that a Nitro
+`swr` or `headers` route rule or a `headers()` entry in `farm.config.ts` adds for that path; a
+policy that is already private, such as `private, max-age=60`, is kept. Responses the middleware returns itself, such as a `403` or a
+redirect, are sent as written.
+
+Middleware that never decides who may read a response, such as logging or response headers, can
+opt back into shared caching with `cache: "public"`:
+
+```ts
+// farm.config.ts
+export default defineConfig({
+  middleware: [
+    {
+      matcher: "/blog/:path*",
+      cache: "public",
+      handler(ctx) {
+        ctx.headers.set("x-area", "blog");
+      },
+    },
+  ],
+});
+```
+
+A middleware file declares it in its exported `config`, and a plugin on its `runtime` hooks:
+
+```ts
+// src/app/middleware.ts
+export const config = { cache: "public" };
+```
+
+A response stays shareable only when every middleware that matched it opts in. Shared caches serve
+it without running that middleware, so never set `cache: "public"` on a guard.
 
 ## Observability events
 

@@ -3,6 +3,7 @@ import {
   _runWithFarmRequestSpan,
   configureFarmTracing,
   getFarmTraceContext,
+  hashFarmCacheKey,
   normalizeFarmTracingConfig,
   recordFarmEventTrace,
   resetFarmTracing,
@@ -419,6 +420,9 @@ export function emitFarmEvent(input: FarmEventInput): FarmEvent {
     level: inferFarmEventLevel(input.type),
     ...input,
   } as FarmEvent;
+  // A redirect target's query can carry tokens or personal data (`/verify?token=`); logs,
+  // traces and handlers get the path only.
+  if (event.type === "route.redirect") event.to = event.to.replace(/[?#][\s\S]*$/, "");
 
   const traceContext = recordFarmEventTrace(event);
   if (traceContext) {
@@ -578,7 +582,11 @@ function formatFarmEventDetails(event: FarmEvent): string {
     "count",
   ]) {
     const value = record[key];
-    if (value !== undefined) {
+    if (key === "key" && typeof value === "string") {
+      // Cache and PPR shell keys embed call arguments and query strings: print the digest
+      // tracing exports, which still correlates events.
+      details.push(`key_hash=${hashFarmCacheKey(value)}`);
+    } else if (value !== undefined) {
       details.push(`${key}=${formatDetailValue(value)}`);
     }
   }

@@ -1,1 +1,1 @@
-Farm.js, the framework for the web and agents, by Farming Labs
+Farm.js, the framework for the web and agents, with the install command pnpm create @farm.js/app

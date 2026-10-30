@@ -86,10 +86,11 @@ including the ones nothing has called yet, without the app sending anything. It 
   `development`).
 - `packages`: the installed versions of the app's `@farm.js/*` and `@farming-labs/*` packages.
 - `mcp.servers`: each MCP server's name, version, path and `authorization` (`"required"` when it
-  runs `authorize`, `"none"` for a public server), its tools (name, title, description, whether
-  it's an API endpoint, `defineTool` or a server function, the read-only, destructive, idempotent
-  and open-world hints, and the input and output JSON Schemas), its resources (name, URI or
-  template, MIME type) and its prompts (name, description, argument schema).
+  runs `authorize` or a guard covers its path, `"none"` for a public server), its tools (name,
+  title, description, whether it's an API endpoint, `defineTool` or a server function, the
+  read-only, destructive, idempotent and open-world hints, and the input and output JSON Schemas),
+  its resources (name, URI or template, MIME type) and its prompts (name, description, argument
+  schema).
 - `webmcp`: whether `@farm.js/webmcp` is on, and the browser tools the app's source defines with
   `defineWebMCPTool` or `registerWebMCPTool`: name, title, description, hints, and the input schema
   when it's written out (`inputSchemaSource: "literal"`). A schema built at runtime, such as
@@ -103,24 +104,33 @@ including the ones nothing has called yet, without the app sending anything. It 
 It never includes environment values, keys, file paths, integration configuration or anything a
 request carries.
 
-Anyone can read it, in `farm dev` and in production, with or without `FARMJS_API_KEY`. It's served
-with CORS for any origin, an `ETag`, and `Cache-Control: public, max-age=0, must-revalidate`. The
-public view lists only what an anonymous MCP client could already list:
+Anyone can read it, in `farm dev` and in production, with or without `FARMJS_API_KEY`, and every
+reader gets the same document. It's served with CORS for any origin, an `ETag`, and
+`Cache-Control: public, max-age=0, must-revalidate`. It lists only what an anonymous MCP client
+could already list:
 
-- A server that requires `authorize` keeps its name, version, path and
-  `authorization: "required"`, with empty `tools`, `resources` and `prompts`.
-- Endpoint tools leave out the endpoint's method and route, which MCP clients never see.
+- A server that requires `authorize`, or sits behind a guard written for its path, keeps its
+  name, version, path and `authorization: "required"`, with empty `tools`, `resources` and
+  `prompts`.
+- Endpoint tools never include the endpoint's method and route, which MCP clients never see.
 
-Farm Infra reads it from the **Site URL** you set on the project's Settings, and signs the request
-for this app's `FARMJS_API_KEY`. That request gets the full view: every server's tools, resources
-and prompts, and each endpoint tool's `method` and `path`. It's sent `Cache-Control: private,
-no-store`. `analytics: false` turns off the full view only; the public manifest is still served.
+Farm Infra reads it from the **Site URL** you set on the project's Settings, as any other client
+does, so it lists a protected server's identity but not its tools. `analytics: false` doesn't
+change the manifest.
+
+[`agent.manifest`](/docs/configuration#app-manifest) hides what you'd rather not publish: a section
+set to `false` is served as `null`, `packages: "names"` drops the versions, `app` can leave out the
+version, renderer or build, `mcp` can drop schemas or hide a server or a single tool, and `webmcp`
+can hide browser tools. Hidden tools are hidden from Farm Infra too.
 
 Turn the manifest off with `agent: { manifest: false }`. Farm Infra then can't list the app's tools
 either.
 
 Farm 0.1.34 served the manifest at `/.well-known/farmjs`. That path still answers the same way, so
 tools that read it there keep working; new readers should use `/.well-known/farmjs.json`.
+
+Earlier releases gave Farm Infra's signed request (the `farmjs-infra-signature` header) a fuller
+view with protected servers' tools and endpoint routes. Apps now ignore that header.
 
 ## Delivery
 

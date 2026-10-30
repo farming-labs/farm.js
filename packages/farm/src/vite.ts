@@ -1,9 +1,12 @@
+import { resolveFarmServerComponentsMode } from "./server-components-mode";
+import { transformFarmFormActionModule } from "./form-actions-transform";
 import {
   invalidateFailedFarmDevModules,
   invalidateFarmDevDependents,
   loadFarmDevModule,
 } from "./dev-module";
 import { createBundledEnv } from "./env";
+import { parseSync } from "vite";
 import type {
   AliasOptions,
   ConfigEnv,
@@ -23,6 +26,7 @@ import { isOptionalPeerInstalled, VERCEL_OG_INSTALL_HINT } from "./optional-peer
 import {
   FARM_NODE_RESPONSE_END_PENDING,
   type FarmPlugin,
+  type FarmPluginRuntimeKind,
   type FarmPluginRuntimeSession,
   type PluginManager,
 } from "./plugin";
@@ -52,6 +56,12 @@ import {
   parseProgrammaticRouteModuleId,
   scanProgrammaticPagePaths,
 } from "./routes-shared";
+import {
+  generateProgrammaticClientRouteModule,
+  programmaticClientRouteKey,
+  type FarmProgrammaticRoutesPluginApi,
+  type ProgrammaticClientRoutes,
+} from "./programmatic-routes-client";
 import type { FarmDocsAPIHandler } from "./docs";
 import {
   createMarkdownMirrorResponse,
@@ -81,16 +91,17 @@ import {
 } from "./api-catalog";
 import {
   createFarmAppManifestResponse,
-  FARM_INFRA_SIGNATURE_HEADER,
   isFarmAppManifestPath,
   resolveFarmAppManifestInput,
 } from "./app-manifest";
+import { farmPathGuardCoversEndpoint, farmPathGuardCoversPage } from "./middleware/may-handle";
 import { resolveFarmAppPackages } from "./app-manifest-packages";
 import { collectFarmWebMCPTools } from "./app-manifest-webmcp";
 import { resolveDevGlobalStylesheetHref } from "./server/dev-styles";
 import { FARM_LAYOUT_ELEMENT_CLIENT_SOURCE } from "./document-layout-client";
 import {
   getClientModuleMetadata,
+  resolveModuleSourcePath,
   getIslandStrategyExport,
   hasUseClientDirective,
   isIsolatableClientBoundarySource,
@@ -185,6 +196,7 @@ import {
   resolveFarmRendererAppSetup,
 } from "./renderer";
 import type { FarmRenderer } from "./renderer";
+import { createFarmReactRefreshPlugins, isFarmReactRefreshActive } from "./react-refresh";
 import { generateFarmIntegrationProviderClientCode } from "./integration-provider-build";
 import type { FarmIslandStrategy } from "./island";
 import { resolveRouteRenderingConfig } from "./ssg";
@@ -228,6 +240,8 @@ interface FarmVitePluginOptions extends FarmConfig {
   publicDir?: FarmUserConfig["publicDir"];
   /** @internal Modules selected by the compiled isolated-hydration ownership plan. */
   isolatedClientBoundaryModules?: ReadonlySet<string>;
+  /** @internal Component modules of programmatic routes, read from the evaluated routes files. */
+  programmaticClientRoutes?: ProgrammaticClientRoutes;
 }
 
 type TypeArtifactSelection = Pick<
@@ -429,6 +443,13 @@ function createRequestFromNodeRequest(
 }
 
 export { createFarmNodeRequestAbortSignal } from "./server-http";
+// The font call compiler and static image imports, for pipelines that build without farmPlugin
+// (React Server Components).
+export { farmFontImportsPlugin } from "./font-vite";
+export { farmImageImportsPlugin } from "./image-vite";
+export { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config";
+export { readRouteRenderingDirectiveFromFile } from "./ssg";
+export { resolveFarmImageProviderForRuntime, resolveFarmImageServerRuntime } from "./image-runtime";
 
 /** Exported for tests: the request boundary all Farm dev middlewares share. */
 export function withFarmRequestTracing(
@@ -915,6 +936,8 @@ export function transformIsolatedClientBoundaryModule(options: {
   moduleReference: string;
   islandStrategy: FarmIslandStrategy;
   parse: (code: string) => FarmModuleAstNode;
+  /** Islands mode: server output in props travels as DOM slots (RFC 0003). */
+  slots?: boolean;
 }): string | null {
   let ast: FarmModuleAstNode;
   try {
@@ -933,7 +956,10 @@ export function transformIsolatedClientBoundaryModule(options: {
     const safeName = exportName.replace(/[^A-Za-z0-9_$]/g, "_");
     const wrapperName = `__farm_isolated_boundary_${safeName || "default"}__`;
     wrapperStatements.push(
-      `const ${wrapperName} = __farm_create_isolated_boundary__(__farm_isolated_react__, ${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`,
+      // Islands mode renders through islx; the older isolated hydration keeps Farm's boundary.
+      options.slots
+        ? `const ${wrapperName} = __farm_islx_island__(${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`
+        : `const ${wrapperName} = __farm_create_isolated_boundary__(__farm_isolated_react__, ${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`,
     );
     wrapperStatements.push(
       isDefault ? `export default ${wrapperName};` : `export { ${wrapperName} as ${exportName} };`,
@@ -1000,7 +1026,10 @@ export function transformIsolatedClientBoundaryModule(options: {
     output = output.slice(0, replacement.start) + replacement.code + output.slice(replacement.end);
   }
 
-  return `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_isolated_boundary__ } from "@farm.js/core/internal/isolated-boundary";\n${output}\n${wrapperStatements.join("\n")}\nexport const __farm_client_boundary_originals__ = Object.freeze({ ${originalEntries.join(", ")} });\n`;
+  const runtimeImport = options.slots
+    ? `import { createIsland as __farm_islx_island__ } from "@farm.js/core/internal/islx-react";`
+    : `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_isolated_boundary__ } from "@farm.js/core/internal/isolated-boundary";`;
+  return `${runtimeImport}\n${output}\n${wrapperStatements.join("\n")}\nexport const __farm_client_boundary_originals__ = Object.freeze({ ${originalEntries.join(", ")} });\n`;
 }
 
 function walkModuleAst(node: FarmModuleAstNode, visit: (node: FarmModuleAstNode) => void): void {
@@ -1111,6 +1140,7 @@ export function farmPlugin(
   });
   let farmApp: FarmApp;
   let serverFnTransformActive = false;
+  let reactRefreshActive = false;
   let server: ViteDevServer;
   let apiRouteManager: APIRouteManager;
   let openAPIManager: OpenAPIManager | null = null;
@@ -1135,8 +1165,12 @@ export function farmPlugin(
     console.log(log);
   };
 
+  const getProgrammaticClientRoutes = () =>
+    options.programmaticClientRoutes ?? farmApp?.getRouteManager().getProgrammaticClientRoutes();
+
   return {
     name: "farm",
+    api: { getProgrammaticClientRoutes } satisfies FarmProgrammaticRoutesPluginApi,
 
     config(userConfig, configEnv) {
       isBuild = configEnv.command === "build";
@@ -1176,6 +1210,7 @@ export function farmPlugin(
       serverFnTransformActive = config.plugins.some(
         (plugin) => plugin.name === SERVER_FN_TRANSFORM_PLUGIN,
       );
+      reactRefreshActive = isFarmReactRefreshActive(config);
       if (options.experimental?.serverActions === true && !serverFnTransformActive) {
         logger.warn(
           "experimental.serverActions has no effect without @farm.js/plugin/rsc in the Vite " +
@@ -1565,6 +1600,13 @@ export function farmPlugin(
         apiServerBasePath,
       );
       await middlewareManager.discover();
+      // sitemap.xml, llms.txt and the default MCP server leave pages middleware guards out.
+      farmApp
+        .getServerRenderer()
+        // Config middleware is matched from the config itself; these are the files.
+        .setMiddlewareRouteLookup(() =>
+          middlewareManager.getMiddlewares().filter((entry) => entry.source !== "config"),
+        );
       if (pm) {
         for (const middleware of middlewareManager.getMiddlewares()) {
           await pm.runHookParallel("middlewareDiscovered", {
@@ -1589,6 +1631,7 @@ export function farmPlugin(
       refreshRouteDiscovery = async (reason: string) => {
         await routeManager.discoverRoutes();
         await apiRouteManager.discoverRoutes();
+        invalidateProgrammaticClientRouteModules(server);
         const manifestModule = server.moduleGraph.getModuleById("/@farm/manifest");
         if (manifestModule) {
           server.moduleGraph.invalidateModule(manifestModule);
@@ -1613,6 +1656,18 @@ export function farmPlugin(
       };
       // A restarted server's docs runtime registers its MCP endpoint again.
       releaseDocsMCPServers();
+      // Docs pages a path-specific guard covers stay out of the docs API, llms, and
+      // sitemaps, as the production build decides.
+      const isFarmDocsPathGuarded = (href: string) =>
+        farmPathGuardCoversPage(
+          {
+            config: farmConfig,
+            middlewareRoutes: middlewareManager
+              .getMiddlewares()
+              .filter((entry) => entry.source !== "config"),
+          },
+          href,
+        );
       const farmDocsHandler = farmDocsDevRuntime
         ? farmDocsDevRuntime.hasFarmDocsRuntimeAdapter(farmConfig.docs)
           ? await farmDocsDevRuntime.createFarmDocsAdapterHandler(farmConfig.docs, {
@@ -1640,6 +1695,7 @@ export function farmPlugin(
                   dispose();
                 };
               },
+              isPathGuarded: isFarmDocsPathGuarded,
             })
           : farmDocsDevRuntime.createFarmDocsHandler(farmConfig.docs, {
               root: farmConfig.root,
@@ -1652,6 +1708,7 @@ export function farmPlugin(
                 farmConfig.root,
                 farmConfig.srcDir,
               ),
+              isPathGuarded: isFarmDocsPathGuarded,
             })
         : null;
       const wrapFarmDocsResponseWithLayouts = async (
@@ -1790,6 +1847,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               srcDir: farmConfig.srcDir,
               docs: farmConfig.docs,
               diagnostics: true,
+              isPathGuarded: isFarmDocsPathGuarded,
             })
           : null;
       const farmDocsFontAssets = new Map(
@@ -1988,6 +2046,67 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             );
           };
 
+          // Built-in endpoints (these content routes, the app manifest, and the API and AI
+          // catalogs) answer inside the plugin runtime, as every request does in production:
+          // runtime.before can refuse or replace the request, and runtime.after sees the
+          // response. `computed` is a response already made to learn that the route matched;
+          // it is released when the request is refused. `respond` may write to `res` itself.
+          const serveBuiltInRoute = async (
+            respond: (request: Request) => Promise<Response | void> | Response | void,
+            {
+              kind = requestMethod === "GET" || requestMethod === "HEAD" ? "page" : "request",
+              computed,
+            }: { kind?: FarmPluginRuntimeKind; computed?: Response } = {},
+          ): Promise<void> => {
+            const discard = async () => {
+              await computed?.body?.cancel().catch(() => {});
+            };
+            let runtimeSession: FarmPluginRuntimeSession | undefined;
+            if (pm?.hasRuntimeRequestHooks()) {
+              try {
+                runtimeSession = await pm.beginRuntimeRequest(
+                  createRequestFromNodeRequest(req, new URL(fullUrl)),
+                  { kind, route: { pathname: requestPathname } },
+                );
+              } catch (error) {
+                await discard();
+                await emitPluginError("runtime-before", error, { pathname: requestPathname });
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "text/plain; charset=utf-8");
+                res.end("Internal Server Error");
+                return;
+              }
+              if (runtimeSession.response) {
+                await discard();
+                await sendWebResponse(
+                  res,
+                  await pm.endRuntimeRequest(runtimeSession, runtimeSession.response),
+                );
+                return;
+              }
+              pm.copyRequestContext(runtimeSession.request, req);
+              applyWebRequestToNodeRequest(runtimeSession.request, req);
+            }
+            if (await runAppMiddlewareForContentRoute()) {
+              await discard();
+              return;
+            }
+            let response: Response | void;
+            try {
+              response = await respond(
+                runtimeSession?.request ?? createRequestFromNodeRequest(req, new URL(fullUrl)),
+              );
+            } catch (error) {
+              if (runtimeSession) await pm!.failRuntimeRequest(runtimeSession, error);
+              throw error;
+            }
+            if (!response) return;
+            await sendWebResponse(
+              res,
+              runtimeSession ? await pm!.endRuntimeRequest(runtimeSession, response) : response,
+            );
+          };
+
           // OpenAPI routes are app routes, so they live beneath the basePath.
           const openAPIRequestPathname = openAPIManager
             ? stripFarmBasePath(requestPathname, farmConfig.basePath)
@@ -1999,28 +2118,37 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             options.openapi?.specRoute &&
             openAPIRequestPathname === options.openapi.specRoute
           ) {
-            if (await runAppMiddlewareForContentRoute()) return;
-            if (requestMethod !== "GET" && requestMethod !== "HEAD") {
-              res.statusCode = 405;
-              res.setHeader("Allow", "GET, HEAD");
-              res.setHeader("Content-Type", "text/plain; charset=utf-8");
-              res.end("Method Not Allowed");
-              return;
-            }
-            const spec = await openAPIManager.getSpec(parsedRequestUrl.origin);
-            const body = JSON.stringify(spec);
-            res.statusCode = 200;
-            res.setHeader("Content-Type", "application/json; charset=utf-8");
-            res.setHeader("Cache-Control", "no-store");
-            res.end(requestMethod === "HEAD" ? undefined : body);
+            const specManager = openAPIManager;
+            await serveBuiltInRoute(async () => {
+              if (requestMethod !== "GET" && requestMethod !== "HEAD") {
+                return new Response("Method Not Allowed", {
+                  status: 405,
+                  headers: { Allow: "GET, HEAD", "Content-Type": "text/plain; charset=utf-8" },
+                });
+              }
+              const spec = await specManager.getSpec(parsedRequestUrl.origin);
+              return new Response(requestMethod === "HEAD" ? null : JSON.stringify(spec), {
+                status: 200,
+                headers: {
+                  "Content-Type": "application/json; charset=utf-8",
+                  "Cache-Control": "no-store",
+                },
+              });
+            });
             return;
           }
 
           // Handle OpenAPI docs route
           if (openAPIManager && openAPIRequestPathname === options.openapi?.route) {
-            if (await runAppMiddlewareForContentRoute()) return;
-            const docsHandler = openAPIManager.getDocsRouteHandler(parsedRequestUrl.origin);
-            return docsHandler(req, res);
+            const docsManager = openAPIManager;
+            await serveBuiltInRoute(
+              async () => {
+                const docsHandler = docsManager.getDocsRouteHandler(parsedRequestUrl.origin);
+                await docsHandler(req, res);
+              },
+              { kind: "docs" },
+            );
+            return;
           }
 
           // agent.manifest: /.well-known/farmjs.json, the app's public manifest, as in production.
@@ -2028,30 +2156,39 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             options.agent?.manifest !== false &&
             isFarmAppManifestPath(stripFarmBasePath(requestPathname, farmConfig.basePath))
           ) {
-            if (await runAppMiddlewareForContentRoute()) return;
-            farmAppPackages ??= resolveFarmAppPackages(farmConfig.root ?? process.cwd());
-            const header = (name: string) => String(req.headers[name] ?? "");
-            const manifest = await createFarmAppManifestResponse(
-              new Request(parsedRequestUrl, {
-                method: requestMethod,
-                headers: {
-                  "if-none-match": header("if-none-match"),
-                  [FARM_INFRA_SIGNATURE_HEADER]: header(FARM_INFRA_SIGNATURE_HEADER),
-                },
-              }),
-              {
-                ...resolveFarmAppManifestInput(farmConfig, {
-                  build: "development",
-                  packages: farmAppPackages,
-                  // Read again on each request; unchanged files come from a cache.
-                  webmcpTools: farmConfig.plugins?.some(({ name }) => name === "farm:webmcp")
-                    ? collectFarmWebMCPTools(farmConfig.root ?? process.cwd(), farmConfig.srcDir)
-                    : [],
+            await serveBuiltInRoute(async () => {
+              farmAppPackages ??= resolveFarmAppPackages(farmConfig.root ?? process.cwd());
+              const manifest = await createFarmAppManifestResponse(
+                new Request(parsedRequestUrl, {
+                  method: requestMethod,
+                  headers: { "if-none-match": String(req.headers["if-none-match"] ?? "") },
                 }),
-                defaultMCP: () => farmApp.getServerRenderer().getDefaultMCPServer(),
-              },
-            );
-            await sendWebResponse(res, manifest);
+                {
+                  ...resolveFarmAppManifestInput(farmConfig, {
+                    build: "development",
+                    packages: farmAppPackages,
+                    // Read again on each request; unchanged files come from a cache.
+                    webmcpTools: farmConfig.plugins?.some(({ name }) => name === "farm:webmcp")
+                      ? collectFarmWebMCPTools(farmConfig.root ?? process.cwd(), farmConfig.srcDir)
+                      : [],
+                  }),
+                  defaultMCP: () => farmApp.getServerRenderer().getDefaultMCPServer(),
+                  // A guard written for an MCP server's path keeps its tools out of the public view.
+                  guardCoversPath: (path) =>
+                    farmPathGuardCoversEndpoint(
+                      {
+                        config: farmConfig,
+                        middlewareRoutes: middlewareManager
+                          .getMiddlewares()
+                          .filter((entry) => entry.source !== "config"),
+                      },
+                      path,
+                      apiServerBasePath,
+                    ),
+                },
+              );
+              return manifest;
+            });
             return;
           }
 
@@ -2060,9 +2197,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             options.agent?.apiCatalog &&
             stripFarmBasePath(requestPathname, farmConfig.basePath) === FARM_API_CATALOG_PATH
           ) {
-            if (await runAppMiddlewareForContentRoute()) return;
-            await sendWebResponse(
-              res,
+            await serveBuiltInRoute(() =>
               createFarmApiCatalogResponse(
                 requestMethod,
                 resolveFarmApiCatalogInput({ ...options, api: farmConfig.api }),
@@ -2091,8 +2226,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               },
             );
             if (aiCatalog) {
-              if (await runAppMiddlewareForContentRoute()) return;
-              await sendWebResponse(res, aiCatalog);
+              await serveBuiltInRoute(() => aiCatalog, { computed: aiCatalog });
               return;
             }
           }
@@ -2126,10 +2260,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 : { body: createFarmNodeRequestBodyStream(req), duplex: "half" };
             const docsResponse = await farmDocsHandler(new Request(docsRequest, docsBodyInit));
             if (docsResponse) {
-              if (await runAppMiddlewareForContentRoute()) return;
-              await sendWebResponse(
-                res,
-                await wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse),
+              await serveBuiltInRoute(
+                () => wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse),
+                { kind: "docs", computed: docsResponse },
               );
               return;
             }
@@ -2171,8 +2304,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   ),
               });
           if (markdownSourceResponse) {
-            if (await runAppMiddlewareForContentRoute()) return;
-            await sendWebResponse(res, markdownSourceResponse);
+            await serveBuiltInRoute(() => markdownSourceResponse, {
+              computed: markdownSourceResponse,
+            });
             return;
           }
 
@@ -2186,22 +2320,28 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 config: farmApp.getConfig().md,
                 routeExists: (pathname) =>
                   Boolean(farmApp.getRouteManager().matchRoute(pathname).route),
-                // Keep the page's own redirect (a sign-in gate, say) so the mirror
-                // answers with it, as production does, instead of the target page.
-                renderPage: async (request) =>
-                  fetch(request, {
-                    redirect: "manual",
-                    // Only accepted mirrors need disconnect listeners. An earlier
-                    // close (for example while the docs handler ran) must also abort.
-                    signal: res.destroyed
-                      ? AbortSignal.abort()
-                      : createFarmNodeRequestAbortSignal(req, res),
-                  }),
+                // The page is rendered by this server's own listener, never the host the
+                // caller's Host names. Redirects are not followed, so the mirror answers with
+                // the page's own (a sign-in gate, say), as production does.
+                renderPage: async (request) => {
+                  const headers = new Headers(request.headers);
+                  // The mirror reads the HTML itself; the dispatch does not decompress.
+                  headers.delete("accept-encoding");
+                  return createFarmDevServerDispatch(server)(
+                    new Request(request, {
+                      headers,
+                      // Only accepted mirrors need disconnect listeners. An earlier
+                      // close (for example while the docs handler ran) must also abort.
+                      signal: res.destroyed
+                        ? AbortSignal.abort()
+                        : createFarmNodeRequestAbortSignal(req, res),
+                    }),
+                  );
+                },
                 apiServerBasePath,
               });
           if (markdownResponse) {
-            if (await runAppMiddlewareForContentRoute()) return;
-            await sendWebResponse(res, markdownResponse);
+            await serveBuiltInRoute(() => markdownResponse, { computed: markdownResponse });
             return;
           }
 
@@ -2214,13 +2354,19 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               .getRouteManager()
               .matchRoute(normalizeFarmMarkdownRoutePath(requestPathname));
             if (!markdownRoute.route) {
-              if (await runAppMiddlewareForContentRoute()) return;
-              res.statusCode = 404;
-              res.setHeader("Content-Type", FARM_MARKDOWN_CONTENT_TYPE);
-              res.setHeader("X-Farm-Markdown-Error", "404");
-              res.setHeader("Cache-Control", "no-store");
-              res.end(
-                createFarmMarkdownErrorBody(404, requestPathname, farmConfig.basePath || "/"),
+              await serveBuiltInRoute(
+                () =>
+                  new Response(
+                    createFarmMarkdownErrorBody(404, requestPathname, farmConfig.basePath || "/"),
+                    {
+                      status: 404,
+                      headers: {
+                        "Content-Type": FARM_MARKDOWN_CONTENT_TYPE,
+                        "X-Farm-Markdown-Error": "404",
+                        "Cache-Control": "no-store",
+                      },
+                    },
+                  ),
               );
               return;
             }
@@ -2351,6 +2497,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                     isProd: false,
                   },
                   request,
+                  { clientAddress: req.socket?.remoteAddress },
                 );
                 if (!result) {
                   throw new Error(`Matched integration route did not return a response`);
@@ -3202,6 +3349,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
             // Run beforeRequest hooks
             if (pm && hasBeforeRequestHook) {
+              const urlBeforeRequestHooks = req.url;
               const currentPathname = new URL(
                 req.url || "/",
                 `http://${req.headers.host || "localhost:3000"}`,
@@ -3213,6 +3361,37 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 req,
                 res,
               );
+
+              // A config rewrite changed req.url after plugin guards ran on the
+              // requested URL. Re-run runtime.before on the destination, like
+              // the production entry does when a rewrite re-enters it.
+              if (
+                runtimeSession &&
+                req.url !== urlBeforeRequestHooks &&
+                req.url?.startsWith("/") &&
+                !res.writableEnded
+              ) {
+                const destinationUrl = new URL(req.url, fullUrl);
+                const destinationMatch = routeManager.matchRoute(destinationUrl.pathname);
+                const guarded = await pm.runRuntimeBeforeForRewrite(
+                  runtimeSession.request,
+                  createRequestFromNodeRequest(req, destinationUrl),
+                  {
+                    kind: "page",
+                    route: {
+                      pathname: destinationUrl.pathname,
+                      pattern: destinationMatch?.route?.pattern || null,
+                      params: destinationMatch?.params || {},
+                    },
+                  },
+                );
+                if (guarded instanceof Response) {
+                  await sendWebResponse(res, guarded);
+                } else {
+                  pm.copyRequestContext(guarded, req);
+                  applyWebRequestToNodeRequest(guarded, req);
+                }
+              }
             }
 
             if (res.writableEnded || responseInterceptor?.isEnded()) {
@@ -3276,7 +3455,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
       }
     },
 
-    async load(id) {
+    async load(id, loadOptions) {
       if (typeof fontImports.load === "function") {
         const fontModule = await fontImports.load.call(this, id);
         if (fontModule) return fontModule;
@@ -3289,7 +3468,17 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
       if (parseProgrammaticRouteModuleId(id)) {
         const renderer = farmApp?.getConfig().renderer || resolveFarmRenderer(options.renderer);
-        return generateProgrammaticRouteModule(id, server?.config.root || options.root, renderer);
+        const root = server?.config.root || options.root;
+        if (isClientEnvironment(this, loadOptions)) {
+          return generateProgrammaticClientRouteModuleForId(
+            id,
+            root,
+            renderer,
+            getProgrammaticClientRoutes(),
+            (file) => this.addWatchFile(file),
+          );
+        }
+        return generateProgrammaticRouteModule(id, root, renderer);
       }
 
       if (isFarmClientVirtualId(id)) {
@@ -3328,7 +3517,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         const isolatedHydrationMode = resolveFarmIsolatedClientHydrationMode(
           resolvedConfig?.experimental?.isolatedClientHydration,
           {
-            serverComponents: resolvedConfig?.experimental?.serverComponents === true,
+            serverComponents:
+              resolveFarmServerComponentsMode(resolvedConfig?.experimental?.serverComponents) ===
+              "rsc",
             hasUnsupportedIntegrationProvider: integrationProviders
               .filter((provider) => provider.component || provider.type === "clerk")
               .some((provider) => provider.supportsIsolatedHydration !== true),
@@ -3361,6 +3552,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             resolveFarmClientCacheAdapterEntry(root, resolvedConfig?.cache),
           ),
           isReactRenderer(renderer) ? getFarmDocsAdapterConfigModule(docs) : undefined,
+          resolveFarmServerComponentsMode(resolvedConfig?.experimental?.serverComponents) ===
+            "islands",
         );
       }
 
@@ -3451,6 +3644,28 @@ export const manifest = getManifest();
     },
 
     async transform(code, id, transformOptions) {
+      // Islands mode: `"use server"` modules register as actions on the server and become stubs in
+      // the browser (RFC 0003). The RSC engine has its own transform.
+      const actionConfig = (farmApp?.getConfig() ?? options) as FarmVitePluginOptions;
+      if (
+        resolveFarmServerComponentsMode(actionConfig.experimental?.serverComponents) ===
+          "islands" &&
+        code.includes("use server") &&
+        !id.includes("/node_modules/") &&
+        /\.[cm]?[jt]sx?(?:$|\?)/.test(id)
+      ) {
+        // A `"use server"` module, or an inline `"use server"` function in a server component.
+        const file = id.split("?", 1)[0]!;
+        const actionModule = transformFarmFormActionModule({
+          code,
+          id,
+          root: actionConfig.root || server?.config.root || process.cwd(),
+          ssr: transformOptions?.ssr === true,
+          // Parsed by file type: page components are TSX.
+          parse: (source) => (parseSync(file, source) as { program: unknown }).program as never,
+        });
+        if (actionModule) return { code: actionModule, map: null };
+      }
       if (!transformOptions?.ssr) {
         // The docs config module reaches the browser for adapter hydration: without credentials.
         const docsConfigModule = getFarmDocsAdapterConfigModule(farmApp?.getConfig()?.docs);
@@ -3547,6 +3762,9 @@ export const manifest = getManifest();
             moduleReference: isolatedModuleReference,
             islandStrategy: getIslandStrategyExport(clientBoundarySource) ?? "load",
             parse: (source) => this.parse(source) as unknown as FarmModuleAstNode,
+            slots:
+              resolveFarmServerComponentsMode(currentConfig.experimental?.serverComponents) ===
+              "islands",
           });
           if (!transformedBoundary) {
             this.error(
@@ -3594,8 +3812,15 @@ export const manifest = getManifest();
         // and svelte's hot API) which preserves component state, so leave the
         // module for them to accept: appending our own `import.meta.hot.accept`
         // here would swallow the update instead of letting theirs run.
+        //
+        // React Fast Refresh, when present, swaps the edited components in
+        // place across the page and isolated island roots alike. A second
+        // accept here would re-render the module's default export as the
+        // whole root and do nothing for a module with only named exports.
         const hmrCode =
-          transformOptions?.ssr || !shouldEmitFarmClientRootHmr(currentConfig.renderer)
+          transformOptions?.ssr ||
+          reactRefreshActive ||
+          !shouldEmitFarmClientRootHmr(currentConfig.renderer)
             ? ""
             : `
 if (import.meta.hot) {
@@ -4042,6 +4267,64 @@ function isFarmClientVirtualId(id: string): boolean {
   return pathname === "/@farm/client" || pathname === "/@farm/client.js";
 }
 
+function isClientEnvironment(
+  context: unknown,
+  loadOptions: { ssr?: boolean } | undefined,
+): boolean {
+  const environment = (
+    context as { environment?: { name?: string; config?: { consumer?: string } } }
+  ).environment;
+  if (environment?.config?.consumer) return environment.config.consumer === "client";
+  if (environment?.name) return environment.name === "client";
+  return loadOptions?.ssr !== true;
+}
+
+/**
+ * The browser copy of a programmatic route imports only its component module, so a route list
+ * change does not reach it through the module graph. Drop the cached copies after discovery.
+ */
+function invalidateProgrammaticClientRouteModules(server: ViteDevServer): void {
+  const graph = server.environments?.client?.moduleGraph;
+  if (!graph) return;
+  for (const [id, module] of graph.idToModuleMap) {
+    if (parseProgrammaticRouteModuleId(id)) graph.invalidateModule(module);
+  }
+}
+
+function generateProgrammaticClientRouteModuleForId(
+  moduleId: string,
+  root: string | undefined,
+  renderer: FarmRenderer,
+  clientRoutes: ProgrammaticClientRoutes | undefined,
+  watchFile: (file: string) => void,
+): string {
+  const parsed = parseProgrammaticRouteModuleId(moduleId)!;
+  const routesFile = resolveRealModuleFile(parsed.filePath, root);
+  watchFile(routesFile);
+  return generateProgrammaticClientRouteModule({
+    kind: parsed.kind,
+    routePath: parsed.routePath,
+    routesFile,
+    route:
+      parsed.kind === "api"
+        ? undefined
+        : clientRoutes?.routes.get(
+            programmaticClientRouteKey(routesFile, parsed.kind, parsed.routePath),
+          ),
+    rendererServer: renderer.server,
+    toImportSpecifier: (file) => toProgrammaticRouteImportSpecifier(file, root),
+  });
+}
+
+function resolveRealModuleFile(filePath: string, root: string | undefined): string {
+  const resolved = resolveModuleSourcePath(filePath, root) ?? filePath;
+  try {
+    return toPosixPath(fs.realpathSync(resolved));
+  } catch {
+    return toPosixPath(resolved);
+  }
+}
+
 function generateProgrammaticRouteModule(
   moduleId: string,
   root?: string,
@@ -4436,6 +4719,7 @@ function generateClientCode(
   basePath = "/",
   clientCachePersistence: ClientCachePersistenceEntryCode = { imports: "", init: "" },
   docsConfigModule?: string,
+  islandValues = false,
 ): string {
   const providerClientCode = generateFarmIntegrationProviderClientCode(
     integrationProviders,
@@ -4454,8 +4738,9 @@ function generateClientCode(
     : appSetupPath
       ? `import React, { hydrateRoot, createRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)}\nimport __farmAppSetup from ${JSON.stringify(toViteModuleId(appSetupPath, root))}\n__farmConfigureApp(__farmAppSetup)`
       : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
+  // Islands mode runs on islx (internal/islands-runtime), under the same names.
   const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'`
+    ? `${islandValues ? "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph, createFarmServerTreeElement } from '@farm.js/core/internal/islands-runtime'" : "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'"}`
     : "";
   const docsAdapterImportBlock = generateFarmDocsAdapterClientRuntime(
     docsAdapterReact,
@@ -4465,7 +4750,7 @@ function generateClientCode(
     ? `const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
   ReactRuntime: React,
   hydrateRoot,
-  load: (reference) => import(/* @vite-ignore */ reference),
+  load: (reference) => import(/* @vite-ignore */ farmModuleUrl(reference)),
   schedule: scheduleFarmIslandHydration,
   wrap: wrapWithIntegrationProviders,
 });
@@ -4485,7 +4770,7 @@ async function hydrateFarmIsolatedClientBoundaries(scope = document, signal) {
 async function createFarmServerTreePageElement(source, pathname) {
   try {
     return await createFarmServerTreeElement(React, source, {
-      load: (reference) => import(/* @vite-ignore */ reference),
+      load: (reference) => import(/* @vite-ignore */ farmModuleUrl(reference)),
       ServerHtml: FarmServerPage,
       key: pathname,
     });
@@ -4511,6 +4796,18 @@ import {
 } from '@farm.js/core/deployment'
 ${providerClientCode.imports}
 ${clientPluginEntry.imports}
+
+// Vite appends ?import to a dynamic import of a variable, and the browser keys that URL as a second
+// copy of a module other modules import statically: two React contexts, two stores. Vite leaves an
+// absolute URL alone. Other files (Markdown pages) need ?import to be served as JavaScript.
+function farmModuleUrl(reference) {
+  return typeof reference === "string" &&
+    reference[0] === "/" &&
+    reference[1] !== "/" &&
+    /\\.(?:[cm]?[jt]sx?|vue|svelte)(?:$|\\?)/.test(reference)
+    ? new URL(reference, location.origin).href
+    : reference;
+}
 ${clientCachePersistence.imports}
 ${docsSearchClientRuntime}
 ${devtoolsClientRuntime}
@@ -4794,7 +5091,7 @@ class LegacyManifestSPARouter {
     this.prefetchingUrls.add(pathname);
     try {
       // Prefetch by importing the module (Vite caches it)
-      const module = await import(/* @vite-ignore */ modulePath);
+      const module = await import(/* @vite-ignore */ farmModuleUrl(modulePath));
       this.moduleCache.set(modulePath, module);
       pageModuleCache.set(modulePath, module);
     } catch (error) {
@@ -5042,7 +5339,7 @@ async function renderRouteSlot(slot, mode = 'render') {
 
   let slotModule = pageModuleCache.get(slot.modulePath);
   if (!slotModule) {
-    slotModule = await import(/* @vite-ignore */ slot.modulePath);
+    slotModule = await import(/* @vite-ignore */ farmModuleUrl(slot.modulePath));
     pageModuleCache.set(slot.modulePath, slotModule);
   }
   const SlotComponent = slotModule?.default;
@@ -5207,7 +5504,7 @@ async function buildClientHydrationElement(
 
   if (loadingModulePath) {
     try {
-      const loadingModule = await import(/* @vite-ignore */ loadingModulePath);
+      const loadingModule = await import(/* @vite-ignore */ farmModuleUrl(loadingModulePath));
       const LoadingComponent = loadingModule?.default;
       if (LoadingComponent) {
         const loadingFallback = React.createElement(LoadingComponent, {
@@ -5235,7 +5532,7 @@ async function loadLayoutComponents(layouts = []) {
     try {
       let LayoutComponent = layoutComponentCache.get(layout.modulePath);
       if (!LayoutComponent) {
-        const layoutModule = await import(/* @vite-ignore */ layout.modulePath);
+        const layoutModule = await import(/* @vite-ignore */ farmModuleUrl(layout.modulePath));
         LayoutComponent = layoutModule.default;
         if (LayoutComponent) {
           layoutComponentCache.set(layout.modulePath, LayoutComponent);
@@ -5401,7 +5698,7 @@ async function tryHydrateImportedPage(
   if (pageShouldHydrate) {
     let pageModule = pageModuleCache.get(modulePath);
     if (!pageModule) {
-      pageModule = await import(/* @vite-ignore */ modulePath);
+      pageModule = await import(/* @vite-ignore */ farmModuleUrl(modulePath));
       pageModuleCache.set(modulePath, pageModule);
     }
     if (signal?.aborted || !container?.isConnected) return false;
@@ -5560,7 +5857,7 @@ function parseNavigationFragment(html) {
   return template.content;
 }
 
-function replaceNavigationBoundary(container, fragment, currentPatterns, nextPatterns) {
+function replaceNavigationBoundary(container, fragment, currentPatterns, nextPatterns, refresh = false) {
   let sharedCount = 0;
   while (
     sharedCount < currentPatterns.length &&
@@ -5587,7 +5884,17 @@ function replaceNavigationBoundary(container, fragment, currentPatterns, nextPat
     return container;
   }
 
-  ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(currentTarget);" : ""}
+  ${
+    isolatedHydrationEnabled
+      ? `${
+          islandValues
+            ? `// A refresh keeps the islands still on the page, with their state and new props.
+  if (refresh) farmIsolatedHydrationRuntime.carryOver(currentTarget, nextTarget);
+  `
+            : ""
+        }disposeFarmIsolatedClientBoundaries(currentTarget);`
+      : ""
+  }
   currentTarget.replaceWith(nextTarget);
   activateFragmentScripts(nextTarget);
   if (fragmentTreeRoot && fragmentTreeRoot !== nextTarget) fragmentTreeRoot.remove();
@@ -5611,7 +5918,7 @@ let activeLayoutShouldHydrate = window.__FARM_LAYOUT_SHOULD_HYDRATE__ === true;
 
 // ====== MANIFEST-DRIVEN HTML-FRAGMENT NAVIGATION ======
 // One page-data response carries both server HTML and the hydration plan.
-async function renderPage(pageData) {
+async function renderPage(pageData, info) {
   const container = document.getElementById('root');
   if (!container) return;
   cancelPendingPageHydration();
@@ -5706,7 +6013,7 @@ async function renderPage(pageData) {
     ${
       isolatedHydrationEnabled
         ? `const hasIsolatedClientBoundaries = Boolean(
-      fragment.querySelector('farm-client-boundary[data-farm-client-boundary]'),
+      fragment.querySelector('f-island[src]'),
     );
     const shouldHydrate =
       pageShouldHydrate || layoutShouldHydrate || (route.shouldHydrate && !hasIsolatedClientBoundaries);`
@@ -5746,7 +6053,7 @@ async function renderPage(pageData) {
         delete window.__FARM_REACT_ROOT__;
         ${
           isolatedHydrationEnabled
-            ? "isolatedHydrationScope = replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns) || container;"
+            ? "isolatedHydrationScope = replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns, info?.refresh === true) || container;"
             : "replaceNavigationBoundary(container, fragment, activeLayoutPatterns, layoutPatterns);"
         }
       }
@@ -5855,7 +6162,7 @@ async function hydrate() {
       isolatedHydrationEnabled
         ? `const hasIsolatedClientBoundaries =
       window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true ||
-      Boolean(rootContainer.querySelector('farm-client-boundary[data-farm-client-boundary]'));`
+      Boolean(rootContainer.querySelector('f-island[src]'));`
         : ""
     }
 
@@ -6129,6 +6436,10 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
   const rendererVitePlugins = await loadFarmRendererVitePlugins(config.renderer, appRoot, {
     ssr: true,
   });
+  // Development-only: these plugins do nothing in a build.
+  const reactRefreshPlugins = isReactRenderer(config.renderer)
+    ? await createFarmReactRefreshPlugins()
+    : [];
   // Node.js built-in module stubs for browser
   const nodeBuiltinStubs: Record<string, string> = {
     "node:string_decoder":
@@ -6303,11 +6614,12 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
       createFarmThemeCssPlugin(config.theme, config.basePath),
       tailwindVitePlugin,
       ...(rendererVitePlugins as any[]),
+      ...reactRefreshPlugins,
       viteBrowserExternalPlugin,
       farmI18nClientBridgePlugin(),
       farmServerOnlyEntriesPlugin(),
       farmPlugin(config),
-      farmEnvironmentFunctionsPlugin(),
+      farmEnvironmentFunctionsPlugin(config),
       farmBrandingPlugin,
     ],
     customLogger: farmLogger,

@@ -7,7 +7,8 @@
 // `<html>`/`<head>`/`<body>`. This mirrors the production (Nitro) build's
 // `hasFullDocument` path so dev and prod agree.
 
-const CONTENTS_WRAPPER = /^<div\b[^>]*style="display\s*:\s*contents"[^>]*>/i;
+// Preact serializes the style with a trailing semicolon (`display:contents;`).
+const CONTENTS_WRAPPER = /^<div\b[^>]*style="display\s*:\s*contents;?\s*"[^>]*>/i;
 
 // React 19 hoists `<meta charSet>`, the viewport, preloads, titles, `<script async src>`, and
 // `<style precedence>` (written as `data-precedence`). When the layout's `<html>` is not the

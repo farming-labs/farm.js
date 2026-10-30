@@ -91,8 +91,7 @@ export function Wrapper() { return <Counter start={1}><b>static</b></Counter>; }
   const address = server.httpServer?.address();
   if (!address || typeof address === "string") throw new Error("Missing dev server address");
   const origin = `http://localhost:${address.port}`;
-  const hasIsland = async () =>
-    (await (await fetch(origin)).text()).includes("data-farm-client-boundary");
+  const hasIsland = async () => (await (await fetch(origin)).text()).includes("<f-island");
   return { server, wrapper, page, hasIsland };
 }
 

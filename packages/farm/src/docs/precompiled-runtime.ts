@@ -3,6 +3,7 @@ import {
   type DocsSearchSourcePage,
   type PerformDocsSearchOptions,
 } from "@farming-labs/docs";
+import { replaceFarmCspNonceMarker } from "../security";
 
 export interface FarmDocsCompiledResponse {
   status: number;
@@ -21,6 +22,11 @@ export interface FarmDocsCompiledSearch {
 export interface FarmDocsCompiledManifest {
   protocol: 1;
   originPlaceholder: string;
+  /**
+   * Build-time stand-in for the CSP nonce on Farm's own scripts, set when the
+   * app uses `security.csp.nonce`. Each response swaps it for its own nonce.
+   */
+  cspNonceMarker?: string;
   entry: string;
   /** Public docs API route. Older manifests default to `/api/docs`. */
   apiPath?: string;
@@ -66,14 +72,15 @@ function createResponse(
       replaceOrigin(value, manifest, request),
     ]),
   );
-  return new Response(
-    request.method === "HEAD" ? null : replaceOrigin(compiled.body, manifest, request),
-    {
-      status: compiled.status,
-      statusText: compiled.statusText,
-      headers,
-    },
-  );
+  let body = replaceOrigin(compiled.body, manifest, request);
+  if (manifest.cspNonceMarker && headers.get("content-type")?.toLowerCase().includes("text/html")) {
+    body = replaceFarmCspNonceMarker(body, manifest.cspNonceMarker);
+  }
+  return new Response(request.method === "HEAD" ? null : body, {
+    status: compiled.status,
+    statusText: compiled.statusText,
+    headers,
+  });
 }
 
 function json(value: unknown, init: ResponseInit = {}): Response {

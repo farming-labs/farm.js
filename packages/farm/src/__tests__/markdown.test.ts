@@ -231,6 +231,33 @@ describe("createMarkdownMirrorResponse", () => {
     expect(explicit?.headers.get("vary")).toBe("Cookie");
   });
 
+  it("keeps a credentialed caller's mirror private when the page sets no cache policy", async () => {
+    // RSC pages answer a signed-in caller without Cache-Control; md.cache must not make
+    // that reader's copy public.
+    const config = resolveMarkdownConfig({ expose: ["/account"], cache: 60 });
+    const renderPage = (request: Request) =>
+      new Response(
+        `<html><body><main><h1>${request.headers.get("cookie") ? "Ada's account" : "Account"}</h1></main></body></html>`,
+        { headers: { "content-type": "text/html; charset=utf-8" } },
+      );
+    for (const headers of [{ Cookie: "session=a" }, { Authorization: "Bearer a" }]) {
+      const mirror = await createMarkdownMirrorResponse({
+        request: new Request("http://farm.test/account.md", { headers }),
+        config,
+        routeExists: () => true,
+        renderPage,
+      });
+      expect(mirror?.headers.get("cache-control")).toBe("private, no-store");
+    }
+    const anonymous = await createMarkdownMirrorResponse({
+      request: new Request("http://farm.test/account.md"),
+      config,
+      routeExists: () => true,
+      renderPage,
+    });
+    expect(anonymous?.headers.get("cache-control")).toBe("public, max-age=60, s-maxage=60");
+  });
+
   it("returns null when the target page route does not exist", async () => {
     const config = resolveMarkdownConfig({
       expose: ["/pricing"],

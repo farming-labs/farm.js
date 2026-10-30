@@ -9,7 +9,7 @@ import SolidCompat, {
   ErrorBoundary,
   createElement,
   isValidElement,
-  materializeSolidElement,
+  materializeSolidDocument,
 } from "./runtime";
 
 export const name = "solid";
@@ -19,28 +19,52 @@ export const capabilities = {
 export { Fragment, Suspense, ErrorBoundary, createElement, isValidElement };
 export { generateHydrationScript };
 
-export async function renderToString(element: unknown): Promise<string> {
-  return renderToStringAsync(() => materializeSolidElement(element));
+/** Farm passes the response's CSP nonce, which Solid puts on its hydration scripts. */
+interface FarmSolidRenderOptions {
+  nonce?: string;
 }
 
-function createSolidStream(element: unknown, onError: (error: unknown) => void) {
-  const options = { onError } as Parameters<typeof renderSolidToStream>[1] & {
+export async function renderToString(
+  element: unknown,
+  options?: FarmSolidRenderOptions,
+): Promise<string> {
+  return renderToStringAsync(
+    () => materializeSolidDocument(element),
+    options?.nonce ? { nonce: options.nonce } : undefined,
+  );
+}
+
+function createSolidStream(
+  element: unknown,
+  onError: (error: unknown) => void,
+  nonce: string | undefined,
+) {
+  const options = { onError, ...(nonce ? { nonce } : {}) } as Parameters<
+    typeof renderSolidToStream
+  >[1] & {
     onError(error: unknown): void;
   };
-  return renderSolidToStream(() => materializeSolidElement(element), options);
+  return renderSolidToStream(() => materializeSolidDocument(element), options);
 }
 
-export function renderToReadableStream(element: unknown): ReadableStream<Uint8Array> {
+export function renderToReadableStream(
+  element: unknown,
+  renderOptions?: FarmSolidRenderOptions,
+): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false;
-      const stream = createSolidStream(element, (error) => {
-        if (closed) return;
-        closed = true;
-        controller.error(error);
-      });
+      const stream = createSolidStream(
+        element,
+        (error) => {
+          if (closed) return;
+          closed = true;
+          controller.error(error);
+        },
+        renderOptions?.nonce,
+      );
 
       const writable = {
         write(chunk: string) {
@@ -63,15 +87,20 @@ export function renderToPipeableStream(
     onShellReady(): void;
     onShellError(error: unknown): void;
     onError(error: unknown): void;
+    nonce?: string;
   },
 ) {
   let shellReady = false;
   let failed = false;
-  const stream = createSolidStream(element, (error) => {
-    failed = true;
-    if (!shellReady) callbacks.onShellError(error);
-    callbacks.onError(error);
-  });
+  const stream = createSolidStream(
+    element,
+    (error) => {
+      failed = true;
+      if (!shellReady) callbacks.onShellError(error);
+      callbacks.onError(error);
+    },
+    callbacks.nonce,
+  );
 
   queueMicrotask(() => {
     if (failed) return;

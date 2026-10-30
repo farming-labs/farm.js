@@ -131,9 +131,9 @@ farm migrate tanstack --write
 
 Framework migrations are deterministic codemods. They inspect the project, print a dry-run plan by default, and only write when `--write` is passed. Existing target files are skipped unless `--force` is passed.
 
-The Next.js migrator copies `app` or `src/app` into Farm's `src/app`, creates `farm.config.ts`, creates a minimal root layout when needed, rewrites supported imports from `next/link`, `next/navigation`, and `next/headers`, and updates package scripts to `farm dev`, `farm build`, and `node .farm/.output/server/index.mjs`.
+The Next.js migrator copies `app` or `src/app` into Farm's `src/app`, creates `farm.config.ts`, creates a minimal root layout when needed, rewrites supported imports from `next/link`, `next/navigation`, and `next/headers`, and updates package scripts to `farm dev`, `farm build`, and `node .farm/.output/server/index.mjs`. It copies the `middleware.*` or Next 16 `proxy.*` file that sits next to the app directory (project root or `src/`) to `src/app/middleware.*`, exposes a `proxy` or default export as the named `middleware` export Farm calls, and warns when a `matcher` string uses regular-expression syntax that needs a `RegExp`.
 
-The TanStack migrator converts file routes from `src/routes` or `routes` into `src/app/**/page.tsx`, maps `$id` to `[id]`, maps `$` to `[...splat]`, adds a default export for simple `component: ComponentName` route files, and updates package scripts to `farm dev`, `farm build`, and `node .farm/.output/server/index.mjs`.
+The TanStack migrator converts file routes from `src/routes` or `routes` into `src/app/**/page.tsx`, maps `$id` to `[id]`, maps `$` to `[...splat]`, adds a default export for simple `component: ComponentName` route files, and updates package scripts to `farm dev`, `farm build`, and `node .farm/.output/server/index.mjs`. A pathless `_layout` (or `__root`) route whose `beforeLoad` guards child routes is flattened away, so the migrator warns that the check is not active until it moves into middleware.
 
 Both migrators leave source files in place and print manual review notes for framework-specific APIs.
 

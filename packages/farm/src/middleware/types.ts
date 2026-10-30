@@ -67,6 +67,8 @@ export interface RequestMiddlewareContext<
 > {
   readonly url: URL;
   readonly pathname: string;
+  /** The pathname the router matches: decoded once, without basePath or locale. */
+  readonly routePathname: string;
   readonly searchParams: URLSearchParams;
   readonly method: string;
   readonly params: Record<string, string>;
@@ -168,6 +170,14 @@ export interface MiddlewareConfig {
   matcher?: MiddlewareMatcher | MiddlewareMatcher[];
   exclude?: (string | RegExp)[];
   runtime?: "nodejs" | "edge";
+  /**
+   * Whether a response this middleware lets through may be stored by a shared cache (a CDN).
+   * Farm cannot tell a guard from harmless middleware, and a CDN serves its copy without
+   * running either, so by default (`"private"`) the response is sent with
+   * `Cache-Control: private, no-store`. Set `"public"` only on middleware that never decides
+   * who may read the response, such as logging or response headers.
+   */
+  cache?: "private" | "public";
 }
 
 export interface MiddlewareConfigEntry extends MiddlewareConfig {
@@ -188,7 +198,13 @@ export interface MiddlewareContext {
   request: IncomingMessage;
   response: ServerResponse;
   url: URL;
+  /** Request pathname as received: still percent-encoded and carrying basePath/locale. */
   pathname: string;
+  /**
+   * The pathname the router matches: decoded once, without basePath or locale. String matchers
+   * compare this value; compare it in path checks too. Updated by `rewrite()`.
+   */
+  readonly routePathname: string;
   searchParams: URLSearchParams;
   method: string;
 

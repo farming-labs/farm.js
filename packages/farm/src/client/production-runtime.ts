@@ -7,5 +7,6 @@ export { setFarmBasePath, stripFarmBasePath } from "../base-path";
 export { getHashTargetElement } from "./hash-target";
 export { reconcileFarmDocumentHead } from "./document-head";
 export { isFarmBlockedNavigationURL, isFarmExternalNavigationURL } from "./navigation-url";
+export { getFarmIslandValueHeaders } from "./island-value-protocol";
 export { createClientCancellation } from "../client-cancellation";
 export { applyFarmCacheInvalidations } from "../cache-invalidation";

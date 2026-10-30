@@ -399,7 +399,7 @@ test("scaffolds a working Better Auth starter with its UI dependencies", async (
     const env = await readFile(path.join(root, ".env.example"), "utf8");
     const gitignore = await readFile(path.join(root, ".gitignore"), "utf8");
 
-    assert.equal(packageJson.dependencies["better-auth"], "^1.5.5");
+    assert.equal(packageJson.dependencies["better-auth"], "^1.6.22");
     assert.equal(packageJson.dependencies["better-sqlite3"], "^12.6.2");
     assert.equal(packageJson.devDependencies["@types/better-sqlite3"], "^7.6.13");
     assert.match(auth, /emailAndPassword:/);
@@ -411,7 +411,9 @@ test("scaffolds a working Better Auth starter with its UI dependencies", async (
     assert.match(panel, /authClient\.signUp\.email/);
     assert.match(panel, /authClient\.getSession/);
     assert.match(panel, /authClient\.signOut/);
-    assert.match(env, /BETTER_AUTH_SECRET=/);
+    // Empty: a placeholder long enough for Better Auth would be accepted as-is.
+    assert.match(env, /^BETTER_AUTH_SECRET=$/m);
+    assert.match(env, /^# Generate with: openssl rand -base64 32$/m);
     assert.match(env, /EXISTING_VALUE=kept/);
     assert.match(gitignore, /node_modules/);
     assert.match(gitignore, /better-auth\.sqlite/);
@@ -518,6 +520,9 @@ test("adds a Vercel AI SDK chat route template", async () => {
     assert.match(route, /import \{ aiChatRoute \} from "@farm.js\/ai"/);
     assert.match(route, /export const POST = aiChatRoute/);
     assert.match(route, /model: "openai\/gpt-4o-mini"/);
+    // Fails closed in production until the app checks a session.
+    assert.match(route, /authorize: \(\) => process\.env\.NODE_ENV === "development"/);
+    assert.doesNotMatch(route, /allowUnauthenticated/);
     await assert.rejects(() => readFile(path.join(root, "src/lib/integrations.ts"), "utf8"));
     await assert.rejects(() => readFile(path.join(root, "farm.config.ts"), "utf8"));
   } finally {

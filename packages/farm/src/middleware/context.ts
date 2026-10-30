@@ -12,6 +12,7 @@ import {
   serializeMiddlewareCookie as serializeCookie,
   serializeMiddlewareCookieDeletion,
 } from "./cookie-header";
+import { toMiddlewareRoutePathname } from "./matcher";
 
 /**
  * Serialize a cookie
@@ -71,6 +72,8 @@ export function createContext(
   viteServer?: ViteDevServer,
   parent?: MiddlewareContext["parent"],
   server?: FarmServerConfig | ResolvedFarmServerConfig,
+  /** Strip basePath/locale the way page routing does, for `ctx.routePathname`. */
+  toRoutePathname?: (pathname: string) => string,
 ): MiddlewareContext {
   const url = resolveFarmRequestURL(req, { trustProxy: server?.trustProxy });
   const headers = new Map<string, string>();
@@ -97,11 +100,12 @@ export function createContext(
     }
   };
 
-  const ctx: MiddlewareContext = {
+  const ctx: MiddlewareContext & { routePathname: string } = {
     request: req,
     response: res,
     url,
     pathname: url.pathname,
+    routePathname: toMiddlewareRoutePathname(url.pathname, toRoutePathname),
     searchParams: url.searchParams,
     method: req.method || "GET",
     params: {},
@@ -142,6 +146,7 @@ export function createContext(
       const newUrl = new URL(rewriteUrl, ctx.url);
       ctx.url = newUrl;
       ctx.pathname = newUrl.pathname;
+      ctx.routePathname = toMiddlewareRoutePathname(newUrl.pathname, toRoutePathname);
       ctx.searchParams = newUrl.searchParams;
       ctx.route = newUrl.pathname;
       // Update the original request URL

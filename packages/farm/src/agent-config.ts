@@ -6,6 +6,11 @@
  * ones that expose more (crawler rules, an API catalog) are opt-in. Each one turns off with `false`.
  */
 import {
+  resolveFarmAppManifestConfig,
+  type FarmAppManifestConfig,
+  type ResolvedFarmAppManifestConfig,
+} from "./app-manifest-config";
+import {
   resolveFarmAgentCrawlers,
   type FarmAgentCrawlers,
   type ResolvedFarmAgentCrawlers,
@@ -78,7 +83,9 @@ export interface FarmAgentUserConfig {
   /**
    * Serve `/sitemap.xml` listing the app's static pages, the same pages the generated
    * llms.txt lists, each with the time its page file last changed. Dynamic routes,
-   * pages whose metadata says noindex, and pages behind a route `guard` are left out.
+   * pages whose metadata says noindex, pages behind a route `guard`, and pages a
+   * path-specific guard covers (non-root middleware.ts, a config or integration
+   * middleware matcher naming the path) are left out.
    * URLs use the root layout's `metadataBase`, or the request's origin without one. An
    * object sets which routes to list. A `src/app/sitemap.ts` or `public/sitemap.xml`
    * replaces the generated file. Left unset, it is served unless the docs engine is
@@ -118,18 +125,20 @@ export interface FarmAgentUserConfig {
   aiCatalog?: boolean;
   /**
    * Serve `/.well-known/farmjs.json`: Farm's version and packages, the app's MCP tools and
-   * their schemas, WebMCP browser tools, integration providers and plugin names, to any
-   * client. An MCP server that requires `authorize` is listed without its tools. `false`
-   * turns it off; Farm Infra then can't discover the app's tools either.
+   * their schemas, WebMCP browser tools, integration providers and plugin names. Everyone,
+   * Farm Infra included, gets the same public document; an MCP server that requires
+   * `authorize` or sits behind a guard is listed by identity only. An object hides sections
+   * (served as `null`), package versions, schemas or single servers and tools. `false` turns
+   * it off; Farm Infra then can't discover the app's tools either.
    *
    * @default true
    */
-  manifest?: boolean;
+  manifest?: boolean | FarmAppManifestConfig;
   /**
    * Serve a read-only MCP server (Streamable HTTP) at `/mcp` with tools that list,
    * search, and read the app's public pages as Markdown: the static pages llms.txt and
-   * the sitemap list, without pages whose metadata says noindex or pages behind a route
-   * `guard`. Pages are read like an anonymous visitor, never with the caller's cookies.
+   * the sitemap list, without pages whose metadata says noindex or pages a route `guard`
+   * or path-specific guard covers. Pages are read like an anonymous visitor, never with the caller's cookies.
    * It steps aside when the app has an MCP server of its own: a route that answers
    * `/mcp`, an API route at `/api/mcp`, the top-level `mcp` config or `apiMcp()`, or a
    * server listed with `registerFarmMCPServer` (the docs engine's MCP). Left unset, it
@@ -148,7 +157,7 @@ export interface ResolvedFarmAgentConfig {
   crawlers: ResolvedFarmAgentCrawlers;
   apiCatalog: boolean;
   aiCatalog: boolean;
-  manifest: boolean;
+  manifest: false | ResolvedFarmAppManifestConfig;
   mcp: boolean;
 }
 
@@ -178,7 +187,7 @@ export function resolveFarmAgentConfig(
     crawlers: resolveFarmAgentCrawlers(input?.crawlers),
     apiCatalog: resolveFarmAgentBoolean(input?.apiCatalog, "apiCatalog", false),
     aiCatalog: resolveFarmAgentBoolean(input?.aiCatalog, "aiCatalog", true),
-    manifest: resolveFarmAgentBoolean(input?.manifest, "manifest", true),
+    manifest: resolveFarmAppManifestConfig(input?.manifest),
     // Same rule as llms.txt: the docs engine serves its own MCP server at /mcp.
     mcp: resolveFarmAgentBoolean(input?.mcp, "mcp", !context.docs),
   };
@@ -194,3 +203,4 @@ function resolveFarmAgentBoolean(input: unknown, key: string, fallback: boolean)
 // rendering directly, without pulling in crawler and preview configuration.
 export { renderFarmAgentJsonLd, serializeJsonLd } from "./agent-json-ld";
 export type { FarmAgentJsonLdContext } from "./agent-json-ld";
+export type { FarmAppManifestConfig, ResolvedFarmAppManifestConfig } from "./app-manifest-config";

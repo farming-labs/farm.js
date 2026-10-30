@@ -1587,6 +1587,35 @@ export function Chart() {}
     expect(source).toContain("[Farm.js] Loading boundary failed to load and was skipped: ");
   });
 
+  it("imports modules by absolute URL in development, so Vite's ?import does not make a second copy", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+    const start = source.indexOf("function farmModuleUrl(reference) {");
+    const end = source.indexOf("\n}\n", start);
+    expect(start).toBeGreaterThan(-1);
+    // The helper as the generated client has it: evaluate the template literal's text.
+    const emitted = new Function(`return \`${source.slice(start, end + 2)}\`;`)() as string;
+    const farmModuleUrl = new Function("location", `${emitted}\nreturn farmModuleUrl;`)({
+      origin: "http://localhost:3000",
+    }) as (reference: unknown) => unknown;
+
+    // A layout imports theme.tsx statically; the server tree loads it by reference. Both must
+    // resolve to one module, or the page reads a different React context than the layout provides.
+    expect(farmModuleUrl("/src/components/theme.tsx")).toBe(
+      "http://localhost:3000/src/components/theme.tsx",
+    );
+    expect(farmModuleUrl("/node_modules/.vite/deps/x.js?v=1")).toBe(
+      "http://localhost:3000/node_modules/.vite/deps/x.js?v=1",
+    );
+    expect(farmModuleUrl("/src/app/page.vue")).toBe("http://localhost:3000/src/app/page.vue");
+    // Vite serves other files as JavaScript only with ?import, so they keep its rewrite.
+    expect(farmModuleUrl("/src/app/docs/page.md")).toBe("/src/app/docs/page.md");
+    expect(farmModuleUrl("//cdn.example.com/x.js")).toBe("//cdn.example.com/x.js");
+    expect(farmModuleUrl("https://cdn.example.com/x.js")).toBe("https://cdn.example.com/x.js");
+    expect(source).not.toMatch(
+      /import\(\/\* @vite-ignore \*\/ (?!farmModuleUrl\()[a-zA-Z.]+\)\.then|load: \(reference\) => import\(\/\* @vite-ignore \*\/ reference\)/,
+    );
+  });
+
   it("reports the failing loading module without masking the original error", async () => {
     const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
     const start = source.indexOf("async function buildClientHydrationElement(");
@@ -1596,7 +1625,7 @@ export function Chart() {}
 
     const emittedFunction = source.slice(start, end);
     const testableFunction = emittedFunction.replace(
-      "import(/* @vite-ignore */ loadingModulePath)",
+      "import(/* @vite-ignore */ farmModuleUrl(loadingModulePath))",
       "loadModule(loadingModulePath)",
     );
     expect(testableFunction).not.toBe(emittedFunction);
@@ -1684,7 +1713,9 @@ export function Chart() {}
     const emittedFunction = source.slice(start, end);
 
     const layoutsLoaded = emittedFunction.indexOf("await loadLayoutComponents(layouts)");
-    const pageImported = emittedFunction.indexOf("import(/* @vite-ignore */ modulePath)");
+    const pageImported = emittedFunction.indexOf(
+      "import(/* @vite-ignore */ farmModuleUrl(modulePath))",
+    );
     expect(layoutsLoaded).toBeGreaterThan(-1);
     expect(pageImported).toBeGreaterThan(-1);
     expect(layoutsLoaded).toBeLessThan(pageImported);
@@ -1790,9 +1821,7 @@ export function Chart() {}
 
     expect(productionSource).toContain("disposeFarmIsolatedClientBoundaries(document);");
     expect(developmentSource).toContain("if (hydrationController.signal.aborted) return;");
-    expect(developmentSource).toContain(
-      "Boolean(rootContainer.querySelector('farm-client-boundary[data-farm-client-boundary]'))",
-    );
+    expect(developmentSource).toContain("Boolean(rootContainer.querySelector('f-island[src]'))");
     const isolatedBootstrap = developmentSource.indexOf(
       "if (hasIsolatedClientBoundaries && !pageShouldHydrate && !layoutShouldHydrate)",
     );
@@ -1837,7 +1866,7 @@ export function Chart() {}
     expect(source).toContain("delete window.__farmDocsRuntime;");
     expect(source).toContain("script.replaceWith(freshScript);");
     expect(source).toContain('document.documentElement.dataset.farmDocsRuntime === "true"');
-    expect(source).toContain("const swapped = await this.swapContent(");
+    expect(source).toContain("let swapped = await this.swapContent(");
     expect(source).toContain(
       "const targetUrl = new URL(targetPath || window.location.href, window.location.origin);",
     );

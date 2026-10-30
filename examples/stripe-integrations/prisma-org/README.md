@@ -91,7 +91,8 @@ Add `.env.local` first:
 ```bash
 APP_BASE_URL=http://localhost:3001
 BETTER_AUTH_URL=http://localhost:3001
-BETTER_AUTH_SECRET=farm-example-better-auth-secret-for-local-dev-only
+# Generate with: openssl rand -base64 32
+BETTER_AUTH_SECRET=
 STRIPE_SECRET_KEY=sk_test_your_key_here
 STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret_here
 # Optional extra-seat add-on prices for real bundled seat upgrades:

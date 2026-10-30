@@ -116,6 +116,47 @@ export async function POST(request: Request) {
 
 `abortSignal: request.signal` stops the model when the visitor closes the page. For a chat route without tools, [`@farm.js/ai`](/docs/integrations) provides `aiChatRoute()`.
 
+Every `aiChatRoute()` request spends your model provider's credits, so the route needs an
+`authorize` hook. Without one it answers 403, unless you set `allowUnauthenticated: true` because
+middleware or the edge already gates the route. `authorize` receives `{ request, body }` and returns
+`true` to run the completion, `false` for a 403, or a `Response` to answer with:
+
+```ts
+import { aiChatRoute } from "@farm.js/ai";
+import { getSession } from "../../../lib/session";
+
+export const POST = aiChatRoute({
+  model: "openai/gpt-4o-mini",
+  system: "You are a helpful assistant.",
+  authorize: async ({ request }) => Boolean(await getSession(request)),
+});
+```
+
+The route also answers 403 to a cross-site request (add trusted origins with `allowedOrigins`), and
+drops `system` messages the client sends so a caller cannot replace your instructions. Set
+`allowSystemMessages: true` to keep them. The AI starter (`--template ai` and
+`farm add integration ai`) authorizes only in development until you check a session in its
+`authorize`.
+
+`aiChatRoute()` accepts file attachments only as `data:` URLs, which is what `useChat` sends for
+attached files. A `file` or `reasoning-file` part with any other URL answers 400, and the server
+fetches no file URL that model messages carry, so a visitor cannot make it request an internal
+address. To accept files you host, allow their URLs:
+
+```ts
+import { aiChatRoute } from "@farm.js/ai";
+
+export const POST = aiChatRoute({
+  model: "openai/gpt-4o-mini",
+  authorize: async ({ request }) => Boolean(await getSession(request)),
+  allowFileUrls: (url) => url.origin === "https://files.example.com",
+});
+```
+
+`allowFileUrls: true` accepts every URL, as the AI SDK does by default. The function sees the
+requested URL only, so allow an origin that does not redirect elsewhere. An
+`experimental_download` you pass in `options` or `prepare` replaces this check.
+
 ## Mastra
 
 ```bash

@@ -22,7 +22,7 @@ function runtime(config = resolveMarkdownConfig(undefined)) {
     "createMarkdownMirrorResponse",
     "matchPageRoute",
     "getFarmRoutePathname",
-    "handleFarmRequest",
+    "fetchFarmInnerRequest",
     "applyProductionMiddlewareHeaders",
     `return async function(request) {
       const url = new URL(request.url);

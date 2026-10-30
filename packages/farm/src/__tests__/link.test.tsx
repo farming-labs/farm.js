@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, createElement } from "react";
 import { expectTypeOf } from "vitest";
 import { createRoot } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import { Link, type ExternalHref, type LinkProps, type RouteHref } from "../client/link";
 import { setFarmTrailingSlashPreference } from "../trailing-slash";
 import { setFarmBasePath } from "../base-path";
@@ -436,6 +437,37 @@ describe("Link", () => {
       expect(onClick).toHaveBeenCalled();
       expect(navigate).not.toHaveBeenCalled();
     });
+
+    it.each(["javascript:alert(1)", "JavaScript:alert(document.domain)"])(
+      "renders %j without an href and refuses to follow it",
+      (href) => {
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        const onClick = vi.fn();
+        const before = window.location.href;
+        const el = render(
+          createElement(Link, { href: href as "https://x", prefetch: "render", onClick }),
+        ) as HTMLAnchorElement;
+
+        expect(el.hasAttribute("href")).toBe(false);
+        expect(el.outerHTML).not.toMatch(/javascript:/i);
+        expect(renderToString(createElement(Link, { href: href as "https://x" }))).not.toMatch(
+          /javascript:/i,
+        );
+        const clickEvent = new MouseEvent("click", { bubbles: true, button: 0, cancelable: true });
+        act(() => {
+          el.dispatchEvent(clickEvent);
+        });
+        expect(onClick).toHaveBeenCalled();
+        expect(clickEvent.defaultPrevented).toBe(true);
+        expect(navigate).not.toHaveBeenCalled();
+        expect(prefetch).not.toHaveBeenCalled();
+        expect(window.location.href).toBe(before);
+        expect(error).toHaveBeenCalledWith(
+          "[Farm.js] Blocked navigation to a javascript: URL as a security precaution.",
+        );
+        error.mockRestore();
+      },
+    );
 
     it("preserves mailto hrefs without prefetching them", () => {
       const el = render(

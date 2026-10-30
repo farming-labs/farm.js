@@ -253,7 +253,7 @@ export class MiddlewareManager {
     const startTime = Date.now();
 
     let parentData: MiddlewareContext["parent"] | undefined;
-    let ctx = createContext(req, res, this.viteServer, undefined, this.server);
+    let ctx = createContext(req, res, this.viteServer, undefined, this.server, toRoutePathname);
 
     if (this.globalConfig) {
       const globalMatch = this.matchesConfig(routePathname, this.globalConfig, ctx);
@@ -347,7 +347,7 @@ export class MiddlewareManager {
 
       // Create new context with parent data
       if (parentData) {
-        ctx = createContext(req, res, this.viteServer, parentData, this.server);
+        ctx = createContext(req, res, this.viteServer, parentData, this.server, toRoutePathname);
         if (routeMatch.params) {
           ctx.params = { ...ctx.params, ...routeMatch.params };
         }

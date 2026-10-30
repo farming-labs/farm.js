@@ -111,6 +111,7 @@ import {
   applyProductionMiddlewareHeaders,
   createProductionMiddlewareRunner,
 } from '@farm.js/core/middleware';
+import { _withFarmGuardedResponseCache } from '@farm.js/core/internal/production-runtime';
 import {
   getAllowedAPIRouteMethods,
   invokeAPIRouteEndpoint,
@@ -126,6 +127,16 @@ import {
   compareRouteSpecificity,
   getRoutePatternSpecificity,
 } from '@farm.js/core/internal/production-runtime';
+import {
+  appMiddlewareMayHandlePath,
+  configMiddlewareMayHandlePath,
+  materializeSSGRoutePath,
+  mergeMetadata,
+  mergeModuleViewport,
+  mergeRouteRenderingDirectiveConfig,
+  renderMetadataHead,
+  resolveMetadataTitle,
+} from '@farm.js/core/internal/production-runtime';
 
 import {
   FARM_MARKDOWN_CONTENT_TYPE,
@@ -135,6 +146,38 @@ import {
   farmRequestWantsMarkdown,
 } from '@farm.js/core/markdown';
 
+${
+  ctx.images && ctx.images.runtime !== "none"
+    ? `import { createCloudflareImageTransformer, createFarmImageHandler } from '@farm.js/core/image/server';
+${
+  ctx.images.runtime === "node"
+    ? "import { createNodeImageFetcher, createNodeImageUrlValidator, createSharpImageTransformer } from '@farm.js/core/image/sharp';"
+    : ""
+}
+const farmImageConfig = ${JSON.stringify(ctx.images.config)};
+const farmImageHandler = createFarmImageHandler(farmImageConfig, ${
+        ctx.images.runtime === "cloudflare"
+          ? `{
+  transform: createCloudflareImageTransformer(),
+  onError(error) { console.error('[Farm Image]', error); },
+}`
+          : `{
+  transform: createSharpImageTransformer(),
+  fetchRemote: createNodeImageFetcher(farmImageConfig),
+  validateRemoteUrl: createNodeImageUrlValidator(farmImageConfig),
+  onError(error) { console.error('[Farm Image]', error); },
+}`
+      });`
+    : "const farmImageHandler = null;"
+}
+const farmImagePath = ${JSON.stringify(ctx.images?.path ?? "/_farm/image")};
+${
+  ctx.images
+    ? `// <Image> reads this when @farm.js/core/image is not bundled (dev, or an external dependency),
+// where the __FARM_IMAGE_CONFIG__ define never reaches it. The SSR environment shares the process.
+globalThis.__FARM_IMAGE_CONFIG__ = ${JSON.stringify(ctx.images.public)};`
+    : ""
+}
 const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
 const farmApiBasePath = ${JSON.stringify(ctx.apiBasePath ?? "/api")};
 const farmMarkdownConfig = ${JSON.stringify(ctx.markdown ?? { enabled: false, expose: [], cache: false, includeMetadata: true })};
@@ -146,8 +189,10 @@ const farmMarkdownConfig = ${JSON.stringify(ctx.markdown ?? { enabled: false, ex
   createFarmLlmsFullRenderer,
   createFarmLlmsMarkdownReader,
   createFarmMetadataRouteResponse,
+  farmPathGuardCoversPage,
   renderFarmLlmsFullTxt,
 } from '@farm.js/core/internal/production-runtime';
+import { FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS } from '@farm.js/core/internal/app-markdown-runtime';
 
 const farmLlmsTxtConfig = ${JSON.stringify(ctx.llmsTxt)};
 const farmLlmsFullRenderer = createFarmLlmsFullRenderer({ revalidate: farmLlmsTxtConfig.revalidate });
@@ -243,6 +288,10 @@ function applyActionResponseHeaders(headers, request) {
     headers.set('cache-control', 'no-store');
     headers.set('x-content-type-options', 'nosniff');
   }
+  // A page renders per request (cookies, headers, client address), so a shared
+  // cache must not keep its HTML or Flight payload unless middleware chose a
+  // policy. Core's server defaults pages the same way.
+  if (!headers.has('cache-control')) headers.set('cache-control', 'private, no-store');
 }
 
 // Auto-discover all route modules. Every glob remains a literal so Vite can analyze it.
@@ -307,6 +356,14 @@ const pages = mergeRouteModules([${routeRoots
 const layouts = mergeRouteModules([${routeRoots
     .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: layouts${index} }`)
     .join(", ")}]);
+// Root layouts that render <html> themselves own the document, as in Next.js.
+const farmDocumentLayoutKeys = new Set(${JSON.stringify(ctx.documentLayouts ?? [])});
+const farmDocumentLayoutModules = new Set(
+  Object.entries(layouts)
+    .filter(([key]) => farmDocumentLayoutKeys.has(key))
+    .map(([, module]) => module),
+);
+
 const loadings = mergeRouteModules([${routeRoots
     .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: loadings${index} }`)
     .join(", ")}]);
@@ -632,7 +689,7 @@ function matchRoute(pathname) {
         Page: module.default,
         pattern: filePath,
         params: match.params,
-        pageMetadata: module.metadata,
+        module,
       };
     }
   }
@@ -641,13 +698,79 @@ function matchRoute(pathname) {
   return null;
 }
 
-function mergeDocumentMetadata(...sources) {
-  const metadata = {};
-  for (const source of sources) {
-    if (typeof source?.title === 'string') metadata.title = source.title;
-    if (typeof source?.description === 'string') metadata.description = source.description;
+// Each page's parsed rendering directive and whether its source reads request state, baked by
+// the build because module exports cannot tell.
+const farmPageRenderingDirectives = ${JSON.stringify(ctx.pageRenderingDirectives ?? {})};
+
+/**
+ * The URL paths the build prerenders, by core's SSG rules: a page asks to be static
+ * (dynamic = "force-static", generateStaticParams, "use ssg"), does not read request
+ * state, and does not revalidate. A prerendered page is a static file the server never sees, so a
+ * path any middleware may handle stays server-rendered.
+ */
+async function collectFarmStaticPages() {
+  ${
+    ctx.i18n?.enabled
+      ? `console.info('[Farm.js] Prerendering is off: i18n resolves the locale per request.');
+  return [];`
+      : ""
   }
-  return metadata;
+  const middlewareRoutes = Object.keys(middlewares)
+    .map((filePath) => ({ path: middlewarePathToRoute(filePath) }))
+    .filter((route) => route.path !== null);
+  const paths = new Set();
+  for (const { filePath, module, segments } of pageRoutes) {
+    const rendering = mergeRouteRenderingDirectiveConfig(farmPageRenderingDirectives[filePath], module);
+    if (!rendering.ssg || rendering.revalidate !== undefined) continue;
+    const pattern = '/' + segments
+      .map((part) => part.isCatchAll
+        ? (part.isOptional ? '[[...' + part.segment + ']]' : '[...' + part.segment + ']')
+        : part.isDynamic ? '[' + part.segment + ']' : part.segment)
+      .join('/');
+    let pagePaths;
+    try {
+      if (!segments.some((part) => part.isDynamic)) {
+        pagePaths = [pattern];
+      } else {
+        const getStaticPaths = module.getStaticPaths || module.generateStaticParams;
+        if (typeof getStaticPaths !== 'function') {
+          throw new Error('a static route with dynamic segments needs generateStaticParams()');
+        }
+        pagePaths = (await getStaticPaths()).map((params) => materializeSSGRoutePath(pattern, params));
+      }
+    } catch (error) {
+      console.error('[Farm.js] Rendering ' + filePath + ' on each request: could not list its static paths.', error);
+      continue;
+    }
+    for (const pagePath of pagePaths) {
+      if (
+        appMiddlewareMayHandlePath(middlewareRoutes, pagePath) ||
+        configMiddlewareMayHandlePath(farmConfigMiddleware, pagePath)
+      ) {
+        continue;
+      }
+      paths.add(pagePath);
+    }
+  }
+  return [...paths];
+}
+
+// The route's metadata as core's server resolves it: layouts root to leaf, then the page, each
+// module's \`metadata\`, \`generateMetadata()\` and viewport exports merged in order.
+async function resolveFarmRouteMetadata(layoutModules, pageModule, pageProps) {
+  let metadata = {};
+  for (const layoutModule of layoutModules) {
+    metadata = mergeMetadata(metadata, layoutModule.metadata);
+    if (typeof layoutModule.generateMetadata === 'function') {
+      metadata = mergeMetadata(metadata, await layoutModule.generateMetadata({ params: pageProps.params }));
+    }
+    metadata = await mergeModuleViewport(metadata, layoutModule, { params: pageProps.params });
+  }
+  metadata = mergeMetadata(metadata, pageModule?.metadata);
+  if (typeof pageModule?.generateMetadata === 'function') {
+    metadata = mergeMetadata(metadata, await pageModule.generateMetadata(pageProps));
+  }
+  return mergeModuleViewport(metadata, pageModule ?? {}, pageProps);
 }
 
 /**
@@ -698,8 +821,19 @@ function getMatchingBoundary(pageFilePath, modules, kind) {
 /**
  * Main request handler - entry point for both dev and production (Nitro).
  * Exported as { fetch: handler } for the RSC/Nitro contract (see vite-plugin-rsc-deploy-example).
+ *
+ * Middleware that let a request through may have been a guard: an IP allowlist, an API key
+ * header, a VPN header. A CDN keys its copy by URL and never runs the guard on a hit, so
+ * whatever such a request answers stays out of shared caches, as in core's server. Only
+ * middleware declaring cache: "public" leaves the policy alone.
  */
 async function handleFarmRequest(request, context) {
+  const farmCacheGuard = { guarded: false };
+  const response = await resolveFarmRequest(farmCacheGuard, request, context);
+  return farmCacheGuard.guarded ? _withFarmGuardedResponseCache(response) : response;
+}
+
+async function resolveFarmRequest(farmCacheGuard, request, context) {
   let url = new URL(request.url);
   let matchedPage = null;
   let errorData = new Map();
@@ -741,6 +875,7 @@ async function handleFarmRequest(request, context) {
   // Execute middleware first
   const middlewareResult = await executeMiddleware(request, context);
   ${generateRscMiddlewareResultHandling()}
+  if (middlewareResult.guarded) farmCacheGuard.guarded = true;
 
   request = middlewareResult.request;
   url = new URL(request.url);
@@ -762,6 +897,11 @@ async function handleFarmRequest(request, context) {
     _runWithMiddlewareData(middlewareResult.data, () =>
       _runWithMiddlewareContext(middlewareContext, async () => {
   const glob = '';
+
+  if (farmImageHandler && url.pathname === farmImagePath) {
+    const imageResponse = await farmImageHandler(request);
+    if (imageResponse) return imageResponse;
+  }
 
   const apiResponse = await handleAPIRequest(request.clone());
   if (apiResponse) {
@@ -945,7 +1085,7 @@ async function handleFarmRequest(request, context) {
     return new Response('Not Found', { status: 404 });
   }
   
-  const { Page, pattern, params, pageMetadata } = matched;
+  const { Page, pattern, params, module: pageModule } = matched;
   ${
     isolateRouteModules
       ? `const routeLoadError = findFarmRouteLoadError(matched);
@@ -953,10 +1093,6 @@ async function handleFarmRequest(request, context) {
   `
       : ""
   }const LayoutModules = getLayoutModules(pattern);
-  const metadata = mergeDocumentMetadata(
-    ...LayoutModules.map((layoutModule) => layoutModule.metadata),
-    pageMetadata,
-  );
   const configuredRoutesDir = ${ctx.routesDir === undefined ? "undefined" : JSON.stringify(ctx.routesDir)};
   const routesDir = configuredRoutesDir === undefined ? 'app' : configuredRoutesDir.trim();
   const routesPath = routesDir ? '/' + routesDir : '';
@@ -969,6 +1105,14 @@ async function handleFarmRequest(request, context) {
   
   // Page props passed to components (includes middleware shared data)
   const pageProps = { params, searchParams, middlewareData };
+  const metadata = await resolveFarmRouteMetadata(LayoutModules, pageModule, pageProps);
+  const renderedHead = renderMetadataHead(metadata, { pathname: url.pathname });
+  // Injected into <head> by the SSR entry; React renders only the charset.
+  const metadataHead =
+    (renderedHead.hasExplicitTitle ? '<title>' + renderedHead.title + '</title>' : '') +
+    renderedHead.viewport +
+    renderedHead.tags;
+  const metadataTitle = resolveMetadataTitle(metadata.title);
   
   debug('Rendering page:', pattern, 'with props:', pageProps);
   
@@ -1014,26 +1158,36 @@ async function handleFarmRequest(request, context) {
     }
   }
   
-  // Single wrapper so #root has exactly one child (avoids duplicate block / "two pages" in DOM).
-  const rootInner = h('div', { 'data-farm-root': 'true' }, layoutContent);
-  // Build the full page. root = full document (for SSR). rootContent = single wrapper + layout (for client hydration).
+  // A root layout that renders <html> owns the document, as in Next.js: the head elements below
+  // are hoisted into its <head> by React, and the browser hydrates the whole document.
+  const ownsDocument =
+    LayoutModules.length > 0 && farmDocumentLayoutModules.has(LayoutModules[0]);
+  // Otherwise a single wrapper, so #root has exactly one child (avoids a duplicate block in the DOM).
+  const rootInner = ownsDocument
+    ? h(
+        React.Fragment,
+        null,
+        h('meta', { charSet: 'utf-8' }),
+        layoutContent,
+      )
+    : h('div', { 'data-farm-root': 'true' }, layoutContent);
+  // Build the full page. root = full document (for SSR). rootContent = what the browser hydrates.
   const payload = {
-    root: h('html', null,
+    ownsDocument,
+    root: ownsDocument ? rootInner : h('html', null,
         h('head', null,
           h('meta', { charSet: 'utf-8' }),
-          h('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' }),
-          h('link', { rel: 'icon', href: 'data:,' }),
-          metadata?.title ? h('title', null, metadata.title) : null,
-          metadata?.description ? h('meta', { name: 'description', content: metadata.description }) : null
+          renderedHead.hasFavicon ? null : h('link', { rel: 'icon', href: 'data:,' }),
         ),
       h('body', null,
         h('div', { id: 'root' }, rootInner)
       )
     ),
     rootContent: rootInner,
+    metadataHead,
     metadata: {
-      title: typeof metadata?.title === 'string' ? metadata.title : undefined,
-      description: typeof metadata?.description === 'string' ? metadata.description : undefined,
+      title: metadataTitle,
+      description: typeof metadata.description === 'string' ? metadata.description : undefined,
     },
 `;
 
@@ -1093,8 +1247,8 @@ async function handleFarmRequest(request, context) {
       h('meta', { charSet: 'utf-8' }),
       h('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' }),
       h('link', { rel: 'icon', href: 'data:,' }),
-      metadata?.title ? h('title', null, metadata.title) : null,
-      metadata?.description ? h('meta', { name: 'description', content: metadata.description }) : null,
+      metadataTitle ? h('title', null, metadataTitle) : null,
+      typeof metadata.description === 'string' ? h('meta', { name: 'description', content: metadata.description }) : null,
       h('link', { rel: 'stylesheet', href: globalsCssPath, as: 'style', precedence: 'default' }),
       h('script', { type: 'module', src: '/@vite/client' })
     ),
@@ -1214,14 +1368,24 @@ ${
  */
 function createFarmLlmsTxtContext(request, context, full) {
   const origin = new URL(request.url).origin;
+  // A page a path-specific guard covers (a non-root middleware.ts, a config
+  // middleware matcher naming the path) is left out, as core's server does.
+  const guard = {
+    config: { middleware: farmConfigMiddleware },
+    middlewareRoutes: Object.keys(middlewares)
+      .map((filePath) => ({ path: middlewarePathToRoute(filePath) }))
+      .filter((route) => route.path !== null),
+  };
   const pages = collectFarmLlmsTxtPages(
-    pageRoutes.map(({ module, segments }) => ({
-      // Dynamic routes have no single URL, so the collector skips them.
-      pattern: '/' + segments
-        .map((part) => (part.isDynamic ? '[' + part.segment + ']' : part.segment))
-        .join('/'),
-      metadata: module && module.metadata,
-    })),
+    pageRoutes
+      .map(({ module, segments }) => ({
+        // Dynamic routes have no single URL, so the collector skips them.
+        pattern: '/' + segments
+          .map((part) => (part.isDynamic ? '[' + part.segment + ']' : part.segment))
+          .join('/'),
+        metadata: module && module.metadata,
+      }))
+      .filter((page) => page.pattern.includes('[') || !farmPathGuardCoversPage(guard, page.pattern)),
     {
       origin,
       markdown: farmMarkdownConfig,
@@ -1237,10 +1401,17 @@ function createFarmLlmsTxtContext(request, context, full) {
       config: farmLlmsTxtConfig,
       rootMetadata: rootLayout && rootLayout.metadata,
     }),
-    // Pages are read in-process through the full handler with a fresh request,
-    // so the caller's cookies never shape the file. HEAD reads nothing.
+    // Pages are read in-process through the full handler as an anonymous
+    // visitor: a fresh request, so the caller's cookies never shape the file,
+    // and a neutral client address, so an IP allowlist never admits the read.
+    // The body is shared across callers. HEAD reads nothing.
     markdown: full && request.method.toUpperCase() !== 'HEAD'
-      ? createFarmLlmsMarkdownReader((page) => handler(page, context))
+      ? createFarmLlmsMarkdownReader((page) =>
+          handler(page, {
+            waitUntil: context && context.waitUntil,
+            clientAddress: FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS,
+          }),
+        )
       : async () => null,
   };
 }
@@ -1310,7 +1481,60 @@ async function handleFarmPageOrMarkdown(request, context) {
   });
 }
 
+// Client navigation addresses a page's RSC payload as '<page>.rsc' ('<dir>/index.rsc' for a
+// trailing slash), so a prerendered page can be a static HTML file next to a static payload file.
+// 'Accept: text/x-component' on the page URL keeps working.
+function farmPayloadPath(pathname) {
+  return pathname.endsWith('/') ? pathname + 'index.rsc' : pathname + '.rsc';
+}
+
+function toFarmPayloadRequest(request) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return request;
+  const url = new URL(request.url);
+  if (!url.pathname.endsWith('.rsc')) return request;
+  if (isFarmAPIPathname(url.pathname, farmApiBasePath) || isFarmAPIPathname(url.pathname)) return request;
+  const page = url.pathname.slice(0, -'.rsc'.length);
+  url.pathname = page.endsWith('/index') ? page.slice(0, -'index'.length) : page;
+  const headers = new Headers(request.headers);
+  headers.set('accept', 'text/x-component');
+  return new Request(url, { method: request.method, headers, signal: request.signal });
+}
+
+// The build's prerender pass (Nitro) runs this server with FARM_RSC_PRERENDER set. It seeds one
+// route that lists the static pages, and each prerendered page queues its payload, both through
+// Nitro's x-nitro-prerender response header. Production servers never answer either.
+const FARM_PRERENDER_ROUTES_PATH = '/__farm/rsc-prerender-routes';
+function isFarmPrerenderRequest(request) {
+  return globalThis.process?.env?.FARM_RSC_PRERENDER === '1' && request.headers.has('x-nitro-prerender');
+}
+
 async function handler(request, context) {
+  const prerendering = isFarmPrerenderRequest(request);
+  if (prerendering && new URL(request.url).pathname === FARM_PRERENDER_ROUTES_PATH) {
+    const pages = await collectFarmStaticPages();
+    return new Response('<!doctype html>', {
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'x-nitro-prerender': pages.map(encodeURIComponent).join(','),
+      },
+    });
+  }
+  const pageRequest = toFarmPayloadRequest(request);
+  const response = await handleFarmRequestWithRuntime(pageRequest, context);
+  if (
+    prerendering &&
+    pageRequest === request &&
+    response.status === 200 &&
+    (response.headers.get('content-type') || '').includes('text/html')
+  ) {
+    const headers = new Headers(response.headers);
+    headers.set('x-nitro-prerender', encodeURIComponent(farmPayloadPath(new URL(request.url).pathname)));
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  }
+  return response;
+}
+
+async function handleFarmRequestWithRuntime(request, context) {
   return _runWithAPIRequestRuntime({
     basePath: farmApiBasePath,
     dispatch: async (localRequest) =>

@@ -6,9 +6,11 @@ import {
   createFarmLlmsFullRenderer,
   createFarmLlmsMarkdownReader,
   createFarmMetadataRouteResponse,
+  farmPathGuardCoversPage,
   renderFarmLlmsFullTxt,
   resolveFarmLlmsTxtConfig,
 } from "@farm.js/core/internal/production-runtime";
+import { FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS } from "@farm.js/core/internal/app-markdown-runtime";
 import { parseRoutePath } from "../../../../farm/src/utils";
 import type { EntryContext } from "../types.js";
 import { generateRscEntry } from "./rsc.js";
@@ -33,14 +35,25 @@ const PAGES: Record<string, Record<string, unknown>> = {
 };
 
 /** Runs the generated llms.txt handler with the real core llms helpers. */
-function createLlmsHandler(llmsTxt: Parameters<typeof resolveFarmLlmsTxtConfig>[0]) {
+function createLlmsHandler(
+  llmsTxt: Parameters<typeof resolveFarmLlmsTxtConfig>[0],
+  options: {
+    pages?: Record<string, Record<string, unknown>>;
+    middlewares?: Record<string, unknown>;
+    configMiddleware?: unknown[];
+  } = {},
+) {
   const config = resolveFarmLlmsTxtConfig(llmsTxt);
   const entry = generateRscEntry({ ...context, llmsTxt: config });
   const start = entry.indexOf("function createFarmLlmsTxtContext(");
   const end = entry.indexOf("/**\n * Serves a page's Markdown mirror", start);
+  const routeStart = entry.indexOf("function middlewarePathToRoute(");
+  const routeEnd = entry.indexOf("function middlewareRouteDepth(", routeStart);
   const pageReads: Request[] = [];
-  const handler = vi.fn(async (request: Request) => {
+  const pageReadContexts: unknown[] = [];
+  const handler = vi.fn(async (request: Request, readContext?: unknown) => {
     pageReads.push(request);
+    pageReadContexts.push(readContext);
     const { pathname } = new URL(request.url);
     return new Response(`# ${pathname}\n\nBody of ${pathname}.\n`, {
       headers: { "content-type": "text/markdown; charset=utf-8" },
@@ -60,9 +73,13 @@ function createLlmsHandler(llmsTxt: Parameters<typeof resolveFarmLlmsTxtConfig>[
     "createFarmLlmsMarkdownReader",
     "createFarmMetadataRouteResponse",
     "renderFarmLlmsFullTxt",
-    `${entry.slice(start, end)}; return handleFarmLlmsTxtRequest;`,
+    "middlewares",
+    "farmConfigMiddleware",
+    "farmPathGuardCoversPage",
+    "FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS",
+    `${entry.slice(routeStart, routeEnd)}\n${entry.slice(start, end)}; return handleFarmLlmsTxtRequest;`,
   )(
-    Object.entries(PAGES).map(([filePath, module]) => ({
+    Object.entries(options.pages ?? PAGES).map(([filePath, module]) => ({
       filePath,
       module,
       segments: parseRoutePath(filePath).segments,
@@ -79,8 +96,12 @@ function createLlmsHandler(llmsTxt: Parameters<typeof resolveFarmLlmsTxtConfig>[
     createFarmLlmsMarkdownReader,
     createFarmMetadataRouteResponse,
     renderFarmLlmsFullTxt,
+    options.middlewares ?? {},
+    options.configMiddleware ?? [],
+    farmPathGuardCoversPage,
+    FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS,
   ) as (request: Request, context?: unknown) => Promise<Response | null>;
-  return { run, handler, pageReads };
+  return { run, handler, pageReads, pageReadContexts };
 }
 
 describe("RSC llms.txt", () => {
@@ -145,6 +166,54 @@ describe("RSC llms.txt", () => {
       expect(request.headers.get("cookie")).toBeNull();
       expect(request.headers.get("x-farm-internal-read")).toBe("llms-full");
     }
+  });
+
+  it("reads pages as an anonymous visitor, never with the caller's client address", async () => {
+    const { run, pageReadContexts } = createLlmsHandler(true);
+    const waitUntil = vi.fn();
+    const response = await run(new Request("https://shop.test/llms-full.txt"), {
+      clientAddress: "127.0.0.1",
+      waitUntil,
+      secret: "caller-only",
+    });
+    expect(response!.status).toBe(200);
+    expect(pageReadContexts).toHaveLength(3);
+    for (const readContext of pageReadContexts) {
+      expect(readContext).toEqual({
+        clientAddress: FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS,
+        waitUntil,
+      });
+    }
+  });
+
+  it("leaves pages under a path guard out of llms.txt and llms-full.txt", async () => {
+    const pages = {
+      ...PAGES,
+      "/internal/page.tsx": { metadata: { title: "Internal" } },
+      "/(staff)/payroll/page.tsx": { metadata: { title: "Payroll" } },
+      "/billing/page.tsx": { metadata: { title: "Billing" } },
+    };
+    const { run, pageReads } = createLlmsHandler(true, {
+      pages,
+      middlewares: {
+        // The root middleware runs for every page and names none.
+        "/middleware.ts": {},
+        "/internal/middleware.ts": {},
+        "/(staff)/payroll/middleware.ts": {},
+      },
+      configMiddleware: [{ matcher: "/billing" }, { matcher: "/(.*)" }],
+    });
+    const list = await (await run(new Request("https://shop.test/llms.txt")))!.text();
+    expect(list).toContain("[Pricing](https://shop.test/pricing.md)");
+    expect(list).not.toContain("Internal");
+    expect(list).not.toContain("Payroll");
+    expect(list).not.toContain("Billing");
+    await (await run(new Request("https://shop.test/llms-full.txt")))!.text();
+    expect(pageReads.map((request) => new URL(request.url).pathname).sort()).toEqual([
+      "/about.md",
+      "/index.md",
+      "/pricing.md",
+    ]);
   });
 
   it("reads no pages for HEAD", async () => {

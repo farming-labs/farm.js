@@ -23,7 +23,7 @@ async function bundle(kind, controlFeature) {
         transform(code, id) {
           if (!controlFeature || !id.endsWith(`keyed-${kind}.tsx`)) return;
           const control = code.replace(
-            /keyedRows(?:PlainReorderHinted|PrependOnly|FilterOnly|AppendOnly|IdentityFilterOnly|Identity|Membership|MapLookup)RuntimeFeature/g,
+            /keyedRows(?:PlainMapReorderHinted|PlainReorderHinted|PrependOnly|FilterOnly|AppendOnly|IdentityFilterOnly|Identity|Membership|MapLookup)RuntimeFeature/g,
             () => {
               replaced = true;
               return controlFeature;
@@ -66,25 +66,29 @@ for (const kind of [
   "slice",
   "reorder",
   "sort",
+  "map-reorder",
 ]) {
   const removalOnly = kind === "filter" || kind === "slice";
   const plainReorder = kind === "reorder" || kind === "sort";
+  const plainMapReorder = kind === "map-reorder";
   const full = await bundle(
     kind,
-    plainReorder
-      ? "keyedRowsReorderHintedRuntimeFeature"
-      : kind === "append"
-        ? "keyedRowsHintedRuntimeFeature"
-        : kind === "prepend"
-          ? "keyedRowsPrependHintedRuntimeFeature"
-          : kind === "identity-filter" || removalOnly
-            ? "keyedRowsFilterHintedRuntimeFeature"
-            : "keyedRowsRuntimeFeature",
+    plainMapReorder
+      ? "keyedRowsMapReorderHintedRuntimeFeature"
+      : plainReorder
+        ? "keyedRowsReorderHintedRuntimeFeature"
+        : kind === "append"
+          ? "keyedRowsHintedRuntimeFeature"
+          : kind === "prepend"
+            ? "keyedRowsPrependHintedRuntimeFeature"
+            : kind === "identity-filter" || removalOnly
+              ? "keyedRowsFilterHintedRuntimeFeature"
+              : "keyedRowsRuntimeFeature",
   );
   const specialized = await bundle(kind);
   assert.ok(
     specialized.code.includes(
-      `keyed-rows:${plainReorder ? "plain-reorder-hinted" : kind === "append" ? "append-only" : kind === "prepend" ? "prepend-only" : removalOnly ? "filter-only" : kind === "identity-filter" ? "identity-filter-only" : kind}`,
+      `keyed-rows:${plainMapReorder ? "plain-map-reorder-hinted" : plainReorder ? "plain-reorder-hinted" : kind === "append" ? "append-only" : kind === "prepend" ? "prepend-only" : removalOnly ? "filter-only" : kind === "identity-filter" ? "identity-filter-only" : kind}`,
     ),
   );
   if (
@@ -92,7 +96,8 @@ for (const kind of [
     kind === "append" ||
     kind === "prepend" ||
     removalOnly ||
-    plainReorder
+    plainReorder ||
+    plainMapReorder
   ) {
     for (const marker of ["Set.prototype.has", "Map.prototype.get"]) {
       assert.ok(full.code.includes(marker), `control must retain ${marker}`);
@@ -100,11 +105,14 @@ for (const kind of [
     }
   }
   assert.ok(specialized.gzip < full.gzip, `${kind} specialization must reduce gzip payload`);
-  if (plainReorder) {
-    assert.ok(full.code.includes("keyed-rows:reorder-hinted"));
+  if (plainReorder || plainMapReorder) {
     assert.ok(
-      full.gzip - specialized.gzip >= 512,
-      `${kind} specialization must save at least 512 B gzip`,
+      full.code.includes(`keyed-rows:${plainMapReorder ? "map-reorder" : "reorder"}-hinted`),
+    );
+    const minimumSaving = plainMapReorder ? 1024 : 512;
+    assert.ok(
+      full.gzip - specialized.gzip >= minimumSaving,
+      `${kind} specialization must save at least ${minimumSaving} B gzip`,
     );
     assert.ok(
       specialized.brotli < full.brotli,

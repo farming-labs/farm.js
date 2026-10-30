@@ -111,6 +111,13 @@ export interface FarmClientHydrationPlanOptions {
    * route.
    */
   asyncOwnerIslands?: boolean;
+  /**
+   * Islands mode (RFC 0003): every page that is not a client component is a server component, so
+   * it is planned like an async owner. Its client components become islands, and under a
+   * hydrating layout they hydrate inside that layout's tree from a server tree, so they read its
+   * context. Requires `asyncOwnerIslands`. Pass it for pages only.
+   */
+  serverOwners?: boolean;
 }
 
 /**
@@ -626,7 +633,8 @@ export function getClientModuleHydrationPlan(
   // components become islands whatever the mode, and the cost guard (which
   // weighs islands against that route-wide root) does not apply.
   const asyncOwner =
-    metadata.suppressedAsyncHydration === true && options.asyncOwnerIslands === true;
+    (metadata.suppressedAsyncHydration === true || options.serverOwners === true) &&
+    options.asyncOwnerIslands === true;
 
   if (mode === "off" && !asyncOwner) return emptyPlan();
 

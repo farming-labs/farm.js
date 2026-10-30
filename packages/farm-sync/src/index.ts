@@ -5,7 +5,12 @@ import {
   validateIntegrationRequestOrigin,
 } from "@farm.js/core";
 import type { FarmSchema, FarmSqlDialect } from "@farm.js/core";
-import { executeSyncOperation, SyncOperationError, type SyncOrmClient } from "./server.js";
+import {
+  executeSyncOperation,
+  PUBLIC_SYNC_SCOPE,
+  SyncOperationError,
+  type SyncOrmClient,
+} from "./server.js";
 import {
   resolveSyncModels,
   type ResolvedSyncModel,
@@ -92,6 +97,15 @@ export function sync(options: SyncPluginOptions) {
     throw new Error("sync(): no models are exposed. Add at least one entry to `models`.");
   }
 
+  for (const [index, entry] of (options.middleware ?? []).entries()) {
+    if (typeof entry !== "function") {
+      throw new TypeError(
+        `sync(): middleware[${index}] must be a function ({ request, context }) => context. ` +
+          "Objects from createServerMiddleware() belong to server functions.",
+      );
+    }
+  }
+
   // Resolved once so an invalid pattern fails at startup, not per request.
   const allowedOrigins = resolveIntegrationAllowedOrigins(
     options.allowedOrigins,
@@ -129,6 +143,9 @@ export function sync(options: SyncPluginOptions) {
               persist: model.persist,
               cursor: model.cursorField ?? null,
               fields: Object.keys(model.fields),
+              // Every caller sees the same rows, so persisted ones can paint
+              // before the server answers. Scoped models wait for it.
+              ...(model.where === false ? { scope: PUBLIC_SYNC_SCOPE } : {}),
             },
           ]),
         ),
@@ -146,6 +163,8 @@ export function sync(options: SyncPluginOptions) {
     // the endpoint on the runtime hook so it is handled by both Nitro and the
     // development server instead of relying solely on the legacy Node hook.
     runtime: {
+      // before only answers the sync endpoint; other responses pass through untouched.
+      cache: "public",
       async before({ request }) {
         return handleSyncRequest(request, undefined, {
           path,

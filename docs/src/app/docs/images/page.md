@@ -164,7 +164,7 @@ Pass a `loader` prop when an application already uses an image CDN. The loader r
 
 ## Security model
 
-The optimizer accepts only configured widths and qualities. It does not forward browser cookies or authorization headers, limits response bodies, checks file signatures instead of trusting `Content-Type`, revalidates redirect destinations, and blocks loopback, link-local, and private network targets. On Node, Farm validates the DNS addresses used by the actual image connection so a hostname cannot switch to a private target between an earlier check and the fetch.
+The optimizer accepts only configured widths and qualities. It does not forward browser cookies or authorization headers, and it fetches a local source as an anonymous visitor: on a Node server, where it connects to itself, middleware sees a placeholder client address instead of `127.0.0.1`, so an IP allowlist that trusts loopback does not admit it. It also limits response bodies, checks file signatures instead of trusting `Content-Type`, revalidates redirect destinations, and blocks loopback, link-local, and private network targets. On Node, Farm validates the DNS addresses used by the actual image connection so a hostname cannot switch to a private target between an earlier check and the fetch.
 
 An oversized source returns `413` whether its size is declared in `Content-Length` or discovered
 while reading. Farm cancels the source without waiting for cleanup; a failed cleanup cannot
@@ -172,7 +172,7 @@ replace that response with a `500`.
 Formats explicitly rejected with `q=0` are never emitted. Farm uses the configured format order to
 break equal-quality ties and keeps the source format when the client only sends wildcard ranges.
 
-SVG optimization and private-network sources are disabled by default. `dangerouslyAllowSVG` adds a restrictive content security policy but should still be enabled only for trusted files. `dangerouslyAllowLocalIP` is intended for controlled private deployments and weakens SSRF protection.
+SVG optimization and private-network sources are disabled by default. Every optimized response carries `Content-Security-Policy: default-src 'none'; sandbox` and `X-Content-Type-Options: nosniff`, and a transformer's result (including Cloudflare's) is served only when it is a single PNG, JPEG, GIF, WebP, or AVIF type and its bytes match that type. `dangerouslyAllowSVG` lets SVG through under the same policy but should still be enabled only for trusted files. `dangerouslyAllowLocalIP` is intended for controlled private deployments and weakens SSRF protection.
 
 ## Deployment providers
 

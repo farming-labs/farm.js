@@ -28,10 +28,13 @@ function runtime(options: { headers?: boolean; warn?: boolean; nonce?: boolean }
     "appendFarmLinkHeader",
     "applyFarmCspNonceToResponse",
     "farmSecurityConfig",
+    "cspNonce",
     "manageFarmDocumentPreloads",
     "manageFarmLinkHeaderPreloads",
     "farmPreloadConfig",
     "reportFarmPreloadWarnings",
+    "farmGuardedResponse",
+    "_withFarmGuardedResponseCache",
     `${generateRuntimePathMatcherSource()}\n${generateConfiguredResponseHeadersRuntimeSource()}\n${generatePreloadResponseRuntimeSource()}\n${source.slice(start, end)}\nreturn prepareResponse;`,
   )(
     new Proxy(URL, {
@@ -58,10 +61,13 @@ function runtime(options: { headers?: boolean; warn?: boolean; nonce?: boolean }
     resolveFarmSecurityConfig(
       options.nonce ? { csp: { policy: "script-src 'self'", nonce: true } } : undefined,
     ),
+    options.nonce ? "abc123" : undefined,
     manageFarmDocumentPreloads,
     manageFarmLinkHeaderPreloads,
     { mode: options.warn ? "warn" : "enforce", maxImages: 1, maxFonts: 1 },
     report,
+    false,
+    (response: Response) => response,
   ) as (request: Request, response: Response | Promise<Response>) => Promise<Response>;
   return { run, parses, normalize, report };
 }
@@ -162,12 +168,14 @@ describe("production response URL ownership", () => {
     const r = runtime({ nonce: true });
     const output = await r.run(
       new Request("https://farm.test/target"),
-      new Response("<script>hello()</script>", {
-        headers: { "content-type": "text/html", "content-length": "24" },
+      new Response('<script nonce="abc123">hello()</script><script>injected()</script>', {
+        headers: { "content-type": "text/html", "content-length": "65" },
       }),
     );
-    const nonce = output.headers.get("content-security-policy")!.match(/'nonce-([^']+)'/)![1];
-    expect(await output.text()).toBe(`<script nonce="${nonce}">hello()</script>`);
+    expect(output.headers.get("content-security-policy")).toBe("script-src 'self' 'nonce-abc123'");
+    expect(await output.text()).toBe(
+      '<script nonce="abc123">hello()</script><script>injected()</script>',
+    );
     expect(output.headers.has("content-length")).toBe(false);
     expect(r.parses).not.toHaveBeenCalled();
   });

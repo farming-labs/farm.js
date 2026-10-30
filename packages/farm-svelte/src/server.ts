@@ -22,9 +22,23 @@ export function generateHydrationScript(): string {
   return "";
 }
 
-export async function renderToString(element: unknown): Promise<string> {
-  const rendered = render(CompatRoot as Component<{ element: unknown }>, { props: { element } });
-  return rendered.body;
+/** Farm passes the response's CSP nonce, which Svelte puts on its hydration scripts. */
+interface FarmSvelteRenderOptions {
+  nonce?: string;
+}
+
+function renderSvelte(element: unknown, options: FarmSvelteRenderOptions | undefined) {
+  return render(CompatRoot as Component<{ element: unknown }>, {
+    props: { element },
+    ...(options?.nonce ? { csp: { nonce: options.nonce } } : {}),
+  });
+}
+
+export async function renderToString(
+  element: unknown,
+  options?: FarmSvelteRenderOptions,
+): Promise<string> {
+  return renderSvelte(element, options).body;
 }
 
 /**
@@ -33,8 +47,9 @@ export async function renderToString(element: unknown): Promise<string> {
  */
 export async function renderToStringWithHead(
   element: unknown,
+  options?: FarmSvelteRenderOptions,
 ): Promise<{ html: string; head: string }> {
-  const rendered = render(CompatRoot as Component<{ element: unknown }>, { props: { element } });
+  const rendered = renderSvelte(element, options);
   return { html: rendered.body, head: rendered.head };
 }
 

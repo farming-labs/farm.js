@@ -71,7 +71,10 @@ export interface ResolvedFarmServerHealthConfig {
 export interface FarmServerConfig {
   /** Maximum request body size for API routes, integrations, workflows, and uploads. */
   bodySizeLimit?: number | string;
-  /** Trust proxy-provided client address and request authority headers. Enable only behind a trusted proxy. */
+  /**
+   * Trust proxy-provided client address and request authority headers. Enable only behind a trusted proxy.
+   * The client address is the last `X-Forwarded-For` hop, the one the closest proxy appended.
+   */
   trustProxy?: boolean;
   /** Maximum time for a Node client to send complete request headers. */
   headersTimeout?: FarmServerDuration;
@@ -326,6 +329,41 @@ export function parseBodySizeLimit(value: number | string, optionName = "bodySiz
   }
 
   return bytes;
+}
+
+/**
+ * Attach the caller's address as `request.socket.remoteAddress`, the shape Farm's
+ * middleware and integrations read it from.
+ *
+ * A web Request carries no socket, so the address comes from a trusted proxy or
+ * from the server adapter's own connection. Never invent one: reporting
+ * `127.0.0.1` used to make every visitor look like the same client, which
+ * collapsed per-client rate limiting into one shared bucket. Leave it undefined
+ * so a consumer can tell that it does not know.
+ */
+export function withFarmRequestClientAddress<T extends Request>(
+  request: T,
+  trustProxy: boolean,
+  clientAddress: string | undefined,
+): T {
+  const requestWithShape = request as T & {
+    socket?: { remoteAddress?: string };
+  };
+
+  if (!requestWithShape.socket) {
+    // The trusted proxy appends the address it saw, so that hop is the last
+    // one. Anything before it was sent by the client and can be anything.
+    const forwardedFor = trustProxy
+      ? request.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim()
+      : undefined;
+    try {
+      requestWithShape.socket = { remoteAddress: forwardedFor || clientAddress || undefined };
+    } catch {
+      // Some Request implementations may not be extensible.
+    }
+  }
+
+  return requestWithShape;
 }
 
 export function cloneFarmRequestWithContext(request: Request): Request {

@@ -245,7 +245,9 @@ describe("production middleware HTTP behavior", () => {
       });
     const request = () =>
       new Request("https://example.com/", {
-        headers: { "x-forwarded-for": "203.0.113.8, 10.0.0.1" },
+        // The client sent 6.6.6.6 and the trusted proxy appended the address
+        // it saw. Only that last hop identifies the caller.
+        headers: { "x-forwarded-for": "6.6.6.6, 203.0.113.8" },
       });
 
     const direct = await createRunner(false)(request());

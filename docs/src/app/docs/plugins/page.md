@@ -229,7 +229,9 @@ still available; a failed error hook does not prevent cleanup or replace the sta
 | `runtime.close`     | During graceful shutdown in long-running Node output.        | Nothing.                                                         |
 
 Runtime request hooks apply to page, API, server-action, integration, docs, asset, and general
-requests. Use `runtime.endpoints` when a plugin owns a small exact URL and should not make unrelated
+requests, including Farm's built-in endpoints (`/.well-known/farmjs.json`, the API and AI catalogs,
+`/mcp`, `llms.txt`, `sitemap.xml`, Markdown mirrors, and OpenAPI routes), in development and
+production. Use `runtime.endpoints` when a plugin owns a small exact URL and should not make unrelated
 static pages dynamic. Endpoint paths are application-relative, automatically honor `basePath`, and
 do not accept route parameters or wildcards.
 
@@ -327,7 +329,15 @@ For each application request, Farm runs the runtime hooks in this order:
 
 `runtime.before` may return a new `Request`, return a `Response` to short-circuit, or return nothing. A short-circuit response still passes through `runtime.after`. `runtime.after` may return a new `Response` or return nothing.
 
-Runtime hooks use Web APIs, so the same plugin works in development and universal production builds. The event includes `kind`, route metadata, the request `AbortSignal`, and `waitUntil()` for background work supported by the host.
+`runtime.before` runs for every request and may be a guard, so in production a response it lets
+through is sent with `Cache-Control: private, no-store` instead of a shared policy, as for
+[middleware](/docs/middleware#caching). A plugin whose `before` decides nothing about access, such
+as logging or analytics, declares `runtime: { cache: "public", before() {} }` to keep the app's
+shared caching.
+
+When a configured rewrite sends the request to an internal destination, every `runtime.before` runs again with the destination `Request` and the same `ctx`, so a guard on `/admin/*` also covers a rewrite that lands there. `runtime.context` and `runtime.after` run once per request.
+
+Runtime hooks don't run for files in `public/`, which are served as static assets first; serve a protected file from a route instead. Runtime hooks use Web APIs, so the same plugin works in development and universal production builds. The event includes `kind`, route metadata, the request `AbortSignal`, and `waitUntil()` for background work supported by the host.
 
 An endpoint is intentionally isolated from `runtime.context` and `runtime.before`. Perform any
 endpoint-specific authentication inside its handler. Global `runtime.after` and `runtime.error`

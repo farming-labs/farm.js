@@ -192,6 +192,21 @@ describe.each([
 describe.each([
   ["development", extractFarmFullDocument],
   ["production", productionExtractor()],
+] as const)("%s full-document wrapper styles", (_runtime, extract) => {
+  it("extracts the document from wrappers Preact serializes with a trailing semicolon", () => {
+    const document = '<html lang="en"><head></head><body><main>hello</main></body></html>';
+    expect(
+      extract(
+        '<div data-farm-layout-boundary="true" data-farm-layout-pattern="/" ' +
+          `style="display:contents;">${document}</div>`,
+      ),
+    ).toBe(document);
+  });
+});
+
+describe.each([
+  ["development", extractFarmFullDocument],
+  ["production", productionExtractor()],
 ] as const)("%s full-document Unicode boundaries", (_runtime, extract) => {
   it.each(["İstanbul", "İİİİİİİİ", "🌱İ$&"])("preserves %s and its reveal tail", (text) => {
     const body = `<html><head></head><body><p>${text}</p>`;

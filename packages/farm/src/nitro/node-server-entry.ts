@@ -7,6 +7,14 @@ export interface FarmNodeServerEntryOptions {
   websocketAdapterModule: string;
 }
 
+export interface FarmBunServerEntryOptions {
+  nitroEntryFile: string;
+  /** srvx's Bun adapter, as Nitro's bun preset resolves it. */
+  bunAdapterModule: string;
+  server: ResolvedFarmServerConfig;
+  websocketAdapterModule: string;
+}
+
 /** Written next to the Node entry and imported first, so it runs before any app module. */
 export const FARM_NODE_ENV_MODULE_FILE = "farm-node-env.mjs";
 
@@ -17,15 +25,104 @@ export const FARM_NODE_ENV_MODULE_FILE = "farm-node-env.mjs";
  */
 export const FARM_NODE_ENV_MODULE_SOURCE = `if (!process.env.NODE_ENV) process.env.NODE_ENV = "production";\n`;
 
+const NODE_SERVER_SOURCE = `const socketPath = process.env.NITRO_UNIX_SOCKET;
+const server = serve({
+  manual: true,
+  silent: true,
+  gracefulShutdown: false,
+  port,
+  hostname: host,
+  node: socketPath ? { path: socketPath } : undefined,
+  tls: cert && key ? { cert, key } : undefined,
+  fetch: nitroApp.fetch,
+  plugins: [...tracingSrvxPlugins],
+});
+const nodeServer = server.node?.server;
+if (!nodeServer) throw new Error("[Farm] Nitro did not create a Node server");
+
+nodeServer.headersTimeout = farmServerConfig.headersTimeout;
+nodeServer.requestTimeout = farmServerConfig.requestTimeout;
+nodeServer.keepAliveTimeout = farmServerConfig.keepAliveTimeout;
+
+let isShuttingDown = false;
+nodeServer.on("request", (_request, response) => {
+  response.once("finish", () => {
+    if (isShuttingDown) nodeServer.closeIdleConnections?.();
+  });
+});
+
+if (import.meta._websocket) {
+  const { handleUpgrade } = wsAdapter({ resolve: resolveWebsocketHooks });
+  nodeServer.on("upgrade", (request, socket, head) => {
+    handleUpgrade(
+      request,
+      socket,
+      head,
+      new NodeRequest({ req: request, upgrade: { socket, head } }),
+    );
+  });
+}
+`;
+
+// Bun.serve's graceful stop waits for in-flight requests and closes idle keep-alive
+// connections itself.
+const BUN_SERVER_SOURCE = `const ws = import.meta._websocket ? wsAdapter({ resolve: resolveWebsocketHooks }) : undefined;
+const server = serve({
+  manual: true,
+  silent: true,
+  gracefulShutdown: false,
+  port,
+  hostname: host,
+  tls: cert && key ? { cert, key } : undefined,
+  fetch: import.meta._websocket
+    ? (request) =>
+        request.headers.get("upgrade") === "websocket"
+          ? ws.handleUpgrade(request, request.runtime.bun.server)
+          : nitroApp.fetch(request)
+    : nitroApp.fetch,
+  bun: { websocket: import.meta._websocket ? ws?.websocket : undefined },
+  plugins: [...tracingSrvxPlugins],
+});
+
+let isShuttingDown = false;
+`;
+
 /** Generate the long-running Node adapter entry while retaining Nitro's routing runtime. */
 export function createFarmNodeServerEntry(options: FarmNodeServerEntryOptions): string {
+  return createFarmServerEntry({
+    ...options,
+    runtime: "node",
+    adapterModule: options.nodeAdapterModule,
+  });
+}
+
+/**
+ * Generate the Bun adapter entry. Nitro's own bun entry leaves shutdown to srvx, which
+ * ignores Farm's lifecycle and timeout and keeps an idle server alive for a second after
+ * SIGTERM; this entry shuts down as the Node one does.
+ */
+export function createFarmBunServerEntry(options: FarmBunServerEntryOptions): string {
+  return createFarmServerEntry({
+    ...options,
+    runtime: "bun",
+    adapterModule: options.bunAdapterModule,
+  });
+}
+
+function createFarmServerEntry(options: {
+  runtime: "node" | "bun";
+  adapterModule: string;
+  nitroEntryFile: string;
+  server: ResolvedFarmServerConfig;
+  websocketAdapterModule: string;
+}): string {
   const serverConfig = JSON.stringify(options.server);
   const nitroEntryImport = `./${options.nitroEntryFile.replace(/^\.\//, "")}`;
+  const node = options.runtime === "node";
 
   return `
-import "./${FARM_NODE_ENV_MODULE_FILE}";
-import "#nitro/virtual/polyfills";
-import { NodeRequest, serve } from ${JSON.stringify(options.nodeAdapterModule)};
+${node ? `import "./${FARM_NODE_ENV_MODULE_FILE}";\n` : ""}import "#nitro/virtual/polyfills";
+import { ${node ? "NodeRequest, " : ""}serve } from ${JSON.stringify(options.adapterModule)};
 import wsAdapter from ${JSON.stringify(options.websocketAdapterModule)};
 import { resolveWebsocketHooks, useNitroApp, useNitroHooks } from "#nitro/runtime/app";
 import { useRuntimeConfig } from "#nitro/runtime/runtime-config";
@@ -148,44 +245,7 @@ const key = process.env.NITRO_SSL_KEY;
 const configuredPort = Number(process.env.NITRO_PORT || process.env.PORT);
 const port = Number.isFinite(configuredPort) && configuredPort > 0 ? configuredPort : 3000;
 const host = process.env.NITRO_HOST || process.env.HOST;
-const socketPath = process.env.NITRO_UNIX_SOCKET;
-const server = serve({
-  manual: true,
-  silent: true,
-  gracefulShutdown: false,
-  port,
-  hostname: host,
-  node: socketPath ? { path: socketPath } : undefined,
-  tls: cert && key ? { cert, key } : undefined,
-  fetch: nitroApp.fetch,
-  plugins: [...tracingSrvxPlugins],
-});
-const nodeServer = server.node?.server;
-if (!nodeServer) throw new Error("[Farm] Nitro did not create a Node server");
-
-nodeServer.headersTimeout = farmServerConfig.headersTimeout;
-nodeServer.requestTimeout = farmServerConfig.requestTimeout;
-nodeServer.keepAliveTimeout = farmServerConfig.keepAliveTimeout;
-
-let isShuttingDown = false;
-nodeServer.on("request", (_request, response) => {
-  response.once("finish", () => {
-    if (isShuttingDown) nodeServer.closeIdleConnections?.();
-  });
-});
-
-if (import.meta._websocket) {
-  const { handleUpgrade } = wsAdapter({ resolve: resolveWebsocketHooks });
-  nodeServer.on("upgrade", (request, socket, head) => {
-    handleUpgrade(
-      request,
-      socket,
-      head,
-      new NodeRequest({ req: request, upgrade: { socket, head } }),
-    );
-  });
-}
-
+${node ? NODE_SERVER_SOURCE : BUN_SERVER_SOURCE}
 setupCloseHooks(server);
 trapUnhandledErrors();
 
@@ -202,7 +262,7 @@ async function shutdown(signal) {
       return true;
     },
   );
-  nodeServer.closeIdleConnections?.();
+  ${node ? "nodeServer.closeIdleConnections?.();" : ""}
   let gracefulTimer;
   const gracefullyClosed = await Promise.race([
     gracefulClose,
@@ -256,7 +316,7 @@ if (!shutdownConfig.disabled) {
 try {
   await server.serve();
   const protocol = cert && key ? "https" : "http";
-  const addressInfo = nodeServer.address();
+  const addressInfo = ${node ? "nodeServer.address()" : "server.bun.server?.address"};
   if (typeof addressInfo === "string") {
     console.log(\`Listening on unix socket \${addressInfo}\`);
   } else if (addressInfo) {

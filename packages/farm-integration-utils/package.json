@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/integration-utils",
-  "version": "0.1.36",
+  "version": "0.1.45",
   "description": "Shared integration utilities for Farm.js",
   "license": "MIT",
   "repository": {
