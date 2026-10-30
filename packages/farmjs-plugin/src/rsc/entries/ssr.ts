@@ -12,9 +12,8 @@ import type { EntryContext } from "../types.js";
  */
 export function generateSsrEntry(ctx: EntryContext): string {
   const debugLog = `// Debug disabled`;
-  const routesDir = ctx.routesDir === undefined ? "app" : ctx.routesDir.trim();
-  const routesPath = routesDir ? `/${routesDir}` : "";
-  const globalsCssPath = ctx.globalCssPath ?? `/${ctx.srcDir}${routesPath}/globals.css`;
+  // Only a global stylesheet the build found: a guessed path 404s in apps that import their CSS.
+  const globalsCssPath = ctx.globalCssPath ?? "";
 
   return `
 import React from 'react';
@@ -120,6 +119,8 @@ export async function renderHTML(firstArg, options = {}) {
   // calls client references on the server (for example, a "use client" Counter).
   const payload = await createFromReadableStream(s1);
   const rootElement = payload.root;
+  // The route's resolved metadata as head tags (core's renderMetadataHead), then the stylesheet.
+  const headTags = (typeof payload.metadataHead === 'string' ? payload.metadataHead : '') + cssLinkTag;
   
   function Root() {
     return rootElement;
@@ -174,7 +175,7 @@ export async function renderHTML(firstArg, options = {}) {
             passThrough.on('error', (e) => controller.error(e));
           }
         });
-    let out = webStream.pipeThrough(injectIntoHeadStream(cssLinkTag));
+    let out = webStream.pipeThrough(injectIntoHeadStream(headTags));
     out = out.pipeThrough(injectRSCPayload(s2));
     out = out.pipeThrough(streamingClientScriptInjector);
     return out;
@@ -184,8 +185,8 @@ export async function renderHTML(firstArg, options = {}) {
   debug('Rendering to HTML stream (then buffering)');
   const fullHtmlRaw = await pipeableStreamToString(passThrough);
   let fullHtml = fullHtmlRaw;
-  if (cssLinkTag && fullHtml.includes("</head>")) {
-    fullHtml = fullHtml.replace("</head>", cssLinkTag + "</head>");
+  if (headTags && fullHtml.includes("</head>")) {
+    fullHtml = fullHtml.replace("</head>", () => headTags + "</head>");
   }
   ${
     ctx.actionsEnabled

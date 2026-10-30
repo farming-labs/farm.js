@@ -380,6 +380,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-window-position-hinted"
   | "keyed-rows-reorder-hinted"
   | "keyed-rows-plain-reorder-hinted"
+  | "keyed-rows-plain-map-reorder-hinted"
   | "keyed-rows-map-reorder-hinted"
   | "keyed-rows-all-hinted"
   | "keyed-rows-mapped-rolling-window-hinted"
@@ -472,6 +473,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-window-position-hinted": "keyedRowsWindowPositionHintedRuntimeFeature",
   "keyed-rows-reorder-hinted": "keyedRowsReorderHintedRuntimeFeature",
   "keyed-rows-plain-reorder-hinted": "keyedRowsPlainReorderHintedRuntimeFeature",
+  "keyed-rows-plain-map-reorder-hinted": "keyedRowsPlainMapReorderHintedRuntimeFeature",
   "keyed-rows-map-reorder-hinted": "keyedRowsMapReorderHintedRuntimeFeature",
   "keyed-rows-all-hinted": "keyedRowsAllHintedRuntimeFeature",
   "keyed-rows-mapped-rolling-window-hinted": "keyedRowsMappedRollingWindowHintedRuntimeFeature",
@@ -697,6 +699,14 @@ function runtimeFeaturesForPlans(
       // Every keyed plan must be target-free. Keep the existing reorder,
       // map, append, and complete-reconciliation capabilities.
       features.add("keyed-rows-plain-reorder-hinted");
+    } else if (
+      keyedRowsFeature === "keyed-rows" &&
+      hintSuffix === "-map-reorder-hinted" &&
+      keyedTargetKinds.size === 0
+    ) {
+      // Every keyed plan must be target-free. Preserve mapped/queued reorder
+      // hints, standalone map/append updates, and complete reconciliation.
+      features.add("keyed-rows-plain-map-reorder-hinted");
     } else if (
       keyedRowsFeature === "keyed-rows" &&
       hintSuffix === "-filter-hinted" &&

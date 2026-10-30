@@ -1,3 +1,4 @@
+import type { FarmServerComponentsConfig } from "./server-components-mode";
 import type { FarmRenderer } from "./renderer";
 import type { IncomingMessage, ServerResponse } from "http";
 import type { FarmAgentUserConfig } from "./agent-config";
@@ -252,7 +253,12 @@ export interface FarmConfig {
    */
   suppressLintOnLink?: boolean;
   experimental?: {
-    serverComponents?: boolean;
+    /**
+     * React Server Components. `true` is `{ mode: "rsc" }`: `farm dev` and `farm build` run
+     * React's Flight pipeline from `@farm.js/plugin/rsc`. `{ mode: "islands" }` is reserved for
+     * Farm's own engine (RFC 0003). Pages and layouts are server components either way.
+     */
+    serverComponents?: FarmServerComponentsConfig;
     serverActions?: boolean;
     /**
      * Enables Partial Prerendering (static-shell caching). Routes still opt in
@@ -671,6 +677,27 @@ export interface Metadata {
           type?: string;
         }>;
     image?: string;
+    /**
+     * `og:video` entries. Point `url` at the media file itself (an MP4, for
+     * example) rather than a player page; relative URLs resolve against
+     * `metadataBase` like `images`.
+     */
+    videos?:
+      | string
+      | {
+          url: string;
+          secureUrl?: string;
+          width?: number;
+          height?: number;
+          type?: string;
+        }
+      | Array<{
+          url: string;
+          secureUrl?: string;
+          width?: number;
+          height?: number;
+          type?: string;
+        }>;
     type?: string;
     locale?: string;
     /** `article:published_time`, rendered when `type` is `"article"`. */

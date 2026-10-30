@@ -100,6 +100,9 @@ describe("Farm docs runtime adapters", () => {
     const options = call.slice(call.indexOf("}, {"), call.indexOf("})"));
     expect(options).toContain("rootDir: farmDocsRuntimeRoot,");
     expect(options).toContain("immutableContent: true,");
+    expect(options).toContain("modulePreloads: farmDocsModulePreloadPaths,");
+    // The page list is filled in after the client build; an unfilled one parses to nothing.
+    expect(source).toContain('JSON.parse("${FARM_DOCS_MODULE_PRELOADS_PLACEHOLDER}")');
   });
 
   it("loads the docs config module through the app's module loader for the runtime", async () => {

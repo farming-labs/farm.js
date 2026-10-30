@@ -1,3 +1,4 @@
+import { resolveFarmServerComponentsMode } from "./server-components-mode";
 import type { FarmSchemaConfig } from "./schema";
 import { assertPluginDependencies } from "./plugin-dependencies";
 import type {
@@ -84,6 +85,7 @@ import {
 } from "./mcp-config";
 import { resolveFarmPerformanceConfig, type ResolvedFarmPerformanceConfig } from "./preload";
 import { validateConfigRouteSource } from "./plugins/route-pattern";
+import { compileMiddlewareConfig } from "./middleware/matcher";
 import {
   farmCspBlocksFrameworkInlineScripts,
   getFarmSecurityHeader,
@@ -976,6 +978,15 @@ function validateRedirectConfigs(redirects: RedirectConfig[], field: string): Re
   return redirects;
 }
 
+// Compile once while resolving the config so an unsupported matcher string
+// fails `farm dev` and `farm build` instead of leaving the gate unmatched.
+function validateMiddlewareConfig(middleware: FarmMiddlewareConfig | undefined) {
+  for (const entry of Array.isArray(middleware) ? middleware : middleware ? [middleware] : []) {
+    compileMiddlewareConfig({ matcher: entry.matcher, exclude: entry.exclude });
+  }
+  return middleware;
+}
+
 function validateConfigRouteSources<T extends { source: string }>(routes: T[], field: string): T[] {
   for (const [index, route] of routes.entries()) {
     validateConfigRouteSource(route.source, `${field}[${index}].source`);
@@ -987,6 +998,8 @@ export async function resolveConfig(
   userConfig: FarmUserConfig,
   mode: "development" | "production",
 ): Promise<ResolvedFarmConfig> {
+  // An unknown serverComponents mode is a config error, not a silent no-op.
+  resolveFarmServerComponentsMode(userConfig.experimental?.serverComponents);
   const projectRoot = userConfig.root || process.cwd();
   const layerResolution = await resolveFarmLayers(userConfig, {
     root: projectRoot,
@@ -1128,7 +1141,12 @@ export async function resolveConfig(
     experimental: {
       serverComponents: false,
       serverActions: false,
-      isolatedClientHydration: "off",
+      // Islands mode hydrates client components as islands (RFC 0003); an app can still pick
+      // isolatedClientHydration itself.
+      isolatedClientHydration:
+        resolveFarmServerComponentsMode(userConfig.experimental?.serverComponents) === "islands"
+          ? "enabled"
+          : "off",
       ppr: false,
       ...userConfig.experimental,
     },
@@ -1154,7 +1172,7 @@ export async function resolveConfig(
     publicDir: userConfig.publicDir || "public",
     i18n: resolveFarmI18nConfig(userConfig.i18n, { root, mode, basePath }),
     openapi,
-    middleware: userConfig.middleware || {},
+    middleware: validateMiddlewareConfig(userConfig.middleware) || {},
     notFound: userConfig.notFound || {},
     context: userConfig.context || (() => undefined),
     server: resolveFarmServerConfig(userConfig.server),

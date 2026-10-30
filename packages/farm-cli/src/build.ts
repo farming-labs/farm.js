@@ -6,6 +6,7 @@ import {
   resolveDeployConfig,
 } from "@farm.js/core/internal/config-runtime";
 import { withProductionNodeEnv } from "@farm.js/core/internal/production-node-env";
+import { ensureFarmRscPackages } from "./rsc-packages";
 
 export { withProductionNodeEnv };
 
@@ -45,6 +46,21 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
 
       if (!userConfig) {
         throw new Error("No Farm config found. Please create farm.config.ts or config.ts.");
+      }
+
+      // experimental.serverComponents: the RSC pipeline builds the app for the deploy preset.
+      await ensureFarmRscPackages(userConfig, root);
+      if (buildRuntimeResult.value.farmAppUsesRscPipeline(userConfig, root)) {
+        const deploy = resolveDeployConfig(userConfig, {
+          preset: options.preset as any,
+          target: options.target,
+        });
+        await buildRuntimeResult.value.buildFarmRsc(userConfig, {
+          root,
+          preset: deploy.preset,
+          outputDir: deploy.outputDir,
+        });
+        return;
       }
 
       const config = await resolveConfig(userConfig, mode);

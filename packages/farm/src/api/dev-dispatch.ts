@@ -53,14 +53,23 @@ export function createFarmDevServerDispatch(
             }
           }
           const status = incoming.statusCode ?? 502;
-          const hasBody = request.method !== "HEAD" && status !== 204 && status !== 304;
+          // A null-body status (204, 205, 304) cannot carry a body into a Response.
+          const hasBody =
+            request.method !== "HEAD" && status !== 204 && status !== 205 && status !== 304;
           if (!hasBody) incoming.resume();
-          resolve(
-            new Response(
-              hasBody ? (Readable.toWeb(incoming) as unknown as ReadableStream<Uint8Array>) : null,
-              { status, statusText: incoming.statusMessage, headers: responseHeaders },
-            ),
-          );
+          try {
+            resolve(
+              new Response(
+                hasBody
+                  ? (Readable.toWeb(incoming) as unknown as ReadableStream<Uint8Array>)
+                  : null,
+                { status, statusText: incoming.statusMessage, headers: responseHeaders },
+              ),
+            );
+          } catch (error) {
+            incoming.destroy();
+            reject(error);
+          }
         },
       );
       outgoing.on("error", reject);

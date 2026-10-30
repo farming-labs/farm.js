@@ -27,7 +27,7 @@ export {
 } from "./production-runtime";
 // The segments every route matcher compares against, for a runner outside core
 // that has to agree with the router about which route a request is for.
-export { canonicalizeRequestPathSegments } from "../utils/decode";
+export { canonicalizeRequestPathSegments, canonicalizeRequestPathname } from "../utils/decode";
 // The cookie rules core's own jar applies, for a runner outside core that has to
 // emit the same Set-Cookie headers.
 export {

@@ -331,6 +331,14 @@ Farm keeps the options it needs to produce its production output: `root`, `base`
 `build.rollupOptions.input`, and `build.rollupOptions.output`), and any `build`, `define`, or
 `esbuild` value Farm sets for that build. Use `basePath` and `publicDir` in Farm's config instead.
 
+`vite.build.sourcemap` never publishes client source maps. A client map carries the original
+source of each module, including code Farm strips from the browser bundle such as
+`createServerOnlyFn` bodies and `generateMetadata`, so any enabled value builds hidden maps (the
+JS names no map) and writes them to `.farm/client-sourcemaps/` instead of the public output. Upload
+them from there to your error tracker. RSC apps built with `@farm.js/plugin/rsc` do the same for
+`build.sourcemap` in `vite.config.ts`, writing the maps to `dist/client-sourcemaps/` beside
+`dist/client/`.
+
 During development, Farm loads server modules through Vite's `ssr` environment runner. With
 React Server Components enabled, RSC entries use a separate `rsc` runner and resolution conditions;
 the browser uses `client`. Vite owns runner caching, hot updates, and cleanup when the server closes.
@@ -499,7 +507,7 @@ with each page's metadata title and description, linking to its [Markdown mirror
 when one is exposed. An options object sets the `title` and `summary` (the root layout's metadata by
 default), adds `details` Markdown, and narrows the list with `include` and `exclude` route patterns,
 which use the same syntax as `md.expose`. Dynamic routes are left out because they have no single
-URL.
+URL, and so are pages a path-specific guard covers, as for the [sitemap](#sitemap).
 
 It also serves `/llms-full.txt`: the same header, then a block per listed page with its title, URL,
 and description, separated by `---`. Pages with an exposed Markdown mirror get it inlined; a page
@@ -579,12 +587,16 @@ properties the builder does not model, for example `{ ...jsonLd.product(input), 
 
 Left unset, `sitemap` serves `/sitemap.xml` listing every static page with a `<lastmod>`: the time
 the page's file last changed, read when the server builds. Dynamic routes, pages whose metadata
-says `robots: { index: false }`, and pages behind a route [`guard`](/docs/routing#route-guards) are
-left out. URLs use the root layout's `metadataBase`, or the request's origin when it has none, the
-same origin the generated `llms.txt` links to; set `metadataBase` so crawlers and caches always see
-your canonical host. With the docs engine enabled it stays off, since the docs engine answers
-`/sitemap.xml` itself. A page that middleware keeps private is still listed, so leave it out with
-`exclude`:
+says `robots: { index: false }`, pages behind a route [`guard`](/docs/routing#route-guards), and
+pages a guard written for their path covers are left out: a `middleware.ts` in the page's folder or
+a parent below the root, a config middleware `matcher` that names the path, or an integration's
+`protectedRoutes`. Guards that cover every path (a root `middleware.ts`, middleware without a
+matcher or with a catch-all or function matcher, a plugin's `runtime.before` hook) hide nothing,
+since they name no page; the content behind them stays private, because pages are read as a
+signed-out visitor. URLs use the root layout's `metadataBase`, or the request's origin when it has
+none, the same origin the generated `llms.txt` links to; set `metadataBase` so crawlers and caches
+always see your canonical host. With the docs engine enabled it stays off, since the docs engine
+answers `/sitemap.xml` itself. Leave out other pages with `exclude`:
 
 ```ts title="farm.config.ts"
 export default defineConfig({
@@ -594,7 +606,8 @@ export default defineConfig({
 });
 ```
 
-`include` narrows the list the same way, and `sitemap: false` turns it off. A `public/sitemap.xml`
+`include` narrows the list the same way, and `sitemap: false` turns it off. `llmsTxt` takes the
+same `include` and `exclude`. A `public/sitemap.xml`
 or a root [`sitemap.ts`](/docs/routing#application-metadata-routes), which can list dynamic pages,
 replaces the generated file.
 
@@ -610,11 +623,11 @@ Left unset, `mcp` serves a read-only [MCP](https://modelcontextprotocol.io) serv
 | `read_page`    | One page as Markdown, from its [Markdown mirror](/docs/markdown), by path or URL. |
 
 The pages are the static pages `llms.txt` and the sitemap list that have a Markdown mirror: dynamic
-routes, pages whose metadata says `robots: { index: false }`, and pages behind a route
-[`guard`](/docs/routing#route-guards) are left out, and `read_page` answers only for a listed page.
-Pages are read the way `llms-full.txt` reads them, as a fresh request without the caller's cookies
-or credentials, so a page middleware or plugin `runtime.before` hook keeps private answers as signed
-out. The server has no write tools and never reaches API routes, server functions, sessions, or
+routes, pages whose metadata says `robots: { index: false }`, and pages a path-specific guard
+covers (see [Sitemap](#sitemap)) are left out, and `read_page` answers only for a listed page; `md.expose`
+leaves out more. Pages are read the way `llms-full.txt` reads them, as a fresh request without the
+caller's cookies or credentials, so a page a root middleware or plugin `runtime.before` hook keeps
+private answers as signed out. The server has no write tools and never reaches API routes, server functions, sessions, or
 environment values.
 
 It names itself after the app's `package.json` (`name` and `version`, or Farm's version without
@@ -697,11 +710,76 @@ such as the [docs engine](/docs/docs-engine)'s endpoint, join the catalog throug
 Every app serves `/.well-known/farmjs.json` (and, for Farm 0.1.34's readers, `/.well-known/farmjs`)
 to any client: Farm's version and the installed `@farm.js/*` packages, the renderer and base path,
 the MCP tools Farm serves with their JSON Schemas, WebMCP browser tools, each integration's
-category and provider (never its configuration), and plugin names. An MCP server that requires
-`authorize` is listed without its tools, resources or prompts, and endpoint tools leave out their
-HTTP route; a request Farm Infra signed for the app's `FARMJS_API_KEY` gets the full view.
+category and provider (never its configuration), and plugin names.
 [Farm Infra analytics](/docs/infra-analytics) lists every field.
-`manifest: false` turns it off.
+
+There is one public document, and everyone gets the same one, Farm Infra included. It lists only
+what an anonymous client could already find. An MCP server that requires `authorize`, or a public
+one whose path a path-specific guard covers (middleware or an integration's `protectedRoutes`, as
+for the [sitemap](#sitemap)), shows only its name, version, path and `authorization: "required"`,
+with empty `tools`, `resources` and `prompts`. Endpoint tools never include their HTTP method or
+route.
+
+`manifest` takes an object to choose what the document shows. Every section is shown by default:
+
+| Option         | Values                                      | Effect                                                                                                                                              |
+| -------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app`          | `boolean` or `{ version, renderer, build }` | `false` serves `app: null`; a field set to `false` is left out. `basePath` always stays.                                                            |
+| `packages`     | `boolean` or `"names"`                      | `"names"` lists the packages with `null` versions.                                                                                                  |
+| `mcp`          | `boolean` or `{ schemas, hide }`            | `schemas: false` drops tools' `inputSchema` and `outputSchema`. `hide` leaves out a server (`"store"`) or one of its tools (`"store/list_orders"`). |
+| `webmcp`       | `boolean` or `{ hide }`                     | `hide` leaves out browser tools by name.                                                                                                            |
+| `integrations` | `boolean`                                   | `false` serves `integrations: null`.                                                                                                                |
+| `agent`        | `boolean`                                   | `false` serves `agent: null`.                                                                                                                       |
+| `plugins`      | `boolean`                                   | `false` serves `plugins: null`.                                                                                                                     |
+
+A hidden section stays in the document as `null`, so readers can tell "hidden by the app" from an
+empty list, which means there is nothing to show:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  agent: {
+    manifest: {
+      app: { build: false },
+      packages: "names",
+      mcp: { schemas: false, hide: ["internal", "store/refund_order"] },
+      webmcp: { hide: ["delete_todo"] },
+      plugins: false,
+    },
+  },
+});
+```
+
+```json title="/.well-known/farmjs.json"
+{
+  "schemaVersion": 1,
+  "app": { "farm": "0.1.41", "renderer": "react", "basePath": "/" },
+  "packages": { "@farm.js/core": null, "@farm.js/mcp": null },
+  "mcp": {
+    "servers": [
+      {
+        "name": "store",
+        "version": "1.0.0",
+        "path": "/api/mcp",
+        "authorization": "none",
+        "resources": [],
+        "prompts": [],
+        "tools": [{ "name": "list_orders", "source": "endpoint", "readOnlyHint": true }]
+      }
+    ]
+  },
+  "webmcp": { "enabled": true, "tools": [{ "name": "list_todos", "inputSchemaSource": "none" }] },
+  "integrations": [{ "key": "billing", "category": "payment", "type": "stripe" }],
+  "agent": { "apiCatalog": null, "llmsTxt": true, "openapi": null },
+  "plugins": null
+}
+```
+
+Unknown options and invalid values fail when the config loads. `manifest: false` turns the
+document off at both paths.
+
+Earlier releases gave a request Farm Infra signed for the app's `FARMJS_API_KEY` a fuller view,
+with protected servers' tools and endpoint routes. That view is gone: Farm Infra reads the same
+public document, and `analytics: false` no longer changes it.
 
 ### API catalog
 
@@ -955,18 +1033,49 @@ security: {
 }
 ```
 
-For dynamic HTML, Farm generates a fresh nonce for every response, adds it to the directive that
-governs script elements (`script-src-elem`, then `script-src`, then `default-src`), and stamps every
-script element in the streamed document. Any existing script `nonce` attribute is normalized to the
-fresh response nonce so application-authored inline scripts follow the same policy.
-Script contents, including Unicode text, are preserved across streamed response chunks.
+For dynamic HTML, Farm generates a fresh nonce for every response before rendering it and adds it to
+the directive that governs script elements (`script-src-elem`, then `script-src`, then
+`default-src`). Only scripts that are given the nonce carry it: Farm's own bootstrap, hydration,
+theme, and client entry scripts, the renderer's streaming scripts (React, Preact, Solid, and Svelte
+receive the nonce), and scripts your app opts in. Every other script element in the response loses
+its `nonce` attribute, so markup injected into the page through `dangerouslySetInnerHTML`, CMS
+content, or a reflected value cannot run, even when it brings its own `nonce`. Script contents,
+including Unicode text, are preserved across streamed response chunks.
 
-For fully prerendered HTML, the same option keeps the page static. Farm removes the build-time nonce,
-hashes the exact contents of every inline script with SHA-256, and emits a route-specific policy with
-those hashes. External scripts still need their origin in `script-src` or `script-src-elem`. Dynamic
-responses and PPR shells continue to use fresh nonces, so a nonce is never cached or reused. Keep
-`reportOnly` on while auditing and verify every third-party script and connection before enforcing the
-policy.
+To let an inline script of your own run, give it the response nonce with `getCspNonce()` from
+`@farm.js/core` in a server-rendered page or layout. It returns `undefined` when `nonce` is off, so
+the same code works without a policy:
+
+```tsx
+import { getCspNonce } from "@farm.js/core";
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html>
+      <body>
+        {children}
+        <script
+          nonce={getCspNonce()}
+          dangerouslySetInnerHTML={{ __html: "window.appReady = true" }}
+        />
+      </body>
+    </html>
+  );
+}
+```
+
+For fully prerendered HTML, the same option keeps the page static. Farm hashes the exact contents of
+the inline scripts that carry the nonce (its own and the ones you opted in) with SHA-256, removes the
+build-time nonce, and emits a route-specific policy with those hashes. Inline scripts that were not
+opted in get no hash and do not run. External scripts still need their origin in `script-src` or
+`script-src-elem`. A nonce is never cached or reused: in nonce mode Farm renders PPR routes per
+request instead of serving a shared shell. Keep `reportOnly` on while auditing and verify every
+third-party script and connection before enforcing the policy.
+
+Before this release, nonce mode gave the response nonce to every script element in the document,
+including app-authored ones, and prerendered pages hashed every inline script. If your app renders
+inline scripts of its own under `nonce: true`, add `nonce={getCspNonce()}` to each one; until then
+the policy blocks them, which `reportOnly` shows without breaking the page.
 
 Without `nonce: true`, Farm warns when a configured policy would block its inline framework scripts.
 
@@ -1001,13 +1110,13 @@ The RSC development bridge applies these limits too. `POST`, `PUT`, `PATCH`, `DE
 bodies keep their original bytes, including multipart uploads and binary data. `GET` and `HEAD`
 remain bodyless. Action origin validation runs before buffering an action body.
 
-`trustProxy` defaults to `false`. Enable it only when the app is behind a trusted reverse proxy that removes client-supplied forwarding headers and writes its own `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` values. Farm uses those headers for the client address and public request URL only when the proxy is trusted. A directly exposed Farm server must leave it disabled so a client cannot spoof the address or authority used by rate limits, redirects, authentication callbacks, logs, or access policy.
+`trustProxy` defaults to `false`. Enable it only when the app is behind a trusted reverse proxy that removes client-supplied forwarding headers and writes its own `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` values. Farm uses those headers for the client address and public request URL only when the proxy is trusted. The client address is the last `X-Forwarded-For` hop, the one your proxy appended: a proxy that appends (nginx `$proxy_add_x_forwarded_for`, most load balancers) keeps whatever the client sent ahead of it, so earlier hops are never trusted. Behind a chain of proxies that address is the one the closest proxy saw; pass a rate-limit `keyGenerator` if you need an outer proxy's view. A directly exposed Farm server must leave it disabled so a client cannot spoof the address or authority used by rate limits, redirects, authentication callbacks, logs, or access policy.
 
 Workflow runner secrets are accepted only through `Authorization: Bearer <secret>` or `X-Farm-Workflow-Secret`. Farm does not accept secrets in query strings because URLs are commonly retained in logs, browser history, and referrer data.
 
 The long-running Node adapter applies `headersTimeout`, `requestTimeout`, and `keepAliveTimeout` to its HTTP server. `headersTimeout` limits how long a client can occupy a connection while sending headers, and `requestTimeout` limits receipt of the complete request. These are transport timeouts, not limits on route-handler or database execution. Durations accept milliseconds or strings such as `"15s"`, `"2m"`, and `"1h"`.
 
-On `SIGTERM` or `SIGINT`, Node output immediately fails readiness, stops accepting connections, drains active responses and streams through Nitro, and then runs Farm integration and plugin cleanup. `gracefulShutdownTimeout` is the maximum drain period before remaining connections are forced closed. The process starts plugin and integration runtime state before it begins listening, so a successful readiness response means startup completed.
+On `SIGTERM` or `SIGINT`, Node and Bun output immediately fails readiness, stops accepting connections, drains active responses and streams through Nitro, and then runs Farm integration and plugin cleanup. `gracefulShutdownTimeout` is the maximum drain period before remaining connections are forced closed. The process starts plugin and integration runtime state before it begins listening, so a successful readiness response means startup completed.
 
 Farm exposes two non-cacheable production health handlers by default:
 
@@ -1020,10 +1129,10 @@ Customize both paths through `server.health`, or set `health: false` when an ada
 
 Server actions are same-origin application RPC endpoints. Farm rejects cross-origin action requests by default and limits the encoded request body to 1 MB.
 
-Server actions run on the React Server Components pipeline from `@farm.js/plugin/rsc` (see the
-[`rsc-demo` example](https://github.com/farming-labs/farm.js/tree/main/examples/rsc-demo)). The
-`experimental` flags below configure that pipeline; on their own they do not make server functions
-callable from the browser, and Farm keeps rejecting client imports of server-function modules.
+Server actions run on the React Server Components pipeline, which `experimental.serverComponents`
+turns on (see [React Server Components](/docs/server-rendering#react-server-components)).
+`experimental.serverActions` without `serverComponents` does not make server functions callable
+from the browser, and Farm keeps rejecting client imports of server-function modules.
 
 ```ts
 import { defineConfig } from "@farm.js/core";
@@ -1161,7 +1270,11 @@ export default defineConfig({
 On Netlify, an `isr` rule caches a response on Netlify's CDN only when Farm sends it with a shared
 `Cache-Control`. A response Farm marks `private` or `no-store` (a request with cookies or an
 `Authorization` header, middleware data, a render that read the request, an error, or a dynamic
-render with no cache policy such as `revalidate`) is never stored for other visitors.
+render with no cache policy such as `revalidate`) is never stored for other visitors. The same
+holds for any other response of an `isr` route, API routes and middleware responses included:
+only a `200` to a request without `Cookie` or `Authorization`, with no `Set-Cookie` and no `Vary`
+on either, is cached on the CDN. The rest are sent `Cache-Control: private, no-store` unless they
+set their own.
 
 API routes remain same-origin by default in development and production. Add `cors` only to route patterns that intentionally form a cross-origin browser API.
 

@@ -209,6 +209,8 @@ export default defineConfig({
 
 `events` is optional. Leave it out to receive every emitted event. Filtering event delivery does not disable span creation, the events recorded on active spans, or the `@farm.js/otel` metrics; use `farmEvents: false` for those.
 
+Cache and PPR shell keys can contain call arguments and query strings, so built-in logs print `key_hash=<digest>` and exported spans carry `farm.key_hash` instead of the key; `onEvent` handlers still receive `event.key`. `route.redirect` carries the redirect target without its query string or fragment.
+
 ## Runtime subscription
 
 Use `onFarmEvent` for tests, local debugging, or integration packages that want to register listeners without owning app config.

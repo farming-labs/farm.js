@@ -132,6 +132,16 @@ if (portal.data?.redirectTo) {
 
 Checkout and portal return paths must be same-origin, root-relative application paths. Protocol-relative paths such as `//example.com` are rejected.
 
+## When billing lives in Convex
+
+If your app runs Polar as the `@convex-dev/polar` Convex component, keep billing there and do not
+also register `polar()` from `@farm.js/polar`. The
+[Convex integration](/docs/integrations/convex#choose-where-a-service-lives) stops `farm dev` and
+`farm build` when both are set up, unless you set `home` to say which side owns billing. To receive
+Polar's webhooks on your own domain, use `component("@convex-dev/polar", { webhooks: true })` from
+`@farm.js/convex` in `convex({ use })`; see
+[Billing with Polar running in Convex](/docs/integrations/convex#billing-with-polar-running-in-convex).
+
 ## When Polar is a good fit
 
 Polar works especially well when the product is developer-facing, open-source, sponsor-backed, or selling digital access. The Farm integration keeps the same caller shape as other billing providers, so moving between Stripe, Autumn, and Polar does not force your app UI to learn a new local API style.
@@ -141,6 +151,8 @@ Polar works especially well when the product is developer-facing, open-source, s
 - Set `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`, `POLAR_SERVER`, and `APP_BASE_URL`.
 - Use sandbox/server config for local testing and production config for live billing.
 - Store the external customer ID with the billing owner so portal and status reads stay stable.
+- `report-usage` sends the caller's `idempotencyKey` to Polar as the event `externalId`
+  `<external customer id>:<key>`, so one customer's key can never claim another's event.
 - The billing POST routes act for the signed-in caller from its session cookie, so a request a
   browser sends from another origin is refused with `403`: a page on another site cannot report
   usage, start a checkout or open the portal for your visitor. Calls with no `Origin` (your own

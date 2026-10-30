@@ -4,6 +4,7 @@ import {
   disposeFarmAuth as runDispose,
   getFarmAuthRuntime,
   migrateFarmAuth as runMigration,
+  withFarmAuthClientAddress,
   compileFarmAuthMigration as runCompileMigration,
 } from "./runtime.js";
 
@@ -41,7 +42,7 @@ export function createFarmAuthIntegration(
         methods: ["GET", "POST"],
         async handler(request) {
           const runtime = await getFarmAuthRuntime();
-          return runtime.handler(request);
+          return runtime.handler(withFarmAuthClientAddress(request));
         },
       },
     ],

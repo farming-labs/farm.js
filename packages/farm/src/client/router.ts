@@ -9,7 +9,7 @@ import {
 } from "./spa-router";
 import { notifyHistoryChange, subscribeHistoryChange } from "./history-sync";
 import { getFarmI18nClientState } from "../i18n/client-state";
-import { _resolveCurrentRequest } from "../server/request-bridge";
+import { _peekCurrentRequest } from "../server/request-bridge";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import {
   applyFarmBasePath,
@@ -292,7 +292,7 @@ function readCurrentUrl(): URL | undefined {
     }
   }
 
-  const request = _resolveCurrentRequest();
+  const request = _peekCurrentRequest();
   if (!request) return undefined;
   try {
     return new URL(request.url);

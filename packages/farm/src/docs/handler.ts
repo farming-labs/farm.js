@@ -1,4 +1,11 @@
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import {
+  type Dirent,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
 import type {
   DocsLlmsTxtPageInput,
@@ -12,6 +19,7 @@ import { FARM_NAVIGATION_HEAD_SELECTOR } from "../client/document-head";
 import { farmAcceptQuality } from "../markdown";
 import type { FarmLayoutFonts } from "../font";
 import { matchesFarmIfNoneMatch } from "../server-http";
+import { stampFarmCspNonce } from "../security";
 import {
   resolveFarmDocsFontAssets,
   toFarmDocsPublicFontAssets,
@@ -42,6 +50,13 @@ export interface FarmDocsHandlerOptions {
   fontStylesheetHref?: string;
   /** Application-owned global stylesheet, including the selected docs theme CSS import. */
   globalStylesheetHref?: string;
+  /**
+   * @internal Whether a path-specific guard (non-root middleware.ts, a config or
+   * integration middleware matcher) covers a docs URL such as `/docs/secret`. Such pages
+   * stay out of llms.txt, llms-full.txt, and the sitemaps, and their `.md` URL answers
+   * only when the guard covers it too.
+   */
+  isPathGuarded?: (pathname: string) => boolean;
 }
 
 export interface FarmDocsPage {
@@ -232,9 +247,46 @@ function getRequestSlug(docs: FarmDocsResolvedConfig, request: Request): string 
   return normalizeSlug(pathname.slice(entry.length));
 }
 
+// Discovery skips these entries, so no docs page lives under them.
+function isDiscoverableDocsEntryName(name: string): boolean {
+  return Boolean(name) && !name.startsWith(".") && name !== "node_modules";
+}
+
+/**
+ * Whether `filePath` is a file discovery lists: every segment below `contentDir` is
+ * a real directory (or, last, a real file) spelled exactly as on disk.
+ */
+function isDiscoverableDocsFile(contentDir: string, filePath: string): boolean {
+  const segments = path.relative(contentDir, filePath).split(path.sep);
+  let dir = contentDir;
+  for (const [index, name] of segments.entries()) {
+    if (!isDiscoverableDocsEntryName(name)) return false;
+    let entry: Dirent | undefined;
+    try {
+      entry = readdirSync(dir, { withFileTypes: true }).find(
+        (candidate) => candidate.name === name,
+      );
+    } catch {
+      return false;
+    }
+    const isLast = index === segments.length - 1;
+    if (!entry || !(isLast ? entry.isFile() : entry.isDirectory())) return false;
+    dir = path.join(dir, name);
+  }
+  return true;
+}
+
 function findDocsPageFile(contentDir: string, slug: string): string | null {
-  const segments = slug ? slug.split("/").filter(Boolean) : [];
-  if (!segments.every(isSafeSegment)) return null;
+  // Only a page's canonical slug, the one discovery derives from its file, loads it.
+  // Guards, listings and caches key on that href, so an alias (`a//b`, `a/./b`, `a/page`,
+  // `A/b` on a case-insensitive disk, a symlinked folder) must not reach the same file.
+  const canonicalSlug = trimSlashes(slug);
+  const segments = canonicalSlug ? canonicalSlug.split("/") : [];
+  if (
+    !segments.every((segment) => isSafeSegment(segment) && isDiscoverableDocsEntryName(segment))
+  ) {
+    return null;
+  }
 
   const slugDir = path.join(contentDir, ...segments);
   const candidates =
@@ -242,10 +294,14 @@ function findDocsPageFile(contentDir: string, slug: string): string | null {
       ? DOCS_FILE_NAMES.map((filename) => path.join(contentDir, filename))
       : [
           ...DOCS_FILE_NAMES.map((filename) => path.join(slugDir, filename)),
-          ...DOCS_FILE_EXTENSIONS.map((extension) => path.join(contentDir, `${slug}${extension}`)),
+          ...DOCS_FILE_EXTENSIONS.map((extension) =>
+            path.join(contentDir, `${canonicalSlug}${extension}`),
+          ),
         ];
 
   for (const candidate of candidates) {
+    if (pathToSlug(contentDir, candidate) !== canonicalSlug) continue;
+    if (!isDiscoverableDocsFile(contentDir, candidate)) continue;
     const safePath = resolveExistingFileInside(contentDir, candidate);
     if (safePath) {
       return safePath;
@@ -322,6 +378,11 @@ export function loadFarmDocsPage(
     frontmatter,
     body,
   };
+}
+
+/** @internal The `.md` URL serving a docs page's Markdown. */
+export function getFarmDocsMarkdownPath(href: string): string {
+  return href === "/" ? "/.md" : `${href}.md`;
 }
 
 function createDocsHref(entry: string, slug: string): string {
@@ -421,8 +482,10 @@ function getDocsDescription(docs: FarmDocsResolvedConfig): string | undefined {
 function getLoadedDocsPages(
   contentDir: string,
   docs: FarmDocsResolvedConfig,
+  isPathGuarded?: (pathname: string) => boolean,
 ): LoadedFarmDocsPage[] {
   return discoverFarmDocsPages(contentDir, docs)
+    .filter((page) => !isPathGuarded?.(page.href))
     .map((page) => loadFarmDocsPage(contentDir, docs, page.slug))
     .filter((page): page is LoadedFarmDocsPage => Boolean(page));
 }
@@ -681,10 +744,12 @@ function createFarmDocsPublicResponse(
   contentDir: string,
   docs: FarmDocsResolvedConfig,
   request: Request,
+  isPathGuarded: ((pathname: string) => boolean) | undefined,
 ): Response | null {
   const url = new URL(request.url);
   let loadedPages: LoadedFarmDocsPage[] | undefined;
-  const getPages = () => (loadedPages ??= getLoadedDocsPages(contentDir, docs));
+  // These files are public at the site root, so a page a guard covers is left out.
+  const getPages = () => (loadedPages ??= getLoadedDocsPages(contentDir, docs, isPathGuarded));
   const sitemapManifest = () =>
     docsEngine().buildDocsSitemapManifest({
       pages: getPages().map(toDocsSitemapPage),
@@ -1588,11 +1653,11 @@ function renderDocsSearchTrigger(showIcon = true, className = ""): string {
 
 function renderDocsSearchMount(clientEntry: string): string {
   return `<div id="farm-docs-search-root" data-farm-docs-search-root data-api="/api/docs"></div>
-  <script type="module" src="${escapeAttribute(clientEntry)}"></script>`;
+  ${stampFarmCspNonce(`<script type="module" src="${escapeAttribute(clientEntry)}"></script>`)}`;
 }
 
 function renderDocsSearchBootstrapScript(): string {
-  return `<script>${generateFarmDocsSearchBootstrapRuntime()}</script>`;
+  return stampFarmCspNonce(`<script>${generateFarmDocsSearchBootstrapRuntime()}</script>`);
 }
 
 function renderPixelToc(items: TocItem[]): string {
@@ -1625,9 +1690,9 @@ function renderDocsHashRuntimeScript(): string {
 }
 
 function renderDocsRuntimeScripts(docs: FarmDocsResolvedConfig): string {
-  return `${renderDocsRuntimeScript(docs)}
+  return stampFarmCspNonce(`${renderDocsRuntimeScript(docs)}
 ${renderDocsHashRuntimeScript()}
-${renderDocsPageActionsRuntimeScript()}`;
+${renderDocsPageActionsRuntimeScript()}`);
 }
 
 function renderFarmDocsFontPreloads(fontAssets: readonly FarmDocsPublicFontAsset[]): string {
@@ -1774,6 +1839,9 @@ export function createFarmDocsHandler(
       const socialImagePage = loadFarmDocsPage(contentDir, docs, socialImageSlug);
       if (
         !socialImagePage ||
+        // The image sits outside the page's URL, where its guard does not reach, and
+        // draws the page's title.
+        options.isPathGuarded?.(socialImagePage.href) ||
         !isFarmDocsSocialImageEnabled(socialImagePage, docs) ||
         getFarmDocsCustomSocialImage(socialImagePage)
       ) {
@@ -1801,7 +1869,12 @@ export function createFarmDocsHandler(
       return new Response(renderFarmDocsSocialImageSvg(descriptor), { status: 200, headers });
     }
 
-    const publicResponse = createFarmDocsPublicResponse(contentDir, docs, request);
+    const publicResponse = createFarmDocsPublicResponse(
+      contentDir,
+      docs,
+      request,
+      options.isPathGuarded,
+    );
     if (publicResponse) return omitFarmDocsHeadBody(request, publicResponse);
 
     if (!isFarmDocsRequest(docs, request)) return null;
@@ -1812,6 +1885,15 @@ export function createFarmDocsHandler(
     // A docs page URL serves Markdown or HTML depending on Accept, so shared caches
     // must key it on Accept. An explicit .md URL always returns Markdown.
     const negotiatesAccept = !requestUrl.pathname.endsWith(".md");
+    // The `.md` URL is the page's content at another path. A guard written for the page
+    // alone (`/docs/secret/:path*` never meets `/docs/secret.md`) did not run for it.
+    if (
+      !negotiatesAccept &&
+      options.isPathGuarded?.(page.href) &&
+      !options.isPathGuarded(getFarmDocsMarkdownPath(page.href))
+    ) {
+      return null;
+    }
     if (shouldReturnMarkdown(request)) {
       const origin = new URL(request.url).origin;
       return omitFarmDocsHeadBody(

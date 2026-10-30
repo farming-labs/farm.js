@@ -176,3 +176,4 @@ export {
   type FarmTelemetryStatus,
   type FarmTelemetryTemplate,
 } from "./telemetry";
+export { ensureFarmRscPackages } from "./rsc-packages";

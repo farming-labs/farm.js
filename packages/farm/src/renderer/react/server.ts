@@ -51,8 +51,10 @@ export const wrapClientGraph = (element: React.ReactNode) =>
   wrapFarmIsolatedClientGraph(React, element);
 export const isolateServerPageGraph = (element: React.ReactNode) =>
   isolateFarmServerPageGraph(React, element);
-export const renderServerTreePage = (element: React.ReactNode) =>
-  renderFarmServerTreePage(React, element, { isolate: isolateServerPageGraph });
+export const renderServerTreePage = (
+  element: React.ReactNode,
+  options: { values?: boolean } = {},
+) => renderFarmServerTreePage(React, element, { isolate: isolateServerPageGraph, ...options });
 export const renderToString = reactRenderToString;
 export const renderToPipeableStream = reactRenderToPipeableStream;
 

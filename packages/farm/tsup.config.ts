@@ -1,6 +1,7 @@
 import path from "node:path";
 import { defineConfig, type Options } from "tsup";
 import { restoreDynamicImportsInDirectory } from "./scripts/restore-cjs-dynamic-imports";
+import { writeReactServerClientEntry } from "./scripts/write-react-server-client";
 
 const entry = {
   index: "src/index.ts",
@@ -24,7 +25,7 @@ const entry = {
   router: "src/router.ts",
   routes: "src/routes.ts",
   request: "src/request.ts",
-  plugin: "src/plugin.ts",
+  plugin: "src/plugin-entry.ts",
   integrations: "src/integrations.ts",
   schema: "src/schema.ts",
   storage: "src/storage/index.ts",
@@ -68,7 +69,16 @@ const entry = {
   "internal/client-runtime": "src/client/production-runtime.ts",
   "internal/client-error-overlay": "src/client/runtime-error-overlay.ts",
   "internal/isolated-boundary": "src/client/isolated-boundary.ts",
+  "internal/island-value-store": "src/client/island-value-store.ts",
+  "internal/island-codec": "src/client/island-codec.ts",
   "internal/server-tree": "src/client/server-tree.ts",
+  "internal/islands-runtime": "src/client/islands-runtime.ts",
+  "internal/islands-server": "src/client/islands-server.ts",
+  "internal/islx-client": "src/islx/client.ts",
+  "internal/islx-server": "src/islx/server.ts",
+  "internal/islx-react": "src/islx/react.ts",
+  "internal/form-actions": "src/form-actions.ts",
+  "internal/form-actions-client": "src/form-actions-client.ts",
   "internal/production-runtime": "src/nitro/production-runtime.ts",
   "internal/product-telemetry-runtime": "src/product-telemetry.ts",
   "internal/infra-analytics-runtime": "src/infra-analytics-runtime.ts",
@@ -106,6 +116,7 @@ export const farmPackageBuildOptions = {
     "@farm.js/core/internal/client-error-overlay",
     "react",
     "react-dom",
+    /^@farm\.js\/islx/,
     "@vercel/og",
     "rolldown",
     "sharp",
@@ -131,6 +142,7 @@ export const farmPackageBuildOptions = {
   // Splitting converts CommonJS dynamic imports to require(); restore import().
   async onSuccess() {
     await restoreDynamicImportsInDirectory(path.join(process.cwd(), "dist"));
+    await writeReactServerClientEntry(path.join(process.cwd(), "dist"));
   },
 } satisfies Options;
 

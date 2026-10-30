@@ -43,7 +43,7 @@ describe("React AOT queued map then reorder hints", () => {
     expect(result.code.match(/createCompilerKeyedArrayMapReorder\(/g)).toHaveLength(1);
     expect(result.code).not.toContain("createCompilerKeyedArrayMapPipeline");
     expect(result.code).not.toContain("createCompilerKeyedArraySort");
-    expect(result.code).toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
     await expect(
       transformWithEsbuild(result.code, "/app/QueuedMapReorderHints.tsx", {
         loader: "tsx",
@@ -268,6 +268,7 @@ describe("React AOT queued map then reorder hints", () => {
 
     expect(result.code).not.toContain("createCompilerKeyedArrayQueuedMapPipeline");
     expect(result.code).not.toContain("keyedRowsMapReorderHintedRuntimeFeature");
+    expect(result.code).not.toContain("keyedRowsPlainMapReorderHintedRuntimeFeature");
   });
 
   it("does not lower queued map and reorder hints for host-backed rows", async () => {

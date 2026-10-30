@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { parseRouteSchema } from "../api/route-schema";
+import { parseRouteSchema, toPublicValidationIssues } from "../api/route-schema";
 
 describe("parseRouteSchema", () => {
   it("runs asynchronous Zod refinements and transforms once", async () => {
@@ -43,5 +43,24 @@ describe("parseRouteSchema", () => {
 
   it("rejects unsupported validators", async () => {
     await expect(parseRouteSchema({}, {})).rejects.toThrow("Route validators must implement");
+  });
+});
+
+describe("toPublicValidationIssues", () => {
+  it("keeps type and refinement messages but never quotes an expected value", () => {
+    const result = z
+      .object({
+        token: z.literal("Bearer s3cr3t"),
+        plan: z.enum(["internal-x9", "free"]),
+        count: z.number(),
+        slug: z.string().refine(() => false, "Slug is taken"),
+      })
+      .safeParse({ token: "Bearer guess", plan: "pro", count: "1", slug: "x" });
+    const issues = toPublicValidationIssues(result.error);
+    expect(JSON.stringify(issues)).not.toMatch(/s3cr3t|internal-x9/);
+    expect(issues.find((issue) => issue.path[0] === "token")?.message).toBe("Invalid value");
+    expect(issues.find((issue) => issue.path[0] === "plan")?.message).toBe("Invalid value");
+    expect(issues.find((issue) => issue.path[0] === "count")?.message).toMatch(/expected number/);
+    expect(issues.find((issue) => issue.path[0] === "slug")?.message).toBe("Slug is taken");
   });
 });

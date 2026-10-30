@@ -944,7 +944,7 @@ for (const template of [
       assert.match(generatedGitignore, /^\.netlify\/?$/m);
       const generatedConfig = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
       assert.match(generatedConfig, /theme:\s*\{\s*default: "dark"/s);
-      await readFile(path.join(generatedDir, ".env.example"), "utf8");
+      assertNoSecretValues(await readFile(path.join(generatedDir, ".env.example"), "utf8"));
       const generatedReadme = await readFile(path.join(generatedDir, "README.md"), "utf8");
       assert.match(generatedReadme, /^# FARMJS /);
 
@@ -1112,9 +1112,14 @@ test("generates every official integration starter", async () => {
       for (const key of template.env) {
         assert.match(environment, new RegExp(`^${key}=`, "m"));
       }
+      assertNoSecretValues(environment);
 
       if (template.name === "ai") {
-        await readFile(path.join(generatedDir, "src/app/api/chat/route.ts"), "utf8");
+        const chatRoute = await readFile(
+          path.join(generatedDir, "src/app/api/chat/route.ts"),
+          "utf8",
+        );
+        assert.match(chatRoute, /authorize: \(\) => process\.env\.NODE_ENV === "development"/);
       } else {
         assert.match(
           await readFile(path.join(generatedDir, "farm.config.ts"), "utf8"),
@@ -1390,6 +1395,17 @@ test("generates starters that start the built server and deploy to Vercel explic
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+// A placeholder secret that passes a provider's length check would be accepted
+// as-is once the file is copied, so every secret ships empty, commented or not.
+function assertNoSecretValues(environment) {
+  for (const match of environment.matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=(.*)$/gm)) {
+    const [, key, value] = match;
+    if (/SECRET|_KEY$|TOKEN|PASSWORD/.test(key)) {
+      assert.equal(value.trim(), "", `${key} ships a value in .env.example`);
+    }
+  }
+}
 
 function escapeRegExp(input) {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

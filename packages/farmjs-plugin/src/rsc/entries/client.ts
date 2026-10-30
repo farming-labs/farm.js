@@ -182,9 +182,10 @@ async function main() {
   
   debug('Starting client hydration');
   
-  // Clean duplicate DOM as early as possible (server may have sent two blocks)
+  // Clean duplicate DOM as early as possible (server may have sent two blocks). Only Farm's own
+  // wrapper: an app that owns the document can have an element with id="root" in its content.
   const rootEl = document.getElementById('root');
-  if (rootEl) {
+  if (rootEl && rootEl.firstElementChild?.hasAttribute('data-farm-root')) {
     while (rootEl.children.length > 1) rootEl.lastElementChild.remove();
     while (rootEl.nextElementSibling) rootEl.nextElementSibling.remove();
   }
@@ -285,8 +286,13 @@ async function main() {
     debug('Fetching RSC for:', url);
     
     try {
-      // Request RSC format instead of HTML
-      const res = await fetch(url, {
+      // Request the page's RSC payload, '<page>.rsc', which a prerendered page serves as a
+      // static file. The page URL itself may be static HTML.
+      const payloadUrl = new URL(url, location.href);
+      payloadUrl.pathname = payloadUrl.pathname.endsWith('/')
+        ? payloadUrl.pathname + 'index.rsc'
+        : payloadUrl.pathname + '.rsc';
+      const res = await fetch(payloadUrl, {
         headers: createFarmDeploymentRequestHeaders(farmDeploymentId, {
           Accept: 'text/x-component',
         }),
@@ -310,6 +316,10 @@ async function main() {
       // reflect the page actually rendered (auth gates redirect this way).
       if (res.redirected && res.url) {
         const dest = new URL(res.url);
+        if (dest.pathname.endsWith('.rsc')) {
+          const page = dest.pathname.slice(0, -'.rsc'.length);
+          dest.pathname = page.endsWith('/index') ? page.slice(0, -'index'.length) : page;
+        }
         if (dest.origin === location.origin) {
           const target = dest.pathname + dest.search + dest.hash;
           if (target !== location.pathname + location.search + location.hash) {
@@ -326,14 +336,17 @@ async function main() {
       location.href = url;
     }
   }
-  const rootElForHydrate = document.getElementById('root');
+  // A root layout that renders <html> owns the document: hydrate it whole, as Next.js does.
+  const rootElForHydrate = initial.ownsDocument ? document : document.getElementById('root');
   if (!rootElForHydrate) {
     console.error('[Farm.js] #root element not found');
     return;
   }
-  // Final cleanup pass before hydrate (in case DOM changed during async)
-  while (rootElForHydrate.children.length > 1) rootElForHydrate.lastElementChild.remove();
-  while (rootElForHydrate.nextElementSibling) rootElForHydrate.nextElementSibling.remove();
+  if (!initial.ownsDocument) {
+    // Final cleanup pass before hydrate (in case DOM changed during async)
+    while (rootElForHydrate.children.length > 1) rootElForHydrate.lastElementChild.remove();
+    while (rootElForHydrate.nextElementSibling) rootElForHydrate.nextElementSibling.remove();
+  }
   debug('Hydrating application');
   globalThis.__FARM_RSC_HYDRATED = true;
   hydrateRoot(rootElForHydrate, React.createElement(BrowserRoot), {

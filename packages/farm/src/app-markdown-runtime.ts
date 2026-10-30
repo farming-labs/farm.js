@@ -1,8 +1,13 @@
 import { pathToFileURL } from "url";
 import type { ComponentType } from "react";
 import type { Metadata, RouteModule } from "./types";
-import { requestAcceptsMarkdown } from "./markdown";
+import {
+  FARM_MARKDOWN_PAGE_CHECK_HEADER,
+  _getFarmMarkdownPageCheckToken,
+  requestAcceptsMarkdown,
+} from "./markdown";
 import { createFarmMarkdownViewResponse } from "./markdown-view";
+import { FARM_ANONYMOUS_CLIENT_ADDRESS } from "./anonymous-client-address";
 import type { FarmMdxComponents, FarmMdxResolvedConfig } from "./app-markdown-config";
 
 // Preserve the existing entry points while keeping response-only imports
@@ -209,6 +214,63 @@ function isAnonymousRequestHeader(name: string): boolean {
   );
 }
 
+/** The page check needs the whole page, not a 304, a range or a compressed body. */
+const PAGE_CHECK_DROPPED_HEADERS = new Set([
+  "accept-encoding",
+  "if-match",
+  "if-modified-since",
+  "if-none-match",
+  "if-range",
+  "if-unmodified-since",
+  "range",
+]);
+
+/**
+ * The page segment Farm wraps around the page component, inside every layout. A layout
+ * that renders a sign-in prompt instead of its children never renders it.
+ */
+const PAGE_SEGMENT_MARKER = /<div\s[^>]*\bid=["']?__farm_page__["'\s>]/i;
+
+/**
+ * Whether this anonymous request for the page's HTML is answered with the page itself:
+ * a 2xx HTML document, unredirected, rendered to the end (so a `redirect()` under a
+ * loading boundary still sets the status), with the page segment in it.
+ */
+async function anonymousVisitorOpensPage(
+  options: {
+    request: Request;
+    renderPage?: (request: Request) => Response | Promise<Response>;
+  },
+  url: URL,
+  targetPathname: string,
+): Promise<boolean> {
+  const pageUrl = new URL(url);
+  pageUrl.pathname = targetPathname;
+  const headers = new Headers();
+  for (const [name, value] of options.request.headers) {
+    if (!PAGE_CHECK_DROPPED_HEADERS.has(name.toLowerCase())) headers.append(name, value);
+  }
+  headers.set("accept", "text/html");
+  headers.set(FARM_MARKDOWN_PAGE_CHECK_HEADER, _getFarmMarkdownPageCheckToken());
+  const response = await options.renderPage!(
+    new Request(pageUrl, {
+      method: "GET",
+      headers,
+      redirect: "manual",
+      signal: options.request.signal,
+    }),
+  );
+  if (
+    response.status < 200 ||
+    response.status >= 300 ||
+    !response.headers.get("content-type")?.toLowerCase().includes("text/html")
+  ) {
+    void response.body?.cancel().catch(() => {});
+    return false;
+  }
+  return PAGE_SEGMENT_MARKER.test(await response.text());
+}
+
 function hasOnlyAnonymousHeaders(headers: Headers): boolean {
   for (const name of headers.keys()) {
     if (!isAnonymousRequestHeader(name)) return false;
@@ -220,7 +282,7 @@ function hasOnlyAnonymousHeaders(headers: Headers): boolean {
  * Internal: the client address an adapter reports for the anonymous page check, in place of the
  * caller's. It is a documentation address (RFC 5737), so no IP allowlist admits it.
  */
-export const FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS = "192.0.2.1";
+export const FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS = FARM_ANONYMOUS_CLIENT_ADDRESS;
 
 export async function createFarmMarkdownSourceResponse(options: {
   request: Request;
@@ -229,8 +291,9 @@ export async function createFarmMarkdownSourceResponse(options: {
     pathname: string,
   ) => Promise<FarmMarkdownPageSource | null> | FarmMarkdownPageSource | null;
   /**
-   * Runs a request through the app's full pipeline, guards included. With it, a
-   * page's source is only served when an anonymous visitor may open the page.
+   * Runs a request through the app's full pipeline, guards and page rendering
+   * included, without following redirects. With it, a page's source is only
+   * served when an anonymous visitor's request for the page's HTML succeeds.
    * The request is that visitor's, so its client address must not be the caller's
    * (see FARM_MARKDOWN_ANONYMOUS_CLIENT_ADDRESS).
    */
@@ -287,9 +350,27 @@ export async function createFarmMarkdownSourceResponse(options: {
         signal: options.request.signal,
       }),
     );
-    if (publicResponse.headers.get("X-Farm-Markdown-Route") === targetPathname) {
-      publicSourceResponses.add(publicResponse);
-      return publicResponse;
+    // Only the source itself counts: a Markdown mirror of the guard's redirect or
+    // refusal carries the route header too.
+    if (
+      publicResponse.headers.get("X-Farm-Markdown-Route") === targetPathname &&
+      publicResponse.headers.has("X-Farm-Markdown-Source")
+    ) {
+      // The body is the anonymous visitor's, but a shared cache never learns from a
+      // request with credentials. A client address or proxy header is not one: proxies
+      // add those to every request.
+      let response = publicResponse;
+      if (options.request.headers.has("cookie") || options.request.headers.has("authorization")) {
+        const headers = new Headers(publicResponse.headers);
+        headers.set("Cache-Control", "private, no-store");
+        response = new Response(publicResponse.body, {
+          status: publicResponse.status,
+          statusText: publicResponse.statusText,
+          headers,
+        });
+      }
+      publicSourceResponses.add(response);
+      return response;
     }
     await publicResponse.body?.cancel();
     // The page is behind a guard. A credentialed caller asking for the page
@@ -302,6 +383,14 @@ export async function createFarmMarkdownSourceResponse(options: {
         "Cache-Control": "private, no-store",
       },
     });
+  }
+
+  // The anonymous visitor's own request. Middleware and integration guards have
+  // already passed it, but a guard in page.tsx or layout.tsx (a
+  // `redirect("/sign-in")` when a cookie is missing) only runs when the page
+  // renders, so render the page's HTML as this visitor first.
+  if (options.renderPage && !(await anonymousVisitorOpensPage(options, url, targetPathname))) {
+    return null;
   }
 
   const headers = new Headers({

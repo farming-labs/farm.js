@@ -112,7 +112,13 @@ export interface StripeBillingPlan {
 }
 
 export interface StripeBillingProduct {
+  /** Listed in the product catalog. Default `true`. */
   public?: boolean;
+  /**
+   * Lets checkout sell a product with `public: false`. Hidden products are
+   * refused otherwise, so knowing an id is not enough to buy one.
+   */
+  purchasable?: boolean;
   name?: string;
   description?: string;
   kind: StripeBillingProductKind;

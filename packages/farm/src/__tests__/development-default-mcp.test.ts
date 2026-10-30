@@ -172,6 +172,91 @@ describe("development default MCP server", () => {
     ]);
   }, 120_000);
 
+  it("leaves pages a path-specific guard covers out of every public listing", async () => {
+    const origin = await startApp(
+      `agent: { llmsTxt: true },
+      // Guards covering every path name no page, so they hide nothing.
+      plugins: [{ name: "acme:observer", runtime: { before() {} } }],
+      middleware: [
+        { matcher: "/private/:path*", handler: () => new Response("sign in", { status: 401 }) },
+        { matcher: "/(.*)", handler: (_ctx, next) => next() },
+        { handler: (_ctx, next) => next() },
+      ]`,
+      {
+        "src/app/middleware.ts": `export default async function middleware(_ctx, next) {
+  await next();
+}`,
+        "src/app/private/notes/page.tsx": `import React from "react";
+export const metadata = { title: "Private notes" };
+export default function Page() { return <main>notes</main>; }`,
+        "src/app/staff/middleware.ts": `export default async function middleware() {
+  return new Response("staff", { status: 401 });
+}`,
+        "src/app/staff/page.tsx": `import React from "react";
+export const metadata = { title: "Staff roster" };
+export default function Page() { return <main>staff</main>; }`,
+      },
+    );
+    const listed = await call(origin, "list_pages");
+    expect(listed.structuredContent.pages.map((page: { path: string }) => page.path)).toEqual([
+      "/",
+      "/about",
+    ]);
+    for (const query of ["private", "staff"]) {
+      expect(JSON.stringify(await call(origin, "search_pages", { query }))).not.toMatch(
+        /Private notes|Staff roster/,
+      );
+    }
+    for (const pathname of ["/sitemap.xml", "/llms.txt", "/llms-full.txt"]) {
+      const body = await (await fetch(`${origin}${pathname}`)).text();
+      expect({
+        pathname,
+        leaks: /\/private\/notes|\/staff|Private notes|Staff roster/.test(body),
+      }).toEqual({ pathname, leaks: false });
+      expect(body).toContain(`${origin}/about`);
+    }
+  }, 120_000);
+
+  it("keeps the tools of an MCP server behind a path guard out of the public manifest", async () => {
+    const origin = await startApp("", {
+      "farm.config.ts": `import { _publishFarmMCPCatalog } from "@farm.js/core/api/runtime";
+// Stands in for apiMcp({ allowUnauthenticated: true }) servers published at startup.
+// The test unpublishes them: the registry is process-wide.
+globalThis.__farmTestUnpublish = [];
+for (const path of ["/api/guarded-mcp", "/api/open-mcp"]) {
+  globalThis.__farmTestUnpublish.push(_publishFarmMCPCatalog(
+    { name: path.slice(5), version: "1.0.0", path },
+    [{ name: "list_orders_" + path.slice(5, -4), kind: "standalone", readOnlyHint: true }],
+    { public: true, schemas: {} },
+  ));
+}
+export default {
+  images: { provider: "none" },
+  middleware: [
+    { matcher: "/api/guarded-mcp", handler: () => new Response("sign in", { status: 401 }) },
+  ],
+};
+`,
+    });
+    let manifest: any;
+    try {
+      manifest = await (await fetch(`${origin}/.well-known/farmjs.json`)).json();
+    } finally {
+      ((globalThis as any).__farmTestUnpublish ?? [])
+        .splice(0)
+        .forEach((done: () => void) => done());
+    }
+    const servers = Object.fromEntries(
+      manifest.mcp.servers.map((server: any) => [server.path, server]),
+    );
+    expect(servers["/api/guarded-mcp"]).toMatchObject({ authorization: "required", tools: [] });
+    expect(JSON.stringify(manifest)).not.toContain("list_orders_guarded");
+    expect(servers["/api/open-mcp"]).toMatchObject({
+      authorization: "none",
+      tools: [expect.objectContaining({ name: "list_orders_open" })],
+    });
+  }, 120_000);
+
   it("reads pages as a fresh anonymous request through the plugin runtime", async () => {
     const origin = await startApp(
       `plugins: [{

@@ -75,12 +75,72 @@ export default defineRoutes(({ page, api }) => [
 Prefer a file route when the URL maps to a folder. Reach for `defineRoutes` for colocated
 features, URLs a folder can't express, and route lists generated from data or configuration.
 
-The browser loads the routes file to hydrate its pages, so the client build keeps only what that
-needs: components, `pending`/`error`/`notFound`, params and search options, and actions. It removes
-`guard`, `data`, `staticPaths`, `generateMetadata`, and `api()` handlers from inline route options,
-along with the imports and top-level helpers only they use, so database clients and credentials
-stay on the server. Write route options inline for this to apply. A client build fails if the
-routes file, or an application module it keeps, still imports a Node builtin such as `node:fs`.
+### Routes files never reach the browser
+
+A routes file holds server code: guards, `data` hooks, `staticPaths`, `generateMetadata`, API
+handlers, and the database clients and credentials they import. The browser never loads it. When
+a programmatic page or layout hydrates, its client copy imports only the module that defines its
+`component` (and its `pending` component), so give every component its own module and import it
+into the routes file:
+
+**src/features/admin/page.tsx**
+
+```tsx
+export function AdminPage({ data }: { data: { users: string[] } }) {
+  return (
+    <ul>
+      {data.users.map((user) => (
+        <li key={user}>{user}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+**src/routes.tsx**
+
+```tsx
+import { defineRoutes } from "@farm.js/core";
+import { AdminPage } from "./features/admin/page";
+import { db } from "./lib/db";
+import { requireAdmin } from "./lib/auth";
+
+export default defineRoutes(({ page }) => [
+  page("/admin", {
+    component: AdminPage,
+    guard: requireAdmin,
+    data: { main: async () => ({ users: await db.listUsers() }) },
+  }),
+]);
+```
+
+Farm finds each component's module from the routes it evaluates on the server, so the route list
+can be built any way you like: helpers, lists imported from other modules, definition objects, or
+options assigned after `page()` returns. Its params, search, guard, and data run on the server,
+and the page hydrates from the props the server resolved for the document.
+
+A client build fails when a hydrating page or layout's component has no module of its own: it is
+declared in the routes file or another module that defines routes, computed there
+(`component: memo(AdminPage)`), or imported straight from a package. A module defines routes when
+it holds route definitions in any shape (exported lists, objects or maps of routes, routes kept
+behind a function) or calls `page()`, `layout()`, `api()`, or `defineRoutes()`; a component module
+that imports one counts too. Move the component to its own module, or re-export the package
+component from one. Several unrelated modules exporting the same component also fail the build
+unless the routes file imports it from one of them. A client build also fails if any browser module
+imports a module that defines routes, or if a component's imports reach a Node builtin; import the
+component, server function, or helper from its own module instead. The one exception is the
+action-only proxy that [route actions](#route-actions) get with Server Actions enabled. Pages and
+layouts that don't hydrate ship no client code, so these rules don't apply to them.
+
+Farm can't trace a route written as a plain object literal that no module exports. While such a
+route exists, a component module is only accepted when neither it nor anything it imports could
+build a route definition (an object with a route `kind`, or an imported route factory). Build those
+routes with `page()` and `layout()`, or export them, if a component module is refused.
+
+> **Migration:** earlier releases loaded the routes file in the browser and stripped its server
+> options. Move components declared in a routes file into their own modules, and stop importing
+> route definitions from client components. Programmatic pages with `params` or `search` now
+> hydrate from server-resolved props, like pages with `guard` or `data`.
 
 ## Named slots and intercepted routes
 
@@ -412,7 +472,7 @@ export async function saveProduct(id: string, name: string) {
 
 `key` enables caching. When a cached entry is still fresh, Farm reuses the previous `data.main` result. `before` still runs for each request, and `after` still runs with the returned data, so setup and logging hooks keep their normal behavior.
 
-`staleTime` accepts a number of milliseconds or a duration string such as `"500ms"`, `"30s"`, `"5m"`, or `"1h"`. Omit `staleTime` when data should stay cached until invalidated.
+`staleTime` accepts a number of milliseconds or a duration string such as `"500ms"`, `"30s"`, `"5m"`, or `"1h"`. Omit `staleTime` when data should stay cached until invalidated. A `staleTime` of `0` (or `"0ms"`) means "always revalidate": `data.main` runs for every request and its result is never cached or shared, as with `createServerQuery`. Any other value, such as a negative number or `"5 minutes"`, throws when the route is defined.
 
 Farm also tags route data by the rendered path, so `revalidatePath("/products/123")` invalidates the matching route data entry. Use `tags` or `paths` when one mutation should refresh more than one route:
 
@@ -969,6 +1029,25 @@ export async function generateMetadata({ params }: MetadataProps<"/blog/[slug]">
 `article:published_time` and `article:modified_time`. `authors` and `tags` take a string or an
 array and render one `article:author` or `article:tag` per item. `section` renders
 `article:section`. Other `openGraph.type` values ignore these fields.
+
+### Video previews
+
+`openGraph.videos` adds a short loop to the link preview in apps that play one, such as Messages and Discord. Other apps keep showing `openGraph.images`, so set both:
+
+**src/app/page.tsx**
+
+```tsx
+export const metadata = {
+  openGraph: {
+    type: "video.other",
+    videos: [{ url: "/og/home.mp4", type: "video/mp4", width: 2400, height: 1260 }],
+  },
+};
+```
+
+Each entry renders `og:video`, plus `og:video:secure_url`, `og:video:type`, `og:video:width`, and `og:video:height` when set. `url` and `secureUrl` resolve against `metadataBase` like image URLs, and a plain string is shorthand for `{ url }`. Point `url` at the media file itself, such as an MP4 in `public/`, not at a player page. Discord plays the video only when `openGraph.type` is `"video"` or starts with `"video."`.
+
+Open Graph merges one level, so `videos` set in a layout applies to every page under it. Set it on the page that owns the video, or set `videos: []` in a page that should not inherit it.
 
 ### Favicons
 

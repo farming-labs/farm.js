@@ -58,6 +58,19 @@ export interface PreviewGatewayOptions {
   maxResponseBodyBytes?: number;
   /** Managed account login and one-preview grant configuration. */
   auth?: PreviewManagedAuthOptions;
+  /**
+   * Whether another preview transport (the persistent relay) serves this name
+   * live, or keeps it reserved for an owner other than `ownerId`. The relay
+   * route wins over this gateway for the same hostname, so a name it claims
+   * gets no polling session or tunnel grant here. Errors fail closed.
+   */
+  isPreviewNameClaimed?: (name: string, ownerId?: string) => boolean | Promise<boolean>;
+  /**
+   * How long a name stays bound to its owner after that owner disconnects or
+   * stops heartbeating. Another owner cannot claim it in that window, so a
+   * reconnect wins over another account. Defaults to 5 minutes.
+   */
+  nameReservationMs?: number;
 }
 
 export interface PreviewGatewaySession {
@@ -137,6 +150,13 @@ export interface PreviewGatewayStore {
   getResponse(sessionId: string, requestId: string): Promise<PreviewGatewayResponse | undefined>;
   deleteResponse(sessionId: string, requestId: string): Promise<void>;
   deleteSession(session: PreviewGatewaySession): Promise<void>;
+  /**
+   * Binds a name to the owner that last held it for `ttlMs` after its session
+   * is deleted. Optional; without it the binding ends with the session record.
+   */
+  reserveName?(name: string, ownerId: string, ttlMs: number): Promise<void>;
+  /** The owner a deleted session's name is still bound to, if any. */
+  getNameReservation?(name: string): Promise<string | undefined>;
 }
 
 export interface PreviewGatewayCreateSessionOptions {
@@ -157,6 +177,8 @@ interface PreviewGatewayRuntimeConfig {
   maxBodyBytes: number;
   maxResponseBodyBytes: number;
   auth?: PreviewManagedAuthOptions;
+  isPreviewNameClaimed?: PreviewGatewayOptions["isPreviewNameClaimed"];
+  nameReservationMs: number;
 }
 
 export interface PreviewGatewayObserver {
@@ -222,6 +244,7 @@ const DEFAULT_POLL_INTERVAL_MS = 100;
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024 * 5;
 const DEFAULT_MAX_RESPONSE_BODY_BYTES = 1024 * 1024 * 5;
 const DEFAULT_POLL_REQUEST_LIMIT = 50;
+const DEFAULT_NAME_RESERVATION_MS = 1000 * 60 * 5;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "content-length",
@@ -284,6 +307,8 @@ export function createPreviewGatewayHandler(
     maxBodyBytes: options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
     maxResponseBodyBytes: options.maxResponseBodyBytes ?? DEFAULT_MAX_RESPONSE_BODY_BYTES,
     auth: options.auth,
+    isPreviewNameClaimed: options.isPreviewNameClaimed,
+    nameReservationMs: options.nameReservationMs ?? DEFAULT_NAME_RESERVATION_MS,
   };
 
   const handlePreviewGatewayRequest = async function handlePreviewGatewayRequest(
@@ -326,7 +351,7 @@ export function createPreviewGatewayHandler(
           const limited = await limitPreviewAccountExchange(request, config.auth);
           if (limited) return limited;
         }
-        return await createTunnelGrant(request, config.auth);
+        return await createTunnelGrant(request, config.auth, store, config);
       }
 
       if (request.method === "POST" && url.pathname === "/api/sessions") {
@@ -365,14 +390,23 @@ export function createPreviewGatewayHandler(
 
   // The persistent relay serves the same public hostnames from a separate name
   // namespace, and its route wins over this handler, so it has to be able to
-  // ask whether a live polling session already owns a name before accepting a
-  // claim for it.
+  // ask whether a live polling session already owns a name (or keeps it
+  // reserved for another owner) before accepting a claim for it.
   return Object.assign(handlePreviewGatewayRequest, {
-    async isPreviewNameClaimed(name: string) {
+    async isPreviewNameClaimed(name: string, ownerId?: string) {
       const claimed = sanitizePreviewName(name);
       if (!claimed) return false;
       const session = await store.getSessionByName(claimed);
-      return Boolean(session && isPreviewClientOnline(session, config));
+      // A live session blocks the other transport unless both are the same
+      // verified owner (a CLI switching transports), which is harmless.
+      if (
+        session &&
+        isPreviewClientOnline(session, config) &&
+        (!ownerId || session.ownerId !== ownerId)
+      ) {
+        return true;
+      }
+      return await isNameHeldByAnotherOwner(store, config, claimed, ownerId, session);
     },
   });
 }
@@ -419,7 +453,12 @@ async function exchangePreviewAccount(request: Request, auth: PreviewManagedAuth
   return json(await exchangeGitHubPreviewToken(input.accessToken || "", auth));
 }
 
-async function createTunnelGrant(request: Request, auth: PreviewManagedAuthOptions) {
+async function createTunnelGrant(
+  request: Request,
+  auth: PreviewManagedAuthOptions,
+  store: PreviewGatewayStore,
+  config: PreviewGatewayRuntimeConfig,
+) {
   const accountToken = readPreviewBearerToken(request);
   if (!accountToken) {
     throw new PreviewAuthError(401, "Sign in with Farm Preview before creating a tunnel grant.");
@@ -432,6 +471,21 @@ async function createTunnelGrant(request: Request, auth: PreviewManagedAuthOptio
   };
   const name = sanitizePreviewName(input.name);
   if (!name) throw new PreviewAuthError(400, "A valid preview name is required.");
+  // A grant for a name another account holds could only ever be used to take
+  // that hostname over, so it is refused up front. Claims check again.
+  const ownerId = `${account.provider}:${account.subject}`;
+  if (
+    (await isNameHeldByAnotherOwner(
+      store,
+      config,
+      name,
+      ownerId,
+      await store.getSessionByName(name),
+    )) ||
+    (await askOtherTransport(config, name, ownerId))
+  ) {
+    return text(previewNameUnavailableMessage(name), 409);
+  }
 
   return json(
     issuePreviewTunnelGrant(
@@ -511,6 +565,7 @@ export class MemoryPreviewGatewayStore implements PreviewGatewayStore {
   private names = new Map<string, string>();
   private queues = new Map<string, PreviewGatewayRequest[]>();
   private responses = new Map<string, PreviewGatewayResponse>();
+  private reservations = new Map<string, { ownerId: string; expiresAt: number }>();
 
   async createSession(
     session: PreviewGatewaySession,
@@ -606,6 +661,24 @@ export class MemoryPreviewGatewayStore implements PreviewGatewayStore {
       this.names.delete(session.name);
     }
     this.queues.delete(session.id);
+  }
+
+  async reserveName(name: string, ownerId: string, ttlMs: number): Promise<void> {
+    const now = Date.now();
+    for (const [reserved, reservation] of this.reservations) {
+      if (reservation.expiresAt <= now) this.reservations.delete(reserved);
+    }
+    this.reservations.set(name, { ownerId, expiresAt: now + ttlMs });
+  }
+
+  async getNameReservation(name: string): Promise<string | undefined> {
+    const reservation = this.reservations.get(name);
+    if (!reservation) return undefined;
+    if (reservation.expiresAt <= Date.now()) {
+      this.reservations.delete(name);
+      return undefined;
+    }
+    return reservation.ownerId;
   }
 }
 
@@ -745,6 +818,20 @@ export class RedisRestPreviewGatewayStore implements PreviewGatewayStore {
     await this.command("DEL", ...keys);
   }
 
+  async reserveName(name: string, ownerId: string, ttlMs: number): Promise<void> {
+    await this.command(
+      "SET",
+      this.reservationKey(name),
+      ownerId,
+      "PX",
+      Math.max(1, Math.ceil(ttlMs)),
+    );
+  }
+
+  async getNameReservation(name: string): Promise<string | undefined> {
+    return (await this.command<string | null>("GET", this.reservationKey(name))) ?? undefined;
+  }
+
   private async claimName(
     session: PreviewGatewaySession,
     replaceSessionId: string | undefined,
@@ -795,6 +882,10 @@ export class RedisRestPreviewGatewayStore implements PreviewGatewayStore {
 
   private nameKey(name: string) {
     return this.key(`name:${name}`);
+  }
+
+  private reservationKey(name: string) {
+    return this.key(`reserved:${name}`);
   }
 
   private queueKey(id: string) {
@@ -860,7 +951,10 @@ async function createSession(
   let session: PreviewGatewaySession;
   for (let attempt = 0; ; attempt++) {
     const existing = await store.getSessionByName(name);
-    if (!existing || !isPreviewClientOnline(existing, config)) {
+    if (
+      (!existing || !isPreviewClientOnline(existing, config)) &&
+      !(await isNameHeldByAnotherOwner(store, config, name, ownerId, existing))
+    ) {
       session = {
         ...(grantId ? { grantId } : {}),
         ...(project ? { project } : {}),
@@ -883,13 +977,23 @@ async function createSession(
         Math.max(1, expiresAt - Date.now()),
         existing ? { replaceSessionId: existing.id } : undefined,
       );
-      if (claimed !== false) break;
+      if (claimed !== false) {
+        // The relay route wins over this gateway for the same hostname. The
+        // claim is stored before asking, and the relay does the same, so two
+        // concurrent claims on different transports cannot both win.
+        let claimedElsewhere: boolean;
+        try {
+          claimedElsewhere = await askOtherTransport(config, name, ownerId);
+        } catch (error) {
+          await store.deleteSession(session);
+          throw error;
+        }
+        if (!claimedElsewhere) break;
+        await store.deleteSession(session);
+      }
     }
     if (requestedName || config.auth) {
-      return text(
-        `A Farm preview named "${name}" is already active. Choose another name or stop the running preview.`,
-        409,
-      );
+      return text(previewNameUnavailableMessage(name), 409);
     }
     if (attempt >= 4) {
       return text("Could not allocate a unique preview name. Try again.", 503);
@@ -962,7 +1066,7 @@ async function handleSessionRoute(
   }
 
   if (request.method === "DELETE" && !route.action) {
-    await store.deleteSession(session);
+    await releasePreviewSession(store, config, session);
     reportSession(config, session, "disconnected");
     return json({ ok: true });
   }
@@ -1091,7 +1195,7 @@ async function proxyPublicRequest(
     return inactivePreviewResponse(request, route.name);
   }
   if (!isPreviewClientOnline(session, config)) {
-    await store.deleteSession(session);
+    await releasePreviewSession(store, config, session);
     reportSession(config, session, "disconnected");
     return inactivePreviewResponse(request, route.name);
   }
@@ -1201,7 +1305,7 @@ async function waitForPreviewResponse(
       await requireSessionAccess(config, session);
       const latestSession = await store.getSessionById(session.id);
       if (!latestSession || !isPreviewClientOnline(latestSession, config)) {
-        if (latestSession) await store.deleteSession(latestSession);
+        if (latestSession) await releasePreviewSession(store, config, latestSession);
         return "stale";
       }
       nextLivenessCheckAt = Date.now() + 1000;
@@ -1263,6 +1367,62 @@ async function markSessionOnline(
 
 function remainingSessionTtl(session: PreviewGatewaySession, config: PreviewGatewayRuntimeConfig) {
   return Math.max(1, Math.min(config.sessionTtlMs, session.expiresAt - Date.now()));
+}
+
+function previewNameUnavailableMessage(name: string) {
+  return `A Farm preview named "${name}" is already active. Choose another name or stop the running preview.`;
+}
+
+/**
+ * A name stays bound to its owner while a session holds it and for
+ * nameReservationMs after that owner stops heartbeating or disconnects, so a
+ * different account cannot take a hostname whose visitors (and their cookies)
+ * still belong to someone else. The same owner can always reclaim it.
+ */
+async function isNameHeldByAnotherOwner(
+  store: PreviewGatewayStore,
+  config: PreviewGatewayRuntimeConfig,
+  name: string,
+  ownerId: string | undefined,
+  session: PreviewGatewaySession | undefined,
+) {
+  if (session?.ownerId && session.ownerId !== ownerId) {
+    const lastHeartbeatAt = session.lastHeartbeatAt || session.createdAt;
+    if (Date.now() - lastHeartbeatAt <= config.clientHeartbeatTimeoutMs + config.nameReservationMs)
+      return true;
+  }
+  if (!store.getNameReservation) return false;
+  const reservedFor = await store.getNameReservation(name);
+  return reservedFor !== undefined && reservedFor !== ownerId;
+}
+
+async function askOtherTransport(
+  config: PreviewGatewayRuntimeConfig,
+  name: string,
+  ownerId: string | undefined,
+) {
+  if (!config.isPreviewNameClaimed) return false;
+  try {
+    return (await config.isPreviewNameClaimed(name, ownerId)) === true;
+  } catch {
+    throw new GatewayHttpError(503, "Preview name verification is temporarily unavailable.");
+  }
+}
+
+/** Deletes a session, keeping its name bound to its owner for the reservation window. */
+async function releasePreviewSession(
+  store: PreviewGatewayStore,
+  config: PreviewGatewayRuntimeConfig,
+  session: PreviewGatewaySession,
+) {
+  if (session.ownerId && store.reserveName && config.nameReservationMs > 0) {
+    // A newer session that already took the name over keeps its own binding.
+    const current = await store.getSessionByName(session.name);
+    if (!current || current.id === session.id) {
+      await store.reserveName(session.name, session.ownerId, config.nameReservationMs);
+    }
+  }
+  await store.deleteSession(session);
 }
 
 function isPreviewClientOnline(

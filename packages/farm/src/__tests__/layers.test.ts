@@ -383,7 +383,10 @@ describe("Farm layers", () => {
     const plugin = farmPlugin({ root });
     const moduleId = createProgrammaticRouteModuleId(routeFile, "page", "/reports");
 
-    const source = await (plugin.load as (id: string) => Promise<string>)(moduleId);
+    // The server copy imports the routes file; the browser copy never does.
+    const source = await (
+      plugin.load as (id: string, options: { ssr: boolean }) => Promise<string>
+    )(moduleId, { ssr: true });
 
     expect(source).toContain(`from ${JSON.stringify(toViteModuleId(routeFile, root))}`);
     expect(source).not.toContain(`from ${JSON.stringify(routeFile)}`);

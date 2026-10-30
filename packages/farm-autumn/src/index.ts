@@ -295,9 +295,6 @@ interface ResolvedAutumnProduct extends AutumnBillingProduct {
 type AutumnAttachCustomizeItems = NonNullable<
   NonNullable<Parameters<AutumnSDK["billing"]["attach"]>[0]["customize"]>["items"]
 >;
-type AutumnUpdateCustomizeItems = NonNullable<
-  NonNullable<Parameters<AutumnSDK["billing"]["update"]>[0]["customize"]>["items"]
->;
 
 const pendingAutumnMeterProjection = new Map<string, number>();
 
@@ -1989,32 +1986,13 @@ export function autumn<TInput extends AutumnIntegrationInput>(
             let nextUsed = projectedCurrentPeriodUsed;
 
             if (isPrepaidFeatureQuantity({ livePlan, product: active.product, featureId })) {
-              if (!active.product?.autumnPlanId) {
-                return new Response(
-                  "Autumn prepaid quantity updates require an active subscription product.",
-                  { status: 409 },
-                );
-              }
-
-              const customizedItems = mergeAutumnProductItems(livePlan, active.product);
-              await sdk.billing.update({
-                customerId: resolved.customer.id ?? resolved.externalCustomerId,
-                planId: active.product.autumnPlanId,
-                featureQuantities: [
-                  {
-                    featureId,
-                    quantity: body.quantity,
-                  },
-                ],
-                customize:
-                  customizedItems.length > 0
-                    ? {
-                        items: customizedItems as AutumnUpdateCustomizeItems,
-                      }
-                    : undefined,
-                prorationBehavior: "prorate_immediately",
-                redirectMode: "never",
-              });
+              // A prepaid quantity is something the customer buys. Changing it
+              // here would let a usage report resize, and charge for, the
+              // subscription with immediate proration and no confirmation.
+              return new Response(
+                `Autumn meter "${body.key}" is billed as a prepaid quantity, which usage reporting cannot change. Change the quantity through checkout (${checkoutPath}) instead.`,
+                { status: 409 },
+              );
             } else if (meter.aggregation === "last") {
               // A last-value meter reports the period's absolute usage, so the write sets it.
               await sdk.balances.update({

@@ -12,6 +12,7 @@ const targetPackageNames = [
   "@farm.js/jobs",
   "@farm.js/clerk",
   "@farm.js/strapi",
+  "@farm.js/convex",
 ];
 const supportPackageNames = ["@farm.js/core", "@farm.js/integration-utils"];
 

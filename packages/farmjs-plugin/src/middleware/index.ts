@@ -22,6 +22,7 @@ import { _withAfterNodeMiddleware } from "@farm.js/core/after";
 import { devServableFileExists } from "../dev-static.js";
 import { resolveDevRequestURL, resolveViteHtmlFallbackUrl } from "../dev-request.js";
 import {
+  canonicalizeRequestPathname,
   matchesMiddlewareConfig,
   serializeMiddlewareCookieDeletion,
 } from "@farm.js/core/middleware";
@@ -93,7 +94,14 @@ export interface MiddlewareContext {
   request: IncomingMessage;
   response: ServerResponse;
   url: URL;
+  /** Request pathname as received: still percent-encoded. */
   pathname: string;
+  /**
+   * The pathname the router matches: each segment decoded once, as core's
+   * `ctx.routePathname`. `.when()` conditions and function matchers also see it,
+   * so `/%61dmin` cannot skip a check written for `/admin`. Updated by `rewrite()`.
+   */
+  readonly routePathname: string;
   searchParams: URLSearchParams;
   method: string;
 
@@ -216,11 +224,13 @@ function createContext(
     }
   };
 
-  const ctx: MiddlewareContext = {
+  const ctx: MiddlewareContext & { routePathname: string } = {
     request: req,
     response: res,
     url,
     pathname: url.pathname,
+    // Vite has already removed its base from the URL, so this is the app's path.
+    routePathname: canonicalizeRequestPathname(url.pathname),
     searchParams: url.searchParams,
     method: req.method || "GET",
     params: {},
@@ -259,6 +269,7 @@ function createContext(
       const newUrl = new URL(rewriteUrl, `http://${req.headers.host || "localhost"}`);
       ctx.url = newUrl;
       ctx.pathname = newUrl.pathname;
+      ctx.routePathname = canonicalizeRequestPathname(newUrl.pathname);
       ctx.searchParams = newUrl.searchParams;
       // Update the original request URL
       req.url = rewriteUrl;

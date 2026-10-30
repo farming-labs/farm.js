@@ -32,6 +32,13 @@ export interface FarmDocsAPIOptions {
    * it on the development server only; production handlers answer 404.
    */
   diagnostics?: boolean;
+  /**
+   * @internal Whether a path-specific guard (non-root middleware.ts, a config or
+   * integration middleware matcher) covers a docs URL such as `/docs/secret`. The API
+   * answers anyone, so such a page is left out of search, llms, the sitemaps, and the
+   * agent spec, and reading its Markdown here is a 404. Farm's server sets this.
+   */
+  isPathGuarded?: (pathname: string) => boolean;
 }
 
 export interface FarmDocsCloudRouteOptions {
@@ -60,6 +67,7 @@ interface FarmDocsAPIContext {
   docs: FarmDocsResolvedConfig;
   contentDir: string;
   diagnostics: boolean;
+  isPathGuarded: (pathname: string) => boolean;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -71,6 +79,8 @@ type FarmDocsRuntimeConfig = {
   root?: string;
   srcDir?: string;
   docs?: FarmDocsResolvedConfig;
+  /** Docs URLs a path-specific guard covers, decided when the app was built. */
+  guardedPaths?: readonly string[];
 };
 
 declare global {
@@ -282,6 +292,7 @@ function getDocsDescription(docs: FarmDocsResolvedConfig): string | undefined {
 
 function getLoadedDocsPages(context: FarmDocsAPIContext): LoadedFarmDocsPage[] {
   return discoverFarmDocsPages(context.contentDir, context.docs)
+    .filter((page) => !context.isPathGuarded(page.href))
     .map((page) => loadFarmDocsPage(context.contentDir, context.docs, page.slug))
     .filter((page): page is LoadedFarmDocsPage => Boolean(page));
 }
@@ -394,7 +405,9 @@ function renderAgentsDocument(context: FarmDocsAPIContext, request: Request): st
 function buildAgentSpec(context: FarmDocsAPIContext, request: Request) {
   const url = new URL(request.url);
   const origin = url.origin;
-  const pages = discoverFarmDocsPages(context.contentDir, context.docs);
+  const pages = discoverFarmDocsPages(context.contentDir, context.docs).filter(
+    (page) => !context.isPathGuarded(page.href),
+  );
   const spec = docsEngine().buildDocsAgentDiscoverySpec(getDocsDiscoveryOptions(context, request));
   const title = getDocsTitle(context.docs);
 
@@ -589,6 +602,8 @@ async function resolveAPIContext(options: FarmDocsAPIOptions): Promise<FarmDocsA
   const docs = isResolvedDocsConfig(docsInput)
     ? docsInput
     : await resolveDocsConfig(docsInput, { root, srcDir });
+  // A route file mounting createDocsAPI() gets the guards the build recorded.
+  const guardedPaths = new Set(runtimeConfig?.guardedPaths ?? []);
 
   return {
     root,
@@ -596,6 +611,7 @@ async function resolveAPIContext(options: FarmDocsAPIOptions): Promise<FarmDocsA
     docs,
     contentDir: resolveFarmDocsContentDir(docs, { root, srcDir }),
     diagnostics: options.diagnostics === true,
+    isPathGuarded: options.isPathGuarded ?? ((pathname) => guardedPaths.has(pathname)),
   };
 }
 
@@ -660,7 +676,9 @@ async function handleDocsAPIGet(request: Request, context: FarmDocsAPIContext): 
     const pathParam = url.searchParams.get("path") || url.searchParams.get("slug");
     const slug = normalizeDocsApiSlug(pathParam ?? pathTarget.slug ?? "", context.docs);
     const page = loadFarmDocsPage(context.contentDir, context.docs, slug);
-    if (!page) return text("Docs page not found\n", "text/plain; charset=utf-8", { status: 404 });
+    if (!page || context.isPathGuarded(page.href)) {
+      return text("Docs page not found\n", "text/plain; charset=utf-8", { status: 404 });
+    }
     return text(
       docsEngine().renderDocsMarkdownDocument(toFarmDocsMarkdownPage(page), {
         origin: new URL(request.url).origin,

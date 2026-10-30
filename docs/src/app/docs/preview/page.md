@@ -252,6 +252,10 @@ https://stripe-webhook.preview.farmjs.dev
 
 Names are best treated as temporary handles. Stop and restart the command when you want to rotate the session.
 
+A name belongs to the account that claimed it. While your preview runs, and for five minutes after it
+stops or disconnects, another account gets an "already active" error for that name, so a restart or
+dropped connection can reconnect before anyone else takes the URL. You can always reclaim your own name.
+
 ## Request Logging
 
 Every remote request is visible in the preview terminal:
@@ -422,6 +426,12 @@ FARM_PREVIEW_TUNNEL_COMMAND='farm-preview-agent tunnel --url {url} --hostname {h
 
 Available template values are `{url}`, `{port}`, `{host}`, `{name}`, and `{hostname}`.
 
+With `--provider local` (cloudflared, localtunnel, or this template), `{url}`, `{port}`, and
+`{host}` point at a loopback proxy that `farm preview` starts in front of your app, not at the app
+itself. The proxy marks each request as preview traffic, so the protections below apply to these
+tunnels too, and passes WebSocket upgrades such as Vite HMR through. Point the tunnel at the
+values it is given rather than at the app's own port, or the protections are skipped.
+
 Use this path only when the hosted Farm gateway is not appropriate for your environment.
 
 ## Environment Variables
@@ -477,8 +487,8 @@ The preview URL forwards public internet traffic to your local app. Treat it lik
 
 ### What the preview serves from your machine
 
-The preview relay and the polling gateway client mark every tunnelled request with an
-`x-farm-preview` header and overwrite any value a visitor sends. For marked requests, the
+The preview relay, the polling gateway client, and the local-provider proxy mark every tunnelled
+request with an `x-farm-preview` header and overwrite any value a visitor sends. For marked requests, the
 dev server serves your pages, API routes, and actions as usual, plus what the browser needs to run
 the app: Vite's client, Farm's client entry, public files, dependencies under `node_modules`, and
 modules and assets inside the source directory (and layer source directories). It answers `403` for:

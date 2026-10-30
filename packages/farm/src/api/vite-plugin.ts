@@ -1,3 +1,4 @@
+import nodePath from "node:path";
 import { loadFarmDevModule } from "../dev-module";
 /**
  * Farm.js API Routes Vite Plugin
@@ -52,6 +53,11 @@ import {
 export interface FarmApiPluginOptions {
   /** Source directory containing the api folder (default: 'src') */
   srcDir?: string;
+  /**
+   * Directory of file API routes, relative to the project root. Defaults to `<srcDir>/api`;
+   * the RSC pipeline points it at `<routes dir>/api`, where its production server finds them.
+   */
+  apiDir?: string;
   /** Enable debug logging */
   debug?: boolean;
   /** Maximum request body size, for example `"10mb"`. */
@@ -81,6 +87,7 @@ export interface ApiRoute {
  */
 export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
   const srcDir = options.srcDir ?? "src";
+  const apiDirFromRoot = options.apiDir ?? nodePath.join(srcDir, "api");
   const debug = options.debug ?? false;
   const bodySizeLimit = resolveFarmServerConfig({
     bodySizeLimit: options.bodySizeLimit,
@@ -434,7 +441,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
       // Initialize discovery
       const initializeDiscovery = async () => {
         const path = await import("path");
-        const apiDir = path.join(server.config.root, srcDir, "api");
+        const apiDir = path.join(server.config.root, apiDirFromRoot);
         log(`Discovering API routes in: ${apiDir}`);
 
         await discoverFileRoutes(apiDir);
@@ -682,7 +689,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
         const previousState = snapshotRouteState();
         try {
           const path = await import("path");
-          const apiDir = path.join(server.config.root, srcDir, "api");
+          const apiDir = path.join(server.config.root, apiDirFromRoot);
           const relativePath = path.relative(apiDir, path.dirname(file));
           const routePath =
             "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));

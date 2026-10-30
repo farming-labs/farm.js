@@ -467,6 +467,58 @@ test("fails when docs are enabled without @farming-labs/docs", async () => {
   }
 });
 
+test("reports whether experimental.serverComponents runs React Server Components", async () => {
+  const root = await createTempProject();
+  const writeConfig = (lines) =>
+    writeFile(
+      path.join(root, "farm.config.mjs"),
+      ["export default {", "  experimental: { serverComponents: true },", ...lines, "};", ""].join(
+        "\n",
+      ),
+    );
+
+  try {
+    // Without the packages the app keeps running without RSC, and doctor says the fallback ends.
+    await writeConfig([]);
+    const fallback = await runFarmDoctor({ root, offline: true });
+    const fallbackCheck = fallback.checks.find(
+      (entry) => entry.code === "SERVER_COMPONENTS_FALLBACK",
+    );
+    assert.equal(fallbackCheck?.status, "warn");
+    assert.match(fallbackCheck?.message || "", /`farm dev` and `farm build` install them/);
+
+    for (const name of ["@farm.js/plugin", "@vitejs/plugin-rsc", "react-server-dom-webpack"]) {
+      const dir = path.join(root, "node_modules", ...name.split("/"));
+      await mkdir(dir, { recursive: true });
+      await writeFile(path.join(dir, "package.json"), JSON.stringify({ name, version: "1.0.0" }));
+    }
+    const ready = await runFarmDoctor({ root, offline: true });
+    assert.equal(
+      ready.checks.find((entry) => entry.code === "SERVER_COMPONENTS_READY")?.status,
+      "pass",
+    );
+
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      'export default { experimental: { serverComponents: { mode: "islands" } } };\n',
+    );
+    const islands = await runFarmDoctor({ root, offline: true });
+    assert.equal(
+      islands.checks.find((entry) => entry.code === "SERVER_COMPONENTS_ISLANDS")?.status,
+      "pass",
+    );
+
+    // Config RSC cannot run that decides what a request may receive stops it, as farm dev does.
+    await writeConfig(["  headers() { return []; },"]);
+    const blocked = await runFarmDoctor({ root, offline: true });
+    const blockedCheck = blocked.checks.find((entry) => entry.code === "SERVER_COMPONENTS_BLOCKED");
+    assert.equal(blockedCheck?.status, "fail");
+    assert.match(blockedCheck?.message || "", /does not run `headers` yet/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("skips optional feature packages the app does not use", async () => {
   const root = await createTempProject();
 

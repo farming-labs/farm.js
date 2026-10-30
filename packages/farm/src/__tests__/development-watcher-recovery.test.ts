@@ -74,8 +74,12 @@ describe("development watcher recovery", () => {
     });
     const serverModule = await server.environments.ssr.transformRequest("/src/app/counter.tsx");
     const clientModule = await server.environments.client.transformRequest("/src/app/counter.tsx");
-    expect(serverModule?.code).not.toContain("__FARM_REACT_ROOT__");
-    expect(clientModule?.code).toContain("__FARM_REACT_ROOT__");
+    expect(serverModule?.code).not.toContain("import.meta.hot");
+    expect(serverModule?.code).not.toContain("$RefreshReg$");
+    // React Fast Refresh owns client component updates; Farm must not also
+    // re-render the module's default export as the page root.
+    expect(clientModule?.code).toContain("validateRefreshBoundaryAndEnqueueUpdate");
+    expect(clientModule?.code).not.toContain("__FARM_REACT_ROOT__");
   });
 
   it("renders a page once its missing import is created, without touching the page", async () => {

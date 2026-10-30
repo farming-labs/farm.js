@@ -208,6 +208,134 @@ describe("production default MCP server", () => {
     });
   }, 240_000);
 
+  it("leaves pages a path-specific guard covers out of every public listing", async () => {
+    await withRoot(async (root) => {
+      const handler = await buildApp(
+        root,
+        {},
+        {
+          "farm.config.ts": `import { defineIntegration } from "@farm.js/core/integrations";
+export default {
+  agent: { llmsTxt: true },
+  // Guards covering every path name no page, so they hide nothing.
+  plugins: [{ name: "acme:observer", runtime: { before() {} } }],
+  middleware: [
+    { matcher: "/private/:path*", handler: () => new Response("sign in", { status: 401 }) },
+    { matcher: "/(.*)", handler: (_ctx, next) => next() },
+    { handler: (_ctx, next) => next() },
+  ],
+  integrations: {
+    auth: defineIntegration({
+      category: "auth",
+      type: "acme-auth",
+      instance: {},
+      middleware: [
+        { matcher: ["/members(.*)"], handler: () => new Response("members", { status: 401 }) },
+      ],
+    }),
+  },
+};
+`,
+          "src/app/private/notes/page.tsx": [
+            'export const metadata = { title: "Private notes" };',
+            "export default function Page() { return <p>notes</p>; }",
+          ].join("\n"),
+          "src/app/middleware.ts":
+            "export default async function middleware(_ctx, next) { await next(); }",
+          "src/app/staff/middleware.ts":
+            'export default async function middleware() { return new Response("staff", { status: 401 }); }',
+          "src/app/staff/page.tsx": [
+            'export const metadata = { title: "Staff roster" };',
+            "export default function Page() { return <p>staff</p>; }",
+          ].join("\n"),
+          "src/app/members/page.tsx": [
+            'export const metadata = { title: "Members area" };',
+            "export default function Page() { return <p>members</p>; }",
+          ].join("\n"),
+        },
+      );
+      const call = async (name: string, args: Record<string, unknown> = {}) =>
+        ((await (await handler.fetch(mcp("tools/call", { name, arguments: args }))).json()) as any)
+          .result;
+      const hidden = ["/private/notes", "/staff", "/members"];
+      const titles = ["Private notes", "Staff roster", "Members area"];
+
+      const listed = await call("list_pages");
+      expect(listed.structuredContent.pages.map((page: { path: string }) => page.path)).toEqual([
+        "/",
+        "/about",
+      ]);
+      for (const query of ["private", "staff", "members"]) {
+        expect(JSON.stringify(await call("search_pages", { query }))).not.toMatch(
+          /Private notes|Staff roster|Members area/,
+        );
+      }
+      expect(JSON.stringify(await call("search_pages", { query: "about" }))).toContain("/about");
+
+      for (const pathname of ["/sitemap.xml", "/llms.txt", "/llms-full.txt"]) {
+        const body = await (
+          await handler.fetch(new Request(`https://acme.test${pathname}`))
+        ).text();
+        for (const value of [...hidden.map((path) => `acme.test${path}`), ...titles]) {
+          expect({ pathname, leaks: body.includes(value) ? value : null }).toEqual({
+            pathname,
+            leaks: null,
+          });
+        }
+        expect(body).toContain("acme.test/about");
+      }
+    });
+  }, 240_000);
+
+  it("keeps the tools of an MCP server behind a path guard out of the public manifest", async () => {
+    await withRoot(async (root) => {
+      const handler = await buildApp(
+        root,
+        {},
+        {
+          "farm.config.ts": `import { _publishFarmMCPCatalog } from "@farm.js/core/api/runtime";
+// Stands in for apiMcp({ allowUnauthenticated: true }) servers published at startup.
+// The test unpublishes them: the registry is process-wide.
+globalThis.__farmTestUnpublish = [];
+for (const path of ["/api/guarded-mcp", "/api/open-mcp"]) {
+  globalThis.__farmTestUnpublish.push(_publishFarmMCPCatalog(
+    { name: path.slice(5), version: "1.0.0", path },
+    [{ name: "list_orders_" + path.slice(5, -4), kind: "standalone", readOnlyHint: true }],
+    { public: true, schemas: {} },
+  ));
+}
+export default {
+  middleware: [
+    { matcher: "/api/guarded-mcp", handler: () => new Response("sign in", { status: 401 }) },
+  ],
+};
+`,
+        },
+      );
+      const unpublish = () =>
+        ((globalThis as any).__farmTestUnpublish ?? [])
+          .splice(0)
+          .forEach((done: () => void) => done());
+      let manifest: any;
+      try {
+        manifest = await (
+          await handler.fetch(new Request("https://acme.test/.well-known/farmjs.json"))
+        ).json();
+      } finally {
+        unpublish();
+      }
+      const servers = Object.fromEntries(
+        manifest.mcp.servers.map((server: any) => [server.path, server]),
+      );
+      expect(servers["/api/guarded-mcp"]).toMatchObject({ authorization: "required", tools: [] });
+      expect(JSON.stringify(manifest)).not.toContain("list_orders_guarded");
+      expect(servers["/api/open-mcp"]).toMatchObject({
+        authorization: "none",
+        tools: [expect.objectContaining({ name: "list_orders_open" })],
+      });
+    });
+  }, 240_000);
+
   it("reads pages as a fresh anonymous request through the plugin runtime", async () => {
     await withRoot(async (root) => {
       const handler = await buildApp(

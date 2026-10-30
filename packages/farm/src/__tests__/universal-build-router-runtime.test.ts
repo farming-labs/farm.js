@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { getFarmIslandValueHeaders } from "../client/island-value-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FARM_HISTORY_CHANGE_EVENT } from "../client/history-sync";
 import {
@@ -658,11 +659,13 @@ describe("generated deployment navigation guard", () => {
   const createGuard = () =>
     new Function(
       "createFarmDeploymentMismatchError",
+      "getFarmIslandValueHeaders",
       "createFarmDeploymentRequestHeaders",
       "isFarmDeploymentMismatchResponse",
       `${generateUniversalRouterStateRuntime()}; return fetchFarmNavigationDocument;`,
     )(
       createFarmDeploymentMismatchError,
+      getFarmIslandValueHeaders,
       createFarmDeploymentRequestHeaders,
       isFarmDeploymentMismatchResponse,
     ) as (url: string, headers: HeadersInit, recover?: boolean) => Promise<Response>;

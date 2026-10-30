@@ -12,6 +12,8 @@ Run request behavior before routes, pass request-scoped data to pages, and short
 
 Farm runs middleware in development and production builds. For every request, Farm finds matching `farm.config.ts` middleware entries first, then matching `src/app/**/middleware.ts` files from the root segment down to the route segment.
 
+Files in `public/` are served as static assets before any middleware or plugin runtime hook runs, so a guard never sees them. Serve a file that needs protection from an API route or page instead.
+
 Apps with `experimental.serverComponents` run both middleware forms through the same request
 pipeline. Farm extracts an explicit `middleware` property, from `farm.config.ts` or from
 `defineConfig` from `@farm.js/plugin/rsc` in `vite.config.ts`, and the imports and local bindings it
@@ -231,6 +233,19 @@ Matchers can be strings, regular expressions, or functions. String matchers supp
 | `/admin*`              | `/admin`, `/admin-panel`, but not `/admin/users`                 |
 | `/auth(.*)`            | `/auth` and nested auth paths                                    |
 
+String matchers are not regular expressions. A string that uses other
+regular-expression syntax, such as the Next.js-style
+`/((?!api|_next/static|_next/image|favicon.ico).*)` or `/(api|trpc)(.*)`, a
+`.*` such as `/admin/.*`, or a param after literal text such as `/user-:id`, fails
+when Farm loads the middleware (`farm dev`, `farm build`, and server startup)
+instead of silently matching nothing. Pass a `RegExp` for those cases:
+
+```ts
+export const config = {
+  matcher: [/^\/(?!api|_next\/static|_next\/image|favicon\.ico).*/, "/api/:path*"],
+};
+```
+
 Matchers are compared against the same pathname the router resolves the request
 to: each segment is decoded once, so `/%64ashboard` meets a `/dashboard` matcher
 exactly like `/dashboard` does. This is what makes a matcher safe to gate access
@@ -244,6 +259,30 @@ same handler as `/api/admin/users`, so a `/api/admin/users` matcher runs for bot
 That pathname is relative to the app's `basePath`. With `basePath: "/console"`, a request for
 `/console/dashboard` meets a `/dashboard` matcher and runs `src/app/dashboard/middleware.ts`;
 leave the base path out of matchers.
+
+`ctx.routePathname` is that pathname: decoded once, without the base path or locale prefix, and
+updated by `ctx.rewrite()`. `ctx.pathname` stays the request path as it arrived, still encoded and
+still carrying both. Compare `ctx.routePathname` in function matchers and `.when()` conditions:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  middleware: [
+    {
+      matcher: (ctx) => ctx.routePathname.startsWith("/api/admin"),
+      handler(ctx) {
+        ctx.json({ error: "Unauthorized" }, 401);
+      },
+    },
+  ],
+});
+```
+
+A function matcher or `.when()` condition that reads `ctx.pathname` is also checked against the
+route pathname, and the middleware runs when either check passes, so `/%61pi/admin` and
+`/console/api/admin` cannot skip a guard written for `/api/admin`. Keep these predicates free of side
+effects; Farm may call them more than once per request.
 
 When a matcher has params, the handler can read them from `ctx.params`.
 
@@ -413,6 +452,41 @@ The production middleware runtime is easiest to verify with a tiny app fixture t
 
 Farm's own test suite keeps this as a reusable helper at `packages/farm/src/__tests__/fixtures/middleware-production-fixture.ts`.
 
+## Caching
+
+A CDN serves its copy of a page without running middleware, so Farm treats every middleware that
+matched a request as a possible guard: in production its response is sent with
+`Cache-Control: private, no-store` instead of the page's shared policy (`s-maxage`, a CDN
+directive, or a Nitro `swr` rule's header). This applies to config middleware, middleware files
+(including a root `src/app/middleware.ts`), and integration guards such as `protectedRoutes`. An
+`@farm.js/plugin/rsc` app applies the same rule to its config and file middleware. Responses the
+middleware returns itself keep their own headers.
+
+Set `cache: "public"` on middleware that never decides who may read a response, such as logging or
+headers, to keep the route's shared caching:
+
+```ts
+// farm.config.ts
+middleware: [
+  {
+    matcher: "/:path*",
+    cache: "public",
+    handler(ctx) {
+      ctx.headers.set("x-request-id", crypto.randomUUID());
+    },
+  },
+];
+```
+
+```ts
+// src/app/middleware.ts
+export const config = { cache: "public" };
+```
+
+A response is shareable again only when every middleware that matched it declares
+`cache: "public"`. A shared cache answers later visitors without running it, so never set it on
+an IP allowlist, API key check, or other guard. See [Responses behind middleware](/docs/cache-ppr#responses-behind-middleware).
+
 ## Common uses
 
 | Use case        | Pattern                                                        |
@@ -427,6 +501,7 @@ Farm's own test suite keeps this as a reusable helper at `packages/farm/src/__te
 - `farm.config.ts` middleware and `src/app/**/middleware.ts` files both run in production builds.
 - Request-first named exports and default Farm handlers use the same matcher, cascading, response, and production runtime.
 - Responses that depend on middleware data or server context are marked private and bypass PPR shell caching.
+- A response any middleware let through is sent with `Cache-Control: private, no-store`, so a CDN never serves a guarded page to another visitor. Middleware that decides nothing about access can declare `cache: "public"` to keep shared caching; see [Caching](#caching).
 - Keep secrets server-only inside middleware.
 - Put secrets and non-serializable dependencies in server context; expose only safe page data through `ctx.data` or `context.data`.
 - Middleware is useful for early redirects, but API handlers and server functions must still enforce their own authorization.

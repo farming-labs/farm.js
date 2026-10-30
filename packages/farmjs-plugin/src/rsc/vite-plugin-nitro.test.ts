@@ -50,9 +50,16 @@ describe("vite-plugin-nitro (standalone nitro() plugin)", () => {
     expect(typeof plugin.config).toBe("function");
 
     const result = plugin.config();
+    // Server entries keep the `index.js` name the Nitro build imports, whatever the app's
+    // package type would make Vite choose.
+    const serverOutput = { output: { entryFileNames: "[name].js" } };
     expect(result.environments).toEqual({
-      rsc: { build: { outDir: path.join(".nitro/vite/dist", "rsc") } },
-      ssr: { build: { outDir: path.join(".nitro/vite/dist", "ssr") } },
+      rsc: {
+        build: { outDir: path.join(".nitro/vite/dist", "rsc"), rolldownOptions: serverOutput },
+      },
+      ssr: {
+        build: { outDir: path.join(".nitro/vite/dist", "ssr"), rolldownOptions: serverOutput },
+      },
       client: { build: { outDir: path.join(".nitro/vite/dist", "client") } },
     });
   });

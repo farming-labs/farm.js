@@ -388,6 +388,13 @@ export interface FarmPluginRuntimeHooks<
 > {
   /** Exact request endpoints owned by this plugin. */
   endpoints?: readonly FarmPluginRuntimeEndpoint<TState, TIntegrationInstance, TIntegrationBound>[];
+  /**
+   * Whether a response `before` lets through may be stored by a shared cache (a CDN). `before`
+   * runs for every request and may be a guard, so by default (`"private"`) Farm sends those
+   * responses with `Cache-Control: private, no-store`. Set `"public"` when `before` never
+   * decides who may read a response, as for logging or analytics.
+   */
+  cache?: "private" | "public";
   start?(
     event: FarmPluginRuntimeEventFor<
       FarmPluginRuntimeStartEvent<TState, TIntegrationInstance>,
@@ -1359,6 +1366,66 @@ export class PluginManager {
     return this.runtimeClosePromise;
   }
 
+  private async runBeforeHooks(
+    request: Request,
+    options: FarmPluginRuntimeRequestOptions,
+    waitUntil: (promise: Promise<unknown>) => void,
+    ctx: Readonly<Record<string, unknown>>,
+  ): Promise<{ request: Request; response?: Response }> {
+    let activeRequest = request;
+    for (const plugin of this.getSortedPlugins()) {
+      const before = plugin.runtime?.before;
+      if (!before) continue;
+
+      const result = await before({
+        ...this.createRuntimeBaseEvent(plugin, activeRequest, options, waitUntil),
+        ctx,
+      });
+
+      if (result instanceof Request) {
+        this.copyRequestStore(activeRequest, result);
+        this.copyRuntimeRequestContext(activeRequest, result);
+        activeRequest = result;
+        continue;
+      }
+      if (result instanceof Response) {
+        return { request: activeRequest, response: result };
+      }
+      if (result !== undefined) {
+        throw new TypeError(
+          `Farm plugin "${plugin.name}" runtime.before must return a Request, Response, or undefined`,
+        );
+      }
+    }
+    return { request: activeRequest };
+  }
+
+  /**
+   * Runs only `runtime.before` for a request Farm re-routed internally, such as
+   * a configured rewrite, so guards also see the destination URL. The session
+   * opened for `source` keeps its context; context and after hooks don't rerun.
+   */
+  async runRuntimeBeforeForRewrite(
+    source: Request,
+    request: Request,
+    options: FarmPluginRuntimeRequestOptions = {},
+  ): Promise<Request | Response> {
+    if (!this.hasRuntimeHook("before")) return request;
+    this.copyRequestContext(source, request);
+    const waitUntil = options.waitUntil
+      ? (promise: Promise<unknown>) => options.waitUntil?.(Promise.resolve(promise))
+      : (promise: Promise<unknown>) => {
+          void Promise.resolve(promise).catch(() => {});
+        };
+    const result = await this.runBeforeHooks(
+      request,
+      options,
+      waitUntil,
+      this.runtimeRequestContexts.get(request) ?? Object.freeze({}),
+    );
+    return result.response ?? result.request;
+  }
+
   async beginRuntimeRequest(
     request: Request,
     options: FarmPluginRuntimeRequestOptions = {},
@@ -1401,36 +1468,17 @@ export class PluginManager {
         waitUntil,
       );
 
-      let response: Response | undefined;
-      for (const plugin of this.getSortedPlugins()) {
-        const before = plugin.runtime?.before;
-        if (!before) continue;
-
-        const result = await before({
-          ...this.createRuntimeBaseEvent(plugin, activeRequest, activeOptions, waitUntil),
-          ctx: runtimeContext,
-        });
-
-        if (result instanceof Request) {
-          this.copyRequestStore(activeRequest, result);
-          this.copyRuntimeRequestContext(activeRequest, result);
-          activeRequest = result;
-          continue;
-        }
-        if (result instanceof Response) {
-          response = result;
-          break;
-        }
-        if (result !== undefined) {
-          throw new TypeError(
-            `Farm plugin "${plugin.name}" runtime.before must return a Request, Response, or undefined`,
-          );
-        }
-      }
+      const before = await this.runBeforeHooks(
+        activeRequest,
+        activeOptions,
+        waitUntil,
+        runtimeContext,
+      );
+      activeRequest = before.request;
 
       return {
         request: activeRequest,
-        response,
+        response: before.response,
         ctx: runtimeContext,
         startedAt,
         options: activeOptions,
@@ -1968,4 +2016,3 @@ export namespace definePlugin {
     };
   }
 }
-export { farmPlugin } from "./vite";

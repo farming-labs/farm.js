@@ -41,6 +41,13 @@ function renderFarmClientBootstrapScript(
   );
 }
 
+function renderFarmClientEntryScript(): string {
+  return '<script type="module" src="/__farm_client_js_src__"></script>';
+}
+
+const MODULE_PRELOAD_TAGS =
+  '\n  <link rel="modulepreload" href="/chunks/react-h1.js" fetchpriority="low">';
+
 function createInjector(viewportTags = renderViewportHead(undefined)) {
   const inject = new Function(
     "html",
@@ -56,9 +63,20 @@ function createInjector(viewportTags = renderViewportHead(undefined)) {
     "renderFarmRendererHydrationScript",
     "ensureFarmDocumentMeta",
     "viewportTags",
+    "renderFarmClientEntryScript",
+    "renderFarmClientModulePreloads",
+    "route",
     "let fullHtml;\n" + extractEmittedFullDocumentInjection() + "\nreturn fullHtml;",
   );
-  return ((...args: unknown[]) => inject(...args, ensureFarmDocumentMeta, viewportTags)) as (
+  return ((...args: unknown[]) =>
+    inject(
+      ...args,
+      ensureFarmDocumentMeta,
+      viewportTags,
+      renderFarmClientEntryScript,
+      () => MODULE_PRELOAD_TAGS,
+      { clientModule: undefined },
+    )) as (
     html: string,
     title: string,
     metaTags: string,
@@ -206,6 +224,10 @@ describe("generated full-document injection", () => {
       '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" data-farm-metadata>',
     );
     expect(head).toContain('<meta name="theme-color" content="#fff" data-farm-metadata>');
+    // The client entry's module preloads follow the stylesheet in the layout's own head.
+    expect(head).toContain(
+      '<link rel="stylesheet" href="/__farm_client_css_href__">' + MODULE_PRELOAD_TAGS,
+    );
   });
 
   it("keeps the charset and viewport a layout's document writes itself", () => {

@@ -90,6 +90,7 @@ const testSource = String.raw`
     keyedRowsFilterOnlyRuntimeFeature,
     keyedRowsPrependOnlyRuntimeFeature,
     keyedRowsPlainReorderHintedRuntimeFeature,
+    keyedRowsPlainMapReorderHintedRuntimeFeature,
     keyedRowsHintedRuntimeFeature,
     keyedRowsStructuralAppendMapHintedRuntimeFeature,
     keyedRowsIdentityRuntimeFeature,
@@ -1130,6 +1131,67 @@ const testSource = String.raw`
       }
     }
   }
+
+  assert.equal(createRequire(import.meta.url)("@farm.js/react/compiler-runtime").keyedRowsPlainMapReorderHintedRuntimeFeature.name, "keyed-rows:plain-map-reorder-hinted");
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  for (const reactivity of ["hybrid", "static"]) {
+    for (const hydrate of [false, true]) {
+      let update;
+      const PlainMapReorder = createCompiledComponentWithFeatures({
+        displayName: "CompatibilityPlainMapReorder", reactivity,
+        initialize: () => [[{id: "a", label: "Alpha"}, {id: "b", label: "Beta"}]],
+        render(_props, state, blocks) {
+          const items = () => state[0].get();
+          update = next => state[0].set(next);
+          return React.createElement("main", null, React.createElement(blocks.KeyedRows, {
+            id: 0, collectionDependency: 0, dependencies: [0], structureDependencies: [0],
+            reorderIndexIndependent: true, items, rowKey: item => item.id,
+            bindings: [{kind: "attribute", name: "value", path: [], read: item => item.label}],
+            create: item => ({kind: "element", tag: "input", attributes: [
+              {name: "value", value: item.label}, {name: "readOnly", value: true},
+            ], styles: [], children: []}),
+            render: () => React.createElement("div", null, items().map(item => React.createElement("input", {key: item.id, value: item.label, readOnly: true}))),
+          }));
+        },
+        bindings: [{kind: "block", id: 0, dependencies: [0]}],
+      }, [keyedRowsPlainMapReorderHintedRuntimeFeature]);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const tree = React.createElement(React.StrictMode, null, React.createElement(PlainMapReorder));
+      const errors = [];
+      if (hydrate) container.innerHTML = renderToString(tree);
+      const serverNodes = [...container.querySelectorAll("input")];
+      let root;
+      try {
+        await React.act(async () => {
+          root = hydrate ? hydrateRoot(container, tree, {onRecoverableError: error => errors.push(error)}) : createRoot(container);
+          if (!hydrate) root.render(tree);
+        });
+        const nodes = [...container.querySelectorAll("input")];
+        if (hydrate) assert.deepEqual(nodes, serverNodes);
+        nodes[1].focus(); nodes[1].setSelectionRange(1, 3);
+        await React.act(async () => {
+          update(previous => {
+            const mapped = createCompilerKeyedArrayMapPipeline(previous, previous.map, item => item.id === "a" ? {...item, label: "Alpha edited"} : item);
+            return createCompilerKeyedArrayMapReorder(mapped, mapped.toReversed);
+          });
+          await Promise.resolve(); await Promise.resolve();
+        });
+        assert.deepEqual([...container.querySelectorAll("input")], [nodes[1], nodes[0]]);
+        assert.deepEqual([...container.querySelectorAll("input")].map(input => input.value), ["Beta", "Alpha edited"]);
+        assert.equal(document.activeElement, nodes[1]);
+        assert.deepEqual([nodes[1].selectionStart, nodes[1].selectionEnd], [1, 3]);
+        await React.act(async () => update([{id: "c", label: "Replacement"}]));
+        assert.equal(container.querySelector("input").value, "Replacement");
+        assert.equal(nodes[0].isConnected, false);
+        assert.deepEqual(errors, []);
+      } finally {
+        await React.act(async () => root?.unmount());
+        container.remove();
+      }
+    }
+  }
+  delete globalThis.IS_REACT_ACT_ENVIRONMENT;
 
   let reverseCompatibilityRows = () => undefined;
   let mapReverseParityCompatibilityRows = () => undefined;

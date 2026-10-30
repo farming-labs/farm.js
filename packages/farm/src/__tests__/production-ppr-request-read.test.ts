@@ -52,6 +52,33 @@ import { visitor } from "../../lib/visitor";
 export const experimental_ppr = true;
 export default function Page() { return <p>{"user=" + visitor()}</p>; }
 `,
+  "src/lib/visitor-fns.ts": `
+import { createServerFn } from "@farm.js/core/server-fn";
+import { createServerQuery } from "@farm.js/core/server-query";
+export const visitorFn = createServerFn({
+  handler: ({ request }) => request?.headers.get("x-user") ?? "anon",
+});
+export const visitorQuery = createServerQuery({
+  key: () => ["visitor"],
+  handler: ({ request }) => request?.headers.get("x-user") ?? "anon",
+});
+export const greetingFn = createServerFn({ handler: () => "hello" });
+`,
+  "src/app/ppr-fn/page.tsx": `
+import { visitorFn } from "../../lib/visitor-fns";
+export const experimental_ppr = true;
+export default async function Page() { return <p>{"user=" + (await visitorFn())}</p>; }
+`,
+  "src/app/ppr-query/page.tsx": `
+import { visitorQuery } from "../../lib/visitor-fns";
+export const experimental_ppr = true;
+export default async function Page() { return <p>{"user=" + (await visitorQuery())}</p>; }
+`,
+  "src/app/ppr-fn-static/page.tsx": `
+import { greetingFn } from "../../lib/visitor-fns";
+export const experimental_ppr = true;
+export default async function Page() { return <p>{"static " + (await greetingFn())}</p>; }
+`,
   "src/app/ppr-static/page.tsx": `
 export const experimental_ppr = true;
 export default function Page() { return <p>static shell</p>; }
@@ -143,7 +170,7 @@ describe("production PPR and ISR renders that read the request", () => {
     if (root) await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  it.each(["/ppr-page", "/ppr-helper"])(
+  it.each(["/ppr-page", "/ppr-helper", "/ppr-fn", "/ppr-query"])(
     "never serves one visitor's %s render to the next from the PPR shell cache",
     async (pathname) => {
       const alice = await visit(pathname, "alice");
@@ -163,6 +190,13 @@ describe("production PPR and ISR renders that read the request", () => {
     await visit("/ppr-static");
     const second = await visit("/ppr-static");
     expect(second.html).toContain("static shell");
+    expect(second.headers.get("x-farm-ppr")).toBe("hit");
+  });
+
+  it("still caches a PPR shell whose server function leaves the request alone", async () => {
+    await visit("/ppr-fn-static", "alice");
+    const second = await visit("/ppr-fn-static", "bob");
+    expect(second.html).toContain("static hello");
     expect(second.headers.get("x-farm-ppr")).toBe("hit");
   });
 

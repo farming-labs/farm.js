@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { getFarmIslandValueHeaders } from "../client/island-value-protocol";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClientCancellation } from "../client-cancellation";
@@ -59,6 +60,7 @@ for (const [index, renderer] of ["html", "react"].entries()) {
         "createFarmDeploymentRequestHeaders",
         "isFarmDeploymentMismatchResponse",
         "createFarmDeploymentMismatchError",
+        "getFarmIslandValueHeaders",
         `
           const isFarmExternalNavigationURL = () => false;
           const isFarmBlockedNavigationURL = () => false;
@@ -83,6 +85,7 @@ for (const [index, renderer] of ["html", "react"].entries()) {
         createFarmDeploymentRequestHeaders,
         isFarmDeploymentMismatchResponse,
         createFarmDeploymentMismatchError,
+        getFarmIslandValueHeaders,
       );
       const fetch = vi.fn().mockResolvedValue(redirectedResponse());
       vi.stubGlobal("fetch", fetch);

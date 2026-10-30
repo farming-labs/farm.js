@@ -990,6 +990,178 @@ test("keeps a name an authenticated gateway session owns out of relay claims", a
   }
 });
 
+// Token "alice-grant"/"mallory-grant" stand in for name-bound grants of two accounts.
+const ownerAuthorizer = ({ token }) =>
+  token === "alice-grant" || token === "mallory-grant"
+    ? { ownerId: `device:${token.split("-")[0]}` }
+    : false;
+
+test("binds a relay name to its owner while held and for the reservation window", async () => {
+  const relay = createPersistentPreviewRelay({
+    authorizeAgent: ownerAuthorizer,
+    nameReservationMs: 200,
+  });
+  const address = await relay.listen();
+
+  try {
+    const alice = await openRegistration(address.websocketUrl, "alice-grant", "acme");
+    assert.equal(alice.payload.type, "ready");
+    assert.equal(await relay.isPreviewNameClaimed("acme", "device:mallory"), true);
+    assert.equal(await relay.isPreviewNameClaimed("acme"), true);
+    // The owner's CLI may fall back to polling with the same grant.
+    assert.equal(await relay.isPreviewNameClaimed("acme", "device:alice"), false);
+    assert.match(
+      (
+        await attemptRegistration(address.websocketUrl, {
+          type: "register",
+          name: "acme",
+          token: "mallory-grant",
+        })
+      ).error.message,
+      /already active/,
+    );
+
+    // Alice's socket drops. Another account cannot take the hostname (and the
+    // visitors' cookies) before she reconnects.
+    alice.socket.close();
+    await once(alice.socket, "close");
+    await waitFor(
+      async () => (await (await fetch(`${address.httpUrl}/api/health`)).json()).agents === 0,
+    );
+    assert.equal(await relay.isPreviewNameClaimed("acme", "device:mallory"), true);
+    const refused = await attemptRegistration(address.websocketUrl, {
+      type: "register",
+      name: "acme",
+      token: "mallory-grant",
+    });
+    assert.match(refused.error.message, /already active/);
+    assert.equal(refused.code, 1008);
+
+    // The same owner reconnects inside the window.
+    const reconnected = await attemptRegistration(address.websocketUrl, {
+      type: "register",
+      name: "acme",
+      token: "alice-grant",
+    });
+    assert.equal(reconnected.ready.type, "ready");
+
+    // After the window the name is free for another account.
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    assert.equal(await relay.isPreviewNameClaimed("acme", "device:mallory"), false);
+    const mallory = await attemptRegistration(address.websocketUrl, {
+      type: "register",
+      name: "acme",
+      token: "mallory-grant",
+    });
+    assert.equal(mallory.ready.type, "ready");
+  } finally {
+    await relay.close();
+  }
+});
+
+test("keeps a dropped name reserved for its owner across relay instances", async () => {
+  const coordinator = new MemoryRelayCoordinator();
+  coordinator.takeRequest = (_id, timeoutMs) =>
+    new Promise((resolve) => setTimeout(() => resolve(undefined), Math.min(timeoutMs, 20)));
+  const options = {
+    authorizeAgent: ownerAuthorizer,
+    coordinator,
+    coordinatorSessionTtlMs: 150,
+    nameReservationMs: 5_000,
+  };
+  const relayA = createPersistentPreviewRelay(options);
+  const relayB = createPersistentPreviewRelay(options);
+  const [addressA, addressB] = await Promise.all([relayA.listen(), relayB.listen()]);
+
+  try {
+    const alice = await openRegistration(addressA.websocketUrl, "alice-grant", "acme");
+    assert.equal(alice.payload.type, "ready");
+    assert.equal(await relayB.isPreviewNameClaimed("acme", "device:mallory"), true);
+    assert.equal(await relayB.isPreviewNameClaimed("acme", "device:alice"), false);
+    alice.socket.close();
+    await once(alice.socket, "close");
+    await waitFor(async () => !(await coordinator.findSession("acme")));
+
+    // The other instance never saw Alice's session, but the binding is shared.
+    assert.equal(await relayB.isPreviewNameClaimed("acme", "device:mallory"), true);
+    assert.equal(await relayB.isPreviewNameClaimed("acme", "device:alice"), false);
+    const refused = await attemptRegistration(addressB.websocketUrl, {
+      type: "register",
+      name: "acme",
+      token: "mallory-grant",
+    });
+    assert.match(refused.error.message, /already active/);
+    const reconnected = await attemptRegistration(addressB.websocketUrl, {
+      type: "register",
+      name: "acme",
+      token: "alice-grant",
+    });
+    assert.equal(reconnected.ready.type, "ready");
+  } finally {
+    await Promise.all([relayA.close(), relayB.close()]);
+  }
+});
+
+test("passes the owner to the other transport's check and fails closed when it errors", async () => {
+  const asked = [];
+  let answer = false;
+  const coordinator = new MemoryRelayCoordinator();
+  coordinator.takeRequest = () => new Promise(() => {});
+  const relay = createPersistentPreviewRelay({
+    authorizeAgent: ownerAuthorizer,
+    coordinator,
+    isPreviewNameClaimed(name, ownerId) {
+      asked.push([name, ownerId]);
+      // The relay's claim is visible before it asks, so concurrent claims on
+      // the two transports cannot both win.
+      assert.ok(coordinator.sessions.has(name));
+      if (answer === "throw") throw new Error("gateway store down");
+      return answer;
+    },
+  });
+  const address = await relay.listen();
+
+  try {
+    answer = "throw";
+    const failed = await attemptRegistration(address.websocketUrl, {
+      type: "register",
+      name: "acme",
+      token: "alice-grant",
+    });
+    assert.match(failed.error.message, /already active/);
+    assert.deepEqual(asked, [["acme", "device:alice"]]);
+    // The losing claim is released instead of blocking the name until it expires.
+    assert.equal(await coordinator.findSession("acme"), undefined);
+
+    answer = false;
+    const accepted = await attemptRegistration(address.websocketUrl, {
+      type: "register",
+      name: "acme",
+      token: "alice-grant",
+    });
+    assert.equal(accepted.ready.type, "ready");
+  } finally {
+    await relay.close();
+  }
+});
+
+async function openRegistration(url, token, name) {
+  const socket = new WebSocket(url);
+  await once(socket, "open");
+  const nextMessage = once(socket, "message");
+  socket.send(JSON.stringify({ type: "register", name, token }));
+  const [data] = await nextMessage;
+  return { socket, payload: JSON.parse(data.toString()) };
+}
+
+async function waitFor(check, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error("Timed out waiting for the relay.");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 test("rejects a cross-origin agent upgrade", async () => {
   const relay = createPersistentPreviewRelay({ registrationToken: RELAY_TOKEN });
   const address = await relay.listen();
@@ -1160,6 +1332,17 @@ class MemoryRelayCoordinator {
   async releaseSession(session) {
     this.releaseCalls += 1;
     if (this.sessions.get(session.name)?.id === session.id) this.sessions.delete(session.name);
+  }
+
+  owners = new Map();
+
+  async reserveName(name, ownerId, ttlMs) {
+    this.owners.set(name, { ownerId, expiresAt: Date.now() + ttlMs });
+  }
+
+  async findNameOwner(name) {
+    const owner = this.owners.get(name);
+    return owner && owner.expiresAt > Date.now() ? owner.ownerId : undefined;
   }
 
   async publishRequest(sessionId, request) {

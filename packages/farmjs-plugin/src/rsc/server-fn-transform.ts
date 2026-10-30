@@ -16,15 +16,130 @@ const EXPORT_BINDING_ALIAS_RE =
 const MODULE_EXT_RE = /\.[cm]?[jt]sx?$/;
 const DECLARATION_RE = /(^|\n)\s*["']([^"']+)["']\s*;?/g;
 
+/**
+ * Query that marks the generated "use server" boundary of a module whose server
+ * functions were found implicitly. Only the server functions are exported from
+ * it, so @vitejs/plugin-rsc registers nothing else from the source module.
+ */
+export const FARM_SERVER_FN_BOUNDARY_QUERY = "?farm-server-fns";
+
+export type FarmServerFnTransformOptions = {
+  /** Vite environment being transformed. Anything other than "rsc" gets the client view. */
+  environment?: string;
+};
+
 export type FarmServerFnTransformResult = {
   code: string;
   exports: string[];
 };
 
+type ServerFnExport = {
+  exportName: string;
+  privateName: string;
+  wrapperName: string;
+};
+
 export function transformFarmServerFns(
   code: string,
   id: string,
+  options: FarmServerFnTransformOptions = {},
 ): FarmServerFnTransformResult | null {
+  const analysis = analyzeServerFnModule(code, id);
+  if (!analysis) return null;
+  const { replacements } = analysis;
+  const exports = replacements.map((replacement) => replacement.exportName);
+
+  // An explicit module directive is the app saying every export is an action.
+  if (hasModuleDirective(code, "use server")) {
+    return { code: applyReplacements(code, replacements, "wrapper"), exports };
+  }
+
+  // Without one, only the server functions may become actions. A module-level
+  // "use server" here would make @vitejs/plugin-rsc register every exported
+  // async function, so a plain helper next to a server function would be
+  // callable by id, skipping the server function's middleware. Route the
+  // server functions through a generated boundary module instead.
+  const boundaryId = JSON.stringify(serverFnBoundaryId(id));
+  if (options.environment !== undefined && options.environment !== "rsc") {
+    // Client and SSR builds only need the action references.
+    return {
+      code: `export { ${exports.join(", ")} } from ${boundaryId};\n`,
+      exports,
+    };
+  }
+
+  const imports = replacements.map((replacement) =>
+    replacement.exportName === "default"
+      ? "default as $$farm_server_fn_boundary_default"
+      : replacement.exportName,
+  );
+  const reExports = replacements.map((replacement) =>
+    replacement.exportName === "default"
+      ? "$$farm_server_fn_boundary_default as default"
+      : replacement.exportName,
+  );
+  const privateNames = replacements.map((replacement) => replacement.privateName);
+  return {
+    code:
+      applyReplacements(code, replacements, "private") +
+      `\nimport { ${imports.join(", ")} } from ${boundaryId};` +
+      `\nexport { ${[...reExports, ...privateNames].join(", ")} };\n`,
+    exports,
+  };
+}
+
+/**
+ * Source of the generated boundary for a module without an explicit
+ * "use server". Its wrappers call the source module's private bindings lazily,
+ * so the import cycle between the two modules is safe in any load order.
+ */
+export function createFarmServerFnBoundaryModule(code: string, id: string): string | null {
+  if (hasModuleDirective(code, "use server")) return null;
+  const analysis = analyzeServerFnModule(code, id);
+  if (!analysis) return null;
+
+  const sourceId = JSON.stringify(id.split("?", 1)[0]!.replace(/\\/g, "/"));
+  const privateNames = analysis.replacements.map((replacement) => replacement.privateName);
+  let output = `"use server";\nimport { ${privateNames.join(", ")} } from ${sourceId};\n`;
+  for (const replacement of analysis.replacements) {
+    const declaration =
+      replacement.exportName === "default"
+        ? "export default async function"
+        : "export async function";
+    output +=
+      `${declaration} ${replacement.wrapperName}(input) {\n  return ${replacement.privateName}(input);\n}\n` +
+      `${copyServerFunctionDescriptor(replacement.wrapperName, replacement.privateName, true)}\n`;
+  }
+  return output;
+}
+
+export function isFarmServerFnBoundaryId(id: string) {
+  return /[?&]farm-server-fns(?:&|$)/.test(id);
+}
+
+function serverFnBoundaryId(id: string) {
+  return `${id.split("?", 1)[0]!.replace(/\\/g, "/")}${FARM_SERVER_FN_BOUNDARY_QUERY}`;
+}
+
+function applyReplacements(
+  code: string,
+  replacements: Array<ServerFnExport & { start: number; end: number; callExpression: string }>,
+  mode: "wrapper" | "private",
+) {
+  let output = code;
+  for (const replacement of [...replacements].sort((a, b) => b.start - a.start)) {
+    const declaration = `const ${replacement.privateName} = ${replacement.callExpression};\n`;
+    const wrapper =
+      mode === "private"
+        ? ""
+        : `${replacement.exportName === "default" ? "export default async function" : "export async function"} ${replacement.wrapperName}(input) {\n  return ${replacement.privateName}(input);\n}\n${copyServerFunctionDescriptor(replacement.wrapperName, replacement.privateName, false)}`;
+    output =
+      output.slice(0, replacement.start) + declaration + wrapper + output.slice(replacement.end);
+  }
+  return output;
+}
+
+function analyzeServerFnModule(code: string, id: string) {
   if (
     !isTransformableModule(id) ||
     (!code.includes("createServerFn") && !code.includes("createServerQuery"))
@@ -63,19 +178,7 @@ export function transformFarmServerFns(
     );
   }
 
-  let output = code;
-  for (const replacement of [...replacements].sort((a, b) => b.start - a.start)) {
-    output = output.slice(0, replacement.start) + replacement.code + output.slice(replacement.end);
-  }
-
-  if (!hasModuleDirective(output, "use server")) {
-    output = `"use server";\n${output}`;
-  }
-
-  return {
-    code: output,
-    exports: replacements.map((replacement) => replacement.exportName),
-  };
+  return { replacements };
 }
 
 function isTransformableModule(id: string) {
@@ -252,12 +355,9 @@ function stripCommentsAndStrings(code: string): string {
 }
 
 function findServerFnExportReplacements(code: string, factoryNames: Map<string, "fn" | "query">) {
-  const replacements: Array<{
-    start: number;
-    end: number;
-    code: string;
-    exportName: string;
-  }> = [];
+  const replacements: Array<
+    ServerFnExport & { start: number; end: number; callExpression: string }
+  > = [];
 
   for (const match of code.matchAll(EXPORT_SERVER_FUNCTION_FACTORY_RE)) {
     const exportName = match[1];
@@ -274,19 +374,18 @@ function findServerFnExportReplacements(code: string, factoryNames: Map<string, 
     if (code[declarationEnd] === ";") declarationEnd++;
 
     const calleeIndex = code.indexOf(calleeName, match.index);
-    const callExpression = code.slice(calleeIndex, callEnd + 1);
-    const privateName = `$$farm_server_${factory}_${exportName}`;
-
     replacements.push({
       start: match.index ?? 0,
       end: declarationEnd,
       exportName,
-      code: `const ${privateName} = ${callExpression};\nexport async function ${exportName}(input) {\n  return ${privateName}(input);\n}\n${copyServerFunctionDescriptor(exportName, privateName)}`,
+      privateName: `$$farm_server_${factory}_${exportName}`,
+      wrapperName: exportName,
+      callExpression: code.slice(calleeIndex, callEnd + 1),
     });
   }
 
   // `export default createServerFn(...)` needs the same treatment. Without it the
-  // module gets no "use server" directive and its handler ships to the client.
+  // module gets no server boundary and its handler ships to the client.
   for (const match of code.matchAll(EXPORT_DEFAULT_SERVER_FUNCTION_FACTORY_RE)) {
     const calleeName = match[1];
     const factory = calleeName ? factoryNames.get(calleeName) : undefined;
@@ -301,14 +400,14 @@ function findServerFnExportReplacements(code: string, factoryNames: Map<string, 
     if (code[declarationEnd] === ";") declarationEnd++;
 
     const calleeIndex = code.indexOf(calleeName, match.index);
-    const callExpression = code.slice(calleeIndex, callEnd + 1);
     const privateName = `$$farm_server_${factory}_default`;
-
     replacements.push({
       start: match.index ?? 0,
       end: declarationEnd,
       exportName: "default",
-      code: `const ${privateName} = ${callExpression};\nexport default async function ${privateName}_export(input) {\n  return ${privateName}(input);\n}\n${copyServerFunctionDescriptor(`${privateName}_export`, privateName)}`,
+      privateName,
+      wrapperName: `${privateName}_export`,
+      callExpression: code.slice(calleeIndex, callEnd + 1),
     });
   }
 
@@ -318,11 +417,14 @@ function findServerFnExportReplacements(code: string, factoryNames: Map<string, 
 /**
  * The exported wrapper replaces the factory's function, so it would lose the internal descriptor
  * that MCP and other non-browser callers read. Copy only that descriptor: the other server
- * function markers stay on the private binding, as before.
+ * function markers stay on the private binding, as before. The boundary module reads it lazily
+ * because the private binding may not be initialized yet while the two modules load.
  */
-function copyServerFunctionDescriptor(target: string, source: string) {
+function copyServerFunctionDescriptor(target: string, source: string, lazy: boolean) {
   const key = 'Symbol.for("farm.server-function.descriptor")';
-  return `Object.defineProperty(${target}, ${key}, { value: ${source}[${key}] });`;
+  return lazy
+    ? `Object.defineProperty(${target}, ${key}, { get: () => ${source}[${key}] });`
+    : `Object.defineProperty(${target}, ${key}, { value: ${source}[${key}] });`;
 }
 
 function hasModuleDirective(code: string, directive: "use client" | "use server") {

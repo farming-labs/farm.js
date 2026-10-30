@@ -158,9 +158,18 @@ If the base path is already gated by your own middleware or at the edge, opt out
 resend({ templates, allowUnauthenticated: true });
 ```
 
-Recipients, sender, and template data still come from the request body, so `authorize` is where you
-decide who may address mail to whom. Email headers are not caller-controlled: they come from your
-template and `defaults` configuration.
+The recipient (`to`) and template data come from the request body, so `authorize` is where you
+decide who may address mail to whom. `to` may be an array, so check every recipient there, not
+only the first. The sender, copy, and attachment fields (`from`, `replyTo`, `cc`, `bcc`,
+`attachments`, `tags`, `topicId`) come from your template and `defaults` configuration: a request
+that sets any of them is rejected with `400`, so a caller allowed to send a template cannot send
+it as someone else, copy it to extra recipients, or attach files. Resend fetches an attachment's
+`path` URL itself, so a caller-chosen attachment can pull any URL into your mail. To let trusted
+callers choose these fields, opt in:
+
+```ts
+resend({ templates, authorize, allowCallerHeaders: true });
+```
 
 ## Production notes
 

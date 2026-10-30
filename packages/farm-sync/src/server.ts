@@ -85,7 +85,7 @@ export async function executeSyncOperation(
 
   switch (body.operation) {
     case "list":
-      return listRows(client, resolved, scope, body.since);
+      return listRows(client, resolved, scope, body.since, body.scope);
     case "insert":
       return insertRow(client, resolved, scope, body.input);
     case "update":
@@ -97,37 +97,155 @@ export async function executeSyncOperation(
   }
 }
 
+/** A row filter checked against the schema, with what a write may derive from it. */
+type ResolvedScope = {
+  where: Record<string, unknown>;
+  /** Every field the filter names at any depth: never writable by the client. */
+  fields: Set<string>;
+  /** Values a new row must carry to satisfy the filter. */
+  stamp: Record<string, unknown>;
+  /** Why the filter cannot decide a new row's values, when it cannot. */
+  notInsertable: string | undefined;
+};
+
+const UNSCOPED: ResolvedScope = {
+  where: {},
+  fields: new Set(),
+  stamp: {},
+  notInsertable: undefined,
+};
+
+// The orm's filter grammar; anything else is rejected rather than guessed at.
+const FILTER_OPERATORS = new Set(["eq", "contains", "in", "not", "gt", "gte", "lt", "lte"]);
+
 async function resolveScope(
   resolved: ResolvedSyncModel,
   args: { context: Record<string, unknown>; request: Request; operation: SyncOperation },
-): Promise<Record<string, unknown>> {
-  if (!resolved.where) return {};
-  const scope = await resolved.where({
+): Promise<ResolvedScope> {
+  if (!resolved.where) return UNSCOPED;
+  const where = await resolved.where({
     context: args.context,
     request: args.request,
     model: resolved.name,
     operation: args.operation,
   });
-  if (!scope || typeof scope !== "object" || Array.isArray(scope)) {
-    throw new SyncOperationError(
-      "server_error",
-      `sync(): the row filter for "${resolved.name}" must return an object.`,
-      500,
-    );
+  if (!isPlainObject(where)) {
+    throw scopeError(resolved, "must return an object");
   }
+  const scope: ResolvedScope = { where, fields: new Set(), stamp: {}, notInsertable: undefined };
+  walkScope(resolved, scope, where, true);
   return scope;
+}
+
+/**
+ * Validate the filter and collect what writes need from it.
+ *
+ * Drivers drop `undefined` values and keys that are not fields, which turns a
+ * filter into no filter at all, so both fail here instead. Only plain equality
+ * reached through `AND` decides a new row's values; `OR`, `NOT`, and operators
+ * leave it ambiguous, so such a filter cannot be used for inserts.
+ */
+function walkScope(
+  resolved: ResolvedSyncModel,
+  scope: ResolvedScope,
+  node: Record<string, unknown>,
+  conjunctive: boolean,
+): void {
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "AND" || key === "OR") {
+      if (!Array.isArray(value) || !value.every(isPlainObject)) {
+        throw scopeError(resolved, `uses ${key} with something other than a list of filters`);
+      }
+      if (key === "OR") scope.notInsertable ??= "it uses OR";
+      for (const clause of value) walkScope(resolved, scope, clause, conjunctive && key === "AND");
+      continue;
+    }
+    if (key === "NOT") {
+      if (!isPlainObject(value)) {
+        throw scopeError(resolved, "uses NOT with something other than a filter");
+      }
+      scope.notInsertable ??= "it uses NOT";
+      walkScope(resolved, scope, value, false);
+      continue;
+    }
+    if (!Object.hasOwn(resolved.fields, key)) {
+      throw scopeError(resolved, `names "${key}", which is not a field of the model`);
+    }
+    scope.fields.add(key);
+
+    let equal: { value: unknown } | undefined;
+    if (isPlainObject(value)) {
+      const operators = Object.keys(value);
+      if (operators.length === 0 || !operators.every((op) => FILTER_OPERATORS.has(op))) {
+        throw scopeError(
+          resolved,
+          `gives "${key}" an object that is not a filter operator (${[...FILTER_OPERATORS].join(", ")})`,
+        );
+      }
+      for (const op of operators) {
+        const operand = value[op];
+        if (operand === undefined || (Array.isArray(operand) && operand.includes(undefined))) {
+          throw scopeError(resolved, `gives "${key}.${op}" an undefined value`);
+        }
+      }
+      if (operators.length === 1 && operators[0] === "eq") equal = { value: value.eq };
+      else scope.notInsertable ??= `"${key}" is not compared by equality`;
+    } else if (value === undefined) {
+      throw scopeError(resolved, `gives "${key}" an undefined value`);
+    } else if (
+      Array.isArray(value) ||
+      (typeof value === "object" && value !== null && !(value instanceof Date))
+    ) {
+      throw scopeError(resolved, `gives "${key}" a value that is not a scalar or filter operator`);
+    } else {
+      equal = { value };
+    }
+
+    if (!equal || !conjunctive) continue;
+    if (Object.hasOwn(scope.stamp, key) && !sameValue(scope.stamp[key], equal.value)) {
+      scope.notInsertable ??= `it gives "${key}" two different values`;
+      continue;
+    }
+    scope.stamp[key] = equal.value;
+  }
+}
+
+function scopeError(resolved: ResolvedSyncModel, problem: string): SyncOperationError {
+  return new SyncOperationError(
+    "server_error",
+    `sync(): the row filter for "${resolved.name}" ${problem}.`,
+    500,
+  );
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date)
+  );
+}
+
+function sameValue(left: unknown, right: unknown): boolean {
+  if (left instanceof Date && right instanceof Date) return left.getTime() === right.getTime();
+  return Object.is(left, right);
 }
 
 async function listRows(
   client: SyncOrmModelClient,
   resolved: ResolvedSyncModel,
-  scope: Record<string, unknown>,
+  scope: ResolvedScope,
   since: unknown,
+  clientScope: unknown,
 ): Promise<SyncListResult> {
   const cursorField = resolved.cursorField;
   const sinceDate = parseSince(since);
-  const incremental = Boolean(cursorField && sinceDate);
-  const where: Record<string, unknown> = { ...scope };
+  const fingerprint = await scopeFingerprint(resolved, scope);
+  // A cursor kept under another scope (a previous account, an old org) says
+  // nothing about this one: answer with a full snapshot so the client drops
+  // what it holds instead of merging a delta into the previous caller's rows.
+  const sameScope =
+    clientScope === undefined || clientScope === null || clientScope === fingerprint;
+  const incremental = Boolean(cursorField && sinceDate && sameScope);
+  const where: Record<string, unknown> = { ...scope.where };
   // `gte`, not `gt`: the cursor has millisecond precision, so a row written in
   // the same millisecond as the cursor row but after the previous list would
   // otherwise never be sent. Resending the cursor row itself is harmless, the
@@ -136,19 +254,60 @@ async function listRows(
 
   const rows = await client.findMany({ where });
   if (!incremental) {
-    return { rows, cursor: cursorField ? nextCursor(rows, cursorField, null) : null, full: true };
+    return {
+      rows,
+      cursor: cursorField ? nextCursor(rows, cursorField, null) : null,
+      full: true,
+      scope: fingerprint,
+    };
   }
 
   // A delta cannot carry deletions, so it also lists every key the caller can
   // still see. Read after the rows, so a row inserted in between is at worst
   // absent from `rows` (and picked up by the next delta), never pruned.
-  const visible = await client.findMany({ where: scope, select: { [resolved.key]: true } });
+  const visible = await client.findMany({ where: scope.where, select: { [resolved.key]: true } });
   return {
     rows,
     cursor: nextCursor(rows, cursorField!, since as string),
     full: false,
     keys: visible.map((row) => row[resolved.key]),
+    scope: fingerprint,
   };
+}
+
+/** Fingerprint of a model with `where: false`: the same for every caller. */
+export const PUBLIC_SYNC_SCOPE = "public";
+
+/**
+ * Identifies the rows a caller can see without revealing the filter's values.
+ * The browser stores it with persisted rows and only reuses rows saved under
+ * the fingerprint the server reports for the current session, so a reload
+ * after a sign-out never paints the previous account's rows.
+ */
+async function scopeFingerprint(
+  resolved: ResolvedSyncModel,
+  scope: ResolvedScope,
+): Promise<string> {
+  if (!resolved.where) return PUBLIC_SYNC_SCOPE;
+  const bytes = new TextEncoder().encode(stableStringify([resolved.name, scope.where]));
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return Array.from(digest.subarray(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function stableStringify(value: unknown): string {
+  if (value instanceof Date) return JSON.stringify({ $date: value.toISOString() });
+  if (typeof value === "bigint") return JSON.stringify({ $bigint: value.toString() });
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.keys(value)
+      .sort()
+      .map(
+        (key) =>
+          `${JSON.stringify(key)}:${stableStringify((value as Record<string, unknown>)[key])}`,
+      );
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
 }
 
 /** A cursor the client echoes back; anything else is a malformed request. */
@@ -183,10 +342,22 @@ function nextCursor(
 async function insertRow(
   client: SyncOrmModelClient,
   resolved: ResolvedSyncModel,
-  scope: Record<string, unknown>,
+  scope: ResolvedScope,
   input: Record<string, unknown> | undefined,
 ): Promise<Record<string, unknown>> {
-  const data = sanitizeInput(resolved, input, { allowKey: true });
+  if (scope.notInsertable) {
+    throw scopeError(
+      resolved,
+      `cannot decide a new row's values because ${scope.notInsertable}. ` +
+        "Inserts need a filter of plain equality conditions, optionally combined with AND",
+    );
+  }
+
+  // Scope and cursor columns are server-owned: client-supplied values are
+  // discarded so a caller cannot widen its scope or stall everyone's
+  // incremental sync by writing a stale timestamp. The stamp covers every
+  // field the filter names, so the row always lands inside the caller's scope.
+  const data = { ...sanitizeInput(resolved, input, { allowKey: true }), ...scope.stamp };
 
   // The browser generates keys so an optimistic row is addressable immediately,
   // but a direct API call may omit one. Without this an id-less row is written
@@ -204,24 +375,23 @@ async function insertRow(
     requireScalarKey(resolved, data[resolved.key]);
   }
 
-  // Scope and cursor columns are server-owned: client-supplied values are
-  // discarded so a caller cannot widen its scope or stall everyone's
-  // incremental sync by writing a stale timestamp.
-  return client.create({ data: { ...data, ...scope, ...cursorStamp(resolved) } });
+  return client.create({ data: { ...data, ...cursorStamp(resolved) } });
 }
 
 async function updateRow(
   client: SyncOrmModelClient,
   resolved: ResolvedSyncModel,
-  scope: Record<string, unknown>,
+  scope: ResolvedScope,
   input: Record<string, unknown> | undefined,
 ): Promise<Record<string, unknown>> {
   const data = sanitizeInput(resolved, input, { allowKey: false });
   const key = requireKey(resolved, input);
 
   // Scope columns are server-owned on update just like on insert: a client
-  // sending one must not move the row into another caller's scope.
-  for (const field of Object.keys(scope)) {
+  // sending one must not move the row into another caller's scope. The row
+  // already matches the filter and keeps every column it reads, so it still
+  // matches afterwards, whatever the filter's shape.
+  for (const field of scope.fields) {
     delete data[field];
   }
 
@@ -242,7 +412,7 @@ async function updateRow(
 async function deleteRow(
   client: SyncOrmModelClient,
   resolved: ResolvedSyncModel,
-  scope: Record<string, unknown>,
+  scope: ResolvedScope,
   input: Record<string, unknown> | undefined,
 ): Promise<{ deleted: number }> {
   const key = requireKey(resolved, input);
@@ -290,11 +460,11 @@ function requireScalarKey(resolved: ResolvedSyncModel, key: unknown) {
  */
 function scopedKeyFilter(
   resolved: ResolvedSyncModel,
-  scope: Record<string, unknown>,
+  scope: ResolvedScope,
   key: unknown,
 ): Record<string, unknown> {
-  if (Object.keys(scope).length === 0) return { [resolved.key]: key };
-  return { AND: [scope, { [resolved.key]: key }] };
+  if (Object.keys(scope.where).length === 0) return { [resolved.key]: key };
+  return { AND: [scope.where, { [resolved.key]: key }] };
 }
 
 /** Drop unknown columns so a client cannot write outside the declared schema. */

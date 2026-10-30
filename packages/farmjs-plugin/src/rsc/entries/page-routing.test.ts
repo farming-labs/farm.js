@@ -17,7 +17,7 @@ function createMatcher(paths: string[]) {
     debug: false,
   });
   const start = entry.indexOf("function filePathToRoute(");
-  const end = entry.indexOf("function mergeDocumentMetadata(", start);
+  const end = entry.indexOf("// Each page's parsed rendering directive", start);
   return new Function(
     "pages",
     "React",

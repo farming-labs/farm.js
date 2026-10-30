@@ -114,6 +114,18 @@ describe("SyncModelStore", () => {
     expect(live.get("1")!.title).toBe("from server");
   });
 
+  it("seeds saved rows under a confirmed delta without replacing rows committed meanwhile", () => {
+    const s = store();
+    s.commitLayer({ type: "upsert", key: "2", row: { id: "2" } }, { id: "2", title: "fresh" });
+    s.seed([
+      { id: "1", title: "saved" },
+      { id: "2", title: "stale" },
+      { id: "3", title: "gone" },
+    ]);
+    s.applyServerRows([], { full: false, cursor: null, keys: ["1"], revision: 0 });
+    expect(s.getRows().map((r) => r.title)).toEqual(["fresh", "saved"]);
+  });
+
   it("persists confirmed rows only, never optimistic guesses", () => {
     const s = store();
     s.applyServerRows([{ id: "1", title: "confirmed" }], { full: true, cursor: null });
