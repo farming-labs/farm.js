@@ -73,6 +73,7 @@ const entry = {
   "internal/island-codec": "src/client/island-codec.ts",
   "internal/server-tree": "src/client/server-tree.ts",
   "internal/islands-runtime": "src/client/islands-runtime.ts",
+  "internal/islands-server": "src/client/islands-server.ts",
   "internal/islx-client": "src/islx/client.ts",
   "internal/islx-server": "src/islx/server.ts",
   "internal/islx-react": "src/islx/react.ts",

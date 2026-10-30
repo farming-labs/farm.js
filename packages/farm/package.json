@@ -674,6 +674,11 @@
       "import": "./dist/internal/islands-runtime.mjs",
       "require": "./dist/internal/islands-runtime.cjs"
     },
+    "./internal/islands-server": {
+      "types": "./dist/internal/islands-server.d.ts",
+      "import": "./dist/internal/islands-server.mjs",
+      "require": "./dist/internal/islands-server.cjs"
+    },
     "./internal/islx-client": {
       "types": "./dist/internal/islx-client.d.ts",
       "import": "./dist/internal/islx-client.mjs",

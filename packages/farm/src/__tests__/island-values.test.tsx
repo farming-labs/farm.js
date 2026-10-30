@@ -17,6 +17,7 @@ import {
   readFarmHeldValues,
   selectFarmValuesToSend,
 } from "../client/island-values";
+import { installFarmIslandsServer } from "../client/islands-server";
 import { _setAppRequestView, _setCurrentRequestResolver } from "../server/request-bridge";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -24,6 +25,7 @@ import { _setAppRequestView, _setCurrentRequestResolver } from "../server/reques
 // The page's value store is islx's: islands mode hydrates through islx.
 const STORE_KEY = Symbol.for("islx.values");
 installFarmIslandValues();
+installFarmIslandsServer();
 
 // A docs navigation tree: what a layout passes to its sidebar and its mobile menu.
 const tree = Array.from({ length: 6 }, (_, section) => ({

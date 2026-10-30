@@ -4,7 +4,6 @@
  * already holds them. See `island-value-protocol.ts` for
  * the wire format and `island-value-store.ts` for the browser side.
  */
-import { setRenderStateResolver } from "@farm.js/islx/react/server";
 import { _resolveCurrentRequest, _resolveCurrentRequestForApp } from "../server/request-bridge";
 import { decodeFarmTagged, encodeFarmLeaf } from "./island-codec";
 import {
@@ -184,16 +183,22 @@ const SERVER_KEY = Symbol.for("farm.island-values.server");
  */
 const sentByRequest = new WeakMap<Request, Set<string>>();
 
+/**
+ * What islx needs to render islands mode's islands, from Farm's request: the values this
+ * request's browser holds, and which this response already wrote (`islands-server.ts`).
+ */
+export function resolveFarmIslandRenderState(): {
+  held: ReadonlySet<string> | null;
+  sent: Set<string>;
+} | null {
+  const request = _resolveCurrentRequest();
+  if (!request) return null;
+  let sent = sentByRequest.get(request);
+  if (!sent) sentByRequest.set(request, (sent = new Set()));
+  return { held: readFarmHeldValues(), sent };
+}
+
 export function installFarmIslandValues(): void {
-  // islx renders islands mode's islands: it reads the values this request's browser holds, and
-  // which this response already wrote, from Farm's request.
-  setRenderStateResolver(() => {
-    const request = _resolveCurrentRequest();
-    if (!request) return null;
-    let sent = sentByRequest.get(request);
-    if (!sent) sentByRequest.set(request, (sent = new Set()));
-    return { held: readFarmHeldValues(), sent };
-  });
   (globalThis as typeof globalThis & Record<symbol, FarmIslandValuesServer>)[SERVER_KEY] = {
     address: addressFarmValues,
     select: selectFarmValuesToSend,

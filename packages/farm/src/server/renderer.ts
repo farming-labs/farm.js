@@ -162,7 +162,6 @@ import type { FarmIslandStrategy } from "../island";
 import { createDefaultErrorDiagnostics } from "./error-diagnostics";
 import { handleFarmFormActionRequest } from "../form-actions";
 import { installFarmIslandValues } from "../client/island-values";
-import * as islands from "../client/islands-runtime";
 import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import {
@@ -177,6 +176,9 @@ import {
 
 // Islands mode: boundaries this server renders address their large prop values.
 installFarmIslandValues();
+
+// Islands mode renders on islx, which loads React: only an islands app loads it (`initialize`).
+let islands: typeof import("../client/islands-runtime") | undefined;
 
 let cachedClerkProvider: { ClerkProvider: any } | null = null;
 
@@ -640,6 +642,11 @@ export class ServerRenderer {
   async initialize(): Promise<void> {
     if (this.rendererRuntime) return;
 
+    if (this.islandValues()) {
+      (await import("../client/islands-server")).installFarmIslandsServer();
+      islands ??= await import("../client/islands-runtime");
+    }
+
     if (this.config.notFound?.component?.trim()) {
       resolveFarmNotFoundComponentPath(this.config, getFarmAppDirectories(this.config));
     }
@@ -784,19 +791,20 @@ export class ServerRenderer {
       return element;
     }
     // Islands mode runs on islx.
-    if (this.islandValues())
+    if (islands && this.islandValues())
       return islands.wrapFarmIsolatedClientGraph(undefined as never, element as never);
     return this.rendererRuntime.wrapClientGraph(element);
   }
 
   /** The page a hydrating layout keeps as server HTML: islands again, or a server tree. */
   private async isolateServerPage(element: unknown, serverTree: boolean): Promise<unknown> {
-    if (this.islandValues()) {
+    if (islands && this.islandValues()) {
+      const runtime = islands;
       return serverTree
-        ? islands.renderFarmServerTreePage(undefined as never, element as never, {
-            isolate: (node) => islands.isolateFarmServerPageGraph(undefined as never, node),
+        ? runtime.renderFarmServerTreePage(undefined as never, element as never, {
+            isolate: (node) => runtime.isolateFarmServerPageGraph(undefined as never, node),
           })
-        : islands.isolateFarmServerPageGraph(undefined as never, element as never);
+        : runtime.isolateFarmServerPageGraph(undefined as never, element as never);
     }
     return serverTree && this.rendererRuntime.renderServerTreePage
       ? this.rendererRuntime.renderServerTreePage(element, { values: false })

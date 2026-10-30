@@ -6275,7 +6275,7 @@ function renderFarmRouteServerTree(element, extra) { return element; }`;
   }
 } from "@farm.js/core/internal/production-runtime";${
     farmIslandsMode
-      ? `\nimport { getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader } from "@farm.js/core/internal/production-runtime";\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${islandsActionKeyCode()}\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
+      ? `\nimport { getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader } from "@farm.js/core/internal/production-runtime";\nimport { installFarmIslandsServer } from "@farm.js/core/internal/islands-server";\ninstallFarmIslandsServer();\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${islandsActionKeyCode()}\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
       : ""
   }`;
   const productionSiteTelemetryImport = config.telemetry

@@ -13,6 +13,7 @@ import {
 } from "../client/isolated-boundary";
 import { getFarmIslandValueStore } from "../client/island-value-store";
 import { installFarmIslandValues } from "../client/island-values";
+import { installFarmIslandsServer } from "../client/islands-server";
 import { createFarmServerTreeElement, renderFarmServerTreePage } from "../client/server-tree";
 import { _setCurrentRequestResolver } from "../server/request-bridge";
 
@@ -492,6 +493,7 @@ describe("server tree pages", () => {
       );
     }
     installFarmIslandValues();
+    installFarmIslandsServer();
     const valueKeys = (html: string) =>
       [...html.matchAll(/<script type="f\/value" name="([0-9a-z]{14})"/g)].map(
         (match) => match[1]!,

@@ -11,6 +11,7 @@ import {
 } from "../client/island-codec";
 import { getFarmIslandValueStore } from "../client/island-value-store";
 import { installFarmIslandValues } from "../client/island-values";
+import { installFarmIslandsServer } from "../client/islands-server";
 // Islands mode runs on islx: the runtime its generated code imports.
 import {
   createFarmIsolatedHydrationRuntime,
@@ -26,6 +27,7 @@ import { resolveServerActionsConfig } from "../server-action-security";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 installFarmIslandValues();
+installFarmIslandsServer();
 
 // Every type JSON cannot hold, as a server component might pass them.
 const sample = () => ({
