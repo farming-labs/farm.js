@@ -4726,7 +4726,9 @@ export default function DynamicPage({ params }) {
 
   // Windows has no POSIX signals: child.kill("SIGTERM") maps to TerminateProcess,
   // so graceful shutdown never runs and its effects cannot be observed.
-  it.each([
+  // it.for, not it.each: only it.for hands the test context to the callback, so
+  // ctx.skip() works where bun is missing or the platform is Windows.
+  it.for([
     { preset: "node-server", command: process.execPath },
     { preset: "bun", command: "bun" },
   ])(
