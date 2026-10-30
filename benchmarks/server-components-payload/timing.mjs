@@ -81,7 +81,11 @@ async function firstLoad(browser, url) {
   };
 }
 
-/** Click "Next" until the new page's heading shows; the time each click takes. */
+/**
+ * Click "Next" until the new page is painted: in the page, from the click to the second animation
+ * frame after the new heading is in the DOM (the first frame renders it). Measured in the page, so
+ * neither engine gains from where its commit falls relative to the test's polling.
+ */
 async function navigations(browser, url, start, pageAt) {
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -92,14 +96,27 @@ async function navigations(browser, url, start, pageAt) {
   for (let index = 0; index < NAVIGATIONS; index++) {
     const expected = pageAt(index + 1);
     const title = /<h1>([^<]*)<\/h1>/.exec(await (await fetch(url + expected)).text())?.[1] ?? "";
-    const startedAt = Date.now();
-    await page.click("[data-next]");
-    await page.waitForFunction(
-      (heading) => document.querySelector("h1")?.textContent === heading,
+    const painted = page.evaluate(
+      (heading) =>
+        new Promise((resolve) => {
+          let clickedAt = 0;
+          document.addEventListener("click", () => (clickedAt = performance.now()), {
+            capture: true,
+            once: true,
+          });
+          const observer = new MutationObserver(() => {
+            if (document.querySelector("h1")?.textContent !== heading) return;
+            observer.disconnect();
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => resolve(performance.now() - clickedAt)),
+            );
+          });
+          observer.observe(document, { subtree: true, childList: true, characterData: true });
+        }),
       title,
-      { polling: "raf" },
     );
-    times.push(Date.now() - startedAt);
+    await page.click("[data-next]");
+    times.push(Math.round(await painted));
     await page.waitForLoadState("networkidle");
   }
   await context.close();
