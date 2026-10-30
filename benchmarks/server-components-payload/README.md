@@ -44,12 +44,12 @@ Two sections of the app:
   a shared 150-product catalog to a client list that reads the cart. Pages rebuild from a server
   tree payload, and segments do not apply.
 
-| Section | Engine | Document, br (raw) | First-load JS, br | Navigation, br (raw) |
-| --- | --- | --- | --- | --- |
-| docs | `rsc` | 16.2 KB (76.2 KB) | 108.8 KB | 12.0 KB (37.4 KB) |
-| docs | `islands` | 16.0 KB (103.5 KB) | 81.3 KB | 2.5 KB (7.9 KB) |
-| shop | `rsc` | 5.5 KB (33.0 KB) | 108.8 KB | 3.8 KB (13.2 KB) |
-| shop | `islands` | 5.6 KB (31.4 KB) | 80.3 KB | 1.5 KB (3.6 KB) |
+| Section | Engine    | Document, br (raw) | First-load JS, br | Navigation, br (raw) |
+| ------- | --------- | ------------------ | ----------------- | -------------------- |
+| docs    | `rsc`     | 16.2 KB (76.2 KB)  | 108.8 KB          | 12.0 KB (37.4 KB)    |
+| docs    | `islands` | 16.0 KB (103.5 KB) | 81.3 KB           | 2.5 KB (7.9 KB)      |
+| shop    | `rsc`     | 5.5 KB (33.0 KB)   | 108.8 KB          | 3.8 KB (13.2 KB)     |
+| shop    | `islands` | 5.6 KB (31.4 KB)   | 80.3 KB           | 1.5 KB (3.6 KB)      |
 
 How the docs navigation got there (same build, earlier runs): 15.7 KB (100.9 KB raw) before
 content-addressed values, 12.3 KB (38.4 KB) with values, 2.5 KB (7.9 KB) with segment navigation.
