@@ -92,17 +92,33 @@ describe("a new app without a deployment", () => {
     expect(() => convex()).toThrow(/requires CONVEX_URL/);
   });
 
-  it("asks for a restart once convex dev writes the deployment URL", async () => {
+  it("asks for a restart at once when convex dev wrote the URL before Farm started watching", () => {
     const root = mkdtempSync(path.join(tmpdir(), "farm-convex-first-run-"));
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    writeFileSync(path.join(root, ".env.local"), "CONVEX_URL=http://127.0.0.1:3210\n");
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const stop = announceNewDeployment(root, 20);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("CONVEX_URL is not set yet"));
-    writeFileSync(path.join(root, ".env.local"), "CONVEX_URL=http://127.0.0.1:3210\n");
-    await vi.waitFor(
-      () => expect(log).toHaveBeenCalledWith(expect.stringContaining("Restart farm dev")),
-      { timeout: 5000, interval: 100 },
-    );
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("Restart farm dev"));
     stop();
   });
+
+  it(
+    "asks for a restart once convex dev writes the deployment URL",
+    { timeout: 15_000 },
+    async () => {
+      const root = mkdtempSync(path.join(tmpdir(), "farm-convex-first-run-"));
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+      const stop = announceNewDeployment(root, 20);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("CONVEX_URL is not set yet"));
+      writeFileSync(path.join(root, ".env.local"), "CONVEX_URL=http://127.0.0.1:3210\n");
+      await vi.waitFor(
+        () => expect(log).toHaveBeenCalledWith(expect.stringContaining("Restart farm dev")),
+        // Polled, so allow for a loaded machine, and stay below the test timeout so a miss
+        // reports this assertion instead of a bare timeout.
+        { timeout: 10_000, interval: 50 },
+      );
+      stop();
+    },
+  );
 });

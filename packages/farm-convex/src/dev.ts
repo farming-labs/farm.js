@@ -100,6 +100,8 @@ export function announceNewDeployment(root: string, interval = 500): () => void 
     console.log("[farm:convex] Convex deployment is ready. Restart farm dev to connect to it.");
   };
   watchFile(filePath, { interval }, check);
+  // convex dev starts alongside Farm and may have written the URL before the watcher attached.
+  check();
   return () => unwatchFile(filePath, check);
 }
 
