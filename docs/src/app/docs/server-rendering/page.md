@@ -298,8 +298,10 @@ export default defineConfig({
 That is the whole setup. When the RSC packages are missing, `farm dev` and `farm build` install
 them with the app's package manager: `@farm.js/plugin` at the installed `@farm.js/core` version, and
 `@vitejs/plugin-rsc`, `react`, `react-dom` and `react-server-dom-webpack` at the exact versions the
-plugin requires. Commit the updated `package.json` and lockfile. Set `FARM_SKIP_RSC_INSTALL=1` where
-the build must not change them. `@vitejs/plugin-react` is optional and adds Fast Refresh.
+plugin requires. Commit the updated `package.json` and lockfile. In CI (`CI` is set) nothing is
+installed: `serverComponents: true` runs without RSC and warns, and an explicit `mode` fails with the
+command to run. Set `FARM_SKIP_RSC_INSTALL=1` anywhere else the build must not change dependencies.
+`@vitejs/plugin-react` is optional and adds Fast Refresh.
 
 `serverComponents: true` is the same as `serverComponents: { mode: "rsc" }`, React's own server
 components engine. `{ mode: "islands" }` is reserved for Farm's own engine, which sends static output

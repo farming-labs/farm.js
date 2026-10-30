@@ -130,7 +130,7 @@ export function formatFarmRscFallbackMessage(
   }
   return `experimental.serverComponents is true, but ${missingPackages.join(", ")} ${
     missingPackages.length === 1 ? "is" : "are"
-  } not installed, so the app runs without React Server Components. \`farm dev\` and \`farm build\` install them; with another tool, run ${FARM_RSC_INSTALL_HINT}.`;
+  } not installed, so the app runs without React Server Components. \`farm dev\` and \`farm build\` install them outside CI; in CI or with another tool, run ${FARM_RSC_INSTALL_HINT}.`;
 }
 
 export function formatFarmRscBlockingMessage(blockingKeys: readonly string[]): string {
