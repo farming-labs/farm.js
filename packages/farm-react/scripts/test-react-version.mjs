@@ -91,6 +91,7 @@ const testSource = String.raw`
     keyedRowsPrependOnlyRuntimeFeature,
     keyedRowsPlainReorderHintedRuntimeFeature,
     keyedRowsPlainMapReorderHintedRuntimeFeature,
+    keyedRowsPlainPositionHintedRuntimeFeature,
     keyedRowsHintedRuntimeFeature,
     keyedRowsStructuralAppendMapHintedRuntimeFeature,
     keyedRowsIdentityRuntimeFeature,
@@ -1183,6 +1184,70 @@ const testSource = String.raw`
         assert.deepEqual([nodes[1].selectionStart, nodes[1].selectionEnd], [1, 3]);
         await React.act(async () => update([{id: "c", label: "Replacement"}]));
         assert.equal(container.querySelector("input").value, "Replacement");
+        assert.equal(nodes[0].isConnected, false);
+        assert.deepEqual(errors, []);
+      } finally {
+        await React.act(async () => root?.unmount());
+        container.remove();
+      }
+    }
+  }
+  delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+
+  assert.equal(createRequire(import.meta.url)("@farm.js/react/compiler-runtime").keyedRowsPlainPositionHintedRuntimeFeature.name, "keyed-rows:plain-position-hinted");
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  for (const reactivity of ["hybrid", "static"]) {
+    for (const hydrate of [false, true]) {
+      let update;
+      const PlainPosition = createCompiledComponentWithFeatures({
+        displayName: "CompatibilityPlainPosition", reactivity,
+        initialize: () => [[{id: "a", label: "Alpha"}, {id: "b", label: "Beta"}]],
+        render(_props, state, blocks) {
+          const items = () => state[0].get();
+          update = next => state[0].set(next);
+          return React.createElement("main", null, React.createElement(blocks.KeyedRows, {
+            id: 0, collectionDependency: 0, dependencies: [0], structureDependencies: [0],
+            positionIndexIndependent: true, items, rowKey: item => item.id,
+            bindings: [{kind: "attribute", name: "value", path: [], read: item => item.label}],
+            create: item => ({kind: "element", tag: "input", attributes: [
+              {name: "value", value: item.label}, {name: "readOnly", value: true},
+            ], styles: [], children: []}),
+            render: () => React.createElement("div", null, items().map(item => React.createElement("input", {key: item.id, value: item.label, readOnly: true}))),
+          }));
+        },
+        bindings: [{kind: "block", id: 0, dependencies: [0]}],
+      }, [keyedRowsPlainPositionHintedRuntimeFeature]);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const tree = React.createElement(React.StrictMode, null, React.createElement(PlainPosition));
+      const errors = [];
+      if (hydrate) container.innerHTML = renderToString(tree);
+      const serverNodes = [...container.querySelectorAll("input")];
+      let root;
+      try {
+        await React.act(async () => {
+          root = hydrate ? hydrateRoot(container, tree, {onRecoverableError: error => errors.push(error)}) : createRoot(container);
+          if (!hydrate) root.render(tree);
+        });
+        const nodes = [...container.querySelectorAll("input")];
+        if (hydrate) assert.deepEqual(nodes, serverNodes);
+        nodes[1].focus(); nodes[1].setSelectionRange(1, 3);
+        for (const [next, labels] of [
+          [previous => createCompilerKeyedArrayPositionUpdate(previous, previous.with, "replace", 0, {id: "a", label: "Alpha edited"}), ["Alpha edited", "Beta"]],
+          [previous => createCompilerKeyedArrayPositionUpdate(previous, previous.toSpliced, "insert", 1, 0, {id: "c", label: "Gamma"}), ["Alpha edited", "Gamma", "Beta"]],
+          [previous => createCompilerKeyedArrayPositionUpdate(previous, previous.toSpliced, "remove", 0, 2), ["Beta"]],
+          [previous => [{id: "d", label: "Opaque"}, ...previous], ["Opaque", "Beta"]],
+        ]) {
+          await React.act(async () => {
+            update(next);
+            await Promise.resolve(); await Promise.resolve();
+          });
+          assert.deepEqual([...container.querySelectorAll("input")].map(input => input.value), labels);
+          if (labels[0] === "Alpha edited") assert.equal(container.querySelector("input"), nodes[0]);
+          assert.equal(container.querySelector("input:last-child"), nodes[1]);
+          assert.equal(document.activeElement, nodes[1]);
+          assert.deepEqual([nodes[1].selectionStart, nodes[1].selectionEnd], [1, 3]);
+        }
         assert.equal(nodes[0].isConnected, false);
         assert.deepEqual(errors, []);
       } finally {
