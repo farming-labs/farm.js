@@ -509,7 +509,7 @@ test("generates a Solid starter while keeping React as the default renderer", as
       packageJson.dependencies["@farm.js/solid"],
       await workspaceRendererVersion("farm-solid"),
     );
-    assert.equal(packageJson.dependencies["solid-js"], "1.9.14");
+    assert.equal(packageJson.dependencies["solid-js"], "1.9.18");
     await assertRendererNeutralStarter(generatedDir, packageJson);
     assert.match(config, /renderer: solid\(\)/);
     assert.match(config, /from "@farm\.js\/solid"/);
@@ -760,7 +760,7 @@ test("generates renderer-native Better Auth starters", async () => {
         packageJson.dependencies["@farm.js/better-auth"],
         templatePackage.dependencies["@farm.js/better-auth"],
       );
-      assert.equal(packageJson.dependencies["better-auth"], "1.6.25");
+      assert.equal(packageJson.dependencies["better-auth"], "1.7.14");
       assert.equal(
         packageJson.scripts["auth:migrate"],
         "node --experimental-strip-types src/lib/migrate-auth.ts",

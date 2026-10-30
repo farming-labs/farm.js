@@ -4529,7 +4529,12 @@ type CompilerKeyedRowSource = Pick<CompilerKeyedRowsBlockProps, "bindings" | "cr
 // Once one row is built from its descriptor, the rest clone it and reapply
 // their bindings. Keyed by the props object: a new render, which can close
 // over new values, derives a new skeleton.
-const KEYED_ROW_TEMPLATES = /* @__PURE__ */ new WeakMap<object, Element>();
+interface KeyedRowTemplate {
+  element: Element;
+  classNames: (string | undefined)[];
+}
+
+const KEYED_ROW_TEMPLATES = /* @__PURE__ */ new WeakMap<object, KeyedRowTemplate>();
 
 function createKeyedRowInstance(
   props: CompilerKeyedRowSource,
@@ -4540,7 +4545,7 @@ function createKeyedRowInstance(
 ): CompilerKeyedRowInstance {
   const template = props.cloneRows && KEYED_ROW_TEMPLATES.get(props);
   const element = template
-    ? (template.cloneNode(true) as Element)
+    ? (template.element.cloneNode(true) as Element)
     : createCompilerHostElement(document, props.create(item, index));
   const instance: CompilerKeyedRowInstance = {
     key,
@@ -4570,6 +4575,10 @@ function createKeyedRowInstance(
     if (found) instance.targets = targets as Element[];
     if (template) {
       for (let bindingIndex = 0; bindingIndex < targets.length; bindingIndex += 1) {
+        const value = instance.values[bindingIndex];
+        // Only primitive strings can reuse the class copied by cloneNode.
+        // Other values still need the normal coercion and attribute semantics.
+        if (typeof value === "string" && value === template.classNames[bindingIndex]) continue;
         commitKeyedRowBinding(
           props.bindings[bindingIndex],
           instance,
@@ -4590,7 +4599,7 @@ function keyedRowTemplate(
   props: CompilerKeyedRowSource,
   element: Element,
   targets: readonly (Element | null)[],
-): Element | undefined {
+): KeyedRowTemplate | undefined {
   // A clone updates bound attributes in place, which keeps a built row's
   // attribute order only if this row has every one of them. Otherwise wait for
   // a row that does.
@@ -4606,10 +4615,24 @@ function keyedRowTemplate(
     }
   }
   const template = element.cloneNode(true) as Element;
-  for (const binding of props.bindings) {
+  const classNames: (string | undefined)[] = [];
+  const classTargets = new Set<Element>();
+  for (let bindingIndex = 0; bindingIndex < props.bindings.length; bindingIndex += 1) {
+    const binding = props.bindings[bindingIndex];
     if (binding.kind === "text") findCompilerHostTarget(template, binding.path)!.textContent = "";
+    if (
+      binding.kind === "attribute" &&
+      (binding.name === "className" || binding.name === "class")
+    ) {
+      const target = targets[bindingIndex]!;
+      // A preceding class binding may change the clone before this one runs.
+      if (!classTargets.has(target)) {
+        classNames[bindingIndex] = target.getAttribute("class") ?? undefined;
+        classTargets.add(target);
+      }
+    }
   }
-  return template;
+  return { element: template, classNames };
 }
 
 function applyKeyedRowBindings(
