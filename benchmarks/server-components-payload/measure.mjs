@@ -41,6 +41,13 @@ const SCENARIOS = [
     start: "/shop/s0",
     page: (index) => `/shop/s${index}`,
   },
+  // blog: long server-rendered posts with highlighted code and one small client component.
+  {
+    name: "blog",
+    firstLoad: ["/blog/b0", "/blog/b20", "/blog/b40", "/blog/b60", "/blog/b80"],
+    start: "/blog/b0",
+    page: (index) => `/blog/b${index}`,
+  },
 ];
 const NAVIGATIONS = 10;
 
