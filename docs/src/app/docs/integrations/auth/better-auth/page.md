@@ -146,6 +146,13 @@ For client-only guards, wait for `authClient.getSession()` before rendering priv
 | Adds integration logging around mounted requests. | Owns adapters, providers, plugins, callbacks, and cookies.   |
 | Removes the need for a manual route module.       | Supplies the React client and server APIs.                   |
 
+## Better Auth running in Convex
+
+When Better Auth runs inside Convex as the `@convex-dev/better-auth` component, Convex owns auth
+and this integration is not used. `convex()` from `@farm.js/convex` detects the component instead. It forwards `/api/auth/*` to your Convex deployment, so sign-in stays on
+your domain and server-rendered pages can read the session. See
+[Convex: auth with Better Auth](/docs/integrations/convex#auth-with-better-auth-running-in-convex).
+
 ## Adapter options
 
 | Option     | Required | Use                                                    |

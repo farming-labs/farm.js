@@ -183,13 +183,13 @@ export const createTodo = createServerFn({
 ```
 
 Client components call it directly or through `useAction` from `@farm.js/core/client`, which also
-works as a form action. This path runs on React Server Components through the
-`@farm.js/plugin/rsc` Vite setup rather than `farm dev`, so it is experimental. Start from the
-[`rsc-demo` example](https://github.com/farming-labs/farm.js/tree/main/examples/rsc-demo) and see
+works as a form action. This path runs on React Server Components, which are experimental: set
+`experimental.serverComponents` and `experimental.serverActions` in `farm.config.ts` (see
+[React Server Components](/docs/server-rendering#react-server-components)), then see
 [Route actions](/docs/routing#route-actions) and
 [Server action security](/docs/configuration#server-action-security).
 
-Setting `experimental.serverActions` in `farm.config.ts` without that setup does not enable server
+Setting `experimental.serverActions` without `experimental.serverComponents` does not enable server
 functions in the browser.
 
 ## Route handlers and middleware

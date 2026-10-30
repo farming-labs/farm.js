@@ -326,17 +326,12 @@ describe("production middleware runtime", () => {
           "# Farm production fixture\n\n> Pages served by the production fixture.\n\n## Pages\n\n",
         ),
       ).toBe(true);
-      expect(llmsText).toContain(
-        "- [Explicit image](https://example.test/dashboard/explicit.md)\n",
-      );
-      expect(llmsText).toContain("- [Dashboard notes](https://example.test/dashboard/notes.md)\n");
+      expect(llmsText).toContain("- [Context ppr](https://example.test/context-ppr.md)\n");
       expect(llmsText).toContain("- [Public notes](https://example.test/public-notes.md)\n");
       expect(llmsText).not.toContain("rewrite-target");
       expect(llmsText).not.toContain("[id]");
-      // Listed even though it answers 401: the index only names pages.
-      expect(llmsText).toContain(
-        "- [Private notes](https://example.test/dashboard/private-notes.md)\n",
-      );
+      // dashboard/middleware.ts guards every /dashboard page, so none is listed (#2285).
+      expect(llmsText).not.toContain("/dashboard");
 
       // llms-full.txt inlines each listed page's .md mirror, read through the same server.
       const llmsFullResponse = await serverModule.default.fetch(
@@ -355,7 +350,7 @@ describe("production middleware runtime", () => {
         "## Public notes\n\nURL: https://example.test/public-notes.md\n\n# Public notes\n\npublic-notes-source\n",
       );
       expect(llmsFull).toContain(
-        "## Explicit image\n\nURL: https://example.test/dashboard/explicit.md\n\n# Explicit image\n\nSource: /dashboard/explicit\n\nexplicit image page",
+        "## Context ppr\n\nURL: https://example.test/context-ppr.md\n\n# Farm.js App\n\nSource: /context-ppr\n\nconfigured context PPR route",
       );
       // Concurrent requests share one render, and HEAD reads no pages.
       const concurrent = await Promise.all(
@@ -374,11 +369,9 @@ describe("production middleware runtime", () => {
           await serverModule.default.fetch(new Request("https://example.test/llms-full.txt"))
         ).text(),
       ).toBe(llmsFull);
-      // /dashboard/private-notes answers 401 without credentials. Its block stays,
-      // but the body is never read into a file anyone can fetch.
-      expect(llmsFull).toContain(
-        "## Private notes\n\nURL: https://example.test/dashboard/private-notes.md\n\n---",
-      );
+      // Guarded /dashboard pages have no block, and their bodies are never read into a
+      // file anyone can fetch.
+      expect(llmsFull).not.toContain("/dashboard");
       expect(llmsFull).not.toContain("dashboard-private-notes-source");
       expect(llmsFull).not.toContain("members-only-source");
       expect(llmsFull).not.toContain("rewrite-target");
@@ -405,8 +398,6 @@ describe("production middleware runtime", () => {
           "",
           "## Notes",
           "",
-          "- [Dashboard notes](https://example.test/dashboard/notes.md)",
-          "- [Private notes](https://example.test/dashboard/private-notes.md)",
           "- [Public notes](https://example.test/public-notes.md)",
           "",
           "## Optional",

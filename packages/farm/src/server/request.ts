@@ -86,34 +86,50 @@ function getAppRequestView(request: Request): Request {
   let view: Request;
   if (request.method !== "GET" && request.method !== "HEAD") {
     // Copying a request with a body would take it from the caller; such a
-    // request is never a shared render anyway, so count it up front.
+    // request is never a shared render anyway, so count it up front. The
+    // headers still carry the visitor's identity, so guard them on the request
+    // itself: its body, URL, and fetch() forwarding stay native.
     countRequestRead(request);
     view = request;
+    try {
+      guardRequestReads(view, request, request.headers, request.clone);
+    } catch {
+      // A frozen request cannot carry the guard; it is still counted.
+    }
   } else {
     view = new Request(request);
-    Object.defineProperties(view, {
-      // The rendered request's own signal, so aborting it reaches the handler unchanged.
-      signal: { configurable: true, get: () => request.signal },
-      headers: {
-        configurable: true,
-        get() {
-          _assertRequestReadAllowed("request.headers");
-          countRequestRead(request);
-          return request.headers;
-        },
-      },
-      clone: {
-        configurable: true,
-        value() {
-          _assertRequestReadAllowed("request.clone()");
-          countRequestRead(request);
-          return request.clone();
-        },
-      },
-    });
+    // The rendered request's own signal, so aborting it reaches the handler unchanged.
+    Object.defineProperty(view, "signal", { configurable: true, get: () => request.signal });
+    guardRequestReads(view, request, request.headers, request.clone);
   }
   appRequestViews.set(request, view);
   return view;
+}
+
+function guardRequestReads(
+  view: Request,
+  request: Request,
+  requestHeaders: Headers,
+  clone: Request["clone"],
+): void {
+  Object.defineProperties(view, {
+    headers: {
+      configurable: true,
+      get() {
+        _assertRequestReadAllowed("request.headers");
+        countRequestRead(request);
+        return requestHeaders;
+      },
+    },
+    clone: {
+      configurable: true,
+      value() {
+        _assertRequestReadAllowed("request.clone()");
+        countRequestRead(request);
+        return clone.call(request);
+      },
+    },
+  });
 }
 
 _setCurrentRequestResolver(

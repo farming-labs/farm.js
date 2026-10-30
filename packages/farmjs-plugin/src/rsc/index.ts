@@ -41,8 +41,15 @@ import { farmEnvironmentFunctionsPlugin } from "@farm.js/core/environment/vite";
 import type { FarmCacheUserConfig } from "@farm.js/core/cache";
 import type { FarmI18nUserConfig } from "@farm.js/core/i18n";
 import {
+  farmFontImportsPlugin,
+  farmImageImportsPlugin,
   generateClientCachePersistenceCode,
+  getPublicFarmImageConfig,
   resolveFarmClientCacheAdapterEntry,
+  resolveFarmImageConfig,
+  resolveFarmImageProviderForRuntime,
+  resolveFarmImageServerRuntime,
+  readRouteRenderingDirectiveFromFile,
 } from "@farm.js/core/vite";
 import { generateRscEntry } from "./entries/rsc.js";
 import { resolveMarkdownConfig, type FarmMarkdownUserConfig } from "@farm.js/core/markdown";
@@ -58,6 +65,8 @@ import {
 } from "./server-fn-transform.js";
 import { transformAutomaticOptimizedBoundaries } from "./automatic-optimized-boundary.js";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
+import { rscPrivateClientSourcemaps } from "./client-sourcemaps.js";
+import { findDocumentLayouts, findRouteFiles } from "./document-layouts.js";
 import { assertRscPackageCompatibility } from "./compatibility.js";
 import { sendRscDevelopmentResponse } from "./dev-response.js";
 import {
@@ -122,6 +131,13 @@ export type { BuildRscNitroOptions } from "./nitro-build.js";
 export { default as nitro } from "./vite-plugin-nitro.js";
 export type { NitroPluginOptions } from "./vite-plugin-nitro.js";
 
+const PAGE_FILE = /^page\.(tsx|jsx|ts|js)$/;
+
+/** Packages the generated RSC entries import that belong to this plugin, not to the app. */
+const PLUGIN_OWNED_ENTRY_IMPORTS = ["rsc-html-stream/server", "rsc-html-stream/client"];
+
+type FarmImageConfig = NonNullable<Parameters<typeof resolveFarmImageConfig>[0]>;
+
 // Extended config type for Farm.js RSC
 export interface FarmRscConfig {
   srcDir?: string;
@@ -132,13 +148,16 @@ export interface FarmRscConfig {
   api?: FarmAPIConfig;
   server?: FarmServerConfig;
   middleware?: FarmMiddlewareConfig;
+  /** Same options as core's `images`: `<Image>` URLs and the optimizer at `images.path`. */
+  images?: FarmImageConfig;
   port?: number;
   experimental?: {
     /**
-     * Enable React Server Components rendering.
+     * Enable React Server Components rendering. `{ mode: "rsc" }` is the same as `true`; this
+     * pipeline is the `"rsc"` engine of core's `experimental.serverComponents`.
      * @default true
      */
-    serverComponents?: boolean;
+    serverComponents?: boolean | { mode: "rsc" };
     /**
      * Enable React Server Actions and their public POST decoder.
      * @default false
@@ -218,6 +237,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
     agent: config.agent,
     mcp: config.mcp,
     middleware: config.middleware,
+    images: config.images,
 
     // Vite server configuration
     server: {
@@ -239,11 +259,22 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
       }),
       farmApiPlugin({
         srcDir: config.srcDir ?? "src",
+        // The production entry serves API routes from the routes directory; so does development.
+        apiDir: path.join(
+          config.srcDir ?? "src",
+          config.routesDir === undefined ? "app" : config.routesDir.trim(),
+          "api",
+        ),
         debug,
         bodySizeLimit: config.server?.bodySizeLimit,
         // The dev API server mounts the MCP endpoint, as core's does.
         ...(config.mcp ? { plugins: ({ root }) => resolveRscMCPPlugins(config.mcp, root) } : {}),
       }),
+      // localFont() from @farm.js/core/font, with its CSS carried by the bundler: this pipeline
+      // has no step that merges font CSS into a global stylesheet.
+      farmFontImportsPlugin({ basePath: config.basePath ?? "/", importCss: true }),
+      // Static image imports as { src, width, height }, which <Image> sizes from.
+      farmImageImportsPlugin(),
       farmRsc({
         debug,
         encryptActions: config.encryptActions,
@@ -813,6 +844,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
 
   return [
     farmEnvironmentFunctionsPlugin() as unknown as Plugin,
+    rscPrivateClientSourcemaps(),
     {
       name: "@farm.js/plugin/rsc:middleware-config",
       enforce: "pre",
@@ -897,7 +929,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
       async config(config: UserConfig, env: ConfigEnv) {
         const c = config as UserConfig & {
           experimental?: {
-            serverComponents?: boolean;
+            serverComponents?: boolean | { mode?: string };
             serverActions?: boolean;
             optimizedBoundary?: boolean;
           };
@@ -918,9 +950,22 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           md?: FarmMarkdownUserConfig | boolean;
           agent?: { llmsTxt?: boolean | FarmLlmsTxtUserConfig };
           mcp?: FarmMCPUserConfig;
+          images?: FarmImageConfig;
         };
         // Check if user enabled RSC in their config
-        rscEnabled = c.experimental?.serverComponents === true;
+        const serverComponents = c.experimental?.serverComponents;
+        if (
+          typeof serverComponents === "object" &&
+          serverComponents !== null &&
+          serverComponents.mode !== "rsc"
+        ) {
+          throw new Error(
+            `[Farm.js] @farm.js/plugin/rsc runs the "rsc" engine; experimental.serverComponents.mode "${String(serverComponents.mode)}" is not supported here.`,
+          );
+        }
+        rscEnabled =
+          serverComponents === true ||
+          (typeof serverComponents === "object" && serverComponents !== null);
         actionsEnabled = c.experimental?.serverActions === true;
         bodySizeLimit = resolveFarmServerConfig(c.server).bodySizeLimit;
         optimizedBoundaryEnabled = c.experimental?.optimizedBoundary === true;
@@ -1038,8 +1083,60 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
             : `/${projectSourceDir}${routeSuffix}`;
           return { name: source.name, base, glob: base };
         });
+        // Each page's rendering directive and whether its source reads request state, which the
+        // runtime cannot see from module exports: the same baked input core's server merges.
+        // Later roots override earlier ones, as the entry's merged page map does.
+        const pageRenderingDirectives: Record<string, unknown> = {};
+        for (const source of getFarmSourceRoots(c)) {
+          const routesRoot = path.resolve(root, source.srcDir, configuredRoutesDir);
+          for (const { key, file } of await findRouteFiles(routesRoot, (name) =>
+            PAGE_FILE.test(name),
+          )) {
+            const directive = readRouteRenderingDirectiveFromFile(file);
+            if (directive) pageRenderingDirectives[key] = directive;
+            else delete pageRenderingDirectives[key];
+          }
+        }
+        // Root layouts that render <html> own the document (Next.js's root layout contract).
+        const documentLayouts = [
+          ...new Set(
+            (
+              await Promise.all(
+                getFarmSourceRoots(c).map((source) =>
+                  findDocumentLayouts(path.resolve(root, source.srcDir, configuredRoutesDir)),
+                ),
+              )
+            ).flat(),
+          ),
+        ];
+        // The same images contract as core: without Sharp, "auto" keeps original URLs
+        // (provider "none") instead of pointing <Image> at an optimizer that cannot run.
+        const nitroPreset = process.env.NITRO_PRESET || "vercel";
+        const imageConfig = resolveFarmImageConfig(
+          resolveFarmImageProviderForRuntime(c.images, {
+            root,
+            preset: nitroPreset,
+            dev: env.command === "serve",
+          }),
+        );
+        const publicImageConfig = getPublicFarmImageConfig(imageConfig);
+        // Development always optimizes with Sharp, as core's dev server does.
+        const imageRuntime =
+          env.command === "serve"
+            ? imageConfig.provider === "none"
+              ? "none"
+              : "node"
+            : resolveFarmImageServerRuntime(imageConfig, nitroPreset);
         // Build context for entry generators
         entryContext = {
+          documentLayouts,
+          pageRenderingDirectives,
+          images: {
+            config: imageConfig,
+            public: publicImageConfig,
+            path: imageConfig.path,
+            runtime: imageRuntime,
+          },
           srcDir,
           outDir,
           basePath: c.basePath ?? "/",
@@ -1121,6 +1218,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           builder: { sharedConfigBuild: true } as any,
           define: {
             __FARM_API_BASE_URL__: JSON.stringify(api.baseURL),
+            __FARM_IMAGE_CONFIG__: JSON.stringify(entryContext.images?.public),
           },
           ssr: {
             external: [
@@ -1144,6 +1242,20 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           resolve: {
             dedupe: ["react", "react-dom", "react-server-dom-webpack"],
             alias: [
+              // The generated entries import the plugin's own dependencies; resolve them from here
+              // so an app (strict pnpm layout) does not have to install them itself.
+              ...PLUGIN_OWNED_ENTRY_IMPORTS.flatMap((specifier) => {
+                try {
+                  return [
+                    {
+                      find: new RegExp(`^${specifier.replace(/[/.]/g, "\\$&")}$`),
+                      replacement: require_.resolve(specifier),
+                    },
+                  ];
+                } catch {
+                  return [];
+                }
+              }),
               ...Object.entries(layerAliases).map(([find, replacement]) => ({
                 find,
                 replacement,

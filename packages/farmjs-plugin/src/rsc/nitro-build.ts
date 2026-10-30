@@ -13,9 +13,12 @@ import {
   copyFileSync,
   existsSync,
   readdirSync,
+  lstatSync,
+  rmSync,
   statSync,
+  symlinkSync,
 } from "fs";
-import type { NitroConfig } from "nitro/types";
+import type { Nitro, NitroConfig } from "nitro/types";
 import {
   FARM_NODE_ENV_MODULE_FILE,
   FARM_NODE_ENV_MODULE_SOURCE,
@@ -124,6 +127,33 @@ function detectBundledRscRuntimes(rendererPath: string): Map<string, string> {
     }
   }
   return packages;
+}
+
+/**
+ * The prerender server runs the Vite output in place, before the runtime packages are copied next
+ * to the server output, and a strict install (pnpm) does not expose a package the plugin depends
+ * on from the app root. Links them where the Vite output resolves from; returns the cleanup.
+ */
+function linkRuntimePackages(viteDistDir: string, packages: ReadonlyMap<string, string>) {
+  const nodeModules = path.join(viteDistDir, "node_modules");
+  const ownsNodeModules = !existsSync(nodeModules);
+  const links: string[] = [];
+  for (const [packageName, packageRoot] of packages) {
+    const link = path.join(nodeModules, ...packageName.split("/"));
+    try {
+      lstatSync(link);
+      continue;
+    } catch {}
+    mkdirSync(path.dirname(link), { recursive: true });
+    // A junction needs no privileges on Windows; elsewhere the type is ignored.
+    symlinkSync(packageRoot, link, "junction");
+    links.push(link);
+  }
+  return () => {
+    // Removes the links, never what they point at.
+    if (ownsNodeModules) rmSync(nodeModules, { recursive: true, force: true });
+    else for (const link of links) rmSync(link, { force: true });
+  };
 }
 
 function copyRuntimePackages(serverDir: string, packages: ReadonlyMap<string, string>): void {
@@ -350,125 +380,54 @@ export type BuildRscNitroOptions = {
   preset?: string;
 };
 
-export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void> {
-  const {
-    rendererPath,
-    publicDir,
-    ssrPath,
-    assetsDir,
-    root,
-    outputDir = path.join(root, ".output"),
-    preset = "vercel",
-  } = options;
-
-  const { build, copyPublicAssets, createNitro, prepare } = await import("nitro/builder");
-
-  console.log(`[FARM] Building RSC server with Nitro (preset: ${preset})...`);
-
-  const buildDir = path.join(root, ".nitro");
-  const serverDir = path.join(outputDir, "server");
-  const publicOutDir = path.join(outputDir, "public");
-
-  // The server sets NODE_ENV to "production" unless the deployment chose one, as the core
-  // node-server output does. The RSC and SSR bundles read it at runtime: left unset, React loads
-  // its development builds and Flight responses carry server component props, stacks and paths.
-  writeFileSync(
-    path.join(path.dirname(path.resolve(rendererPath)), FARM_NODE_ENV_MODULE_FILE),
-    FARM_NODE_ENV_MODULE_SOURCE,
-    "utf-8",
-  );
-  const entryPath = writeRscEntryFile(buildDir, rendererPath, ssrPath);
-  const registeredRuntimePackages = new Map(runtimePackagesByRoot.get(path.resolve(root)) ?? []);
-  for (const [packageName, packageRoot] of detectBundledRscRuntimes(rendererPath)) {
-    registeredRuntimePackages.set(packageName, packageRoot);
+function listModuleFiles(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  const files: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...listModuleFiles(full));
+    else if (/\.(?:m|c)?js$/.test(entry.name)) files.push(full);
   }
+  return files;
+}
 
-  const publicAssets: NitroConfig["publicAssets"] = [
-    { dir: publicDir, baseURL: "/", maxAge: 31536000 },
+/**
+ * Copy the packages the RSC and SSR bundles load into the server output. Nitro traces only its own
+ * bundle, and these are copied in afterwards; their code-split chunks and dynamic imports (such as
+ * shiki's WebAssembly engine) reach package files the entry files alone do not. The RSC bundle
+ * resolves packages with the react-server condition, the SSR bundle without it.
+ */
+async function traceRscBundleDependencies(
+  root: string,
+  serverDir: string,
+  rscDir: string,
+  ssrDir: string | null,
+): Promise<void> {
+  const { traceNodeModules } = await import("nf3");
+  const traces: Array<[string[], string[]]> = [
+    [listModuleFiles(rscDir), ["react-server", "node", "import", "default"]],
+    [ssrDir ? listModuleFiles(ssrDir) : [], ["node", "import", "default"]],
   ];
-  if (assetsDir) {
-    publicAssets.push({
-      dir: path.join(publicDir, assetsDir),
-      baseURL: `/${assetsDir}`,
-      maxAge: 31536000,
-    });
+  for (const [files, conditions] of traces) {
+    if (files.length === 0) continue;
+    await traceNodeModules(files, { rootDir: root, outDir: serverDir, conditions });
   }
+}
 
-  const config: NitroConfig = {
-    preset,
-    // The RSC plugin supports Vite 6+, while Nitro's beta Vite builder follows
-    // its own Vite 8 peer range. The prebuilt renderer works with Rolldown and
-    // keeps the app's Vite version out of Nitro's production build contract.
-    builder: "rolldown",
-    rootDir: root,
-    serverDir: root,
-    buildDir,
-    dev: false,
-    alias: {
-      h3: runtimeRequire.resolve("h3"),
-    },
-    output: {
-      dir: outputDir,
-      serverDir,
-      publicDir: publicOutDir,
-    },
-    publicAssets,
-    renderer: { handler: entryPath },
-    // The prebuilt RSC/SSR bundles are copied after Nitro finishes, so Nitro's
-    // module graph cannot otherwise see their bare package imports. Trace both
-    // entry points explicitly to keep node-server output self-contained.
-    traceDeps: [rendererPath, ...(ssrPath ? [ssrPath] : [])],
-    // Externalize rsc/ssr so we don't bundle (they reference Vite-generated manifest). We copy dist into server output after build.
-    rollupConfig: {
-      external: (id: string) => {
-        // Ids reach this predicate in both separator forms on Windows, and matching
-        // only the POSIX one makes the same module external in one pass and not in
-        // the next, which Rollup rejects.
-        const normalized = id.split("\\").join("/");
-        return (
-          normalized.includes("../dist/") ||
-          normalized.includes("dist/rsc") ||
-          normalized.includes("dist/ssr")
-        );
-      },
-    },
-    compatibilityDate: "2024-12-01",
-    minify: true,
-  };
-
-  const nitro = await createNitro(config);
-  await prepare(nitro);
-  await copyPublicAssets(nitro);
-  await build(nitro);
-  await nitro.close();
-  copyRuntimePackages(serverDir, registeredRuntimePackages);
-
-  // Copy dist into server so runtime relative imports resolve. Handle missing dir (e.g. buildApp order).
-  const serverDistDir = path.join(serverDir, "dist");
-  const rscSrc = path.dirname(path.resolve(rendererPath));
-  const ssrSrc = ssrPath ? path.dirname(path.resolve(ssrPath)) : null;
-  mkdirSync(serverDistDir, { recursive: true });
-  copyDir(rscSrc, path.join(serverDistDir, "rsc"));
-  if (ssrSrc) copyDir(ssrSrc, path.join(serverDistDir, "ssr"));
-  // Stub manifest if missing (RSC plugin may write it after our hook runs)
-  const rscDestDir = path.join(serverDistDir, "rsc");
-  const manifestDest = path.join(rscDestDir, "__vite_rsc_assets_manifest.js");
-  if (!existsSync(manifestDest)) {
-    mkdirSync(rscDestDir, { recursive: true });
-    writeFileSync(
-      manifestDest,
-      "export default { serverResources: {}, clientReferenceDeps: {} };",
-      "utf-8",
-    );
-  }
-
-  // Nitro may group the entry differently by builder. Make copied-dist imports
-  // relative to the emitted chunk so output survives moving away from the project.
-  rewriteRscEntryImports(serverDir, serverDistDir);
-
+/**
+ * Give the SSR bundle the production client CSS href and bootstrap script, so its HTML has styles
+ * and hydrates. Runs on the Vite output before Nitro, so the prerender pass and the copies in the
+ * server output render the same document. Only placeholders are replaced, so it is idempotent.
+ */
+function patchRscServerBundles(
+  rscDir: string,
+  ssrDir: string,
+  publicDir: string,
+  assetsDir: string | undefined,
+): void {
   // Patch SSR bundle: inject production client CSS href and bootstrap script so HTML has styles and hydration works
-  const ssrIndexPath = path.join(serverDistDir, "ssr", "index.js");
-  const manifestPath = path.join(serverDistDir, "rsc", MANIFEST_FILENAME);
+  const ssrIndexPath = path.join(ssrDir, "index.js");
+  const manifestPath = path.join(rscDir, MANIFEST_FILENAME);
   let bootstrapScriptContent = "";
   let clientEntryHref = "";
   const RSC_CALL_SERVER_PLACEHOLDER =
@@ -520,9 +479,12 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
     }
     try {
       let ssrCode = readFileSync(ssrIndexPath, "utf-8");
-      if (ssrCode.includes("__FARM_CLIENT_CSS_HREF__")) {
-        ssrCode = ssrCode.replace("__FARM_CLIENT_CSS_HREF__", clientCssHref);
-      }
+      // Only the assignment: the bundle also compares against the placeholder, and a second
+      // run over an already patched bundle must leave that comparison intact.
+      ssrCode = ssrCode.replace(
+        /(CLIENT_CSS_HREF\s*=\s*)"__FARM_CLIENT_CSS_HREF__"/,
+        "$1" + JSON.stringify(clientCssHref),
+      );
       if (clientEntryHref && ssrCode.includes("__FARM_CLIENT_ENTRY_HREF__")) {
         ssrCode = ssrCode.replace(
           /(CLIENT_ENTRY_HREF\s*=\s*)"__FARM_CLIENT_ENTRY_HREF__"/,
@@ -540,6 +502,221 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
       // ignore
     }
   }
+}
+
+/** The route the RSC entry answers, during the prerender pass only, with its static pages. */
+const FARM_PRERENDER_ROUTES_PATH = "/__farm/rsc-prerender-routes";
+
+/**
+ * Prerender the app's static pages and their RSC payloads into the public output with Nitro's
+ * prerenderer, which serves them before the server on every preset. The RSC entry lists the pages
+ * (it has the route modules and their generateStaticParams), through Nitro's x-nitro-prerender
+ * header on a seed route that is removed afterwards.
+ */
+async function prerenderRscPages(
+  nitro: Nitro,
+  prerender: (nitro: Nitro) => Promise<void>,
+  viteDistDir: string,
+): Promise<void> {
+  nitro.options.prerender = {
+    ...nitro.options.prerender,
+    routes: [FARM_PRERENDER_ROUTES_PATH],
+    crawlLinks: false,
+    // Failures are judged below: a seed that cannot run only skips prerendering.
+    failOnError: false,
+  };
+  // The prerender server is a separate Nitro build of the same renderer entry. Point its imports of
+  // the prebuilt bundles at the Vite output, as the server output's are pointed at their copies.
+  nitro.hooks.hook("prerender:init", (prerenderer) => {
+    prerenderer.hooks.hook("compiled", () => {
+      rewriteRscEntryImports(prerenderer.options.output.serverDir, viteDistDir);
+    });
+  });
+  let seedError: { message?: string } | undefined;
+  const failedPages: string[] = [];
+  nitro.hooks.hook("prerender:route", (route) => {
+    if (route.route !== FARM_PRERENDER_ROUTES_PATH) {
+      if (route.error) failedPages.push(`${route.route} (${route.error.message})`);
+      return;
+    }
+    seedError = route.error;
+    removeSeedOutput(nitro, route.fileName);
+  });
+  const previous = process.env.FARM_RSC_PRERENDER;
+  process.env.FARM_RSC_PRERENDER = "1";
+  try {
+    await prerender(nitro);
+  } finally {
+    if (previous === undefined) delete process.env.FARM_RSC_PRERENDER;
+    else process.env.FARM_RSC_PRERENDER = previous;
+  }
+  if (seedError) {
+    // The server could not start in place (for example, a runtime package only the server output
+    // carries). Every page still renders on request, so the build goes on without static files.
+    console.warn(
+      `[FARM] Prerendering skipped: the server could not list its static pages (${seedError.message}). Pages render on each request.`,
+    );
+    return;
+  }
+  if (failedPages.length > 0) {
+    // A page that asks to be static and fails to render fails the build, as in Next.js.
+    throw new Error(`[FARM] Prerendering failed for:\n  ${failedPages.join("\n  ")}`);
+  }
+}
+
+/** Remove the seed route's file, and the directories it created, from the public output. */
+function removeSeedOutput(nitro: Nitro, fileName: string | undefined): void {
+  const publicDir = path.resolve(nitro.options.output.publicDir);
+  const prerendered = (nitro as Nitro & { _prerenderedRoutes?: { route: string }[] })
+    ._prerenderedRoutes;
+  const index = prerendered?.findIndex((entry) => entry.route === FARM_PRERENDER_ROUTES_PATH) ?? -1;
+  if (index >= 0) prerendered!.splice(index, 1);
+  if (!fileName) return;
+  let target = path.join(publicDir, fileName);
+  rmSync(target, { force: true });
+  for (
+    target = path.dirname(target);
+    target.startsWith(publicDir + path.sep) &&
+    existsSync(target) &&
+    readdirSync(target).length === 0;
+    target = path.dirname(target)
+  ) {
+    rmSync(target, { recursive: true });
+  }
+}
+
+export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void> {
+  const { rendererPath, publicDir, ssrPath, assetsDir, root, preset = "vercel" } = options;
+  const outputDir = options.outputDir ?? path.join(root, ".output");
+
+  const { build, copyPublicAssets, createNitro, prepare, prerender } =
+    await import("nitro/builder");
+
+  console.log(`[FARM] Building RSC server with Nitro (preset: ${preset})...`);
+
+  const buildDir = path.join(root, ".nitro");
+  // Vercel's Build Output API has its own layout (functions/, static/), which the preset owns when
+  // the caller names the deployment directory (`farm build`). Without one, the output keeps the
+  // server/ and public/ layout that hand-written post-build scripts copy from.
+  const presetOwnsLayout =
+    options.outputDir !== undefined && (preset === "vercel" || preset === "vercel-edge");
+
+  // The server sets NODE_ENV to "production" unless the deployment chose one, as the core
+  // node-server output does. The RSC and SSR bundles read it at runtime: left unset, React loads
+  // its development builds and Flight responses carry server component props, stacks and paths.
+  writeFileSync(
+    path.join(path.dirname(path.resolve(rendererPath)), FARM_NODE_ENV_MODULE_FILE),
+    FARM_NODE_ENV_MODULE_SOURCE,
+    "utf-8",
+  );
+  const entryPath = writeRscEntryFile(buildDir, rendererPath, ssrPath);
+  const registeredRuntimePackages = new Map(runtimePackagesByRoot.get(path.resolve(root)) ?? []);
+  for (const [packageName, packageRoot] of detectBundledRscRuntimes(rendererPath)) {
+    registeredRuntimePackages.set(packageName, packageRoot);
+  }
+
+  const publicAssets: NitroConfig["publicAssets"] = [
+    { dir: publicDir, baseURL: "/", maxAge: 31536000 },
+  ];
+  if (assetsDir) {
+    publicAssets.push({
+      dir: path.join(publicDir, assetsDir),
+      baseURL: `/${assetsDir}`,
+      maxAge: 31536000,
+    });
+  }
+
+  const config: NitroConfig = {
+    preset,
+    // The RSC plugin supports Vite 6+, while Nitro's beta Vite builder follows
+    // its own Vite 8 peer range. The prebuilt renderer works with Rolldown and
+    // keeps the app's Vite version out of Nitro's production build contract.
+    builder: "rolldown",
+    rootDir: root,
+    serverDir: root,
+    buildDir,
+    dev: false,
+    alias: {
+      h3: runtimeRequire.resolve("h3"),
+    },
+    output: presetOwnsLayout
+      ? { dir: outputDir }
+      : {
+          dir: outputDir,
+          serverDir: path.join(outputDir, "server"),
+          publicDir: path.join(outputDir, "public"),
+        },
+    publicAssets,
+    renderer: { handler: entryPath },
+    // The prebuilt RSC/SSR bundles are copied after Nitro finishes, so Nitro's
+    // module graph cannot otherwise see their bare package imports. Trace both
+    // entry points explicitly to keep node-server output self-contained.
+    traceDeps: [rendererPath, ...(ssrPath ? [ssrPath] : [])],
+    // Externalize rsc/ssr so we don't bundle (they reference Vite-generated manifest). We copy dist into server output after build.
+    rollupConfig: {
+      external: (id: string) => {
+        // Ids reach this predicate in both separator forms on Windows, and matching
+        // only the POSIX one makes the same module external in one pass and not in
+        // the next, which Rollup rejects.
+        const normalized = id.split("\\").join("/");
+        return (
+          normalized.includes("../dist/") ||
+          normalized.includes("dist/rsc") ||
+          normalized.includes("dist/ssr")
+        );
+      },
+    },
+    compatibilityDate: "2024-12-01",
+    minify: true,
+  };
+
+  if (ssrPath) {
+    patchRscServerBundles(
+      path.dirname(path.resolve(rendererPath)),
+      path.dirname(path.resolve(ssrPath)),
+      publicDir,
+      assetsDir,
+    );
+  }
+
+  const nitro = await createNitro(config);
+  const serverDir = nitro.options.output.serverDir;
+  await prepare(nitro);
+  await copyPublicAssets(nitro);
+  const viteDistDir = path.dirname(path.dirname(path.resolve(rendererPath)));
+  const unlinkRuntimePackages = linkRuntimePackages(viteDistDir, registeredRuntimePackages);
+  try {
+    await prerenderRscPages(nitro, prerender, viteDistDir);
+  } finally {
+    unlinkRuntimePackages();
+  }
+  await build(nitro);
+  await nitro.close();
+  copyRuntimePackages(serverDir, registeredRuntimePackages);
+
+  // Copy dist into server so runtime relative imports resolve. Handle missing dir (e.g. buildApp order).
+  const serverDistDir = path.join(serverDir, "dist");
+  const rscSrc = path.dirname(path.resolve(rendererPath));
+  const ssrSrc = ssrPath ? path.dirname(path.resolve(ssrPath)) : null;
+  mkdirSync(serverDistDir, { recursive: true });
+  copyDir(rscSrc, path.join(serverDistDir, "rsc"));
+  if (ssrSrc) copyDir(ssrSrc, path.join(serverDistDir, "ssr"));
+  await traceRscBundleDependencies(root, serverDir, rscSrc, ssrSrc);
+  // Stub manifest if missing (RSC plugin may write it after our hook runs)
+  const rscDestDir = path.join(serverDistDir, "rsc");
+  const manifestDest = path.join(rscDestDir, "__vite_rsc_assets_manifest.js");
+  if (!existsSync(manifestDest)) {
+    mkdirSync(rscDestDir, { recursive: true });
+    writeFileSync(
+      manifestDest,
+      "export default { serverResources: {}, clientReferenceDeps: {} };",
+      "utf-8",
+    );
+  }
+
+  // Nitro may group the entry differently by builder. Make copied-dist imports
+  // relative to the emitted chunk so output survives moving away from the project.
+  rewriteRscEntryImports(serverDir, serverDistDir);
 
   console.log("[FARM] RSC Nitro build completed");
   console.log(`[FARM] Output: ${outputDir}`);

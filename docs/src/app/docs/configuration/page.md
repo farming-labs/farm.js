@@ -335,7 +335,9 @@ Farm keeps the options it needs to produce its production output: `root`, `base`
 source of each module, including code Farm strips from the browser bundle such as
 `createServerOnlyFn` bodies and `generateMetadata`, so any enabled value builds hidden maps (the
 JS names no map) and writes them to `.farm/client-sourcemaps/` instead of the public output. Upload
-them from there to your error tracker.
+them from there to your error tracker. RSC apps built with `@farm.js/plugin/rsc` do the same for
+`build.sourcemap` in `vite.config.ts`, writing the maps to `dist/client-sourcemaps/` beside
+`dist/client/`.
 
 During development, Farm loads server modules through Vite's `ssr` environment runner. With
 React Server Components enabled, RSC entries use a separate `rsc` runner and resolution conditions;
@@ -708,13 +710,76 @@ such as the [docs engine](/docs/docs-engine)'s endpoint, join the catalog throug
 Every app serves `/.well-known/farmjs.json` (and, for Farm 0.1.34's readers, `/.well-known/farmjs`)
 to any client: Farm's version and the installed `@farm.js/*` packages, the renderer and base path,
 the MCP tools Farm serves with their JSON Schemas, WebMCP browser tools, each integration's
-category and provider (never its configuration), and plugin names. An MCP server that requires
-`authorize`, or a public one whose path a path-specific guard covers (middleware or an
-integration's `protectedRoutes`, as for the [sitemap](#sitemap)), is listed as requiring
-authorization without its tools, resources or prompts, and endpoint tools leave out their HTTP
-route; a request Farm Infra signed for the app's `FARMJS_API_KEY` gets the full view.
+category and provider (never its configuration), and plugin names.
 [Farm Infra analytics](/docs/infra-analytics) lists every field.
-`manifest: false` turns it off.
+
+There is one public document, and everyone gets the same one, Farm Infra included. It lists only
+what an anonymous client could already find. An MCP server that requires `authorize`, or a public
+one whose path a path-specific guard covers (middleware or an integration's `protectedRoutes`, as
+for the [sitemap](#sitemap)), shows only its name, version, path and `authorization: "required"`,
+with empty `tools`, `resources` and `prompts`. Endpoint tools never include their HTTP method or
+route.
+
+`manifest` takes an object to choose what the document shows. Every section is shown by default:
+
+| Option         | Values                                      | Effect                                                                                                                                              |
+| -------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app`          | `boolean` or `{ version, renderer, build }` | `false` serves `app: null`; a field set to `false` is left out. `basePath` always stays.                                                            |
+| `packages`     | `boolean` or `"names"`                      | `"names"` lists the packages with `null` versions.                                                                                                  |
+| `mcp`          | `boolean` or `{ schemas, hide }`            | `schemas: false` drops tools' `inputSchema` and `outputSchema`. `hide` leaves out a server (`"store"`) or one of its tools (`"store/list_orders"`). |
+| `webmcp`       | `boolean` or `{ hide }`                     | `hide` leaves out browser tools by name.                                                                                                            |
+| `integrations` | `boolean`                                   | `false` serves `integrations: null`.                                                                                                                |
+| `agent`        | `boolean`                                   | `false` serves `agent: null`.                                                                                                                       |
+| `plugins`      | `boolean`                                   | `false` serves `plugins: null`.                                                                                                                     |
+
+A hidden section stays in the document as `null`, so readers can tell "hidden by the app" from an
+empty list, which means there is nothing to show:
+
+```ts title="farm.config.ts"
+export default defineConfig({
+  agent: {
+    manifest: {
+      app: { build: false },
+      packages: "names",
+      mcp: { schemas: false, hide: ["internal", "store/refund_order"] },
+      webmcp: { hide: ["delete_todo"] },
+      plugins: false,
+    },
+  },
+});
+```
+
+```json title="/.well-known/farmjs.json"
+{
+  "schemaVersion": 1,
+  "app": { "farm": "0.1.41", "renderer": "react", "basePath": "/" },
+  "packages": { "@farm.js/core": null, "@farm.js/mcp": null },
+  "mcp": {
+    "servers": [
+      {
+        "name": "store",
+        "version": "1.0.0",
+        "path": "/api/mcp",
+        "authorization": "none",
+        "resources": [],
+        "prompts": [],
+        "tools": [{ "name": "list_orders", "source": "endpoint", "readOnlyHint": true }]
+      }
+    ]
+  },
+  "webmcp": { "enabled": true, "tools": [{ "name": "list_todos", "inputSchemaSource": "none" }] },
+  "integrations": [{ "key": "billing", "category": "payment", "type": "stripe" }],
+  "agent": { "apiCatalog": null, "llmsTxt": true, "openapi": null },
+  "plugins": null
+}
+```
+
+Unknown options and invalid values fail when the config loads. `manifest: false` turns the
+document off at both paths.
+
+Earlier releases gave a request Farm Infra signed for the app's `FARMJS_API_KEY` a fuller view,
+with protected servers' tools and endpoint routes. That view is gone: Farm Infra reads the same
+public document, and `analytics: false` no longer changes it.
 
 ### API catalog
 
@@ -1064,10 +1129,10 @@ Customize both paths through `server.health`, or set `health: false` when an ada
 
 Server actions are same-origin application RPC endpoints. Farm rejects cross-origin action requests by default and limits the encoded request body to 1 MB.
 
-Server actions run on the React Server Components pipeline from `@farm.js/plugin/rsc` (see the
-[`rsc-demo` example](https://github.com/farming-labs/farm.js/tree/main/examples/rsc-demo)). The
-`experimental` flags below configure that pipeline; on their own they do not make server functions
-callable from the browser, and Farm keeps rejecting client imports of server-function modules.
+Server actions run on the React Server Components pipeline, which `experimental.serverComponents`
+turns on (see [React Server Components](/docs/server-rendering#react-server-components)).
+`experimental.serverActions` without `serverComponents` does not make server functions callable
+from the browser, and Farm keeps rejecting client imports of server-function modules.
 
 ```ts
 import { defineConfig } from "@farm.js/core";

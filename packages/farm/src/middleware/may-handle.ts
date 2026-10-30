@@ -7,10 +7,9 @@
  */
 import { createFarmAPIMiddlewarePathnames } from "../api/server-path";
 import type { ResolvedFarmConfig } from "../config";
-import {
-  integrationMiddlewareMayHandlePath,
-  type FarmIntegrationsUserConfig,
-} from "../integrations";
+import { integrationMiddlewareMayHandlePath } from "../integration-middleware-matcher";
+// Type-only: a value import would bundle the whole integration runtime into the server.
+import type { FarmIntegrationsUserConfig } from "../integrations";
 import {
   compileMiddlewareConfig,
   matchesCompiledMiddlewareConfig,

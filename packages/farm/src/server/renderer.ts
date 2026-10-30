@@ -160,6 +160,10 @@ import { pathToFileURL } from "node:url";
 import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
 import type { FarmIslandStrategy } from "../island";
 import { createDefaultErrorDiagnostics } from "./error-diagnostics";
+import { handleFarmFormActionRequest } from "../form-actions";
+import { installFarmIslandValues } from "../client/island-values";
+import { resolveServerActionsConfig } from "../server-action-security";
+import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import {
   createFarmCspNonceRewriter,
   createFarmCspNonce,
@@ -169,6 +173,12 @@ import {
   resolveFarmSecurityConfig,
   type ResolvedFarmSecurityConfig,
 } from "../security";
+
+// Islands mode: boundaries this server renders address their large prop values.
+installFarmIslandValues();
+
+// Islands mode renders on islx, which loads React: only an islands app loads it (`initialize`).
+let islands: typeof import("../client/islands-runtime") | undefined;
 
 let cachedClerkProvider: { ClerkProvider: any } | null = null;
 
@@ -632,6 +642,11 @@ export class ServerRenderer {
   async initialize(): Promise<void> {
     if (this.rendererRuntime) return;
 
+    if (this.islandValues()) {
+      (await import("../client/islands-server")).installFarmIslandsServer();
+      islands ??= await import("../client/islands-runtime");
+    }
+
     if (this.config.notFound?.component?.trim()) {
       resolveFarmNotFoundComponentPath(this.config, getFarmAppDirectories(this.config));
     }
@@ -775,7 +790,25 @@ export class ServerRenderer {
     ) {
       return element;
     }
+    // Islands mode runs on islx.
+    if (islands && this.islandValues())
+      return islands.wrapFarmIsolatedClientGraph(undefined as never, element as never);
     return this.rendererRuntime.wrapClientGraph(element);
+  }
+
+  /** The page a hydrating layout keeps as server HTML: islands again, or a server tree. */
+  private async isolateServerPage(element: unknown, serverTree: boolean): Promise<unknown> {
+    if (islands && this.islandValues()) {
+      const runtime = islands;
+      return serverTree
+        ? runtime.renderFarmServerTreePage(undefined as never, element as never, {
+            isolate: (node) => runtime.isolateFarmServerPageGraph(undefined as never, node),
+          })
+        : runtime.isolateFarmServerPageGraph(undefined as never, element as never);
+    }
+    return serverTree && this.rendererRuntime.renderServerTreePage
+      ? this.rendererRuntime.renderServerTreePage(element, { values: false })
+      : this.rendererRuntime.isolateServerPageGraph!(element);
   }
 
   private async renderElementToCompleteHTML(
@@ -862,6 +895,13 @@ export class ServerRenderer {
     return { html: await this.renderElementToCompleteHTML(element, options), head: "" };
   }
 
+  /** Islands mode sends large prop values once, keyed by content (RFC 0003). */
+  private islandValues(): boolean {
+    return (
+      resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) === "islands"
+    );
+  }
+
   /**
    * Render the route tree used by client navigation without producing a second
    * document response. Layout markers let the browser preserve the longest
@@ -894,10 +934,7 @@ export class ServerRenderer {
     ) {
       // As in renderPage: the layout keeps this page as server HTML, so its islands stay islands,
       // unless the page renders as a server tree the layout's root rebuilds.
-      element =
-        input.serverTree && this.rendererRuntime.renderServerTreePage
-          ? await this.rendererRuntime.renderServerTreePage(element)
-          : this.rendererRuntime.isolateServerPageGraph(element);
+      element = await this.isolateServerPage(element, input.serverTree === true);
     }
     element = this.createPageBoundary(element, {
       pageShouldHydrate: input.pageShouldHydrate,
@@ -1448,6 +1485,32 @@ export class ServerRenderer {
         params,
       });
 
+      // Islands mode: a form or client component posting a server action to this page. Loading
+      // the page and its layouts registers the `"use server"` modules they import, as the
+      // production server does at startup.
+      let actionRequest: Request | undefined;
+      if (
+        req.method === "POST" &&
+        resolveFarmServerComponentsMode(this.config.experimental?.serverComponents) === "islands"
+      ) {
+        await Promise.all([
+          this.routeManager.loadRouteModule(route.modulePath),
+          ...layouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath)),
+        ]);
+        actionRequest = createWebRequestFromFarmRequest(req, {
+          trustProxy: this.config.server?.trustProxy,
+        });
+        const actionResponse = await handleFarmFormActionRequest(
+          actionRequest,
+          resolveServerActionsConfig(this.config.serverActions),
+        );
+        if (actionResponse) {
+          await sendWebResponse(res, actionResponse);
+          completeRender(actionResponse.status, route.pattern);
+          return;
+        }
+      }
+
       const loadingBoundaryEntry = this.routeManager.getMatchingLoading(pathname, route);
       errorBoundaryEntry = this.routeManager.getMatchingError(pathname, route);
 
@@ -1456,9 +1519,12 @@ export class ServerRenderer {
       pluginExposedContext = getRequestContextSnapshot(req as object, {
         exposedOnly: true,
       });
-      const currentRequest = createWebRequestFromFarmRequest(req, {
-        trustProxy: this.config.server?.trustProxy,
-      });
+      // The action check above already read the body stream into a Request.
+      const currentRequest =
+        actionRequest ??
+        createWebRequestFromFarmRequest(req, {
+          trustProxy: this.config.server?.trustProxy,
+        });
       const routeContext = await this.resolveRouteContext({
         request: currentRequest,
         rawRequest: req,
@@ -1879,10 +1945,10 @@ export class ServerRenderer {
               // The hydrating layout keeps this page as server HTML, so its client components
               // render as their own islands instead of joining the layout's React tree. A
               // server-tree page instead joins it: the browser rebuilds the resolved tree there.
-              pageElement =
-                routeManifestEntry?.serverTree === true && this.rendererRuntime.renderServerTreePage
-                  ? await this.rendererRuntime.renderServerTreePage(pageElement)
-                  : this.rendererRuntime.isolateServerPageGraph(pageElement);
+              pageElement = await this.isolateServerPage(
+                pageElement,
+                routeManifestEntry?.serverTree === true,
+              );
             }
 
             // Every route gets a stable HTML boundary. Server-only pages keep

@@ -94,7 +94,7 @@ return pageProps;`,
   });
 
   it("hydrates a client navigation with middleware data as a Map", () => {
-    const renderPage = extractBlock(source, "async function renderPage(pageData) {");
+    const renderPage = extractBlock(source, "async function renderPage(pageData, info) {");
     const revive = renderPage.match(
       /const (\w+) = pageData\.props \? normalizeServerProps\(pageData\.props\)/,
     );

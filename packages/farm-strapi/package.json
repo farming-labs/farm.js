@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/strapi",
-  "version": "0.1.40",
+  "version": "0.1.44",
   "description": "Strapi CMS integration for Farm.js",
   "license": "MIT",
   "repository": {

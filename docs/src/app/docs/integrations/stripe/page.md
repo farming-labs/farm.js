@@ -217,6 +217,12 @@ The same `ctx` includes `ctx.args.db`, `ctx.data`, request params, the raw reque
   Invoice events change the status only for the owner's current subscription, so a one-off invoice
   never reactivates a canceled one. Features and limits come from the plan only while the status is
   `active`, `trialing`, or `past_due`; `canceled`, `unpaid`, and `incomplete` get the `free` plan's.
+  A Stripe `paused` subscription is stored as `incomplete` and `incomplete_expired` as `canceled`.
+- Checkout only sells products with `public: false` when they also set `purchasable: true`. A
+  hidden product is otherwise refused, so knowing its id is not enough to buy it.
+- `report-usage` sends the caller's `idempotencyKey` to Stripe as `<customer id>:<key>`. Stripe
+  dedupes meter event identifiers across the account, so one customer's key can never claim, and
+  drop, another customer's event. `stripeEventIdentifier` in the response is the scoped value.
 - Store billing snapshots through the integration schema when the app needs fast entitlement reads.
 - Run `farm stripe migrate --apply` after upgrading so the additive
   `billing_checkout_session` table can persistently deduplicate success-page and webhook delivery.

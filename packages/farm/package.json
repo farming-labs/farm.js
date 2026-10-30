@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.40",
+  "version": "0.1.44",
   "description": "The core of Farm.js, the framework for the web and agents",
   "keywords": [
     "@farm.js/core",
@@ -190,6 +190,12 @@
       "internal/isolated-boundary": [
         "./dist/internal/isolated-boundary.d.ts"
       ],
+      "internal/island-value-store": [
+        "./dist/internal/island-value-store.d.ts"
+      ],
+      "internal/island-codec": [
+        "./dist/internal/island-codec.d.ts"
+      ],
       "internal/server-tree": [
         "./dist/internal/server-tree.d.ts"
       ],
@@ -306,6 +312,7 @@
     },
     "./client": {
       "types": "./types/client.d.ts",
+      "react-server": "./dist/client.react-server.mjs",
       "import": "./dist/client.mjs",
       "require": "./dist/client.cjs"
     },
@@ -647,10 +654,55 @@
       "import": "./dist/internal/isolated-boundary.mjs",
       "require": "./dist/internal/isolated-boundary.cjs"
     },
+    "./internal/island-value-store": {
+      "types": "./dist/internal/island-value-store.d.ts",
+      "import": "./dist/internal/island-value-store.mjs",
+      "require": "./dist/internal/island-value-store.cjs"
+    },
+    "./internal/island-codec": {
+      "types": "./dist/internal/island-codec.d.ts",
+      "import": "./dist/internal/island-codec.mjs",
+      "require": "./dist/internal/island-codec.cjs"
+    },
     "./internal/server-tree": {
       "types": "./dist/internal/server-tree.d.ts",
       "import": "./dist/internal/server-tree.mjs",
       "require": "./dist/internal/server-tree.cjs"
+    },
+    "./internal/islands-runtime": {
+      "types": "./dist/internal/islands-runtime.d.ts",
+      "import": "./dist/internal/islands-runtime.mjs",
+      "require": "./dist/internal/islands-runtime.cjs"
+    },
+    "./internal/islands-server": {
+      "types": "./dist/internal/islands-server.d.ts",
+      "import": "./dist/internal/islands-server.mjs",
+      "require": "./dist/internal/islands-server.cjs"
+    },
+    "./internal/islx-client": {
+      "types": "./dist/internal/islx-client.d.ts",
+      "import": "./dist/internal/islx-client.mjs",
+      "require": "./dist/internal/islx-client.cjs"
+    },
+    "./internal/islx-server": {
+      "types": "./dist/internal/islx-server.d.ts",
+      "import": "./dist/internal/islx-server.mjs",
+      "require": "./dist/internal/islx-server.cjs"
+    },
+    "./internal/islx-react": {
+      "types": "./dist/internal/islx-react.d.ts",
+      "import": "./dist/internal/islx-react.mjs",
+      "require": "./dist/internal/islx-react.cjs"
+    },
+    "./internal/form-actions": {
+      "types": "./dist/internal/form-actions.d.ts",
+      "import": "./dist/internal/form-actions.mjs",
+      "require": "./dist/internal/form-actions.cjs"
+    },
+    "./internal/form-actions-client": {
+      "types": "./dist/internal/form-actions-client.d.ts",
+      "import": "./dist/internal/form-actions-client.mjs",
+      "require": "./dist/internal/form-actions-client.cjs"
     },
     "./internal/build-runtime": {
       "types": "./dist/internal/build-runtime.d.ts",
@@ -694,6 +746,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@farm.js/islx": "0.0.1",
     "@farming-labs/orm": "0.0.65",
     "@farming-labs/orm-runtime": "0.0.65",
     "@formatjs/icu-messageformat-parser": "3.5.15",

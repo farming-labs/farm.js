@@ -24,6 +24,10 @@ export const FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE = [
   "@farm.js/core/query/client",
   "@farm.js/core/server-fn/client",
   "@farm.js/core/server-query/client",
+  // Islands mode's browser runtime: Farm imports islx, which the app reaches only through Farm.
+  "@farm.js/core > @farm.js/islx/client",
+  "@farm.js/core > @farm.js/islx/react",
+  "@farm.js/core > @farm.js/islx/react/client",
 ] as const;
 
 export function getFarmClientOptimizeDepsInclude(renderer?: FarmRenderer): string[] {

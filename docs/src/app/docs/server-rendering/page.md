@@ -279,6 +279,112 @@ rules. This experiment is disabled when RSC owns the route. Integration provider
 route-wide root unless they explicitly declare that they can be recreated around independent
 isolated roots.
 
+## React Server Components
+
+Turn on React Server Components in `farm.config.ts`. `farm dev`, `farm build`, and `farm start`
+then run Farm's RSC pipeline on the official `@vitejs/plugin-rsc`: pages and layouts are server
+components, and `"use client"` marks client components.
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  experimental: {
+    serverComponents: true,
+  },
+});
+```
+
+That is the whole setup. When the RSC packages are missing, `farm dev` and `farm build` install
+them with the app's package manager: `@farm.js/plugin` at the installed `@farm.js/core` version, and
+`@vitejs/plugin-rsc`, `react`, `react-dom` and `react-server-dom-webpack` at the exact versions the
+plugin requires. Commit the updated `package.json` and lockfile. In CI (`CI` is set) nothing is
+installed: `serverComponents: true` runs without RSC and warns, and an explicit `mode` fails with the
+command to run. Set `FARM_SKIP_RSC_INSTALL=1` anywhere else the build must not change dependencies.
+Fast Refresh works in development without more setup; an app that installs `@vitejs/plugin-react`
+gets its own copy instead of Farm's.
+
+`serverComponents: true` is the same as `serverComponents: { mode: "rsc" }`, React's own server
+components engine. `{ mode: "islands" }` is Farm's own engine
+([RFC 0003](https://github.com/farming-labs/farm.js/blob/main/rfcs/0003-islands-server-components.md)),
+built on [islx](https://github.com/farming-labs/islx), its renderer-agnostic wire format:
+it renders on Farm's normal pipeline, sends static output once as HTML, and hydrates only client
+components. A client component that receives server output (`children`, or any element prop) keeps
+that output as a slot of the existing HTML instead of receiving it again, and a server page under a
+layout that hydrates (a client provider, say) hydrates inside that layout's tree, so its client
+components read the provider's context. A large prop value (512 bytes of JSON or more, such as a
+navigation tree) travels once, keyed by its content: client components that share it share one
+copy, and a client navigation leaves out the values the browser already holds. A client navigation
+also leaves out the layouts the browser keeps: the server renders the page and any layout that
+changed, so a layout's client state survives and its HTML is not sent again. A layout the browser
+keeps does not render on that navigation, so put access checks in middleware or a page `guard`,
+not in a layout's body. `router.refresh()` and full loads render every layout. A PPR route caches
+each segment under its own key next to the full page, and sends every value so the cached HTML
+suits any browser; a prerendered page always sends the whole document. A page under a layout that
+hydrates as one root (a client provider around the pages) sends its large prop values once too,
+in the payload its client components rebuild from. When the browser already renders that layout,
+a navigation to such a page carries only that payload: the browser rebuilds the page in the
+layout's React tree, so the server leaves out the page's HTML. `"use server"`
+functions work from forms, with or without JavaScript, and from client components, in `farm dev`
+and in production. A server component can pass one to a client component as a prop, and can
+declare one inline: an `async` function with `"use server"` as its first statement may read the
+component's variables, which travel with it sealed (AES-GCM, bound to the action) rather than as
+form fields the browser could read or change. Every instance of one build shares the sealing key;
+set `ISLX_ACTIONS_KEY` to keep forms on open pages working across deploys. A `<form>` written in a
+server component posts its action without a page load once JavaScript runs. After an
+action called from JavaScript, the page refreshes, as the form posted without JavaScript would show
+it: islands still on the page keep their state and get their new props, and a `redirect()` from the
+action becomes a client navigation. Props and action arguments are not limited to JSON:
+`undefined`, `NaN`, `Infinity`, `-0`, `BigInt`, `Date`, `Map`, `Set`, `URL`, `RegExp`, typed arrays
+and `ArrayBuffer` arrive as themselves (`URL` and `RegExp` in islands mode only; RSC does not
+support them). Functions other than server actions and class instances do not cross; a client
+component given one keeps its server HTML and is not hydrated. Islands mode needs none of the RSC packages and is experimental. Both modes share
+the authoring rules on this page, so switching between them is a one-line change; the same contract
+tests (`tests/e2e-server-components`) run against both, in development and in production builds.
+`benchmarks/server-components-payload` compares what each mode sends.
+
+The app's `vite` options and plugins apply as in other Farm apps, and so does built-in Tailwind.
+The build goes to the deploy target's
+output directory, so `farm start` and platform deploys work unchanged.
+
+The pipeline does not run every Farm feature yet:
+
+- `auth`, `integrations`, `headers`, `redirects`, `rewrites`, `routeRules`, and `context` decide
+  what a request may see or receive. Running the app without them could expose what they protect,
+  so `farm dev` and `farm build` stop with an error that names them.
+- Farm `plugins`, `storage`, `schema`, `cron`, `workflows`, `docs`, `theme`, and `observability`
+  are ignored, with a warning.
+
+Before this flag ran the RSC pipeline it only switched off isolated hydration, so some apps set it
+without using React Server Components. If such an app uses `auth`, `integrations` or another
+feature above that RSC cannot run yet, nothing is installed and it keeps running without React
+Server Components, with a warning that says why. `{ mode: "rsc" }` is always treated as a
+deliberate choice. `farm doctor` reports which way an app goes.
+
+A `vite.config.ts` built with `defineConfig` from
+`@farm.js/plugin/rsc` and the `vite` CLI keeps working, as in the
+[`rsc-demo` example](https://github.com/farming-labs/farm.js/tree/main/examples/rsc-demo).
+
+Both setups follow the same route contract:
+
+- **Static pages.** A page that opts in to static rendering, as in [Static rendering](#static-rendering),
+  is prerendered at build time together with its RSC payload. A dynamic route lists its paths with
+  `generateStaticParams()`. Client navigation fetches the payload at `<page>.rsc` (`/index.rsc` for
+  `/`), so a prerendered page navigates without reaching the server. A page that any middleware may
+  handle, and every page of an app with i18n, stays server-rendered, because middleware never sees a
+  static file. Pages with `revalidate` also render on each request for now; the pipeline has no
+  revalidating cache yet. A page that asks to be static and fails to render fails the build.
+- **Metadata.** Layouts and pages resolve `metadata`, `generateMetadata()`, and viewport exports in
+  the same order and with the same title templates as other Farm apps, and the server renders the
+  same head tags.
+- **Images.** `<Image>` follows the app's `images` config. Without `sharp`, `provider: "auto"` keeps
+  original image URLs, and the optimizer at `images.path` runs only when it can.
+- **Root layouts.** A root layout that renders `<html>` owns the document, as in Next.js, and the
+  browser hydrates the whole document.
+
+A client that loaded an older deployment and fetches a prerendered payload from a newer one does not
+get the deployment-mismatch reload that a server-rendered payload triggers.
+
 ## Automatic optimized boundaries
 
 Automatic optimized boundaries are a React-only experiment and are not applied to Preact, Solid,

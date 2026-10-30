@@ -97,7 +97,8 @@ in the browser, gets `403`.
 
 To let HTTP callers in, pass `authorize`. It receives a copy of the request, so it can read the
 body, plus the task key (`null` for the task list) and the operation. Return `true` to allow the
-request, `false` to answer `403`, or a `Response` to answer with:
+request, `{ caller }` to allow it and name who sent it, `false` to answer `403`, or a `Response`
+to answer with:
 
 ```ts
 import { getSession } from "./auth";
@@ -112,15 +113,22 @@ export const appIntegrations = {
     async authorize(request, { task, operation }) {
       const session = await getSession(request);
       if (!session) return new Response("Sign in first", { status: 401 });
-      return task === "sendWelcomeEmail" && operation === "trigger";
+      if (task !== "sendWelcomeEmail" || operation !== "trigger") return false;
+      return { caller: session.userId };
     },
   }),
 } as const;
 ```
 
 `status` and `cancel` take any handle ID the caller sends, so check that the run belongs to the
-caller before allowing them. With Trigger.dev, a task's `status` and `cancel` routes only act on
-that task's own runs.
+caller before allowing them. A task's `status` and `cancel` routes only act on that task's own
+runs (Trigger.dev) or events (Inngest).
+
+An HTTP caller's `idempotencyKey` cannot claim anyone else's key. The task's own
+`defaults.idempotencyKey` wins over it, and a key the caller picks is namespaced to the task and to
+the `caller` that `authorize` returned, as `farm-http:<task id>:<caller>:<key>`. Without a named
+caller, every HTTP caller of a task shares one namespace. Keys passed by server code through `api`
+are used as given.
 
 ## Trigger one run
 

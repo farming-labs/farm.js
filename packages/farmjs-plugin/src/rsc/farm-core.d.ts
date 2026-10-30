@@ -2,6 +2,7 @@ declare module "@farm.js/core" {
   import type { Plugin } from "vite";
   export const farmApiPlugin: (options?: {
     srcDir?: string;
+    apiDir?: string;
     debug?: boolean;
     bodySizeLimit?: number | string;
     plugins?: (context: {

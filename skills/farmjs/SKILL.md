@@ -349,8 +349,11 @@ farm add integration jobs-trigger
 ```
 
 Current integration families include AI, Stripe, Autumn, Polar, Resend, Trigger.dev, Inngest,
-Unkey, Cloudflare agents, Eve, Auth0, Auth.js, Better Auth, Clerk, Supabase, WorkOS, custom
-integrations, UI registries, and ORM-backed data.
+Unkey, Cloudflare agents, Eve, Auth0, Auth.js, Better Auth, Clerk, Supabase, WorkOS, Convex
+(`@farm.js/convex`, installed with `pnpm add`, not `farm add`), custom integrations, UI
+registries, and ORM-backed data. Auth, billing or email that runs inside Convex is detected from
+`convex/convex.config.ts` by `convex()`, or listed with `component()` in `convex({ use })`; never
+a second Farm integration. Auth that stays in Farm gives `convex()` a `token` reader and `tokenPath`.
 
 Provider adapters support two ownership modes: pass credentials so the adapter constructs its
 default SDK, or pass an app-owned vendor client through `instance`. Keep the vendor instance in a
@@ -470,8 +473,11 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
   `src/app/robots.ts`, win over it; it wins over the docs engine's robots.txt.
 - Use `md`/`mdx` for page mirrors and content routes; use `openapi` for API references.
 - Every app serves a public `/.well-known/farmjs.json` manifest (Farm version and packages, MCP
-  tools and schemas, WebMCP tools, integration providers, plugin names; never config or env).
-  MCP servers with `authorize` are listed without their tools. `agent.manifest: false` turns it off.
+  tools and schemas, WebMCP tools, integration providers, plugin names; never config or env), the
+  same document for every reader, Farm Infra included. MCP servers with `authorize` or behind a
+  guard are listed without their tools. `agent.manifest: { packages: "names", mcp: { schemas:
+false, hide: ["server", "server/tool"] }, webmcp: { hide }, app: { build: false }, plugins:
+false }` trims it (a hidden section is `null`); `agent.manifest: false` turns it off.
 - Use `agent.noindexPreviews: true` to send `X-Robots-Tag: noindex, nofollow` on preview
   deployments (`FARM_PREVIEW=1`, `VERCEL_ENV=preview`, Netlify deploy-preview/branch-deploy at
   build time, Render PR previews). Test locally with `FARM_PREVIEW=1 farm dev`.

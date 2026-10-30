@@ -1,4 +1,8 @@
-import { createEndpoint } from "@farm.js/core";
+import {
+  createEndpoint,
+  describeIntegrationOriginRejection,
+  validateIntegrationRequestOrigin,
+} from "@farm.js/core";
 import {
   convertToModelMessages,
   createDownload,
@@ -41,8 +45,36 @@ export interface AIChatPrepareContext<TBody extends AIChatRequestBody = AIChatRe
   modelMessages: Awaited<ReturnType<AIConvertToModelMessagesFunction>>;
 }
 
+export interface AIChatAuthorizeContext<TBody extends AIChatRequestBody = AIChatRequestBody> {
+  request: Request;
+  body: TBody;
+}
+
+/** Return `true` to run the completion, `false` to refuse it, or a `Response` to answer with. */
+export type AIChatAuthorize<TBody extends AIChatRequestBody = AIChatRequestBody> = (
+  context: AIChatAuthorizeContext<TBody>,
+) => boolean | Response | Promise<boolean | Response>;
+
 export interface AIChatRouteOptions<TBody extends AIChatRequestBody = AIChatRequestBody> {
   model: LanguageModel;
+  /**
+   * Decide who may run a completion, such as by checking the session. Every
+   * call spends the model provider's credits, so the route answers 403 without
+   * it unless `allowUnauthenticated` is set.
+   */
+  authorize?: AIChatAuthorize<TBody>;
+  /**
+   * Serve the route to anyone. Only for an app that already gates the route in
+   * middleware or at the edge, or that means to offer a public completion.
+   */
+  allowUnauthenticated?: boolean;
+  /** Extra trusted origins, using the `serverActions.allowedOrigins` syntax. */
+  allowedOrigins?: readonly string[];
+  /**
+   * Keep `system` messages the client sends. Off by default: they are dropped,
+   * so a caller cannot replace the app's instructions with its own.
+   */
+  allowSystemMessages?: boolean;
   system?: AIStreamTextInput["system"];
   instructions?: AIStreamTextInput["instructions"];
   streamText?: AIStreamTextFunction;
@@ -110,7 +142,10 @@ export const aiChatRequestBodySchema: AIChatRequestBodySchema = {
  * Create a Vercel AI SDK chat route for Farm's Next-style app/api convention.
  *
  * // src/app/api/chat/route.ts
- * export const POST = aiChatRoute({ model: "openai/gpt-4o-mini" });
+ * export const POST = aiChatRoute({
+ *   model: "openai/gpt-4o-mini",
+ *   authorize: async ({ request }) => Boolean(await getSession(request)),
+ * });
  */
 export function aiChatRoute<TBody extends AIChatRequestBody = AIChatRequestBody>(
   input: AIChatRouteOptions<TBody>,
@@ -121,9 +156,50 @@ export function aiChatRoute<TBody extends AIChatRequestBody = AIChatRequestBody>
       body: aiChatRequestBodySchema,
     },
     async (context) => {
+      const refused = await guardAIChatRoute(input, context.request, context.body as TBody);
+      if (refused) return refused;
       return createAIChatResponse(input, context.request, context.body);
     },
   );
+}
+
+const MISSING_AI_CHAT_AUTHORIZE_ERROR =
+  "The AI chat route is not authorized. Every request spends your model provider's credits, " +
+  "so it refuses anonymous callers. Pass `authorize` to aiChatRoute, or set " +
+  "`allowUnauthenticated: true` if the route is already gated by your own middleware.";
+
+/**
+ * The origin check stops a cross-site page from spending the app's credits
+ * through a visitor's session; `authorize` is the real gate, and the route
+ * fails closed without it. A request with no origin metadata still reaches
+ * `authorize`, so a server-to-server caller can authenticate there.
+ */
+async function guardAIChatRoute<TBody extends AIChatRequestBody>(
+  input: AIChatRouteOptions<TBody>,
+  request: Request,
+  body: TBody,
+): Promise<Response | null> {
+  const origin = validateIntegrationRequestOrigin(request, {
+    allowedOrigins: input.allowedOrigins,
+    requireOriginMetadata: false,
+  });
+  if (!origin.ok) {
+    return Response.json(
+      { error: describeIntegrationOriginRejection(origin.reason) },
+      { status: 403 },
+    );
+  }
+
+  if (input.authorize) {
+    const decision = await input.authorize({ request, body });
+    if (decision instanceof Response) return decision;
+    if (decision === true) return null;
+    return Response.json({ error: "Unauthorized AI chat request." }, { status: 403 });
+  }
+
+  if (input.allowUnauthenticated === true) return null;
+
+  return Response.json({ error: MISSING_AI_CHAT_AUTHORIZE_ERROR }, { status: 403 });
 }
 
 export const createAIChatRoute = aiChatRoute;
@@ -139,7 +215,26 @@ async function createAIChatResponse<TBody extends AIChatRequestBody>(
     return createAIChatValidationResponse(bodyValidation.issues);
   }
 
-  const body = bodyValidation.data as TBody;
+  const parsedBody = bodyValidation.data as TBody;
+  // A client system message would replace the app's instructions with the caller's.
+  const body =
+    input.allowSystemMessages === true
+      ? parsedBody
+      : ({
+          ...parsedBody,
+          messages: parsedBody.messages.filter(
+            (message) => !isRecord(message) || message.role !== "system",
+          ),
+        } as TBody);
+  if (body.messages.length === 0) {
+    return createAIChatValidationResponse([
+      {
+        path: ["messages"],
+        code: "too_small",
+        message: "Expected at least one user or assistant message.",
+      },
+    ]);
+  }
   const messages = input.selectMessages?.(body, request) ?? body.messages;
   if (!Array.isArray(messages)) {
     return createAIChatValidationResponse([
@@ -172,6 +267,8 @@ async function createAIChatResponse<TBody extends AIChatRequestBody>(
   };
   const preparedOptions = await input.prepare?.(prepareContext);
   const streamInput = {
+    // AI SDK 7 refuses system messages in `messages` unless told otherwise.
+    ...(input.allowSystemMessages === true ? { allowSystemInMessages: true } : {}),
     ...(input.allowFileUrls === true
       ? {}
       : { experimental_download: createFileUrlDownload(input.allowFileUrls) }),

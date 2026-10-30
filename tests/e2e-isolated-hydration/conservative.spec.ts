@@ -11,7 +11,7 @@ test("a client component from a package falls back and stays interactive", async
   await expect(button).toHaveText("press me");
   // Package boundaries cannot be isolated yet, so the page hydrates route-wide
   // and the button carries no marker of its own.
-  await expect(page.locator("main farm-client-boundary")).toHaveCount(0);
+  await expect(page.locator("main f-island")).toHaveCount(0);
 
   await button.click();
   await expect(button).toHaveText("package pressed");
@@ -27,7 +27,7 @@ for (const [route, names] of [
     await page.goto(route);
 
     // The island count is not statically known, so the page hydrates route-wide.
-    await expect(page.locator("main farm-client-boundary")).toHaveCount(0);
+    await expect(page.locator("main f-island")).toHaveCount(0);
 
     // Each item still holds its own state.
     for (const name of names) {
@@ -44,7 +44,7 @@ for (const [route, names] of [
 test("layout islands keep isolating on the fallback routes", async ({ page }) => {
   for (const route of ["/package-island", "/map-basic", "/map-helper"]) {
     await page.goto(route);
-    await expect(page.locator("header farm-client-boundary")).toHaveCount(2);
+    await expect(page.locator("header f-island")).toHaveCount(2);
     const counter = page.locator("header").getByTestId("counter");
     await counter.click();
     await expect(counter).toHaveText("count: 1");

@@ -123,7 +123,7 @@ in `keyParts`.
 
 The cached result is shared by every request, so the function cannot read the request:
 `cookies()`, `headers()`, `getCspNonce()`, `getCurrentRequest()`, a server function's
-`request.headers`, Farm Auth's `auth.user()` and `auth.session()`, the server `api` client, and
+`request.headers` and `request.clone()` (in a render or an action), Farm Auth's `auth.user()` and `auth.session()`, the server `api` client, and
 integration server clients throw inside it. Read what you need outside and pass it in as an
 argument, which also puts it in the key:
 
@@ -344,6 +344,9 @@ calling one that leaves the request alone does not. Farm never stores that rende
 sends it with `X-Farm-PPR: bypass` and `Cache-Control: private, no-store`. The same applies to a `revalidate` route whose layout reads the
 request: it renders per request instead of advertising a shared `s-maxage`. Reads in middleware do
 not count, since they run before the page renders.
+
+`preloadQuery` from [`@farm.js/convex/server`](/docs/integrations/convex#caching) reads the request
+the same way, so a page that preloads live Convex data is never stored in the shared cache.
 
 ```tsx
 import { Suspense } from "react";

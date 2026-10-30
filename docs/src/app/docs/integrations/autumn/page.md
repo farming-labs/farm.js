@@ -175,6 +175,8 @@ Autumn customers. To keep the existing ones while you move them, return
 - `reportUsage` adds to Autumn's stored usage with `track`, so parallel reports all count. When a
   meter `guard` sets a hard cap, a report that pushes usage past it is taken back out and answered
   with `state: "hard_limit_reached"`. `last` meters set the reported value instead.
+- A meter whose feature is billed as a prepaid quantity is bought, not reported: `reportUsage`
+  answers `409` for it, and the quantity changes through checkout.
 - The billing POST routes act for the signed-in caller from its session cookie, so a request a
   browser sends from another origin is refused with `403`: a page on another site cannot report
   usage, start a checkout or open the portal for your visitor. Calls with no `Origin` (your own

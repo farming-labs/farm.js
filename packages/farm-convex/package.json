@@ -1,0 +1,79 @@
+{
+  "name": "@farm.js/convex",
+  "version": "0.1.0-beta.3",
+  "description": "Convex integration for Farm.js",
+  "keywords": [
+    "convex",
+    "farm.js",
+    "realtime"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farming-labs/farm.js",
+    "directory": "packages/farm-convex"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./functions": {
+      "types": "./dist/functions.d.ts",
+      "import": "./dist/functions.js"
+    },
+    "./convex.config": {
+      "types": "./dist/component/convex.config.d.ts",
+      "import": "./dist/component/convex.config.js"
+    },
+    "./convex.config.js": {
+      "types": "./dist/component/convex.config.d.ts",
+      "import": "./dist/component/convex.config.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "dev": "tsc --watch",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "@farm.js/integration-utils": "workspace:*",
+    "unstorage": "2.0.0-alpha.10"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "^18.2.45",
+    "convex": "1.48.0",
+    "react": "19.2.8",
+    "typescript": "^5.3.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
+  },
+  "peerDependencies": {
+    "convex": "^1.25.0",
+    "react": "^18.2.0 || ^19.0.0"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
