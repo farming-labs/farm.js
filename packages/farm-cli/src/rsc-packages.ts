@@ -113,6 +113,16 @@ export async function ensureFarmRscPackages(
     // An exact pin must match; a range only needs the package to be there.
     return /^\d+\.\d+\.\d+(-[\w.]+)?$/.test(wanted) ? current !== wanted : !current;
   }).map((name) => `${name}@${peers[name]}`);
+  // React's RSC APIs do not follow semver, so the plugin runs on one tested combination: say so
+  // when that changes a version the app already had.
+  for (const name of ["react", "react-dom"]) {
+    const current = installedVersion(root, name);
+    if (current && specs.includes(`${name}@${peers[name]}`)) {
+      logger.warn(
+        `[Farm.js] React Server Components run on ${name} ${peers[name]} exactly; changing ${name} ${current} to ${peers[name]}.`,
+      );
+    }
+  }
   if (specs.length > 0) await add(specs);
   return installed;
 }

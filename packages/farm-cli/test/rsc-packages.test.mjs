@@ -157,3 +157,21 @@ test("installs without NODE_ENV, so the package manager keeps devDependencies", 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("moves an app's react to the plugin's tested version, which RSC requires", async () => {
+  const root = await createApp({
+    "@farm.js/core": { version: "0.1.40" },
+    react: { version: "19.3.1" },
+    "react-dom": { version: "19.3.1" },
+  });
+  try {
+    const commands = [];
+    await ensureFarmRscPackages(flag, root, fakeInstaller(root, commands), {});
+    assert.deepEqual(commands, [
+      "pnpm add @farm.js/plugin@0.1.40",
+      "pnpm add @vitejs/plugin-rsc@0.5.32 react@19.2.8 react-dom@19.2.8 react-server-dom-webpack@19.2.8",
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
