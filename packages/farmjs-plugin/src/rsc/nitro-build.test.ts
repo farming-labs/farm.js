@@ -284,6 +284,64 @@ export function render() {
     }
   }, 60_000);
 
+  it("prerenders pages that use a runtime package only the plugin depends on", async () => {
+    // A strict install (pnpm) does not expose @farming-labs/strata from the app root, and the
+    // prerender server runs before the runtime packages are copied next to the server output.
+    const fixtureRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-prerender-runtime-"));
+    try {
+      const rscDir = path.join(fixtureRoot, "dist", "rsc");
+      const ssrDir = path.join(fixtureRoot, "dist", "ssr");
+      const clientDir = path.join(fixtureRoot, "dist", "client");
+      mkdirSync(rscDir, { recursive: true });
+      mkdirSync(ssrDir, { recursive: true });
+      mkdirSync(clientDir, { recursive: true });
+      writeFileSync(
+        path.join(rscDir, "index.js"),
+        `import { render } from "@farming-labs/strata";
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const prerendering = process.env.FARM_RSC_PRERENDER === "1" && request.headers.has("x-nitro-prerender");
+    if (prerendering && url.pathname === "/__farm/rsc-prerender-routes") {
+      return new Response("<!doctype html>", {
+        headers: { "content-type": "text/html; charset=utf-8", "x-nitro-prerender": "%2Fabout" },
+      });
+    }
+    const fragment = render({
+      type: "document",
+      children: [{ type: "element", tag: "strong", children: [{ type: "text", value: "native" }] }],
+    });
+    return new Response("<html>" + fragment.html + "</html>", {
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
+  },
+};`,
+      );
+      writeFileSync(path.join(ssrDir, "index.js"), "export function renderHTML() {}");
+
+      const outputDir = path.join(fixtureRoot, ".output");
+      await buildRscNitro({
+        root: fixtureRoot,
+        rendererPath: path.join(rscDir, "index.js"),
+        ssrPath: path.join(ssrDir, "index.js"),
+        publicDir: clientDir,
+        outputDir,
+        preset: "node-server",
+      });
+
+      expect(readFileSync(path.join(outputDir, "public", "about", "index.html"), "utf-8")).toBe(
+        "<html><strong>native</strong></html>",
+      );
+      // The links the prerender server used are gone; the server output carries its own copy.
+      expect(existsSync(path.join(fixtureRoot, "dist", "node_modules"))).toBe(false);
+      expect(
+        existsSync(path.join(outputDir, "server", "node_modules", "@farming-labs", "strata")),
+      ).toBe(true);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it("fails the build when a listed page fails to prerender", async () => {
     const fixtureRoot = mkdtempSync(path.join(tmpdir(), "farm-rsc-prerender-fail-"));
 

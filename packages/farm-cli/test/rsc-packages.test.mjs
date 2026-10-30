@@ -133,3 +133,27 @@ test("an app inside a workspace uses the workspace root's package manager", asyn
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("installs without NODE_ENV, so the package manager keeps devDependencies", async () => {
+  const root = await createApp({ "@farm.js/core": { version: "0.1.40" } });
+  try {
+    const envs = [];
+    const install = fakeInstaller(root, []);
+    await ensureFarmRscPackages(
+      flag,
+      root,
+      async (command) => {
+        envs.push(command.env);
+        await install(command);
+      },
+      { NODE_ENV: "production", PATH: "/usr/bin" },
+    );
+    assert.ok(envs.length > 0);
+    for (const env of envs) {
+      assert.equal(env.NODE_ENV, undefined);
+      assert.equal(env.PATH, "/usr/bin");
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

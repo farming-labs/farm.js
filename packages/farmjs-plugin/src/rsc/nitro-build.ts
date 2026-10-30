@@ -13,8 +13,10 @@ import {
   copyFileSync,
   existsSync,
   readdirSync,
+  lstatSync,
   rmSync,
   statSync,
+  symlinkSync,
 } from "fs";
 import type { Nitro, NitroConfig } from "nitro/types";
 import {
@@ -125,6 +127,33 @@ function detectBundledRscRuntimes(rendererPath: string): Map<string, string> {
     }
   }
   return packages;
+}
+
+/**
+ * The prerender server runs the Vite output in place, before the runtime packages are copied next
+ * to the server output, and a strict install (pnpm) does not expose a package the plugin depends
+ * on from the app root. Links them where the Vite output resolves from; returns the cleanup.
+ */
+function linkRuntimePackages(viteDistDir: string, packages: ReadonlyMap<string, string>) {
+  const nodeModules = path.join(viteDistDir, "node_modules");
+  const ownsNodeModules = !existsSync(nodeModules);
+  const links: string[] = [];
+  for (const [packageName, packageRoot] of packages) {
+    const link = path.join(nodeModules, ...packageName.split("/"));
+    try {
+      lstatSync(link);
+      continue;
+    } catch {}
+    mkdirSync(path.dirname(link), { recursive: true });
+    // A junction needs no privileges on Windows; elsewhere the type is ignored.
+    symlinkSync(packageRoot, link, "junction");
+    links.push(link);
+  }
+  return () => {
+    // Removes the links, never what they point at.
+    if (ownsNodeModules) rmSync(nodeModules, { recursive: true, force: true });
+    else for (const link of links) rmSync(link, { force: true });
+  };
 }
 
 function copyRuntimePackages(serverDir: string, packages: ReadonlyMap<string, string>): void {
@@ -654,7 +683,13 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
   const serverDir = nitro.options.output.serverDir;
   await prepare(nitro);
   await copyPublicAssets(nitro);
-  await prerenderRscPages(nitro, prerender, path.dirname(path.dirname(path.resolve(rendererPath))));
+  const viteDistDir = path.dirname(path.dirname(path.resolve(rendererPath)));
+  const unlinkRuntimePackages = linkRuntimePackages(viteDistDir, registeredRuntimePackages);
+  try {
+    await prerenderRscPages(nitro, prerender, viteDistDir);
+  } finally {
+    unlinkRuntimePackages();
+  }
   await build(nitro);
   await nitro.close();
   copyRuntimePackages(serverDir, registeredRuntimePackages);

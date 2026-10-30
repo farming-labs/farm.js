@@ -88,10 +88,13 @@ export async function ensureFarmRscPackages(
       } not installed. CI does not change dependencies: run \`${packageManager} ${verb} ${status.missingPackages.join(" ")}\` and commit the result.`,
     );
   }
+  // `farm build` has set NODE_ENV=production by now, and under it npm, pnpm and yarn install
+  // without devDependencies: the app would lose @farm.js/cli and its build tools.
+  const { NODE_ENV: _nodeEnv, ...installEnv } = env;
   const installed: string[] = [];
   const add = async (specs: string[]) => {
     logger.info(`[Farm.js] Installing React Server Components packages: ${specs.join(" ")}`);
-    await run({ command: packageManager, args: [verb, ...specs], cwd: root });
+    await run({ command: packageManager, args: [verb, ...specs], cwd: root, env: installEnv });
     installed.push(...specs);
   };
 
