@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import fs from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
@@ -14,7 +14,6 @@ import { imageSize } from "image-size";
 import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
-import { signFarmInfraManifestRequest } from "../app-manifest";
 import { loadConfig, resolveConfig } from "../config";
 import { defineIntegration } from "../integrations";
 import { definePlugin } from "../plugin";
@@ -286,6 +285,14 @@ async function resolveInstalledChromiumExecutable(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** The header Farm Infra signed manifest requests with, which once unlocked a full view. */
+function legacyFarmInfraSignature(key: string) {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const secret = createHash("sha256").update(key).digest("hex");
+  const hmac = createHmac("sha256", secret).update(`farmjs-manifest-v1\n${timestamp}`);
+  return `t=${timestamp}, v1=${hmac.digest("hex")}`;
 }
 
 async function runProductionRequest(
@@ -2688,10 +2695,9 @@ export default {
     }
   }, 120_000);
 
-  it("serves /.well-known/farmjs.json to anyone, and the full view to Farm Infra's signed request", async () => {
+  it("serves the same public /.well-known/farmjs.json to anyone, signed by Farm Infra or not", async () => {
     const root = await createProductionFixture();
     const key = `fti_${"m".repeat(43)}`;
-    const keyHash = createHash("sha256").update(key).digest("hex");
     // What @farm.js/mcp does when it mounts its endpoint: publish the tools and their schemas.
     // "fixture" is public; "admin" requires authorize.
     const publish = `_publishFarmMCPCatalog(
@@ -2773,9 +2779,14 @@ export const listTodos = defineWebMCPTool({
       // Reading WebMCP tools is build work: the server never loads the parser's native binary.
       await expect(fs.stat(path.join(serverDir, "node_modules", "rolldown"))).rejects.toThrow();
       const linked = { FARMJS_API_KEY: key, FARMJS_API_URL: "http://127.0.0.1:9" };
+      const bodies = new Set<string>();
 
-      // Anyone, linked to Farm Infra or not: the public view.
-      for (const env of [undefined, linked]) {
+      // Anyone, linked to Farm Infra or not, signed or not: the one public document.
+      for (const [env, init] of [
+        [undefined, undefined],
+        [linked, undefined],
+        [linked, { headers: { "farmjs-infra-signature": legacyFarmInfraSignature(key) } }],
+      ] as const) {
         await runProductionRequest(
           serverDir,
           async (response) => {
@@ -2811,58 +2822,7 @@ export const listTodos = defineWebMCPTool({
                 tools: [],
               },
             ]);
-            const body = JSON.stringify(manifest);
-            for (const hidden of [key, "/api/users/[id]", "ban_user", "admin://audit"]) {
-              expect(body).not.toContain(hidden);
-            }
-          },
-          "/.well-known/farmjs.json",
-          undefined,
-          env,
-        );
-      }
-      await runProductionRequest(
-        serverDir,
-        async (response) => {
-          expect(response.status).toBe(200);
-          expect(response.headers.get("cache-control")).toBe("private, no-store");
-          const manifest = await response.json();
-          expect(manifest).toMatchObject({
-            schemaVersion: 1,
-            app: { basePath: "/", build: "manifest-test" },
-            mcp: {
-              servers: [
-                {
-                  name: "fixture",
-                  path: "/api/mcp",
-                  authorization: "none",
-                  resources: [{ name: "handbook", uri: "docs://handbook" }],
-                  tools: [
-                    {
-                      name: "list_users",
-                      source: "defineTool",
-                      readOnlyHint: true,
-                      inputSchema: { type: "object", properties: { q: { type: "string" } } },
-                    },
-                    {
-                      name: "remove_user",
-                      source: "endpoint",
-                      method: "DELETE",
-                      path: "/api/users/[id]",
-                      destructiveHint: true,
-                    },
-                  ],
-                },
-                // Infra's view lists the tools of a server that requires authorize.
-                {
-                  name: "admin",
-                  authorization: "required",
-                  tools: [{ name: "ban_user" }],
-                  resources: [{ name: "audit" }],
-                },
-              ],
-            },
-            webmcp: {
+            expect(manifest.webmcp).toEqual({
               enabled: true,
               tools: [
                 {
@@ -2873,17 +2833,24 @@ export const listTodos = defineWebMCPTool({
                   inputSchemaSource: "literal",
                 },
               ],
-            },
-            integrations: [{ key: "errors", category: "monitoring", type: "fixture-errors" }],
-          });
-          expect(manifest.plugins).toEqual(expect.arrayContaining(["farm:webmcp", "fixture-mcp"]));
-          expect(JSON.stringify(manifest)).not.toContain(key);
-        },
-        "/.well-known/farmjs.json",
-        { headers: { "farmjs-infra-signature": await signFarmInfraManifestRequest(keyHash) } },
-        linked,
-      );
-      // Farm 0.1.34 served it at /.well-known/farmjs: that path still answers, signed or not.
+            });
+            expect(manifest.plugins).toEqual(
+              expect.arrayContaining(["farm:webmcp", "fixture-mcp"]),
+            );
+            const body = JSON.stringify(manifest);
+            for (const hidden of [key, "/api/users/[id]", "ban_user", "admin://audit"]) {
+              expect(body).not.toContain(hidden);
+            }
+            bodies.add(body);
+          },
+          "/.well-known/farmjs.json",
+          init,
+          env,
+        );
+      }
+      expect(bodies.size).toBe(1);
+
+      // Farm 0.1.34 served it at /.well-known/farmjs: that path still answers.
       await runProductionRequest(
         serverDir,
         async (response) => {
@@ -2897,10 +2864,103 @@ export const listTodos = defineWebMCPTool({
     }
   }, 120_000);
 
-  it("serves no /.well-known/farmjs.json with agent.manifest: false, signed or not", async () => {
+  it("serves the agent.manifest sections the app chose, from the embedded config", async () => {
+    const root = await createProductionFixture();
+    const publish = `_publishFarmMCPCatalog(
+      { name: "fixture", version: "1.0.0", path: "/api/mcp" },
+      [
+        { name: "list_users", kind: "standalone", readOnlyHint: true },
+        { name: "remove_user", kind: "standalone", destructiveHint: true },
+      ],
+      { public: true, schemas: { list_users: { input: { type: "object" } } } },
+    );
+    _publishFarmMCPCatalog({ name: "internal", version: "1.0.0", path: "/api/internal/mcp" }, [
+      { name: "ping", kind: "standalone" },
+    ], { public: true });`;
+    try {
+      // The fixture links @farm.js/core; listing it makes it an installed package.
+      await fs.writeFile(
+        path.join(root, "package.json"),
+        JSON.stringify({ private: true, type: "module", dependencies: { "@farm.js/core": "*" } }),
+      );
+      await fs.writeFile(
+        path.join(root, "farm.config.ts"),
+        `import { _publishFarmMCPCatalog } from "@farm.js/core/api/runtime";
+export default {
+  plugins: [{
+    name: "fixture-mcp",
+    routes: ({ route }) => {
+      ${publish}
+      return [route.post("/api/mcp", { handler: () => Response.json({ ok: true }) })];
+    },
+  }],
+};`,
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          telemetry: false,
+          deploymentId: "sections-test",
+          agent: {
+            manifest: {
+              app: { build: false },
+              packages: "names",
+              mcp: { schemas: false, hide: ["internal", "fixture/remove_user"] },
+              integrations: false,
+              plugins: false,
+            },
+          },
+          plugins: [
+            definePlugin({
+              name: "fixture-mcp",
+              routes: ({ route }) => [
+                route.post("/api/mcp", { handler: () => Response.json({ ok: true }) }),
+              ],
+            }),
+          ],
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(200);
+          const manifest = await response.json();
+          expect(manifest.app).toEqual({
+            farm: expect.any(String),
+            renderer: "react",
+            basePath: "/",
+          });
+          expect(manifest.packages).toEqual({ "@farm.js/core": null });
+          expect(manifest.mcp.servers).toEqual([
+            {
+              name: "fixture",
+              version: "1.0.0",
+              path: "/api/mcp",
+              authorization: "none",
+              resources: [],
+              prompts: [],
+              tools: [{ name: "list_users", source: "defineTool", readOnlyHint: true }],
+            },
+          ]);
+          expect(manifest).toMatchObject({ integrations: null, plugins: null });
+          expect(manifest.agent).not.toBeNull();
+          expect(JSON.stringify(manifest)).not.toContain("sections-test");
+        },
+        "/.well-known/farmjs.json",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("serves no /.well-known/farmjs.json at either path with agent.manifest: false", async () => {
     const root = await createProductionFixture();
     const key = `fti_${"o".repeat(43)}`;
-    const keyHash = createHash("sha256").update(key).digest("hex");
     try {
       const config = await resolveConfig(
         {
@@ -2914,15 +2974,18 @@ export const listTodos = defineWebMCPTool({
       );
       await build(config, { root, preset: "node-server" });
       const serverDir = path.join(root, ".farm", ".output", "server");
-      await runProductionRequest(
-        serverDir,
-        async (response) => {
-          expect(response.headers.get("content-type") ?? "").not.toContain("application/json");
-        },
-        "/.well-known/farmjs.json",
-        { headers: { "farmjs-infra-signature": await signFarmInfraManifestRequest(keyHash) } },
-        { FARMJS_API_KEY: key, FARMJS_API_URL: "http://127.0.0.1:9" },
-      );
+      for (const pathname of ["/.well-known/farmjs.json", "/.well-known/farmjs"]) {
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(404);
+            expect(response.headers.get("content-type") ?? "").not.toContain("application/json");
+          },
+          pathname,
+          { headers: { "farmjs-infra-signature": legacyFarmInfraSignature(key) } },
+          { FARMJS_API_KEY: key, FARMJS_API_URL: "http://127.0.0.1:9" },
+        );
+      }
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

@@ -9012,7 +9012,7 @@ ${
     config.agent?.manifest !== false
       ? `
   // agent.manifest: /.well-known/farmjs.json (and 0.1.34's /.well-known/farmjs), the app's
-  // public manifest; Farm Infra's signed request gets the full view.
+  // public manifest, the same document for every request.
   if (
     [${JSON.stringify(FARM_APP_MANIFEST_PATH)}, ${JSON.stringify(FARM_APP_MANIFEST_LEGACY_PATH)}].includes(
       normalizeRuntimePath(routePathname),

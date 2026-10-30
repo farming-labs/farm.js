@@ -88,7 +88,6 @@ import {
 } from "./api-catalog";
 import {
   createFarmAppManifestResponse,
-  FARM_INFRA_SIGNATURE_HEADER,
   isFarmAppManifestPath,
   resolveFarmAppManifestInput,
 } from "./app-manifest";
@@ -2148,14 +2147,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           ) {
             await serveBuiltInRoute(async () => {
               farmAppPackages ??= resolveFarmAppPackages(farmConfig.root ?? process.cwd());
-              const header = (name: string) => String(req.headers[name] ?? "");
               const manifest = await createFarmAppManifestResponse(
                 new Request(parsedRequestUrl, {
                   method: requestMethod,
-                  headers: {
-                    "if-none-match": header("if-none-match"),
-                    [FARM_INFRA_SIGNATURE_HEADER]: header(FARM_INFRA_SIGNATURE_HEADER),
-                  },
+                  headers: { "if-none-match": String(req.headers["if-none-match"] ?? "") },
                 }),
                 {
                   ...resolveFarmAppManifestInput(farmConfig, {

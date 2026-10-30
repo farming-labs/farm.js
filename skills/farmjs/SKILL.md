@@ -473,8 +473,11 @@ Built-in server plugins are imported from `@farm.js/core/plugin/server`, includi
   `src/app/robots.ts`, win over it; it wins over the docs engine's robots.txt.
 - Use `md`/`mdx` for page mirrors and content routes; use `openapi` for API references.
 - Every app serves a public `/.well-known/farmjs.json` manifest (Farm version and packages, MCP
-  tools and schemas, WebMCP tools, integration providers, plugin names; never config or env).
-  MCP servers with `authorize` are listed without their tools. `agent.manifest: false` turns it off.
+  tools and schemas, WebMCP tools, integration providers, plugin names; never config or env), the
+  same document for every reader, Farm Infra included. MCP servers with `authorize` or behind a
+  guard are listed without their tools. `agent.manifest: { packages: "names", mcp: { schemas:
+false, hide: ["server", "server/tool"] }, webmcp: { hide }, app: { build: false }, plugins:
+false }` trims it (a hidden section is `null`); `agent.manifest: false` turns it off.
 - Use `agent.noindexPreviews: true` to send `X-Robots-Tag: noindex, nofollow` on preview
   deployments (`FARM_PREVIEW=1`, `VERCEL_ENV=preview`, Netlify deploy-preview/branch-deploy at
   build time, Render PR previews). Test locally with `FARM_PREVIEW=1 farm dev`.

@@ -1,6 +1,8 @@
 export * from "./types";
 export type { FarmAgentUserConfig, FarmAgentJsonLd } from "./agent-config";
 export type { FarmAgentCrawlers, FarmCrawlerPolicy } from "./agent-crawlers";
+export type { FarmAppManifestConfig } from "./app-manifest-config";
+export type { FarmAppManifest, FarmAppManifestServer, FarmAppManifestTool } from "./app-manifest";
 export { defineRenderer, REACT_RENDERER } from "./renderer";
 export type {
   FarmRenderer,
