@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, unwatchFile, watchFile } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { styleText } from "node:util";
@@ -90,19 +90,27 @@ const DEPLOYMENT_URL_PATTERN = /^(?:VITE_)?CONVEX_URL=\S/m;
 
 /** Tell the developer to restart once convex dev has written the new deployment's URL. */
 export function announceNewDeployment(root: string, interval = 500): () => void {
-  const filePath = path.join(root, ".env.local");
   console.warn(
     "[farm:convex] CONVEX_URL is not set yet. convex dev will create a deployment; restart farm dev when it is ready.",
   );
-  const check = () => {
-    if (!DEPLOYMENT_URL_PATTERN.test(readEnvironmentFile(root))) return;
-    unwatchFile(filePath, check);
-    console.log("[farm:convex] Convex deployment is ready. Restart farm dev to connect to it.");
+  // A plain read on a timer, not fs.watchFile: it behaves the same on every platform and in
+  // worker threads, and it also sees a URL written before the check started.
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const stop = () => {
+    if (timer) clearInterval(timer);
+    timer = undefined;
   };
-  watchFile(filePath, { interval }, check);
-  // convex dev starts alongside Farm and may have written the URL before the watcher attached.
-  check();
-  return () => unwatchFile(filePath, check);
+  const check = () => {
+    if (!DEPLOYMENT_URL_PATTERN.test(readEnvironmentFile(root))) return false;
+    stop();
+    console.log("[farm:convex] Convex deployment is ready. Restart farm dev to connect to it.");
+    return true;
+  };
+  if (!check()) {
+    timer = setInterval(check, interval);
+    timer.unref?.();
+  }
+  return stop;
 }
 
 export function createConvexPlugin(input: ConvexPluginInput) {
