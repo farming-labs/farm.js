@@ -2689,6 +2689,21 @@ function rewriteKeyedArrayReorderPipelineHints(
   };
 }
 
+// Queued passes only compose helpers emitted by earlier passes. A syntactic miss
+// proves there is nothing to compose; a possible match still needs the complete
+// existing scope, ordering and lineage checks. Recheck each root, without caching.
+function containsCompilerHelperCall(root: t.JSXElement, helpers: readonly t.Identifier[]): boolean {
+  const names = new Set(helpers.map((helper) => helper.name));
+  let found = false;
+  t.traverseFast(root, (node) => {
+    if (t.isCallExpression(node) && t.isIdentifier(node.callee) && names.has(node.callee.name)) {
+      found = true;
+      return t.traverseFast.stop;
+    }
+  });
+  return found;
+}
+
 function rewriteQueuedKeyedArrayReorderMapHints(
   root: t.JSXElement,
   statesBySetter: ReadonlyMap<string, StateBinding>,
@@ -2701,7 +2716,19 @@ function rewriteQueuedKeyedArrayReorderMapHints(
   structuralSortIdentifier: t.Identifier,
   allowed: boolean,
 ): { root: t.JSXElement; mapCount: number } {
-  if (!allowed) return { root, mapCount: 0 };
+  if (
+    !allowed ||
+    !containsCompilerHelperCall(root, [
+      mapUpdateIdentifier,
+      queuedMapPipelineIdentifier,
+      mapReorderIdentifier,
+      reorderIdentifier,
+      sortIdentifier,
+      structuralReorderIdentifier,
+      structuralSortIdentifier,
+    ])
+  )
+    return { root: allowed ? t.cloneNode(root, true) : root, mapCount: 0 };
   const file = expressionFile(t.cloneNode(root, true));
   let mapCount = 0;
 
@@ -2858,9 +2885,18 @@ function rewriteQueuedKeyedArrayMappedStructuralHints(
   structuralCount: number;
   stateIndices: ReadonlySet<number>;
 } {
-  if (!allowed) {
+  if (
+    !allowed ||
+    !containsCompilerHelperCall(root, [
+      mapUpdateIdentifier,
+      queuedMapPipelineIdentifier,
+      mappedStructuralIdentifier,
+      filterIdentifier,
+      sliceIdentifier,
+    ])
+  ) {
     return {
-      root,
+      root: allowed ? t.cloneNode(root, true) : root,
       mapCount: 0,
       structuralCount: 0,
       stateIndices: new Set(),
@@ -3006,9 +3042,21 @@ function rewriteQueuedKeyedArrayStructuralMapHints(
   structuralAppendMapCount: number;
   stateIndices: ReadonlySet<number>;
 } {
-  if (!allowed) {
+  if (
+    !allowed ||
+    !containsCompilerHelperCall(root, [
+      mapUpdateIdentifier,
+      mapPipelineIdentifier,
+      appendIdentifier,
+      mappedStructuralAppendIdentifier,
+      structuralAppendMapPipelineIdentifier,
+      filterIdentifier,
+      sliceIdentifier,
+      mappedStructuralIdentifier,
+    ])
+  ) {
     return {
-      root,
+      root: allowed ? t.cloneNode(root, true) : root,
       mapCount: 0,
       mappedStructuralAppendCount: 0,
       structuralAppendMapCount: 0,
@@ -3177,9 +3225,21 @@ function rewriteQueuedKeyedArrayStructuralPrependMapHints(
   structuralPrependMapCount: number;
   stateIndices: ReadonlySet<number>;
 } {
-  if (!allowed) {
+  if (
+    !allowed ||
+    !containsCompilerHelperCall(root, [
+      mapUpdateIdentifier,
+      mapPipelineIdentifier,
+      prependIdentifier,
+      mappedStructuralPrependIdentifier,
+      structuralPrependMapPipelineIdentifier,
+      filterIdentifier,
+      sliceIdentifier,
+      mappedStructuralIdentifier,
+    ])
+  ) {
     return {
-      root,
+      root: allowed ? t.cloneNode(root, true) : root,
       mapCount: 0,
       mappedStructuralPrependCount: 0,
       structuralPrependMapCount: 0,
@@ -3355,11 +3415,25 @@ function rewriteQueuedKeyedArrayRollingWindowMapHints(
   structuralRollingWindowCount: number;
   trailingMapCount: number;
 } {
-  if (!allowed) {
+  if (
+    !allowed ||
+    !containsCompilerHelperCall(root, [
+      mapUpdateIdentifier,
+      mapPipelineIdentifier,
+      queuedMapPipelineIdentifier,
+      rollingWindowMapPipelineIdentifier,
+      mappedRollingWindowIdentifier,
+      rollingWindowIdentifier,
+      structuralAppendIdentifier,
+      mappedStructuralAppendIdentifier,
+      structuralAppendMapPipelineIdentifier,
+      mappedStructuralIdentifier,
+    ])
+  ) {
     return {
       chainedMapCount: 0,
       chainedRollingWindowCount: 0,
-      root,
+      root: allowed ? t.cloneNode(root, true) : root,
       leadingMapCount: 0,
       mappedRollingWindowCount: 0,
       rollingWindowCount: 0,
@@ -3575,9 +3649,23 @@ function rewriteQueuedKeyedArrayStructuralReorderHints(
   replacedMapSortCount: number;
   replacedQueuedMapCount: number;
 } {
-  if (!allowed) {
+  if (
+    !allowed ||
+    !containsCompilerHelperCall(root, [
+      filterIdentifier,
+      sliceIdentifier,
+      mapPipelineIdentifier,
+      queuedMapPipelineIdentifier,
+      mappedStructuralIdentifier,
+      mapReorderIdentifier,
+      reorderIdentifier,
+      sortIdentifier,
+      structuralReorderIdentifier,
+      structuralSortIdentifier,
+    ])
+  ) {
     return {
-      root,
+      root: allowed ? t.cloneNode(root, true) : root,
       reorderCount: 0,
       sortCount: 0,
       replacedMapReorderCount: 0,
@@ -3755,9 +3843,20 @@ function rewriteQueuedKeyedArrayMapReorderHints(
   mapReorderCount: number;
   mapSortCount: number;
 } {
-  if (!allowed) {
+  if (
+    !allowed ||
+    !containsCompilerHelperCall(root, [
+      mapUpdateIdentifier,
+      queuedMapPipelineIdentifier,
+      mapReorderIdentifier,
+      reorderIdentifier,
+      sortIdentifier,
+      structuralReorderIdentifier,
+      structuralSortIdentifier,
+    ])
+  ) {
     return {
-      root,
+      root: allowed ? t.cloneNode(root, true) : root,
       mapCount: 0,
       mapReorderCount: 0,
       mapSortCount: 0,
