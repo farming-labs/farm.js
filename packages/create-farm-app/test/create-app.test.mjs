@@ -760,7 +760,7 @@ test("generates renderer-native Better Auth starters", async () => {
         packageJson.dependencies["@farm.js/better-auth"],
         templatePackage.dependencies["@farm.js/better-auth"],
       );
-      assert.equal(packageJson.dependencies["better-auth"], "1.6.25");
+      assert.equal(packageJson.dependencies["better-auth"], "1.7.14");
       assert.equal(
         packageJson.scripts["auth:migrate"],
         "node --experimental-strip-types src/lib/migrate-auth.ts",
