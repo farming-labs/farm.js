@@ -58,7 +58,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@babel/core": "^7.28.0",
+    "@babel/core": "^7.29.7",
     "@preact/preset-vite": "2.10.6",
     "preact-render-to-string": "6.7.0"
   },

@@ -69,7 +69,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@babel/core": "7.28.4"
+    "@babel/core": "7.29.7"
   },
   "devDependencies": {
     "@farm.js/core": "workspace:*",
