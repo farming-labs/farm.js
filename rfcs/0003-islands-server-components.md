@@ -121,7 +121,26 @@ renders in place through the server proxy of RFC 0001, which wraps its HTML in a
 records its module reference and props. There is no separate SSR pass over a payload, which removes
 cost 4.
 
-### 2. First-load wire format: HTML plus an island manifest
+### 2. First-load wire format: HTML plus island scripts
+
+The format is implemented in [islx](https://github.com/farming-labs/islx) (`@farm.js/islx`), a
+renderer-agnostic package Farm's islands mode runs on; its
+[SPEC.md](https://github.com/farming-labs/islx/blob/main/SPEC.md) is the normative version. Every
+element, script type and header carries the `f` prefix, and JSON reserves one key, `$`:
+
+```html
+<f-island src="src/components/toc.tsx" export="Toc" props="_R_b_" strategy="load">…</f-island>
+<script type="f/props" for="_R_b_">{"headings":[…],"tree":{"$":"r","v":"04jiw29097x8ki"}}</script>
+<script type="f/value" name="04jiw29097x8ki">[…]</script>
+<f-slot name="_R_5_s0">…server output passed as children…</f-slot>
+```
+
+Headers: `F-Values` (values the browser holds), `F-Layouts` (layouts on screen), `F-Render`
+(`tree`: rebuild from the server tree; `document`: a navigation), `F-Action` (an action call).
+Tags: `r` value, `s` slot, `a` action (with `b`, its sealed captured values), `o` app data with a
+`$` key, and `u n B D M S U R Y F K` for the types JSON cannot hold.
+
+The design below began as one manifest per page:
 
 The document carries the HTML and one non-executable JSON manifest, escaped like Farm's existing
 page data:
@@ -158,19 +177,19 @@ identical to the previous page's, and one value, the navigation tree, is about 9
 inlines every value in every payload. Islands mode sends a large value once:
 
 - A serialized prop value whose JSON reaches 512 bytes is identified by a 64-bit hash of that JSON.
-  The island's props carry `{ "$farmValue": "<hash>" }` in its place, and the value travels in a
-  `<script type="application/json" data-farm-value="<hash>">` before the island. Inner values are
+  The island's props carry `{"$":"r","v":"<hash>"}` in its place, and the value travels in a
+  `<script type="f/value" name="<hash>">` before the island. Inner values are
   addressed first, so a tree that changes in one place keeps sharing its unchanged parts; a thin
   wrapper around one addressed value gets no key of its own.
 - **Client:** a value store keyed by hash. It parses each value once and hands islands that share a
   value the same object. Only islands mode ships it.
-- **Navigation:** the request names the hashes the client holds (`x-farm-values`, the 128 most
+- **Navigation:** the request names the hashes the client holds (`F-Values`, the 128 most
   recently used). The server leaves those values out, with everything inside them. An exact list
   instead of a Bloom filter: no false positives, so no recovery fetch, and the header stays under
   2 KB.
 - **Caching:** leaving values out makes the HTML one browser's. The server counts it as a request
   read, the mechanism `headers()` uses, so that response never enters a PPR shell, an ISR entry or
-  a shared CDN cache, and production page responses vary on `x-farm-values`. Responses without the
+  a shared CDN cache, and production page responses vary on `F-Values`. Responses without the
   header, including every first load, stay complete and cacheable.
 - **Shared value files (measured, not built):** writing values that two or more prerendered pages
   share as immutable files (`/_farm/v/<hash>.json`) makes a first visit 43% heavier on the docs
@@ -179,9 +198,12 @@ inlines every value in every payload. Islands mode sends a large value once:
   repeat text the HTML renders, which brotli shares inside the document (3.5 KB) but not in a
   separate file (10.4 KB). Worth revisiting only for large values the HTML does not render, such as
   search indexes. The lab figure above assumed the file was already cached.
-- Why not dedupe within one document: React can discard a render attempt that suspended, so "sent
-  already" cannot be tracked during render. Each island sends its values; brotli removes the repeat,
-  and the store parses each hash once.
+- Within one document: islx writes each value once per response. A render state the framework
+  gives (`renderToStream`, `IslandsProvider`, or Farm's request store) remembers what the response
+  wrote, and an island records its values only after its props have encoded, so a render React
+  retries (an action's values still sealing) never marks a value written without writing it. On the
+  docs benchmark the raw document drops from 103.5 KB to 69.7 KB; brotli had already removed most
+  of the repeat (16.0 to 15.9 KB).
 
 Measured in the lab on the RSC benchmark (brotli, averages over 376 docs pages): the first-load
 document drops from 46.0 KB (islands) to 22.8 KB, plus a 23.5 KB value file shared by every docs page,
@@ -210,7 +232,7 @@ region's tree, so they read its context and share its state.
 
 Slots are what keep regions cheap. A slot is mounted as an opaque host element whose content React
 does not reconcile. Its HTML is read from the existing DOM at hydration time, not sent again. Server
-layouts (#2299) and the server tree already render static subtrees this way (`<farm-server-html>`),
+layouts (#2299) and the server tree already render static subtrees this way (`<f-html>`),
 but they embed the HTML a second time in the JSON. Islands mode must not.
 
 A client component that inspects its children (`Children.map`, `cloneElement`, `isValidElement` on
@@ -330,7 +352,7 @@ navigation with state kept in layouts; back and forward; HMR; error and not-foun
   "manifest" is the set of per-island scripts. Not built: shared value files (measured above),
   values in server-tree payloads.
 - Phase 3, first part: segment navigation in production. A navigation sends the layouts on screen
-  (`X-Farm-Layout-Chain`, keyed by pattern and params); the server renders the page and the layouts
+  (`F-Layouts`, keyed by pattern and params); the server renders the page and the layouts
   that changed, and marks the rest `data-farm-layout-kept`. The browser applies a segment only where
   the page still shows those layouts, and fetches the whole document otherwise (a stale prefetch).
   Not kept: the root layout, any layout when one in the chain hydrates as a root, and routes with
@@ -345,13 +367,13 @@ navigation), so a navigation from other layouts fetches its own answer.
   so hydration matches. On the shop benchmark a navigation drops from 5.8 KB to 4.2 KB (brotli);
   RSC sends 3.8 KB.
 - Payload-only navigations: a browser that renders the destination in its layout's React root
-  says so (`X-Farm-Tree-Navigation`), and the server sends that page's payload, chunks and
+  says so (`F-Render: tree`), and the server sends that page's payload, chunks and
   server-HTML parts without its HTML, which the browser would never use. The shop navigation
   drops to 1.5 KB. A response marked payload-only that arrives where no root can rebuild it (a
   stale prefetch) makes the browser fetch the whole document; a failed chunk renders the page
   whole so its error boundary applies.
 - Server actions as props: a registered `"use server"` function in client props travels as
-  `{"$farmAction": id}` (island props) or `{ $: "a" }` (server-tree payloads); the browser turns it
+  `{"$":"a","v":id}` in island props and server-tree payloads alike; the browser turns it
   into a cached stub, and server rendering keeps the real function, so the form still posts without
   JavaScript. After an action called from JavaScript the page refreshes; a refresh carries the
   islands still on the page over (same component at the same position keeps its root and state and
@@ -359,19 +381,26 @@ navigation), so a navigation from other layouts fetches its own answer.
   navigation.
 - Typed values: props, server-tree payloads and action arguments and results carry `undefined`,
   non-finite numbers and `-0`, `BigInt`, `Date`, `Map`, `Set`, `URL`, `RegExp`, typed arrays and
-  `ArrayBuffer` as one-key `$farm…` markers (`client/island-codec.ts`). The server encodes through
-  its installed hook, so the browser bundle carries only the decoder, and only in islands mode.
-  Decoding action arguments accepts browser input: no `__proto__` assignment, unknown or malformed
-  markers rejected with 400. Keys starting with `$farm` are reserved.
+  `ArrayBuffer` as `$` tags (`{"$":"D","v":"…"}`). The server encodes through its installed hook,
+  so the browser bundle carries only the decoder. Decoding action arguments accepts browser input:
+  no `__proto__` assignment, unknown or malformed tags rejected with 400. App data that has its own
+  `$` key travels wrapped as `o`, so no key is reserved.
 - Contract suite: `tests/e2e-server-components`, the same tests for `"rsc"` and `"islands"`, against
   `farm dev` and production builds.
+- islx: the format, the codec, values, server trees, hydration and server actions moved into
+  [`@farm.js/islx`](https://github.com/farming-labs/islx) (0.0.1), which islands mode now runs on
+  (#2367). It added inline `"use server"` functions: the variables they read from their component
+  travel sealed (AES-GCM, bound to the action, a key per build or `ISLX_ACTIONS_KEY`), never as
+  readable form fields. Forms written in server components post without a page load once
+  JavaScript runs. The contract suite covers both, in both modes (18 tests). Apps on isolated
+  hydration without islands mode never load islx.
 
 ## Prior work in Farm
 
 - [RFC 0001](./0001-isolated-client-hydration.md): isolated client boundaries, the server proxy,
   island strategies.
 - The server tree (`client/server-tree.ts`): server output as a tree of host elements and client
-  references, with `<farm-server-html>` for parts it cannot represent.
+  references, with `<f-html>` for parts it cannot represent.
 - Server layouts (#2299): a layout rendered as a server tree whose client components rebuild under
   the parent root, the first context region.
 - Page module preloads (#2292), so island chunks are not discovered late.
