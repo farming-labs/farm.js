@@ -509,7 +509,7 @@ test("generates a Solid starter while keeping React as the default renderer", as
       packageJson.dependencies["@farm.js/solid"],
       await workspaceRendererVersion("farm-solid"),
     );
-    assert.equal(packageJson.dependencies["solid-js"], "1.9.14");
+    assert.equal(packageJson.dependencies["solid-js"], "1.9.18");
     await assertRendererNeutralStarter(generatedDir, packageJson);
     assert.match(config, /renderer: solid\(\)/);
     assert.match(config, /from "@farm\.js\/solid"/);
