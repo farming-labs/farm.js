@@ -42,8 +42,8 @@
   },
   "dependencies": {
     "@farm.js/core": "workspace:*",
-    "@module-federation/runtime": "^2.9.0",
-    "@module-federation/vite": "^1.21.6"
+    "@module-federation/runtime": "^2.9.2",
+    "@module-federation/vite": "^1.23.7"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
