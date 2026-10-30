@@ -4,6 +4,7 @@
  * already holds them. See `island-value-protocol.ts` for
  * the wire format and `island-value-store.ts` for the browser side.
  */
+import { setRenderStateResolver } from "@farmjs/islx/react/server";
 import { _resolveCurrentRequest, _resolveCurrentRequestForApp } from "../server/request-bridge";
 import { decodeFarmTagged, encodeFarmLeaf } from "./island-codec";
 import {
@@ -181,7 +182,18 @@ const SERVER_KEY = Symbol.for("farm.island-values.server");
  * Gives island boundaries rendered on this server their value addressing. Boundaries reach it
  * through a global, so the browser bundle never carries it.
  */
+const sentByRequest = new WeakMap<Request, Set<string>>();
+
 export function installFarmIslandValues(): void {
+  // islx renders islands mode's islands: it reads the values this request's browser holds, and
+  // which this response already wrote, from Farm's request.
+  setRenderStateResolver(() => {
+    const request = _resolveCurrentRequest();
+    if (!request) return null;
+    let sent = sentByRequest.get(request);
+    if (!sent) sentByRequest.set(request, (sent = new Set()));
+    return { held: readFarmHeldValues(), sent };
+  });
   (globalThis as typeof globalThis & Record<symbol, FarmIslandValuesServer>)[SERVER_KEY] = {
     address: addressFarmValues,
     select: selectFarmValuesToSend,

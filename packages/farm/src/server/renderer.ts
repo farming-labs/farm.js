@@ -162,6 +162,7 @@ import type { FarmIslandStrategy } from "../island";
 import { createDefaultErrorDiagnostics } from "./error-diagnostics";
 import { handleFarmFormActionRequest } from "../form-actions";
 import { installFarmIslandValues } from "../client/island-values";
+import * as islands from "../client/islands-runtime";
 import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import {
@@ -782,7 +783,24 @@ export class ServerRenderer {
     ) {
       return element;
     }
+    // Islands mode runs on islx.
+    if (this.islandValues())
+      return islands.wrapFarmIsolatedClientGraph(undefined as never, element as never);
     return this.rendererRuntime.wrapClientGraph(element);
+  }
+
+  /** The page a hydrating layout keeps as server HTML: islands again, or a server tree. */
+  private async isolateServerPage(element: unknown, serverTree: boolean): Promise<unknown> {
+    if (this.islandValues()) {
+      return serverTree
+        ? islands.renderFarmServerTreePage(undefined as never, element as never, {
+            isolate: (node) => islands.isolateFarmServerPageGraph(undefined as never, node),
+          })
+        : islands.isolateFarmServerPageGraph(undefined as never, element as never);
+    }
+    return serverTree && this.rendererRuntime.renderServerTreePage
+      ? this.rendererRuntime.renderServerTreePage(element, { values: false })
+      : this.rendererRuntime.isolateServerPageGraph!(element);
   }
 
   private async renderElementToCompleteHTML(
@@ -908,12 +926,7 @@ export class ServerRenderer {
     ) {
       // As in renderPage: the layout keeps this page as server HTML, so its islands stay islands,
       // unless the page renders as a server tree the layout's root rebuilds.
-      element =
-        input.serverTree && this.rendererRuntime.renderServerTreePage
-          ? await this.rendererRuntime.renderServerTreePage(element, {
-              values: this.islandValues(),
-            })
-          : this.rendererRuntime.isolateServerPageGraph(element);
+      element = await this.isolateServerPage(element, input.serverTree === true);
     }
     element = this.createPageBoundary(element, {
       pageShouldHydrate: input.pageShouldHydrate,
@@ -1924,12 +1937,10 @@ export class ServerRenderer {
               // The hydrating layout keeps this page as server HTML, so its client components
               // render as their own islands instead of joining the layout's React tree. A
               // server-tree page instead joins it: the browser rebuilds the resolved tree there.
-              pageElement =
-                routeManifestEntry?.serverTree === true && this.rendererRuntime.renderServerTreePage
-                  ? await this.rendererRuntime.renderServerTreePage(pageElement, {
-                      values: this.islandValues(),
-                    })
-                  : this.rendererRuntime.isolateServerPageGraph(pageElement);
+              pageElement = await this.isolateServerPage(
+                pageElement,
+                routeManifestEntry?.serverTree === true,
+              );
             }
 
             // Every route gets a stable HTML boundary. Server-only pages keep

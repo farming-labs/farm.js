@@ -1,6 +1,7 @@
 import React, { act } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
+import { createIsland } from "../islx/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   decodeFarmJson,
@@ -10,11 +11,12 @@ import {
 } from "../client/island-codec";
 import { getFarmIslandValueStore } from "../client/island-value-store";
 import { installFarmIslandValues } from "../client/island-values";
+// Islands mode runs on islx: the runtime its generated code imports.
 import {
-  createFarmIsolatedClientBoundary,
   createFarmIsolatedHydrationRuntime,
-} from "../client/isolated-boundary";
-import { createFarmServerTreeElement, renderFarmServerTreePage } from "../client/server-tree";
+  createFarmServerTreeElement,
+  renderFarmServerTreePage,
+} from "../client/islands-runtime";
 import {
   FARM_FORM_ACTION_HEADER,
   handleFarmFormActionRequest,
@@ -131,10 +133,7 @@ describe("typed props", () => {
     seen.push(props);
     return <ShowSource {...props} />;
   }
-  const Show = createFarmIsolatedClientBoundary(React, Recording, "/src/show.tsx", "Show", "load", {
-    slots: true,
-    values: true,
-  });
+  const Show = createIsland(Recording, "/src/show.tsx", "Show", "load");
 
   it("reach an island as the types the server passed", async () => {
     const html = renderToString(<Show {...sample()} />);
@@ -145,7 +144,10 @@ describe("typed props", () => {
     const runtime = createFarmIsolatedHydrationRuntime({
       ReactRuntime: React,
       hydrateRoot,
-      load: async () => ({ __farm_client_boundary_originals__: { Show: Recording } }),
+      load: async () => ({
+        Show: Recording,
+        __farm_client_boundary_originals__: { Show: Recording },
+      }),
       schedule: async ({ hydrate }) => hydrate(),
       decode: decodeFarmTagged,
     });
@@ -173,7 +175,10 @@ describe("typed props", () => {
       React,
       container.querySelector("#__farm_page__")!,
       {
-        load: async () => ({ __farm_client_boundary_originals__: { Show: Recording } }),
+        load: async () => ({
+          Show: Recording,
+          __farm_client_boundary_originals__: { Show: Recording },
+        }),
         ServerHtml: () => null,
         decode: decodeFarmTagged,
         values: getFarmIslandValueStore(),
@@ -207,9 +212,10 @@ describe("typed server action calls", () => {
           "content-type": "text/plain;charset=UTF-8",
           origin: "https://app.test",
         },
-        body: JSON.stringify(
-          encodeFarmJson([new Date("2026-01-01T00:00:00.000Z"), new Map([["k", 9n]])]),
-        ),
+        // islx's call body: the arguments, tagged, under "a".
+        body: JSON.stringify({
+          a: encodeFarmJson([new Date("2026-01-01T00:00:00.000Z"), new Map([["k", 9n]])]),
+        }),
       }),
       resolveServerActionsConfig(undefined),
     );
@@ -233,7 +239,7 @@ describe("typed server action calls", () => {
           "content-type": "text/plain;charset=UTF-8",
           origin: "https://app.test",
         },
-        body: JSON.stringify([{ $: "B", v: "not a number" }]),
+        body: JSON.stringify({ a: [{ $: "B", v: "not a number" }] }),
       }),
       resolveServerActionsConfig(undefined),
     );

@@ -240,6 +240,43 @@ test("a server action passed as a prop works before JavaScript loads", async ({ 
   await context.close();
 });
 
+test("an inline server action reads its page's variables, from a form and from a client component", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await page.goto("/inline");
+  await hydrated(page);
+  // The captured values travel sealed, never as readable form fields.
+  expect(await page.content()).not.toContain("Ada");
+  await page.evaluate(() => ((window as { __contract?: number }).__contract = 1));
+  await page.getByRole("button", { name: "Inline clicks: 0" }).click();
+
+  const fromPage = `page item ${Date.now()}`;
+  await page.getByLabel("Page item").fill(fromPage);
+  await page.getByRole("button", { name: "Add from page" }).click();
+  await expect(page.getByTestId("items")).toContainText(`${fromPage} (inline, Ada since 2026)`);
+
+  const fromIsland = `island item ${Date.now()}`;
+  await page.getByLabel("Item", { exact: true }).fill(fromIsland);
+  await page.getByRole("button", { name: "Add item" }).click();
+  await expect(page.getByTestId("items")).toContainText(`${fromIsland} (inline, Ada since 2026)`);
+  // No document load, and client state survived both refreshes.
+  await expect(page.getByRole("button", { name: "Inline clicks: 1" })).toBeVisible();
+  expect(await page.evaluate(() => (window as { __contract?: number }).__contract)).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test("an inline server action works before JavaScript loads", async ({ browser }) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await page.goto("/inline");
+  const title = `no-js inline item ${Date.now()}`;
+  await page.getByLabel("Page item").fill(title);
+  await page.getByRole("button", { name: "Add from page" }).click();
+  await expect(page.getByTestId("items")).toContainText(`${title} (inline, Ada since 2026)`);
+  await context.close();
+});
+
 test("a client component receives values JSON cannot hold as their own types", async ({
   page,
   request,

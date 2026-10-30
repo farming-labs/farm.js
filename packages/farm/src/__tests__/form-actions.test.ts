@@ -1,12 +1,15 @@
+import { parseSync } from "vite";
 import { describe, expect, it, vi } from "vitest";
-import { redirect } from "../navigation-errors";
+import { notFound, redirect } from "../navigation-errors";
 import {
-  FARM_FORM_ACTION_FIELD,
   FARM_FORM_ACTION_HEADER,
   handleFarmFormActionRequest,
   registerFarmFormAction,
 } from "../form-actions";
-import { resolveServerActionsConfig } from "../server-action-security";
+import {
+  getServerActionExecutionContext,
+  resolveServerActionsConfig,
+} from "../server-action-security";
 import {
   getFarmFormActionId,
   hasUseServerDirective,
@@ -15,8 +18,15 @@ import {
 
 const config = resolveServerActionsConfig(undefined);
 
-function formPost(fields: Record<string, string>, headers: Record<string, string> = {}) {
-  const body = new URLSearchParams(fields);
+/** A form posting `id` as React writes it for `<form action={fn}>` (islx's fields). */
+function formPost(
+  id: string | null,
+  fields: Record<string, string>,
+  headers: Record<string, string> = {},
+) {
+  const body = new URLSearchParams(
+    id === null ? fields : { $F_REF_R_1_: "", "$F_R_1_:A": id, ...fields },
+  );
   return new Request("https://app.test/todos?view=all", {
     method: "POST",
     headers: {
@@ -28,48 +38,54 @@ function formPost(fields: Record<string, string>, headers: Record<string, string
   });
 }
 
-describe("islands-mode server actions", () => {
+describe("islands-mode server actions (run by islx)", () => {
   it("gives a registered action React's form hook with its id", () => {
     const action = registerFarmFormAction(async () => {}, "add-todo");
     const descriptor = (
-      action as unknown as { $$FORM_ACTION: () => { method: string; data: FormData } }
-    ).$$FORM_ACTION();
+      action as unknown as { $$FORM_ACTION: (prefix: string) => { method: string; data: FormData } }
+    ).$$FORM_ACTION("R_1_");
     expect(descriptor.method).toBe("POST");
-    expect(descriptor.data.get(FARM_FORM_ACTION_FIELD)).toBe("add-todo");
+    expect(descriptor.data.get("$F_R_1_:A")).toBe("add-todo");
   });
 
-  it("runs a posted form action and redirects back to the page", async () => {
+  it("runs a posted form action in Farm's action context, and redirects back to the page", async () => {
     const received: FormData[] = [];
-    registerFarmFormAction(async (form: FormData) => received.push(form), "form-ok");
+    let context: unknown;
+    registerFarmFormAction(async (form: FormData) => {
+      context = getServerActionExecutionContext();
+      received.push(form);
+    }, "form-ok");
     const response = await handleFarmFormActionRequest(
-      formPost({ [FARM_FORM_ACTION_FIELD]: "form-ok", title: "Milk" }),
+      formPost("form-ok", { title: "Milk" }),
       config,
     );
     expect(response?.status).toBe(303);
     expect(response?.headers.get("location")).toBe("/todos?view=all");
     expect(received[0]?.get("title")).toBe("Milk");
-    expect(received[0]?.has(FARM_FORM_ACTION_FIELD)).toBe(false);
+    expect([...received[0]!.keys()]).toEqual(["title"]);
+    expect(context).toBeDefined();
   });
 
-  it("follows redirect() and leaves other posts to the page", async () => {
+  it("follows redirect() and notFound(), and leaves other posts to the page", async () => {
     registerFarmFormAction(async () => redirect("/done"), "form-redirect");
-    const redirected = await handleFarmFormActionRequest(
-      formPost({ [FARM_FORM_ACTION_FIELD]: "form-redirect" }),
-      config,
-    );
+    registerFarmFormAction(async () => notFound(), "form-missing");
+    const redirected = await handleFarmFormActionRequest(formPost("form-redirect", {}), config);
     expect(redirected?.headers.get("location")).toBe("/done");
-    expect(await handleFarmFormActionRequest(formPost({ title: "no action" }), config)).toBeNull();
+    expect((await handleFarmFormActionRequest(formPost("form-missing", {}), config))?.status).toBe(
+      404,
+    );
     expect(
-      (await handleFarmFormActionRequest(formPost({ [FARM_FORM_ACTION_FIELD]: "missing" }), config))
-        ?.status,
-    ).toBe(404);
+      await handleFarmFormActionRequest(formPost(null, { title: "no action" }), config),
+    ).toBeNull();
+    // An action this deploy does not know: the page loads again.
+    expect((await handleFarmFormActionRequest(formPost("missing", {}), config))?.status).toBe(303);
   });
 
   it("rejects a cross-origin form post before running anything", async () => {
     const action = vi.fn();
     registerFarmFormAction(action, "form-csrf");
     const response = await handleFarmFormActionRequest(
-      formPost({ [FARM_FORM_ACTION_FIELD]: "form-csrf" }, { origin: "https://evil.test" }),
+      formPost("form-csrf", {}, { origin: "https://evil.test" }),
       config,
     );
     expect(response?.status).toBe(403);
@@ -86,26 +102,33 @@ describe("islands-mode server actions", () => {
           "content-type": "text/plain;charset=UTF-8",
           origin: "https://app.test",
         },
-        body: JSON.stringify([2, 3]),
+        body: JSON.stringify({ a: [2, 3] }),
       }),
       config,
     );
     expect(await response?.json()).toEqual({ result: 5 });
   });
+
+  it("applies Farm's body size limit", async () => {
+    registerFarmFormAction(async () => "ok", "rpc-big");
+    const response = await handleFarmFormActionRequest(
+      new Request("https://app.test/todos", {
+        method: "POST",
+        headers: {
+          [FARM_FORM_ACTION_HEADER]: "rpc-big",
+          "content-type": "text/plain",
+          origin: "https://app.test",
+        },
+        body: JSON.stringify({ a: ["x".repeat(2000)] }),
+      }),
+      resolveServerActionsConfig({ bodySizeLimit: 100 }),
+    );
+    expect(response?.status).toBe(413);
+  });
 });
 
 describe('the "use server" transform', () => {
-  const parse = (code: string) => {
-    // Enough of an ESTree for the export shapes the transform reads.
-    const body: unknown[] = [];
-    for (const match of code.matchAll(/export (?:async )?function (\w+)/g)) {
-      body.push({
-        type: "ExportNamedDeclaration",
-        declaration: { type: "FunctionDeclaration", id: { name: match[1] } },
-      });
-    }
-    return { type: "Program", body };
-  };
+  const parse = (code: string) => parseSync("module.tsx", code).program as never;
   const source =
     '"use server";\nexport async function addTodo(form) {}\nexport async function clear() {}\n';
 
@@ -117,11 +140,13 @@ describe('the "use server" transform', () => {
       ssr: true,
       parse,
     })!;
-    expect(code).toContain(source);
+    expect(code).toContain("export async function addTodo(form) {}");
+    // islx registers it, reached through Farm (an app needs no dependency of its own).
+    expect(code).toContain('from "@farm.js/core/internal/islx-server"');
     expect(code).toContain(
-      `__farm_register_action__(addTodo, ${JSON.stringify(getFarmFormActionId("/app", "/app/src/actions.ts", "addTodo"))});`,
+      `$$islx_ref(addTodo, ${JSON.stringify(getFarmFormActionId("/app", "/app/src/actions.ts", "addTodo"))},`,
     );
-    expect(code).toContain("__farm_register_action__(clear,");
+    expect(code).toContain("$$islx_ref(clear,");
   });
 
   it("replaces the module with stubs in the browser", () => {
@@ -133,8 +158,20 @@ describe('the "use server" transform', () => {
       parse,
     })!;
     expect(code).not.toContain("async function");
-    expect(code).toContain("export const addTodo = __farm_action_stub__(");
-    expect(code).toContain("@farm.js/core/internal/form-actions-client");
+    expect(code).toContain("export const addTodo = $$islx_ref(");
+    expect(code).toContain("@farm.js/core/internal/islx-client");
+  });
+
+  it("hoists an inline action out of a server component", () => {
+    const code = transformFarmFormActionModule({
+      code: 'export default async function Page() {\n  const list = "inbox";\n  async function add(form) {\n    "use server";\n    return list;\n  }\n  return <form action={add} />;\n}\n',
+      id: "/app/src/page.tsx",
+      root: "/app",
+      ssr: true,
+      parse,
+    })!;
+    expect(code).toContain("const add = $$islx_bind(");
+    expect(code).toContain("async function $$islx_action_0([list], form)");
   });
 
   it("leaves other modules alone", () => {

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import { createBundledEnv } from "../env";
@@ -3508,8 +3509,9 @@ document.addEventListener("click", function(e) {
   const isolatedHydrationEnabled = isolatedBoundaryModules.size > 0;
   // Only an app with a server-tree page ships the code that rebuilds one.
   const serverTreeEnabled = isolatedHydrationEnabled && clientPages.some((page) => page.serverTree);
+  // Islands mode runs on islx (internal/islands-runtime), under the same names.
   const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";${islandValues ? '\nimport { getFarmIslandValueStore } from "@farm.js/core/internal/island-value-store";\nimport { getFarmFormActionStub } from "@farm.js/core/internal/form-actions-client";\nimport { decodeFarmTagged } from "@farm.js/core/internal/island-codec";' : ""}${serverTreeEnabled ? '\nimport { createFarmServerTreeElement } from "@farm.js/core/internal/server-tree";' : ""}`
+    ? `${islandValues ? 'import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph, createFarmServerTreeElement } from "@farm.js/core/internal/islands-runtime";' : 'import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";'}${serverTreeEnabled && !islandValues ? '\nimport { createFarmServerTreeElement } from "@farm.js/core/internal/server-tree";' : ""}`
     : "";
   const isolatedHydrationRuntime = isolatedHydrationEnabled
     ? `const farmIsolatedBoundaryLoaders = {
@@ -3530,7 +3532,7 @@ const farmIsolatedHydrationRuntime = createFarmIsolatedHydrationRuntime({
   hydrateRoot,
   load: loadFarmIsolatedBoundary,
   schedule: scheduleFarmIslandHydration,
-  wrap: wrapWithIntegrationProviders,${islandValues ? "\n  values: getFarmIslandValueStore(),\n  actions: getFarmFormActionStub,\n  decode: decodeFarmTagged," : ""}
+  wrap: wrapWithIntegrationProviders,
 });
 
 // A hydrating layout keeps a non-hydrating page as server HTML; this wrapper runs its islands.
@@ -3552,7 +3554,7 @@ async function createFarmServerTreePageElement(source, pathname) {
     return await createFarmServerTreeElement(React, source, {
       load: loadFarmIsolatedBoundary,
       ServerHtml: FarmServerPage,
-      key: pathname,${islandValues ? "\n      values: getFarmIslandValueStore(),\n      actions: getFarmFormActionStub,\n      decode: decodeFarmTagged," : ""}
+      key: pathname,
     });
   } catch (error) {
     console.warn("[Farm.js] Could not rebuild the server tree of " + pathname + "; its server HTML was kept.", error);
@@ -5804,7 +5806,9 @@ function generateVirtualEntryCode(
   const rendererServerImports = isReactRenderer(config.renderer)
     ? `import * as React from "react";\nimport * as ReactDOMServer from "react-dom/server";${
         hasIsolatedClientGraphRuntime
-          ? '\nimport { isolateFarmServerPageGraph, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";\nimport { renderFarmServerTreePage } from "@farm.js/core/internal/server-tree";'
+          ? farmIslandsMode
+            ? '\nimport { isolateFarmServerPageGraph, wrapFarmIsolatedClientGraph, renderFarmServerTreePage } from "@farm.js/core/internal/islands-runtime";'
+            : '\nimport { isolateFarmServerPageGraph, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";\nimport { renderFarmServerTreePage } from "@farm.js/core/internal/server-tree";'
           : ""
       }`
     : `import React, * as ReactDOMServer from ${JSON.stringify(config.renderer.server)};${generateFarmRendererAppSetupServerCode(config)}`;
@@ -6271,7 +6275,7 @@ function renderFarmRouteServerTree(element, extra) { return element; }`;
   }
 } from "@farm.js/core/internal/production-runtime";${
     farmIslandsMode
-      ? `\nimport { getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader } from "@farm.js/core/internal/production-runtime";\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
+      ? `\nimport { getSharedLayoutPrefixLength, handleFarmFormActionRequest, ignoreFarmHeldValues, installFarmIslandValues, parseFarmLayoutChainHeader } from "@farm.js/core/internal/production-runtime";\nconst farmFormActionsConfig = ${JSON.stringify(resolveServerActionsConfig(config.serverActions))};\ninstallFarmIslandValues();\n${islandsActionKeyCode()}\n${FARM_SEGMENT_NAVIGATION_SERVER_RUNTIME}`
       : ""
   }`;
   const productionSiteTelemetryImport = config.telemetry
@@ -12287,3 +12291,13 @@ async function copyPrismaClientForVercel(
   await writeNitroOutputPackage(nitroFuncDir, functionPackage, fs);
 }
 export { generateNativeMCPPluginSource } from "./native-mcp-source";
+
+/**
+ * Islands mode seals the values an inline action captures with a key every instance of one build
+ * shares (islx reads `ISLX_ACTIONS_KEY` first, so an app can keep it across deploys). Without it,
+ * each serverless instance would make its own key and reject forms another one rendered.
+ */
+function islandsActionKeyCode(): string {
+  const key = randomBytes(32).toString("base64url");
+  return `import { setBuildDefaults as __farmIslxBuildDefaults } from "@farm.js/core/internal/islx-server";\n__farmIslxBuildDefaults({ key: ${JSON.stringify(key)} });`;
+}

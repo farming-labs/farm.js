@@ -306,7 +306,8 @@ gets its own copy instead of Farm's.
 
 `serverComponents: true` is the same as `serverComponents: { mode: "rsc" }`, React's own server
 components engine. `{ mode: "islands" }` is Farm's own engine
-([RFC 0003](https://github.com/farming-labs/farm.js/blob/main/rfcs/0003-islands-server-components.md)):
+([RFC 0003](https://github.com/farming-labs/farm.js/blob/main/rfcs/0003-islands-server-components.md)),
+built on [islx](https://github.com/farming-labs/islx), its renderer-agnostic wire format:
 it renders on Farm's normal pipeline, sends static output once as HTML, and hydrates only client
 components. A client component that receives server output (`children`, or any element prop) keeps
 that output as a slot of the existing HTML instead of receiving it again, and a server page under a
@@ -325,7 +326,12 @@ in the payload its client components rebuild from. When the browser already rend
 a navigation to such a page carries only that payload: the browser rebuilds the page in the
 layout's React tree, so the server leaves out the page's HTML. `"use server"`
 functions work from forms, with or without JavaScript, and from client components, in `farm dev`
-and in production. A server component can pass one to a client component as a prop. After an
+and in production. A server component can pass one to a client component as a prop, and can
+declare one inline: an `async` function with `"use server"` as its first statement may read the
+component's variables, which travel with it sealed (AES-GCM, bound to the action) rather than as
+form fields the browser could read or change. Every instance of one build shares the sealing key;
+set `ISLX_ACTIONS_KEY` to keep forms on open pages working across deploys. A `<form>` written in a
+server component posts its action without a page load once JavaScript runs. After an
 action called from JavaScript, the page refreshes, as the form posted without JavaScript would show
 it: islands still on the page keep their state and get their new props, and a `redirect()` from the
 action becomes a client navigation. Props and action arguments are not limited to JSON:

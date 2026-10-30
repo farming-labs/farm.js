@@ -1,11 +1,12 @@
 import { resolveFarmServerComponentsMode } from "./server-components-mode";
-import { hasUseServerDirective, transformFarmFormActionModule } from "./form-actions-transform";
+import { transformFarmFormActionModule } from "./form-actions-transform";
 import {
   invalidateFailedFarmDevModules,
   invalidateFarmDevDependents,
   loadFarmDevModule,
 } from "./dev-module";
 import { createBundledEnv } from "./env";
+import { parseSync } from "vite";
 import type {
   AliasOptions,
   ConfigEnv,
@@ -955,7 +956,10 @@ export function transformIsolatedClientBoundaryModule(options: {
     const safeName = exportName.replace(/[^A-Za-z0-9_$]/g, "_");
     const wrapperName = `__farm_isolated_boundary_${safeName || "default"}__`;
     wrapperStatements.push(
-      `const ${wrapperName} = __farm_create_isolated_boundary__(__farm_isolated_react__, ${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)}${options.slots ? ", { slots: true, values: true }" : ""});`,
+      // Islands mode renders through islx; the older isolated hydration keeps Farm's boundary.
+      options.slots
+        ? `const ${wrapperName} = __farm_islx_island__(${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`
+        : `const ${wrapperName} = __farm_create_isolated_boundary__(__farm_isolated_react__, ${localName}, ${JSON.stringify(options.moduleReference)}, ${JSON.stringify(exportName)}, ${JSON.stringify(options.islandStrategy)});`,
     );
     wrapperStatements.push(
       isDefault ? `export default ${wrapperName};` : `export { ${wrapperName} as ${exportName} };`,
@@ -1022,7 +1026,10 @@ export function transformIsolatedClientBoundaryModule(options: {
     output = output.slice(0, replacement.start) + replacement.code + output.slice(replacement.end);
   }
 
-  return `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_isolated_boundary__ } from "@farm.js/core/internal/isolated-boundary";\n${output}\n${wrapperStatements.join("\n")}\nexport const __farm_client_boundary_originals__ = Object.freeze({ ${originalEntries.join(", ")} });\n`;
+  const runtimeImport = options.slots
+    ? `import { createIsland as __farm_islx_island__ } from "@farm.js/core/internal/islx-react";`
+    : `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_isolated_boundary__ } from "@farm.js/core/internal/isolated-boundary";`;
+  return `${runtimeImport}\n${output}\n${wrapperStatements.join("\n")}\nexport const __farm_client_boundary_originals__ = Object.freeze({ ${originalEntries.join(", ")} });\n`;
 }
 
 function walkModuleAst(node: FarmModuleAstNode, visit: (node: FarmModuleAstNode) => void): void {
@@ -3643,14 +3650,19 @@ export const manifest = getManifest();
       if (
         resolveFarmServerComponentsMode(actionConfig.experimental?.serverComponents) ===
           "islands" &&
-        hasUseServerDirective(code)
+        code.includes("use server") &&
+        !id.includes("/node_modules/") &&
+        /\.[cm]?[jt]sx?(?:$|\?)/.test(id)
       ) {
+        // A `"use server"` module, or an inline `"use server"` function in a server component.
+        const file = id.split("?", 1)[0]!;
         const actionModule = transformFarmFormActionModule({
           code,
           id,
           root: actionConfig.root || server?.config.root || process.cwd(),
           ssr: transformOptions?.ssr === true,
-          parse: (source) => this.parse(source) as never,
+          // Parsed by file type: page components are TSX.
+          parse: (source) => (parseSync(file, source) as { program: unknown }).program as never,
         });
         if (actionModule) return { code: actionModule, map: null };
       }
@@ -4726,8 +4738,9 @@ function generateClientCode(
     : appSetupPath
       ? `import React, { hydrateRoot, createRoot, configureApp as __farmConfigureApp } from ${JSON.stringify(renderer.client)}\nimport __farmAppSetup from ${JSON.stringify(toViteModuleId(appSetupPath, root))}\n__farmConfigureApp(__farmAppSetup)`
       : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
+  // Islands mode runs on islx (internal/islands-runtime), under the same names.
   const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'${islandValues ? "\nimport { getFarmIslandValueStore } from '@farm.js/core/internal/island-value-store'\nimport { getFarmFormActionStub } from '@farm.js/core/internal/form-actions-client'\nimport { decodeFarmTagged } from '@farm.js/core/internal/island-codec'" : ""}`
+    ? `${islandValues ? "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph, createFarmServerTreeElement } from '@farm.js/core/internal/islands-runtime'" : "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'"}`
     : "";
   const docsAdapterImportBlock = generateFarmDocsAdapterClientRuntime(
     docsAdapterReact,
@@ -4739,7 +4752,7 @@ function generateClientCode(
   hydrateRoot,
   load: (reference) => import(/* @vite-ignore */ farmModuleUrl(reference)),
   schedule: scheduleFarmIslandHydration,
-  wrap: wrapWithIntegrationProviders,${islandValues ? "\n  values: getFarmIslandValueStore(),\n  actions: getFarmFormActionStub,\n  decode: decodeFarmTagged," : ""}
+  wrap: wrapWithIntegrationProviders,
 });
 window.__FARM_ISOLATED_HYDRATION_RUNTIME__ = farmIsolatedHydrationRuntime;
 // A hydrating layout keeps a non-hydrating page as server HTML; this wrapper runs its islands.
@@ -4759,7 +4772,7 @@ async function createFarmServerTreePageElement(source, pathname) {
     return await createFarmServerTreeElement(React, source, {
       load: (reference) => import(/* @vite-ignore */ farmModuleUrl(reference)),
       ServerHtml: FarmServerPage,
-      key: pathname,${islandValues ? "\n      values: getFarmIslandValueStore(),\n      actions: getFarmFormActionStub,\n      decode: decodeFarmTagged," : ""}
+      key: pathname,
     });
   } catch (error) {
     console.warn('[Farm.js] Could not rebuild the server tree of ' + pathname + '; its server HTML was kept.', error);

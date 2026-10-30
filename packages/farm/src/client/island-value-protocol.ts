@@ -53,7 +53,8 @@ export const FARM_VALUE_KEY_PATTERN = /^[0-9a-z]{14}$/;
 /** Keys sent per request: the most recently used ones. */
 export const FARM_MAX_HELD_VALUES = 128;
 /** Where the page's value store lives, shared by every copy of the runtime. */
-export const FARM_ISLAND_VALUE_STORE_KEY = Symbol.for("farm.island-values");
+// islx's store (islands mode hydrates through islx), so navigations name what it holds.
+export const FARM_ISLAND_VALUE_STORE_KEY = Symbol.for("islx.values");
 
 /** The addressing a server installs (`installFarmIslandValues` in `island-values.ts`). */
 export interface FarmIslandValuesServerHook {

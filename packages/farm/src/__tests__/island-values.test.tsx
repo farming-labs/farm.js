@@ -1,11 +1,11 @@
 import React, { act } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
+import { createIsland } from "../islx/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  createFarmIsolatedClientBoundary,
-  createFarmIsolatedHydrationRuntime,
-} from "../client/isolated-boundary";
+import { createFarmIsolatedClientBoundary } from "../client/isolated-boundary";
+// Islands mode hydrates through islx: the runtime its generated code imports.
+import { createFarmIsolatedHydrationRuntime } from "../client/islands-runtime";
 import { getFarmIslandValueHeaders } from "../client/island-value-protocol";
 import { decodeFarmTagged } from "../client/island-codec";
 import { getFarmIslandValueStore } from "../client/island-value-store";
@@ -21,7 +21,8 @@ import { _setAppRequestView, _setCurrentRequestResolver } from "../server/reques
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const STORE_KEY = Symbol.for("farm.island-values");
+// The page's value store is islx's: islands mode hydrates through islx.
+const STORE_KEY = Symbol.for("islx.values");
 installFarmIslandValues();
 
 // A docs navigation tree: what a layout passes to its sidebar and its mobile menu.
@@ -136,14 +137,7 @@ describe("content-addressed island values", () => {
   });
 
   it("renders a value once per island and leaves out what the browser holds", () => {
-    const Boundary = createFarmIsolatedClientBoundary(
-      React,
-      Sidebar,
-      "/src/sidebar.tsx",
-      "Sidebar",
-      "load",
-      { slots: true, values: true },
-    );
+    const Boundary = createIsland(Sidebar, "/src/sidebar.tsx", "Sidebar", "load");
     serve();
     const html = renderToString(<Boundary tree={tree} label="Docs" />);
     const [key] = valueScripts(html);
@@ -185,14 +179,7 @@ describe("content-addressed island values", () => {
       seen.push(props.tree);
       return <Sidebar {...props} />;
     }
-    const Boundary = createFarmIsolatedClientBoundary(
-      React,
-      Recording,
-      "/src/sidebar-lookalike.tsx",
-      "default",
-      "load",
-      { slots: true, values: true },
-    );
+    const Boundary = createIsland(Recording, "/src/sidebar-lookalike.tsx", "default", "load");
     serve();
     document.body.innerHTML = renderToString(<Boundary tree={lookalike} label="Docs" />);
     _setCurrentRequestResolver(undefined);
@@ -201,7 +188,10 @@ describe("content-addressed island values", () => {
     const runtime = createFarmIsolatedHydrationRuntime({
       ReactRuntime: React,
       hydrateRoot,
-      load: async () => ({ __farm_client_boundary_originals__: { default: Recording } }),
+      load: async () => ({
+        default: Recording,
+        __farm_client_boundary_originals__: { default: Recording },
+      }),
       schedule: async ({ hydrate }) => hydrate(),
       values: getFarmIslandValueStore(),
       decode: decodeFarmTagged,
@@ -217,14 +207,7 @@ describe("content-addressed island values", () => {
       seen.push(props.tree);
       return <Sidebar {...props} />;
     }
-    const Boundary = createFarmIsolatedClientBoundary(
-      React,
-      Recording,
-      "/src/recording.tsx",
-      "default",
-      "load",
-      { slots: true, values: true },
-    );
+    const Boundary = createIsland(Recording, "/src/recording.tsx", "default", "load");
     serve();
     document.body.innerHTML = renderToString(
       <>
@@ -233,16 +216,20 @@ describe("content-addressed island values", () => {
       </>,
     );
     _setCurrentRequestResolver(undefined);
-    // Each island carries the tree and its sections; the browser reads each key once.
+    // The tree and its sections travel once for the page (islx remembers what this request
+    // wrote); both islands read the same keys.
     const scripts = valueScripts(document.body.innerHTML);
     expect(new Set(scripts).size).toBe(7);
-    expect(scripts).toHaveLength(14);
+    expect(scripts).toHaveLength(7);
     seen.length = 0;
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const runtime = createFarmIsolatedHydrationRuntime({
       ReactRuntime: React,
       hydrateRoot,
-      load: async () => ({ __farm_client_boundary_originals__: { default: Recording } }),
+      load: async () => ({
+        default: Recording,
+        __farm_client_boundary_originals__: { default: Recording },
+      }),
       schedule: async ({ hydrate }) => hydrate(),
       values: getFarmIslandValueStore(),
     });
@@ -260,6 +247,7 @@ describe("content-addressed island values", () => {
   });
 
   it("ships the addressing only where a server installed it", () => {
+    // Farm's own boundary (isolated hydration without islands mode) sends props as JSON.
     const Boundary = createFarmIsolatedClientBoundary(
       React,
       Sidebar,
@@ -281,14 +269,7 @@ describe("content-addressed island values", () => {
   });
 
   it("keeps the server HTML when a value never arrived", async () => {
-    const Boundary = createFarmIsolatedClientBoundary(
-      React,
-      Sidebar,
-      "/src/sidebar-missing.tsx",
-      "Sidebar",
-      "load",
-      { slots: true, values: true },
-    );
+    const Boundary = createIsland(Sidebar, "/src/sidebar-missing.tsx", "Sidebar", "load");
     serve({ "f-values": "" });
     const html = renderToString(<Boundary tree={tree} label="Docs" />);
     document.body.innerHTML = html.replace(/<script type="f\/value"[\s\S]*?<\/script>/g, "");
@@ -296,16 +277,16 @@ describe("content-addressed island values", () => {
     const runtime = createFarmIsolatedHydrationRuntime({
       ReactRuntime: React,
       hydrateRoot,
-      load: async () => ({ __farm_client_boundary_originals__: { Sidebar } }),
+      load: async () => ({ Sidebar, __farm_client_boundary_originals__: { Sidebar } }),
       schedule: async ({ hydrate }) => hydrate(),
       values: getFarmIslandValueStore(),
       report,
     });
     await act(async () => runtime.hydrate(document));
     expect(report).toHaveBeenCalledWith(
-      expect.stringContaining("Could not hydrate isolated client boundary"),
+      expect.stringContaining("Could not hydrate Sidebar"),
       expect.objectContaining({
-        message: expect.stringMatching(/island value [0-9a-z]{14} was not found/),
+        message: expect.stringMatching(/value [0-9a-z]{14} was not found/),
       }),
     );
     expect(document.querySelector("nav")?.textContent).toBe(tree[0]!.items[0]!.title);
