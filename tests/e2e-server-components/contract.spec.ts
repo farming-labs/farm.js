@@ -117,15 +117,25 @@ test("a Suspense boundary streams its fallback first, then the content", async (
 });
 
 test("client components before and inside slow Suspense content both hydrate", async ({ page }) => {
-  await page.goto("/stream");
+  await page.goto("/stream", { waitUntil: "commit" });
+  const early = page.getByRole("button", { name: /^Early: / });
+  // Click until the Early counter responds, and note whether the slow content had arrived then.
+  let slowArrivedFirst = true;
+  await expect(async () => {
+    await early.click({ timeout: 100 });
+    await expect(early).toHaveText(/^Early: [1-9]/, { timeout: 50 });
+    slowArrivedFirst = (await page.getByTestId("slow-content").count()) > 0;
+  }).toPass({ intervals: [20], timeout: 10_000 });
+  // Islands mode starts the client while the body streams. The RSC client starts once the
+  // stream ends, as does Farm's development server for now.
+  if (mode === "islands" && !dev) expect(slowArrivedFirst).toBe(false);
+
+  const late = page.getByRole("button", { name: /^Late: / });
   await expect(page.getByTestId("slow-content")).toBeVisible();
-  for (const label of ["Early", "Late"]) {
-    const button = page.getByRole("button", { name: new RegExp(`^${label}: `) });
-    await expect(async () => {
-      await button.click({ timeout: 200 });
-      await expect(button).toHaveText(new RegExp(`^${label}: [1-9]`), { timeout: 100 });
-    }).toPass({ timeout: 10_000 });
-  }
+  await expect(async () => {
+    await late.click({ timeout: 200 });
+    await expect(late).toHaveText(/^Late: [1-9]/, { timeout: 100 });
+  }).toPass({ timeout: 10_000 });
 });
 
 test("generateMetadata sets the head", async ({ request }) => {

@@ -3441,7 +3441,7 @@ void farmClientRuntime.start();
 spaRouter.initializeHistory();
 window.__FARM_SPA_ROUTER__ = spaRouter;
 
-void hydrateFarmDocsAdapterRuntime();
+${islandValues ? "void farmDocumentParsed().then(hydrateFarmDocsAdapterRuntime);" : "void hydrateFarmDocsAdapterRuntime();"}
 
 window.addEventListener("beforeunload", function(event) {
   if (spaRouter.shouldBlockUnload()) {
@@ -4006,19 +4006,45 @@ function resetReactRoot() {
   isHydrated = false;
 }
 
-// Hydrate client components
+${
+  islandValues
+    ? `// Islands mode starts the client while the body streams (an async entry): a page of islands
+// hydrates them as they arrive; anything else waits for the whole document.
+function farmDocumentParsed() {
+  if (document.readyState !== "loading") return Promise.resolve();
+  return new Promise(function(resolve) {
+    document.addEventListener("DOMContentLoaded", function() { resolve(); }, { once: true });
+  });
+}
+
+`
+    : ""
+}// Hydrate client components
 async function hydrate() {
   await window.__FARM_PPR_REFRESH_PROMISE__;
   // A PPR refresh that is still retrying must not replace DOM once hydration starts.
   window.__FARM_PPR_HYDRATING__ = true;
   await farmClientRuntime.start();
 
+  const pathname = window.location.pathname;
+  const matched = matchRoute(pathname);
+  ${
+    islandValues
+      ? `if (
+    !matched ||
+    !matched.route.hasIsolatedClientBoundaries ||
+    matched.route.pageShouldHydrate ||
+    hasHydratableLayout(pathname)
+  ) {
+    await farmDocumentParsed();
+  }`
+      : ""
+  }
+
   if (await hydrateFarmDocsAdapterRuntime()) {
     return;
   }
 
-  const pathname = window.location.pathname;
-  const matched = matchRoute(pathname);
   hydrateInitialRouteSlots();
 
   if (!matched) {
@@ -7098,8 +7124,9 @@ function renderFarmRendererHydrationScript() {
     : "";
 }
 
-function renderFarmClientEntryScript() {
-  return stampFarmCspNonce('<script type="module" src="/__farm_client_js_src__"></script>');
+function renderFarmClientEntryScript(early) {
+  // An early entry runs as soon as it loads, while the body still streams.
+  return stampFarmCspNonce('<script type="module"' + (early ? ' async' : '') + ' src="/__farm_client_js_src__"></script>');
 }
 
 // Renderer options for the response being rendered: its CSP nonce, which the
@@ -10019,15 +10046,18 @@ ${
             farmResolvedRuntimeConfig.basePath,
             getFarmTheme(request)
           );
-          // The page's client data and entry, after its content.
-          const farmClientScripts = function() {
+          // The page's client data and entry. Islands mode starts the client while the body streams
+          // (an async entry right after <body>), so islands that arrive early hydrate before slow
+          // Suspense content resolves; other modes keep them at the end.
+          const farmClientScripts = function(early) {
             return '  ' + renderFarmClientBootstrapScript(
               pageProps.__farmCanonicalPath,
               routeSlotPayload,
               clientPageProps
             ) + '\\n' +
-              '  ' + renderFarmClientEntryScript() + '\\n';
+              '  ' + renderFarmClientEntryScript(early) + '\\n';
           };
+          const farmEarlyClientScripts = ${farmIslandsMode ? "farmClientScripts(true)" : '""'};
           const streamPrefix = '<!DOCTYPE html>\\n<html lang="en">\\n<head>\\n' +
             farmThemeDocument.head + '\\n' +
             '  <meta charset="utf-8">\\n' +
@@ -10037,8 +10067,10 @@ ${
             '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n' +
             '  <link rel="modulepreload" href="/__farm_client_js_src__">' + renderFarmClientModulePreloads(null, route.clientModule) + '\\n' +
             renderFarmRendererHydrationScript() + '\\n' +
-            '</head>\\n<body>\\n  <div id="root">';
-          const streamSuffix = '</div>\\n' + farmClientScripts() + '</body>\\n</html>';
+            '</head>\\n<body>\\n' + farmEarlyClientScripts + '  <div id="root">';
+          const streamSuffix = '</div>\\n' +
+            (farmEarlyClientScripts ? '' : farmClientScripts()) +
+            '</body>\\n</html>';
           const themedStreamPrefix = streamPrefix.replace(
             '<html lang="en">',
             () => '<html lang="en"' + farmThemeDocument.attributes + '>'
@@ -10103,6 +10135,8 @@ ${
                     // The client entry arrives last: fetch it while the body streams.
                     ).replace(/<\\/head>/i, function() {
                       return '  <link rel="modulepreload" href="/__farm_client_js_src__">\\n</head>';
+                    }).replace(/<body\\b[^>]*>/i, function(open) {
+                      return open + (farmEarlyClientScripts ? '\\n' + farmEarlyClientScripts : '');
                     }),
                     farmThemeConfig,
                     farmResolvedRuntimeConfig.basePath,
@@ -10112,7 +10146,7 @@ ${
                 async function(rootOpened) {
                   return (await lateNavigationRecovery()) +
                     (rootOpened ? '</div>\\n' : '') +
-                    farmClientScripts();
+                    (farmEarlyClientScripts ? '' : farmClientScripts());
                 },
                 onStreamComplete
               )
