@@ -3,7 +3,7 @@
  * islx. It keeps every value it has read, parses each once, and names what it holds in
  * navigations (`F-Values`), so the server leaves those values out.
  */
-import { getValueStore } from "@farmjs/islx/client";
+import { getValueStore } from "@farm.js/islx/client";
 import type { FarmIslandValueStore } from "./island-value-protocol";
 
 /** The page's value store, shared by every copy of the runtime. */

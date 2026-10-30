@@ -4,7 +4,7 @@
  * captured values travel sealed. Farm supplies its security configuration, the request context
  * actions run in, and how its `redirect()` and `notFound()` answer. The RSC engine has its own.
  */
-import { handleAction, registerServerReference } from "@farmjs/islx/server";
+import { handleAction, registerServerReference } from "@farm.js/islx/server";
 import { getFarmRedirectError, isFarmNotFoundError } from "./navigation-errors";
 import {
   runWithServerActionRequest,

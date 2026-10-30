@@ -115,7 +115,7 @@ export const farmPackageBuildOptions = {
     "@farm.js/core/internal/client-error-overlay",
     "react",
     "react-dom",
-    /^@farmjs\/islx/,
+    /^@farm\.js\/islx/,
     "@vercel/og",
     "rolldown",
     "sharp",

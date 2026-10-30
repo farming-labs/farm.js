@@ -5,13 +5,13 @@
  * islands mode never load islx.
  */
 import type React from "react";
-import { enhanceForms, setActionNavigator } from "@farmjs/islx/client";
-import { isolateIslands, renderServerTree, withinClientRoot } from "@farmjs/islx/react";
+import { enhanceForms, setActionNavigator } from "@farm.js/islx/client";
+import { isolateIslands, renderServerTree, withinClientRoot } from "@farm.js/islx/react";
 import {
   createHydrationRuntime,
   createServerHtml,
   createServerTreeElement,
-} from "@farmjs/islx/react/client";
+} from "@farm.js/islx/react/client";
 import type { FarmIslandStrategy } from "../island";
 import { getFarmIslandValuesServer } from "./island-value-protocol";
 

@@ -6,7 +6,7 @@
  * reaches a client bundle.
  */
 import { createHash } from "node:crypto";
-import { transformActions } from "@farmjs/islx/compiler";
+import { transformActions } from "@farm.js/islx/compiler";
 import path from "node:path";
 
 interface AstNode {

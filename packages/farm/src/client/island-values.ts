@@ -4,7 +4,7 @@
  * already holds them. See `island-value-protocol.ts` for
  * the wire format and `island-value-store.ts` for the browser side.
  */
-import { setRenderStateResolver } from "@farmjs/islx/react/server";
+import { setRenderStateResolver } from "@farm.js/islx/react/server";
 import { _resolveCurrentRequest, _resolveCurrentRequestForApp } from "../server/request-bridge";
 import { decodeFarmTagged, encodeFarmLeaf } from "./island-codec";
 import {
