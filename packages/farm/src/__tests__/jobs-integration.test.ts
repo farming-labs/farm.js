@@ -748,15 +748,13 @@ describe("jobs integration", () => {
   });
 
   it("does not read another task's Inngest run", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async (url) =>
-        String(url).endsWith("/runs")
-          ? jsonResponse({
-              data: [{ run_id: "run_x", status: "Completed", output: { secret: "x" } }],
-            })
-          : jsonResponse({ data: { id: "evt_other", name: "farm/charge-card", data: {} } }),
-      );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) =>
+      String(url).endsWith("/runs")
+        ? jsonResponse({
+            data: [{ run_id: "run_x", status: "Completed", output: { secret: "x" } }],
+          })
+        : jsonResponse({ data: { id: "evt_other", name: "farm/charge-card", data: {} } }),
+    );
     const integration = jobs({
       runtime: inngest({ eventKey: "evt_test_key", signingKey: "sign_test_key" }),
       tasks: defineTasks({
