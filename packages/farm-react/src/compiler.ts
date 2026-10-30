@@ -376,6 +376,7 @@ type CompilerRuntimeFeatureName =
   | "keyed-rows-hinted"
   | "keyed-rows-append-only"
   | "keyed-rows-position-hinted"
+  | "keyed-rows-plain-position-hinted"
   | "keyed-rows-batch-position-hinted"
   | "keyed-rows-window-position-hinted"
   | "keyed-rows-reorder-hinted"
@@ -469,6 +470,7 @@ const COMPILER_RUNTIME_FEATURE_EXPORTS: Record<CompilerRuntimeFeatureName, strin
   "keyed-rows-hinted": "keyedRowsHintedRuntimeFeature",
   "keyed-rows-append-only": "keyedRowsAppendOnlyRuntimeFeature",
   "keyed-rows-position-hinted": "keyedRowsPositionHintedRuntimeFeature",
+  "keyed-rows-plain-position-hinted": "keyedRowsPlainPositionHintedRuntimeFeature",
   "keyed-rows-batch-position-hinted": "keyedRowsBatchPositionHintedRuntimeFeature",
   "keyed-rows-window-position-hinted": "keyedRowsWindowPositionHintedRuntimeFeature",
   "keyed-rows-reorder-hinted": "keyedRowsReorderHintedRuntimeFeature",
@@ -691,6 +693,14 @@ function runtimeFeaturesForPlans(
       // All keyed plans must be plain and target-free. Mixed/structural hints
       // retain their broader runtime; opaque updates still fully reconcile.
       features.add("keyed-rows-prepend-only");
+    } else if (
+      keyedRowsFeature === "keyed-rows" &&
+      hintSuffix === "-position-hinted" &&
+      keyedTargetKinds.size === 0
+    ) {
+      // Every keyed plan must be target-free. Keep position, map, append,
+      // and complete-reconciliation capabilities; broader hints stay separate.
+      features.add("keyed-rows-plain-position-hinted");
     } else if (
       keyedRowsFeature === "keyed-rows" &&
       hintSuffix === "-reorder-hinted" &&

@@ -281,12 +281,17 @@ if (keyedRollingWindowOn.code.includes("keyed-rows:mapped-rolling-window-hinted"
 }
 if (
   !keyedPositionOn.code.includes("FarmCompiledKeyedRows") ||
-  !keyedPositionOn.code.includes("keyed-rows:position-hinted") ||
+  !keyedPositionOn.code.includes("keyed-rows:plain-position-hinted") ||
   !keyedPositionOn.code.includes("positionIndexIndependent")
 ) {
   throw new Error(
-    `Keyed position fixture did not retain its isolated position-hint runtime: rows=${keyedPositionOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedPositionOn.code.includes("keyed-rows:position-hinted")}, proof=${keyedPositionOn.code.includes("positionIndexIndependent")}.`,
+    `Keyed position fixture did not retain its isolated position-hint runtime: rows=${keyedPositionOn.code.includes("FarmCompiledKeyedRows")}, feature=${keyedPositionOn.code.includes("keyed-rows:plain-position-hinted")}, proof=${keyedPositionOn.code.includes("positionIndexIndependent")}.`,
   );
+}
+for (const marker of ["Set.prototype.has", "Map.prototype.get", "keyed-rows:position-hinted"]) {
+  if (keyedPositionOn.code.includes(marker)) {
+    throw new Error(`Target-free position fixture unexpectedly retained ${marker}.`);
+  }
 }
 if (
   !keyedBatchPositionOn.code.includes("FarmCompiledKeyedRows") ||
@@ -365,7 +370,8 @@ for (const [name, output] of [
   }
   if (
     output.code.includes("positionIndexIndependent") ||
-    output.code.includes("keyed-rows:position-hinted")
+    output.code.includes("keyed-rows:position-hinted") ||
+    output.code.includes("keyed-rows:plain-position-hinted")
   ) {
     throw new Error(`${name} fixture retained the optional position-hint runtime.`);
   }
