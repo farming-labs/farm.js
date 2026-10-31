@@ -2062,8 +2062,8 @@ importers:
   packages/farm:
     dependencies:
       '@farm.js/islx':
-        specifier: 0.0.1
-        version: 0.0.1(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4)
+        specifier: 0.0.2
+        version: 0.0.2(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4)
       '@farming-labs/orm':
         specifier: 0.0.65
         version: 0.0.65
@@ -5892,8 +5892,8 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@farm.js/islx@0.0.1(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4):
-    resolution: {integrity: sha512-kK1mOpVRxjA7f9mu4a3w4rhNjsZh4dwQI/boRiDpLMnW9jc36ZIO2sb9nFbMmznceOqff9eipyK9hyKvA5vyqQ==}
+  /@farm.js/islx@0.0.2(react-dom@19.2.8)(react@19.2.8)(vite@8.3.4):
+    resolution: {integrity: sha512-tDZ47tfHxSGG1TcQt99RuOT7+AhY2YuTm2vk0ihsNL7e3sxz/IqgkvbYdHwEzU2ugGLHqKeRvuxC8SLMvy+Maw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       react: '>=19'
