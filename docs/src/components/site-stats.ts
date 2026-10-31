@@ -5,8 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import type { SiteStats } from "../app/api/stats/route";
 import { createScramble } from "./scramble";
 
-/** What a readout shows before its count arrives, or when it never does. */
-export const NO_READING = "--";
+/** What a readout shows before its count arrives, or when it never does: three wide, like most counts. */
+export const NO_READING = "---";
 /** How long a count takes to settle out of the glyphs. */
 const SETTLE_MS = 850;
 /** Glyphs re-roll at this pace rather than every frame, so they read as characters, not noise. */
