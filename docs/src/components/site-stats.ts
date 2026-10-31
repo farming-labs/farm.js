@@ -4,8 +4,6 @@
 import { useEffect, useState } from "react";
 import type { SiteStats } from "../app/api/stats/route";
 
-export type { SiteStats };
-
 let request: Promise<SiteStats | null> | undefined;
 
 /** 681 stays 681; 5531 is 5.5k; 22404 is 22k; 1250000 is 1.3M. */
@@ -17,7 +15,7 @@ export function formatCount(value: number): string {
 }
 
 /** One request per page load, shared by every header that asks. */
-export function loadSiteStats(): Promise<SiteStats | null> {
+function loadSiteStats(): Promise<SiteStats | null> {
   request ??= fetch("/api/stats", { headers: { accept: "application/json" } })
     .then((response) => (response.ok ? (response.json() as Promise<SiteStats>) : null))
     .catch(() => null);
@@ -36,9 +34,4 @@ export function useSiteStats(): SiteStats | null {
     };
   }, []);
   return stats;
-}
-
-/** Lets tests start from a fresh request. */
-export function resetSiteStatsForTests(): void {
-  request = undefined;
 }
