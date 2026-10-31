@@ -357,9 +357,10 @@ output directory, so `farm start` and platform deploys work unchanged.
 
 The pipeline does not run every Farm feature yet:
 
-- `auth`, `integrations`, `headers`, `redirects`, `rewrites`, `routeRules`, and `context` decide
-  what a request may see or receive. Running the app without them could expose what they protect,
-  so `farm dev` and `farm build` stop with an error that names them.
+- `auth`, `integrations`, `headers`, `redirects`, `rewrites`, `routeRules`, `context`, and
+  `security.csp` decide what a request may see or receive. Running the app without them could
+  expose what they protect, so `farm dev` and `farm build` stop with an error that names them,
+  including when a layer (`extends`) sets them.
 - Farm `plugins`, `storage`, `schema`, `cron`, `workflows`, `docs`, `theme`, and `observability`
   are ignored, with a warning.
 
