@@ -8025,7 +8025,9 @@ async function handleMetadataImageRequest(request, routePathname) {
       hasGeneratedMetadataImages
         ? `return createFarmMetadataImageResponse(value, imageModule, {
       method,
-      ifNoneMatch: request.headers.get("if-none-match"),
+      ifNoneMatch: request.headers.get("if-none-match"),${
+        isReactRenderer(config.renderer) ? "" : "\n      renderer: ReactDOMServer,"
+      }
     });`
         : 'throw new Error("Generated metadata image runtime is unavailable");'
     }

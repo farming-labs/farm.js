@@ -2836,6 +2836,7 @@ export class ServerRenderer {
     const response = await createFarmMetadataImageResponse(value, imageModule, {
       method: req.method,
       ifNoneMatch: Array.isArray(ifNoneMatch) ? ifNoneMatch[0] : ifNoneMatch,
+      renderer: isReactRenderer(this.config.renderer) ? undefined : this.rendererRuntime,
     });
     await sendWebResponse(res as any, response);
   }
