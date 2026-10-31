@@ -1,10 +1,10 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import ts from "typescript";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DesktopShellContext } from "@farm.js/core/desktop";
-import shell, { resolveElectrobunCli } from "./index";
+import shell, { DEFAULT_ICON, resolveElectrobunCli } from "./index";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -31,8 +31,14 @@ function context(root: string, overrides: Partial<DesktopShellContext> = {}): De
 
 async function generated(ctx: DesktopShellContext): Promise<Record<string, string>> {
   return Object.fromEntries(
-    (await shell.generateMain(ctx)).map((file) => [file.path, file.contents]),
+    (await shell.generateMain(ctx)).flatMap((file) =>
+      typeof file.contents === "string" ? [[file.path, file.contents]] : [],
+    ),
   );
+}
+
+async function generatedIcon(ctx: DesktopShellContext): Promise<Uint8Array | string | undefined> {
+  return (await shell.generateMain(ctx)).find((file) => file.path.endsWith(".png"))?.contents;
 }
 
 describe("@farm.js/desktop-electrobun", () => {
@@ -50,7 +56,7 @@ describe("@farm.js/desktop-electrobun", () => {
       build: {
         bun: { entrypoint: "main.ts" },
         copy: { "../server": "farm" },
-        mac: { bundleCEF: false, createDmg: false },
+        mac: { bundleCEF: false, createDmg: false, icons: "icon.iconset" },
         linux: { bundleCEF: false },
         win: { bundleCEF: false },
       },
@@ -87,6 +93,22 @@ describe("@farm.js/desktop-electrobun", () => {
       'import farmDesktopHooks from "../../../../src/desktop.ts";',
     );
     expect(files["main.ts"]).toContain("await farmDesktopHooks.onReady?.(");
+  });
+
+  it("writes the Farm icon into the icon set unless the app sets desktop.icon", async () => {
+    const files = (await shell.generateMain(context("/app"))).map((file) => file.path);
+    expect(files).toContain("icon.iconset/icon_512x512@2x.png");
+    expect(Buffer.from((await generatedIcon(context("/app"))) as Uint8Array)).toEqual(
+      await readFile(DEFAULT_ICON),
+    );
+
+    const root = await mkdtemp(path.join(os.tmpdir(), "farm-electrobun-"));
+    roots.push(root);
+    const icon = path.join(root, "app-icon.png");
+    await writeFile(icon, "app icon bytes");
+    const base = context(root);
+    const appIcon = await generatedIcon({ ...base, desktop: { ...base.desktop, icon } });
+    expect(Buffer.from(appIcon as Uint8Array).toString()).toBe("app icon bytes");
   });
 
   it("says how to install electrobun when it is missing", async () => {

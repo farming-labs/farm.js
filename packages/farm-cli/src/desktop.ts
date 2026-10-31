@@ -117,7 +117,7 @@ const GENERATED_MANIFEST = ".farm-generated.json";
  */
 async function writeShellFiles(
   shellDir: string,
-  files: Array<{ path: string; contents: string }>,
+  files: Array<{ path: string; contents: string | Uint8Array }>,
 ): Promise<void> {
   await mkdir(shellDir, { recursive: true });
   const written = new Set<string>();

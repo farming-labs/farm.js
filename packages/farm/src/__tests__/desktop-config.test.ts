@@ -93,6 +93,19 @@ describe("desktop config", () => {
     });
   });
 
+  it("resolves desktop.icon against the app root and says when it is missing", async () => {
+    const root = await appRoot();
+    expect(() => validateFarmDesktopConfig({ icon: "icon.svg" })).toThrow(/icon must be a PNG/);
+    expect(() => resolveFarmDesktopConfig({ icon: "src/app-icon.png" }, root)).toThrow(
+      /desktop: icon src\/app-icon\.png was not found/,
+    );
+    await fs.mkdir(path.join(root, "src"));
+    await fs.writeFile(path.join(root, "src", "app-icon.png"), "");
+    expect(resolveFarmDesktopConfig({ icon: "src/app-icon.png" }, root).icon).toBe(
+      path.join(root, "src", "app-icon.png"),
+    );
+  });
+
   it("fails a desktop build on a malformed desktop key", async () => {
     setPlatform("desktop");
     const root = await appRoot();
