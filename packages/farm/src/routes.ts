@@ -1203,28 +1203,38 @@ function createProgrammaticPageComponent(
     ) as unknown as ComponentType<PageProps>;
   }
 
-  const FarmProgrammaticPageContent = async function FarmProgrammaticPageContent(props: PageProps) {
-    try {
-      const resolvedProps = isProgrammaticRoutePropsResolved(props)
-        ? props
-        : await resolveProgrammaticRouteProps(route, props);
-
-      return createElement(Component, stripProgrammaticRoutePropsMarker(resolvedProps));
-    } catch (error) {
-      if (isProgrammaticRedirectSignal(error)) {
-        throw error;
-      }
-
-      if (isProgrammaticNotFoundSignal(error) && route.notFound) {
-        return createElement(route.notFound, createProgrammaticRouteErrorProps(error, props));
-      }
-
-      if (route.error) {
-        return createElement(route.error, createProgrammaticRouteErrorProps(error, props));
-      }
-
+  const renderRouteError = (error: unknown, props: PageProps) => {
+    if (isProgrammaticRedirectSignal(error)) {
       throw error;
     }
+
+    if (isProgrammaticNotFoundSignal(error) && route.notFound) {
+      return createElement(route.notFound, createProgrammaticRouteErrorProps(error, props));
+    }
+
+    if (route.error) {
+      return createElement(route.error, createProgrammaticRouteErrorProps(error, props));
+    }
+
+    throw error;
+  };
+
+  // The server resolves route props before it renders, so this usually renders
+  // synchronously, which renderers without async components (Preact) need.
+  const FarmProgrammaticPageContent = function FarmProgrammaticPageContent(props: PageProps) {
+    if (isProgrammaticRoutePropsResolved(props)) {
+      try {
+        return createElement(Component, stripProgrammaticRoutePropsMarker(props));
+      } catch (error) {
+        return renderRouteError(error, props);
+      }
+    }
+
+    return resolveProgrammaticRouteProps(route, props)
+      .then((resolvedProps) =>
+        createElement(Component, stripProgrammaticRoutePropsMarker(resolvedProps)),
+      )
+      .catch((error) => renderRouteError(error, props));
   };
 
   return markClientStrippedPage(
