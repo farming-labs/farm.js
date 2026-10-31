@@ -18,7 +18,7 @@ farm build             # --web, the default, unchanged
 
 ## Setup
 
-Add `desktop` to the config and install a shell adapter:
+Add `desktop` to the config and install `@farm.js/desktop` with the shell's toolkit:
 
 **farm.config.ts**
 
@@ -35,7 +35,7 @@ export default defineConfig({
 ```
 
 ```sh
-pnpm add -D @farm.js/desktop-electrobun electrobun
+pnpm add -D @farm.js/desktop electrobun
 ```
 
 | Option          | Default                              | Notes                                                              |
@@ -47,7 +47,7 @@ pnpm add -D @farm.js/desktop-electrobun electrobun
 | `window.width`  | `1024`                               | Points                                                             |
 | `window.height` | `768`                                | Points                                                             |
 | `window.title`  | `name`                               |                                                                    |
-| `shell`         | `"electrobun"`                       | Resolves to `@farm.js/desktop-<shell>`, or a package name          |
+| `shell`         | `"electrobun"`                       | Resolves to `@farm.js/desktop/<shell>`, or a package name          |
 
 A web build checks a static block's shape and otherwise ignores it: Farm removes `desktop` from
 the config module a server bundle imports, so the output is byte-identical to the same app without
@@ -154,7 +154,7 @@ the environment do not apply: the server binds `127.0.0.1` on a port the OS assi
 
 ## Electrobun
 
-`@farm.js/desktop-electrobun` is the default shell. It generates `electrobun.config.ts` and the
+`@farm.js/desktop/electrobun` is the default shell. It generates `electrobun.config.ts` and the
 main process into `.farm/output/desktop/shell` on every run, embeds the Farm server in Electrobun's
 Bun, and uses the system WebView (WKWebView on macOS), so no Chromium ships with the app.
 
@@ -188,8 +188,9 @@ export default defineDesktop({
 
 ## Shell adapters
 
-A shell adapter is a package whose default export implements `DesktopShell` from
-`@farm.js/core/desktop`:
+`@farm.js/desktop` ships the built-in shells as subpaths (`@farm.js/desktop/electrobun`). Any other
+shell is a package, or a package subpath, whose default export implements `DesktopShell` from
+`@farm.js/core/desktop`; set `desktop.shell` to its name:
 
 ```ts
 import { defineDesktopShell } from "@farm.js/core/desktop";

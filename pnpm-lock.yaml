@@ -554,9 +554,9 @@ importers:
       '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
-      '@farm.js/desktop-electrobun':
+      '@farm.js/desktop':
         specifier: workspace:*
-        version: link:../../packages/farm-desktop-electrobun
+        version: link:../../packages/farm-desktop
       '@types/react':
         specifier: ^19.0.0
         version: 19.2.13
@@ -2534,7 +2534,7 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@vitest/coverage-v8@5.0.5)(jsdom@25.0.1)(vite@8.3.4)
 
-  packages/farm-desktop-electrobun:
+  packages/farm-desktop:
     devDependencies:
       '@farm.js/core':
         specifier: workspace:*

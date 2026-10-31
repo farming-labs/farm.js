@@ -88,7 +88,7 @@ export interface DesktopDevSession {
   close(): Promise<void>;
 }
 
-/** What a desktop shell package (such as `@farm.js/desktop-electrobun`) default-exports. */
+/** What a desktop shell package (such as `@farm.js/desktop/electrobun`) default-exports. */
 export interface DesktopShell {
   name: string;
   /** The runtime the shell embeds the Farm server in; selects the `bun` or `node-server` preset. */

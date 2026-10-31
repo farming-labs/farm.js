@@ -54,8 +54,8 @@ export interface FarmDesktopUserConfig {
   icon?: string;
   window?: FarmDesktopWindowConfig;
   /**
-   * Desktop shell adapter. A name resolves to the `@farm.js/desktop-<name>` package; a
-   * package name (containing `/`) is imported as is. Defaults to `"electrobun"`.
+   * Desktop shell adapter. A name resolves to `@farm.js/desktop/<name>`; a package name or
+   * subpath (containing `/`) is imported as is. Defaults to `"electrobun"`.
    */
   shell?: "electrobun" | (string & {});
 }
@@ -90,7 +90,7 @@ export interface ResolvedFarmDesktopConfig {
   window: { width: number; height: number; title: string };
   /** Adapter name, as configured. */
   shell: string;
-  /** Package the CLI imports the adapter from. */
+  /** Module the CLI imports the adapter from, such as `@farm.js/desktop/electrobun`. */
   shellPackage: string;
 }
 
@@ -98,7 +98,8 @@ const DESKTOP_KEYS = new Set(["name", "id", "version", "icon", "window", "shell"
 const WINDOW_KEYS = new Set(["width", "height", "title"]);
 const APP_ID = /^[A-Za-z][A-Za-z0-9-]*(?:\.[A-Za-z0-9][A-Za-z0-9-]*)+$/;
 const SHELL_NAME = /^[a-z][a-z0-9-]*$/;
-const SHELL_PACKAGE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
+const SHELL_PACKAGE =
+  /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/;
 
 let failPrefix = "desktop";
 
@@ -196,9 +197,9 @@ function slug(value: string): string {
   );
 }
 
-/** The adapter package for a `desktop.shell` value. */
+/** The module a `desktop.shell` value imports: built-in shells are `@farm.js/desktop` subpaths. */
 export function resolveFarmDesktopShellPackage(shell: string): string {
-  return shell.includes("/") ? shell : `@farm.js/desktop-${shell}`;
+  return shell.includes("/") ? shell : `@farm.js/desktop/${shell}`;
 }
 
 /** Fill in `desktop` defaults for a desktop dev session or build. */

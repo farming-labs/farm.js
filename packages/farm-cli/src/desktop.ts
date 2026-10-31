@@ -53,11 +53,30 @@ function readPackageManagerField(root: string): unknown {
   }
 }
 
-/** The install command for a missing adapter, in the app's package manager. */
-export function formatDesktopShellInstallCommand(root: string, packageName: string): string {
+/** The install command for missing packages, in the app's package manager. */
+export function formatDesktopShellInstallCommand(root: string, ...packages: string[]): string {
   const manager = detectFarmPackageManager(root, readPackageManagerField(root));
   const add = manager === "npm" ? "npm install -D" : `${manager} add -D`;
-  return `${add} ${packageName}`;
+  return `${add} ${packages.join(" ")}`;
+}
+
+/** `@farm.js/desktop/electrobun` -> `@farm.js/desktop`; `my-shell` -> `my-shell`. */
+export function desktopShellPackageName(specifier: string): string {
+  const parts = specifier.split("/");
+  return parts.slice(0, specifier.startsWith("@") ? 2 : 1).join("/");
+}
+
+/** Toolkits the built-in shells drive, installed alongside `@farm.js/desktop`. */
+const BUILT_IN_SHELL_TOOLKITS: Record<string, string[]> = { electrobun: ["electrobun"] };
+
+function isPackageInstalled(requireFromApp: NodeJS.Require, packageName: string): boolean {
+  try {
+    requireFromApp.resolve(`${packageName}/package.json`);
+    return true;
+  } catch (error) {
+    // Installed, but its exports map hides package.json.
+    return (error as NodeJS.ErrnoException).code === "ERR_PACKAGE_PATH_NOT_EXPORTED";
+  }
 }
 
 function isDesktopShell(value: unknown): value is DesktopShell {
@@ -83,10 +102,19 @@ export async function loadFarmDesktopShell(
   try {
     entry = requireFromApp.resolve(desktop.shellPackage);
   } catch {
+    const packageName = desktopShellPackageName(desktop.shellPackage);
+    if (packageName !== desktop.shellPackage && isPackageInstalled(requireFromApp, packageName)) {
+      throw new FarmDesktopError(
+        "shell-missing",
+        `desktop.shell "${desktop.shell}": ${packageName} is installed but has no ${desktop.shellPackage} shell. ` +
+          "Check the shell name, or update the package.",
+      );
+    }
+    const toolkits = BUILT_IN_SHELL_TOOLKITS[desktop.shell] ?? [];
     throw new FarmDesktopError(
       "shell-missing",
-      `desktop.shell "${desktop.shell}" needs ${desktop.shellPackage}, which is not installed in ${root}.\n` +
-        `Install it:\n  ${formatDesktopShellInstallCommand(root, desktop.shellPackage)}`,
+      `desktop.shell "${desktop.shell}" needs ${packageName}, which is not installed in ${root}.\n` +
+        `Install it:\n  ${formatDesktopShellInstallCommand(root, packageName, ...toolkits)}`,
     );
   }
   const module = (await import(pathToFileURL(entry).href)) as { default?: unknown };
