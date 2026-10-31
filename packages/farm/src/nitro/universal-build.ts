@@ -894,6 +894,25 @@ export function hasFarmRuntimeConfigModule(
 }
 
 /**
+ * Nitro groups node_modules into `_libs` chunks with a function `name`, and
+ * Rolldown warns (MISSING_CODE_SPLITTING_GROUP_DEBUG_NAME) on every build when
+ * such a group has no `debugName`. Name the groups so app builds stay quiet.
+ */
+export function nameCodeSplittingGroups(bundlerConfig: unknown): void {
+  const outputs = (bundlerConfig as { output?: unknown } | null)?.output;
+  for (const output of Array.isArray(outputs) ? outputs : [outputs]) {
+    const groups = (output as { codeSplitting?: { groups?: unknown } } | undefined)?.codeSplitting
+      ?.groups;
+    if (!Array.isArray(groups)) continue;
+    groups.forEach((group: { name?: unknown; debugName?: string } | null, index) => {
+      if (group && typeof group.name === "function" && !group.debugName) {
+        group.debugName = index === 0 ? "libs" : `libs-${index}`;
+      }
+    });
+  }
+}
+
+/**
  * Minify one emitted server chunk with Oxc. Mirrors the esbuild pass this
  * replaced: ES module scope, no legal comments, ASCII-only output, and
  * function/class names preserved unless `keepNames` is false.
@@ -11762,6 +11781,7 @@ function toFarmNodeResponse(request, response) {
   }
   nitroInstance.hooks.hook("prerender:init", (prerenderer) => {
     prerenderer.hooks.hook("rollup:before", (_prerenderNitro, rollupConfig) => {
+      nameCodeSplittingGroups(rollupConfig);
       // Nitro's virtual modules (storage, tasks, ...) emit bare imports of
       // Nitro's own runtime dependencies (unstorage, h3, ...). Their virtual
       // importer is discarded during resolution, so under pnpm's strict
@@ -11810,6 +11830,9 @@ function toFarmNodeResponse(request, response) {
       });
     });
   }
+  nitroInstance.hooks.hook("rollup:before", (_nitro, rollupConfig) => {
+    nameCodeSplittingGroups(rollupConfig);
+  });
   if (serverChunkMinifier || useRolldownBuilder) {
     // Register after Nitro and user hooks are prepared so the minifier is the
     // final renderChunk transform, matching Nitro's Terser ordering.
