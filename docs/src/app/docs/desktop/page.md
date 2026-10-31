@@ -43,6 +43,7 @@ pnpm add -D @farm.js/desktop-electrobun electrobun
 | `name`          | package.json `productName` or `name` | Display name                                                       |
 | `id`            | `local.farm.<name>`                  | Reverse-DNS identifier. The OS keys the app's data directory on it |
 | `version`       | package.json `version`               |                                                                    |
+| `icon`          | the Farm icon                        | Square PNG relative to the app root; 1024×1024 recommended         |
 | `window.width`  | `1024`                               | Points                                                             |
 | `window.height` | `768`                                | Points                                                             |
 | `window.title`  | `name`                               |                                                                    |
@@ -163,6 +164,9 @@ Bun, and uses the system WebView (WKWebView on macOS), so no Chromium ships with
 - `appDataDir()` is Electrobun's `Utils.paths.userData`, for example
   `~/Library/Application Support/<desktop.id>/stable` on macOS.
 - Quitting the app drains requests and runs Farm's shutdown hooks before the process exits.
+- `desktop.icon` (or the Farm icon) becomes the app's `AppIcon.icns` on macOS.
+- Known limit: the first launch after an install or update leaves Electrobun's hidden unpacking
+  process running until logout. Later launches don't.
 
 The first `electrobun` command downloads Hutch and the Electrobun runtime into `~/.hutch`. The
 packaged app ships its own Bun. Measured on macOS 26, Apple silicon, with

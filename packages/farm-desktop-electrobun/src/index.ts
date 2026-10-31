@@ -1,17 +1,21 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, rename, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   defineDesktopShell,
   type DesktopDevSession,
   type DesktopShellContext,
 } from "@farm.js/core/desktop";
-import { createElectrobunConfig, createElectrobunMain } from "./templates.js";
+import { createElectrobunConfig, createElectrobunMain, ICONSET_IMAGE } from "./templates.js";
 
 export { createElectrobunConfig, createElectrobunMain } from "./templates.js";
 
 const isWindows = process.platform === "win32";
+
+/** The Farm icon, used when the app sets no `desktop.icon`. */
+export const DEFAULT_ICON = fileURLToPath(new URL("../assets/icon.png", import.meta.url));
 
 /**
  * The `electrobun` bootstrap installed in the app, which runs Hutch's Electrobun toolchain.
@@ -90,10 +94,11 @@ export default defineDesktopShell({
   name: "electrobun",
   runtime: "bun",
 
-  generateMain(context) {
+  async generateMain(context) {
     return [
       { path: "electrobun.config.ts", contents: createElectrobunConfig(context) },
       { path: "main.ts", contents: createElectrobunMain(context) },
+      { path: ICONSET_IMAGE, contents: await readFile(context.desktop.icon ?? DEFAULT_ICON) },
     ];
   },
 

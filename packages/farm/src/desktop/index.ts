@@ -40,7 +40,8 @@ export function defineDesktop<Window = unknown>(hooks: DesktopHooks<Window>): De
 /** A file a shell adapter generates, relative to the shell output directory. */
 export interface DesktopGeneratedFile {
   path: string;
-  contents: string;
+  /** Text, or bytes for binary files such as the app icon. */
+  contents: string | Uint8Array;
 }
 
 export interface DesktopShellContext {

@@ -4,6 +4,13 @@ import type { DesktopShellContext } from "@farm.js/core/desktop";
 /** Where the Farm server output lands inside the app's `Resources/app` folder. */
 export const SERVER_RESOURCE_DIR = "farm";
 
+/**
+ * The macOS icon set Electrobun turns into AppIcon.icns. One 1024px image is a valid set; the
+ * OS scales it for smaller sizes.
+ */
+export const ICONSET_DIR = "icon.iconset";
+export const ICONSET_IMAGE = `${ICONSET_DIR}/icon_512x512@2x.png`;
+
 function toImportPath(from: string, to: string): string {
   const relative = path.relative(from, to).split(path.sep).join("/");
   return relative.startsWith(".") ? relative : `./${relative}`;
@@ -24,7 +31,7 @@ export function createElectrobunConfig(context: DesktopShellContext): string {
       // The Farm server built for Bun. main.ts imports its entry from Resources/app/farm.
       copy: { [serverSource]: SERVER_RESOURCE_DIR },
       // The system WebView (WKWebView, WebView2, WebKitGTK): no bundled Chromium.
-      mac: { bundleCEF: false, createDmg: false },
+      mac: { bundleCEF: false, createDmg: false, icons: ICONSET_DIR },
       linux: { bundleCEF: false },
       win: { bundleCEF: false },
     },

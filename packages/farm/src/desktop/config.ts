@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 
 import type { FarmDeployConfig, FarmUserConfig } from "../config";
@@ -47,6 +47,11 @@ export interface FarmDesktopUserConfig {
   id?: string;
   /** App version. Defaults to the package.json `version`. */
   version?: string;
+  /**
+   * App icon: a square PNG, relative to the app root. 1024×1024 is recommended; the OS scales it
+   * down. Defaults to the Farm icon.
+   */
+  icon?: string;
   window?: FarmDesktopWindowConfig;
   /**
    * Desktop shell adapter. A name resolves to the `@farm.js/desktop-<name>` package; a
@@ -80,6 +85,8 @@ export interface ResolvedFarmDesktopConfig {
   name: string;
   id: string;
   version: string;
+  /** Absolute path of the app's icon PNG, or undefined for the shell's default icon. */
+  icon?: string;
   window: { width: number; height: number; title: string };
   /** Adapter name, as configured. */
   shell: string;
@@ -87,7 +94,7 @@ export interface ResolvedFarmDesktopConfig {
   shellPackage: string;
 }
 
-const DESKTOP_KEYS = new Set(["name", "id", "version", "window", "shell"]);
+const DESKTOP_KEYS = new Set(["name", "id", "version", "icon", "window", "shell"]);
 const WINDOW_KEYS = new Set(["width", "height", "title"]);
 const APP_ID = /^[A-Za-z][A-Za-z0-9-]*(?:\.[A-Za-z0-9][A-Za-z0-9-]*)+$/;
 const SHELL_NAME = /^[a-z][a-z0-9-]*$/;
@@ -149,6 +156,10 @@ export function validateFarmDesktopConfig(
     fail(`id must be a reverse-DNS identifier such as "com.example.notes", got "${id}".`);
   }
   optionalString(input.version, "version");
+  const icon = optionalString(input.icon, "icon");
+  if (icon !== undefined && !/\.png$/i.test(icon)) {
+    fail(`icon must be a PNG file, such as "src/app-icon.png", got "${icon}".`);
+  }
   if (input.window !== undefined) {
     if (!isPlainObject(input.window)) fail("window must be an object, such as { width: 1024 }.");
     checkKeys(input.window, WINDOW_KEYS, "window.");
@@ -205,11 +216,14 @@ export function resolveFarmDesktopConfig(
     path.basename(root);
   const name = config.name?.trim() || packageName || "Farm App";
   const shell = config.shell?.trim() || "electrobun";
+  const icon = config.icon ? path.resolve(root, config.icon.trim()) : undefined;
+  if (icon && !existsSync(icon)) fail(`icon ${config.icon} was not found in ${root}.`);
   return {
     name,
     id: config.id?.trim() || `local.farm.${slug(name)}`,
     version:
       config.version?.trim() || (typeof pkg.version === "string" && pkg.version.trim()) || "0.0.0",
+    ...(icon ? { icon } : {}),
     window: {
       width: config.window?.width ?? 1024,
       height: config.window?.height ?? 768,

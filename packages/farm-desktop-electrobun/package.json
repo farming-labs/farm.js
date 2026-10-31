@@ -15,6 +15,7 @@
     "directory": "packages/farm-desktop-electrobun"
   },
   "files": [
+    "assets",
     "dist"
   ],
   "type": "module",
