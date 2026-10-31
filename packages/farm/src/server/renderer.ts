@@ -462,16 +462,24 @@ function rendererRenderOptions(): FarmRendererRenderOptions | undefined {
   return nonce ? { nonce } : undefined;
 }
 
+/**
+ * Islands mode starts the client while the body streams, as production does: an async entry
+ * right after `<body>` hydrates islands as they arrive, and waits for the document otherwise.
+ */
+const FARM_DEV_EARLY_CLIENT_SCRIPT = `<script type="module" async src="/@farm/client.js"></script>`;
+
 function createDocumentFooter(options: {
   suspenseRevealFallback: string;
   refreshPPR?: boolean;
   deferredHydrationScript?: string;
+  /** The client entry already started from the top of the body. */
+  earlyClient?: boolean;
 }): string {
   return `</div>
   ${options.suspenseRevealFallback}
   ${options.refreshPPR ? createPPRRefreshScript() : ""}
   ${options.deferredHydrationScript || ""}
-  <script type="module" src="/@farm/client.js"></script>
+  ${options.earlyClient ? "" : '<script type="module" src="/@farm/client.js"></script>'}
 </body>
 </html>`;
 }
@@ -3530,6 +3538,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
         cspNonce ? filterFarmCspNonces(html, cspNonce) : html;
       const createLateNavigationRecovery = (navigationError: unknown) =>
         this.createLateNavigationRecoveryHTML(req, navigationError);
+      const earlyClient = this.islandValues();
       const { pipe, abort } = renderToPipeableStream(streamRoot, {
         nonce: cspNonce,
         onShellReady() {
@@ -3568,7 +3577,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
   ${propsScript}
   ${hydrationClickQueueScript}
 </head>
-<body class="">
+<body class="">${earlyClient ? `\n  ${FARM_DEV_EARLY_CLIENT_SCRIPT}` : ""}
   <div id="root">`;
           const securedShell = stampDocumentHTML(shell);
           htmlParts.push(securedShell);
@@ -3666,6 +3675,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
               createDocumentFooter({
                 suspenseRevealFallback,
                 deferredHydrationScript: createDeferredHydrationScript(deferredProps.records),
+                earlyClient,
               }),
             );
             htmlParts.push(footer);
@@ -3689,6 +3699,7 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
                   createDocumentFooter({
                     suspenseRevealFallback,
                     refreshPPR: staticShellClosed,
+                    earlyClient,
                   }),
                 );
               }

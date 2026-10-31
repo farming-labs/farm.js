@@ -1836,8 +1836,9 @@ export function Chart() {}
       isolatedBootstrap,
       developmentSource.indexOf("if (!shouldHydrate)", isolatedBootstrap),
     );
+    // Islands mode hydrates the document (so islx watches streamed islands); otherwise #root.
     const isolatedHydrate = isolatedBranch.indexOf(
-      "await hydrateFarmIsolatedClientBoundaries(rootContainer, hydrationController.signal);",
+      'await hydrateFarmIsolatedClientBoundaries(${islandValues ? "document" : "rootContainer"}, hydrationController.signal);',
     );
     const abortGuard = isolatedBranch.indexOf("if (hydrationController.signal.aborted) return;");
     const release = isolatedBranch.indexOf("markFarmHydrated();");

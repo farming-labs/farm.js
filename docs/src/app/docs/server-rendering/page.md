@@ -317,7 +317,8 @@ components engine. `{ mode: "islands" }` is Farm's own engine
 ([RFC 0003](https://github.com/farming-labs/farm.js/blob/main/rfcs/0003-islands-server-components.md)),
 built on [islx](https://github.com/farming-labs/islx), its renderer-agnostic wire format:
 it renders on Farm's normal pipeline, sends static output once as HTML, and hydrates only client
-components. A client component that receives server output (`children`, or any element prop) keeps
+components. Client components hydrate while the page streams: one above slow Suspense
+content is interactive before that content arrives, in `farm dev` and in production. A client component that receives server output (`children`, or any element prop) keeps
 that output as a slot of the existing HTML instead of receiving it again, and a server page under a
 layout that hydrates (a client provider, say) hydrates inside that layout's tree, so its client
 components read the provider's context. That layout, and the other server layouts on its pages,
