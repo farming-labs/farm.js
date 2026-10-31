@@ -320,7 +320,11 @@ it renders on Farm's normal pipeline, sends static output once as HTML, and hydr
 components. A client component that receives server output (`children`, or any element prop) keeps
 that output as a slot of the existing HTML instead of receiving it again, and a server page under a
 layout that hydrates (a client provider, say) hydrates inside that layout's tree, so its client
-components read the provider's context. A large prop value (512 bytes of JSON or more, such as a
+components read the provider's context. That layout, and the other server layouts on its pages,
+render as server trees too: the browser rebuilds them from the HTML, so their modules and their
+server-only imports never reach it, and a navigation keeps the provider's state. A provider
+imported straight from a package fails the build; render it from a local `"use client"` module
+(a `providers.tsx`) instead. A large prop value (512 bytes of JSON or more, such as a
 navigation tree) travels once, keyed by its content: client components that share it share one
 copy, and a client navigation leaves out the values the browser already holds. A client navigation
 also leaves out the layouts the browser keeps: the server renders the page and any layout that
