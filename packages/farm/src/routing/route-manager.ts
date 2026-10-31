@@ -277,7 +277,9 @@ export class RouteManager {
     projectRoot: string;
     manifest: FarmClientRouteManifest;
     isolatedClientBoundaryModules: ReadonlySet<string>;
+    islandsErrors: string[];
   };
+  private reportedIslandsErrors = new Set<string>();
 
   constructor(config: Required<FarmConfig>, viteServer?: ViteDevServer) {
     this.config = config;
@@ -891,11 +893,22 @@ export class RouteManager {
       }
     }
 
+    // Such a page renders without client JavaScript; `farm build` fails on it (getIslandsErrors).
+    const islandsErrors = routeEntries.flatMap(({ entry, metadata }) =>
+      metadata.islandsError ? [`${entry.pattern}: ${metadata.islandsError}.`] : [],
+    );
+    for (const error of islandsErrors) {
+      if (this.reportedIslandsErrors.has(error)) continue;
+      this.reportedIslandsErrors.add(error);
+      logger.error(`[Farm.js] islands mode cannot hydrate ${error}`);
+    }
+
     const manifest = { routes, layouts, slots };
     this.clientManifestCache = {
       projectRoot: normalizedProjectRoot,
       manifest,
       isolatedClientBoundaryModules,
+      islandsErrors,
     };
     return manifest;
   }
@@ -931,6 +944,15 @@ export class RouteManager {
     const normalizedProjectRoot = path.resolve(projectRoot);
     this.generateClientManifest(normalizedProjectRoot);
     return this.clientManifestCache?.isolatedClientBoundaryModules ?? new Set();
+  }
+
+  /**
+   * @internal Islands-mode pages with a client component that cannot become an island. Hydrating
+   * such a page whole would ship its server code to the browser, so it stays static instead.
+   */
+  getIslandsErrors(projectRoot: string = this.config.root): readonly string[] {
+    this.generateClientManifest(path.resolve(projectRoot));
+    return this.clientManifestCache?.islandsErrors ?? [];
   }
 
   /**

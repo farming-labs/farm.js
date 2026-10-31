@@ -1346,6 +1346,13 @@ export async function buildUniversal(
     logger.info(`📋 Found ${pageRoutes.length} page routes and ${layoutRoutes.length} layouts`);
 
     const isolatedClientBoundaryModules = routeManager.getIsolatedClientBoundaryModules(root);
+    const islandsErrors = routeManager.getIslandsErrors(root);
+    if (islandsErrors.length > 0) {
+      await routeRuntimeManifestResultPromise;
+      throw new Error(
+        `[Farm.js] islands mode cannot hydrate these pages without shipping their server code to the browser:\n${islandsErrors.map((error) => `  - ${error}`).join("\n")}`,
+      );
+    }
     const hydrationPlanCache = new Map<string, ClientModuleHydrationPlan>();
 
     const clientOutputDir = path.join(root, distDir, "client");

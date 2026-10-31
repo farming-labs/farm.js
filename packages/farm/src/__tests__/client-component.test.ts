@@ -743,10 +743,7 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
     const pageFile = path.join(root, "src", "app", "page.tsx");
     const clientFile = path.join(root, "src", "client.tsx");
     fs.mkdirSync(path.dirname(pageFile), { recursive: true });
-    fs.writeFileSync(
-      clientFile,
-      `'use client';\nfunction Counter() { return null; }\nexport { Counter };\n`,
-    );
+    fs.writeFileSync(clientFile, `'use client';\nexport * from "./counter-implementation";\n`);
     fs.writeFileSync(
       pageFile,
       `import { Counter } from "../client";\nexport default function Page() { return <Counter />; }\n`,
@@ -1336,7 +1333,7 @@ export default function Layout() { return <><Counter />{labels.join(",")}</>; }
 
       const reexport = asyncPage(
         "<StarButton count={stars} />",
-        '"use client";\nfunction StarButton() { return null; }\nexport { StarButton };\n',
+        '"use client";\nexport * from "./star-button-implementation";\n',
       );
       expect(
         getClientModuleHydrationPlan(reexport.pageFile, reexport.root, "off", islands),

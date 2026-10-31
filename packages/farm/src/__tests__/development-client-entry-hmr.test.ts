@@ -103,8 +103,7 @@ describe("development client entry HMR teardown", () => {
     await fs.writeFile(
       boundaryPath,
       `"use client";
-function Counter() { return <button>count</button>; }
-export { Counter };`,
+export * from "./counter-implementation";`,
     );
     await fs.writeFile(
       path.join(routeDir, "page.tsx"),

@@ -6,6 +6,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFarmIsolatedClientBoundary } from "../client/isolated-boundary";
 import { getClientModuleHydrationPlan, usesFarmServerTree } from "../utils/client-component";
+import { transformIsolatedClientBoundaryModule } from "../vite";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -90,5 +91,123 @@ describe("islands mode", () => {
       asyncOwnerIslands: true,
     });
     expect(experiment.asyncOwnerIslands).toBeUndefined();
+  });
+
+  describe("a client component that cannot become an island", () => {
+    const plan = (page: string, files: Record<string, string>) => {
+      const root = mkdtempSync(path.join(tmpdir(), "farm-islands-error-"));
+      roots.push(root);
+      mkdirSync(path.join(root, "src/app"), { recursive: true });
+      for (const [file, content] of Object.entries(files)) {
+        writeFileSync(path.join(root, "src", file), content);
+      }
+      writeFileSync(path.join(root, "src/app/page.tsx"), page);
+      return getClientModuleHydrationPlan(path.join(root, "src/app/page.tsx"), root, "off", {
+        asyncOwnerIslands: true,
+        serverOwners: true,
+      });
+    };
+    const row = {
+      "row.tsx": '"use client";\nexport function Row() { return <tr><td>row</td></tr>; }\n',
+    };
+
+    it("never hydrates the server page whole, which would ship its server code", () => {
+      const page = plan(
+        'import { Row } from "../row";\nimport { secret } from "../secret";\nexport default function Page() { return <table><tbody><Row />{secret()}</tbody></table>; }\n',
+        row,
+      );
+      expect(page).toMatchObject({
+        shouldHydrate: false,
+        islandStrategy: null,
+        hasIsolatedClientBoundaries: false,
+        isolatedBoundaries: [],
+      });
+      expect(page.islandsError).toBe(
+        'the client boundary imported from ../row renders inside <table>, where the HTML parser relocates its hydration marker. Move "use client" up to a component that renders the whole <table>, or render it inside a <td>, <th> or <caption>',
+      );
+    });
+
+    it("reports `export *`, whose names live in another module", () => {
+      const page = plan(
+        'import { Row } from "../row-index";\nexport default function Page() { return <main><Row /></main>; }\n',
+        { ...row, "row-index.tsx": '"use client";\nexport * from "./row";\n' },
+      );
+      expect(page.shouldHydrate).toBe(false);
+      expect(page.islandsError).toMatch(/unsupported export shape\. Export each component by name/);
+    });
+
+    it("isolates components inside table cells and foreignObject", () => {
+      for (const body of [
+        "<table><tbody><tr><td><Counter /></td></tr></tbody></table>",
+        "<table><caption><Counter /></caption></table>",
+        "<svg><foreignObject><Counter /></foreignObject></svg>",
+      ]) {
+        const page = plan(
+          `import { Counter } from "../counter";\nexport default function Page() { return ${body}; }\n`,
+          {
+            "counter.tsx":
+              '"use client";\nexport function Counter() { return <button>1</button>; }\n',
+          },
+        );
+        expect(page.islandsError, body).toBeUndefined();
+        expect(page.asyncOwnerIslands, body).toBe(true);
+      }
+    });
+  });
+
+  it("isolates components exported through export lists and re-exports", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "farm-islands-export-list-"));
+    roots.push(root);
+    mkdirSync(path.join(root, "src/app"), { recursive: true });
+    writeFileSync(
+      path.join(root, "src/counter.tsx"),
+      '"use client";\nfunction Counter() { return <button>1</button>; }\nexport { Counter };\n',
+    );
+    writeFileSync(
+      path.join(root, "src/app/page.tsx"),
+      'import { Counter } from "../counter";\nexport default function Page() { return <main><Counter /></main>; }\n',
+    );
+    const page = getClientModuleHydrationPlan(path.join(root, "src/app/page.tsx"), root, "off", {
+      asyncOwnerIslands: true,
+      serverOwners: true,
+    });
+    expect(page.islandsError).toBeUndefined();
+    expect(page.isolatedBoundaries).toEqual([
+      { modulePath: path.join(root, "src/counter.tsx"), islandStrategy: "load" },
+    ]);
+  });
+
+  it("wraps export-list and re-exported components as islands", async () => {
+    const { parseSync } = await import("vite");
+    const output = transformIsolatedClientBoundaryModule({
+      code: [
+        '"use client";',
+        'import { useState } from "react";',
+        "function Counter() { return null; }",
+        "const helper = 1;",
+        "export { Counter, helper, Counter as default };",
+        'export { Button as PrimaryButton, format } from "./button";',
+        'export type { Props } from "./types";',
+      ].join("\n"),
+      moduleReference: "/src/counter.tsx",
+      islandStrategy: "load",
+      parse: (code) => (parseSync("counter.tsx", code) as { program: unknown }).program as never,
+      slots: true,
+    })!;
+    expect(output).toContain(
+      'import { Button as __farm_isolated_reexport_0__, format as __farm_isolated_reexport_1__ } from "./button";',
+    );
+    expect(output).toContain(
+      'const __farm_isolated_boundary_Counter__ = __farm_islx_island__(Counter, "/src/counter.tsx", "Counter", "load");',
+    );
+    expect(output).toContain("export { __farm_isolated_boundary_Counter__ as Counter };");
+    expect(output).toContain("export default __farm_isolated_boundary_default__;");
+    expect(output).toContain(
+      'const __farm_isolated_boundary_PrimaryButton__ = __farm_islx_island__(__farm_isolated_reexport_0__, "/src/counter.tsx", "PrimaryButton", "load");',
+    );
+    expect(output).toContain("export { helper as helper };");
+    expect(output).toContain("export { __farm_isolated_reexport_1__ as format };");
+    expect(output).toContain('export type { Props } from "./types";');
+    expect(output).not.toMatch(/export \{ Counter, helper/);
   });
 });

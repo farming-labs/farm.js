@@ -254,8 +254,11 @@ Islands have the same limits as [isolated client leaves](#isolated-client-leaves
 - Props must be serializable. Server-rendered JSX passed as `children` or another prop
   (`<ClientShell><ServerList /></ClientShell>`) crosses only under a hydrating layout (above);
   elsewhere that one client component keeps its server HTML and Farm logs it once.
-- A client component must use a supported export shape and must not sit where the HTML parser moves
-  it, such as directly inside `<table>`.
+- A client component must export each component by name (`export function Name`,
+  `export { Name }`, `export { Name } from "./name"`, or `export default`), not through
+  `export *`, and must not sit where the HTML parser moves it: directly inside `<table>`, `<tbody>`,
+  `<tr>`, `<select>` or `<svg>`. Inside a `<td>`, `<th>`, `<caption>` or `<foreignObject>` it is
+  fine.
 - An integration provider that wraps the whole route, and does not declare
   `supportsIsolatedHydration: true`, keeps its routes route-wide.
 
@@ -263,6 +266,11 @@ When one of these applies, the route stays server-rendered, its client component
 interactive, and Farm logs a warning naming the module and the reason. Fix the reason, or render
 the interactive part from a synchronous page. Preact, Solid, Vue, and Svelte keep async pages
 server-only.
+
+In [islands mode](#react-server-components) every page is a server component, so hydrating a page whole
+would ship its module and its server-only imports to the browser. Islands mode never does that:
+`farm build` fails and names each page, the reason, and how to restructure it, and `farm dev` logs
+the same error and serves the page without client JavaScript.
 
 Client components that come from a package, such as the icons in `lucide-react`, cannot be isolated
 yet. An async page renders them as static HTML and still hydrates its own client components as

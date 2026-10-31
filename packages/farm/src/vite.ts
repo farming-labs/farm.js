@@ -1002,6 +1002,45 @@ export function transformIsolatedClientBoundaryModule(options: {
       continue;
     }
 
+    // `export { Name }`, `export { Name as default }`, and `export { Name } from "./name"`.
+    if (
+      node?.type === "ExportNamedDeclaration" &&
+      !node.declaration &&
+      node.exportKind !== "type"
+    ) {
+      const specifiers = (node.specifiers || []).filter(
+        (specifier: any) => specifier.type === "ExportSpecifier" && specifier.exportKind !== "type",
+      );
+      const specifierName = (name: any): string => name?.name ?? String(name?.value ?? "");
+      const isComponentExport = (specifier: any) => {
+        const exported = specifierName(specifier.exported);
+        return exported === "default" || /^[A-Z]/.test(exported);
+      };
+      if (!specifiers.some(isComponentExport)) continue;
+      const imports: string[] = [];
+      const kept: string[] = [];
+      specifiers.forEach((specifier: any, index: number) => {
+        const local = specifierName(specifier.local);
+        const exported = specifierName(specifier.exported);
+        let localName = local;
+        if (node.source) {
+          localName = `__farm_isolated_reexport_${index}__`;
+          imports.push(`${moduleExportName(local)} as ${localName}`);
+        }
+        if (isComponentExport(specifier)) addWrapper(localName, exported, exported === "default");
+        else kept.push(`${localName} as ${moduleExportName(exported)}`);
+      });
+      replacements.push({
+        start: node.start,
+        end: node.end,
+        code: node.source
+          ? `import { ${imports.join(", ")} } from ${options.code.slice(node.source.start, node.source.end)};`
+          : "",
+      });
+      if (kept.length > 0) wrapperStatements.push(`export { ${kept.join(", ")} };`);
+      continue;
+    }
+
     if (node?.type !== "ExportNamedDeclaration" || !node.declaration) continue;
     const declaration = node.declaration;
     const declaredNames: string[] = [];
@@ -1039,6 +1078,11 @@ export function transformIsolatedClientBoundaryModule(options: {
     ? `import { createIsland as __farm_islx_island__ } from "@farm.js/core/internal/islx-react";`
     : `import * as __farm_isolated_react__ from "react";\nimport { createFarmIsolatedClientBoundary as __farm_create_isolated_boundary__ } from "@farm.js/core/internal/isolated-boundary";`;
   return `${runtimeImport}\n${output}\n${wrapperStatements.join("\n")}\nexport const __farm_client_boundary_originals__ = Object.freeze({ ${originalEntries.join(", ")} });\n`;
+}
+
+/** An import or export name: an identifier, or a string literal for an arbitrary name. */
+function moduleExportName(name: string): string {
+  return /^[A-Za-z_$][\w$]*$/.test(name) ? name : JSON.stringify(name);
 }
 
 function walkModuleAst(node: FarmModuleAstNode, visit: (node: FarmModuleAstNode) => void): void {
