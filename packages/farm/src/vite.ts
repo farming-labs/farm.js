@@ -6330,7 +6330,31 @@ async function renderPage(pageData, info) {
 // Set up the navigation handler
 spaRouter.setNavigationHandler(renderPage);
 
-async function hydrate() {
+${
+  islandValues
+    ? `// Islands mode starts the client while the body streams (an async entry): a page of islands
+// hydrates them as they arrive; anything else waits for the whole document.
+function farmDocumentParsed() {
+  if (document.readyState !== 'loading') return Promise.resolve();
+  return new Promise((resolve) => {
+    document.addEventListener('DOMContentLoaded', () => resolve(), { once: true });
+  });
+}
+
+function farmIslandsOnlyDocument() {
+  return (
+    window.__FARM_HAS_ISOLATED_CLIENT_BOUNDARIES__ === true &&
+    window.__FARM_IS_CLIENT__ !== true &&
+    window.__FARM_PAGE_SHOULD_HYDRATE__ !== true &&
+    window.__FARM_LAYOUT_SHOULD_HYDRATE__ !== true &&
+    !(Array.isArray(window.__FARM_ROUTE_SLOTS__) && window.__FARM_ROUTE_SLOTS__.length > 0)
+  );
+}
+
+`
+    : ""
+}async function hydrate() {
+  ${islandValues ? "if (!farmIslandsOnlyDocument()) await farmDocumentParsed();" : ""}
   await window.__FARM_PPR_REFRESH_PROMISE__;
   // A PPR refresh that is still retrying must not replace DOM once hydration starts.
   window.__FARM_PPR_HYDRATING__ = true;
@@ -6386,7 +6410,9 @@ async function hydrate() {
         ? `if (hasIsolatedClientBoundaries && !pageShouldHydrate && !layoutShouldHydrate) {
       const hydrationController = new AbortController();
       pendingPageHydrationController = hydrationController;
-      await hydrateFarmIsolatedClientBoundaries(rootContainer, hydrationController.signal);
+      // Islands mode hydrates the document, as production does, so islx also watches the islands
+      // that stream in after this runs.
+      await hydrateFarmIsolatedClientBoundaries(${islandValues ? "document" : "rootContainer"}, hydrationController.signal);
       if (hydrationController.signal.aborted) return;
       // The rest of the document is static server HTML with nothing to hydrate, so
       // stop holding its clicks and submits once the load-strategy islands are live.
@@ -6518,10 +6544,15 @@ async function hydrate() {
   }
 }
 
-if (document.readyState === 'loading') {
+${
+  islandValues
+    ? `// hydrate() waits for the document itself unless the page is islands only.
+hydrate()`
+    : `if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', hydrate)
 } else {
   hydrate()
+}`
 }
 
 // ====== EVENT DELEGATION FOR LINKS ======
