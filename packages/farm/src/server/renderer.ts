@@ -161,7 +161,7 @@ import { FARM_ISLAND_REPLAYABLE_SELECTOR } from "../island";
 import type { FarmIslandStrategy } from "../island";
 import { createDefaultErrorDiagnostics } from "./error-diagnostics";
 import { handleFarmFormActionRequest } from "../form-actions";
-import { installFarmIslandValues } from "../client/island-values";
+import { installFarmIslandValues, uninstallFarmIslandValues } from "../client/island-values";
 import { resolveServerActionsConfig } from "../server-action-security";
 import { resolveFarmServerComponentsMode } from "../server-components-mode";
 import {
@@ -173,9 +173,6 @@ import {
   resolveFarmSecurityConfig,
   type ResolvedFarmSecurityConfig,
 } from "../security";
-
-// Islands mode: boundaries this server renders address their large prop values.
-installFarmIslandValues();
 
 // Islands mode renders on islx, which loads React: only an islands app loads it (`initialize`).
 let islands: typeof import("../client/islands-runtime") | undefined;
@@ -642,9 +639,14 @@ export class ServerRenderer {
   async initialize(): Promise<void> {
     if (this.rendererRuntime) return;
 
+    // Islands mode: boundaries this server renders address their large prop values. Without it
+    // props stay plain JSON, so a dev server restarted with islands mode off stops encoding them.
     if (this.islandValues()) {
+      installFarmIslandValues();
       (await import("../client/islands-server")).installFarmIslandsServer();
       islands ??= await import("../client/islands-runtime");
+    } else {
+      uninstallFarmIslandValues();
     }
 
     if (this.config.notFound?.component?.trim()) {
