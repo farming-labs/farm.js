@@ -14,14 +14,15 @@ import {
   X,
 } from "./icons";
 import type { LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import githubIconUrl from "simple-icons/icons/github.svg?url";
 import npmIconUrl from "simple-icons/icons/npm.svg?url";
 import farmingLabsLogoUrl from "../assets/farming-labs-logo-dark.svg?url";
 import { launchPost } from "../lib/blog";
-import { formatCount, useSiteStats } from "./site-stats";
+import { formatCount, NO_READING, useScrambledText, useSiteStats } from "./site-stats";
 
-const statLinkClass =
-  "inline-flex h-11 min-w-11 items-center justify-center gap-2 border-l border-white/12 px-3.5 text-white/52 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white";
+const readoutClass =
+  "group inline-flex h-11 items-center gap-3 border-l border-white/12 px-4 font-mono uppercase tracking-normal transition-colors duration-150 hover:bg-white/[0.035] focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white";
 
 const navItems = [
   {
@@ -111,14 +112,52 @@ function NpmIcon({ className }: { className?: string }) {
   return <BrandIcon className={className} src={npmIconUrl} />;
 }
 
-// A live count from /api/stats; nothing until it arrives, so the header never shows a made-up number.
-function StatCount({ value, suffix = "" }: { value: number | null | undefined; suffix?: string }) {
-  if (typeof value !== "number") return null;
+// A live count from /api/stats as a two-line readout. It reads NO_READING until the count
+// arrives, then scrambles into it, and scrambles again on hover or focus.
+function StatReadout({
+  href,
+  icon,
+  label,
+  name,
+  suffix = "",
+  title,
+  value,
+}: {
+  href: string;
+  icon: ReactNode;
+  label: string;
+  /** Printed after the count, such as a unit. */
+  suffix?: string;
+  /** The link's accessible name, given the formatted count when there is one. */
+  name: (count?: string) => string;
+  title: string;
+  value: number | null | undefined;
+}) {
+  const count = typeof value === "number" ? formatCount(value) : undefined;
+  const { ref, replay } = useScrambledText(count && `${count}${suffix}`);
   return (
-    <span className="font-mono text-[10px] tabular-nums tracking-normal text-white/72">
-      {formatCount(value)}
-      {suffix}
-    </span>
+    <a
+      aria-label={name(count)}
+      className={readoutClass}
+      href={href}
+      onFocus={replay}
+      onPointerEnter={replay}
+      title={title}
+    >
+      {icon}
+      <span className="flex flex-col leading-none">
+        <span className="text-[8px] text-white/40 transition-colors duration-150 group-hover:text-white/64">
+          {label}
+        </span>
+        <span
+          aria-hidden
+          className="mt-1 text-[12px] normal-case tabular-nums text-white [&>span]:transition-opacity [&>span]:duration-300 [&>span]:ease-out [&>[data-settled=false]]:opacity-35"
+          ref={ref}
+        >
+          {NO_READING}
+        </span>
+      </span>
+    </a>
   );
 }
 
@@ -222,32 +261,29 @@ export function SiteHeader({ activePage }: { activePage?: "blog" | "agents" }) {
         </nav>
 
         <div className="ml-auto hidden shrink-0 items-stretch xl:flex">
-          <a
-            aria-label={
-              typeof stats?.stars === "number"
-                ? `Farm.js on GitHub, ${formatCount(stats.stars)} stars`
-                : "Open Farm.js on GitHub"
-            }
-            className={statLinkClass}
+          <StatReadout
             href="https://github.com/farming-labs/farm.js"
+            icon={<GithubIcon className="size-4" />}
+            label="GitHub stars"
+            name={(count) =>
+              count ? `Farm.js on GitHub, ${count} stars` : "Open Farm.js on GitHub"
+            }
             title="GitHub"
-          >
-            <GithubIcon className="size-4" />
-            <StatCount value={stats?.stars} />
-          </a>
-          <a
-            aria-label={
-              typeof stats?.peakWeeklyDownloads === "number"
-                ? `@farm.js/core on npm, ${formatCount(stats.peakWeeklyDownloads)} downloads in its best week`
+            value={stats?.stars}
+          />
+          <StatReadout
+            href="https://www.npmjs.com/package/@farm.js/core"
+            icon={<NpmIcon className="size-4" />}
+            label="npm downloads"
+            suffix="/week"
+            name={(count) =>
+              count
+                ? `@farm.js/core on npm, ${count} downloads in its best week`
                 : "Open @farm.js/core on npm"
             }
-            className={statLinkClass}
-            href="https://www.npmjs.com/package/@farm.js/core"
-            title="npm"
-          >
-            <NpmIcon className="size-4" />
-            <StatCount value={stats?.peakWeeklyDownloads} suffix="/wk" />
-          </a>
+            title="@farm.js/core downloads in its best week"
+            value={stats?.peakWeeklyDownloads}
+          />
           <a
             className="inline-flex h-11 items-center gap-1.5 border-l border-white/12 bg-white bg-clip-padding px-5 font-mono text-[10px] font-normal uppercase tracking-normal text-black transition-colors duration-150 hover:bg-white/88 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
             href="/docs"

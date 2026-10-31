@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-
-// The launch video's look: characters run through these signs before they settle.
-const GLYPHS = "#%&/_<>*+=!?01";
+import { createScramble } from "../scramble";
 
 // One loop, in milliseconds. A cursor drags a selection over a word (which may
 // scramble into another), drags a wire from the selection into a target and
@@ -48,32 +46,6 @@ const ease = (value: number) =>
   value < 0.5 ? 4 * value * value * value : 1 - (-2 * value + 2) ** 3 / 2;
 const lerp = (from: number, to: number, amount: number) => from + (to - from) * amount;
 const progress = (t: number, step: Step) => clamp((t - AT[step]) / DURATION[step]);
-const randomGlyph = () => GLYPHS[Math.floor(Math.random() * GLYPHS.length)]!;
-
-/**
- * Scrambles between two strings through GLYPHS. Each character settles at its
- * own point (left to right, with jitter, reseeded every loop), and the string
- * grows or shrinks a character at a time between the two lengths.
- */
-function createScramble(a: string, b: string) {
-  const length = Math.max(a.length, b.length);
-  let settleAt: number[] = [];
-  const reseed = () => {
-    settleAt = Array.from({ length }, (_, index) => (index / length) * 0.7 + Math.random() * 0.3);
-  };
-  reseed();
-  const at = (from: string, to: string, amount: number) => {
-    if (amount <= 0) return from;
-    if (amount >= 1) return to;
-    const visible = Math.round(lerp(from.length, to.length, amount));
-    let next = "";
-    for (let index = 0; index < Math.min(length, visible); index += 1) {
-      next += amount >= settleAt[index]! ? (to[index] ?? "") : randomGlyph();
-    }
-    return next;
-  };
-  return { reseed, at };
-}
 
 type Point = [number, number];
 type Box = { left: number; top: number; right: number; bottom: number };
