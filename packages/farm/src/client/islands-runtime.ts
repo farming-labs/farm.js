@@ -154,7 +154,9 @@ export function createFarmServerTreeLayout(
   },
 ) {
   return createServerTreeLayout(source, scope, options);
+}
 
+/**
  * One server render of a page. Its islands write each large value once per render: a request that
  * renders twice (a page that calls notFound(), or a synchronous attempt that suspended and
  * streams instead) sends the values again in the render that reaches the browser.
