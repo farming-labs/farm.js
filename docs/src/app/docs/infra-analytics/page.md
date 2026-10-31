@@ -73,8 +73,26 @@ Removing the environment variables also turns it off.
   `unknown`.
 
 Farm never sends URLs, query strings, route parameters, headers, cookies, IP addresses, full
-user-agents, request or response bodies, tool arguments or results, or error messages. Requests that
-match no route are reported as `/[unmatched]`.
+user-agents, request or response bodies, tool arguments or results, or error messages.
+
+### What `route` contains
+
+`route` is always a template, never the requested path:
+
+| Request                                                      | `route`                                                 |
+| ------------------------------------------------------------ | ------------------------------------------------------- |
+| A page, API, integration, or plugin endpoint route           | Its pattern: `/users/[id]`, `/api/stats`                |
+| A Markdown mirror (`/blog/hello.md`)                         | The page's pattern plus `.md`: `/blog/[slug].md`        |
+| A docs page (`/docs/routing`)                                | The docs route: `/docs`, `/docs/[...slug]`              |
+| The docs API (`/api/docs?query=...`)                         | `/api/docs`, or `/api/docs/[...path]` below it          |
+| An MCP server Farm or the docs engine serves                 | Its endpoint: `/mcp`, plus `/mcp/server-card`           |
+| `llms.txt`, `sitemap.xml`, `robots.txt`, `.well-known` files | The fixed path: `/llms.txt`, `/.well-known/farmjs.json` |
+| The OpenAPI spec or reference, the image optimizer           | The configured path: `/openapi.json`, `/_farm/image`    |
+| Anything nothing answered (a 404, or a 405 with no route)    | `/[unmatched]`                                          |
+
+A deeper path the docs engine serves outside its pages keeps only its leading segments, such as
+`/.well-known/mcp/[...path]`. Static assets and the app's own metadata files (`robots.ts`,
+`sitemap.ts`, `opengraph-image`) are not reported.
 
 ## Tool discovery: `/.well-known/farmjs.json`
 

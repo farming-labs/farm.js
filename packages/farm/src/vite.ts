@@ -83,6 +83,15 @@ import {
 } from "./app-markdown";
 import { applyWebResponseHeaders, sendWebResponse } from "./server/response";
 import { createFarmAiCatalogResponse } from "./ai-catalog";
+import { FARM_DEFAULT_MCP_PATH } from "./agent-mcp";
+import {
+  listFarmBuiltInRoutePaths,
+  resolveFarmDocsEngineRouteLabel,
+  resolveFarmDocsRouteLabel,
+  resolveFarmMarkdownRouteLabel,
+  resolveFarmMCPRouteLabel,
+  setFarmRouteLabel,
+} from "./route-label";
 import { registerFarmMCPServer } from "./mcp-catalog";
 import {
   createFarmApiCatalogResponse,
@@ -1271,6 +1280,20 @@ export function farmPlugin(
         });
       }
       const apiServerBasePath = resolveFarmAPIServerBasePath(farmConfig.api);
+      // Every fixed path a built-in endpoint below may answer. A path is only labeled when
+      // its endpoint answered, so listing one this config never serves costs nothing.
+      const devBuiltInRoutePaths = new Set(
+        listFarmBuiltInRoutePaths({
+          agent: {
+            apiCatalog: true,
+            mcp: true,
+            llmsTxt: { enabled: true, full: true },
+            sitemap: { enabled: true },
+            crawlers: { enabled: true },
+          },
+          openapi: options.openapi,
+        }),
+      );
       const serverConfig = resolveFarmServerConfig(farmConfig.server);
       // Development SSR loads @farm.js/core/image untransformed, so the
       // __FARM_IMAGE_CONFIG__ define never reaches it. Publish the same value
@@ -2056,7 +2079,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             {
               kind = requestMethod === "GET" || requestMethod === "HEAD" ? "page" : "request",
               computed,
-            }: { kind?: FarmPluginRuntimeKind; computed?: Response } = {},
+              label,
+            }: {
+              kind?: FarmPluginRuntimeKind;
+              computed?: Response;
+              /**
+               * The route template analytics reports (see route-label.ts). Without one, a
+               * built-in endpoint's fixed path, or nothing: never the requested path.
+               */
+              label?: string | null;
+            } = {},
           ): Promise<void> => {
             const discard = async () => {
               await computed?.body?.cancel().catch(() => {});
@@ -2064,9 +2096,18 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             let runtimeSession: FarmPluginRuntimeSession | undefined;
             if (pm?.hasRuntimeRequestHooks()) {
               try {
+                const routePathname = stripFarmBasePath(requestPathname, farmConfig.basePath);
+                const route = setFarmRouteLabel(
+                  { pathname: requestPathname },
+                  label !== undefined
+                    ? label
+                    : devBuiltInRoutePaths.has(routePathname)
+                      ? routePathname
+                      : resolveFarmMCPRouteLabel(routePathname, apiServerBasePath),
+                );
                 runtimeSession = await pm.beginRuntimeRequest(
                   createRequestFromNodeRequest(req, new URL(fullUrl)),
-                  { kind, route: { pathname: requestPathname } },
+                  { kind, route },
                 );
               } catch (error) {
                 await discard();
@@ -2262,12 +2303,24 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             if (docsResponse) {
               await serveBuiltInRoute(
                 () => wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse),
-                { kind: "docs", computed: docsResponse },
+                {
+                  kind: "docs",
+                  computed: docsResponse,
+                  label: resolveFarmDocsEngineRouteLabel(
+                    stripFarmBasePath(requestPathname, farmConfig.basePath),
+                    { path: farmConfig.docs?.entry || "/docs" },
+                  ),
+                },
               );
               return;
             }
           }
 
+          const markdownRouteLabel = () =>
+            resolveFarmMarkdownRouteLabel(
+              stripFarmBasePath(requestPathname, farmConfig.basePath),
+              (page) => farmApp.getRouteManager().matchRoute(page).route?.pattern,
+            );
           const markdownSourceResponse = viteModuleRequest
             ? null
             : await createFarmMarkdownSourceResponse({
@@ -2306,6 +2359,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           if (markdownSourceResponse) {
             await serveBuiltInRoute(() => markdownSourceResponse, {
               computed: markdownSourceResponse,
+              label: markdownRouteLabel(),
             });
             return;
           }
@@ -2341,7 +2395,10 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 apiServerBasePath,
               });
           if (markdownResponse) {
-            await serveBuiltInRoute(() => markdownResponse, { computed: markdownResponse });
+            await serveBuiltInRoute(() => markdownResponse, {
+              computed: markdownResponse,
+              label: markdownRouteLabel(),
+            });
             return;
           }
 
@@ -2765,10 +2822,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 const docsResponse = pm
                   ? await pm.runRuntimeRequest(request, invokeDocsAPIHandler, {
                       kind: "docs",
-                      route: {
-                        pathname,
-                        pattern: apiLifecyclePayload.routePath,
-                      },
+                      route: setFarmRouteLabel(
+                        { pathname, pattern: apiLifecyclePayload.routePath },
+                        resolveFarmDocsRouteLabel(pathname, {
+                          path: farmConfig.docs?.entry || "/docs",
+                        }),
+                      ),
                     })
                   : await invokeDocsAPIHandler(request);
                 if (docsResponse) {
@@ -3235,6 +3294,18 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           // resolved. The session options still describe the requested route,
           // because production computes them from the incoming request too.
           const requestedMatch = routeManager.matchRoute(requestedPathname);
+          // What the renderer serves without a route (llms.txt, robots.txt, sitemap.xml, the
+          // default MCP server) is reported by its fixed path; see route-label.ts.
+          const pageBuiltInRouteLabel = (pathname: string) => {
+            const routePathname = stripFarmBasePath(pathname, farmConfig.basePath);
+            const mcpLabel = resolveFarmMCPRouteLabel(routePathname, apiServerBasePath);
+            if (mcpLabel) return mcpLabel;
+            if (farmAgentGeneratedPaths(farmConfig).includes(routePathname)) return routePathname;
+            return routePathname === FARM_DEFAULT_MCP_PATH &&
+              farmApp.getServerRenderer().getDefaultMCPServer()
+              ? FARM_DEFAULT_MCP_PATH
+              : null;
+          };
           let runtimeSession: FarmPluginRuntimeSession | undefined;
           if (pm && hasRuntimeRequestHooks) {
             try {
@@ -3242,11 +3313,14 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 createRequestFromNodeRequest(req, new URL(fullUrl)),
                 {
                   kind: "page",
-                  route: {
-                    pathname: requestedPathname,
-                    pattern: requestedMatch?.route?.pattern || null,
-                    params: requestedMatch?.params || {},
-                  },
+                  route: setFarmRouteLabel(
+                    {
+                      pathname: requestedPathname,
+                      pattern: requestedMatch?.route?.pattern || null,
+                      params: requestedMatch?.params || {},
+                    },
+                    requestedMatch?.route ? null : pageBuiltInRouteLabel(requestedPathname),
+                  ),
                 },
               );
               pm.copyRequestContext(runtimeSession.request, req);

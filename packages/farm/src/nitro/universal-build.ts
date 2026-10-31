@@ -181,6 +181,7 @@ import { getFarmPresetRuntime } from "../deployment";
 import { isFarmPreviewDeploymentEnvironment } from "../deployment-environment";
 import { resolveFarmInstrumentationRuntime } from "../instrumentation-runtime";
 import { FARM_PRERENDER_ENV } from "../plugins/infra-analytics";
+import { listFarmBuiltInRoutePaths } from "../route-label";
 import {
   getFarmRendererCapabilities,
   getFarmRendererStreamingCapabilitiesForRuntime,
@@ -6269,6 +6270,10 @@ function renderFarmRouteServerTree(element, extra) { return element; }`;
   withFarmRouteContext,
   createLateNotFoundRecovery,
   createLateRedirectRecovery,${
+    hasInfraAnalyticsRuntime
+      ? "\n  resolveFarmDocsEngineRouteLabel,\n  resolveFarmDocsRouteLabel,\n  resolveFarmMarkdownRouteLabel,\n  resolveFarmMCPRouteLabel,\n  setFarmRouteLabel,"
+      : ""
+  }${
     hasFarmServerStorageConfig(config.storage)
       ? "\n  _registerFarmStorageModules,\n  disposeFarmStorage,\n  initFarmStorage,"
       : ""
@@ -8479,7 +8484,77 @@ function getFarmPluginRequestOptions(request) {
 
   return { kind: "request", route };
 }
-
+${
+  hasInfraAnalyticsRuntime
+    ? `
+// Farm Infra analytics reports a request by a route template, never its path. Built-in
+// endpoints, Markdown mirrors, and docs pages have no app route pattern, so they are
+// labeled here; route.pattern keeps meaning the matched app route for plugins.
+const farmBuiltInRoutePaths = new Set(${JSON.stringify(
+        listFarmBuiltInRoutePaths({
+          agent: {
+            ...config.agent,
+            aiCatalog: servesAiCatalog,
+            mcp: servesDefaultMCP,
+            sitemap: { enabled: servesAgentSitemap },
+            crawlers: { enabled: servesAgentRobotsTxt },
+          },
+          openapi: openAPIReference,
+        }),
+      )});
+${
+  config.docs?.enabled
+    ? `const farmDocsRouteLabelInput = {
+  path: normalizeRuntimePath(farmDocsResolvedConfig?.entry || "/docs"),
+  apiPath: ${JSON.stringify(farmDocsPrecompiledManifest?.apiPath || "/api/docs")},
+};
+`
+    : ""
+}// The request's route payload, for a handler that learns what answered while it handles.
+const farmRouteLabelSlot = Symbol("farm.route.label.slot");
+function labelFarmRequestOptions(options) {
+  if (options.kind === "asset" || options.kind === "api" || options.kind === "integration") {
+    return options;
+  }
+  const pathname = options.route.pathname;
+  const routePathname = getFarmRoutePathname(pathname);
+  const mcpLabel = resolveFarmMCPRouteLabel(routePathname, farmLocalAPIBasePath);
+  if (mcpLabel) {
+    setFarmRouteLabel(options.route, mcpLabel);
+    return options;
+  }
+  ${
+    config.docs?.enabled
+      ? `if (options.kind === "docs") {
+    setFarmRouteLabel(options.route, resolveFarmDocsRouteLabel(routePathname, farmDocsRouteLabelInput));
+    return options;
+  }`
+      : ""
+  }
+  ${
+    config.md?.enabled || hasMarkdownPages
+      ? `const markdownLabel = resolveFarmMarkdownRouteLabel(
+    routePathname,
+    (page) => matchPageRoute(page)?.route.pattern,
+  );
+  if (markdownLabel) {
+    setFarmRouteLabel(options.route, markdownLabel);
+    return options;
+  }`
+      : ""
+  }
+  if (options.route.pattern) return options;
+  const builtInPath = normalizeRuntimePath(routePathname);
+  if (farmBuiltInRoutePaths.has(builtInPath)) {
+    setFarmRouteLabel(options.route, builtInPath);
+  } else if (${imageRuntime === "none" ? "false" : `pathname === ${JSON.stringify(config.images.path)}`}) {
+    setFarmRouteLabel(options.route, ${JSON.stringify(config.images.path)});
+  }
+  return options;
+}
+`
+    : ""
+}
 /** The directory of the page a pathname selects, or null; route groups confine layouts to it. */
 function getMatchedPageDirectory(pathname) {
   const match = matchPageRoute(pathname);
@@ -9005,7 +9080,18 @@ ${
       : "";
   })()}) {
     const docsResponse = await farmDocsHandler(cloneFarmRequestWithContext(request));
-    if (docsResponse) {
+    if (docsResponse) {${
+      hasInfraAnalyticsRuntime
+        ? `
+      const farmAnalyticsRoute = adapterContext?.[farmRouteLabelSlot];
+      if (farmAnalyticsRoute) {
+        setFarmRouteLabel(
+          farmAnalyticsRoute,
+          resolveFarmDocsEngineRouteLabel(routePathname, farmDocsRouteLabelInput),
+        );
+      }`
+        : ""
+    }
       if (!docsResponse.headers.get("content-type")?.toLowerCase().includes("text/html")) {
         return applyProductionMiddlewareHeaders(
           withFarmDocsRequestCache(docsResponse, request, farmLocaleResolution, middlewareData, middlewareContext),
@@ -10552,7 +10638,16 @@ async function handleFarmFetch(request, context) {
   return farmProductionLifecycle.runRequest(
     () =>
       runWithFarmRequestSpan(request, async () => {
-        const runtimeOptions = farmPluginRuntime ? getFarmPluginRequestOptions(request) : null;
+        const runtimeOptions = farmPluginRuntime ? getFarmPluginRequestOptions(request) : null;${
+          hasInfraAnalyticsRuntime
+            ? `
+        const farmAnalyticsOptions = farmInfraAnalytics
+          ? labelFarmRequestOptions(runtimeOptions || getFarmPluginRequestOptions(request))
+          : null;
+        // The docs engine labels what it answered on this payload; see farmRouteLabelSlot.
+        if (farmAnalyticsOptions) context = { ...context, [farmRouteLabelSlot]: farmAnalyticsOptions.route };`
+            : ""
+        }
         // Created before rendering so only scripts Farm, the renderer, or the
         // app (through getCspNonce()) give it carry the response nonce.
         const cspNonce = createFarmCspNonce(farmSecurityConfig);
@@ -10594,10 +10689,10 @@ async function handleFarmFetch(request, context) {
             )
           : ${
             hasInfraAnalyticsRuntime && !hasPluginRuntime
-              ? `farmInfraAnalytics
+              ? `farmAnalyticsOptions
             ? farmInfraAnalytics.record(
                 request,
-                getFarmPluginRequestOptions(request),
+                farmAnalyticsOptions,
                 typeof context?.waitUntil === "function" ? context.waitUntil.bind(context) : undefined,
                 () => prepareResponse(request, handleFarmRequest(request, context)),
               )

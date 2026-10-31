@@ -5,7 +5,7 @@
  * `FARMJS_API_KEY` plus `FARMJS_PROJECT_ID`, or a project's write-only key alone.
  * `analytics: false` in farm.config turns it off. It never sends without that link.
  *
- * Only server-side metadata leaves the app: the matched route template, method,
+ * Only server-side metadata leaves the app: the route template (see route-label.ts), method,
  * status, duration, registered MCP tool outcomes and a self-reported agent
  * category. No URLs, query strings, headers, cookies, bodies, IPs or errors.
  */
@@ -14,6 +14,7 @@ import type { FarmPlugin, FarmPluginRuntimeAfterEvent } from "../plugin";
 import { classifyFarmAgent, type FarmAgentIdentity } from "../agent-identity";
 import { onFarmEvent } from "../observability";
 import { getCurrentRequestOrNull } from "../server/request";
+import { getFarmRouteLabel } from "../route-label";
 
 export type FarmInfraAnalyticsEnvironment = "production" | "staging" | "development";
 
@@ -329,7 +330,8 @@ interface State {
 interface RequestMetadata {
   id: string;
   agent: FarmInfraAgentIdentity;
-  route: string;
+  /** Read when an event is made: a handler may label the route while it answers. */
+  route: object | undefined;
   completed: boolean;
   waitUntil(promise: Promise<unknown>): void;
 }
@@ -338,13 +340,13 @@ const CONTEXT_KEY = "farm.infra.analytics";
 
 function beginRequest(
   request: Request,
-  pattern: unknown,
+  route: object | undefined,
   waitUntil: (promise: Promise<unknown>) => void,
 ): RequestMetadata {
   return {
     id: uuid(),
     agent: classifyFarmInfraAgent(request.headers.get("user-agent")),
-    route: routeTemplate(pattern),
+    route,
     completed: false,
     waitUntil,
   };
@@ -360,7 +362,7 @@ function requestEvent(
     id: uuid(),
     requestId: metadata.id,
     timestamp: new Date().toISOString(),
-    route: metadata.route,
+    route: routeTemplate(getFarmRouteLabel(metadata.route)),
     agent: metadata.agent,
     kind: "request",
     method,
@@ -377,7 +379,7 @@ function toolEvent(
     id: uuid(),
     requestId: metadata.id,
     timestamp: new Date().toISOString(),
-    route: metadata.route,
+    route: routeTemplate(getFarmRouteLabel(metadata.route)),
     agent: metadata.agent,
     kind: "mcp.tool",
     tool: event.tool,
@@ -425,13 +427,15 @@ export function farmInfraAnalyticsPlugin(
       },
       before(event) {
         if (event.kind === "asset" || !event.state) return;
-        event.req.set(
-          contextKey,
-          beginRequest(event.request, event.route?.pattern, event.waitUntil),
-        );
+        event.req.set(contextKey, beginRequest(event.request, event.route, event.waitUntil));
       },
       after(event: FarmPluginRuntimeAfterEvent<State>) {
-        const metadata = event.req.get<RequestMetadata>(contextKey);
+        // A plugin endpoint answers before any runtime.before hook runs.
+        const metadata =
+          event.req.get<RequestMetadata>(contextKey) ??
+          (event.kind === "endpoint"
+            ? beginRequest(event.request, event.route, event.waitUntil)
+            : undefined);
         if (!metadata || metadata.completed || !event.state) return;
         metadata.completed = true;
         if (!METHODS.has(event.request.method)) return;
@@ -488,7 +492,7 @@ export function farmInfraAnalyticsRecorder(
       if (runtime.kind === "asset") return handler();
       const background = (promise: Promise<unknown>) =>
         waitUntil ? waitUntil(promise) : void promise.catch(() => {});
-      const metadata = beginRequest(request, runtime.route?.pattern, background);
+      const metadata = beginRequest(request, runtime.route, background);
       const startedAt = performance.now();
       let response: Response;
       try {
