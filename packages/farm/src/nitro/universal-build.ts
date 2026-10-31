@@ -5945,7 +5945,7 @@ function generateVirtualEntryCode(
     ? `import * as React from "react";\nimport * as ReactDOMServer from "react-dom/server";${
         hasIsolatedClientGraphRuntime
           ? farmIslandsMode
-            ? '\nimport { isolateFarmServerPageGraph, wrapFarmIsolatedClientGraph, renderFarmServerTreePage, renderFarmServerTreeLayout } from "@farm.js/core/internal/islands-runtime";'
+            ? '\nimport { isolateFarmServerPageGraph, wrapFarmIsolatedClientGraph, renderFarmServerTreePage, renderFarmServerTreeLayout, withFarmIslandsRender } from "@farm.js/core/internal/islands-runtime";'
             : '\nimport { isolateFarmServerPageGraph, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";\nimport { renderFarmServerTreePage } from "@farm.js/core/internal/server-tree";'
           : ""
       }`
@@ -5961,7 +5961,16 @@ function isolateFarmRouteServerPage(element) {
   return isolateFarmServerPageGraph(React, element);
 }
 
-// An async page below a hydrating layout renders as a serialized tree the browser rebuilds in
+${
+  farmIslandsMode
+    ? `// One islands render (renderFarmElement): its own record of the values it wrote.
+function farmIslandsRender(element) {
+  return withFarmIslandsRender(element);
+}
+
+`
+    : ""
+}// An async page below a hydrating layout renders as a serialized tree the browser rebuilds in
 // the layout's React root, so its client components read the layout's context.
 function renderFarmRouteServerTree(element, extra) {
   return renderFarmServerTreePage(React, element, {
@@ -7276,6 +7285,9 @@ function escapeFarmHtmlAttribute(value) {
 }
 
 async function renderFarmElement(ReactDOMServer, element, routeKey) {
+  // Islands mode: each render writes its islands' values itself, so a request that renders twice
+  // (notFound(), or a synchronous attempt that suspends and streams) still sends them.
+  if (typeof farmIslandsRender === "function") element = farmIslandsRender(element);
   const streamErrors = [];
   const syncHtml = renderFarmElementSync(ReactDOMServer, element, routeKey);
   if (syncHtml !== undefined) return { html: syncHtml, shellHtml: syncHtml, streamErrors };
