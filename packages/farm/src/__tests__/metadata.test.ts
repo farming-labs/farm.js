@@ -78,6 +78,34 @@ describe("metadata head rendering", () => {
     expect(renderMetadataHead({}).tags).not.toContain('rel="canonical"');
   });
 
+  it("resolves a ./ canonical against the page, as Next.js does", () => {
+    // A root layout's canonical: "./" names each page below it, not the site root.
+    const layout = { metadataBase: "https://farm.test", alternates: { canonical: "./" } };
+    expect(renderMetadataHead(layout, { pathname: "/docs/architecture" }).tags).toContain(
+      '<link rel="canonical" href="https://farm.test/docs/architecture">',
+    );
+    expect(renderMetadataHead(layout, { pathname: "/" }).tags).toContain(
+      '<link rel="canonical" href="https://farm.test/">',
+    );
+    expect(
+      renderMetadataHead(
+        { alternates: { canonical: "./print", languages: { de: "./de" } } },
+        { pathname: "/docs/" },
+      ).tags,
+    ).toContain('<link rel="canonical" href="/docs/print">');
+    // The request path is sanitized as for the default canonical.
+    expect(renderMetadataHead(layout, { pathname: "//evil.com/x" }).tags).toContain(
+      '<link rel="canonical" href="https://farm.test/evil.com/x">',
+    );
+    // Rooted and absolute canonicals are unchanged.
+    expect(
+      renderMetadataHead(
+        { metadataBase: "https://farm.test", alternates: { canonical: "/post" } },
+        { pathname: "/docs/architecture" },
+      ).tags,
+    ).toContain('<link rel="canonical" href="https://farm.test/post">');
+  });
+
   it("keeps the defaulted canonical same-origin for authority-introducing paths", () => {
     // A request path like `//evil.com` or `/\evil.com` must not become a
     // cross-origin canonical (SEO canonical poisoning). It is collapsed to a
