@@ -273,10 +273,9 @@ class Navigator(
             if (animating || modal != null) return
             val stack = stacks[current]
             if (stack.size > 1) {
-                stack[stack.size - 2].view.apply {
-                    visibility = View.VISIBLE
-                    translationX = -width * PARALLAX
-                }
+                val below = stack[stack.size - 2].view
+                below.visibility = View.VISIBLE
+                below.translationX = -width * PARALLAX
             }
         }
 

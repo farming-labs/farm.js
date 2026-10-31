@@ -48,7 +48,7 @@ class WebViewPool(
         page.host = null
         holder.removeView(page.webView)
         // Refill after the transition, so warming does not compete with it.
-        main.postDelayed(::fill, 500)
+        main.postDelayed({ fill() }, 500)
         return page
     }
 

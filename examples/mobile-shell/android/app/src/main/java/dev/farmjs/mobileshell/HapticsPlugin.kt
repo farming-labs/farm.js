@@ -25,8 +25,8 @@ class HapticsPlugin(private val context: Context) : FarmPlugin {
         }
         // The view path follows the user's system haptics setting.
         val performed = webView.performHapticFeedback(constant)
-        val method = if (performed) "performHapticFeedback" else vibrate(style)
-        return JSONObject().put("via", "native").put("style", style).put("method", method)
+        val path = if (performed) "performHapticFeedback" else vibrate(style)
+        return JSONObject().put("via", "native").put("style", style).put("method", path)
     }
 
     private fun vibrate(style: String): String {
