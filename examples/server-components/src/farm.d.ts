@@ -28,6 +28,7 @@ export type RoutePath =
   | "/types"
   | "/values/a"
   | "/values/b"
+  | "/values/slow"
   | "/window";
 export type RoutePattern =
   | "/"
@@ -45,6 +46,7 @@ export type RoutePattern =
   | "/types"
   | "/values/a"
   | "/values/b"
+  | "/values/slow"
   | "/window";
 export type RouteModulePattern =
   | "/"
@@ -64,6 +66,7 @@ export type RouteModulePattern =
   | "/values"
   | "/values/a"
   | "/values/b"
+  | "/values/slow"
   | "/window";
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {

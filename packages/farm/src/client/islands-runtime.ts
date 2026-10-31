@@ -6,7 +6,13 @@
  */
 import { enhanceForms, setActionNavigator } from "@farm.js/islx/client";
 import * as React from "react";
-import { Outlet, isolateIslands, renderServerTree, withinClientRoot } from "@farm.js/islx/react";
+import {
+  IslandsProvider,
+  Outlet,
+  isolateIslands,
+  renderServerTree,
+  withinClientRoot,
+} from "@farm.js/islx/react";
 import {
   createHydrationRuntime,
   createServerHtml,
@@ -148,4 +154,15 @@ export function createFarmServerTreeLayout(
   },
 ) {
   return createServerTreeLayout(source, scope, options);
+
+ * One server render of a page. Its islands write each large value once per render: a request that
+ * renders twice (a page that calls notFound(), or a synchronous attempt that suspended and
+ * streams instead) sends the values again in the render that reaches the browser.
+ */
+export function withFarmIslandsRender(element: React.ReactNode): React.ReactElement {
+  return React.createElement(
+    IslandsProvider,
+    { held: getFarmIslandValuesServer()?.held() ?? null },
+    element,
+  );
 }
