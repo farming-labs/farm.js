@@ -297,7 +297,9 @@ export async function buildFarmDesktop(options: FarmDesktopCommandOptions = {}):
     for (const file of artifacts.files) {
       const size =
         existsSync(file) && statSync(file).isFile() ? ` (${formatSize(statSync(file).size)})` : "";
-      runtime.logger.info(`📦 ${path.relative(root, file)}${size}`);
+      // Forward slashes on every OS, like the rest of Farm's build output.
+      const shown = path.relative(root, file).split(path.sep).join("/");
+      runtime.logger.info(`📦 ${shown}${size}`);
     }
     return artifacts.files;
   });
