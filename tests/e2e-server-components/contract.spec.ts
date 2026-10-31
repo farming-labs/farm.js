@@ -233,6 +233,30 @@ test("a large value shared by two client components survives client navigation",
   }
 });
 
+test("a request that renders twice still sends every value its islands reference", async ({
+  request,
+}) => {
+  test.skip(mode !== "islands", "values are islands mode's wire format");
+  const valuesOf = (html: string) => ({
+    referenced: new Set(
+      [...html.matchAll(/\{"\$":"r","v":"([0-9a-z]{14})"\}/g)].map((match) => match[1]),
+    ),
+    sent: new Set(
+      [...html.matchAll(/<script type="f\/value" name="([0-9a-z]{14})">/g)].map(
+        (match) => match[1],
+      ),
+    ),
+  });
+  // Renders that do not suspend teach the route to render synchronously first; a request that
+  // suspends then renders twice, and the second render is the one the browser receives.
+  for (const query of ["", "", `?slow=${Date.now()}`]) {
+    const html = await (await request.get(`/values/slow${query}`)).text();
+    const { referenced, sent } = valuesOf(html);
+    expect(referenced.size).toBeGreaterThan(0);
+    for (const key of referenced) expect(sent).toContain(key);
+  }
+});
+
 test("a client component calls a server action it received as a prop, and the page shows the result", async ({
   page,
 }) => {

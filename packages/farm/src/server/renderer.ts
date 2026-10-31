@@ -180,6 +180,35 @@ installFarmIslandValues();
 // Islands mode renders on islx, which loads React: only an islands app loads it (`initialize`).
 let islands: typeof import("../client/islands-runtime") | undefined;
 
+/** Islands mode: every render of the runtime is one islands render (`withFarmIslandsRender`). */
+function withFarmIslandsRenders(
+  runtime: FarmServerRendererRuntime,
+  islandsRuntime: typeof import("../client/islands-runtime"),
+): FarmServerRendererRuntime {
+  const wrap = (element: unknown) =>
+    islandsRuntime.withFarmIslandsRender(
+      element as Parameters<typeof islandsRuntime.withFarmIslandsRender>[0],
+    );
+  const wrapped: FarmServerRendererRuntime = {
+    ...runtime,
+    renderToString: (element, ...rest) => runtime.renderToString(wrap(element), ...rest),
+  };
+  for (const name of [
+    "renderToStringWithHead",
+    "renderToPipeableStream",
+    "renderToReadableStream",
+  ] as const) {
+    const render = runtime[name] as ((element: unknown, ...rest: unknown[]) => unknown) | undefined;
+    if (render) {
+      (wrapped as unknown as Record<string, unknown>)[name] = (
+        element: unknown,
+        ...rest: unknown[]
+      ) => render(wrap(element), ...rest);
+    }
+  }
+  return wrapped;
+}
+
 let cachedClerkProvider: { ClerkProvider: any } | null = null;
 
 const importRuntimeModule = new Function("specifier", "return import(specifier);") as (
@@ -680,7 +709,10 @@ export class ServerRenderer {
       "node",
     );
 
-    this.rendererRuntime = runtime as FarmServerRendererRuntime;
+    this.rendererRuntime =
+      islands && this.islandValues()
+        ? withFarmIslandsRenders(runtime as FarmServerRendererRuntime, islands)
+        : (runtime as FarmServerRendererRuntime);
     this.routeManager.setRendererRuntime?.(this.rendererRuntime);
     await this.applyRendererAppSetup();
   }

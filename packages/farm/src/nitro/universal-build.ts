@@ -5854,7 +5854,7 @@ function generateVirtualEntryCode(
     ? `import * as React from "react";\nimport * as ReactDOMServer from "react-dom/server";${
         hasIsolatedClientGraphRuntime
           ? farmIslandsMode
-            ? '\nimport { isolateFarmServerPageGraph, wrapFarmIsolatedClientGraph, renderFarmServerTreePage } from "@farm.js/core/internal/islands-runtime";'
+            ? '\nimport { isolateFarmServerPageGraph, wrapFarmIsolatedClientGraph, renderFarmServerTreePage, withFarmIslandsRender } from "@farm.js/core/internal/islands-runtime";'
             : '\nimport { isolateFarmServerPageGraph, wrapFarmIsolatedClientGraph } from "@farm.js/core/internal/isolated-boundary";\nimport { renderFarmServerTreePage } from "@farm.js/core/internal/server-tree";'
           : ""
       }`
@@ -7169,7 +7169,14 @@ function escapeFarmHtmlAttribute(value) {
     .replace(/>/g, "&gt;");
 }
 
-async function renderFarmElement(ReactDOMServer, element, routeKey) {
+async function renderFarmElement(ReactDOMServer, element, routeKey) {${
+    farmIslandsMode && hasIsolatedClientGraphRuntime
+      ? `
+  // Islands mode: each render writes its islands' values itself, so a request that renders twice
+  // (notFound(), or a synchronous attempt that suspends and streams) still sends them.
+  element = withFarmIslandsRender(element);`
+      : ""
+  }
   const streamErrors = [];
   const syncHtml = renderFarmElementSync(ReactDOMServer, element, routeKey);
   if (syncHtml !== undefined) return { html: syncHtml, shellHtml: syncHtml, streamErrors };
