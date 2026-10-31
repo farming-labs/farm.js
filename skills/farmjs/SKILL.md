@@ -356,6 +356,10 @@ Unkey, Cloudflare agents, Eve, Auth0, Auth.js, Better Auth, Clerk, Supabase, Wor
 registries, and ORM-backed data. Auth, billing or email that runs inside Convex is detected from
 `convex/convex.config.ts` by `convex()`, or listed with `component()` in `convex({ use })`; never
 a second Farm integration. Auth that stays in Farm gives `convex()` a `token` reader and `tokenPath`.
+Durable agents (`@farm.js/agent`, `pnpm add @farm.js/agent agent-unit`) mount as
+`integrations: { agent: agent({ framework, storage, authorize }) }` and serve `src/agents` under
+`/api/agent`; agent-unit builds them into the Nitro output for every target. Its settings evaluate in
+the server, so never move them into a separate agent-unit.config.ts.
 
 Provider adapters support two ownership modes: pass credentials so the adapter constructs its
 default SDK, or pass an app-owned vendor client through `instance`. Keep the vendor instance in a

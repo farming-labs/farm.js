@@ -300,4 +300,4 @@ Any framework that produces a `Response`, a `ReadableStream`, or an async iterab
   });
   ```
 
-- **Long runs.** A route lives as long as its request. For work that outlasts the request or must survive a restart, hand it to [jobs](/docs/integrations/jobs) or to the framework's own durable runtime.
+- **Long runs.** A route lives as long as its request. For runs that pause for approval or must survive a restart, serve the same agents with [durable agents](/docs/integrations/agent); for other background work, use [jobs](/docs/integrations/jobs).
