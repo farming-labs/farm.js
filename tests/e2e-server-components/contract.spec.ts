@@ -82,6 +82,33 @@ test("a client component reads context from a client provider in a server layout
   expect(errors).toEqual([]);
 });
 
+test("a server layout around a client provider keeps its code on the server", async ({ page }) => {
+  const scripts: string[] = [];
+  page.on("response", async (response) => {
+    if (response.request().resourceType() === "script") scripts.push(await response.text());
+  });
+  const errors = collectErrors(page);
+  // Into the provider's layout from a page whose layouts render on the server only, and back.
+  await page.goto("/");
+  await hydrated(page);
+  await page.evaluate(() => ((window as { __contract?: number }).__contract = 1));
+  await page.getByRole("link", { name: "Context" }).click();
+  await expect(page.getByRole("heading", { name: "Context" })).toBeVisible();
+  await expect(page.getByText("Layout note: contract-layout-server-only-2b7e1d")).toBeVisible();
+  await hydrated(page);
+  await page.getByRole("button", { name: "Toggle theme" }).click();
+  await expect(page.getByTestId("theme-label")).toHaveText("Theme: dark");
+  await page.getByRole("link", { name: "Home" }).click();
+  await page.getByRole("link", { name: "Context" }).click();
+  await hydrated(page);
+  await page.getByRole("button", { name: "Toggle theme" }).click();
+  await expect(page.getByTestId("theme-label")).not.toHaveText("Theme: none");
+  expect(await page.evaluate(() => (window as { __contract?: number }).__contract)).toBe(1);
+  expect(scripts.length).toBeGreaterThan(0);
+  for (const source of scripts) expect(source).not.toContain("contract-layout-server-only-2b7e1d");
+  expect(errors).toEqual([]);
+});
+
 test("async server components resolve before the HTML is sent", async ({ request }) => {
   const html = await (await request.get("/async")).text();
   expect(html).toContain("Loaded first");

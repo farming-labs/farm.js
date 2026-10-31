@@ -105,6 +105,11 @@ export interface ClientModuleHydrationPlan extends ClientModuleMetadata {
    * message, and development renders the page without client JavaScript.
    */
   islandsError?: string;
+  /**
+   * Islands mode: the layout hydrates as one root rebuilt from its server tree. Its module stays
+   * on the server; `isolatedBoundaries` are the client components the tree loads.
+   */
+  serverTreeLayout?: true;
 }
 
 export interface FarmClientHydrationPlanOptions {
@@ -124,6 +129,13 @@ export interface FarmClientHydrationPlanOptions {
    * context. Requires `asyncOwnerIslands`. Pass it for pages only.
    */
   serverOwners?: boolean;
+  /**
+   * Islands mode, for layouts: a synchronous layout whose client components need one React root
+   * (a provider around the pages) renders as a server tree instead of shipping its module. The
+   * browser rebuilds it from the tree and renders the page at its outlet. Requires
+   * `asyncOwnerIslands`.
+   */
+  serverTreeLayouts?: boolean;
 }
 
 /**
@@ -616,6 +628,52 @@ export function getClientModuleHydrationPlan(
   root: string | undefined,
   mode: FarmIsolatedClientHydrationMode = "off",
   options: FarmClientHydrationPlanOptions = {},
+): ClientModuleHydrationPlan {
+  const plan = planClientModuleHydration(modulePath, root, mode, options);
+  // Islands mode: a layout that would still hydrate as one root renders as a server tree.
+  if (
+    options.serverTreeLayouts !== true ||
+    options.asyncOwnerIslands !== true ||
+    !plan.shouldHydrate ||
+    plan.isClientComponent ||
+    plan.asyncOwnerIslands
+  ) {
+    return plan;
+  }
+  const resolvedPath = resolveOwnerSourcePath(resolveModuleSourcePath(modulePath, root), root);
+  const owner = parseClientModuleMetadata(readIfExists(resolvedPath ?? ""), true);
+  // An owner that is a client component, or opts into hydrating whole, keeps its root.
+  if (!resolvedPath || owner.isClientComponent || owner.hasHydrateExport) return plan;
+  const layout = collectIsolatedClientBoundaries(resolvedPath, root, {
+    allowDynamicCardinality: true,
+    allowElementProps: true,
+  });
+  const routeWide = {
+    ...plan,
+    shouldHydrate: plan.legacyShouldHydrate,
+    islandStrategy: plan.legacyIslandStrategy,
+    hasIsolatedClientBoundaries: false,
+    isolatedBoundaries: [],
+  };
+  if (layout.fallbackReason) {
+    return {
+      ...routeWide,
+      shouldHydrate: false,
+      islandStrategy: null,
+      fallbackReason: layout.fallbackReason,
+      islandsError: layout.fallbackHint
+        ? `${layout.fallbackReason}. ${layout.fallbackHint}`
+        : layout.fallbackReason,
+    };
+  }
+  return { ...routeWide, serverTreeLayout: true, isolatedBoundaries: layout.boundaries };
+}
+
+function planClientModuleHydration(
+  modulePath: string,
+  root: string | undefined,
+  mode: FarmIsolatedClientHydrationMode,
+  options: FarmClientHydrationPlanOptions,
 ): ClientModuleHydrationPlan {
   const metadata = getClientModuleMetadata(modulePath, root);
   const emptyPlan = (
@@ -1433,6 +1491,7 @@ function collectIsolatedClientBoundaries(
             continue;
           }
           fallbackReason = `package client boundary ${specifier} cannot yet be isolated`;
+          fallbackHint = `Render it from a local "use client" module (a providers.tsx that renders the ${specifier} component)`;
           return 0;
         }
         continue;
