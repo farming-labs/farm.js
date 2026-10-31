@@ -208,6 +208,13 @@ export function installFarmIslandValues(): void {
   };
 }
 
+/** Removes the addressing: an app without islands mode sends props as plain JSON. */
+export function uninstallFarmIslandValues(): void {
+  delete (globalThis as typeof globalThis & Record<symbol, FarmIslandValuesServer | undefined>)[
+    SERVER_KEY
+  ];
+}
+
 /** @internal The addressing a server installed, if any. */
 export function getFarmIslandValuesServer(): FarmIslandValuesServer | undefined {
   return (globalThis as typeof globalThis & Record<symbol, FarmIslandValuesServer | undefined>)[
