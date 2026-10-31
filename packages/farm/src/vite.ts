@@ -107,7 +107,10 @@ import { farmPathGuardCoversEndpoint, farmPathGuardCoversPage } from "./middlewa
 import { resolveFarmAppPackages } from "./app-manifest-packages";
 import { collectFarmWebMCPTools } from "./app-manifest-webmcp";
 import { resolveDevGlobalStylesheetHref } from "./server/dev-styles";
-import { FARM_LAYOUT_ELEMENT_CLIENT_SOURCE } from "./document-layout-client";
+import {
+  FARM_LAYOUT_ELEMENT_CLIENT_SOURCE,
+  FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE,
+} from "./document-layout-client";
 import {
   getClientModuleMetadata,
   resolveModuleSourcePath,
@@ -4885,7 +4888,7 @@ function generateClientCode(
       : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
   // Islands mode runs on islx (internal/islands-runtime), under the same names.
   const isolatedHydrationImport = isolatedHydrationEnabled
-    ? `${islandValues ? "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph, createFarmServerTreeElement } from '@farm.js/core/internal/islands-runtime'" : "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'"}`
+    ? `${islandValues ? "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph, createFarmServerTreeElement, createFarmServerTreeLayout } from '@farm.js/core/internal/islands-runtime'" : "import { createFarmIsolatedHydrationRuntime, createFarmServerPageBoundary, wrapFarmIsolatedClientGraph } from '@farm.js/core/internal/isolated-boundary'\nimport { createFarmServerTreeElement } from '@farm.js/core/internal/server-tree'"}`
     : "";
   const docsAdapterImportBlock = generateFarmDocsAdapterClientRuntime(
     docsAdapterReact,
@@ -4923,8 +4926,26 @@ async function createFarmServerTreePageElement(source, pathname) {
     console.warn('[Farm.js] Could not rebuild the server tree of ' + pathname + '; its server HTML was kept.', error);
     return null;
   }
+}
+${
+  islandValues
+    ? `${FARM_SERVER_TREE_LAYOUT_CLIENT_SOURCE}
+let farmLastRouteState = null;
+
+// A hot update to a layout tree's client module renders the route again.
+function rerenderFarmTreeLayouts() {
+  const route = farmLastRouteState;
+  const root = appRoot || reactRoot;
+  if (!route || !root) return;
+  root.render(route.wrap(wrapWithLoadedLayouts(route.page, route.layouts, route.params)));
 }`
-    : `async function createFarmServerTreePageElement() { return null; }`;
+    : "async function buildFarmTreeLayouts() { return true; }\nfunction getFarmTreeLayoutComponent() { return null; }\nlet farmLastRouteState = null;\nfunction rerenderFarmTreeLayouts() {}"
+}`
+    : `async function createFarmServerTreePageElement() { return null; }
+async function buildFarmTreeLayouts() { return true; }
+function getFarmTreeLayoutComponent() { return null; }
+let farmLastRouteState = null;
+function rerenderFarmTreeLayouts() {}`;
 
   return `
 ${rendererClientImports}
@@ -5669,10 +5690,26 @@ async function buildClientHydrationElement(
   return element;
 }
 
-async function loadLayoutComponents(layouts = []) {
+async function loadLayoutComponents(layouts = [], params = {}, source) {
+  // Islands mode: a layout rendered as a server tree rebuilds from source (the document, or a
+  // navigation's HTML) instead of importing its module. Null when one cannot.
   const loadedLayouts = [];
+  const treeLayouts = layouts.filter((layout) => layout?.serverTree === true);
+  if (
+    treeLayouts.length > 0 &&
+    !(await buildFarmTreeLayouts(treeLayouts, params, source || document.getElementById('root') || document, {
+      load: (reference) => import(/* @vite-ignore */ farmModuleUrl(reference)),
+      onUpdate: rerenderFarmTreeLayouts,
+    }))
+  ) {
+    return null;
+  }
 
   for (const layout of layouts) {
+    if (layout?.serverTree === true) {
+      loadedLayouts.push({ ...layout, Component: getFarmTreeLayoutComponent(layout.pattern) });
+      continue;
+    }
     if (!layout?.modulePath) continue;
     try {
       let LayoutComponent = layoutComponentCache.get(layout.modulePath);
@@ -5767,7 +5804,7 @@ async function buildRouteComponentProps(pageModule, params, searchParams, path, 
 }
 
 async function buildWrappedHydrationElement(PageComponent, pageProps, layouts = []) {
-  const loadedLayouts = await loadLayoutComponents(layouts);
+  const loadedLayouts = (await loadLayoutComponents(layouts, pageProps?.params || {})) || [];
   const pageElement = await buildClientHydrationElement(PageComponent, pageProps);
   const wrappedTree = wrapWithLoadedLayouts(
     pageElement,
@@ -5778,6 +5815,7 @@ async function buildWrappedHydrationElement(PageComponent, pageProps, layouts = 
 }
 
 function hydrateFarmRoute(container, route) {
+  farmLastRouteState = route;
   ${
     isReactRenderer(renderer)
       ? "return hydrateRoot(container, route.element);"
@@ -5786,6 +5824,7 @@ function hydrateFarmRoute(container, route) {
 }
 
 function renderFarmRoute(root, route) {
+  farmLastRouteState = route;
   if (route?.layouts?.length > 0 && typeof root.renderRoute === 'function') {
     root.renderRoute(route);
   } else {
@@ -5837,8 +5876,10 @@ async function tryHydrateImportedPage(
   let pageElement = null;
   // Import layouts before the page, root first, so Vite injects their CSS in the same
   // layout-then-page order as the server's stylesheet links and the production bundle.
-  const loadedLayouts = layoutShouldHydrate ? await loadLayoutComponents(layouts) : [];
-  if (signal?.aborted) return false;
+  const loadedLayouts = layoutShouldHydrate
+    ? await loadLayoutComponents(layouts, params, hydrationOptions.layoutSource)
+    : [];
+  if (signal?.aborted || !loadedLayouts) return false;
 
   if (pageShouldHydrate) {
     let pageModule = pageModuleCache.get(modulePath);
@@ -6181,6 +6222,7 @@ async function renderPage(pageData, info) {
           layoutShouldHydrate,
           islandStrategy: route.islandStrategy,
           serverHtml: nextPage ? nextPage.innerHTML : '',
+          layoutSource: fragment,
           loadingModulePath: route.loadingModulePath,
         },
       );

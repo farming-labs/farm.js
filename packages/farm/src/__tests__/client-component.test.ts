@@ -1678,7 +1678,9 @@ export function Chart() {}
     const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
 
     expect(source).toContain("const layoutComponentCache = new Map();");
-    expect(source).toContain("async function loadLayoutComponents(layouts = [])");
+    expect(source).toContain(
+      "async function loadLayoutComponents(layouts = [], params = {}, source)",
+    );
     expect(source).toContain("for (const layout of layouts)");
     expect(source).toContain("function wrapWithLoadedLayouts(element, loadedLayouts, params)");
     expect(source).toContain("for (let index = loadedLayouts.length - 1; index >= 0; index--)");
@@ -1709,7 +1711,9 @@ export function Chart() {}
     expect(start).toBeGreaterThan(-1);
     const emittedFunction = source.slice(start, end);
 
-    const layoutsLoaded = emittedFunction.indexOf("await loadLayoutComponents(layouts)");
+    const layoutsLoaded = emittedFunction.indexOf(
+      "await loadLayoutComponents(layouts, params, hydrationOptions.layoutSource)",
+    );
     const pageImported = emittedFunction.indexOf(
       "import(/* @vite-ignore */ farmModuleUrl(modulePath))",
     );
@@ -1901,8 +1905,8 @@ export function Chart() {}
     );
 
     expect(source.match(/refresh: function\(options = \{\}\)/g)).toHaveLength(2);
-    expect(source).toContain(
-      'if (!options.refresh && matched?.route.navigation === "client-render")',
+    expect(source).toMatch(
+      /if \(\s*!options\.refresh &&\s*matched\?\.route\.navigation === "client-render" &&/,
     );
     expect(source).toContain("options.refresh ? null : matchInterceptedRouteSlot(pathname, from)");
     expect(source).toContain("fetchPage: async function(url, interceptFrom, fresh = false");

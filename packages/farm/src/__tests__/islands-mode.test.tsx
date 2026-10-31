@@ -6,6 +6,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFarmIsolatedClientBoundary } from "../client/isolated-boundary";
 import { getClientModuleHydrationPlan, usesFarmServerTree } from "../utils/client-component";
+import { getFarmServerTreeLayoutPatterns } from "../routing/layout-selector";
 import { transformIsolatedClientBoundaryModule } from "../vite";
 
 const roots: string[] = [];
@@ -209,5 +210,84 @@ describe("islands mode", () => {
     expect(output).toContain("export { __farm_isolated_reexport_1__ as format };");
     expect(output).toContain('export type { Props } from "./types";');
     expect(output).not.toMatch(/export \{ Counter, helper/);
+  });
+
+  describe("a server layout around a client provider", () => {
+    const planLayout = (
+      layout: string,
+      files: Record<string, string>,
+      serverTreeLayouts = true,
+    ) => {
+      const root = mkdtempSync(path.join(tmpdir(), "farm-islands-layout-"));
+      roots.push(root);
+      mkdirSync(path.join(root, "src/app"), { recursive: true });
+      for (const [file, content] of Object.entries(files)) {
+        mkdirSync(path.dirname(path.join(root, "src", file)), { recursive: true });
+        writeFileSync(path.join(root, "src", file), content);
+      }
+      writeFileSync(path.join(root, "src/app/layout.tsx"), layout);
+      return {
+        root,
+        plan: getClientModuleHydrationPlan(path.join(root, "src/app/layout.tsx"), root, "enabled", {
+          asyncOwnerIslands: true,
+          serverTreeLayouts,
+        }),
+      };
+    };
+    const theme = {
+      "theme.tsx":
+        '"use client";\nexport function ThemeProvider({ children }) { return <div>{children}</div>; }\n',
+    };
+    const providerLayout =
+      'import { ThemeProvider } from "../theme";\nimport { secret } from "../secret";\nexport default function Layout({ children }) { return <ThemeProvider><p>{secret()}</p>{children}</ThemeProvider>; }\n';
+
+    it("renders as a server tree, so its module stays on the server", () => {
+      const { root, plan } = planLayout(providerLayout, theme);
+      expect(plan).toMatchObject({ shouldHydrate: true, serverTreeLayout: true });
+      expect(plan.isolatedBoundaries).toEqual([
+        { modulePath: path.join(root, "src/theme.tsx"), islandStrategy: "load" },
+      ]);
+      // Outside islands mode it hydrates whole, as before.
+      expect(planLayout(providerLayout, theme, false).plan.serverTreeLayout).toBeUndefined();
+    });
+
+    it("keeps a layout whose client components can be islands as islands", () => {
+      const { plan } = planLayout(
+        'import { Counter } from "../counter";\nexport default function Layout({ children }) { return <main><Counter />{children}</main>; }\n',
+        {
+          "counter.tsx":
+            '"use client";\nexport function Counter() { return <button>1</button>; }\n',
+        },
+      );
+      expect(plan).toMatchObject({ shouldHydrate: false, hasIsolatedClientBoundaries: true });
+      expect(plan.serverTreeLayout).toBeUndefined();
+    });
+
+    it("reports a provider imported from a package, with the local-wrapper fix", () => {
+      const { plan } = planLayout(
+        'import { ThemeProvider } from "acme-theme";\nexport default function Layout({ children }) { return <ThemeProvider>{children}</ThemeProvider>; }\n',
+        {
+          "../node_modules/acme-theme/package.json": '{"name":"acme-theme","main":"index.js"}',
+          "../node_modules/acme-theme/index.js":
+            '"use client";\nexport function ThemeProvider({ children }) { return children; }\n',
+        },
+      );
+      expect(plan.shouldHydrate).toBe(false);
+      expect(plan.islandsError).toMatch(
+        /package client boundary acme-theme cannot yet be isolated\. Render it from a local "use client" module/,
+      );
+    });
+
+    it("renders the server layouts on the same pages as trees too", () => {
+      const patterns = getFarmServerTreeLayoutPatterns([
+        { pattern: "/", shouldHydrate: false },
+        { pattern: "/shop", shouldHydrate: true, serverTreeLayout: true },
+        { pattern: "/shop/[id]", shouldHydrate: false },
+        { pattern: "/docs", shouldHydrate: false },
+        // A "use client" layout keeps its module.
+        { pattern: "/app", shouldHydrate: true },
+      ]);
+      expect([...patterns].sort()).toEqual(["/", "/shop", "/shop/[id]"]);
+    });
   });
 });

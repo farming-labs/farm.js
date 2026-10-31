@@ -82,3 +82,28 @@ export function layoutsCanCoverSamePage(a: string, b: string): boolean {
   }
   return true;
 }
+
+/**
+ * Internal, islands mode: the layouts the browser rebuilds from their server trees instead of
+ * importing their modules. A server layout that hydrates as one root renders as a tree, and so
+ * does every other server layout on the same pages, since that root renders the page's whole
+ * layout chain. A `"use client"` layout keeps its module.
+ */
+export function getFarmServerTreeLayoutPatterns(
+  layouts: ReadonlyArray<{ pattern: string; shouldHydrate: boolean; serverTreeLayout?: true }>,
+): Set<string> {
+  const hydrating = layouts
+    .filter((layout) => layout.shouldHydrate)
+    .map((layout) => layout.pattern);
+  const patterns = new Set<string>();
+  for (const layout of layouts) {
+    if (
+      layout.serverTreeLayout ||
+      (!layout.shouldHydrate &&
+        hydrating.some((pattern) => layoutsCanCoverSamePage(layout.pattern, pattern)))
+    ) {
+      patterns.add(layout.pattern);
+    }
+  }
+  return patterns;
+}

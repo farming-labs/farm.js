@@ -1772,6 +1772,7 @@ export class ServerRenderer {
               hasIsolatedClientBoundaries?: boolean;
               suppressedAsyncHydration?: true;
               suppressedAsyncHydrationReason?: string;
+              serverTree?: true;
             }
           | undefined;
         if (manifestEntry?.suppressedAsyncHydration) {
@@ -1788,6 +1789,7 @@ export class ServerRenderer {
             ...(manifestEntry.hasIsolatedClientBoundaries === true
               ? { hasIsolatedClientBoundaries: true }
               : {}),
+            ...(manifestEntry.serverTree === true ? { serverTree: true } : {}),
           };
         }
         return {
@@ -1806,6 +1808,10 @@ export class ServerRenderer {
         islandStrategy: layoutHydrationMetadata[index]?.islandStrategy ?? null,
         ...(layoutHydrationMetadata[index]?.hasIsolatedClientBoundaries === true
           ? { hasIsolatedClientBoundaries: true }
+          : {}),
+        // Islands mode: the browser rebuilds this layout from its tree, not its module.
+        ...(shouldHydrateLayout && layoutHydrationMetadata[index]?.serverTree === true
+          ? { serverTree: true }
           : {}),
       }));
       const hydrationStrategies = [
@@ -1985,11 +1991,22 @@ export class ServerRenderer {
                 );
                 slotProps[slot.name] = slotElement;
               }
-              wrappedElement = this.rendererRuntime.createElement(LayoutComponent, {
-                children: wrappedElement,
-                params,
-                ...slotProps,
-              });
+              wrappedElement =
+                shouldHydrateLayout &&
+                layoutHydrationMetadata[i]?.serverTree === true &&
+                islands &&
+                this.islandValues()
+                  ? await islands.renderFarmServerTreeLayout(
+                      LayoutComponent,
+                      { params },
+                      { children: wrappedElement, ...slotProps },
+                      layoutEntry.pattern,
+                    )
+                  : this.rendererRuntime.createElement(LayoutComponent, {
+                      children: wrappedElement,
+                      params,
+                      ...slotProps,
+                    });
               wrappedElement = this.createLayoutBoundary(layoutEntry.pattern, wrappedElement);
             }
 
