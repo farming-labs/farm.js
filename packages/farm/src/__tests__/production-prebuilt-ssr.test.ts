@@ -108,19 +108,26 @@ export default function StableCounter() {
 }
 `.trim(),
   );
+  // `export *` keeps this boundary route-wide: its export names live in another module.
   await fs.writeFile(
     path.join(root, "src", "components", "fallback-counter.tsx"),
     `
 "use client";
 
+export * from "./fallback-counter-implementation";
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "components", "fallback-counter-implementation.tsx"),
+    `
+"use client";
+
 import { useState } from "react";
 
-function FallbackCounter() {
+export function FallbackCounter() {
   const [count, setCount] = useState(0);
   return <button data-fallback-counter onClick={() => setCount((value) => value + 1)}>fallback:{count}</button>;
 }
-
-export { FallbackCounter };
 `.trim(),
   );
   await fs.writeFile(
