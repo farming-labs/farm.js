@@ -4,9 +4,14 @@
  * runtime uses, so the rest of Farm's runtime stays the same; apps on isolated hydration without
  * islands mode never load islx.
  */
-import type React from "react";
 import { enhanceForms, setActionNavigator } from "@farm.js/islx/client";
-import { isolateIslands, renderServerTree, withinClientRoot } from "@farm.js/islx/react";
+import * as React from "react";
+import {
+  IslandsProvider,
+  isolateIslands,
+  renderServerTree,
+  withinClientRoot,
+} from "@farm.js/islx/react";
 import {
   createHydrationRuntime,
   createServerHtml,
@@ -110,4 +115,17 @@ export function createFarmServerTreeElement(
     ServerHtml: options.ServerHtml,
     key: options.key,
   });
+}
+
+/**
+ * One server render of a page. Its islands write each large value once per render: a request that
+ * renders twice (a page that calls notFound(), or a synchronous attempt that suspended and
+ * streams instead) sends the values again in the render that reaches the browser.
+ */
+export function withFarmIslandsRender(element: React.ReactNode): React.ReactElement {
+  return React.createElement(
+    IslandsProvider,
+    { held: getFarmIslandValuesServer()?.held() ?? null },
+    element,
+  );
 }
