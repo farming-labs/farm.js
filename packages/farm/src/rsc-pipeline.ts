@@ -20,6 +20,7 @@ export {
   farmAppUsesRscPipeline,
   farmConfigUsesServerComponents,
   inspectFarmServerComponents,
+  resolveFarmRscCheckConfig,
 } from "./server-components-status";
 
 type FarmConfigInput = Record<string, any>;
