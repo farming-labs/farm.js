@@ -4668,7 +4668,9 @@ ${
     const rootWasReactOwned = reactRootContainer === currentRoot;
     resetReactRoot();
     resetRouteSlotRoots();
-    const replacedSharedBoundary = rootWasReactOwned
+    // A route whose layouts hydrate renders them for its own root (inline client components,
+    // islands mode's layout trees), so the HTML of shared layouts is replaced too.
+    const replacedSharedBoundary = rootWasReactOwned || hydrateLayouts
       ? null
       : replaceSharedLayoutBoundary(currentRoot, newRoot, navigation?.refresh === true);
     let isolatedHydrationScope = replacedSharedBoundary || currentRoot;

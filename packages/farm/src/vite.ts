@@ -3768,7 +3768,9 @@ export const getManifest = () => ({
             ...(groupScope ? { urlPattern: stripRouteGroups(layout.pattern), groupScope } : {}),
             shouldHydrate: layout.shouldHydrate,
             islandStrategy: layout.islandStrategy,
-            preloads: [layout.modulePath],
+            // Islands mode: rebuilt from its server tree, so its module is never preloaded.
+            ...(layout.serverTree ? { serverTree: true } : {}),
+            preloads: layout.serverTree ? [] : [layout.modulePath],
             assets: [],
           };
         }
@@ -5694,7 +5696,12 @@ async function loadLayoutComponents(layouts = [], params = {}, source) {
   // Islands mode: a layout rendered as a server tree rebuilds from source (the document, or a
   // navigation's HTML) instead of importing its module. Null when one cannot.
   const loadedLayouts = [];
-  const treeLayouts = layouts.filter((layout) => layout?.serverTree === true);
+  // A navigation's layout list names modules only; the manifest knows which render as trees.
+  const manifestLayouts = Object.values(getManifest().layouts || {});
+  const isTreeLayout = (layout) =>
+    layout?.serverTree === true ||
+    manifestLayouts.some((entry) => entry.pattern === layout?.pattern && entry.serverTree === true);
+  const treeLayouts = layouts.filter(isTreeLayout);
   if (
     treeLayouts.length > 0 &&
     !(await buildFarmTreeLayouts(treeLayouts, params, source || document.getElementById('root') || document, {
@@ -5706,7 +5713,7 @@ async function loadLayoutComponents(layouts = [], params = {}, source) {
   }
 
   for (const layout of layouts) {
-    if (layout?.serverTree === true) {
+    if (isTreeLayout(layout)) {
       loadedLayouts.push({ ...layout, Component: getFarmTreeLayoutComponent(layout.pattern) });
       continue;
     }
@@ -6157,14 +6164,15 @@ async function renderPage(pageData, info) {
     let fragmentHtml = pageData.fragment?.html;
     let layoutPatterns = nextLayoutPatterns;
 
-    // The fragment leaves out the layouts both routes share. When React owns the
-    // current layouts and will not keep rendering them, the swap below replaces the
-    // whole container, so a fragment without its outer layouts would drop them.
-    // Load the complete route for that swap instead.
+    // The fragment leaves out the layouts both routes share. When the swap below replaces
+    // the whole container (React owns the current layouts and will not keep rendering them,
+    // or the next route's layouts hydrate), a fragment without its outer layouts would drop
+    // them. Load the complete route for that swap instead.
+    const updatesInPlace = activeLayoutShouldHydrate && route.layoutShouldHydrate && (appRoot || reactRoot);
     if (
       typeof fragmentHtml === 'string' &&
-      activeLayoutShouldHydrate &&
-      !(route.layoutShouldHydrate && (appRoot || reactRoot)) &&
+      (activeLayoutShouldHydrate || route.layoutShouldHydrate) &&
+      !updatesInPlace &&
       nextLayoutPatterns.length > 0 &&
       !findLayoutBoundary(parseNavigationFragment(fragmentHtml), nextLayoutPatterns[0])
     ) {
@@ -6228,7 +6236,9 @@ async function renderPage(pageData, info) {
       );
     } else {
       ${isolatedHydrationEnabled ? "let isolatedHydrationScope = container;" : ""}
-      if (activeLayoutShouldHydrate) {
+      // A route whose layouts hydrate renders them for its own root (inline client components,
+      // islands mode's layout trees), so the HTML of shared layouts is replaced too.
+      if (activeLayoutShouldHydrate || layoutShouldHydrate) {
         ${isolatedHydrationEnabled ? "disposeFarmIsolatedClientBoundaries(container);" : ""}
         if (appRoot) { try { appRoot.unmount(); } catch (error) {} appRoot = null; }
         if (reactRoot) { try { reactRoot.unmount(); } catch (error) {} reactRoot = null; }

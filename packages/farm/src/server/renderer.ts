@@ -3045,7 +3045,9 @@ export class ServerRenderer {
           pattern: layoutEntry.pattern,
           shouldHydrate: layoutEntry.shouldHydrate,
           islandStrategy: layoutEntry.islandStrategy,
-          preloads: [layoutEntry.modulePath],
+          // Islands mode: rebuilt from its server tree, so its module is never preloaded.
+          ...(layoutEntry.serverTree ? { serverTree: true } : {}),
+          preloads: layoutEntry.serverTree ? [] : [layoutEntry.modulePath],
           assets: [],
         };
       }
@@ -3390,7 +3392,9 @@ window.__FARM_I18N__ = ${getFarmI18nClientSnapshot() ? serializeInlineValue(getF
           pattern: layoutEntry.pattern,
           shouldHydrate: layoutEntry.shouldHydrate,
           islandStrategy: layoutEntry.islandStrategy,
-          preloads: [layoutEntry.modulePath],
+          // Islands mode: rebuilt from its server tree, so its module is never preloaded.
+          ...(layoutEntry.serverTree ? { serverTree: true } : {}),
+          preloads: layoutEntry.serverTree ? [] : [layoutEntry.modulePath],
           assets: [],
         };
       }
