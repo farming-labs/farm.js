@@ -132,8 +132,9 @@ export const farmPackageBuildOptions = {
   // entry inlined its own copy of the modules it imports.
   splitting: true,
   treeshake: false,
+  // No keepNames: its `__name(fn, "fn")` calls are side effects to an app's bundler, so every
+  // core function stayed in server and browser bundles whether the app used it or not.
   esbuildOptions(options, { format }) {
-    options.keepNames = true;
     // Split CommonJS is emitted as ESM and converted afterwards, which keeps
     // import.meta. Give it the empty object esbuild substitutes in CommonJS.
     if (format === "cjs") options.define = { ...options.define, "import.meta": "{}" };
