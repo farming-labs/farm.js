@@ -16,7 +16,6 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import githubIconUrl from "simple-icons/icons/github.svg?url";
-import npmIconUrl from "simple-icons/icons/npm.svg?url";
 import farmingLabsLogoUrl from "../assets/farming-labs-logo-dark.svg?url";
 import { launchPost } from "../lib/blog";
 import { formatCount, NO_READING, useScrambledText, useSiteStats } from "./site-stats";
@@ -108,10 +107,6 @@ function GithubIcon({ className }: { className?: string }) {
   return <BrandIcon className={className} src={githubIconUrl} />;
 }
 
-function NpmIcon({ className }: { className?: string }) {
-  return <BrandIcon className={className} src={npmIconUrl} />;
-}
-
 // A live count from /api/stats as a two-line readout. It reads NO_READING until the count
 // arrives, then scrambles into it, and scrambles again on hover or focus.
 function StatReadout({
@@ -119,22 +114,19 @@ function StatReadout({
   icon,
   label,
   name,
-  suffix = "",
   title,
   value,
 }: {
   href: string;
   icon: ReactNode;
   label: string;
-  /** Printed after the count, such as a unit. */
-  suffix?: string;
   /** The link's accessible name, given the formatted count when there is one. */
   name: (count?: string) => string;
   title: string;
   value: number | null | undefined;
 }) {
   const count = typeof value === "number" ? formatCount(value) : undefined;
-  const { ref, replay } = useScrambledText(count && `${count}${suffix}`);
+  const { ref, replay } = useScrambledText(count);
   return (
     <a
       aria-label={name(count)}
@@ -151,7 +143,7 @@ function StatReadout({
         </span>
         <span
           aria-hidden
-          className="mt-1 text-[12px] normal-case tabular-nums text-white [&>span]:transition-opacity [&>span]:duration-300 [&>span]:ease-out [&>[data-settled=false]]:opacity-35"
+          className="mt-1 text-[12px] normal-case tabular-nums text-white [&>span]:transition-opacity [&>span]:duration-150 [&>span]:ease-out [&>[data-settled=false]]:opacity-35"
           ref={ref}
         >
           {NO_READING}
@@ -270,19 +262,6 @@ export function SiteHeader({ activePage }: { activePage?: "blog" | "agents" }) {
             }
             title="GitHub"
             value={stats?.stars}
-          />
-          <StatReadout
-            href="https://www.npmjs.com/package/@farm.js/core"
-            icon={<NpmIcon className="size-4" />}
-            label="npm downloads"
-            suffix="/week"
-            name={(count) =>
-              count
-                ? `@farm.js/core on npm, ${count} downloads in its best week`
-                : "Open @farm.js/core on npm"
-            }
-            title="@farm.js/core downloads in its best week"
-            value={stats?.peakWeeklyDownloads}
           />
           <a
             className="inline-flex h-11 items-center gap-1.5 border-l border-white/12 bg-white bg-clip-padding px-5 font-mono text-[10px] font-normal uppercase tracking-normal text-black transition-colors duration-150 hover:bg-white/88 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"

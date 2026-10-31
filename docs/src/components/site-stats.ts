@@ -1,6 +1,6 @@
-// Live GitHub stars and npm downloads for the site header. The numbers come from /api/stats
-// (cached at the CDN) after hydration, so the server HTML and the first client render match,
-// and a count that isn't available never shows a made-up number.
+// Live GitHub stars for the site header. The count comes from /api/stats (cached at the CDN)
+// after hydration, so the server HTML and the first client render match, and a count that
+// isn't available never shows a made-up number.
 import { useEffect, useRef, useState } from "react";
 import type { SiteStats } from "../app/api/stats/route";
 import { createScramble } from "./scramble";
@@ -8,11 +8,11 @@ import { createScramble } from "./scramble";
 /** What a readout shows before its count arrives, or when it never does. */
 export const NO_READING = "--";
 /** How long a count takes to settle out of the glyphs. */
-const SETTLE_MS = 1_100;
+const SETTLE_MS = 850;
 /** Glyphs re-roll at this pace rather than every frame, so they read as characters, not noise. */
-const ROLL_MS = 80;
+const ROLL_MS = 50;
 
-/** 684 stays 684; 8789 is 8.8k; 22404 is 22k; 1250000 is 1.3M. */
+/** 684 stays 684; 5531 is 5.5k; 22404 is 22k; 1250000 is 1.3M. */
 export function formatCount(value: number): string {
   if (value < 1_000) return String(value);
   if (value < 10_000) return `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}k`;
