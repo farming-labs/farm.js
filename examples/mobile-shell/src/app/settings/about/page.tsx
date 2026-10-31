@@ -5,7 +5,7 @@ export const metadata: Metadata = { title: "About" };
 export default function AboutPage() {
   return (
     <>
-      <h1>About</h1>
+      <h1 className="page-title">About</h1>
       <div className="card">
         <p>
           Each screen is one WebView. The native navigator owns the stack, so this page was pushed

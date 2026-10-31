@@ -10,7 +10,7 @@ export default async function NotesPage() {
   const notes = listNotes();
   return (
     <>
-      <h1>Notes</h1>
+      <h1 className="page-title">Notes</h1>
       <ul className="list">
         {notes.map((note) => (
           <li key={note.id}>

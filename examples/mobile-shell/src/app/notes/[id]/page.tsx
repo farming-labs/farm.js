@@ -13,7 +13,7 @@ export default async function NotePage({ params }: PageProps) {
   if (!note) {
     return (
       <>
-        <h1>Not found</h1>
+        <h1 className="page-title">Not found</h1>
         <p className="meta">No note with id {String(params?.id)}.</p>
       </>
     );
@@ -25,7 +25,7 @@ export default async function NotePage({ params }: PageProps) {
 
   return (
     <>
-      <h1>{note.title}</h1>
+      <h1 className="page-title">{note.title}</h1>
       <div className="card">
         <p>{note.body}</p>
         <div className="meta">Updated {new Date(note.updatedAt).toUTCString()}</div>

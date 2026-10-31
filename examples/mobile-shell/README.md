@@ -85,6 +85,38 @@ The Android toolchain needs JDK 17+ and the Android SDK (platform 35, build-tool
   `__farmBridge.call()`; in a browser it falls back to `navigator.vibrate`, and rejects with
   `NativeUnavailableError` when there is no fallback.
 
-## Findings
+## Findings (spike run, 2026-10-30)
 
-See the PR description for the run log, numbers and screenshots.
+Environment: Android 15 emulator (`google_apis` arm64, swiftshader GPU) on an M-series Mac,
+server on the host loopback (`10.0.2.2`). Numbers are medians of 6 to 10 pushes from
+`adb logcat -s FarmShell`; an emulator with software GPU is slower than a mid-range phone for
+rendering and faster for network.
+
+| | farm dev | farm build + start |
+| --- | --- | --- |
+| first tab, cold (WebView process start + document) | 1.4 to 1.8 s | 1.0 to 1.4 s |
+| push, warm pool (visit to rendered) | 130 ms | 107 ms |
+| push, cold WebView (visit to first paint) | 163 ms | 129 ms |
+| push, cold WebView (visit to router ready) | 357 ms | 142 ms |
+| pool refill (warm path load) | 0.4 to 1.6 s | 70 to 660 ms |
+| bridge round trip `native.haptics.impact()` | 4.4 ms | |
+
+APK: 5.7 MB debug, 2.0 MB release with R8 (unsigned). Most of it is Material and AppCompat.
+
+- **Felt native**: tab bar and per-tab stacks, the slide-in push with parallax, the modal sheet
+  over the tab bar, the back key and predictive back gesture (the screen below shows while
+  dragging), the in-page "Settings tab" link switching tabs, keyboard insets in the modal, and
+  modal save -> dismiss -> refreshed list -> pushed note.
+- **Did not**: a warm WebView shows its warm path until the in-place render lands, so it is
+  hidden until then (an empty screen with a progress bar for ~100 ms). The pool barely beats a
+  cold WebView once Chromium is up, because both pay the same server round trip and the WebView
+  renderer process is shared; the pool's real win is skipping the first WebView startup (~1 s)
+  and, once assets are bundled (RFC 7.2), skipping JS download and parse. Bundled page shells are
+  what would make pushes instant on a real network.
+- **Capacitor**: its Android `Bridge` holds one `final WebView`, builds its own plugin instances,
+  `WebViewLocalServer` and `MessageHandler` for that WebView, and plugins register
+  activity-result launchers when the bridge is created, which fails after the activity has
+  started. A bridge per pooled WebView duplicates every plugin and cannot be created lazily, so
+  Capacitor's bridge does not attach to a pool. The spike uses a thin Farm bridge; loading
+  Capacitor plugins unchanged would need a `Bridge`-compatible facade per call.
+- **Core changes for phase 2** are listed in the PR description.

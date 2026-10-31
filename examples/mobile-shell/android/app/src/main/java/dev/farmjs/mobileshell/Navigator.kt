@@ -104,9 +104,12 @@ class Navigator(
                 val screen = newScreen(modal = false)
                 stacks[index] += screen
                 containers[index].addView(screen.view)
-                show(screen, config.url(config.tabs[index].path), "tab ${config.tabs[index].path}") {
-                    if (index == 0) onFirstReady?.let { onFirstReady = null; it() }
-                }
+                show(
+                    screen,
+                    config.url(config.tabs[index].path),
+                    "tab ${config.tabs[index].path}",
+                    onContent = { if (index == 0) onFirstReady?.let { onFirstReady = null; it() } },
+                ) {}
             }
             containers.forEachIndexed { i, container -> container.visibility = if (i == index) View.VISIBLE else View.GONE }
             current = index
@@ -235,7 +238,7 @@ class Navigator(
      * a warm page waits for its in-place render (capped), a cold page
      * animates right away and shows a progress bar while the document loads.
      */
-    private fun show(screen: Screen, url: String, label: String, ready: () -> Unit) {
+    private fun show(screen: Screen, url: String, label: String, onContent: () -> Unit = {}, ready: () -> Unit) {
         val started = SystemClock.uptimeMillis()
         val warm = screen.view.tag == "warm" && screen.page.routerReady
         var fired = false
@@ -249,11 +252,15 @@ class Navigator(
             val ms = SystemClock.uptimeMillis() - started
             Log.i(TAG, "$label warm=$warm visit->content=${ms}ms (pool ready=${pool?.readyCount ?: 0})")
             fire()
+            onContent()
         }
         if (warm) {
             screen.render(url)
             main.postDelayed({ fire() }, WARM_WAIT_MS)
         } else {
+            screen.onPainted = {
+                Log.i(TAG, "$label warm=false visit->firstPaint=${SystemClock.uptimeMillis() - started}ms")
+            }
             screen.load(url)
             fire()
         }

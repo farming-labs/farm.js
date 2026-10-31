@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "Settings" };
 export default function SettingsPage() {
   return (
     <>
-      <h1>Settings</h1>
+      <h1 className="page-title">Settings</h1>
       <div className="card">
         <p>
           Haptics go through <code>native.haptics.impact()</code>. In the shell that is the message

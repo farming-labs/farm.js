@@ -75,6 +75,9 @@ class Page(
                 }
                 // A render the navigator asked for fell back to a document load: let it through.
                 if (renderToken != 0 && config.isAppUrl(url)) return false
+                // Reloads of the current document (dev HMR does location.href = location.href).
+                val current = view.url?.let(Uri::parse)
+                if (current != null && config.isAppUrl(url) && current.path == url.path && current.query == url.query) return false
                 // Plain <a href> taps, location assignments, links to other origins.
                 host?.onVisit(this@Page, url, false) ?: return false
                 return true

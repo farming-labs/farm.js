@@ -41,6 +41,11 @@ html[data-platform] .web-only {
   display: none !important;
 }
 
+/* The native bar shows the page title, so the page heading would repeat it. */
+html[data-platform] .page-title {
+  display: none;
+}
+
 .web-tabs {
   display: flex;
   gap: 16px;

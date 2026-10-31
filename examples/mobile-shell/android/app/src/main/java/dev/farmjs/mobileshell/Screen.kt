@@ -32,6 +32,9 @@ class Screen(
 
     /** Called once when the page shows content for this screen (render done or first paint). */
     var onShown: ((title: String) -> Unit)? = null
+
+    /** Called once on the first paint of a cold document load. */
+    var onPainted: (() -> Unit)? = null
     private var awaitedToken = 0
 
     init {
@@ -58,6 +61,9 @@ class Screen(
 
     /** Warm path: render in the running page. */
     fun render(url: String) {
+        // The warm page still shows the warm path; keep it hidden until the target renders.
+        page.webView.alpha = 0f
+        progress.visibility = View.VISIBLE
         awaitedToken = page.render(url)
     }
 
@@ -69,6 +75,7 @@ class Screen(
 
     private fun shown(title: String) {
         progress.visibility = View.GONE
+        page.webView.alpha = 1f
         if (title.isNotEmpty()) toolbar.title = title
         onShown?.invoke(title)
         onShown = null
@@ -80,8 +87,15 @@ class Screen(
         if (token == awaitedToken) shown(title)
     }
 
+    override fun onRenderError(page: Page, token: Int, url: String) {
+        // Page falls back to a document load; show it as it paints.
+        if (token == awaitedToken) page.webView.alpha = 1f
+    }
+
     override fun onCommitVisible(page: Page) {
         progress.visibility = View.GONE
+        onPainted?.invoke()
+        onPainted = null
     }
 
     override fun onRouterReady(page: Page, title: String) = shown(title)
