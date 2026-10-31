@@ -34,6 +34,8 @@ const FARM_RSC_BLOCKING_KEYS = [
   "rewrites",
   "routeRules",
   "context",
+  // A Content Security Policy the RSC pipeline would not send.
+  "security",
 ] as const;
 
 /** Config the RSC pipeline does not run yet and ignores with a warning. */
@@ -83,7 +85,12 @@ export function findFarmAppPackageDir(root: string, packageName: string): string
   }
 }
 
-function isSet(value: unknown): boolean {
+function isSet(value: unknown, key?: string): boolean {
+  // `security` has one option, and `csp: false` turns it off.
+  if (key === "security") {
+    const csp = (value as { csp?: unknown } | null | undefined)?.csp;
+    return csp !== undefined && csp !== false && csp !== null;
+  }
   if (value === undefined || value === false || value === null) return false;
   if (Array.isArray(value)) return value.length > 0;
   return typeof value !== "object" || Object.keys(value).length > 0;
@@ -107,7 +114,11 @@ export function inspectFarmServerComponents(
     missingPackages,
     // `true` predates the pipeline; `{ mode: "rsc" }` is new and fails with the install command.
     fallback: enabled && !explicit && missingPackages.length > 0,
-    blockingKeys: enabled ? FARM_RSC_BLOCKING_KEYS.filter((key) => isSet(config?.[key])) : [],
+    blockingKeys: enabled
+      ? FARM_RSC_BLOCKING_KEYS.filter((key) => isSet(config?.[key], key)).map((key) =>
+          key === "security" ? "security.csp" : key,
+        )
+      : [],
     ignoredKeys: enabled ? FARM_RSC_IGNORED_KEYS.filter((key) => isSet(config?.[key])) : [],
   };
 }
@@ -145,7 +156,22 @@ export function formatFarmRscBlockingMessage(blockingKeys: readonly string[]): s
 let warnedFallback = false;
 
 /**
- * Whether `farm dev` and `farm build` run the RSC pipeline. Apps set the flag before it loaded the
+ * The config `farmAppUsesRscPipeline` must read: the project's merged with its layers (`extends`).
+ * A layer can bring auth, headers or route rules the RSC pipeline does not run either.
+ */
+export async function resolveFarmRscCheckConfig(
+  config: FarmConfigInput | null | undefined,
+  root: string,
+  mode: "development" | "production",
+): Promise<FarmConfigInput | null | undefined> {
+  if (!config?.extends) return config;
+  const { resolveFarmLayers } = await import("./layers");
+  return (await resolveFarmLayers(config, { root, mode })).config;
+}
+
+/**
+ * Whether `farm dev` and `farm build` run the RSC pipeline. Pass the config through
+ * `resolveFarmRscCheckConfig` first. Apps set the flag before it loaded the
  * pipeline (it only switched off isolated hydration), so one without the RSC packages keeps running
  * as before, with a warning. An app whose config RSC cannot honor safely fails here.
  */

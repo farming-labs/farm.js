@@ -225,4 +225,21 @@ describe("experimental.serverComponents from farm.config", () => {
     expect(warn).toHaveBeenCalledOnce();
     expect(warn.mock.calls[0]![0]).toContain("does not run `plugins` yet. It is ignored.");
   });
+
+  it("refuses a Content Security Policy it would not send", () => {
+    const root = createApp();
+    expect(() =>
+      farmAppUsesRscPipeline(
+        { security: { csp: "default-src 'self'" }, experimental: { serverComponents: true } },
+        root,
+      ),
+    ).toThrow("does not run `security.csp` yet");
+    // `csp: false` is no policy at all.
+    expect(
+      farmAppUsesRscPipeline(
+        { security: { csp: false }, experimental: { serverComponents: true } },
+        root,
+      ),
+    ).toBe(true);
+  });
 });
