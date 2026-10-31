@@ -883,7 +883,22 @@ export function applyProductionMiddlewareHeaders(
       : [];
   return _withFarmResponseHeaders(response, (headers) => {
     for (const [key, value] of middlewareHeaders) {
-      if (key.toLowerCase() === "set-cookie") continue;
+      const name = key.toLowerCase();
+      if (name === "set-cookie") continue;
+      // Vary is a list a cache reads whole: a response varies on what middleware read as well as
+      // on what the page varies on (islands mode's F-Layouts), so both lists are kept.
+      if (name === "vary") {
+        // Header names are case-insensitive: keep the first spelling of each.
+        const values = new Map<string, string>();
+        for (const entry of [headers.get("vary"), value].flatMap((list) =>
+          list ? list.split(",") : [],
+        )) {
+          const field = entry.trim();
+          if (field && !values.has(field.toLowerCase())) values.set(field.toLowerCase(), field);
+        }
+        headers.set("Vary", Array.from(values.values()).join(", "));
+        continue;
+      }
       // A returned Response's headers are authoritative and preserved (matching
       // the dev runtime, where the Response is applied after ctx.headers). ctx
       // headers only add keys the Response did not already set.

@@ -66,6 +66,26 @@ describe("owned responses", () => {
     expect([...shared.headers]).toEqual([["x-app", "1"]]);
   });
 
+  it("keeps the Vary a page sets and the Vary middleware sets", () => {
+    // Islands mode varies a page on F-Layouts; a middleware varies it on a request header too.
+    const page = _markFarmOwnedResponse(
+      new Response("<html></html>", { headers: { Vary: "F-Layouts, Accept" } }),
+    );
+    const response = applyProductionMiddlewareHeaders(
+      page,
+      new Headers({ Vary: "X-Variant, accept", "X-Other": "1" }),
+    );
+    expect(response.headers.get("vary")).toBe("F-Layouts, Accept, X-Variant");
+    expect(response.headers.get("x-other")).toBe("1");
+    // A header other than Vary that the page set still wins.
+    expect(
+      applyProductionMiddlewareHeaders(
+        new Response("", { headers: { "X-Other": "page" } }),
+        new Headers({ "X-Other": "middleware" }),
+      ).headers.get("x-other"),
+    ).toBe("page");
+  });
+
   it("adds markdown negotiation headers once per owned page response", () => {
     const config = resolveMarkdownConfig(undefined);
     const first = applyMarkdownNegotiationHeaders(_markFarmOwnedResponse(html()), {
