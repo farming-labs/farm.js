@@ -233,8 +233,8 @@ export interface FarmConfig {
   telemetry?: boolean;
   /**
    * Request and MCP tool analytics for a Farm Infra project. On only when the server
-   * environment links the app to one (`FARMJS_API_KEY` plus `FARMJS_PROJECT_ID`, or a
-   * project's write-only key). Set to false to never send them.
+   * environment sets `FARMJS_API_KEY` (plus `FARMJS_PROJECT_ID` for a key reaching several
+   * projects). Set to false to never send them.
    */
   analytics?: boolean;
   /**

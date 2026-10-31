@@ -25,9 +25,7 @@ const MODE_LABELS = {
 export async function loginToFarmPreview(options: PreviewAccountOptions = {}) {
   await loadPreviewEnvironment(options.root, options.configPath);
   try {
-    await signInToPreviewGateway(resolvePreviewGatewayUrl(options.gatewayUrl), undefined, {
-      root: options.root,
-    });
+    await signInToPreviewGateway(resolvePreviewGatewayUrl(options.gatewayUrl));
   } catch (error) {
     // Saying no is a choice, not a failure.
     if (!(error instanceof PreviewApiKeyDeclinedError)) throw error;
@@ -71,7 +69,8 @@ export async function whoamiFarmPreview(options: PreviewAccountOptions = {}): Pr
       `Using FARM_PREVIEW_TOKEN, which is deprecated${status.mode === "infrastructure" ? ". Set FARMJS_API_KEY instead" : ""}.`,
     );
   } else if (using.hint) {
-    logger.info(`Signed in with a saved API key (${using.hint}).`);
+    // farm login's key starts previews; analytics needs a Site analytics key.
+    logger.info(`Signed in with a saved API key for previews (${using.hint}).`);
   } else {
     const until = using.expiresAt ? `, until ${formatPreviewExpiration(using.expiresAt)}` : "";
     logger.info(`Signed in as ${using.login ?? "your saved account"}${until}.`);

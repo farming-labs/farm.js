@@ -162,50 +162,43 @@ test("login saves an API key from Infrastructure, and logout only forgets it her
   await assert.rejects(signInToPreviewGateway(gatewayUrl, runtime()), /doesn't use sign-in/);
 });
 
-test("after signing in, a picked project is saved to the app's .env", async () => {
+/** Runs work with console.log captured, so the CLI's info lines can be checked. */
+async function captureLog(work) {
+  const lines = [];
+  const original = console.log;
+  console.log = (...args) => lines.push(args.join(" "));
+  try {
+    await work();
+  } finally {
+    console.log = original;
+  }
+  return lines.join("\n");
+}
+
+test("login says its key is for previews and writes no project to .env", async () => {
   const previous = process.env.FARMJS_PROJECT_ID;
   delete process.env.FARMJS_PROJECT_ID;
-  const roots = [];
-  const tempRoot = async () => {
-    roots.push(await fs.mkdtemp(path.join(os.tmpdir(), "farm-login-project-")));
-    return roots.at(-1);
-  };
-  const projects = [
-    { id: "project_1", name: "Storefront", organization: "Acme" },
-    { id: "project_2", name: "Docs", organization: "Acme" },
-  ];
-  // A malformed id is never offered: it would be written into .env.
-  const keyResponse = () =>
-    Response.json(
-      { key: savedKey, projects: [...projects, { id: "bad\nX=1", name: "Injected" }] },
-      { status: 201 },
-    );
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-login-project-"));
+  const projects = [{ id: "project_1", name: "Storefront", organization: "Acme" }];
+  // Infrastructure still lists the account's projects; previews never needed one.
+  const keyResponse = () => Response.json({ key: savedKey, projects }, { status: 201 });
   try {
-    const root = await tempRoot();
-    await fs.writeFile(path.join(root, ".env"), "OTHER=1");
-    const picked = runtime({ config: infra, keyResponse, pick: 1 });
-    await signInToPreviewGateway(gatewayUrl, picked, { root });
-    assert.deepEqual(picked.offered, [projects]);
-    assert.equal(
-      await fs.readFile(path.join(root, ".env"), "utf8"),
-      "OTHER=1\nFARMJS_PROJECT_ID=project_2\n",
+    const r = runtime({ config: infra, keyResponse, pick: 0 });
+    const output = await captureLog(() => signInToPreviewGateway(gatewayUrl, r, { root }));
+    assert.deepEqual(r.offered, []);
+    assert.equal(process.env.FARMJS_PROJECT_ID, undefined);
+    await assert.rejects(fs.readFile(path.join(root, ".env")), { code: "ENOENT" });
+    assert.match(output, /This key is for farm preview\./);
+    assert.match(
+      output,
+      /create a Site analytics key on the API keys page \(https:\/\/infra\.example\.com\/dashboard\/settings\) and set it as FARMJS_API_KEY/,
     );
-    // An app that already names its project isn't asked again.
-    const again = runtime({ config: infra, keyResponse, pick: 0 });
-    await signInToPreviewGateway(gatewayUrl, again, { root });
-    assert.deepEqual(again.offered, []);
-
-    // Skipping writes nothing.
-    delete process.env.FARMJS_PROJECT_ID;
-    const skipped = await tempRoot();
-    const skip = runtime({ config: infra, keyResponse });
-    await signInToPreviewGateway(gatewayUrl, skip, { root: skipped });
-    assert.equal(skip.offered.length, 1);
-    await assert.rejects(fs.readFile(path.join(skipped, ".env")), { code: "ENOENT" });
+    assert.doesNotMatch(output, /account-wide|full access|FARMJS_PROJECT_ID/i);
+    assert.ok(!output.includes(savedKey));
   } finally {
     if (previous === undefined) delete process.env.FARMJS_PROJECT_ID;
     else process.env.FARMJS_PROJECT_ID = previous;
-    await Promise.all(roots.map((root) => fs.rm(root, { recursive: true, force: true })));
+    await fs.rm(root, { recursive: true, force: true });
   }
 });
 
@@ -235,6 +228,28 @@ test("login saves nothing when Infrastructure can't make a key", async () => {
     /Revoke one in Farm\.js Infrastructure/,
   );
   assert.equal(full.store.size, 0);
+  // The account left the organization it chose: Infrastructure says what to do.
+  const left = runtime({
+    config: infra,
+    keyResponse: () =>
+      Response.json(
+        {
+          message:
+            "You aren't a member of the organization you chose. Run farm login again and choose another.",
+        },
+        { status: 403 },
+      ),
+  });
+  await assert.rejects(
+    signInToPreviewGateway(gatewayUrl, left),
+    /^Error: You aren't a member of the organization you chose\. Run farm login again/,
+  );
+  assert.equal(left.store.size, 0);
+  const bare = runtime({ config: infra, keyResponse: () => new Response(null, { status: 403 }) });
+  await assert.rejects(
+    signInToPreviewGateway(gatewayUrl, bare),
+    /couldn't create an API key \(403\)/,
+  );
   const older = runtime({
     config: infra,
     keyResponse: () => new Response("Not found", { status: 404 }),
@@ -301,6 +316,12 @@ test("farm whoami and farm logout run end to end against a gateway", async () =>
       );
       return true;
     });
+    // farm login's key is for previews, and whoami says so without printing it.
+    env.FARMJS_API_KEY = "";
+    await fs.writeFile(credentials, JSON.stringify({ [gateway]: savedKey }));
+    const saved = await farm("whoami");
+    assert.match(saved.stdout, /Signed in with a saved API key for previews \(farmjs_save…\)\./);
+    assert.ok(!saved.stdout.includes(savedKey));
   } finally {
     server.close();
     await fs.rm(root, { recursive: true, force: true });

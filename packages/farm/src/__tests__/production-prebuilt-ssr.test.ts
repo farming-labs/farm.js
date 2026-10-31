@@ -2493,7 +2493,7 @@ export function CopyButton({ text }) {
     { label: "without a plugin runtime", withPlugin: false },
     { label: "alongside a runtime plugin", withPlugin: true },
   ])(
-    "sends Farm Infra analytics only when the environment links a project, $label",
+    "sends Farm Infra analytics only when the environment sets a key, $label",
     async ({ withPlugin }) => {
       const root = await createProductionFixture();
       const received: { headers: Record<string, string | string[] | undefined>; body: string }[] =
@@ -2593,6 +2593,29 @@ export function CopyButton({ text }) {
             },
           ],
         });
+
+        // An API key scoped to one project needs nothing else: Farm Infra resolves the project.
+        const apiKey = `farmjs_${"s".repeat(32)}`;
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            await vi.waitFor(() => expect(received).toHaveLength(2), { timeout: 5_000 });
+          },
+          pathname,
+          undefined,
+          {
+            FARMJS_API_KEY: apiKey,
+            FARMJS_API_URL: `http://127.0.0.1:${receiverPort}`,
+            NODE_ENV: "production",
+          },
+        );
+        expect(received[1]!.headers.authorization).toBe(`Bearer ${apiKey}`);
+        expect(received[1]!.headers["x-farm-environment"]).toBe("production");
+        expect(received[1]!.headers).not.toHaveProperty("x-farm-project");
+        expect(JSON.parse(received[1]!.body).events).toMatchObject([
+          { kind: "request", route: "/users/[id]", method: "GET", status: 200 },
+        ]);
       } finally {
         await new Promise((resolve) => receiver.close(resolve));
         await fs.rm(root, { recursive: true, force: true });

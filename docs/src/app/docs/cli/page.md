@@ -196,7 +196,7 @@ POST /api/auth/login -> 200 580ms
 
 The local `farm dev` terminal logs the matched page, API route, and middleware work. Client components hydrate through the same public URL; early button clicks are queued and replayed after hydration so slow dev-mode module loading does not lose the click.
 
-`farm login`, `farm whoami` and `farm logout` manage the saved Farm Preview sign-in without starting a preview.
+`farm login`, `farm whoami` and `farm logout` manage the saved Farm Preview sign-in without starting a preview. The key `farm login` saves is for previews only; for [analytics](/docs/infra-analytics), create a Site analytics key on the [API keys page](https://app.farmjs.dev/dashboard/settings) and set it as `FARMJS_API_KEY`.
 
 See [Instant Preview](/docs/preview) for webhook setup, custom gateway configuration, troubleshooting, and security notes.
 
