@@ -5870,7 +5870,16 @@ function isolateFarmRouteServerPage(element) {
   return isolateFarmServerPageGraph(React, element);
 }
 
-// An async page below a hydrating layout renders as a serialized tree the browser rebuilds in
+${
+  farmIslandsMode
+    ? `// One islands render (renderFarmElement): its own record of the values it wrote.
+function farmIslandsRender(element) {
+  return withFarmIslandsRender(element);
+}
+
+`
+    : ""
+}// An async page below a hydrating layout renders as a serialized tree the browser rebuilds in
 // the layout's React root, so its client components read the layout's context.
 function renderFarmRouteServerTree(element, extra) {
   return renderFarmServerTreePage(React, element, {
@@ -7169,14 +7178,10 @@ function escapeFarmHtmlAttribute(value) {
     .replace(/>/g, "&gt;");
 }
 
-async function renderFarmElement(ReactDOMServer, element, routeKey) {${
-    farmIslandsMode && hasIsolatedClientGraphRuntime
-      ? `
+async function renderFarmElement(ReactDOMServer, element, routeKey) {
   // Islands mode: each render writes its islands' values itself, so a request that renders twice
   // (notFound(), or a synchronous attempt that suspends and streams) still sends them.
-  element = withFarmIslandsRender(element);`
-      : ""
-  }
+  if (typeof farmIslandsRender === "function") element = farmIslandsRender(element);
   const streamErrors = [];
   const syncHtml = renderFarmElementSync(ReactDOMServer, element, routeKey);
   if (syncHtml !== undefined) return { html: syncHtml, shellHtml: syncHtml, streamErrors };
