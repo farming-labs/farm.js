@@ -6354,8 +6354,8 @@ function farmIslandsOnlyDocument() {
 `
     : ""
 }async function hydrate() {
-  ${islandValues ? "if (!farmIslandsOnlyDocument()) await farmDocumentParsed();" : ""}
   await window.__FARM_PPR_REFRESH_PROMISE__;
+  ${islandValues ? "if (!farmIslandsOnlyDocument()) await farmDocumentParsed();" : ""}
   // A PPR refresh that is still retrying must not replace DOM once hydration starts.
   window.__FARM_PPR_HYDRATING__ = true;
   await farmClientRuntime.start();
