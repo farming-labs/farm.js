@@ -35,6 +35,10 @@ export interface FarmIslandsRuntimeOptions {
   report?(message: string, error?: unknown): void;
 }
 
+// The return types below name islx's functions instead of the React types they infer to: those are
+// islx's copy of the React types, which Farm's declarations cannot always name (TS2742 when the
+// hoisted @types/react differs from Farm's own).
+
 type Router = {
   refresh?(options?: { scroll?: boolean }): Promise<void>;
   navigate?(href: string): Promise<void>;
@@ -77,17 +81,23 @@ export function createFarmIsolatedHydrationRuntime(options: FarmIslandsRuntimeOp
 export function createFarmServerPageBoundary(
   _React: typeof React,
   runtime: Parameters<typeof createServerHtml>[0],
-) {
+): ReturnType<typeof createServerHtml> {
   return createServerHtml(runtime);
 }
 
 /** A layout that hydrates as one React root: its client components join that root. */
-export function wrapFarmIsolatedClientGraph(_React: typeof React, element: React.ReactNode) {
+export function wrapFarmIsolatedClientGraph(
+  _React: typeof React,
+  element: React.ReactNode,
+): ReturnType<typeof withinClientRoot> {
   return withinClientRoot(element);
 }
 
 /** The page such a layout keeps as server HTML: its client components are islands again. */
-export function isolateFarmServerPageGraph(_React: typeof React, element: React.ReactNode) {
+export function isolateFarmServerPageGraph(
+  _React: typeof React,
+  element: React.ReactNode,
+): ReturnType<typeof isolateIslands> {
   return isolateIslands(element);
 }
 
@@ -96,7 +106,7 @@ export function renderFarmServerTreePage(
   _React: typeof React,
   element: React.ReactNode,
   options: { isolate?(element: React.ReactNode): React.ReactNode; payloadOnly?: boolean },
-) {
+): ReturnType<typeof renderServerTree> {
   return renderServerTree(element, {
     isolate: options.isolate,
     payloadOnly: options.payloadOnly,
@@ -114,7 +124,7 @@ export function createFarmServerTreeElement(
     ServerHtml: React.ComponentType<any>;
     key?: string;
   },
-) {
+): ReturnType<typeof createServerTreeElement> {
   return createServerTreeElement(source, {
     load: options.load,
     ServerHtml: options.ServerHtml,
@@ -132,7 +142,7 @@ export function renderFarmServerTreeLayout(
   props: Record<string, unknown>,
   outlets: Record<string, React.ReactNode>,
   scope: string,
-) {
+): ReturnType<typeof renderServerTree> {
   const outletProps: Record<string, React.ReactNode> = {};
   for (const name of Object.keys(outlets)) {
     outletProps[name] = React.createElement(Outlet, name === "children" ? {} : { name });
