@@ -1,10 +1,12 @@
 import type { Metadata } from "@farm.js/core";
 import { ArrowRight, Newspaper } from "lucide-react";
+import type { ReactNode } from "react";
 import { BlogAuthor } from "../../components/blog/author";
 import { BlogExplore } from "../../components/blog/explore";
+import { BlogFigure } from "../../components/blog/figures";
 import { ReleaseArtwork } from "../../components/blog/release-artwork";
 import { IndexedLabel } from "../../components/site-chrome";
-import { launchPost } from "../../lib/blog";
+import { agentNativePost, launchPost, posts } from "../../lib/blog";
 
 export const metadata = {
   openGraph: { title: "Blog — Farm.js", url: "/blog" },
@@ -12,7 +14,29 @@ export const metadata = {
   description: "Releases, engineering notes, and ideas from the people building Farm.js.",
 } satisfies Metadata;
 
+/** Each post's card art. Headings break where their author wants them to. */
+const ART: Record<string, { heading: ReactNode; artwork: ReactNode }> = {
+  [launchPost.href]: {
+    heading: (
+      <>
+        Farm.js v0.1.0: <span>Stable, Integrated, and Agent-Native.</span>
+      </>
+    ),
+    artwork: <ReleaseArtwork />,
+  },
+  [agentNativePost.href]: {
+    heading: (
+      <>
+        Making your site <span>agent-native.</span>
+      </>
+    ),
+    artwork: <BlogFigure fit kind="agent-layers" />,
+  },
+};
+
 export default function BlogPage() {
+  const [featured, ...rest] = posts.map(({ post }) => post);
+
   return (
     <>
       <header className="blog-index-header">
@@ -36,24 +60,41 @@ export default function BlogPage() {
         <article className="blog-featured" aria-labelledby="featured-title">
           <div className="blog-featured-copy">
             <div className="blog-post-meta">
-              <span className="blog-category">{launchPost.category}</span>
-              <time dateTime={launchPost.dateTime}>{launchPost.date}</time>
+              <span className="blog-category">{featured.category}</span>
+              <time dateTime={featured.dateTime}>{featured.date}</time>
             </div>
             <h3 id="featured-title">
-              <a href={launchPost.href}>
-                Farm.js v0.1.0: <span>Stable, Integrated, and Agent-Native.</span>
-              </a>
+              <a href={featured.href}>{ART[featured.href]?.heading ?? featured.title}</a>
             </h3>
-            <p>{launchPost.description}</p>
+            <p>{featured.description}</p>
           </div>
-          <ReleaseArtwork />
+          {ART[featured.href]?.artwork}
           <div className="blog-featured-bottom">
             <BlogAuthor />
-            <a className="blog-read-link" href={launchPost.href}>
+            <a className="blog-read-link" href={featured.href}>
               Read article <ArrowRight aria-hidden size={16} strokeWidth={1.5} />
             </a>
           </div>
         </article>
+        {rest.length > 0 && (
+          <ul className="blog-post-list">
+            {rest.map((post) => (
+              <li key={post.href}>
+                <a href={post.href}>
+                  <div className="blog-post-meta">
+                    <span className="blog-category">{post.category}</span>
+                    <time dateTime={post.dateTime}>{post.date}</time>
+                  </div>
+                  <h3>{post.title}</h3>
+                  <p>{post.description}</p>
+                  <span className="blog-post-list-more">
+                    Read article <ArrowRight aria-hidden size={14} strokeWidth={1.5} />
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <BlogExplore />

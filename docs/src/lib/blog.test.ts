@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { getLaunchSectionId, launchSections } from "./blog";
+import { getSectionId, launchSections, posts } from "./blog";
 
 const post = readFileSync(new URL("../app/blog/0.1.0/page.md", import.meta.url), "utf8");
 
@@ -34,7 +34,7 @@ describe("launch post content", () => {
       ...post.matchAll(/<span id="([^"]+)" className="blog-heading-anchor" \/>\s*\n\s*## (.+)/g),
     ];
     expect(headings).toHaveLength(launchSections.length);
-    for (const [, id, heading] of headings) expect(getLaunchSectionId(heading)).toBe(id);
+    for (const [, id, heading] of headings) expect(getSectionId(heading)).toBe(id);
   });
 
   it("points every documentation link at an existing guide", () => {
@@ -78,5 +78,29 @@ describe("launch post content", () => {
     }
     expect(post).toContain("same allowlist controls discovery and execution");
     expect(post).not.toContain("authorize: async ({ request, tools })");
+  });
+});
+
+describe("every post", () => {
+  it("anchors each listed section, in order, to the heading that follows it", () => {
+    for (const { post: entry, sections } of posts) {
+      const source = readFileSync(new URL(`../app${entry.href}/page.md`, import.meta.url), "utf8");
+      const headings = [
+        ...source.matchAll(
+          /<span id="([^"]+)" className="blog-heading-anchor" \/>\s*\n\s*## (.+)/g,
+        ),
+      ];
+      expect(headings.map(([, id]) => id)).toEqual(sections.map(([id]) => id));
+      for (const [, id, heading] of headings) expect(getSectionId(heading)).toBe(id);
+    }
+  });
+
+  it("gives the index a card and a Markdown entry for each post", () => {
+    const index = readFileSync(new URL("../app/blog/page.md", import.meta.url), "utf8");
+    const page = readFileSync(new URL("../app/blog/page.tsx", import.meta.url), "utf8");
+    for (const { post: entry } of posts) {
+      expect(index).toContain(`](${entry.href})`);
+      expect(page).toContain("posts");
+    }
   });
 });
