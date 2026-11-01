@@ -274,7 +274,25 @@ API MCP is experimental, and so is [WebMCP](/docs/plugins/webmcp), its browser-s
 
 Everything above assumes an action finishes inside one request. Plenty don't. "Issue the refund" is a database write, a payment-provider call, and a human who has to say yes, possibly tomorrow. Exposing that as a plain tool gives an agent a call that either blocks for an hour or returns before the work is real.
 
-So the fourth layer has a second half: operations that outlive the request that started them. `@farm.js/agent` serves the agents in `src/agents` as durable runs, built on [agent-unit](https://github.com/farming-labs/agent-unit), which is a separate open-source project rather than a Farm-only feature.
+So the fourth layer has a second half, and it starts with an unglamorous problem: where does the agent actually run?
+
+### The host problem
+
+Writing an agent is the easy part now. Every framework has a good answer for the loop. What none of them answer is that your Mastra server, your LangGraph graph and your AI SDK tool loop each have to become a thing that boots on Cloudflare Workers, or Vercel, or Lambda, each of which disagrees about environment variables, background work after a response, scheduled jobs, and which Node built-ins exist.
+
+This is the same problem Nitro solved for web frameworks, and [agent-unit](https://github.com/farming-labs/agent-unit) is the equivalent for agent ones. It's a separate open-source project, not a Farm feature. One command takes the server you already have and produces a deployable build:
+
+```bash
+agent-unit build --preset cloudflare
+```
+
+Node, Bun, Deno, Cloudflare Workers, Vercel, Netlify and AWS Lambda, from the same source. A Hono app, a bare `{ fetch }` handler, or Mastra's own server builds for every one of them unchanged — your framework keeps its routes, its memory and its storage. One `agent-unit.config.ts` carries each host's settings, so run storage is files on Node, a Durable Object per run on Workers, and Upstash on Vercel without the code knowing. Secrets are read where the server runs, never baked into the build.
+
+The differences between hosts are the actual work, and they are handled rather than documented: `agent-unit/env` reads configuration and bindings the same way everywhere, `waitUntil` keeps work alive after the response, `tasks` run on each host's own scheduler, and Workers get the Node modules that agent SDKs import anyway.
+
+### Durable runs, when you want them
+
+On top of that sits an optional engine, and this is what makes the refund safe to expose. In a Farm app it arrives as `@farm.js/agent`, which serves the agents in `src/agents`:
 
 ```ts title="src/agents/refund.ts"
 import { defineAgent } from "agent-unit";
@@ -286,9 +304,13 @@ export default defineAgent(async (input: { orderId: string }, run) => {
 });
 ```
 
-Two primitives carry the weight. `run.step` runs once and is replayed from the run's journal afterwards, so a restart does not charge the card twice. `run.interrupt` pauses the run until an answer arrives, across restarts and deploys — the human approval is part of the program, not a callback you wire up around it.
+Two primitives carry the weight. `run.step` runs once and is replayed from the run's journal afterwards, so a restart does not charge the card twice. `run.interrupt` pauses the run until an answer arrives, across restarts and deploys — the human approval is part of the program, not a callback you wire around it. Runs can sleep for days.
 
-The surfaces this exposes are the same idea as the rest of the post, which is the point:
+Agents written with the AI SDK, Mastra, LangGraph or the OpenAI Agents SDK work unchanged, and their own pauses become interrupts: tool approvals, Mastra's `suspend()`, LangGraph's `interrupt()`.
+
+### What it exposes
+
+The surfaces are the same idea as the rest of this post, which is the point:
 
 | Request                                  | Does                                                           |
 | ---------------------------------------- | -------------------------------------------------------------- |
@@ -299,9 +321,9 @@ The surfaces this exposes are the same idea as the rest of the post, which is th
 | `GET /api/agent/manifest.json`           | Lists the agents                                               |
 | `POST /api/agent/mcp`                    | The same agents, as MCP tools                                  |
 
-That last row matters for an agent-native site. A caller that speaks MCP gets the durable agents in the same vocabulary as the endpoint-backed tools from the previous section, and the same app authorizes both. The agents are also served as an A2A agent, and the event stream follows [AG-UI](https://docs.ag-ui.com), so a client reconnecting after a dropped connection picks up from the last event it saw instead of starting over.
+That last row is the one that matters here. A caller that speaks MCP gets the durable agents in the same vocabulary as the endpoint-backed tools from the previous section, and the same app authorizes both. Every agent also gets an A2A agent card, and the event stream follows [AG-UI](https://docs.ag-ui.com), so a client reconnecting after a dropped connection picks up from the last event it saw instead of starting over.
 
-Agents written with the AI SDK, Mastra, LangGraph, or the OpenAI Agents SDK work unchanged, and their own pauses become interrupts: tool approvals, Mastra's `suspend()`, LangGraph's `interrupt()`. [`examples/agent`](https://github.com/farming-labs/farm.js/tree/main/examples/agent) runs the approval flow end to end, and the [durable agents guide](/docs/integrations/agent) covers storage drivers, the sweep that wakes sleeping runs, and per-target budgets.
+[`examples/agent`](https://github.com/farming-labs/farm.js/tree/main/examples/agent) runs the approval flow end to end, and the [durable agents guide](/docs/integrations/agent) covers storage drivers, the sweep that wakes sleeping runs, and per-target budgets.
 
 The honest framing: a tool call is the right shape for "what are my active projects", and a durable run is the right shape for "refund this order". A site that is agent-native for real needs both, because the second category is where the money and the mistakes are.
 
@@ -355,6 +377,7 @@ The difference is not capability. It is what you have to keep correct by hand:
 | MCP authorization                     | A second auth path                        | The route's middleware, plus a per-caller catalog |
 | Form descriptions for agents          | —                                         | `?actions`                                        |
 | Actions that outlive a request        | A queue, a journal, and resume logic      | `run.step` / `run.interrupt`, served as MCP       |
+| Agent server on another host          | Rewrite the entrypoint per platform       | `agent-unit build --preset <host>`                |
 
 Every row in the first column is a place where two descriptions of one operation can disagree. The failure mode is not an error page; it is an agent confidently calling a tool whose schema is a release behind, or a Markdown mirror still serving a page you put behind a paywall last month.
 
