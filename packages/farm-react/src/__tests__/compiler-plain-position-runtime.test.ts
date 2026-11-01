@@ -98,7 +98,11 @@ describe.each(["hybrid", "static"] as const)("plain position runtime in %s mode"
     );
     expect(result.compiled).toEqual(["Rows"]);
     expect(result.diagnostics).toEqual([]);
-    expect(result.code).toMatch(/keyedRows(?:Host|Conditional|Complete)\w*RuntimeFeature/);
+    expect(result.optimizations.keyedArrayPositionHints).toBe(1);
+    expect(result.code).toContain("createCompilerKeyedArrayPositionUpdate");
+    expect(result.code).toMatch(
+      /keyedRows(?:Host|Conditional|Complete)PositionHintedRuntimeFeature/,
+    );
     expect(result.code).not.toContain("keyedRowsPlainPositionHintedRuntimeFeature");
   });
 });
