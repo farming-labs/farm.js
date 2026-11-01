@@ -766,8 +766,18 @@
   white-space: nowrap;
 }
 @media (max-width: 620px) {
+  /* The reading column is narrower than this table, and the page clips overflow, so the
+     table scrolls inside the article rather than losing its last column. */
   .blog-prose .farm-markdown table {
+    display: block;
+    overflow-x: auto;
     font-size: 13px;
+  }
+  .blog-prose .farm-markdown tbody,
+  .blog-prose .farm-markdown thead {
+    display: table;
+    width: 100%;
+    min-width: 440px;
   }
   .blog-prose .farm-markdown th,
   .blog-prose .farm-markdown td {

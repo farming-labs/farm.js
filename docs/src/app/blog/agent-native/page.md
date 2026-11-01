@@ -20,7 +20,7 @@ Agent-native is not one feature. It is four, and they are strictly ordered: each
 1. **Readable.** An agent can get your content as text, without executing your app.
 2. **Discoverable.** It can find out what pages exist without crawling blindly.
 3. **Governed.** You decide which agents may read, and which may train.
-4. **Actionable.** It can *do* something, under your authorization, not just read.
+4. **Actionable.** It can _do_ something, under your authorization, not just read.
 
 Layers one and two are a content problem, and the ecosystem has mostly solved them. Layers three and four are an authorization problem, which is why almost nothing has solved them — they are where "AI-ready" stops being a static file and starts touching your session, your middleware, and your database.
 
@@ -99,7 +99,7 @@ A mirror nobody can find is a mirror nobody reads. `/llms.txt` is on by default 
 - [AI catalog](http://localhost:3000/.well-known/ai-catalog.json): MCP server cards for this site
 ```
 
-Note the second section. The index does not only say what there is to read — it says what there is to *call*, and where the machine-readable description of those tools lives. That is layer two doing its job for layer four.
+Note the second section. The index does not only say what there is to read — it says what there is to _call_, and where the machine-readable description of those tools lives. That is layer two doing its job for layer four.
 
 `/llms-full.txt` inlines every listed page into one document, `sitemap.xml` and schema.org JSON-LD are generated from the metadata you already wrote, and `/.well-known/farmjs.json` describes the app itself: its version, renderer, integrations by category, and the JSON Schema of every tool it serves. One public document, the same for everyone.
 
@@ -143,7 +143,9 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/account.md  # 307
 The mirror redirects, because the page redirects. A signed-in caller gets their own account as Markdown; an anonymous one gets the sign-in redirect, in both representations. The generated indexes go further: they fetch each page with a fresh request carrying no cookies, no `Authorization`, no custom headers, and no client IP — so a guarded page keeps its title and URL in `llms-full.txt` but arrives with no body. It was never read as anyone. Drop it from the listing entirely when even the title is too much:
 
 ```ts title="farm.config.ts"
-agent: { llmsTxt: { exclude: ["/account"] } }
+export default defineConfig({
+  agent: { llmsTxt: { exclude: ["/account"] } },
+});
 ```
 
 The principle this adds up to: **discovery never grants permission.** Which brings us to the layer where that principle has to survive contact with a write.
@@ -152,13 +154,25 @@ The principle this adds up to: **discovery never grants permission.** Which brin
 
 ## Layer 4: actionable
 
-Reading is the easy half. The user who asked their agent about your pricing eventually wants it to *start the trial*.
+Reading is the easy half. The user who asked their agent about your pricing eventually wants it to _start the trial_.
 
 The usual way to do this is to stand up an MCP server beside your app, declare the tools it offers, write schemas for their arguments, and re-implement authentication — because the MCP server is a different entry point from your API. You now have two descriptions of the same operation, two validators, and two auth paths, and the second one is the one nobody reviews.
 
-Farm's `@farm.js/mcp` takes the other route: a tool *is* an API route you already have. You point at the handler.
+Farm's `@farm.js/mcp` takes the other route: a tool _is_ an API route you already have. You point at the handler.
 
 ```ts title="src/app/api/projects/route.ts"
+export const GET = createEndpoint(
+  "/api/projects",
+  {
+    method: "GET",
+    query: z.object({ status: z.enum(["active", "planned"]).optional() }),
+    middleware: [requireToken],
+  },
+  async ({ query, context }) => {
+    /* … */
+  },
+);
+
 export const POST = createEndpoint(
   "/api/projects",
   {
@@ -169,7 +183,9 @@ export const POST = createEndpoint(
     }),
     middleware: [requireToken],
   },
-  async ({ body, context }) => { /* … */ },
+  async ({ body, context }) => {
+    /* … */
+  },
 );
 ```
 
@@ -201,12 +217,20 @@ Four things follow from that, and each one is a thing you did not write.
 **The tool catalog is per caller.** `authorize` returns which tools this caller has, so discovery itself is scoped. A reader asking `tools/list` sees one tool; the writer sees two:
 
 ```json
-{ "name": "list_projects",
-  "inputSchema": { "type": "object",
-    "properties": { "query": { "type": "object",
-      "properties": { "status": { "type": "string", "enum": ["active", "planned"] } } } },
-    "additionalProperties": false },
-  "annotations": { "readOnlyHint": true, "destructiveHint": false } }
+{
+  "name": "list_projects",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "object",
+        "properties": { "status": { "type": "string", "enum": ["active", "planned"] } }
+      }
+    },
+    "additionalProperties": false
+  },
+  "annotations": { "readOnlyHint": true, "destructiveHint": false }
+}
 ```
 
 **The schema came from the route.** That `enum` is the `z.enum(["active", "planned"])` on the endpoint's query, converted to JSON Schema. `readOnlyHint` was inferred because it is a `GET`. There is no second schema to drift.
@@ -217,19 +241,27 @@ Four things follow from that, and each one is a thing you did not write.
 { "error": { "code": -32602, "message": "Tool create_project not found" } }
 ```
 
-**The route's own pipeline runs.** A tool call is a request for the endpoint's path, carrying the agent's headers, so the middleware and integration guards protecting that path run first — exactly as they do for a direct `POST`. The writer's call reaches the handler, and the response carries the `actor` that the route's *own* middleware resolved, plus the `status` default from its *own* schema:
+**The route's own pipeline runs.** A tool call is a request for the endpoint's path, carrying the agent's headers, so the middleware and integration guards protecting that path run first — exactly as they do for a direct `POST`. The writer's call reaches the handler, and the response carries the `actor` that the route's _own_ middleware resolved, plus the `status` default from its _own_ schema:
 
 ```json
-{ "project": { "id": "project-3", "name": "Invoice redesign", "status": "planned" },
-  "actor": "demo-writer" }
+{
+  "project": { "id": "project-3", "name": "Invoice redesign", "status": "planned" },
+  "actor": "demo-writer"
+}
 ```
 
 And when the model invents a bad argument, your validator catches it, with your message:
 
 ```json
-{ "content": [{ "type": "text",
-    "text": "Input validation error: … #/body/name: String is too short (1 < 2)." }],
-  "isError": true }
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "Input validation error: … #/body/name: String is too short (1 < 2)."
+    }
+  ],
+  "isError": true
+}
 ```
 
 That error is the point of the whole design. The agent hit the same wall a buggy frontend would have hit, in the same place, for the same reason.
@@ -253,10 +285,14 @@ curl "http://localhost:3000/pricing.md?actions"
   "page": "/pricing",
   "markdown": "/pricing.md",
   "actions": [
-    { "type": "form", "method": "POST", "action": "/api/contact",
+    {
+      "type": "form",
+      "method": "POST",
+      "action": "/api/contact",
       "enctype": "application/x-www-form-urlencoded",
       "fields": [{ "name": "email", "type": "email", "label": "Work email", "required": true }],
-      "submit": [{ "label": "Request a quote" }] }
+      "submit": [{ "label": "Request a quote" }]
+    }
   ]
 }
 ```
@@ -271,16 +307,16 @@ To be fair about the landscape: layers one and two are not exotic any more. Nuxt
 
 The difference is not capability. It is what you have to keep correct by hand:
 
-| Surface | Hand-built | Farm.js |
-| --- | --- | --- |
-| Markdown for a React page | Render it yourself, or author pages twice | Generated from the page |
-| Partial reads, token estimates, ETags | Yours to build | `?outline`, `?section`, `?max_tokens` |
-| `llms.txt` | A module or a route handler | On by default |
-| Guarded pages excluded | Remember to check the guard | The mirror *is* the guarded response |
-| Search vs training crawlers | Maintain the agent lists | `crawlers: { search, training }` |
-| MCP tool schemas | Write them beside your route schemas | Derived from the route |
-| MCP authorization | A second auth path | The route's middleware, plus a per-caller catalog |
-| Form descriptions for agents | — | `?actions` |
+| Surface                               | Hand-built                                | Farm.js                                           |
+| ------------------------------------- | ----------------------------------------- | ------------------------------------------------- |
+| Markdown for a React page             | Render it yourself, or author pages twice | Generated from the page                           |
+| Partial reads, token estimates, ETags | Yours to build                            | `?outline`, `?section`, `?max_tokens`             |
+| `llms.txt`                            | A module or a route handler               | On by default                                     |
+| Guarded pages excluded                | Remember to check the guard               | The mirror _is_ the guarded response              |
+| Search vs training crawlers           | Maintain the agent lists                  | `crawlers: { search, training }`                  |
+| MCP tool schemas                      | Write them beside your route schemas      | Derived from the route                            |
+| MCP authorization                     | A second auth path                        | The route's middleware, plus a per-caller catalog |
+| Form descriptions for agents          | —                                         | `?actions`                                        |
 
 Every row in the first column is a place where two descriptions of one operation can disagree. The failure mode is not an error page; it is an agent confidently calling a tool whose schema is a release behind, or a Markdown mirror still serving a page you put behind a paywall last month.
 
@@ -296,7 +332,13 @@ export default defineConfig({
     llmsTxt: { title: "Acme", summary: "Billing for small teams.", exclude: ["/account"] },
     crawlers: { search: "allow", training: "block" },
   },
-  mcp: { name: "acme", tools: [/* two endpoints */], authorize },
+  mcp: {
+    name: "acme",
+    tools: [
+      /* two endpoints */
+    ],
+    authorize,
+  },
 });
 ```
 
@@ -311,8 +353,6 @@ PASS  Markdown mirror
       http://localhost:3000/pricing.md answers text/markdown (about 111 tokens).
 PASS  Partial reads
       The mirror serves ?outline, ?section, ?max_tokens, and ETags.
-PASS  llms.txt
-      Lists 4 pages.
 PASS  robots.txt
       14 user-agent groups.
 PASS  MCP endpoint
@@ -324,7 +364,7 @@ WARN  Little server text
 SUMMARY  15 passed / 1 warning / 0 failed / 4 info
 ```
 
-The warning is real, and it is the kind of thing this layer should catch: my demo pricing page is genuinely thin. A surface that is switched off is reported with the config that turns it on; a surface that is *advertised but broken* — an OpenAPI spec in your catalog that 404s — fails and exits non-zero, so you can put it in CI with `--json`.
+The warning is real, and it is the kind of thing this layer should catch: my demo pricing page is genuinely thin. A surface that is switched off is reported with the config that turns it on; a surface that is _advertised but broken_ — an OpenAPI spec in your catalog that 404s — fails and exits non-zero, so you can put it in CI with `--json`.
 
 <span id="do-this-in-your-own-app" className="blog-heading-anchor" />
 

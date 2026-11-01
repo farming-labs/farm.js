@@ -1,38 +1,16 @@
 import type { Metadata } from "@farm.js/core";
 import { ArrowRight, Newspaper } from "lucide-react";
-import type { ReactNode } from "react";
 import { BlogAuthor } from "../../components/blog/author";
 import { BlogExplore } from "../../components/blog/explore";
-import { BlogFigure } from "../../components/blog/figures";
-import { ReleaseArtwork } from "../../components/blog/release-artwork";
+import { POST_ART } from "../../components/blog/post-art";
 import { IndexedLabel } from "../../components/site-chrome";
-import { agentNativePost, launchPost, posts } from "../../lib/blog";
+import { posts } from "../../lib/blog";
 
 export const metadata = {
   openGraph: { title: "Blog — Farm.js", url: "/blog" },
   title: "Blog — Farm.js",
   description: "Releases, engineering notes, and ideas from the people building Farm.js.",
 } satisfies Metadata;
-
-/** Each post's card art. Headings break where their author wants them to. */
-const ART: Record<string, { heading: ReactNode; artwork: ReactNode }> = {
-  [launchPost.href]: {
-    heading: (
-      <>
-        Farm.js v0.1.0: <span>Stable, Integrated, and Agent-Native.</span>
-      </>
-    ),
-    artwork: <ReleaseArtwork />,
-  },
-  [agentNativePost.href]: {
-    heading: (
-      <>
-        Making your site <span>agent-native.</span>
-      </>
-    ),
-    artwork: <BlogFigure fit kind="agent-layers" />,
-  },
-};
 
 export default function BlogPage() {
   const [featured, ...rest] = posts.map(({ post }) => post);
@@ -64,13 +42,13 @@ export default function BlogPage() {
               <time dateTime={featured.dateTime}>{featured.date}</time>
             </div>
             <h3 id="featured-title">
-              <a href={featured.href}>{ART[featured.href]?.heading ?? featured.title}</a>
+              <a href={featured.href}>{POST_ART[featured.href].heading}</a>
             </h3>
             <p>{featured.description}</p>
           </div>
-          {ART[featured.href]?.artwork}
+          {POST_ART[featured.href].card}
           <div className="blog-featured-bottom">
-            <BlogAuthor />
+            <BlogAuthor post={featured} />
             <a className="blog-read-link" href={featured.href}>
               Read article <ArrowRight aria-hidden size={16} strokeWidth={1.5} />
             </a>

@@ -41,7 +41,7 @@ export function BlogPostLayout({
           <h1>{heading ?? post.title}</h1>
           <p>{post.description}</p>
           <div className="blog-post-byline">
-            <BlogAuthor />
+            <BlogAuthor post={post} />
           </div>
         </div>
         {artwork}

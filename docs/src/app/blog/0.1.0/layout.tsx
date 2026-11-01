@@ -1,6 +1,6 @@
 import type { LayoutProps, Metadata } from "@farm.js/core";
+import { POST_ART } from "../../../components/blog/post-art";
 import { BlogPostLayout } from "../../../components/blog/post-layout";
-import { ReleaseArtwork } from "../../../components/blog/release-artwork";
 import { launchPost, launchSections } from "../../../lib/blog";
 
 // The post's title and description come from page.md; Open Graph needs its own.
@@ -13,17 +13,15 @@ export const metadata = {
   },
 } satisfies Metadata;
 
+const art = POST_ART[launchPost.href];
+
 export default function LaunchPostLayout({ children }: LayoutProps) {
   return (
     <BlogPostLayout
       post={launchPost}
       sections={launchSections}
-      heading={
-        <>
-          Farm.js v0.1.0: Stable, Integrated, <span>and Agent-Native.</span>
-        </>
-      }
-      artwork={<ReleaseArtwork fullBleed />}
+      heading={art.heading}
+      artwork={art.header}
     >
       {children}
     </BlogPostLayout>

@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { POST_ART } from "../components/blog/post-art";
 import { getSectionId, launchSections, posts } from "./blog";
 
 const post = readFileSync(new URL("../app/blog/0.1.0/page.md", import.meta.url), "utf8");
@@ -95,12 +96,18 @@ describe("every post", () => {
     }
   });
 
-  it("gives the index a card and a Markdown entry for each post", () => {
+  it("lists every post in the index's Markdown mirror", () => {
     const index = readFileSync(new URL("../app/blog/page.md", import.meta.url), "utf8");
-    const page = readFileSync(new URL("../app/blog/page.tsx", import.meta.url), "utf8");
+    for (const { post: entry } of posts) expect(index).toContain(`](${entry.href})`);
+  });
+
+  it("gives every post its heading and both pieces of artwork", () => {
     for (const { post: entry } of posts) {
-      expect(index).toContain(`](${entry.href})`);
-      expect(page).toContain("posts");
+      const art = POST_ART[entry.href];
+      expect(art, `${entry.href} has no POST_ART entry`).toBeDefined();
+      for (const slot of ["heading", "header", "card"] as const) {
+        expect(art[slot], `${entry.href} is missing its ${slot}`).toBeTruthy();
+      }
     }
   });
 });

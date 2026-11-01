@@ -1,5 +1,5 @@
 import type { LayoutProps, Metadata } from "@farm.js/core";
-import { BlogFigure } from "../../../components/blog/figures";
+import { POST_ART } from "../../../components/blog/post-art";
 import { BlogPostLayout } from "../../../components/blog/post-layout";
 import { agentNativePost, agentNativeSections } from "../../../lib/blog";
 
@@ -13,21 +13,15 @@ export const metadata = {
   },
 } satisfies Metadata;
 
+const art = POST_ART[agentNativePost.href];
+
 export default function AgentNativePostLayout({ children }: LayoutProps) {
   return (
     <BlogPostLayout
       post={agentNativePost}
       sections={agentNativeSections}
-      heading={
-        <>
-          Making your site <span>agent-native.</span>
-        </>
-      }
-      artwork={
-        <div className="blog-post-artwork">
-          <BlogFigure fit kind="agent-layers" />
-        </div>
-      }
+      heading={art.heading}
+      artwork={art.header}
     >
       {children}
     </BlogPostLayout>
