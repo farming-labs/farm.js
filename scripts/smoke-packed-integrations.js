@@ -117,6 +117,9 @@ function writeFixture(fixtureDirectory, packedPackages, targets) {
           overrides: Object.fromEntries(
             [...packedPackages.entries()].map(([name, archive]) => [name, fileDependency(archive)]),
           ),
+          // Overrides rewrite peer ranges to the archive too, which a strict peer check then
+          // rejects ("unmet peer @farm.js/core@file:..."). The archives are the versions under test.
+          peerDependencyRules: { allowAny: [...packedPackages.keys()] },
         },
       },
       null,
