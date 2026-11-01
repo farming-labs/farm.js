@@ -31,6 +31,7 @@ export function createFarmDesktopDevGuard(
     secret: session.secret,
     handshakeToken: session.handshakeToken,
     basePath: options.basePath,
+    handshakeState: session,
     port: () => {
       const address = server.httpServer?.address();
       return address && typeof address === "object" ? address.port : undefined;
