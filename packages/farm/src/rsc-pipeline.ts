@@ -9,8 +9,9 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { InlineConfig, ViteDevServer } from "vite";
+import type { InlineConfig, Plugin, ViteDevServer } from "vite";
 import { loadTailwindVitePlugin } from "./build/tailwind";
+import { resolveFarmPlatform } from "./desktop/config";
 import { loadFarmReactPlugin } from "./react-refresh";
 import { resolveDeployOutputPath } from "./config";
 import { FARM_RSC_INSTALL_HINT, findFarmAppPackageDir } from "./server-components-status";
@@ -157,6 +158,9 @@ export async function createFarmRscViteConfig(
     experimental: { ...userConfig.experimental, serverComponents: true },
     port: options.port ?? userConfig.server?.port,
     plugins: [
+      ...(options.command === "serve" && resolveFarmPlatform() === "desktop"
+        ? [farmRscDesktopDevGuardPlugin(userConfig.basePath)]
+        : []),
       ...(tailwind ? [tailwind] : []),
       ...vitePlugins,
       viteRsc.default({ serverHandler: false, entries: FARM_RSC_ENTRIES }),
@@ -181,6 +185,28 @@ export async function createFarmRscViteConfig(
     // The Farm config is the app's config; a stray vite.config must not add a second pipeline.
     configFile: false,
     mode: options.command === "build" ? "production" : "development",
+  };
+}
+
+/**
+ * `farm dev --desktop`: the same desktop guard as Farm's own dev server, ahead of every other
+ * middleware, so the RSC dev server answers only the desktop window.
+ */
+function farmRscDesktopDevGuardPlugin(basePath: unknown): Plugin {
+  return {
+    name: "farm:desktop-dev-guard",
+    enforce: "pre",
+    configureServer: {
+      order: "pre",
+      async handler(server) {
+        const { createFarmDesktopDevGuard } = await import("./desktop/dev-guard");
+        server.middlewares.use(
+          createFarmDesktopDevGuard(server, {
+            basePath: typeof basePath === "string" ? basePath : "",
+          }),
+        );
+      },
+    },
   };
 }
 

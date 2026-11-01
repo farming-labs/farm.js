@@ -273,6 +273,65 @@ describe("farm dev --desktop", () => {
 
     await expectDesktopGuard(port, session.handshakeToken, { dev: true });
   }, 120_000);
+
+  it("guards the RSC dev server of an app with experimental.serverComponents", async () => {
+    const root = await createApp("farm-desktop-rsc-dev-", {
+      "farm.config.ts": `export default {
+  telemetry: false,
+  desktop: { name: "Notes", id: "com.example.notes" },
+  experimental: { serverComponents: true },
+};`,
+    });
+    // Stand-ins for the RSC packages: the guard must not depend on what the pipeline serves.
+    const addPackage = async (name: string, manifest: object, files: Record<string, string>) => {
+      const dir = path.join(root, "node_modules", ...name.split("/"));
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(
+        path.join(dir, "package.json"),
+        JSON.stringify({ name, type: "module", ...manifest }),
+      );
+      for (const [file, source] of Object.entries(files)) {
+        await fs.writeFile(path.join(dir, file), source);
+      }
+    };
+    await addPackage(
+      "@farm.js/plugin",
+      { exports: { "./rsc": { import: "./rsc.js" } } },
+      {
+        "rsc.js": `export function defineConfig(config) { return { plugins: config.plugins, server: { port: config.port } }; }
+export function nitro() { return { name: "nitro" }; }`,
+      },
+    );
+    await addPackage(
+      "@vitejs/plugin-rsc",
+      { exports: { ".": { import: "./index.js" } } },
+      { "index.js": `export default function rsc() { return { name: "rsc" }; }` },
+    );
+    await addPackage("react-server-dom-webpack", {}, {});
+
+    const session = secretPair();
+    installFarmDesktopSetup({ command: "dev" });
+    process.env.FARM_PLATFORM = "desktop";
+    (globalThis as Record<PropertyKey, unknown>)[FARM_DESKTOP_DEV_SESSION] = session;
+    const server = await createServer({ root });
+    servers.add(server);
+    const port = await getAvailablePort();
+    await server.listen(port);
+    connectHost = "localhost";
+
+    for (const pathname of ["/", "/@vite/client", "/farm.config.ts"]) {
+      expect((await raw(port, pathname)).status, pathname).toBe(403);
+    }
+    const handshake = await raw(port, `${FARM_DESKTOP_HANDSHAKE_PATH}?t=${session.handshakeToken}`);
+    expect(handshake.status).toBe(303);
+    const cookie = ([handshake.headers["set-cookie"]].flat()[0] ?? "").split(";")[0];
+    expect(cookie.startsWith(`${FARM_DESKTOP_COOKIE}=`)).toBe(true);
+    expect((await raw(port, "/@vite/client", { headers: { cookie } })).status).toBe(200);
+    expect(
+      (await raw(port, "/@vite/client", { headers: { cookie, host: `evil.example:${port}` } }))
+        .status,
+    ).toBe(403);
+  }, 120_000);
 });
 
 describe("farm build --desktop", () => {
