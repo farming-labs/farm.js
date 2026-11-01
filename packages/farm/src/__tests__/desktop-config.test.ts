@@ -68,6 +68,10 @@ describe("desktop config", () => {
     expect(validateFarmDesktopConfig({ shell: "@acme/desktop-shell" })).toEqual({
       shell: "@acme/desktop-shell",
     });
+    expect(validateFarmDesktopConfig({ shell: "@acme/desktop/tauri" })).toEqual({
+      shell: "@acme/desktop/tauri",
+    });
+    expect(() => validateFarmDesktopConfig({ shell: "@acme/desktop/" })).toThrow(/not a valid/);
   });
 
   it("fills defaults from package.json", async () => {
@@ -78,7 +82,7 @@ describe("desktop config", () => {
       version: "2.3.4",
       window: { width: 1024, height: 768, title: "notes-app" },
       shell: "electrobun",
-      shellPackage: "@farm.js/desktop-electrobun",
+      shellPackage: "@farm.js/desktop/electrobun",
     });
     expect(
       resolveFarmDesktopConfig(

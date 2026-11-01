@@ -1,11 +1,12 @@
-# @farm.js/desktop-electrobun
+# @farm.js/desktop
 
-The [Electrobun](https://github.com/blackboardsh/electrobun) shell for Farm.js desktop apps. Install
-it with `electrobun`, add `desktop` to `farm.config.ts`, and run `farm dev --desktop` or
-`farm build --desktop`.
+Desktop shells for Farm.js apps. Each shell is a subpath, picked with `desktop.shell` in
+`farm.config.ts`. The default is [Electrobun](https://github.com/blackboardsh/electrobun)
+(`@farm.js/desktop/electrobun`). Install it with the shell's toolkit, add `desktop` to the config,
+and run `farm dev --desktop` or `farm build --desktop`.
 
 ```sh
-pnpm add -D @farm.js/desktop-electrobun electrobun
+pnpm add -D @farm.js/desktop electrobun
 ```
 
 ```ts
@@ -15,7 +16,9 @@ export default defineConfig({
 });
 ```
 
-On every run Farm writes the shell project to `.farm/output/desktop/shell`:
+## Electrobun
+
+On every run Farm writes the Electrobun shell project to `.farm/output/desktop/shell`:
 
 - `electrobun.config.ts`: app name, identifier, and version from `desktop`; the Farm server output
   copied into the app; the system WebView (no bundled Chromium).

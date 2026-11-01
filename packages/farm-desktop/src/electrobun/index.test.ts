@@ -23,7 +23,7 @@ function context(root: string, overrides: Partial<DesktopShellContext> = {}): De
       version: "1.2.3",
       window: { width: 900, height: 700, title: "Notes" },
       shell: "electrobun",
-      shellPackage: "@farm.js/desktop-electrobun",
+      shellPackage: "@farm.js/desktop/electrobun",
     },
     ...overrides,
   };
@@ -41,7 +41,7 @@ async function generatedIcon(ctx: DesktopShellContext): Promise<Uint8Array | str
   return (await shell.generateMain(ctx)).find((file) => file.path.endsWith(".png"))?.contents;
 }
 
-describe("@farm.js/desktop-electrobun", () => {
+describe("@farm.js/desktop/electrobun", () => {
   it("is a Bun shell", () => {
     expect(shell.name).toBe("electrobun");
     expect(shell.runtime).toBe("bun");

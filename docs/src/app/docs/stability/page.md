@@ -46,7 +46,7 @@ An integration's stable surface is its Farm API: the factory, options, mounted r
 - Renderer packages: `@farm.js/react` (the React compiler and runtime package; the default React path lives in core), `@farm.js/preact`, `@farm.js/solid`, `@farm.js/vue`, `@farm.js/svelte`
 - Plugins: `@farm.js/analyzer`, `@farm.js/cache-redis`, `@farm.js/content`, `@farm.js/hints`, `@farm.js/msw`, `@farm.js/otel`, `@farm.js/partytown`, `@farm.js/preview-tunnel`, `@farm.js/pwa`, `@farm.js/scripts`, `@farm.js/search`, `@farm.js/stylex`, `@farm.js/sync`
 
-**Experimental packages:** `@farm.js/convex`, `@farm.js/federation`, `@farm.js/mcp`, `@farm.js/wasm`, `@farm.js/webmcp`.
+**Experimental packages:** `@farm.js/convex`, `@farm.js/desktop`, `@farm.js/federation`, `@farm.js/mcp`, `@farm.js/wasm`, `@farm.js/webmcp`.
 
 ## Renderers
 

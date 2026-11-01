@@ -15,7 +15,7 @@ export { createElectrobunConfig, createElectrobunMain } from "./templates.js";
 const isWindows = process.platform === "win32";
 
 /** The Farm icon, used when the app sets no `desktop.icon`. */
-export const DEFAULT_ICON = fileURLToPath(new URL("../assets/icon.png", import.meta.url));
+export const DEFAULT_ICON = fileURLToPath(new URL("../../assets/icon.png", import.meta.url));
 
 /**
  * The `electrobun` bootstrap installed in the app, which runs Hutch's Electrobun toolchain.
@@ -29,7 +29,7 @@ export function resolveElectrobunCli(root: string): string {
   }
   throw Object.assign(
     new Error(
-      `@farm.js/desktop-electrobun needs the electrobun package in ${root}. Install it next to the adapter, for example:\n  pnpm add -D electrobun`,
+      `@farm.js/desktop/electrobun needs the electrobun package in ${root}. Install it next to the adapter, for example:\n  pnpm add -D electrobun`,
     ),
     { name: "FarmDesktopError", code: "shell-missing" },
   );

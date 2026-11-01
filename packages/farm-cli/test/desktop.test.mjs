@@ -97,14 +97,15 @@ async function createApp(t, { config, shell = true } = {}) {
     );
   }
   if (shell) {
-    const shellDir = path.join(root, "node_modules", "@farm.js", "desktop-fake");
+    // Built-in shells are @farm.js/desktop subpaths; "fake" is one more.
+    const shellDir = path.join(root, "node_modules", "@farm.js", "desktop");
     await mkdir(shellDir, { recursive: true });
     await writeFile(
       path.join(shellDir, "package.json"),
       JSON.stringify({
-        name: "@farm.js/desktop-fake",
+        name: "@farm.js/desktop",
         type: "module",
-        exports: { ".": "./index.mjs" },
+        exports: { "./fake": "./index.mjs", "./package.json": "./package.json" },
       }),
     );
     await writeFile(path.join(shellDir, "index.mjs"), FAKE_SHELL);
@@ -164,10 +165,23 @@ test("a missing shell adapter prints the install command", async (t) => {
   });
   const result = await runFarm(["build", "--desktop", "--root", root]);
   assert.notEqual(result.code, 0);
-  assert.match(result.output, /needs @farm\.js\/desktop-electrobun, which is not installed/);
-  assert.match(result.output, /npm install -D @farm\.js\/desktop-electrobun/);
+  assert.match(result.output, /needs @farm\.js\/desktop, which is not installed/);
+  assert.match(result.output, /npm install -D @farm\.js\/desktop electrobun/);
   // An expected failure: the message, no stack trace.
   assert.doesNotMatch(result.output, /at loadFarmDesktopShell/);
+});
+
+test("an unknown built-in shell name says the package has no such shell", async (t) => {
+  const root = await createApp(t, {
+    config: `export default { desktop: { name: "Notes", shell: "tauri" } };`,
+  });
+  const result = await runFarm(["build", "--desktop", "--root", root]);
+  assert.notEqual(result.code, 0);
+  assert.match(
+    result.output,
+    /desktop\.shell "tauri": @farm\.js\/desktop is installed but has no @farm\.js\/desktop\/tauri shell/,
+  );
+  assert.doesNotMatch(result.output, /npm install/);
 });
 
 test("farm build --desktop builds the server, generates the shell, and packages it", async (t) => {
@@ -334,7 +348,7 @@ test("farm config inspect --desktop prints the resolved block for an OS and prof
       version: "1.0.0",
       window: { width: 1024, height: 768, title: "Notes beta" },
       shell: "fake",
-      shellPackage: "@farm.js/desktop-fake",
+      shellPackage: "@farm.js/desktop/fake",
     },
   });
 

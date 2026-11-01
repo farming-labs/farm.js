@@ -1,8 +1,7 @@
 {
-  "name": "@farm.js/desktop-electrobun",
+  "name": "@farm.js/desktop",
   "version": "0.1.0-beta.0",
-  "private": true,
-  "description": "Electrobun shell for Farm.js desktop apps (farm dev --desktop, farm build --desktop)",
+  "description": "Desktop shells for Farm.js apps (farm dev --desktop, farm build --desktop). Ships the Electrobun shell.",
   "keywords": [
     "desktop",
     "electrobun",
@@ -12,22 +11,20 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/farming-labs/farm.js",
-    "directory": "packages/farm-desktop-electrobun"
+    "directory": "packages/farm-desktop"
   },
   "files": [
     "assets",
     "dist"
   ],
   "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
-    }
+    "./electrobun": {
+      "types": "./dist/electrobun/index.d.ts",
+      "import": "./dist/electrobun/index.js",
+      "default": "./dist/electrobun/index.js"
+    },
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public"
@@ -48,6 +45,11 @@
   "peerDependencies": {
     "@farm.js/core": "workspace:*",
     "electrobun": "^2.0.5"
+  },
+  "peerDependenciesMeta": {
+    "electrobun": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=22.13.0"
