@@ -433,7 +433,7 @@ The warning is real, and it is the kind of thing this layer should catch: my dem
 
 In rough order of value per minute of work:
 
-1. **Check what you already answer.** `farm agent check https://your-site.com` works against a deployed site. Start from the gaps, not from a blog post's checklist.
+1. **Check what you already answer.** Paste your URL into [farmjs.dev/agents/check](https://farmjs.dev/agents/check). It reads only public responses, so it scores any site on any framework with nothing installed, and names the change that closes each gap. Inside a Farm app, `farm agent check` is the same idea in your terminal, with `--json` for CI. Start from the gaps, not from a blog post's checklist.
 2. **Say who may train on you.** `agent: { crawlers: { search: "allow", training: "block" } }`, or the reverse. Make it a decision rather than a default.
 3. **Audit one guarded page.** Fetch its `.md` while signed out. If content comes back, that is the bug this whole layer exists to prevent — in any framework.
 4. **Name your index.** `agent: { llmsTxt: { title, summary, exclude } }`. The `exclude` list is the important argument.
@@ -467,4 +467,4 @@ Already have an app elsewhere? `farm migrate inspect` identifies a supported sou
 
 And if you build something with this, or hit the place where layer four stops being enough, I would genuinely like to hear about it: [open an issue](https://github.com/farming-labs/farm.js/issues), or come argue with me about the design. The agent web is early enough that the conventions are still up for grabs, and I would rather get them right than get them first.
 
-The [agent infrastructure page](/agents) covers what we are building above this, and [`farm agent check`](/docs/cli#check-agent-readiness) will tell you where your own site stands in about two seconds.
+The [agent infrastructure page](/agents) covers what we are building above this. And if you read this far without touching a terminal, [farmjs.dev/agents/check](https://farmjs.dev/agents/check) will tell you where your own site stands right now, whatever it is built with.
