@@ -80,6 +80,10 @@ describe("@farm.js/desktop/electrobun", () => {
     expect(main).toContain('"basePath": "/notes"');
     expect(main).toContain('const HANDSHAKE_PATH = "/__farm/desktop/handshake";');
     expect(main).toContain('setNavigationRules(["^*", farm.origin + "/*"])');
+    // Page content gets no Electrobun RPC (Electrobun defaults to sandbox: false).
+    expect(/new BrowserWindow\(\{([^}]|\{[^}]*\})*\}\)/.exec(main)?.[0]).toMatch(
+      /\n  sandbox: true,\n/,
+    );
     expect(main).toContain("Utils.openExternal(url)");
     expect(main).toContain('Electrobun.events.on("before-quit"');
     // The token never reaches the shell's logs.
